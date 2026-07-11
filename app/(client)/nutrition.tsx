@@ -7,6 +7,7 @@ import type { Theme } from '../../src/theme/tokens';
 import { buildPlan, swapIndex, groceryData, DEPTS, DEPT_ICO, type PlannedMeal } from '../../src/lib/meals';
 import type { Diet, Goal } from '../../src/lib/types';
 import { useClientData } from '../../src/ui/clientData';
+import { useCoachNutrition } from '../../src/ui/coachNutrition';
 
 const DIETS: Diet[] = ['meat', 'vegetarian', 'vegan', 'paleo', 'keto'];
 const DIET_LABEL: Record<Diet, string> = { meat: 'Meat', vegetarian: 'Veggie', vegan: 'Vegan', paleo: 'Paleo', keto: 'Keto' };
@@ -16,6 +17,7 @@ const GOAL_LABEL: Record<Goal, string> = { fatloss: 'Fat Loss', tone: 'Tone', mu
 export default function Nutrition() {
   const t = useTheme();
   const c = useClientData();
+  const coachAdjust = useCoachNutrition().get(c.id);
   const w = c.weightKg;
   const bf = c.bodyFatPct;
   const diet = c.diet;
@@ -23,7 +25,7 @@ export default function Nutrition() {
   const [recipe, setRecipe] = useState<PlannedMeal | null>(null);
   const [showGrocery, setShowGrocery] = useState(false);
 
-  const input = { id: c.id, weightKg: w, bodyFatPct: bf, activity: c.activity, goal: c.goal, diet, mealsPerDay: c.mealsPerDay, mealOverride: override };
+  const input = { id: c.id, weightKg: w, bodyFatPct: bf, activity: c.activity, goal: c.goal, diet, mealsPerDay: c.mealsPerDay, mealOverride: override, coachAdjust: coachAdjust || undefined };
   const { plan, target, tot } = buildPlan(input);
   const swap = (pos: number, slot: PlannedMeal['slot'], idx: number) => setOverride({ ...override, [pos]: swapIndex(diet, slot, idx) });
   const groc = groceryData(input);
@@ -34,6 +36,7 @@ export default function Nutrition() {
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
         <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800', textTransform: 'capitalize' }}>Meal plan</Text>
         <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 16 }}>Built for your body & goal · tap a meal for the recipe</Text>
+        {coachAdjust ? (<View style={{ backgroundColor: t.surface, borderColor: t.brand, borderWidth: 1, borderRadius: 14, padding: 12, marginBottom: 14 }}><Text style={{ color: t.brand, fontSize: 11, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5 }}>🥗 Adjusted by your coach</Text>{coachAdjust.note ? <Text style={{ color: t.ink2, fontSize: 13, marginTop: 5, lineHeight: 18 }}>{coachAdjust.note}</Text> : null}</View>) : null}
 
         <View style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18, marginBottom: 14 }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>

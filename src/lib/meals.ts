@@ -7,7 +7,7 @@
 // Pure & UI-free: identical on client and server, trivially unit-testable. The RN
 // screens render these objects; they never reimplement the math.
 import type { Diet, BodyStats } from './types';
-import { macrosFor } from './nutrition';
+import { macrosFor, applyCoachAdjust, type CoachAdjust } from './nutrition';
 
 export type Slot = 'Breakfast' | 'Lunch' | 'Dinner' | 'Snack';
 export const DEPTS = [
@@ -244,6 +244,7 @@ export interface PlanInput extends BodyStats {
   weightKg: number;          // latest weight (also used to seed)
   mealsPerDay: 3 | 4 | 5;
   mealOverride?: Record<number, number>;
+  coachAdjust?: CoachAdjust;
 }
 
 export function slotsFor(mealsPerDay: number): Slot[] {
@@ -259,7 +260,7 @@ function mealSeed(c: PlanInput, slotIdx: number): number {
 
 /** Build a day's plan scaled toward the client's calorie target. */
 export function buildPlan(c: PlanInput): { plan: PlannedMeal[]; target: ReturnType<typeof macrosFor>; tot: { K: number; P: number; C: number; F: number } } {
-  const target = macrosFor(c);
+  const target = applyCoachAdjust(macrosFor(c), c.coachAdjust);
   const slots = slotsFor(c.mealsPerDay);
   const override = c.mealOverride ?? {};
   let plan: PlannedMeal[] = slots.map((slot, i) => {
@@ -301,7 +302,7 @@ export function searchMeals(diet: Diet, slot: Slot, query: string, limit = 40): 
 
 // ── Weekly grocery list ──────────────────────────────────────────────────────
 function planForDay(c: PlanInput, dayOffset: number): (GeneratedMeal & { servings: number })[] {
-  const target = macrosFor(c);
+  const target = applyCoachAdjust(macrosFor(c), c.coachAdjust);
   const slots = slotsFor(c.mealsPerDay);
   const plan = slots.map((slot, i) => {
     const size = catalogSize(c.diet, slot);

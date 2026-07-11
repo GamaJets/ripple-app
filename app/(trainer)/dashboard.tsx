@@ -9,6 +9,7 @@ import { MOCK_TRAINER } from '../../src/lib/mockData';
 import { type RosterClient } from '../../src/lib/trainerMock';
 import { useRoster } from '../../src/ui/roster';
 import { useCoachFeedback } from '../../src/ui/feedback';
+import { useCoachNutrition } from '../../src/ui/coachNutrition';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useCheckIns } from '../../src/ui/checkins';
 import { currentStreak, longestStreak, personalRecords, weekStats } from '../../src/lib/streaks';
@@ -34,7 +35,9 @@ export default function TrainerClients() {
   const router = useRouter();
   const { roster, addClient, removeClient } = useRoster();
   const { getFeedback, addFeedback } = useCoachFeedback();
+  const { get: getNutri, setAdjust: setNutri, clear: clearNutri } = useCoachNutrition();
   const [fb, setFb] = useState('');
+  const [nnote, setNnote] = useState('');
   const [sel, setSel] = useState<RosterClient | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [newName, setNewName] = useState('');
@@ -168,6 +171,32 @@ export default function TrainerClients() {
                   <Text style={{ color: t.ink3, fontSize: 13 }}>Last active {sel.lastActive} · next session {sel.next}. Detailed session history appears here once {sel.name.split(' ')[0]} logs workouts.</Text>
                 </View>
               )}
+
+              <View style={{ marginBottom: 14 }}>
+                <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 7 }}>Meal Plan Targets</Text>
+                <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 10 }}>Nudge {sel.name.split(' ')[0]}'s daily calories & protein — applies to their Meals tab live.</Text>
+                <Text style={{ color: t.ink2, fontSize: 12, fontWeight: '700', marginBottom: 6 }}>Calories</Text>
+                <View style={{ flexDirection: 'row', gap: 6, marginBottom: 10 }}>
+                  {[-300, -150, 0, 150, 300].map((v) => { const on = (getNutri(sel.id)?.kcalDelta ?? 0) === v; return (
+                    <Pressable key={v} onPress={() => setNutri(sel.id, { kcalDelta: v })} style={{ flex: 1, paddingVertical: 9, borderRadius: 10, alignItems: 'center', backgroundColor: on ? t.brand : t.surface2, borderWidth: 1, borderColor: on ? t.brand : t.ring }}>
+                      <Text style={{ color: on ? t.brandInk : t.ink2, fontWeight: '800', fontSize: 12 }}>{v > 0 ? '+' + v : v}</Text>
+                    </Pressable>); })}
+                </View>
+                <Text style={{ color: t.ink2, fontSize: 12, fontWeight: '700', marginBottom: 6 }}>Protein (g)</Text>
+                <View style={{ flexDirection: 'row', gap: 6, marginBottom: 10 }}>
+                  {[0, 10, 20, 30].map((v) => { const on = (getNutri(sel.id)?.proteinDelta ?? 0) === v; return (
+                    <Pressable key={v} onPress={() => setNutri(sel.id, { proteinDelta: v })} style={{ flex: 1, paddingVertical: 9, borderRadius: 10, alignItems: 'center', backgroundColor: on ? t.brand : t.surface2, borderWidth: 1, borderColor: on ? t.brand : t.ring }}>
+                      <Text style={{ color: on ? t.brandInk : t.ink2, fontWeight: '800', fontSize: 12 }}>{v > 0 ? '+' + v : v}</Text>
+                    </Pressable>); })}
+                </View>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <TextInput value={nnote} onChangeText={setNnote} placeholder="Note on the plan (optional)…" placeholderTextColor={t.ink3} style={{ flex: 1, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14 }} />
+                  <Pressable onPress={() => { setNutri(sel.id, { note: nnote.trim() }); }} style={{ backgroundColor: t.brand, borderRadius: 12, paddingHorizontal: 16, justifyContent: 'center' }}><Text style={{ color: t.brandInk, fontWeight: '800' }}>Save</Text></Pressable>
+                </View>
+                {getNutri(sel.id) ? (
+                  <Pressable onPress={() => { clearNutri(sel.id); setNnote(''); }} style={{ paddingVertical: 8, marginTop: 2 }}><Text style={{ color: t.ink3, fontSize: 12, fontWeight: '700' }}>Clear adjustment</Text></Pressable>
+                ) : null}
+              </View>
 
               <View style={{ marginBottom: 14 }}>
                 <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 7 }}>Coach Feedback</Text>
