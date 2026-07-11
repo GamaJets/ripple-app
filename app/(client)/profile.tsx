@@ -11,6 +11,7 @@ import type { Theme } from '../../src/theme/tokens';
 import { ageFromDob } from '../../src/lib/age';
 import { macrosFor } from '../../src/lib/nutrition';
 import { useClientData } from '../../src/ui/clientData';
+import { Icon, type IconName } from '../../src/ui/Icon';
 import type { Goal } from '../../src/lib/types';
 
 const GOALS: { id: Goal; label: string; note: string; icon: string }[] = [
@@ -100,6 +101,16 @@ function Seg({ options, value, onChange, t }: { options: string[]; value: string
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
 
+const HUB_ICON: Record<string, IconName> = {
+  '/(client)/report': 'chart', '/(client)/consistency': 'flame', '/(client)/records': 'trophy',
+  '/(client)/standards': 'chart', '/(client)/goal': 'target', '/(client)/measurements': 'ruler',
+  '/(client)/achievements': 'trophy', '/(client)/cards': 'share', '/(client)/activity': 'bell',
+  '/(client)/week': 'calendar', '/(client)/library': 'video', '/(client)/tools': 'settings',
+  '/(client)/recovery': 'water', '/(client)/habits': 'check', '/(client)/checkin': 'pencil',
+  '/(client)/foodlog': 'meals', '/(client)/coach': 'chat', '/(client)/messages': 'message',
+  '/(client)/social': 'share', '/(client)/devices': 'clock', '/(client)/music': 'play',
+  '/(client)/appearance': 'palette', '/(client)/settings': 'settings',
+};
 const HUB_GROUPS: { title: string; items: { icon: string; label: string; note: string; route: string }[] }[] = [
   { title: 'Progress & Insights', items: [
     { icon: '📈', label: 'Weekly Report', note: 'Your week at a glance · share it', route: '/(client)/report' },
@@ -214,7 +225,7 @@ export default function Profile() {
               </View>
             )}
             <View style={{ position: 'absolute', bottom: -2, right: -2, width: 22, height: 22, borderRadius: 11, backgroundColor: t.surface, borderWidth: 1, borderColor: t.ring, alignItems: 'center', justifyContent: 'center' }}>
-              <Text style={{ fontSize: 11 }}>📷</Text>
+              <Icon name="camera" size={12} color={t.ink2} />
             </View>
           </Pressable>
           <View style={{ flex: 1 }}>
@@ -305,12 +316,12 @@ export default function Profile() {
             <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, overflow: 'hidden', marginBottom: 18 }}>
               {g.items.map((h, i) => (
                 <Pressable key={h.route} onPress={() => router.push(h.route as any)} style={{ flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 16, paddingVertical: 14, borderTopWidth: i === 0 ? 0 : 1, borderTopColor: t.ring }}>
-                  <View style={{ width: 38, height: 38, borderRadius: 11, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}><Text style={{ fontSize: 19 }}>{h.icon}</Text></View>
+                  <View style={{ width: 38, height: 38, borderRadius: 11, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}><Icon name={HUB_ICON[h.route] || 'chevron'} size={18} color={t.brand} /></View>
                   <View style={{ flex: 1 }}>
                     <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15 }}>{h.label}</Text>
                     <Text style={{ color: t.ink3, fontSize: 12, marginTop: 1 }}>{h.note}</Text>
                   </View>
-                  <Text style={{ color: t.ink3, fontSize: 20 }}>›</Text>
+                  <Icon name="chevron" size={18} color={t.ink3} />
                 </Pressable>
               ))}
             </View>
