@@ -71,7 +71,8 @@ export default function Scans() {
   const scans = cd.scans;
   const [img, setImg] = useState<string | null>(null);
   const [wt, setWt] = useState(''); const [bf, setBf] = useState(''); const [sm, setSm] = useState('');
-  const [photos, setPhotos] = useState<string[]>([]);
+  const [photos, setPhotos] = useState<{ uri: string; at: string }[]>([]);
+  const [cmp, setCmp] = useState<number[]>([]);
   const [reading, setReading] = useState(false);
   const [ocrMsg, setOcrMsg] = useState<string | null>(null);
   const now = new Date();
@@ -115,12 +116,13 @@ export default function Scans() {
     setImg(null); setWt(''); setBf(''); setSm('');
     Alert.alert('Scan saved', 'Added to your history and charts for ' + scanDateLabel() + '.');
   };
-  const takePhoto = async () => {
-    const perm = await ImagePicker.requestCameraPermissionsAsync();
-    if (!perm.granted) { Alert.alert('Permission needed', 'Allow camera access to add a progress photo.'); return; }
-    const res = await ImagePicker.launchCameraAsync({ quality: 0.6 });
-    if (!res.canceled && res.assets && res.assets[0]) setPhotos([res.assets[0].uri, ...photos]);
+  const addPhoto = async (fromCamera: boolean) => {
+    const perm = fromCamera ? await ImagePicker.requestCameraPermissionsAsync() : await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) { Alert.alert('Permission needed', 'Allow ' + (fromCamera ? 'camera' : 'photo library') + ' access to add a progress photo.'); return; }
+    const res = fromCamera ? await ImagePicker.launchCameraAsync({ quality: 0.6 }) : await ImagePicker.launchImageLibraryAsync({ quality: 0.6 });
+    if (!res.canceled && res.assets && res.assets[0]) { setPhotos((p) => [{ uri: res.assets[0].uri, at: new Date().toISOString() }, ...p]); setCmp([]); }
   };
+  const toggleCmp = (i: number) => setCmp((c) => (c.includes(i) ? c.filter((x) => x !== i) : c.length >= 2 ? [c[1], i] : [...c, i]));
 
   const chrono = [...scans].sort((a, b) => Date.parse(a.takenAt) - Date.parse(b.takenAt));
   const latest = chrono[chrono.length - 1];
@@ -188,13 +190,54 @@ export default function Scans() {
 
         <View style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18 }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-            <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16, textTransform: 'capitalize' }}>Progress photos</Text>
-            <Pressable onPress={takePhoto} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 9, paddingHorizontal: 12, paddingVertical: 7 }}><Text style={{ color: t.ink, fontWeight: '700', fontSize: 12 }}>📷 Add</Text></Pressable>
+            <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16, textTransform: 'capitalize' }}>Progress Photos</Text>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <Pressable onPress={() => addPhoto(false)} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 9, paddingHorizontal: 12, paddingVertical: 7 }}><Text style={{ color: t.ink, fontWeight: '700', fontSize: 12 }}>🖼 Upload</Text></Pressable>
+              <Pressable onPress={() => addPhoto(true)} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 9, paddingHorizontal: 12, paddingVertical: 7 }}><Text style={{ color: t.ink, fontWeight: '700', fontSize: 12 }}>📷 Photo</Text></Pressable>
+            </View>
           </View>
           {photos.length === 0 ? (
-            <Text style={{ color: t.ink3, fontSize: 13 }}>No photos yet. Tap “Add” to capture your first progress photo — they build a side-by-side timeline over time.</Text>
+            <Text style={{ color: t.ink3, fontSize: 13 }}>No photos yet. Add your first progress photo — once you have two, tap them to see a before → after comparison.</Text>
           ) : (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10 }}>{photos.map((p, i) => <Image key={i} source={{ uri: p }} style={{ width: 110, height: 150, borderRadius: 12, backgroundColor: t.surface2 }} />)}</ScrollView>
+            <View>
+              {cmp.length === 2 ? (() => {
+                const a = photos[cmp[0]], b = photos[cmp[1]];
+                const older = Date.parse(a.at) <= Date.parse(b.at) ? a : b;
+                const newer = older === a ? b : a;
+                const days = Math.abs(Math.round((Date.parse(newer.at) - Date.parse(older.at)) / 86400000));
+                const pair: [string, { uri: string; at: string }][] = [['Before', older], ['After', newer]];
+                return (
+                  <View style={{ marginBottom: 14 }}>
+                    <View style={{ flexDirection: 'row', gap: 10 }}>
+                      {pair.map(([label, ph]) => (
+                        <View key={label} style={{ flex: 1 }}>
+                          <Image source={{ uri: ph.uri }} style={{ width: '100%', height: 220, borderRadius: 12, backgroundColor: t.surface2 }} />
+                          <Text style={{ color: t.ink2, fontSize: 12, fontWeight: '700', marginTop: 6 }}>{label}</Text>
+                          <Text style={{ color: t.ink3, fontSize: 11 }}>{new Date(ph.at).toLocaleDateString()}</Text>
+                        </View>
+                      ))}
+                    </View>
+                    <Text style={{ color: t.brand, fontSize: 12, fontWeight: '700', textAlign: 'center', marginTop: 8 }}>{days === 0 ? 'Same day' : `${days} day${days === 1 ? '' : 's'} apart`}</Text>
+                  </View>
+                );
+              })() : (
+                <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 10 }}>Tap two photos to compare before → after.</Text>
+              )}
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10 }}>
+                {photos.map((p, i) => {
+                  const selIdx = cmp.indexOf(i);
+                  return (
+                    <Pressable key={i} onPress={() => toggleCmp(i)}>
+                      <View style={{ borderRadius: 12, borderWidth: selIdx >= 0 ? 2 : 0, borderColor: t.brand, overflow: 'hidden' }}>
+                        <Image source={{ uri: p.uri }} style={{ width: 110, height: 150, backgroundColor: t.surface2 }} />
+                        {selIdx >= 0 ? <View style={{ position: 'absolute', top: 6, right: 6, width: 20, height: 20, borderRadius: 10, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: t.brandInk, fontSize: 11, fontWeight: '800' }}>{selIdx + 1}</Text></View> : null}
+                      </View>
+                      <Text style={{ color: t.ink3, fontSize: 10, marginTop: 4, textAlign: 'center' }}>{new Date(p.at).toLocaleDateString()}</Text>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+            </View>
           )}
         </View>
       </ScrollView>
