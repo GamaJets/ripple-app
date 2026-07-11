@@ -1,4 +1,5 @@
 // Client dashboard — polished dark UI on demo data (via the repo layer later).
+import { useState, useEffect, useRef } from 'react';
 import { View, Text, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -9,6 +10,9 @@ import { ageFromDob } from '../../src/lib/age';
 import { seriesDelta } from '../../src/lib/format';
 import { useClientData } from '../../src/ui/clientData';
 import { TrendChart } from '../../src/ui/Chart';
+import { MOCK_CLIENT } from '../../src/lib/mockData';
+import { currentStreak, longestStreak, personalRecords, weekStats, streakMilestone } from '../../src/lib/streaks';
+import { Confetti } from '../../src/ui/Confetti';
 
 function Ripple({ size, color }: { size: number; color: string }) {
   return (
@@ -50,9 +54,18 @@ export default function Dashboard() {
   const dW = seriesDelta(c.weightSeries.map((x) => x.v));
   const goalLabel: Record<string, string> = { fatloss: 'Fat loss', tone: 'Tone', muscle: 'Build muscle' };
 
-  const ws = c.weightSeries.map((x) => x.v);
-  const min = Math.min(...ws), max = Math.max(...ws);
-  const norm = (v: number) => (max === min ? 0.5 : (v - min) / (max - min));
+  // Gamification: streak, personal records, this-week totals.
+  const log = MOCK_CLIENT.log;
+  const streak = currentStreak(log);
+  const longest = longestStreak(log);
+  const prs = personalRecords(log).slice(0, 3);
+  const wk = weekStats(log);
+  const milestone = streakMilestone(streak);
+  const [confetti, setConfetti] = useState(false);
+  const celebrated = useRef(false);
+  useEffect(() => {
+    if (milestone && !celebrated.current) { celebrated.current = true; setConfetti(true); }
+  }, [milestone]);
 
   const macroRows = [
     { k: 'Protein', g: macros.protein, cal: macros.protein * 4, color: t.brand },
@@ -74,6 +87,43 @@ export default function Dashboard() {
             <View style={{ width: 44, height: 44, borderRadius: 13, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}><Ripple size={26} color={t.brandInk} /></View>
           </View>
         </View>
+
+        {/* Streak & records */}
+        <Pressable onPress={() => setConfetti(true)} style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18, marginBottom: 14 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+              <View style={{ width: 54, height: 54, borderRadius: 16, backgroundColor: streak > 0 ? 'rgba(245,158,11,0.15)' : t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+                <Text style={{ fontSize: 26 }}>🔥</Text>
+              </View>
+              <View>
+                <Text style={{ color: t.ink, fontSize: 26, fontWeight: '800', letterSpacing: -0.5 }}>{streak}<Text style={{ fontSize: 14, color: t.ink3, fontWeight: '700' }}> day{streak === 1 ? '' : 's'}</Text></Text>
+                <Text style={{ color: t.ink3, fontSize: 12, fontWeight: '600' }}>{streak > 0 ? 'Current streak' : 'Train today to start a streak'} · best {longest}</Text>
+              </View>
+            </View>
+            <View style={{ alignItems: 'flex-end' }}>
+              <Text style={{ color: t.brand, fontSize: 20, fontWeight: '800' }}>{wk.workouts}</Text>
+              <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '600' }}>this week</Text>
+            </View>
+          </View>
+          {milestone ? (
+            <View style={{ marginTop: 12, backgroundColor: 'rgba(245,158,11,0.12)', borderRadius: 12, paddingVertical: 8, paddingHorizontal: 12 }}>
+              <Text style={{ color: t.s3, fontWeight: '700', fontSize: 13 }}>{milestone}</Text>
+            </View>
+          ) : null}
+          {prs.length > 0 && (
+            <View style={{ marginTop: 12 }}>
+              <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', marginBottom: 7, textTransform: 'uppercase', letterSpacing: 0.5 }}>Personal Records 🏆</Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 7 }}>
+                {prs.map((pr) => (
+                  <View key={pr.exercise} style={{ backgroundColor: t.surface2, borderRadius: 10, borderWidth: 1, borderColor: t.ring, paddingHorizontal: 10, paddingVertical: 7 }}>
+                    <Text style={{ color: t.ink2, fontSize: 11, fontWeight: '600' }}>{pr.exercise}</Text>
+                    <Text style={{ color: t.ink, fontSize: 13, fontWeight: '800' }}>{pr.weight} kg × {pr.reps}</Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+          )}
+        </Pressable>
 
         <View style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18, marginBottom: 14 }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -122,6 +172,7 @@ export default function Dashboard() {
           <Action t={t} icon="📅" label="Book session" onPress={() => router.push('/(client)/calendar')} />
         </View>
       </ScrollView>
+      <Confetti show={confetti} onDone={() => setConfetti(false)} />
     </SafeAreaView>
   );
 }

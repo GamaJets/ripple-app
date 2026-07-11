@@ -50,6 +50,8 @@ export const MOCK_CLIENT: MockClient = {
     { id: 's2', clientId: 'c1', takenAt: daysAgo(7), weightKg: 67.4, bodyFatPct: 28.2, skeletalMuscleKg: 24.9, source: 'InBody 770 (OCR)' },
   ],
   log: [
+    { t: daysAgo(0), exercise: 'Back Squat', sets: [[8, 55], [8, 55], [6, 57], [6, 57]], kcal: 330 },
+    { t: daysAgo(1), exercise: 'Barbell Bench Press', sets: [[8, 34], [8, 34], [7, 34]], kcal: 300 },
     { t: daysAgo(2), exercise: 'Back Squat', sets: [[8, 52], [8, 52], [8, 54], [7, 54]], kcal: 312 },
     { t: daysAgo(3), exercise: 'Treadmill / Run', cardio: { mins: 32, dist: 5.2, unit: 'km' }, kcal: 342 },
     { t: daysAgo(4), exercise: 'Barbell Bench Press', sets: [[8, 30], [8, 32], [8, 32], [6, 32]], kcal: 288 },
