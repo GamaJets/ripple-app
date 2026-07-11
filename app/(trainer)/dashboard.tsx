@@ -81,7 +81,14 @@ export default function TrainerClients() {
           </View>
         </View>
 
-        <View style={{ flexDirection: 'row', gap: 12, marginBottom: 16 }}>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginBottom: 16 }}>
+          {([["🏋️","Programs","/(trainer)/builder"],["📅","Schedule","/(trainer)/calendar"],["🎬","Videos","/(trainer)/videos"],["📈","Analytics","/(trainer)/analytics"],["🏆","Leaderboard","/(trainer)/leaderboard"]] as const).map(([ic, label, route]) => (
+            <Pressable key={route} onPress={() => router.push(route as any)} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 8 }}>
+              <Text style={{ fontSize: 14 }}>{ic}</Text><Text style={{ color: t.ink2, fontWeight: '700', fontSize: 13 }}>{label}</Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+<View style={{ flexDirection: 'row', gap: 12, marginBottom: 16 }}>
           <Stat t={t} label="Active clients" value={String(active)} />
           <Stat t={t} label="Est. revenue" value={'$' + revenue.toLocaleString()} unit="/mo" />
           <Stat t={t} label="Unread" value={String(unread)} />

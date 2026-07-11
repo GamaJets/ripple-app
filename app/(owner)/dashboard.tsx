@@ -26,7 +26,14 @@ export default function OwnerOverview() {
           <View><Text style={{ color: t.ink3, fontSize: 14 }}>Platform</Text><Text style={{ color: t.ink, fontSize: 24, fontWeight: '800', textTransform: 'capitalize' }}>Repple HQ</Text></View>
           <Pressable onPress={() => router.push('/')} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 7 }}><Text style={{ color: t.ink2, fontWeight: '700', fontSize: 12 }}>Switch role</Text></Pressable>
         </View>
-        <View style={{ flexDirection: 'row', gap: 12, marginBottom: 12 }}>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginBottom: 16 }}>
+          {([["🧑‍🏫","Trainers","/(owner)/trainers"],["🎨","Brand","/(owner)/brand"],["📈","Growth","/(owner)/growth"],["🛠️","Ops","/(owner)/ops"]] as const).map(([ic, label, route]) => (
+            <Pressable key={route} onPress={() => router.push(route as any)} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 8 }}>
+              <Text style={{ fontSize: 14 }}>{ic}</Text><Text style={{ color: t.ink2, fontWeight: '700', fontSize: 13 }}>{label}</Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+<View style={{ flexDirection: 'row', gap: 12, marginBottom: 12 }}>
           <Big t={t} label="Platform MRR" value={'$' + mrr.toLocaleString()} sub="from trainer fees" tint />
           <Big t={t} label="Trainers" value={String(trainers.length)} sub={trainers.filter((x) => x.status === 'trial').length + ' on trial'} />
         </View>
