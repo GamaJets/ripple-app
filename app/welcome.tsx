@@ -1,11 +1,12 @@
-// Welcome / Auth (Phase 1) — sign in or create an account. Works on mock auth
-// today; wired to Supabase auth when keys are added. Gated by app/index.tsx.
+// Welcome / Auth (Phase 1) — sign in or create an account. Mock auth when
+// USE_SUPABASE is false; real Supabase auth when true. Gated by app/index.tsx.
 import { useState } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useRouter } from 'expo-router';
 import { useTheme } from '../src/ui/components';
 import { useAuth } from '../src/ui/auth';
+import { USE_SUPABASE } from '../src/lib/config';
 
 function Ripple({ size, color }: { size: number; color: string }) {
   return (
@@ -26,17 +27,34 @@ export default function Welcome() {
   const [email, setEmail] = useState('');
   const [pw, setPw] = useState('');
   const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
 
-  const canGo = email.trim().length > 3 && pw.length >= 4 && (mode === 'in' || name.trim().length > 0);
+  const canGo = email.trim().length > 3 && pw.length >= 6 && (mode === 'in' || name.trim().length > 0);
   const go = async () => {
     if (!canGo || busy) return;
-    setBusy(true);
+    setBusy(true); setNotice(null);
     try {
-      if (mode === 'up') { await auth.signUp(name, email, pw); router.replace('/onboarding'); }
-      else { await auth.signIn(email, pw); router.replace('/'); }
+      if (mode === 'up') {
+        const res = await auth.signUp(name, email.trim(), pw);
+        if (res.needsConfirmation) {
+          setNotice('Account created. Check your email to confirm, then sign in.');
+          setMode('in');
+        } else {
+          router.replace('/onboarding');
+        }
+      } else {
+        await auth.signIn(email.trim(), pw);
+        router.replace('/');
+      }
+    } catch (e: any) {
+      setNotice(e?.message || 'Something went wrong. Please try again.');
     } finally { setBusy(false); }
   };
-  const provider = async (p: 'apple' | 'google') => { await auth.signInWithProvider(p); router.replace('/'); };
+  const provider = async (p: 'apple' | 'google') => {
+    setNotice(null);
+    try { await auth.signInWithProvider(p); router.replace('/'); }
+    catch (e: any) { setNotice(e?.message || 'Sign-in failed.'); }
+  };
 
   const inp = { color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 14, fontSize: 15, marginBottom: 12 } as const;
 
@@ -54,17 +72,23 @@ export default function Welcome() {
           {/* Sign in / Sign up toggle */}
           <View style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: 12, padding: 4, marginBottom: 20, borderWidth: 1, borderColor: t.ring }}>
             {([['up', 'Create Account'], ['in', 'Sign In']] as const).map(([m, label]) => (
-              <Pressable key={m} onPress={() => setMode(m)} accessibilityRole="button" accessibilityLabel={label} style={{ flex: 1, paddingVertical: 10, borderRadius: 9, alignItems: 'center', backgroundColor: mode === m ? t.brand : 'transparent' }}>
+              <Pressable key={m} onPress={() => { setMode(m); setNotice(null); }} accessibilityRole="button" accessibilityLabel={label} style={{ flex: 1, paddingVertical: 10, borderRadius: 9, alignItems: 'center', backgroundColor: mode === m ? t.brand : 'transparent' }}>
                 <Text style={{ color: mode === m ? t.brandInk : t.ink3, fontWeight: '700', fontSize: 13 }}>{label}</Text>
               </Pressable>
             ))}
           </View>
 
+          {notice ? (
+            <View style={{ backgroundColor: t.surface, borderColor: t.brand, borderWidth: 1, borderRadius: 12, padding: 12, marginBottom: 14 }}>
+              <Text style={{ color: t.ink2, fontSize: 13, lineHeight: 18 }}>{notice}</Text>
+            </View>
+          ) : null}
+
           {mode === 'up' ? (
             <TextInput value={name} onChangeText={setName} placeholder="Full name" placeholderTextColor={t.ink3} autoCapitalize="words" style={inp} accessibilityLabel="Full name" />
           ) : null}
           <TextInput value={email} onChangeText={setEmail} placeholder="Email" placeholderTextColor={t.ink3} keyboardType="email-address" autoCapitalize="none" autoCorrect={false} style={inp} accessibilityLabel="Email" />
-          <TextInput value={pw} onChangeText={setPw} placeholder="Password" placeholderTextColor={t.ink3} secureTextEntry autoCapitalize="none" style={inp} accessibilityLabel="Password" />
+          <TextInput value={pw} onChangeText={setPw} placeholder="Password (min 6 characters)" placeholderTextColor={t.ink3} secureTextEntry autoCapitalize="none" style={inp} accessibilityLabel="Password" />
 
           <Pressable onPress={go} disabled={!canGo || busy} accessibilityRole="button" style={{ backgroundColor: canGo ? t.brand : t.surface2, borderColor: canGo ? t.brand : t.ring, borderWidth: 1, borderRadius: 14, paddingVertical: 16, alignItems: 'center', marginTop: 6 }}>
             <Text style={{ color: canGo ? t.brandInk : t.ink3, fontWeight: '800', fontSize: 15 }}>{busy ? 'Please wait…' : mode === 'up' ? 'Create Account' : 'Sign In'}</Text>
@@ -83,7 +107,7 @@ export default function Welcome() {
             <Text style={{ fontSize: 15 }}>🇬</Text><Text style={{ color: t.ink, fontWeight: '700', fontSize: 15 }}>Continue with Google</Text>
           </Pressable>
 
-          <Text style={{ color: t.ink3, fontSize: 11, textAlign: 'center', marginTop: 22, lineHeight: 16 }}>Demo mode — any email/password works. Real accounts activate when the backend is connected. By continuing you agree to the Terms & Privacy Policy.</Text>
+          <Text style={{ color: t.ink3, fontSize: 11, textAlign: 'center', marginTop: 22, lineHeight: 16 }}>{USE_SUPABASE ? 'Your account is securely stored. By continuing you agree to the Terms & Privacy Policy.' : 'Demo mode — any email/password works. Real accounts activate when the backend is connected.'}</Text>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>

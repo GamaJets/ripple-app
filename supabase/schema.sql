@@ -252,3 +252,36 @@ create policy msg_participants on messages
 
 -- NOTE: extend these per table before storing real user data. A security review
 -- of the full policy set is a Phase-2 checklist item in the build plan.
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Phase-1 auth wiring (added when the live backend was connected).
+-- 1) Let a signed-in user read/write ONLY their own profile row.
+-- 2) Auto-create that profile row the moment they sign up, pulling role +
+--    full_name from the signUp metadata. Runs as SECURITY DEFINER so the
+--    insert bypasses RLS (there is no session yet at insert time).
+-- ═══════════════════════════════════════════════════════════════════════════
+create policy profiles_self on profiles
+  for all using (id = auth.uid()) with check (id = auth.uid());
+
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  insert into public.profiles (id, role, full_name)
+  values (
+    new.id,
+    coalesce(new.raw_user_meta_data->>'role', 'client'),
+    coalesce(new.raw_user_meta_data->>'full_name', '')
+  )
+  on conflict (id) do nothing;
+  return new;
+end;
+$$;
+
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute function public.handle_new_user();

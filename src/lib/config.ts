@@ -1,6 +1,6 @@
 // Single source of truth: rich demo data (mock) vs live Supabase backend.
 // Centralised so every screen agrees (avoids per-file env drift).
-// TEMP: mock while we build & polish the UI on full demo data.
-// Flip to the env line (and seed the database) when wiring live data.
-export const USE_SUPABASE = false;
-// export const USE_SUPABASE = process.env.EXPO_PUBLIC_USE_SUPABASE === '1';
+// LIVE: real Supabase auth is active. Domain data (sessions, workouts, meals,
+// roster, etc.) still runs on the in-memory providers until each is migrated
+// to the repo layer — see docs/roadmap-next-50.md Phase 1.
+export const USE_SUPABASE = true;

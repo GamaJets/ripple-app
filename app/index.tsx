@@ -33,8 +33,17 @@ function Portal({ t, icon, title, sub, onPress }: { t: Theme; icon: string; titl
 export default function Home() {
   const t = useTheme();
   const router = useRouter();
-  const { authed, user, signOut } = useAuth();
+  const { authed, user, loading, signOut } = useAuth();
 
+  // Live mode: brief splash while the persisted session is rehydrated so we
+  // don't flash the welcome screen for an already signed-in user.
+  if (loading) {
+    return (
+      <View style={{ flex: 1, backgroundColor: t.bg, alignItems: 'center', justifyContent: 'center' }}>
+        <Ripple size={52} color={t.brand} />
+      </View>
+    );
+  }
   if (!authed) return <Redirect href="/welcome" />;
 
   return (
@@ -44,7 +53,7 @@ export default function Home() {
           <View style={{ width: 46, height: 46, borderRadius: 14, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}><Ripple size={28} color={t.brandInk} /></View>
           <Text style={{ color: t.ink, fontSize: 30, fontWeight: '800', letterSpacing: -0.5 }}>Repple</Text>
         </View>
-        <Text style={{ color: t.ink3, fontSize: 14, marginBottom: 30 }}>Signed in as {user?.email} · demo data</Text>
+        <Text style={{ color: t.ink3, fontSize: 14, marginBottom: 30 }}>Signed in as {user?.email}</Text>
         <Text style={{ color: t.ink2, fontSize: 13, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 12 }}>Choose a portal</Text>
         <Portal t={t} icon="🏃" title="Client App" sub="Program, meals, progress, booking" onPress={() => router.push('/(client)/dashboard')} />
         <Portal t={t} icon="🧑‍🏫" title="Trainer Portal" sub="Clients, schedule, videos, analytics" onPress={() => router.push('/(trainer)/dashboard')} />
