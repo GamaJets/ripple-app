@@ -9,6 +9,7 @@ import { MOCK_TRAINER } from '../../src/lib/mockData';
 import { type RosterClient } from '../../src/lib/trainerMock';
 import { useRoster } from '../../src/ui/roster';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
+import { useCheckIns } from '../../src/ui/checkins';
 import { currentStreak, longestStreak, personalRecords, weekStats } from '../../src/lib/streaks';
 
 function Stat({ t, label, value, unit }: { t: Theme; label: string; value: string; unit?: string }) {
@@ -42,6 +43,7 @@ export default function TrainerClients() {
   // Live training data is available for the demo client (c1).
   const hasLog = sel?.id === 'c1';
   const { log } = useWorkoutLog();
+  const { latest: latestCheckIn } = useCheckIns();
   const streak = hasLog ? currentStreak(log) : 0;
   const best = hasLog ? longestStreak(log) : 0;
   const wk = hasLog ? weekStats(log) : null;
@@ -123,6 +125,14 @@ export default function TrainerClients() {
                       </View>
                     ))}
                   </View>
+
+                  {latestCheckIn ? (
+                    <View style={{ backgroundColor: t.surface2, borderRadius: 12, borderWidth: 1, borderColor: t.ring, padding: 12, marginBottom: 14 }}>
+                      <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>Latest Check-in · {new Date(latestCheckIn.at).toLocaleDateString()}</Text>
+                      <Text style={{ color: t.ink2, fontSize: 13 }}>{latestCheckIn.weightKg} kg · energy {latestCheckIn.energy}/5 · sleep {latestCheckIn.sleep}/5 · mood {latestCheckIn.mood}/5 · adherence {latestCheckIn.adherence}/5</Text>
+                      {latestCheckIn.note ? <Text style={{ color: t.ink3, fontSize: 13, marginTop: 6, fontStyle: 'italic' }}>“{latestCheckIn.note}”</Text> : null}
+                    </View>
+                  ) : null}
 
                   {prs.length > 0 && (
                     <View style={{ marginBottom: 14 }}>

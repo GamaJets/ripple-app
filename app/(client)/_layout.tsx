@@ -41,6 +41,7 @@ export default function ClientLayout() {
       <Tabs.Screen name="calendar" options={{ href: null, title: 'Book Sessions' }} />
       <Tabs.Screen name="habits" options={{ href: null, title: 'Daily Habits' }} />
       <Tabs.Screen name="achievements" options={{ href: null, title: 'Achievements' }} />
+      <Tabs.Screen name="checkin" options={{ href: null, title: 'Weekly Check-in' }} />
     </Tabs>
   );
 }

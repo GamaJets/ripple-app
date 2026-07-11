@@ -7,6 +7,7 @@ import { WorkoutLogProvider } from '../src/ui/workoutLog';
 import { CoachProfileProvider } from '../src/ui/coachProfile';
 import { RosterProvider } from '../src/ui/roster';
 import { HabitsProvider } from '../src/ui/habits';
+import { CheckInsProvider } from '../src/ui/checkins';
 import { AuthProvider } from '../src/ui/auth';
 import { ErrorBoundary } from '../src/ui/ErrorBoundary';
 import { AppThemeProvider, useTheme } from '../src/ui/components';
@@ -28,9 +29,11 @@ export default function RootLayout() {
                 <CoachProfileProvider>
                   <RosterProvider>
                     <HabitsProvider>
-                      <ErrorBoundary>
-                        <ThemedStack />
-                      </ErrorBoundary>
+                      <CheckInsProvider>
+                        <ErrorBoundary>
+                          <ThemedStack />
+                        </ErrorBoundary>
+                      </CheckInsProvider>
                     </HabitsProvider>
                   </RosterProvider>
                 </CoachProfileProvider>

@@ -102,6 +102,7 @@ const round1 = (n: number) => Math.round(n * 10) / 10;
 
 const HUB: { icon: string; label: string; note: string; route: string }[] = [
   { icon: '✅', label: 'Daily Habits', note: 'Habits & water tracker', route: '/(client)/habits' },
+  { icon: '📝', label: 'Weekly Check-in', note: 'Send your coach a weekly pulse', route: '/(client)/checkin' },
   { icon: '🏆', label: 'Achievements', note: 'Badges you\'ve unlocked', route: '/(client)/achievements' },
   { icon: '🤖', label: 'AI Coach', note: 'Chat with your AI coach · knows your plan', route: '/(client)/coach' },
   { icon: '⌚', label: 'Watch & Devices', note: 'Apple Watch, WHOOP, Garmin…', route: '/(client)/devices' },
