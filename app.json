@@ -15,24 +15,26 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.repple.app",
+      "bundleIdentifier": "com.washateria.repple",
       "infoPlist": {
         "NSHealthShareUsageDescription": "Repple reads your heart rate and calories to log workouts.",
         "NSHealthUpdateUsageDescription": "Repple writes completed workouts to Apple Health.",
         "NSCameraUsageDescription": "Repple uses the camera to capture InBody scans and progress photos.",
-        "NSPhotoLibraryUsageDescription": "Repple lets you upload InBody scans and progress photos."
+        "NSPhotoLibraryUsageDescription": "Repple lets you upload InBody scans and progress photos.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
-      "package": "com.repple.app",
+      "package": "com.washateria.repple",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0d9488"
       },
       "permissions": [
-        "CAMERA",
-        "READ_MEDIA_IMAGES",
-        "health.READ_HEART_RATE"
+        "android.permission.CAMERA",
+        "android.permission.READ_MEDIA_IMAGES",
+        "health.READ_HEART_RATE",
+        "android.permission.RECORD_AUDIO"
       ]
     },
     "web": {
@@ -50,6 +52,13 @@
           "healthUpdatePermission": "Repple writes completed workouts to Apple Health."
         }
       ]
-    ]
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "7d4ca6bf-2f1c-4b87-94f4-9b6bdd008aad"
+      }
+    },
+    "owner": "repple"
   }
 }
