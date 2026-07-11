@@ -5,8 +5,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
-import { MOCK_TRAINER } from '../../src/lib/mockData';
+import { MOCK_TRAINER, MOCK_CLIENT } from '../../src/lib/mockData';
 import { ROSTER, type RosterClient } from '../../src/lib/trainerMock';
+import { currentStreak, longestStreak, personalRecords, weekStats } from '../../src/lib/streaks';
 
 function Stat({ t, label, value, unit }: { t: Theme; label: string; value: string; unit?: string }) {
   return (
@@ -17,6 +18,13 @@ function Stat({ t, label, value, unit }: { t: Theme; label: string; value: strin
   );
 }
 
+function timeAgo(iso: string) {
+  const days = Math.round((Date.now() - Date.parse(iso)) / 86400000);
+  if (days <= 0) return 'today';
+  if (days === 1) return 'yesterday';
+  return `${days}d ago`;
+}
+
 export default function TrainerClients() {
   const t = useTheme();
   const router = useRouter();
@@ -24,6 +32,15 @@ export default function TrainerClients() {
   const active = ROSTER.length;
   const revenue = active * MOCK_TRAINER.sessionFee * 4;
   const unread = ROSTER.reduce((a, c) => a + c.unread, 0);
+
+  // Live training data is available for the demo client (c1).
+  const hasLog = sel?.id === 'c1';
+  const log = MOCK_CLIENT.log;
+  const streak = hasLog ? currentStreak(log) : 0;
+  const best = hasLog ? longestStreak(log) : 0;
+  const wk = hasLog ? weekStats(log) : null;
+  const prs = hasLog ? personalRecords(log).slice(0, 3) : [];
+  const recent = hasLog ? log.slice(0, 4) : [];
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
@@ -80,11 +97,56 @@ export default function TrainerClients() {
 
       <Modal visible={!!sel} transparent animationType="slide" onRequestClose={() => setSel(null)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setSel(null)} />
-        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, borderColor: t.ring, padding: 20 }}>
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, borderColor: t.ring, maxHeight: '86%' }}>
           {sel && (
-            <View>
+            <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 30 }} showsVerticalScrollIndicator={false}>
               <Text style={{ color: t.ink, fontSize: 20, fontWeight: '800', textTransform: 'capitalize' }}>{sel.name}</Text>
               <Text style={{ color: t.ink3, fontSize: 13, marginTop: 2, marginBottom: 16 }}>{sel.goal} · {sel.weightDelta > 0 ? '+' : ''}{sel.weightDelta} kg · {sel.adherence}% adherence</Text>
+
+              {hasLog ? (
+                <View>
+                  {/* Live training snapshot */}
+                  <View style={{ flexDirection: 'row', gap: 8, marginBottom: 14 }}>
+                    {[['🔥 Streak', `${streak}`], ['Best', `${best}`], ['This wk', `${wk?.workouts ?? 0}`], ['Volume', wk ? `${(wk.volumeKg / 1000).toFixed(1)}t` : '—']].map(([l, v]) => (
+                      <View key={l} style={{ flex: 1, backgroundColor: t.surface2, borderRadius: 12, borderWidth: 1, borderColor: t.ring, paddingVertical: 10, alignItems: 'center' }}>
+                        <Text style={{ color: t.ink, fontWeight: '800', fontSize: 16 }}>{v}</Text>
+                        <Text style={{ color: t.ink3, fontSize: 10, marginTop: 2 }}>{l}</Text>
+                      </View>
+                    ))}
+                  </View>
+
+                  {prs.length > 0 && (
+                    <View style={{ marginBottom: 14 }}>
+                      <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 7 }}>Personal Records 🏆</Text>
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 7 }}>
+                        {prs.map((pr) => (
+                          <View key={pr.exercise} style={{ backgroundColor: t.surface2, borderRadius: 10, borderWidth: 1, borderColor: t.ring, paddingHorizontal: 10, paddingVertical: 7 }}>
+                            <Text style={{ color: t.ink2, fontSize: 11, fontWeight: '600' }}>{pr.exercise}</Text>
+                            <Text style={{ color: t.ink, fontSize: 13, fontWeight: '800' }}>{pr.weight} kg × {pr.reps}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    </View>
+                  )}
+
+                  <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 7 }}>Recent Sessions</Text>
+                  {recent.map((l, i) => (
+                    <View key={i} style={{ backgroundColor: t.surface2, borderRadius: 12, borderWidth: 1, borderColor: t.ring, padding: 12, marginBottom: 8, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ color: t.ink, fontWeight: '700', fontSize: 14, textTransform: 'capitalize' }}>{l.exercise}</Text>
+                        <Text style={{ color: t.ink3, fontSize: 12, marginTop: 2 }}>{l.sets ? l.sets.map((s: number[]) => `${s[0]}×${s[1]}kg`).join(' · ') : l.cardio ? `${l.cardio.mins} min · ${l.cardio.dist} ${l.cardio.unit}` : ''}</Text>
+                      </View>
+                      <Text style={{ color: t.ink3, fontSize: 11 }}>{timeAgo(l.t)}</Text>
+                    </View>
+                  ))}
+                  <View style={{ height: 6 }} />
+                </View>
+              ) : (
+                <View style={{ backgroundColor: t.surface2, borderRadius: 12, borderWidth: 1, borderColor: t.ring, padding: 14, marginBottom: 14 }}>
+                  <Text style={{ color: t.ink3, fontSize: 13 }}>Last active {sel.lastActive} · next session {sel.next}. Detailed session history appears here once {sel.name.split(' ')[0]} logs workouts.</Text>
+                </View>
+              )}
+
               {[['📋 Review program', 'Adjust sets, reps & exercises'], ['🥗 Review meal plan', 'Tweak macros & swaps'], ['📊 View progress & scans', 'Weight, body fat, photos'], ['💬 Message', 'Open the chat thread']].map(([label, sub]) => (
                 <Pressable key={label} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 10 }}>
                   <Text style={{ color: t.ink, fontWeight: '700', fontSize: 14 }}>{label}</Text>
@@ -94,7 +156,7 @@ export default function TrainerClients() {
               <Pressable onPress={() => setSel(null)} style={{ backgroundColor: t.brand, borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginTop: 4 }}>
                 <Text style={{ color: t.brandInk, fontWeight: '800' }}>Close</Text>
               </Pressable>
-            </View>
+            </ScrollView>
           )}
         </View>
       </Modal>
