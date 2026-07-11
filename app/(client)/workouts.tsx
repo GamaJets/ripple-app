@@ -1,7 +1,7 @@
 // Train — pick any weekday, follow your AI program (log/swap/video), run a guided
 // session with a rest timer + live heart rate, OR log cardio.
 import { useState, useEffect, useRef } from 'react';
-import { View, Text, TextInput, Pressable, ScrollView, Modal } from 'react-native';
+import { View, Text, TextInput, Pressable, ScrollView, Modal, Alert } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
@@ -35,6 +35,7 @@ export default function Train() {
   const [ctype, setCtype] = useState(CARDIO[0]); const [mins, setMins] = useState('30'); const [dist, setDist] = useState('5'); const [unit, setUnit] = useState<'km' | 'mi'>('km');
   const [showCal, setShowCal] = useState(false);
   const [selCalDay, setSelCalDay] = useState('');
+  const [confetti, setConfetti] = useState(false);
   const today0 = new Date();
   const monday0 = new Date(today0); monday0.setDate(today0.getDate() - jsToMon); monday0.setHours(0, 0, 0, 0);
   const dateFor = (i: number) => { const d = new Date(monday0); d.setDate(monday0.getDate() + i); return d; };
@@ -66,6 +67,24 @@ export default function Train() {
     setCardioLog([{ type: ctype, mins: m, dist: d, unit, kcal }, ...cardioLog]);
     addWorkouts([{ t: new Date().toISOString(), exercise: ctype, cardio: { mins: m, dist: d, unit }, kcal }]);
     setMins('30'); setDist('5');
+  };
+  // Save manually-logged strength sets to the shared log (updates streak/PRs).
+  const saveManual = () => {
+    const nowISO = new Date().toISOString();
+    let pr = false;
+    const entries: WorkoutEntry[] = workout.exercises.map((e) => {
+      const s = logged[uid(e)] || [];
+      if (!s.length) return null;
+      const setPairs = s.map((x) => [parseInt(x.reps, 10) || 0, parseFloat(x.kg) || 0] as [number, number]);
+      const bestE1 = Math.max(0, ...setPairs.map(([r, kg]) => (r && kg ? est1RM(kg, r) : 0)));
+      if (bestE1 > priorBest1RM(workoutLog, nameOf(e))) pr = true;
+      return { t: nowISO, exercise: nameOf(e), sets: setPairs, kcal: Math.round(setPairs.reduce((a, [r, kg]) => a + r * kg, 0) / 60) + s.length * 8 };
+    }).filter(Boolean) as WorkoutEntry[];
+    if (!entries.length) return;
+    addWorkouts(entries);
+    setLogged({});
+    if (pr) setConfetti(true);
+    Alert.alert('Workout saved ✓', `${entries.length} exercise${entries.length === 1 ? '' : 's'} logged.${pr ? ' New personal record! 🏆' : ''} Your streak and records are updated.`, [{ text: 'Nice' }]);
   };
   const inp = { color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 9, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, flex: 1 } as const;
 
@@ -156,6 +175,11 @@ export default function Train() {
                 </View>
               );
             })}
+            {Object.values(logged).some((a) => a.length > 0) ? (
+              <Pressable onPress={saveManual} style={{ backgroundColor: t.brand, borderRadius: 14, paddingVertical: 15, alignItems: 'center', marginTop: 4 }}>
+                <Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 15 }}>✓ Save Workout To Log</Text>
+              </Pressable>
+            ) : null}
           </View>
         ) : (
           <View>
@@ -278,6 +302,7 @@ export default function Train() {
       <Modal visible={session} animationType="slide" onRequestClose={() => setSession(false)}>
         <SessionRunner t={t} exercises={workout.exercises} focus={workout.focus} nameOf={nameOf} liveHr={w.today.heartRateAvg} log={workoutLog} onComplete={addWorkouts} onClose={() => setSession(false)} />
       </Modal>
+      <Confetti show={confetti} onDone={() => setConfetti(false)} />
     </SafeAreaView>
   );
 }
