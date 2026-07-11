@@ -5,18 +5,20 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { buildPlan, swapIndex, groceryData, DEPTS, DEPT_ICO, type PlannedMeal } from '../../src/lib/meals';
-import type { Diet } from '../../src/lib/types';
+import type { Diet, Goal } from '../../src/lib/types';
 import { useClientData } from '../../src/ui/clientData';
 
 const DIETS: Diet[] = ['meat', 'vegetarian', 'vegan', 'paleo', 'keto'];
 const DIET_LABEL: Record<Diet, string> = { meat: 'Meat', vegetarian: 'Veggie', vegan: 'Vegan', paleo: 'Paleo', keto: 'Keto' };
+const GOALS: Goal[] = ['fatloss', 'tone', 'muscle'];
+const GOAL_LABEL: Record<Goal, string> = { fatloss: 'Fat Loss', tone: 'Tone', muscle: 'Build Muscle' };
 
 export default function Nutrition() {
   const t = useTheme();
   const c = useClientData();
   const w = c.weightKg;
   const bf = c.bodyFatPct;
-  const [diet, setDiet] = useState<Diet>(c.diet);
+  const diet = c.diet;
   const [override, setOverride] = useState<Record<number, number>>({});
   const [recipe, setRecipe] = useState<PlannedMeal | null>(null);
   const [showGrocery, setShowGrocery] = useState(false);
@@ -50,9 +52,18 @@ export default function Nutrition() {
           </View>
         </View>
 
+        <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>Goal</Text>
+        <View style={{ flexDirection: 'row', gap: 8, marginBottom: 14 }}>
+          {GOALS.map((g) => (
+            <Pressable key={g} onPress={() => { c.setGoal(g); setOverride({}); }} style={{ flex: 1, paddingVertical: 9, borderRadius: 20, alignItems: 'center', backgroundColor: c.goal === g ? t.brand : t.surface, borderWidth: 1, borderColor: c.goal === g ? t.brand : t.ring }}>
+              <Text style={{ color: c.goal === g ? t.brandInk : t.ink2, fontWeight: '700', fontSize: 13 }}>{GOAL_LABEL[g]}</Text>
+            </Pressable>
+          ))}
+        </View>
+        <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>Diet</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginBottom: 14 }}>
           {DIETS.map((d) => (
-            <Pressable key={d} onPress={() => { setDiet(d); setOverride({}); }} style={{ paddingHorizontal: 16, paddingVertical: 9, borderRadius: 20, backgroundColor: diet === d ? t.brand : t.surface, borderWidth: 1, borderColor: diet === d ? t.brand : t.ring }}>
+            <Pressable key={d} onPress={() => { c.setDiet(d); setOverride({}); }} style={{ paddingHorizontal: 16, paddingVertical: 9, borderRadius: 20, backgroundColor: diet === d ? t.brand : t.surface, borderWidth: 1, borderColor: diet === d ? t.brand : t.ring }}>
               <Text style={{ color: diet === d ? t.brandInk : t.ink2, fontWeight: '700', fontSize: 13 }}>{DIET_LABEL[d]}</Text>
             </Pressable>
           ))}
