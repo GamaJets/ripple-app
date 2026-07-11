@@ -7,6 +7,7 @@ import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { buildProgram, type ProgramExercise } from '../../src/lib/programs';
 import { useClientData } from '../../src/ui/clientData';
+import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
 import { useWearables } from '../../src/ui/wearables';
 import type { WorkoutEntry } from '../../src/lib/mockData';
 import { suggestForExercise, priorBest1RM } from '../../src/lib/progression';
@@ -20,9 +21,10 @@ const CARDIO = ['Treadmill / Run', 'Cycling', 'Rowing', 'Ski erg', 'Elliptical',
 export default function Train() {
   const t = useTheme();
   const cd = useClientData();
+  const coachProgram = useAssignedPrograms().getProgram(cd.id);
   const w = useWearables();
   const { log: workoutLog, addWorkouts } = useWorkoutLog();
-  const program = buildProgram(cd.goal, cd.bodyFatPct);
+  const program = coachProgram ?? buildProgram(cd.goal, cd.bodyFatPct);
   const jsToMon = (new Date().getDay() + 6) % 7;
   const [dayIdx, setDayIdx] = useState(jsToMon);
   const [mode, setMode] = useState<'strength' | 'cardio'>('strength');
@@ -57,7 +59,7 @@ export default function Train() {
   const dayKcal = dayEntries.reduce((a, l) => a + (l.kcal || 0), 0);
   const prettyDay = (ds: string) => { const [y, m, d] = ds.split('-').map(Number); return new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' }); };
 
-  const workout = program.days[dayIdx % program.days.length];
+  const workout = program.days[dayIdx % program.days.length] || program.days[0] || { day: '', focus: 'Rest day', exercises: [] };
   const uid = (e: ProgramExercise) => `${dayIdx}:${e.key}`;
   const nameOf = (e: ProgramExercise) => swaps[uid(e)] || e.name;
   const logSet = (e: ProgramExercise, reps: string, kg: string) => { if (!reps) return; setLogged({ ...logged, [uid(e)]: [...(logged[uid(e)] || []), { reps, kg }] }); };
@@ -92,6 +94,7 @@ export default function Train() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
         <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800', textTransform: 'capitalize' }}>Train</Text>
+        {coachProgram ? (<View style={{ alignSelf: 'flex-start', backgroundColor: t.surface2, borderColor: t.brand, borderWidth: 1, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4, marginTop: 6 }}><Text style={{ color: t.brand, fontSize: 11, fontWeight: '800' }}>📋 Assigned by your coach</Text></View>) : null}
         <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 14 }}>{program.title} · pick the day you're training</Text>
 
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
@@ -142,7 +145,7 @@ export default function Train() {
           <View>
             <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 14, marginBottom: 12 }}>
               <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, textTransform: 'capitalize' }}>{workout.focus}</Text>
-              <Text style={{ color: t.ink3, fontSize: 12, marginTop: 2 }}>🤖 {program.focus.join(' · ')}{workout.cardio ? ` · finish with ${workout.cardio}` : ''}</Text>
+              <Text style={{ color: t.ink3, fontSize: 12, marginTop: 2 }}>{coachProgram ? '📋 ' : '🤖 '}{program.focus.join(' · ')}{workout.cardio ? ` · finish with ${workout.cardio}` : ''}</Text>
               <Pressable onPress={() => setSession(true)} style={{ backgroundColor: t.brand, borderRadius: 12, paddingVertical: 13, alignItems: 'center', marginTop: 12 }}>
                 <Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 15 }}>▶  Start Guided Session</Text>
               </Pressable>

@@ -24,6 +24,7 @@ export default function TrainerLayout() {
       }}
     >
       <Tabs.Screen name="dashboard" options={{ title: 'Clients', tabBarIcon: ({ focused }) => <TabIcon emoji="👥" focused={focused} /> }} />
+      <Tabs.Screen name="builder" options={{ title: 'Programs', tabBarIcon: ({ focused }) => <TabIcon emoji="🏋️" focused={focused} /> }} />
       <Tabs.Screen name="calendar" options={{ title: 'Schedule', tabBarIcon: ({ focused }) => <TabIcon emoji="📅" focused={focused} /> }} />
       <Tabs.Screen name="videos" options={{ title: 'Videos', tabBarIcon: ({ focused }) => <TabIcon emoji="🎬" focused={focused} /> }} />
       <Tabs.Screen name="analytics" options={{ title: 'Analytics', tabBarIcon: ({ focused }) => <TabIcon emoji="📈" focused={focused} /> }} />

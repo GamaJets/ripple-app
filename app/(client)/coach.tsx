@@ -6,6 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { useClientData } from '../../src/ui/clientData';
+import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
 import { macrosFor } from '../../src/lib/nutrition';
 import { buildProgram } from '../../src/lib/programs';
 import { askCoach, coachAvailable, type ChatMsg } from '../../src/lib/coach';
@@ -16,8 +17,9 @@ export default function Coach() {
   const t = useTheme();
   const router = useRouter();
   const cd = useClientData();
+  const coachProgram = useAssignedPrograms().getProgram(cd.id);
   const macros = macrosFor({ weightKg: cd.weightKg, bodyFatPct: cd.bodyFatPct, activity: cd.activity, goal: cd.goal, diet: cd.diet });
-  const program = buildProgram(cd.goal, cd.bodyFatPct);
+  const program = coachProgram ?? buildProgram(cd.goal, cd.bodyFatPct);
   const context = {
     name: cd.name, goal: cd.goal, diet: cd.diet, weightKg: Math.round(cd.weightKg * 10) / 10,
     bodyFatPct: cd.bodyFatPct, muscleKg: cd.muscleKg, mealsPerDay: cd.mealsPerDay,

@@ -6,6 +6,7 @@ import { SessionsProvider } from '../src/ui/sessions';
 import { WorkoutLogProvider } from '../src/ui/workoutLog';
 import { CoachProfileProvider } from '../src/ui/coachProfile';
 import { RosterProvider } from '../src/ui/roster';
+import { AssignedProgramsProvider } from '../src/ui/assignedPrograms';
 import { HabitsProvider } from '../src/ui/habits';
 import { CheckInsProvider } from '../src/ui/checkins';
 import { AuthProvider } from '../src/ui/auth';
@@ -28,6 +29,7 @@ export default function RootLayout() {
               <WorkoutLogProvider>
                 <CoachProfileProvider>
                   <RosterProvider>
+                    <AssignedProgramsProvider>
                     <HabitsProvider>
                       <CheckInsProvider>
                         <ErrorBoundary>
@@ -35,6 +37,7 @@ export default function RootLayout() {
                         </ErrorBoundary>
                       </CheckInsProvider>
                     </HabitsProvider>
+                  </AssignedProgramsProvider>
                   </RosterProvider>
                 </CoachProfileProvider>
               </WorkoutLogProvider>
