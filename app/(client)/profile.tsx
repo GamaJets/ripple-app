@@ -109,7 +109,7 @@ const HUB_ICON: Record<string, IconName> = {
   '/(client)/recovery': 'water', '/(client)/habits': 'check', '/(client)/checkin': 'pencil',
   '/(client)/foodlog': 'meals', '/(client)/coach': 'chat', '/(client)/messages': 'message',
   '/(client)/social': 'share', '/(client)/devices': 'clock', '/(client)/music': 'play',
-  '/(client)/appearance': 'palette', '/(client)/settings': 'settings',
+  '/(client)/appearance': 'palette', '/(client)/settings': 'settings', '/': 'swap',
 };
 const HUB_GROUPS: { title: string; items: { icon: string; label: string; note: string; route: string }[] }[] = [
   { title: 'Progress & Insights', items: [
@@ -144,6 +144,7 @@ const HUB_GROUPS: { title: string; items: { icon: string; label: string; note: s
     { icon: '🎧', label: 'Music & Playlists', note: 'AI workout playlists', route: '/(client)/music' },
   ] },
   { title: 'Account', items: [
+    { icon: '🔁', label: 'Switch portal', note: 'Client · Trainer · Owner', route: '/' },
     { icon: '🎨', label: 'Appearance', note: 'Theme & accent colour', route: '/(client)/appearance' },
     { icon: '⚙️', label: 'Settings', note: 'Notifications, units, legal & version', route: '/(client)/settings' },
   ] },

@@ -27,7 +27,7 @@ import { BrandProvider } from '../src/ui/brand';
 
 function ThemedStack() {
   const t = useTheme();
-  return <Stack screenOptions={{ headerStyle: { backgroundColor: t.surface }, headerTintColor: t.ink, contentStyle: { backgroundColor: t.bg } }} />;
+  return <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: t.bg } }} />;
 }
 
 export default function RootLayout() {

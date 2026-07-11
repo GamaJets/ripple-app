@@ -133,7 +133,7 @@ export default function Home() {
           </View>
           <View style={{ flex: 1 }}>
             <Text style={{ color: t.brand, fontSize: 10, fontWeight: '800', letterSpacing: 0.6, textTransform: 'uppercase' }}>Today · {workout.focus}</Text>
-            <Text style={{ color: t.ink, fontSize: 16, fontWeight: '800', marginTop: 2 }}>{workout.exercises.length} exercises</Text>
+            <Text style={{ color: t.ink, fontSize: 16, fontWeight: '800', marginTop: 2 }}>{workout.exercises.length} exercises · ~{Math.max(20, workout.exercises.length * 9)} min</Text>
             <Pressable onPress={() => router.push('/(client)/workouts')} style={{ backgroundColor: t.brand, borderRadius: 11, paddingVertical: 10, alignItems: 'center', marginTop: 9, flexDirection: 'row', justifyContent: 'center', gap: 6 }}>
               <Icon name="play" size={15} color={t.brandInk} /><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 13 }}>Start workout</Text>
             </Pressable>
