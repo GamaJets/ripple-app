@@ -95,17 +95,20 @@ export default function Dashboard() {
         </View>
 
         {/* Streak & records */}
-        {ann ? (
-          <View style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 16, marginBottom: 14 }}>
-            <Text style={{ color: t.s3, fontSize: 11, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>📣 Announcement</Text>
-            <Text style={{ color: t.ink2, fontSize: 14, lineHeight: 20 }}>{ann.body}</Text>
-          </View>
-        ) : null}
-        {coachNotes.length ? (
+        {(ann || coachNotes.length) ? (
           <View style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.brand, padding: 16, marginBottom: 14 }}>
-            <Text style={{ color: t.brand, fontSize: 11, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>💬 From your coach</Text>
-            <Text style={{ color: t.ink2, fontSize: 14, lineHeight: 20 }} numberOfLines={5}>{coachNotes[0].body}</Text>
-            <Text style={{ color: t.ink3, fontSize: 11, marginTop: 8 }}>{new Date(coachNotes[0].at).toLocaleDateString()}</Text>
+            <Text style={{ color: t.brand, fontSize: 11, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>From your coach</Text>
+            {coachNotes.length ? (
+              <View style={{ marginBottom: ann ? 12 : 0 }}>
+                <Text style={{ color: t.ink2, fontSize: 14, lineHeight: 20 }} numberOfLines={5}>💬 {coachNotes[0].body}</Text>
+                <Text style={{ color: t.ink3, fontSize: 11, marginTop: 4 }}>{new Date(coachNotes[0].at).toLocaleDateString()}</Text>
+              </View>
+            ) : null}
+            {ann ? (
+              <View style={{ borderTopWidth: coachNotes.length ? 1 : 0, borderTopColor: t.ring, paddingTop: coachNotes.length ? 12 : 0 }}>
+                <Text style={{ color: t.ink2, fontSize: 14, lineHeight: 20 }}>📣 {ann.body}</Text>
+              </View>
+            ) : null}
           </View>
         ) : null}
         <Pressable onPress={() => setConfetti(true)} style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18, marginBottom: 14 }}>

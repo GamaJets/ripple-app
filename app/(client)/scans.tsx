@@ -6,6 +6,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { useClientData } from '../../src/ui/clientData';
+import { useRouter } from 'expo-router';
 import { TrendChart } from '../../src/ui/Chart';
 import { analyzeInBody, visionAvailable } from '../../src/lib/vision';
 
@@ -67,6 +68,7 @@ function Stat({ t, label, value, unit, tint }: { t: Theme; label: string; value:
 
 export default function Scans() {
   const t = useTheme();
+  const router = useRouter();
   const cd = useClientData();
   const scans = cd.scans;
   const [img, setImg] = useState<string | null>(null);
@@ -136,6 +138,13 @@ export default function Scans() {
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
         <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800', textTransform: 'capitalize' }}>Progress</Text>
         <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 16 }}>InBody scans, photos &amp; body trends</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginBottom: 18 }}>
+          {([['📈','Report','/(client)/report'],['📏','Measurements','/(client)/measurements'],['🏆','Records','/(client)/records'],['🔥','Consistency','/(client)/consistency'],['📊','Standards','/(client)/standards'],['🎯','Goal','/(client)/goal']] as const).map(([ic,label,route]) => (
+            <Pressable key={route} onPress={() => router.push(route as any)} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 8 }}>
+              <Text style={{ fontSize: 14 }}>{ic}</Text><Text style={{ color: t.ink2, fontWeight: '700', fontSize: 13 }}>{label}</Text>
+            </Pressable>
+          ))}
+        </ScrollView>
 
         <View style={{ flexDirection: 'row', gap: 12, marginBottom: 14 }}>
           <Stat t={t} label="Weight" value={String(latest.weightKg)} unit="kg" tint />
