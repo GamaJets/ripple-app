@@ -10,6 +10,7 @@ export default function OwnerLayout() {
       <Tabs.Screen name="trainers" options={{ title: 'Trainers', tabBarIcon: ({ focused }) => <TabIcon emoji="🧑‍🏫" focused={focused} /> }} />
       <Tabs.Screen name="brand" options={{ title: 'Brand', tabBarIcon: ({ focused }) => <TabIcon emoji="🎨" focused={focused} /> }} />
       <Tabs.Screen name="growth" options={{ title: 'Growth', tabBarIcon: ({ focused }) => <TabIcon emoji="📈" focused={focused} /> }} />
+      <Tabs.Screen name="ops" options={{ title: 'Ops', tabBarIcon: ({ focused }) => <TabIcon emoji="🛠️" focused={focused} /> }} />
     </Tabs>
   );
 }
