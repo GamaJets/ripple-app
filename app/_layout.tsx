@@ -13,6 +13,7 @@ import { CheckInsProvider } from '../src/ui/checkins';
 import { AuthProvider } from '../src/ui/auth';
 import { ErrorBoundary } from '../src/ui/ErrorBoundary';
 import { AppThemeProvider, useTheme } from '../src/ui/components';
+import { BrandProvider } from '../src/ui/brand';
 
 function ThemedStack() {
   const t = useTheme();
@@ -23,6 +24,7 @@ export default function RootLayout() {
   return (
     <SafeAreaProvider>
       <AppThemeProvider>
+        <BrandProvider>
         <AuthProvider>
         <ClientDataProvider>
           <WearablesProvider>
@@ -48,6 +50,7 @@ export default function RootLayout() {
           </WearablesProvider>
         </ClientDataProvider>
         </AuthProvider>
+      </BrandProvider>
       </AppThemeProvider>
     </SafeAreaProvider>
   );

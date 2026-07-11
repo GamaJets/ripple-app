@@ -6,6 +6,7 @@ import { Redirect, useRouter } from 'expo-router';
 import { useTheme } from '../src/ui/components';
 import type { Theme } from '../src/theme/tokens';
 import { useAuth } from '../src/ui/auth';
+import { useBrand } from '../src/ui/brand';
 
 function Ripple({ size, color }: { size: number; color: string }) {
   return (
@@ -34,6 +35,7 @@ export default function Home() {
   const t = useTheme();
   const router = useRouter();
   const { authed, user, loading, signOut } = useAuth();
+  const { appName } = useBrand();
 
   // Live mode: brief splash while the persisted session is rehydrated so we
   // don't flash the welcome screen for an already signed-in user.
@@ -51,7 +53,7 @@ export default function Home() {
       <ScrollView contentContainerStyle={{ padding: 22, paddingTop: 60 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 6 }}>
           <View style={{ width: 46, height: 46, borderRadius: 14, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}><Ripple size={28} color={t.brandInk} /></View>
-          <Text style={{ color: t.ink, fontSize: 30, fontWeight: '800', letterSpacing: -0.5 }}>Repple</Text>
+          <Text style={{ color: t.ink, fontSize: 30, fontWeight: '800', letterSpacing: -0.5 }}>{appName}</Text>
         </View>
         <Text style={{ color: t.ink3, fontSize: 14, marginBottom: 30 }}>Signed in as {user?.email}</Text>
         <Text style={{ color: t.ink2, fontSize: 13, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 12 }}>Choose a portal</Text>

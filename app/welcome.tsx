@@ -6,6 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useRouter } from 'expo-router';
 import { useTheme } from '../src/ui/components';
 import { useAuth } from '../src/ui/auth';
+import { useBrand } from '../src/ui/brand';
 import { USE_SUPABASE } from '../src/lib/config';
 
 function Ripple({ size, color }: { size: number; color: string }) {
@@ -22,6 +23,7 @@ export default function Welcome() {
   const t = useTheme();
   const router = useRouter();
   const auth = useAuth();
+  const { appName } = useBrand();
   const [mode, setMode] = useState<'in' | 'up'>('up');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -65,7 +67,7 @@ export default function Welcome() {
         <ScrollView contentContainerStyle={{ padding: 24, paddingTop: 50, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 8 }}>
             <View style={{ width: 46, height: 46, borderRadius: 14, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}><Ripple size={28} color={t.brandInk} /></View>
-            <Text style={{ color: t.ink, fontSize: 30, fontWeight: '800', letterSpacing: -0.5 }}>Repple</Text>
+            <Text style={{ color: t.ink, fontSize: 30, fontWeight: '800', letterSpacing: -0.5 }}>{appName}</Text>
           </View>
           <Text style={{ color: t.ink3, fontSize: 15, marginBottom: 28 }}>{mode === 'up' ? 'Create your account to get started.' : 'Welcome back — sign in to continue.'}</Text>
 
