@@ -11,6 +11,7 @@ import { CoachFeedbackProvider } from '../src/ui/feedback';
 import { CoachNutritionProvider } from '../src/ui/coachNutrition';
 import { PlatformTrainersProvider } from '../src/ui/trainers';
 import { MeasurementsProvider } from '../src/ui/measurements';
+import { PromosProvider } from '../src/ui/promos';
 import { HabitsProvider } from '../src/ui/habits';
 import { CheckInsProvider } from '../src/ui/checkins';
 import { AuthProvider } from '../src/ui/auth';
@@ -40,6 +41,7 @@ export default function RootLayout() {
                     <CoachNutritionProvider>
                     <PlatformTrainersProvider>
                     <MeasurementsProvider>
+                    <PromosProvider>
                     <HabitsProvider>
                       <CheckInsProvider>
                         <ErrorBoundary>
@@ -47,7 +49,8 @@ export default function RootLayout() {
                         </ErrorBoundary>
                       </CheckInsProvider>
                     </HabitsProvider>
-                  </MeasurementsProvider>
+                  </PromosProvider>
+                    </MeasurementsProvider>
                     </PlatformTrainersProvider>
                     </CoachNutritionProvider>
                     </CoachFeedbackProvider>
