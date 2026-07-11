@@ -8,6 +8,7 @@ import { buildPlan, swapIndex, groceryData, DEPTS, DEPT_ICO, type PlannedMeal } 
 import type { Diet, Goal } from '../../src/lib/types';
 import { useClientData } from '../../src/ui/clientData';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
+import { useRouter } from 'expo-router';
 
 const DIETS: Diet[] = ['meat', 'vegetarian', 'vegan', 'paleo', 'keto'];
 const DIET_LABEL: Record<Diet, string> = { meat: 'Meat', vegetarian: 'Veggie', vegan: 'Vegan', paleo: 'Paleo', keto: 'Keto' };
@@ -17,6 +18,7 @@ const GOAL_LABEL: Record<Goal, string> = { fatloss: 'Fat Loss', tone: 'Tone', mu
 export default function Nutrition() {
   const t = useTheme();
   const c = useClientData();
+  const router = useRouter();
   const coachAdjust = useCoachNutrition().get(c.id);
   const w = c.weightKg;
   const bf = c.bodyFatPct;
@@ -36,6 +38,20 @@ export default function Nutrition() {
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
         <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800', textTransform: 'capitalize' }}>Meal plan</Text>
         <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 16 }}>Built for your body & goal · tap a meal for the recipe</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginTop: 4, marginBottom: 4 }}>
+          {([["🍎","Food Log","/(client)/foodlog"],["💧","Recovery","/(client)/recovery"],["🧮","Macros","/(client)/tools"]] as const).map(([ic, label, route]) => (
+            <Pressable key={route} onPress={() => router.push(route as any)} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 8 }}>
+              <Text style={{ fontSize: 14 }}>{ic}</Text><Text style={{ color: t.ink2, fontWeight: '700', fontSize: 13 }}>{label}</Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginTop: 4, marginBottom: 4 }}>
+          {([["🍎","Food Log","/(client)/foodlog"],["💧","Recovery","/(client)/recovery"],["🧮","Macros","/(client)/tools"]] as const).map(([ic, label, route]) => (
+            <Pressable key={route} onPress={() => router.push(route as any)} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 8 }}>
+              <Text style={{ fontSize: 14 }}>{ic}</Text><Text style={{ color: t.ink2, fontWeight: '700', fontSize: 13 }}>{label}</Text>
+            </Pressable>
+          ))}
+        </ScrollView>
         {coachAdjust ? (<View style={{ backgroundColor: t.surface, borderColor: t.brand, borderWidth: 1, borderRadius: 14, padding: 12, marginBottom: 14 }}><Text style={{ color: t.brand, fontSize: 11, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5 }}>🥗 Adjusted by your coach</Text>{coachAdjust.note ? <Text style={{ color: t.ink2, fontSize: 13, marginTop: 5, lineHeight: 18 }}>{coachAdjust.note}</Text> : null}</View>) : null}
 
         <View style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18, marginBottom: 14 }}>

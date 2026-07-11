@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView, Modal, Alert } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { buildProgram, type ProgramExercise } from '../../src/lib/programs';
@@ -20,6 +21,7 @@ const CARDIO = ['Treadmill / Run', 'Cycling', 'Rowing', 'Ski erg', 'Elliptical',
 
 export default function Train() {
   const t = useTheme();
+  const router = useRouter();
   const cd = useClientData();
   const coachProgram = useAssignedPrograms().getProgram(cd.id);
   const w = useWearables();
@@ -95,6 +97,20 @@ export default function Train() {
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
         <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800', textTransform: 'capitalize' }}>Train</Text>
         {coachProgram ? (<View style={{ alignSelf: 'flex-start', backgroundColor: t.surface2, borderColor: t.brand, borderWidth: 1, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4, marginTop: 6 }}><Text style={{ color: t.brand, fontSize: 11, fontWeight: '800' }}>📋 Assigned by your coach</Text></View>) : null}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginTop: 12, marginBottom: 4 }}>
+          {([["🗓️","This Week","/(client)/week"],["🏆","Records","/(client)/records"],["💧","Recovery","/(client)/recovery"],["🎬","Library","/(client)/library"],["🧮","Tools","/(client)/tools"]] as const).map(([ic, label, route]) => (
+            <Pressable key={route} onPress={() => router.push(route as any)} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 8 }}>
+              <Text style={{ fontSize: 14 }}>{ic}</Text><Text style={{ color: t.ink2, fontWeight: '700', fontSize: 13 }}>{label}</Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginTop: 12, marginBottom: 4 }}>
+          {([["🗓️","This Week","/(client)/week"],["🏆","Records","/(client)/records"],["💧","Recovery","/(client)/recovery"],["🎬","Library","/(client)/library"],["🧮","Tools","/(client)/tools"]] as const).map(([ic, label, route]) => (
+            <Pressable key={route} onPress={() => router.push(route as any)} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 8 }}>
+              <Text style={{ fontSize: 14 }}>{ic}</Text><Text style={{ color: t.ink2, fontWeight: '700', fontSize: 13 }}>{label}</Text>
+            </Pressable>
+          ))}
+        </ScrollView>
         <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 14 }}>{program.title} · pick the day you're training</Text>
 
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
