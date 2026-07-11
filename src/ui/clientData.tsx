@@ -11,6 +11,7 @@ interface Series { t: string; v: number }
 interface Value {
   id: string; name: string; init: string;
   dob: string; setDob: (v: string) => void;
+  photo: string | null; setPhoto: (v: string | null) => void;
   heightCm: number; setHeightCm: (v: number) => void;
   goal: Goal; setGoal: (v: Goal) => void;
   diet: Diet; setDiet: (v: Diet) => void;
@@ -24,6 +25,7 @@ const Ctx = createContext<Value | null>(null);
 export function ClientDataProvider({ children }: { children: ReactNode }) {
   const base = MOCK_CLIENT;
   const [dob, setDob] = useState(base.dob);
+  const [photo, setPhoto] = useState<string | null>(null);
   const [heightCm, setHeightCm] = useState(base.heightCm);
   const [goal, setGoal] = useState<Goal>(base.goal);
   const [diet, setDiet] = useState<Diet>(base.diet);
@@ -36,7 +38,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
 
   const value: Value = {
     id: base.id, name: base.name, init: base.name.split(' ').map((x) => x[0]).join(''),
-    dob, setDob, heightCm, setHeightCm,
+    dob, setDob, photo, setPhoto, heightCm, setHeightCm,
     goal, setGoal, diet, setDiet,
     activity: base.activity, mealsPerDay: base.mealsPerDay as 3 | 4 | 5,
     weightKg, bodyFatPct: latest.bodyFatPct, muscleKg: latest.skeletalMuscleKg, setWeightKg: (v) => setManualWeight(v),

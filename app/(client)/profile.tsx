@@ -2,14 +2,22 @@
 // shared client context so a weight edit here recalculates macros everywhere,
 // plus links out to every secondary screen (Devices, Food Log, Library, …).
 import { useState, useRef, useEffect } from 'react';
-import { View, Text, TextInput, Pressable, ScrollView, Modal } from 'react-native';
+import { View, Text, TextInput, Pressable, ScrollView, Modal, Image, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import * as ImagePicker from 'expo-image-picker';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { ageFromDob } from '../../src/lib/age';
 import { macrosFor } from '../../src/lib/nutrition';
 import { useClientData } from '../../src/ui/clientData';
+import type { Goal } from '../../src/lib/types';
+
+const GOALS: { id: Goal; label: string; note: string; icon: string }[] = [
+  { id: 'fatloss', label: 'Fat Loss', note: 'Lose fat, keep muscle', icon: '🔥' },
+  { id: 'tone', label: 'Tone', note: 'Lean & defined', icon: '✨' },
+  { id: 'muscle', label: 'Build Muscle', note: 'Add size & strength', icon: '💪' },
+];
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const ITEM_H = 44;
@@ -108,6 +116,19 @@ export default function Profile() {
   const router = useRouter();
   const cd = useClientData();
 
+  const pickPhoto = async (fromCamera: boolean) => {
+    const perm = fromCamera ? await ImagePicker.requestCameraPermissionsAsync() : await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) { Alert.alert('Permission needed', 'Allow ' + (fromCamera ? 'camera' : 'photo library') + ' access to set your photo.'); return; }
+    const res = fromCamera ? await ImagePicker.launchCameraAsync({ quality: 0.7, allowsEditing: true, aspect: [1, 1] }) : await ImagePicker.launchImageLibraryAsync({ quality: 0.7, allowsEditing: true, aspect: [1, 1] });
+    if (!res.canceled && res.assets && res.assets[0]) cd.setPhoto(res.assets[0].uri);
+  };
+  const changePhoto = () => Alert.alert('Profile Photo', undefined, [
+    { text: 'Take Photo', onPress: () => pickPhoto(true) },
+    { text: 'Choose From Library', onPress: () => pickPhoto(false) },
+    ...(cd.photo ? [{ text: 'Remove', style: 'destructive' as const, onPress: () => cd.setPhoto(null) }] : []),
+    { text: 'Cancel', style: 'cancel' as const },
+  ]);
+
   const [showDob, setShowDob] = useState(false);
 
   const [heightUnit, setHeightUnit] = useState<'cm' | 'in'>('cm');
@@ -152,12 +173,41 @@ export default function Profile() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 16 }}>
-          <View style={{ width: 54, height: 54, borderRadius: 27, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}>
-            <Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 20 }}>{cd.init}</Text>
-          </View>
+          <Pressable onPress={changePhoto}>
+            {cd.photo ? (
+              <Image source={{ uri: cd.photo }} style={{ width: 54, height: 54, borderRadius: 27, backgroundColor: t.surface2 }} />
+            ) : (
+              <View style={{ width: 54, height: 54, borderRadius: 27, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}>
+                <Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 20 }}>{cd.init}</Text>
+              </View>
+            )}
+            <View style={{ position: 'absolute', bottom: -2, right: -2, width: 22, height: 22, borderRadius: 11, backgroundColor: t.surface, borderWidth: 1, borderColor: t.ring, alignItems: 'center', justifyContent: 'center' }}>
+              <Text style={{ fontSize: 11 }}>📷</Text>
+            </View>
+          </Pressable>
           <View style={{ flex: 1 }}>
             <Text style={{ color: t.ink, fontSize: 22, fontWeight: '800', textTransform: 'capitalize' }}>{cd.name}</Text>
             <Text style={{ color: t.ink3, fontSize: 13, marginTop: 2 }}>Weight changes recalculate your plan automatically</Text>
+          </View>
+        </View>
+
+        <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 16, marginBottom: 12 }}>
+          <Text style={{ color: t.ink, fontSize: 15, fontWeight: '800', marginBottom: 3 }}>Your Goal</Text>
+          <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 12 }}>We tailor your workouts and meal targets to this.</Text>
+          <View style={{ gap: 8 }}>
+            {GOALS.map((g) => {
+              const on = cd.goal === g.id;
+              return (
+                <Pressable key={g.id} onPress={() => cd.setGoal(g.id)} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 12, padding: 12, backgroundColor: on ? t.brand : t.surface2, borderWidth: 1, borderColor: on ? t.brand : t.ring }}>
+                  <Text style={{ fontSize: 20 }}>{g.icon}</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ color: on ? t.brandInk : t.ink, fontWeight: '800', fontSize: 15 }}>{g.label}</Text>
+                    <Text style={{ color: on ? t.brandInk : t.ink3, fontSize: 12, opacity: on ? 0.85 : 1 }}>{g.note}</Text>
+                  </View>
+                  {on ? <Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 16 }}>✓</Text> : null}
+                </Pressable>
+              );
+            })}
           </View>
         </View>
 

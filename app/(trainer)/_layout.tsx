@@ -1,4 +1,4 @@
-// Trainer portal tabs — Clients · Schedule · Videos · Analytics
+// Trainer portal tabs — Clients · Schedule · Videos · Analytics · Profile
 import { Tabs } from 'expo-router';
 import { Text } from 'react-native';
 import { useTheme } from '../../src/ui/components';
@@ -24,6 +24,7 @@ export default function TrainerLayout() {
       <Tabs.Screen name="calendar" options={{ title: 'Schedule', tabBarIcon: ({ focused }) => <TabIcon emoji="📅" focused={focused} /> }} />
       <Tabs.Screen name="videos" options={{ title: 'Videos', tabBarIcon: ({ focused }) => <TabIcon emoji="🎬" focused={focused} /> }} />
       <Tabs.Screen name="analytics" options={{ title: 'Analytics', tabBarIcon: ({ focused }) => <TabIcon emoji="📈" focused={focused} /> }} />
+      <Tabs.Screen name="profile" options={{ title: 'Profile', tabBarIcon: ({ focused }) => <TabIcon emoji="👤" focused={focused} /> }} />
     </Tabs>
   );
 }
