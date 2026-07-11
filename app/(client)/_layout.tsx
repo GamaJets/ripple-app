@@ -39,6 +39,8 @@ export default function ClientLayout() {
       <Tabs.Screen name="coach" options={{ href: null, title: "AI Coach" }} />
       <Tabs.Screen name="music" options={{ href: null, title: "Music & Playlists" }} />
       <Tabs.Screen name="calendar" options={{ href: null, title: 'Book Sessions' }} />
+      <Tabs.Screen name="habits" options={{ href: null, title: 'Daily Habits' }} />
+      <Tabs.Screen name="achievements" options={{ href: null, title: 'Achievements' }} />
     </Tabs>
   );
 }

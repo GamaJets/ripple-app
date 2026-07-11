@@ -2,7 +2,7 @@
 // Renders an absolute overlay of falling colored pieces when `show` is true,
 // then calls onDone. Used to celebrate streak milestones and new PRs.
 import { useEffect, useRef } from 'react';
-import { Animated, useWindowDimensions, View, Easing } from 'react-native';
+import { Animated, useWindowDimensions, View, Easing, AccessibilityInfo } from 'react-native';
 
 const COLORS = ['#2dd4bf', '#f59e0b', '#e06767', '#a78bfa', '#34d399', '#60a5fa', '#f472b6'];
 
@@ -23,12 +23,19 @@ export function Confetti({ show, onDone, count = 44 }: { show: boolean; onDone?:
 
   useEffect(() => {
     if (!show) return;
-    pieces.forEach((p) => p.anim.setValue(0));
-    Animated.parallel(
-      pieces.map((p) =>
-        Animated.timing(p.anim, { toValue: 1, duration: p.dur, delay: p.delay, easing: Easing.linear, useNativeDriver: true })
-      )
-    ).start(() => onDone && onDone());
+    let cancelled = false;
+    // Accessibility: skip the animation entirely when Reduce Motion is on.
+    AccessibilityInfo.isReduceMotionEnabled().then((reduce) => {
+      if (cancelled) return;
+      if (reduce) { onDone && onDone(); return; }
+      pieces.forEach((p) => p.anim.setValue(0));
+      Animated.parallel(
+        pieces.map((p) =>
+          Animated.timing(p.anim, { toValue: 1, duration: p.dur, delay: p.delay, easing: Easing.linear, useNativeDriver: true })
+        )
+      ).start(() => onDone && onDone());
+    });
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [show]);
 

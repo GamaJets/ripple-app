@@ -6,6 +6,8 @@ import { SessionsProvider } from '../src/ui/sessions';
 import { WorkoutLogProvider } from '../src/ui/workoutLog';
 import { CoachProfileProvider } from '../src/ui/coachProfile';
 import { RosterProvider } from '../src/ui/roster';
+import { HabitsProvider } from '../src/ui/habits';
+import { ErrorBoundary } from '../src/ui/ErrorBoundary';
 import { AppThemeProvider, useTheme } from '../src/ui/components';
 
 function ThemedStack() {
@@ -23,7 +25,11 @@ export default function RootLayout() {
               <WorkoutLogProvider>
                 <CoachProfileProvider>
                   <RosterProvider>
-                    <ThemedStack />
+                    <HabitsProvider>
+                      <ErrorBoundary>
+                        <ThemedStack />
+                      </ErrorBoundary>
+                    </HabitsProvider>
                   </RosterProvider>
                 </CoachProfileProvider>
               </WorkoutLogProvider>
