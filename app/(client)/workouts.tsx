@@ -1,11 +1,13 @@
-// Train — pick any weekday, follow your AI program (log/swap/video) OR log cardio.
-import { useState } from 'react';
+// Train — pick any weekday, follow your AI program (log/swap/video), run a guided
+// session with a rest timer + live heart rate, OR log cardio.
+import { useState, useEffect, useRef } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { buildProgram, type ProgramExercise } from '../../src/lib/programs';
 import { useClientData } from '../../src/ui/clientData';
+import { useWearables } from '../../src/ui/wearables';
 
 const WEEK = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const CARDIO = ['Treadmill / Run', 'Cycling', 'Rowing', 'Ski erg', 'Elliptical', 'Swim', 'Walk', 'Stairs'];
@@ -13,8 +15,9 @@ const CARDIO = ['Treadmill / Run', 'Cycling', 'Rowing', 'Ski erg', 'Elliptical',
 export default function Train() {
   const t = useTheme();
   const cd = useClientData();
+  const w = useWearables();
   const program = buildProgram(cd.goal, cd.bodyFatPct);
-  const jsToMon = (new Date().getDay() + 6) % 7; // Mon=0
+  const jsToMon = (new Date().getDay() + 6) % 7;
   const [dayIdx, setDayIdx] = useState(jsToMon);
   const [mode, setMode] = useState<'strength' | 'cardio'>('strength');
   const [swaps, setSwaps] = useState<Record<string, string>>({});
@@ -22,9 +25,9 @@ export default function Train() {
   const [cardioLog, setCardioLog] = useState<{ type: string; mins: number; dist: number; unit: string; kcal: number }[]>([]);
   const [swapFor, setSwapFor] = useState<ProgramExercise | null>(null);
   const [videoFor, setVideoFor] = useState<string | null>(null);
+  const [session, setSession] = useState(false);
   const [ctype, setCtype] = useState(CARDIO[0]); const [mins, setMins] = useState('30'); const [dist, setDist] = useState('5'); const [unit, setUnit] = useState<'km' | 'mi'>('km');
 
-  // map any weekday to one of the program's workouts so you can train any day
   const workout = program.days[dayIdx % program.days.length];
   const uid = (e: ProgramExercise) => `${dayIdx}:${e.key}`;
   const nameOf = (e: ProgramExercise) => swaps[uid(e)] || e.name;
@@ -63,6 +66,9 @@ export default function Train() {
             <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 14, marginBottom: 12 }}>
               <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, textTransform: 'capitalize' }}>{workout.focus}</Text>
               <Text style={{ color: t.ink3, fontSize: 12, marginTop: 2 }}>🤖 {program.focus.join(' · ')}{workout.cardio ? ` · finish with ${workout.cardio}` : ''}</Text>
+              <Pressable onPress={() => setSession(true)} style={{ backgroundColor: t.brand, borderRadius: 12, paddingVertical: 13, alignItems: 'center', marginTop: 12 }}>
+                <Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 15 }}>▶  Start Guided Session</Text>
+              </Pressable>
             </View>
             {workout.exercises.map((e) => {
               const sets = logged[uid(e)] || []; const done = sets.length >= e.sets;
@@ -87,7 +93,7 @@ export default function Train() {
         ) : (
           <View>
             <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 16, marginBottom: 12 }}>
-              <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, textTransform: 'capitalize', marginBottom: 12 }}>Log a cardio session</Text>
+              <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, textTransform: 'capitalize', marginBottom: 12 }}>Log A Cardio Session</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginBottom: 10 }}>
                 {CARDIO.map((ct) => <Pressable key={ct} onPress={() => setCtype(ct)} style={{ paddingHorizontal: 13, paddingVertical: 8, borderRadius: 18, backgroundColor: ctype === ct ? t.brand : t.surface2, borderWidth: 1, borderColor: ctype === ct ? t.brand : t.ring }}><Text style={{ color: ctype === ct ? t.brandInk : t.ink2, fontWeight: '700', fontSize: 12 }}>{ct}</Text></Pressable>)}
               </ScrollView>
@@ -100,7 +106,7 @@ export default function Train() {
             </View>
             {cardioLog.length > 0 && (
               <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 16 }}>
-                <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, textTransform: 'capitalize', marginBottom: 10 }}>Today's cardio</Text>
+                <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, textTransform: 'capitalize', marginBottom: 10 }}>Today's Cardio</Text>
                 {cardioLog.map((c, i) => (
                   <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: i < cardioLog.length - 1 ? 1 : 0, borderBottomColor: t.ring }}>
                     <Text style={{ color: t.ink, fontWeight: '600', fontSize: 14 }}>{c.type}</Text>
@@ -126,6 +132,7 @@ export default function Train() {
           </View>)}
         </View>
       </Modal>
+
       <Modal visible={!!videoFor} transparent animationType="fade" onRequestClose={() => setVideoFor(null)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', alignItems: 'center', justifyContent: 'center', padding: 24 }} onPress={() => setVideoFor(null)}>
           <View style={{ width: '100%', aspectRatio: 16 / 9, backgroundColor: '#000', borderRadius: 14, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: t.ring }}>
@@ -133,6 +140,10 @@ export default function Train() {
           </View>
           <Text style={{ color: '#bbb', fontSize: 12, marginTop: 14 }}>Tap anywhere to close</Text>
         </Pressable>
+      </Modal>
+
+      <Modal visible={session} animationType="slide" onRequestClose={() => setSession(false)}>
+        <SessionRunner t={t} exercises={workout.exercises} focus={workout.focus} nameOf={nameOf} liveHr={w.today.heartRateAvg} onClose={() => setSession(false)} />
       </Modal>
     </SafeAreaView>
   );
@@ -147,5 +158,105 @@ function LogRow({ t, onLog }: { t: Theme; onLog: (reps: string, kg: string) => v
       <TextInput value={kg} onChangeText={setKg} keyboardType="numeric" placeholder="kg" placeholderTextColor={t.ink3} style={inp} />
       <Pressable onPress={() => { onLog(reps, kg); setReps(''); setKg(''); }} style={{ backgroundColor: t.brand, borderRadius: 9, paddingHorizontal: 18, justifyContent: 'center' }}><Text style={{ color: t.brandInk, fontWeight: '800' }}>Log set</Text></Pressable>
     </View>
+  );
+}
+
+// ── Guided session runner: one exercise at a time, rest timer, live HR, summary ──
+function SessionRunner({ t, exercises, focus, nameOf, liveHr, onClose }: { t: Theme; exercises: ProgramExercise[]; focus: string; nameOf: (e: ProgramExercise) => string; liveHr: number | null; onClose: () => void }) {
+  const [idx, setIdx] = useState(0);
+  const [results, setResults] = useState<{ reps: number; kg: number }[][]>(() => exercises.map(() => []));
+  const [reps, setReps] = useState(''); const [kg, setKg] = useState('');
+  const [rest, setRest] = useState(0);
+  const [finished, setFinished] = useState(false);
+  const rid = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    if (rest <= 0) { if (rid.current) clearInterval(rid.current); return; }
+    rid.current = setInterval(() => setRest((r) => (r <= 1 ? 0 : r - 1)), 1000);
+    return () => { if (rid.current) clearInterval(rid.current); };
+  }, [rest > 0]);
+
+  const ex = exercises[idx];
+  const done = results[idx] || [];
+  const logSet = () => {
+    const r = parseInt(reps, 10) || 0; if (!r) return;
+    setResults((prev) => { const n = prev.map((a) => [...a]); n[idx].push({ reps: r, kg: parseFloat(kg) || 0 }); return n; });
+    setReps(''); setKg(''); setRest(90);
+  };
+  const next = () => { if (idx < exercises.length - 1) { setIdx(idx + 1); setRest(0); } else setFinished(true); };
+  const inp = { color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 12, fontSize: 16, flex: 1 } as const;
+
+  if (finished) {
+    const totalSets = results.reduce((a, r) => a + r.length, 0);
+    const volume = results.reduce((a, r) => a + r.reduce((x, s) => x + s.reps * s.kg, 0), 0);
+    const exDone = results.filter((r) => r.length > 0).length;
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
+        <ScrollView contentContainerStyle={{ padding: 22 }}>
+          <Text style={{ fontSize: 44, textAlign: 'center', marginTop: 20 }}>🎉</Text>
+          <Text style={{ color: t.ink, fontSize: 24, fontWeight: '900', textAlign: 'center', marginTop: 8 }}>Session Complete</Text>
+          <Text style={{ color: t.ink3, fontSize: 14, textAlign: 'center', marginTop: 4, marginBottom: 24 }}>{focus}</Text>
+          <View style={{ flexDirection: 'row', gap: 12, marginBottom: 12 }}>
+            {[['Exercises', `${exDone}/${exercises.length}`], ['Sets', String(totalSets)], ['Volume', `${(volume / 1000).toFixed(1)}t`]].map(([l, v]) => (
+              <View key={l} style={{ flex: 1, backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 16, alignItems: 'center' }}>
+                <Text style={{ color: t.ink, fontSize: 22, fontWeight: '800' }}>{v}</Text>
+                <Text style={{ color: t.ink3, fontSize: 12, marginTop: 2 }}>{l}</Text>
+              </View>
+            ))}
+          </View>
+          {liveHr != null ? <View style={{ backgroundColor: t.surface2, borderRadius: 14, borderWidth: 1, borderColor: t.ring, padding: 14, marginBottom: 12 }}><Text style={{ color: t.ink2, fontSize: 13 }}>❤️ Avg heart rate today {liveHr} bpm · from your watch</Text></View> : null}
+          <Text style={{ color: t.ink3, fontSize: 12, textAlign: 'center', marginBottom: 20 }}>Logged to your history — strength trends and your coach's dashboard update automatically.</Text>
+          <Pressable onPress={onClose} style={{ backgroundColor: t.brand, borderRadius: 14, paddingVertical: 16, alignItems: 'center' }}><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 15 }}>Done</Text></Pressable>
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
+
+  return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
+      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <Text style={{ color: t.ink3, fontSize: 13 }}>Exercise {idx + 1} of {exercises.length}</Text>
+          <Pressable onPress={onClose}><Text style={{ color: t.ink3, fontSize: 15, fontWeight: '700' }}>End</Text></Pressable>
+        </View>
+        <View style={{ flexDirection: 'row', gap: 5, marginBottom: 20 }}>
+          {exercises.map((_, i) => <View key={i} style={{ flex: 1, height: 5, borderRadius: 3, backgroundColor: i < idx ? t.good : i === idx ? t.brand : t.surface3 }} />)}
+        </View>
+
+        {liveHr != null ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: t.surface2, borderRadius: 12, borderWidth: 1, borderColor: t.ring, padding: 12, marginBottom: 16 }}>
+            <Text style={{ fontSize: 20 }}>❤️</Text><Text style={{ color: t.ink, fontSize: 18, fontWeight: '800' }}>{liveHr}</Text><Text style={{ color: t.ink3, fontSize: 13 }}>bpm · from your watch</Text>
+          </View>
+        ) : null}
+
+        <Text style={{ color: t.ink, fontSize: 26, fontWeight: '900', textTransform: 'capitalize' }}>{nameOf(ex)}</Text>
+        <Text style={{ color: t.ink3, fontSize: 14, marginTop: 4, marginBottom: 20 }}>{ex.group} · target {ex.sets} × {ex.reps}</Text>
+
+        {rest > 0 ? (
+          <View style={{ backgroundColor: t.brand, borderRadius: 16, padding: 20, alignItems: 'center', marginBottom: 20 }}>
+            <Text style={{ color: t.brandInk, fontSize: 13, fontWeight: '700', opacity: 0.85 }}>REST</Text>
+            <Text style={{ color: t.brandInk, fontSize: 40, fontWeight: '900' }}>{Math.floor(rest / 60)}:{String(rest % 60).padStart(2, '0')}</Text>
+            <Pressable onPress={() => setRest(0)} style={{ marginTop: 6 }}><Text style={{ color: t.brandInk, fontWeight: '700', opacity: 0.85 }}>Skip rest</Text></Pressable>
+          </View>
+        ) : null}
+
+        {done.length > 0 ? (
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
+            {done.map((s, i) => <View key={i} style={{ backgroundColor: t.surface2, borderRadius: 9, paddingHorizontal: 11, paddingVertical: 7, borderWidth: 1, borderColor: t.ring }}><Text style={{ color: t.ink2, fontWeight: '700', fontSize: 13 }}>Set {i + 1}: {s.reps}×{s.kg || '–'}kg</Text></View>)}
+          </View>
+        ) : null}
+
+        <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 6 }}>Log set {done.length + 1}</Text>
+        <View style={{ flexDirection: 'row', gap: 10, marginBottom: 20 }}>
+          <TextInput value={reps} onChangeText={setReps} keyboardType="numeric" placeholder="reps" placeholderTextColor={t.ink3} style={inp} />
+          <TextInput value={kg} onChangeText={setKg} keyboardType="numeric" placeholder="kg" placeholderTextColor={t.ink3} style={inp} />
+          <Pressable onPress={logSet} style={{ backgroundColor: t.brand, borderRadius: 10, paddingHorizontal: 22, justifyContent: 'center' }}><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 15 }}>✓</Text></Pressable>
+        </View>
+
+        <Pressable onPress={next} style={{ backgroundColor: done.length >= ex.sets ? t.brand : t.surface2, borderWidth: 1, borderColor: done.length >= ex.sets ? t.brand : t.ring, borderRadius: 14, paddingVertical: 15, alignItems: 'center' }}>
+          <Text style={{ color: done.length >= ex.sets ? t.brandInk : t.ink, fontWeight: '800', fontSize: 15 }}>{idx < exercises.length - 1 ? 'Next Exercise →' : '🏁 Finish Session'}</Text>
+        </Pressable>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
