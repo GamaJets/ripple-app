@@ -6,6 +6,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { useClientData } from '../../src/ui/clientData';
+import { TrendChart } from '../../src/ui/Chart';
 import { analyzeInBody, visionAvailable } from '../../src/lib/vision';
 
 type Scan = { id: string; takenAt: string; weightKg: number; bodyFatPct: number; skeletalMuscleKg: number; source: string; image?: string };
@@ -166,15 +167,8 @@ export default function Scans() {
         </View>
 
         <View style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18, marginBottom: 14 }}>
-          <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16, textTransform: 'capitalize', marginBottom: 14 }}>Body-fat trend</Text>
-          <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 8, height: 90 }}>
-            {chrono.map((s, i, arr) => { const h = 20 + norm(s.bodyFatPct) * 60; const last = i === arr.length - 1; return (
-              <View key={s.id} style={{ flex: 1, alignItems: 'center', gap: 5 }}>
-                <Text style={{ color: t.ink3, fontSize: 10 }}>{s.bodyFatPct}</Text>
-                <View style={{ width: '66%', height: h, borderRadius: 6, backgroundColor: last ? t.brand : t.surface3 }} />
-                <Text style={{ color: t.ink3, fontSize: 9 }}>{fmt(s.takenAt)}</Text>
-              </View>); })}
-          </View>
+          <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16, textTransform: 'capitalize', marginBottom: 10 }}>Body-Fat Trend</Text>
+          <TrendChart data={cd.bodyFatSeries} unit="%" color={t.s5} goodDown height={150} />
         </View>
 
         <View style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18, marginBottom: 14 }}>

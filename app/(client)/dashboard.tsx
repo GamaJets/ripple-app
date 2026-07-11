@@ -8,6 +8,7 @@ import { macrosFor } from '../../src/lib/nutrition';
 import { ageFromDob } from '../../src/lib/age';
 import { seriesDelta } from '../../src/lib/format';
 import { useClientData } from '../../src/ui/clientData';
+import { TrendChart } from '../../src/ui/Chart';
 
 function Ripple({ size, color }: { size: number; color: string }) {
   return (
@@ -84,16 +85,8 @@ export default function Dashboard() {
               <Text style={{ color: dW <= 0 ? t.brand : t.s6, fontWeight: '700', fontSize: 13 }}>{dW > 0 ? '+' : ''}{dW} kg</Text>
             </View>
           </View>
-          <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 8, height: 64, marginTop: 16 }}>
-            {c.weightSeries.map((p, i) => {
-              const h = 16 + norm(p.v) * 44;
-              const last = i === c.weightSeries.length - 1;
-              return (
-                <View key={i} style={{ flex: 1, alignItems: 'center' }}>
-                  <View style={{ width: '68%', height: h, borderRadius: 6, backgroundColor: last ? t.brand : t.surface3 }} />
-                </View>
-              );
-            })}
+          <View style={{ marginTop: 12 }}>
+            <TrendChart data={c.weightSeries} unit=" kg" goodDown={c.goal !== 'muscle'} height={130} />
           </View>
           <Text style={{ color: t.ink3, fontSize: 11, marginTop: 10 }}>Last {c.weightSeries.length} check-ins · Goal: {goalLabel[c.goal] ?? c.goal}</Text>
         </View>
