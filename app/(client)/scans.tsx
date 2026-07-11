@@ -8,6 +8,7 @@ import type { Theme } from '../../src/theme/tokens';
 import { useClientData } from '../../src/ui/clientData';
 import { useRouter } from 'expo-router';
 import { TrendChart } from '../../src/ui/Chart';
+import { Icon } from '../../src/ui/Icon';
 import { analyzeInBody, visionAvailable } from '../../src/lib/vision';
 
 type Scan = { id: string; takenAt: string; weightKg: number; bodyFatPct: number; skeletalMuscleKg: number; source: string; image?: string };
@@ -139,9 +140,9 @@ export default function Scans() {
         <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800', textTransform: 'capitalize' }}>Progress</Text>
         <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 16 }}>InBody scans, photos &amp; body trends</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginBottom: 18 }}>
-          {([['📈','Report','/(client)/report'],['📏','Measurements','/(client)/measurements'],['🏆','Records','/(client)/records'],['🔥','Consistency','/(client)/consistency'],['📊','Standards','/(client)/standards'],['🎯','Goal','/(client)/goal']] as const).map(([ic,label,route]) => (
+          {([['chart','Report','/(client)/report'],['ruler','Measurements','/(client)/measurements'],['trophy','Records','/(client)/records'],['flame','Consistency','/(client)/consistency'],['chart','Standards','/(client)/standards'],['target','Goal','/(client)/goal']] as const).map(([ic,label,route]) => (
             <Pressable key={route} onPress={() => router.push(route as any)} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 8 }}>
-              <Text style={{ fontSize: 14 }}>{ic}</Text><Text style={{ color: t.ink2, fontWeight: '700', fontSize: 13 }}>{label}</Text>
+              <Icon name={ic} size={14} color={t.brand} /><Text style={{ color: t.ink2, fontWeight: '700', fontSize: 13 }}>{label}</Text>
             </Pressable>
           ))}
         </ScrollView>
@@ -156,18 +157,18 @@ export default function Scans() {
           <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16, textTransform: 'capitalize', marginBottom: 4 }}>Add an InBody scan</Text>
           <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 14 }}>Snap or upload your report, pick the scan date, enter the numbers.</Text>
           <View style={{ flexDirection: 'row', gap: 10, marginBottom: 12 }}>
-            <Pressable onPress={() => pick(true)} style={{ flex: 1, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingVertical: 16, alignItems: 'center', gap: 5 }}><Text style={{ fontSize: 22 }}>📷</Text><Text style={{ color: t.ink, fontWeight: '700', fontSize: 13 }}>Take photo</Text></Pressable>
-            <Pressable onPress={() => pick(false)} style={{ flex: 1, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingVertical: 16, alignItems: 'center', gap: 5 }}><Text style={{ fontSize: 22 }}>🖼️</Text><Text style={{ color: t.ink, fontWeight: '700', fontSize: 13 }}>Upload scan</Text></Pressable>
+            <Pressable onPress={() => pick(true)} style={{ flex: 1, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingVertical: 16, alignItems: 'center', gap: 5 }}><Icon name="camera" size={22} color={t.ink} /><Text style={{ color: t.ink, fontWeight: '700', fontSize: 13 }}>Take photo</Text></Pressable>
+            <Pressable onPress={() => pick(false)} style={{ flex: 1, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingVertical: 16, alignItems: 'center', gap: 5 }}><Icon name="plus" size={22} color={t.ink} /><Text style={{ color: t.ink, fontWeight: '700', fontSize: 13 }}>Upload scan</Text></Pressable>
           </View>
           {img && (
             <View style={{ marginBottom: 12 }}>
               <Image source={{ uri: img }} style={{ width: '100%', height: 180, borderRadius: 12, backgroundColor: t.surface2 }} resizeMode="cover" />
-              {reading ? <Text style={{ color: t.brand, fontSize: 12, marginTop: 6, fontWeight: '600' }}>🔍 Reading your scan…</Text> : <Text style={{ color: ocrMsg && ocrMsg.startsWith('Read') ? t.brand : t.ink3, fontSize: 11, marginTop: 6 }}>{ocrMsg || '📄 Scan attached — reading the numbers…'}</Text>}
+              {reading ? <Text style={{ color: t.brand, fontSize: 12, marginTop: 6, fontWeight: '600' }}>Reading your scan…</Text> : <Text style={{ color: ocrMsg && ocrMsg.startsWith('Read') ? t.brand : t.ink3, fontSize: 11, marginTop: 6 }}>{ocrMsg || 'Scan attached — reading the numbers…'}</Text>}
             </View>
           )}
           <Text style={{ color: t.ink2, fontSize: 13, fontWeight: '600', marginBottom: 6 }}>Scan date</Text>
           <Pressable onPress={() => setShowDate(true)} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, marginBottom: 12, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Text style={{ color: t.ink, fontSize: 15, fontWeight: '600' }}>{scanDateLabel()}</Text><Text style={{ color: t.ink3 }}>📅 ▾</Text>
+            <Text style={{ color: t.ink, fontSize: 15, fontWeight: '600' }}>{scanDateLabel()}</Text><Icon name="calendar" size={15} color={t.ink3} />
           </Pressable>
           <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
             <TextInput value={wt} onChangeText={setWt} keyboardType="numeric" placeholder="Weight kg" placeholderTextColor={t.ink3} style={{ flex: 1, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 11, fontSize: 14 }} />
@@ -188,7 +189,7 @@ export default function Scans() {
           </View>
           {[...chrono].reverse().map((s, i, arr) => (
             <View key={s.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, borderBottomWidth: i < arr.length - 1 ? 1 : 0, borderBottomColor: t.ring }}>
-              {s.image ? <Image source={{ uri: s.image }} style={{ width: 40, height: 40, borderRadius: 8 }} /> : <View style={{ width: 40, height: 40, borderRadius: 8, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}><Text>📄</Text></View>}
+              {s.image ? <Image source={{ uri: s.image }} style={{ width: 40, height: 40, borderRadius: 8 }} /> : <View style={{ width: 40, height: 40, borderRadius: 8, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}><Icon name="chart" size={16} color={t.ink3} /></View>}
               <View style={{ flex: 1 }}>
                 <Text style={{ color: t.ink, fontWeight: '600', fontSize: 14 }}>{s.weightKg} kg · {s.bodyFatPct}% BF</Text>
                 <Text style={{ color: t.ink3, fontSize: 11 }}>{fmt(s.takenAt)} · {s.source}</Text>
@@ -201,8 +202,8 @@ export default function Scans() {
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
             <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16, textTransform: 'capitalize' }}>Progress Photos</Text>
             <View style={{ flexDirection: 'row', gap: 8 }}>
-              <Pressable onPress={() => addPhoto(false)} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 9, paddingHorizontal: 12, paddingVertical: 7 }}><Text style={{ color: t.ink, fontWeight: '700', fontSize: 12 }}>🖼 Upload</Text></Pressable>
-              <Pressable onPress={() => addPhoto(true)} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 9, paddingHorizontal: 12, paddingVertical: 7 }}><Text style={{ color: t.ink, fontWeight: '700', fontSize: 12 }}>📷 Photo</Text></Pressable>
+              <Pressable onPress={() => addPhoto(false)} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 9, paddingHorizontal: 12, paddingVertical: 7 }}><Text style={{ color: t.ink, fontWeight: '700', fontSize: 12 }}>Upload</Text></Pressable>
+              <Pressable onPress={() => addPhoto(true)} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 9, paddingHorizontal: 12, paddingVertical: 7 }}><Text style={{ color: t.ink, fontWeight: '700', fontSize: 12 }}>Photo</Text></Pressable>
             </View>
           </View>
           {photos.length === 0 ? (
