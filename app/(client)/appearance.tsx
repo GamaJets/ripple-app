@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { View, Text, Pressable, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { useTheme } from '../../src/ui/components';
+import { useTheme, useThemeControls } from '../../src/ui/components';
 import { brandInkFor } from '../../src/theme/tokens';
 
 const ACCENTS = ['#2dd4bf', '#3987e5', '#9085e9', '#e66767', '#199e70', '#c98500', '#e6579a'];
@@ -18,8 +18,7 @@ const MODES = [
 export default function Appearance() {
   const t = useTheme();
   const router = useRouter();
-  const [mode, setMode] = useState('dark');
-  const [accent, setAccent] = useState('#2dd4bf');
+  const { mode, accent, setMode, setAccent } = useThemeControls();
   const [saved, setSaved] = useState(false);
   const accentInk = brandInkFor(accent);
 
@@ -33,7 +32,7 @@ export default function Appearance() {
         <Text style={{ color: t.ink2, fontSize: 13, fontWeight: '700', marginBottom: 10 }}>Theme</Text>
         <View style={{ flexDirection: 'row', gap: 10, marginBottom: 20 }}>
           {MODES.map((m) => (
-            <Pressable key={m.id} onPress={() => setMode(m.id)}
+            <Pressable key={m.id} onPress={() => setMode(m.id as any)}
               style={{ flex: 1, backgroundColor: t.surface, borderRadius: 14, borderWidth: 2, borderColor: mode === m.id ? accent : t.ring, padding: 16, alignItems: 'center', gap: 6 }}>
               <Text style={{ fontSize: 24 }}>{m.ico}</Text>
               <Text style={{ color: t.ink, fontWeight: '700', fontSize: 13 }}>{m.label}</Text>

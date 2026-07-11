@@ -1,11 +1,37 @@
-// Shared UI primitives — keep every screen consistent with the design tokens.
-import { ReactNode } from 'react';
+// Shared UI primitives + the live theme (accent colour + light/dark/auto).
+import { ReactNode, createContext, useContext, useState, useEffect } from 'react';
 import { View, Text, ScrollView, Pressable, StyleSheet, useColorScheme } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { dark, light, type Theme } from '../theme/tokens';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { dark, light, brandInkFor, type Theme } from '../theme/tokens';
+
+export type ThemeMode = 'dark' | 'light' | 'auto';
+interface ThemeControls { mode: ThemeMode; accent: string; setMode: (m: ThemeMode) => void; setAccent: (c: string) => void; theme: Theme }
+const ThemeCtx = createContext<ThemeControls | null>(null);
+
+export function AppThemeProvider({ children }: { children: ReactNode }) {
+  const sys = useColorScheme();
+  const [mode, setModeState] = useState<ThemeMode>('dark');
+  const [accent, setAccentState] = useState<string>(dark.brand);
+  useEffect(() => { (async () => {
+    try { const m = await AsyncStorage.getItem('repple.themeMode'); const a = await AsyncStorage.getItem('repple.accent'); if (m) setModeState(m as ThemeMode); if (a) setAccentState(a); } catch {}
+  })(); }, []);
+  const setMode = (m: ThemeMode) => { setModeState(m); AsyncStorage.setItem('repple.themeMode', m).catch(() => {}); };
+  const setAccent = (c: string) => { setAccentState(c); AsyncStorage.setItem('repple.accent', c).catch(() => {}); };
+  const isDark = mode === 'auto' ? sys !== 'light' : mode === 'dark';
+  const base = isDark ? dark : light;
+  const theme: Theme = { ...base, brand: accent, brandInk: brandInkFor(accent) };
+  return <ThemeCtx.Provider value={{ mode, accent, setMode, setAccent, theme }}>{children}</ThemeCtx.Provider>;
+}
 
 export function useTheme(): Theme {
-  return dark; // Repple is dark-themed to match the brand
+  const c = useContext(ThemeCtx);
+  return c ? c.theme : dark;
+}
+export function useThemeControls(): ThemeControls {
+  const c = useContext(ThemeCtx);
+  if (!c) throw new Error('useThemeControls must be used inside <AppThemeProvider>');
+  return c;
 }
 
 export function Screen({ title, subtitle, children }: { title: string; subtitle?: string; children: ReactNode }) {

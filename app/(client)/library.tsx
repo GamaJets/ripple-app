@@ -1,6 +1,6 @@
 // Exercise Library — searchable list of how-to videos your coach uploaded.
 import { useState } from 'react';
-import { View, Text, TextInput, Pressable, ScrollView, Modal } from 'react-native';
+import { View, Text, TextInput, Pressable, ScrollView, Modal, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -61,11 +61,14 @@ export default function Library() {
             <Text style={{ color: t.ink, fontSize: 18, fontWeight: '800' }}>{open?.name}</Text>
             <Pressable onPress={() => setOpen(null)}><Text style={{ color: t.brand, fontSize: 16, fontWeight: '800' }}>Close</Text></Pressable>
           </View>
-          <View style={{ height: 200, borderRadius: 14, backgroundColor: t.surface2, borderWidth: 1, borderColor: t.ring, alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
-            <Text style={{ fontSize: 44 }}>{open?.uploaded ? '▶️' : '🎬'}</Text>
-            <Text style={{ color: t.ink3, fontSize: 13, marginTop: 8 }}>{open?.uploaded ? `${open?.group} · ${open?.dur}` : 'Your coach is still filming this one'}</Text>
-          </View>
-          <Text style={{ color: t.ink2, fontSize: 13, lineHeight: 19 }}>Watch your coach demo the movement, then head to Train to log your sets. If a lift bothers you, use “Swap” on the workout screen for an alternative.</Text>
+          <Pressable onPress={() => open && Linking.openURL('https://www.youtube.com/results?search_query=' + encodeURIComponent(open.name + ' proper form technique'))} style={{ height: 200, borderRadius: 14, backgroundColor: '#000', borderWidth: 1, borderColor: t.ring, alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
+            <View style={{ width: 62, height: 62, borderRadius: 31, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}><Text style={{ fontSize: 26, color: t.brandInk }}>▶</Text></View>
+            <Text style={{ color: '#bbb', fontSize: 13, marginTop: 10 }}>{open ? `${open.group} · ${open.dur}` : ''}</Text>
+          </Pressable>
+          <Pressable onPress={() => open && Linking.openURL('https://www.youtube.com/results?search_query=' + encodeURIComponent(open.name + ' proper form technique'))} style={{ backgroundColor: t.brand, borderRadius: 12, paddingVertical: 13, alignItems: 'center', marginBottom: 12 }}>
+            <Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 15 }}>▶  Watch Demo Video</Text>
+          </Pressable>
+          <Text style={{ color: t.ink2, fontSize: 13, lineHeight: 19 }}>Watch the movement, then head to Train to log your sets. When your coach uploads their own clip it plays here; for now this opens a trusted demo. If a lift bothers you, use “Swap” on the workout screen for an alternative.</Text>
         </View>
       </Modal>
     </SafeAreaView>

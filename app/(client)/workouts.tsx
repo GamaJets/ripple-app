@@ -2,7 +2,7 @@
 // session with a rest timer + live heart rate, OR log cardio.
 import { useState, useEffect, useRef } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView, Modal } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { buildProgram, type ProgramExercise } from '../../src/lib/programs';
@@ -213,6 +213,8 @@ function LogRow({ t, onLog }: { t: Theme; onLog: (reps: string, kg: string) => v
 
 // ── Guided session runner: one exercise at a time, rest timer, live HR, summary ──
 function SessionRunner({ t, exercises, focus, nameOf, liveHr, onClose }: { t: Theme; exercises: ProgramExercise[]; focus: string; nameOf: (e: ProgramExercise) => string; liveHr: number | null; onClose: () => void }) {
+  const insets = useSafeAreaInsets();
+  const topPad = Math.max(insets.top, 44);
   const [idx, setIdx] = useState(0);
   const [results, setResults] = useState<{ reps: number; kg: number }[][]>(() => exercises.map(() => []));
   const [reps, setReps] = useState(''); const [kg, setKg] = useState('');
@@ -242,7 +244,7 @@ function SessionRunner({ t, exercises, focus, nameOf, liveHr, onClose }: { t: Th
     const exDone = results.filter((r) => r.length > 0).length;
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-        <ScrollView contentContainerStyle={{ padding: 22 }}>
+        <ScrollView contentContainerStyle={{ padding: 22, paddingTop: topPad + 10 }}>
           <Text style={{ fontSize: 44, textAlign: 'center', marginTop: 20 }}>🎉</Text>
           <Text style={{ color: t.ink, fontSize: 24, fontWeight: '900', textAlign: 'center', marginTop: 8 }}>Session Complete</Text>
           <Text style={{ color: t.ink3, fontSize: 14, textAlign: 'center', marginTop: 4, marginBottom: 24 }}>{focus}</Text>
@@ -264,7 +266,7 @@ function SessionRunner({ t, exercises, focus, nameOf, liveHr, onClose }: { t: Th
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
+      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40, paddingTop: topPad + 4 }}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
           <Text style={{ color: t.ink3, fontSize: 13 }}>Exercise {idx + 1} of {exercises.length}</Text>
           <Pressable onPress={onClose}><Text style={{ color: t.ink3, fontSize: 15, fontWeight: '700' }}>End</Text></Pressable>

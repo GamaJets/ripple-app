@@ -1,6 +1,6 @@
 // Share & Social — connect Instagram / TikTok and share progress cards.
 import { useState } from 'react';
-import { View, Text, Pressable, ScrollView, Alert } from 'react-native';
+import { View, Text, Pressable, ScrollView, Alert, Share } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -25,10 +25,9 @@ export default function Social() {
   const bfDrop = first && latest ? Math.round((first.bodyFatPct - latest.bodyFatPct) * 10) / 10 : 0;
   const wtDrop = first && latest ? Math.round((first.weightKg - latest.weightKg) * 10) / 10 : 0;
 
-  const share = () => {
-    const active = NETWORKS.filter((n) => conn[n.id]).map((n) => n.name);
-    if (active.length === 0) { Alert.alert('Connect an account', 'Turn on at least one network above to share your progress card.'); return; }
-    Alert.alert('Progress card ready', `Sharing your card to ${active.join(', ')}.\n\nRepple never posts without you tapping share.`);
+  const share = async () => {
+    const msg = `My Repple progress 💪 Down ${Math.abs(wtDrop)} kg and ${Math.abs(bfDrop)}% body fat so far. Every rep ripples out. 🌊`;
+    try { await Share.share({ message: msg }); } catch {}
   };
 
   return (
