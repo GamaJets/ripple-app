@@ -49,6 +49,7 @@ export default function ClientLayout() {
       <Tabs.Screen name="goal" options={{ href: null, title: 'Goal Tracker' }} />
       <Tabs.Screen name="tools" options={{ href: null, title: 'Lifting Tools' }} />
       <Tabs.Screen name="recovery" options={{ href: null, title: 'Recovery' }} />
+      <Tabs.Screen name="week" options={{ href: null, title: 'This Week' }} />
     </Tabs>
   );
 }
