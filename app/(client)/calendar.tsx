@@ -1,12 +1,14 @@
 // Book — month calendar of your in-person sessions. Tap a day to book an open
-// slot or cancel one you've booked (24h+ ahead avoids the late fee).
+// slot or cancel one you've booked (24h+ ahead avoids the late fee). Reads the
+// shared session store, so slots the coach opens appear here to book.
 import { useState } from 'react';
 import { View, Text, Pressable, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
-import { MOCK_SESSIONS, MOCK_TRAINER } from '../../src/lib/mockData';
+import { MOCK_TRAINER } from '../../src/lib/mockData';
+import { useSessions } from '../../src/ui/sessions';
 import type { TrainingSession } from '../../src/lib/types';
 
 const CLIENT_ID = 'c1';
@@ -24,7 +26,7 @@ export default function Calendar() {
   const t = useTheme();
   const router = useRouter();
   const now = new Date();
-  const [sessions, setSessions] = useState<TrainingSession[]>(JSON.parse(JSON.stringify(MOCK_SESSIONS)));
+  const { sessions, bookSession, releaseSession } = useSessions();
   const [viewYear, setViewYear] = useState(now.getFullYear());
   const [viewMonth, setViewMonth] = useState(now.getMonth());
   const [selKey, setSelKey] = useState(`${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`);
@@ -57,13 +59,13 @@ export default function Calendar() {
   }
 
   function book(s: TrainingSession) {
-    setSessions((p) => p.map((x) => x.id === s.id ? { ...x, status: 'booked', clientId: CLIENT_ID, released: false } : x));
+    bookSession(s.id, CLIENT_ID);
     Alert.alert('Session booked ✓', `${DOW[new Date(s.startsAt).getDay()]} ${timeLabel(s.startsAt)} with ${MOCK_TRAINER.name} is confirmed.\n\nA confirmation has been sent to you and your coach.`, [{ text: 'Great' }]);
   }
   function cancel(s: TrainingSession) {
     const late = Date.parse(s.startsAt) - Date.now() < 24 * 3600 * 1000;
     const doCancel = () => {
-      setSessions((p) => p.map((x) => x.id === s.id ? { ...x, status: 'available', clientId: null, released: true } : x));
+      releaseSession(s.id);
       Alert.alert('Cancelled', `Your ${timeLabel(s.startsAt)} session was cancelled. The slot has been re-offered to other clients.${late ? `\n\nA $${fee} late-cancellation fee applies.` : ''}`, [{ text: 'OK' }]);
     };
     if (late) Alert.alert('Within 24 hours', `Cancelling now charges the $${fee} late-cancellation fee, and the slot is offered to other clients. Continue?`, [{ text: 'Keep it', style: 'cancel' }, { text: `Cancel · $${fee}`, style: 'destructive', onPress: doCancel }]);

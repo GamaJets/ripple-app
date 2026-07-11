@@ -29,6 +29,7 @@ export default function Train() {
   const [session, setSession] = useState(false);
   const [ctype, setCtype] = useState(CARDIO[0]); const [mins, setMins] = useState('30'); const [dist, setDist] = useState('5'); const [unit, setUnit] = useState<'km' | 'mi'>('km');
   const [showCal, setShowCal] = useState(false);
+  const [selCalDay, setSelCalDay] = useState('');
   const today0 = new Date();
   const monday0 = new Date(today0); monday0.setDate(today0.getDate() - jsToMon); monday0.setHours(0, 0, 0, 0);
   const dateFor = (i: number) => { const d = new Date(monday0); d.setDate(monday0.getDate() + i); return d; };
@@ -41,6 +42,14 @@ export default function Train() {
   const firstDow = (new Date(calYear, calMonth, 1).getDay() + 6) % 7;
   const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
   const monthLabel = monday0.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+
+  // Day-detail for the month view: which workouts were performed on the tapped day.
+  const activeCalDay = selCalDay || dstr(today0);
+  const dayEntries = MOCK_CLIENT.log.filter((l) => dstr(new Date(l.t)) === activeCalDay);
+  const dayVolume = dayEntries.reduce((a, l) => a + (l.sets ? l.sets.reduce((x: number, s: number[]) => x + (s[0] || 0) * (s[1] || 0), 0) : 0), 0);
+  const daySets = dayEntries.reduce((a, l) => a + (l.sets ? l.sets.length : 0), 0);
+  const dayKcal = dayEntries.reduce((a, l) => a + (l.kcal || 0), 0);
+  const prettyDay = (ds: string) => { const [y, m, d] = ds.split('-').map(Number); return new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' }); };
 
   const workout = program.days[dayIdx % program.days.length];
   const uid = (e: ProgramExercise) => `${dayIdx}:${e.key}`;
@@ -57,7 +66,7 @@ export default function Train() {
 
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
           <Text style={{ color: t.ink2, fontSize: 13, fontWeight: '700', textTransform: 'capitalize' }}>{monthLabel}</Text>
-          <Pressable onPress={() => setShowCal(true)}><Text style={{ color: t.brand, fontWeight: '700', fontSize: 13 }}>📅 Month View</Text></Pressable>
+          <Pressable onPress={() => { setSelCalDay(dstr(dateFor(dayIdx))); setShowCal(true); }}><Text style={{ color: t.brand, fontWeight: '700', fontSize: 13 }}>📅 Month View</Text></Pressable>
         </View>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginBottom: 14 }}>
           {WEEK.map((d, i) => {
@@ -71,6 +80,25 @@ export default function Train() {
             );
           })}
         </ScrollView>
+
+        {/* What you did on the selected weekday */}
+        {(() => {
+          const selDayStr = dstr(dateFor(dayIdx));
+          const entries = MOCK_CLIENT.log.filter((l) => dstr(new Date(l.t)) === selDayStr);
+          if (entries.length === 0) return null;
+          return (
+            <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.brand, padding: 14, marginBottom: 14 }}>
+              <Text style={{ color: t.ink, fontWeight: '800', fontSize: 14 }}>✅ Logged {prettyDay(selDayStr)}</Text>
+              {entries.map((l, i) => (
+                <Text key={i} style={{ color: t.ink3, fontSize: 12, marginTop: 6 }}>
+                  <Text style={{ color: t.ink2, fontWeight: '700' }}>{l.exercise}</Text>
+                  {l.sets ? ` · ${l.sets.map((s: number[]) => `${s[0]}×${s[1]}kg`).join(', ')}` : l.cardio ? ` · ${l.cardio.mins} min · ${l.cardio.dist} ${l.cardio.unit}` : ''}
+                  {l.kcal ? ` · 🔥 ${l.kcal}` : ''}
+                </Text>
+              ))}
+            </View>
+          );
+        })()}
 
         <View style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: 10, padding: 3, marginBottom: 14, borderWidth: 1, borderColor: t.ring }}>
           {(['strength', 'cardio'] as const).map((mm) => (
@@ -163,32 +191,67 @@ export default function Train() {
 
       <Modal visible={showCal} transparent animationType="slide" onRequestClose={() => setShowCal(false)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setShowCal(false)} />
-        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, borderColor: t.ring, padding: 20, paddingBottom: 30 }}>
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, borderColor: t.ring, padding: 20, paddingBottom: 30, maxHeight: '88%' }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
             <Text style={{ color: t.ink, fontSize: 18, fontWeight: '800', textTransform: 'capitalize' }}>{monthLabel}</Text>
             <Pressable onPress={() => setShowCal(false)}><Text style={{ color: t.brand, fontSize: 16, fontWeight: '800' }}>Close</Text></Pressable>
           </View>
-          <View style={{ flexDirection: 'row', marginBottom: 6 }}>
-            {WEEK.map((d) => <Text key={d} style={{ flex: 1, textAlign: 'center', color: t.ink3, fontSize: 11, fontWeight: '700' }}>{d[0]}</Text>)}
-          </View>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-            {Array.from({ length: firstDow }).map((_, i) => <View key={'e' + i} style={{ width: `${100 / 7}%`, aspectRatio: 1 }} />)}
-            {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((day) => {
-              const ds = `${calYear}-${pad2(calMonth + 1)}-${pad2(day)}`;
-              const worked = workedDates.has(ds); const isToday = ds === dstr(today0);
-              return (
-                <View key={day} style={{ width: `${100 / 7}%`, aspectRatio: 1, alignItems: 'center', justifyContent: 'center' }}>
-                  <View style={{ width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: worked ? t.brand : 'transparent', borderWidth: isToday && !worked ? 1 : 0, borderColor: t.brand }}>
-                    <Text style={{ color: worked ? t.brandInk : isToday ? t.brand : t.ink2, fontWeight: worked || isToday ? '800' : '500', fontSize: 13 }}>{day}</Text>
+          <ScrollView showsVerticalScrollIndicator={false}>
+            <View style={{ flexDirection: 'row', marginBottom: 6 }}>
+              {WEEK.map((d) => <Text key={d} style={{ flex: 1, textAlign: 'center', color: t.ink3, fontSize: 11, fontWeight: '700' }}>{d[0]}</Text>)}
+            </View>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+              {Array.from({ length: firstDow }).map((_, i) => <View key={'e' + i} style={{ width: `${100 / 7}%`, aspectRatio: 1 }} />)}
+              {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((day) => {
+                const ds = `${calYear}-${pad2(calMonth + 1)}-${pad2(day)}`;
+                const worked = workedDates.has(ds); const isToday = ds === dstr(today0); const isSel = ds === activeCalDay;
+                return (
+                  <Pressable key={day} onPress={() => setSelCalDay(ds)} style={{ width: `${100 / 7}%`, aspectRatio: 1, alignItems: 'center', justifyContent: 'center' }}>
+                    <View style={{ width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: worked ? t.brand : 'transparent', borderWidth: isSel ? 2 : isToday && !worked ? 1 : 0, borderColor: isSel ? t.ink : t.brand }}>
+                      <Text style={{ color: worked ? t.brandInk : isToday ? t.brand : t.ink2, fontWeight: worked || isToday ? '800' : '500', fontSize: 13 }}>{day}</Text>
+                    </View>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            {/* Tapped-day detail: what was performed + stats */}
+            <View style={{ borderTopWidth: 1, borderTopColor: t.ring, marginTop: 14, paddingTop: 14 }}>
+              <Text style={{ color: t.ink, fontWeight: '800', fontSize: 15, marginBottom: 8 }}>{prettyDay(activeCalDay)}</Text>
+              {dayEntries.length === 0 ? (
+                <Text style={{ color: t.ink3, fontSize: 13 }}>Rest day — no workout logged.</Text>
+              ) : (
+                <View>
+                  <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
+                    {([['Exercises', String(dayEntries.length)], ['Sets', String(daySets)], ['Volume', dayVolume ? `${(dayVolume / 1000).toFixed(1)}t` : '—'], ['🔥 kcal', String(dayKcal)]] as [string, string][]).map(([l, v]) => (
+                      <View key={l} style={{ flex: 1, backgroundColor: t.surface2, borderRadius: 12, borderWidth: 1, borderColor: t.ring, paddingVertical: 10, alignItems: 'center' }}>
+                        <Text style={{ color: t.ink, fontWeight: '800', fontSize: 15 }}>{v}</Text>
+                        <Text style={{ color: t.ink3, fontSize: 10, marginTop: 2 }}>{l}</Text>
+                      </View>
+                    ))}
                   </View>
+                  {dayEntries.map((l, i) => (
+                    <View key={i} style={{ backgroundColor: t.surface2, borderRadius: 12, borderWidth: 1, borderColor: t.ring, padding: 12, marginBottom: 8 }}>
+                      <Text style={{ color: t.ink, fontWeight: '700', fontSize: 14, textTransform: 'capitalize' }}>{l.exercise}</Text>
+                      {l.sets ? (
+                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 7 }}>
+                          {l.sets.map((s: number[], j: number) => <View key={j} style={{ backgroundColor: t.surface, borderRadius: 8, paddingHorizontal: 9, paddingVertical: 5, borderWidth: 1, borderColor: t.ring }}><Text style={{ color: t.ink2, fontSize: 12, fontWeight: '600' }}>{s[0]}×{s[1]}kg</Text></View>)}
+                        </View>
+                      ) : l.cardio ? (
+                        <Text style={{ color: t.ink3, fontSize: 12, marginTop: 5 }}>{l.cardio.mins} min · {l.cardio.dist} {l.cardio.unit}</Text>
+                      ) : null}
+                      {l.kcal ? <Text style={{ color: t.ink3, fontSize: 11, marginTop: 6 }}>🔥 {l.kcal} kcal</Text> : null}
+                    </View>
+                  ))}
                 </View>
-              );
-            })}
-          </View>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 14 }}>
-            <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: t.brand }} />
-            <Text style={{ color: t.ink3, fontSize: 12 }}>Days you trained · {workedDates.size} sessions logged</Text>
-          </View>
+              )}
+            </View>
+
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 14 }}>
+              <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: t.brand }} />
+              <Text style={{ color: t.ink3, fontSize: 12 }}>Days you trained · {workedDates.size} sessions logged · tap any day for details</Text>
+            </View>
+          </ScrollView>
         </View>
       </Modal>
 

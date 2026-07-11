@@ -1,23 +1,23 @@
 // Trainer · Schedule — month calendar of sessions with add & cancel.
-// Coach can see booked/open/blocked days at a glance, tap a day to see that
-// day's sessions, add a new session (assign a client or leave it open), and
-// cancel a booked session — which frees the slot and re-offers it to the
-// coach's other clients (the cross-client push described in the roadmap).
+// Reads/writes the shared session store so booked/open slots and cancellations
+// stay in sync with the client app. Adding a slot that overlaps an existing one
+// is rejected (no double-booking). Cancelling a booked session frees the slot
+// and re-offers it to the coach's other clients.
 import { useState } from 'react';
 import { View, Text, Pressable, ScrollView, Alert, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
-import { MOCK_SESSIONS, MOCK_TRAINER } from '../../src/lib/mockData';
+import { MOCK_TRAINER } from '../../src/lib/mockData';
 import { ROSTER } from '../../src/lib/trainerMock';
 import { cancelSession } from '../../src/lib/booking';
+import { useSessions } from '../../src/ui/sessions';
 import type { TrainingSession } from '../../src/lib/types';
 
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MON = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const nameOf = (id: string | null) => ROSTER.find((c) => c.id === id)?.name ?? 'Open slot';
 
-// Local (not UTC) day key so a session at 9am shows on the right calendar cell.
 function dayKey(iso: string) {
   const d = new Date(iso);
   return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
@@ -32,7 +32,7 @@ let SEQ = 5000;
 export default function TrainerSchedule() {
   const t = useTheme();
   const now = new Date();
-  const [sessions, setSessions] = useState<TrainingSession[]>(JSON.parse(JSON.stringify(MOCK_SESSIONS)));
+  const { sessions, addSession, releaseSession, removeSession } = useSessions();
   const [viewYear, setViewYear] = useState(now.getFullYear());
   const [viewMonth, setViewMonth] = useState(now.getMonth());
   const [selKey, setSelKey] = useState(`${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`);
@@ -44,14 +44,12 @@ export default function TrainerSchedule() {
   const booked = sessions.filter((s) => s.status === 'booked');
   const open = sessions.filter((s) => s.status === 'available');
 
-  // Group sessions by local day key for the calendar dots.
   const byDay = new Map<string, TrainingSession[]>();
   for (const s of sessions) {
     const k = dayKey(s.startsAt);
     (byDay.get(k) ?? byDay.set(k, []).get(k)!).push(s);
   }
 
-  // Build the month grid (leading blanks + day cells).
   const first = new Date(viewYear, viewMonth, 1);
   const startDow = first.getDay();
   const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
@@ -71,14 +69,18 @@ export default function TrainerSchedule() {
     setViewMonth(m); setViewYear(y);
   }
 
-  function addSession() {
+  function handleAdd() {
     const d = new Date(selY, selM, selD); d.setHours(addHour, 0, 0, 0);
     const s: TrainingSession = {
       id: `ms${SEQ++}`, trainerId: MOCK_TRAINER.id, clientId: addClient,
       startsAt: d.toISOString(), durationMin: addDur,
       status: addClient ? 'booked' : 'available', released: false,
     };
-    setSessions((p) => [...p, s]);
+    const res = addSession(s);
+    if (!res.ok) {
+      Alert.alert('Time not available', `You already have a session that overlaps ${timeLabel(s.startsAt)} on ${DOW[selDate.getDay()]} ${selD}/${selM + 1}. Pick another time.`, [{ text: 'OK' }]);
+      return;
+    }
     setAddOpen(false);
     if (addClient) {
       Alert.alert('Session booked ✓', `${timeLabel(s.startsAt)} with ${nameOf(addClient)} confirmed.\n\nA confirmation push has been sent to both your app and ${nameOf(addClient)}'s client app.`, [{ text: 'Great' }]);
@@ -88,8 +90,7 @@ export default function TrainerSchedule() {
   function doCancel(s: TrainingSession) {
     const others = ROSTER.filter((c) => c.id !== s.clientId).map((c) => c.name);
     const res = cancelSession(s, MOCK_TRAINER.sessionFee, ROSTER.map((c) => c.id));
-    // Free the slot and re-offer it to the coach's other clients.
-    setSessions((p) => p.map((x) => x.id === s.id ? { ...x, status: 'available', clientId: null, released: true } : x));
+    releaseSession(s.id);
     Alert.alert(
       'Session cancelled',
       `${timeLabel(s.startsAt)} with ${nameOf(s.clientId)} was cancelled.\n\n` +
@@ -107,7 +108,7 @@ export default function TrainerSchedule() {
   function removeOpen(s: TrainingSession) {
     Alert.alert('Remove open slot?', `${timeLabel(s.startsAt)} is currently open. Remove it from your availability?`, [
       { text: 'Keep', style: 'cancel' },
-      { text: 'Remove', style: 'destructive', onPress: () => setSessions((p) => p.filter((x) => x.id !== s.id)) },
+      { text: 'Remove', style: 'destructive', onPress: () => removeSession(s.id) },
     ]);
   }
 
@@ -161,7 +162,7 @@ export default function TrainerSchedule() {
                       <Text style={{ color: isSel ? t.brandInk : t.ink, fontSize: 14, fontWeight: isToday || isSel ? '800' : '600' }}>{d}</Text>
                     </View>
                     <View style={{ flexDirection: 'row', gap: 3, height: 6, marginTop: 2 }}>
-                      {hasBooked && <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: isSel ? t.brand : t.brand }} />}
+                      {hasBooked && <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: t.brand }} />}
                       {hasOpen && <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: t.ink3 }} />}
                     </View>
                   </Pressable>
@@ -261,7 +262,7 @@ export default function TrainerSchedule() {
               <Pressable onPress={() => setAddOpen(false)} style={{ flex: 1, paddingVertical: 15, borderRadius: 14, alignItems: 'center', backgroundColor: t.surface2, borderWidth: 1, borderColor: t.ring }}>
                 <Text style={{ color: t.ink2, fontWeight: '800' }}>Cancel</Text>
               </Pressable>
-              <Pressable onPress={addSession} style={{ flex: 2, paddingVertical: 15, borderRadius: 14, alignItems: 'center', backgroundColor: t.brand }}>
+              <Pressable onPress={handleAdd} style={{ flex: 2, paddingVertical: 15, borderRadius: 14, alignItems: 'center', backgroundColor: t.brand }}>
                 <Text style={{ color: t.brandInk, fontWeight: '800' }}>{addClient ? 'Book Session' : 'Add Open Slot'}</Text>
               </Pressable>
             </View>
