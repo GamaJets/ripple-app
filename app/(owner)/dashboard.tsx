@@ -1,6 +1,7 @@
 import { View, Text, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { Icon } from '../../src/ui/Icon';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { usePlatformTrainers } from '../../src/ui/trainers';
@@ -27,9 +28,9 @@ export default function OwnerOverview() {
           <Pressable onPress={() => router.push('/')} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 7 }}><Text style={{ color: t.ink2, fontWeight: '700', fontSize: 12 }}>Switch role</Text></Pressable>
         </View>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginBottom: 16 }}>
-          {([["🧑‍🏫","Trainers","/(owner)/trainers"],["🎨","Brand","/(owner)/brand"],["📈","Growth","/(owner)/growth"],["🛠️","Ops","/(owner)/ops"]] as const).map(([ic, label, route]) => (
+          {([["people","Trainers","/(owner)/trainers"],["palette","Brand","/(owner)/brand"],["trending","Growth","/(owner)/growth"],["wrench","Ops","/(owner)/ops"]] as const).map(([ic, label, route]) => (
             <Pressable key={route} onPress={() => router.push(route as any)} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 8 }}>
-              <Text style={{ fontSize: 14 }}>{ic}</Text><Text style={{ color: t.ink2, fontWeight: '700', fontSize: 13 }}>{label}</Text>
+              <Icon name={ic} size={14} color={t.brand} /><Text style={{ color: t.ink2, fontWeight: '700', fontSize: 13 }}>{label}</Text>
             </Pressable>
           ))}
         </ScrollView>

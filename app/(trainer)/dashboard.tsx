@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { View, Text, Pressable, ScrollView, Modal, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { Icon } from '../../src/ui/Icon';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { MOCK_TRAINER } from '../../src/lib/mockData';
@@ -82,9 +83,9 @@ export default function TrainerClients() {
         </View>
 
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginBottom: 16 }}>
-          {([["🏋️","Programs","/(trainer)/builder"],["📅","Schedule","/(trainer)/calendar"],["🎬","Videos","/(trainer)/videos"],["📈","Analytics","/(trainer)/analytics"],["🏆","Leaderboard","/(trainer)/leaderboard"]] as const).map(([ic, label, route]) => (
+          {([["train","Programs","/(trainer)/builder"],["calendar","Schedule","/(trainer)/calendar"],["video","Videos","/(trainer)/videos"],["chart","Analytics","/(trainer)/analytics"],["trophy","Leaderboard","/(trainer)/leaderboard"]] as const).map(([ic, label, route]) => (
             <Pressable key={route} onPress={() => router.push(route as any)} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 8 }}>
-              <Text style={{ fontSize: 14 }}>{ic}</Text><Text style={{ color: t.ink2, fontWeight: '700', fontSize: 13 }}>{label}</Text>
+              <Icon name={ic} size={14} color={t.brand} /><Text style={{ color: t.ink2, fontWeight: '700', fontSize: 13 }}>{label}</Text>
             </Pressable>
           ))}
         </ScrollView>
