@@ -3,6 +3,7 @@ import { Tabs } from 'expo-router';
 import { Text } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
+import { Icon } from '../../src/ui/Icon';
 
 function TabIcon({ emoji, focused }: { emoji: string; focused: boolean }) {
   return <Text style={{ fontSize: 22, opacity: focused ? 1 : 0.45 }}>{emoji}</Text>;
@@ -23,13 +24,13 @@ export default function TrainerLayout() {
         sceneStyle: { backgroundColor: t.bg },
       }}
     >
-      <Tabs.Screen name="dashboard" options={{ title: 'Clients', tabBarIcon: ({ focused }) => <TabIcon emoji="👥" focused={focused} /> }} />
-      <Tabs.Screen name="builder" options={{ title: 'Programs', tabBarIcon: ({ focused }) => <TabIcon emoji="🏋️" focused={focused} /> }} />
-      <Tabs.Screen name="calendar" options={{ title: 'Schedule', tabBarIcon: ({ focused }) => <TabIcon emoji="📅" focused={focused} /> }} />
-      <Tabs.Screen name="videos" options={{ title: 'Videos', tabBarIcon: ({ focused }) => <TabIcon emoji="🎬" focused={focused} /> }} />
-      <Tabs.Screen name="analytics" options={{ title: 'Analytics', tabBarIcon: ({ focused }) => <TabIcon emoji="📈" focused={focused} /> }} />
+      <Tabs.Screen name="dashboard" options={{ title: 'Clients', tabBarIcon: ({ color }) => <Icon name="people" size={23} color={color} /> }} />
+      <Tabs.Screen name="builder" options={{ title: 'Programs', tabBarIcon: ({ color }) => <Icon name="train" size={23} color={color} /> }} />
+      <Tabs.Screen name="calendar" options={{ title: 'Schedule', tabBarIcon: ({ color }) => <Icon name="calendar" size={23} color={color} /> }} />
+      <Tabs.Screen name="videos" options={{ title: 'Videos', tabBarIcon: ({ color }) => <Icon name="video" size={23} color={color} /> }} />
+      <Tabs.Screen name="analytics" options={{ title: 'Analytics', tabBarIcon: ({ color }) => <Icon name="chart" size={23} color={color} /> }} />
       <Tabs.Screen name="leaderboard" options={{ href: null, title: 'Leaderboard' }} />
-      <Tabs.Screen name="profile" options={{ title: 'Profile', tabBarIcon: ({ focused }) => <TabIcon emoji="👤" focused={focused} /> }} />
+      <Tabs.Screen name="profile" options={{ title: 'Profile', tabBarIcon: ({ color }) => <Icon name="me" size={23} color={color} /> }} />
     </Tabs>
   );
 }

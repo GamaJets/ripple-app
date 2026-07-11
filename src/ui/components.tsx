@@ -1,32 +1,44 @@
-// Shared UI primitives + the live theme (accent colour + light/dark/auto).
+// Shared UI primitives + the live theme. The theme is one of 10 palettes
+// (Elevated Teal default), selectable by client & trainer. An optional accent
+// override sits on top for owner white-labelling. Both persist.
 import { ReactNode, createContext, useContext, useState, useEffect } from 'react';
-import { View, Text, ScrollView, Pressable, StyleSheet, useColorScheme } from 'react-native';
+import { View, Text, ScrollView, Pressable, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { dark, light, brandInkFor, type Theme } from '../theme/tokens';
+import { paletteByKey, brandInkFor, DEFAULT_PALETTE, PALETTES, teal, type Theme, type PaletteMeta } from '../theme/tokens';
 
-export type ThemeMode = 'dark' | 'light' | 'auto';
-interface ThemeControls { mode: ThemeMode; accent: string; setMode: (m: ThemeMode) => void; setAccent: (c: string) => void; theme: Theme }
+interface ThemeControls {
+  palette: string; setPalette: (k: string) => void;
+  accent: string | null; setAccent: (c: string | null) => void;
+  palettes: PaletteMeta[]; theme: Theme;
+}
 const ThemeCtx = createContext<ThemeControls | null>(null);
 
 export function AppThemeProvider({ children }: { children: ReactNode }) {
-  const sys = useColorScheme();
-  const [mode, setModeState] = useState<ThemeMode>('dark');
-  const [accent, setAccentState] = useState<string>(dark.brand);
+  const [palette, setPaletteState] = useState<string>(DEFAULT_PALETTE);
+  const [accent, setAccentState] = useState<string | null>(null);
   useEffect(() => { (async () => {
-    try { const m = await AsyncStorage.getItem('repple.themeMode'); const a = await AsyncStorage.getItem('repple.accent'); if (m) setModeState(m as ThemeMode); if (a) setAccentState(a); } catch {}
+    try {
+      const p = await AsyncStorage.getItem('repple.palette');
+      const a = await AsyncStorage.getItem('repple.accent');
+      if (p) setPaletteState(p);
+      if (a) setAccentState(a);
+    } catch {}
   })(); }, []);
-  const setMode = (m: ThemeMode) => { setModeState(m); AsyncStorage.setItem('repple.themeMode', m).catch(() => {}); };
-  const setAccent = (c: string) => { setAccentState(c); AsyncStorage.setItem('repple.accent', c).catch(() => {}); };
-  const isDark = mode === 'auto' ? sys !== 'light' : mode === 'dark';
-  const base = isDark ? dark : light;
-  const theme: Theme = { ...base, brand: accent, brandInk: brandInkFor(accent) };
-  return <ThemeCtx.Provider value={{ mode, accent, setMode, setAccent, theme }}>{children}</ThemeCtx.Provider>;
+  const setPalette = (k: string) => { setPaletteState(k); AsyncStorage.setItem('repple.palette', k).catch(() => {}); };
+  const setAccent = (c: string | null) => {
+    setAccentState(c);
+    if (c) AsyncStorage.setItem('repple.accent', c).catch(() => {});
+    else AsyncStorage.removeItem('repple.accent').catch(() => {});
+  };
+  const base = paletteByKey(palette);
+  const theme: Theme = accent ? { ...base, brand: accent, brandInk: brandInkFor(accent) } : base;
+  return <ThemeCtx.Provider value={{ palette, setPalette, accent, setAccent, palettes: PALETTES, theme }}>{children}</ThemeCtx.Provider>;
 }
 
 export function useTheme(): Theme {
   const c = useContext(ThemeCtx);
-  return c ? c.theme : dark;
+  return c ? c.theme : teal;
 }
 export function useThemeControls(): ThemeControls {
   const c = useContext(ThemeCtx);
@@ -49,9 +61,7 @@ export function Screen({ title, subtitle, children }: { title: string; subtitle?
 
 export function Card({ children, tint }: { children: ReactNode; tint?: boolean }) {
   const t = useTheme();
-  return (
-    <View style={[s.card, { backgroundColor: tint ? t.surface2 : t.surface, borderColor: t.ring }]}>{children}</View>
-  );
+  return <View style={[s.card, { backgroundColor: tint ? t.surface2 : t.surface, borderColor: t.ring }]}>{children}</View>;
 }
 
 export function Tile({ label, value, unit, foot }: { label: string; value: string; unit?: string; foot?: string }) {

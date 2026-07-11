@@ -3,6 +3,7 @@ import { Tabs } from 'expo-router';
 import { Text } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
+import { Icon } from '../../src/ui/Icon';
 
 function TabIcon({ emoji, focused }: { emoji: string; focused: boolean }) {
   return <Text style={{ fontSize: 22, opacity: focused ? 1 : 0.45 }}>{emoji}</Text>;
@@ -25,11 +26,11 @@ export default function ClientLayout() {
         sceneStyle: { backgroundColor: t.bg },
       }}
     >
-      <Tabs.Screen name="dashboard" options={{ headerShown: false, title: 'Home', tabBarIcon: ({ focused }) => <TabIcon emoji="🏠" focused={focused} /> }} />
-      <Tabs.Screen name="workouts" options={{ headerShown: false, title: 'Train', tabBarIcon: ({ focused }) => <TabIcon emoji="🏋️" focused={focused} /> }} />
-      <Tabs.Screen name="nutrition" options={{ headerShown: false, title: 'Meals', tabBarIcon: ({ focused }) => <TabIcon emoji="🍽️" focused={focused} /> }} />
-      <Tabs.Screen name="scans" options={{ headerShown: false, title: 'Progress', tabBarIcon: ({ focused }) => <TabIcon emoji="📊" focused={focused} /> }} />
-      <Tabs.Screen name="profile" options={{ headerShown: false, title: 'Me', tabBarIcon: ({ focused }) => <TabIcon emoji="👤" focused={focused} /> }} />
+      <Tabs.Screen name="dashboard" options={{ headerShown: false, title: 'Home', tabBarIcon: ({ color }) => <Icon name="home" size={23} color={color} /> }} />
+      <Tabs.Screen name="workouts" options={{ headerShown: false, title: 'Train', tabBarIcon: ({ color }) => <Icon name="train" size={23} color={color} /> }} />
+      <Tabs.Screen name="nutrition" options={{ headerShown: false, title: 'Meals', tabBarIcon: ({ color }) => <Icon name="meals" size={23} color={color} /> }} />
+      <Tabs.Screen name="scans" options={{ headerShown: false, title: 'Progress', tabBarIcon: ({ color }) => <Icon name="progress" size={23} color={color} /> }} />
+      <Tabs.Screen name="profile" options={{ headerShown: false, title: 'Me', tabBarIcon: ({ color }) => <Icon name="me" size={23} color={color} /> }} />
       <Tabs.Screen name="messages" options={{ href: null, title: "Messages" }} />
       <Tabs.Screen name="devices" options={{ href: null, title: "Watch & Devices" }} />
       <Tabs.Screen name="foodlog" options={{ href: null, title: "Food Log" }} />
