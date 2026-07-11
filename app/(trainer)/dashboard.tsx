@@ -10,6 +10,8 @@ import { type RosterClient } from '../../src/lib/trainerMock';
 import { useRoster } from '../../src/ui/roster';
 import { useCoachFeedback } from '../../src/ui/feedback';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
+import { useCoachNotes } from '../../src/ui/coachNotes';
+import { useAnnouncements } from '../../src/ui/announcements';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useCheckIns } from '../../src/ui/checkins';
 import { currentStreak, longestStreak, personalRecords, weekStats } from '../../src/lib/streaks';
@@ -36,6 +38,11 @@ export default function TrainerClients() {
   const { roster, addClient, removeClient } = useRoster();
   const { getFeedback, addFeedback } = useCoachFeedback();
   const { get: getNutri, setAdjust: setNutri, clear: clearNutri } = useCoachNutrition();
+  const { getNotes, addNote, removeNote } = useCoachNotes();
+  const { addAnnouncement } = useAnnouncements();
+  const [pnote, setPnote] = useState('');
+  const [bcOpen, setBcOpen] = useState(false);
+  const [bcText, setBcText] = useState('');
   const [fb, setFb] = useState('');
   const [nnote, setNnote] = useState('');
   const [sel, setSel] = useState<RosterClient | null>(null);
@@ -64,9 +71,14 @@ export default function TrainerClients() {
             <Text style={{ color: t.ink3, fontSize: 14 }}>Coaching</Text>
             <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800', textTransform: 'capitalize' }}>{MOCK_TRAINER.name.replace('Coach ', '')}</Text>
           </View>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+          <Pressable onPress={() => { setBcText(''); setBcOpen(true); }} style={{ backgroundColor: t.brand, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 7 }}>
+            <Text style={{ color: t.brandInk, fontWeight: '700', fontSize: 12 }}>📣 Broadcast</Text>
+          </Pressable>
           <Pressable onPress={() => router.push('/')} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 7 }}>
             <Text style={{ color: t.ink2, fontWeight: '700', fontSize: 12 }}>Switch role</Text>
           </Pressable>
+          </View>
         </View>
 
         <View style={{ flexDirection: 'row', gap: 12, marginBottom: 16 }}>
@@ -214,6 +226,20 @@ export default function TrainerClients() {
                 </View>
               </View>
 
+              <View style={{ marginBottom: 14 }}>
+                <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 7 }}>Private Notes (only you)</Text>
+                {getNotes(sel.id).map((n) => (
+                  <View key={n.id} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8, backgroundColor: t.surface2, borderRadius: 12, borderWidth: 1, borderColor: t.ring, padding: 12, marginBottom: 8 }}>
+                    <Text style={{ color: t.ink2, fontSize: 13, flex: 1, lineHeight: 19 }}>{n.body}</Text>
+                    <Pressable onPress={() => removeNote(sel.id, n.id)}><Text style={{ color: t.ink3, fontWeight: '800', fontSize: 14 }}>✕</Text></Pressable>
+                  </View>
+                ))}
+                <View style={{ flexDirection: 'row', gap: 8, marginTop: 2 }}>
+                  <TextInput value={pnote} onChangeText={setPnote} placeholder="Private note (client can't see this)…" placeholderTextColor={t.ink3} multiline style={{ flex: 1, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14 }} />
+                  <Pressable onPress={() => { const id = sel.id; if (pnote.trim()) { addNote(id, pnote); setPnote(''); } }} style={{ backgroundColor: t.surface3, borderRadius: 12, paddingHorizontal: 16, justifyContent: 'center' }}><Text style={{ color: t.ink, fontWeight: '800' }}>Save</Text></Pressable>
+                </View>
+              </View>
+
               {[['📋 Review program', 'Adjust sets, reps & exercises'], ['🥗 Review meal plan', 'Tweak macros & swaps'], ['📊 View progress & scans', 'Weight, body fat, photos'], ['💬 Message', 'Open the chat thread']].map(([label, sub]) => (
                 <Pressable key={label} onPress={() => { if (label.indexOf('Review program') >= 0) { const id = sel.id; setSel(null); router.push({ pathname: '/(trainer)/builder', params: { clientId: id } }); } }} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 10 }}>
                   <Text style={{ color: t.ink, fontWeight: '700', fontSize: 14 }}>{label}</Text>
@@ -252,6 +278,15 @@ export default function TrainerClients() {
             <Pressable onPress={() => setAddOpen(false)} style={{ flex: 1, paddingVertical: 15, borderRadius: 14, alignItems: 'center', backgroundColor: t.surface2, borderWidth: 1, borderColor: t.ring }}><Text style={{ color: t.ink2, fontWeight: '800' }}>Cancel</Text></Pressable>
             <Pressable onPress={() => { if (!newName.trim()) { Alert.alert('Add a name', 'Enter the client name.'); return; } addClient(newName, newGoal); setAddOpen(false); Alert.alert('Client added ✓', `${newName.trim()} is now on your roster.`, [{ text: 'Great' }]); }} style={{ flex: 2, paddingVertical: 15, borderRadius: 14, alignItems: 'center', backgroundColor: t.brand }}><Text style={{ color: t.brandInk, fontWeight: '800' }}>Add Client</Text></Pressable>
           </View>
+        </View>
+      </Modal>
+      <Modal visible={bcOpen} transparent animationType="slide" onRequestClose={() => setBcOpen(false)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setBcOpen(false)} />
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, borderColor: t.ring, padding: 20, paddingBottom: 30 }}>
+          <Text style={{ color: t.ink, fontSize: 20, fontWeight: '800', marginBottom: 4 }}>Broadcast to all clients</Text>
+          <Text style={{ color: t.ink3, fontSize: 13, marginBottom: 16 }}>Everyone on your roster sees this on their dashboard.</Text>
+          <TextInput value={bcText} onChangeText={setBcText} placeholder="Your announcement…" placeholderTextColor={t.ink3} multiline style={{ color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, minHeight: 90, textAlignVertical: 'top', marginBottom: 16 }} />
+          <Pressable onPress={() => { if (!bcText.trim()) { Alert.alert('Write something', 'Enter your announcement.'); return; } addAnnouncement(bcText); setBcOpen(false); Alert.alert('Sent ✓', 'Your clients will see this on their dashboard.'); }} style={{ backgroundColor: t.brand, borderRadius: 14, paddingVertical: 15, alignItems: 'center' }}><Text style={{ color: t.brandInk, fontWeight: '800' }}>Send to all clients</Text></Pressable>
         </View>
       </Modal>
     </SafeAreaView>

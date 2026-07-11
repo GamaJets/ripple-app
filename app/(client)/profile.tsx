@@ -106,6 +106,7 @@ const HUB: { icon: string; label: string; note: string; route: string }[] = [
   { icon: '📈', label: 'Weekly Report', note: 'Your week at a glance · share it', route: '/(client)/report' },
   { icon: '🏆', label: 'Personal Records', note: 'Your best lifts, ranked', route: '/(client)/records' },
   { icon: '🎯', label: 'Goal Tracker', note: 'Target weight & projected finish', route: '/(client)/goal' },
+  { icon: '🧮', label: 'Lifting Tools', note: '1RM, plate math & macro reference', route: '/(client)/tools' },
   { icon: '✅', label: 'Daily Habits', note: 'Habits & water tracker', route: '/(client)/habits' },
   { icon: '📝', label: 'Weekly Check-in', note: 'Send your coach a weekly pulse', route: '/(client)/checkin' },
   { icon: '🏆', label: 'Achievements', note: 'Badges you\'ve unlocked', route: '/(client)/achievements' },

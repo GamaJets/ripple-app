@@ -13,6 +13,8 @@ import { PlatformTrainersProvider } from '../src/ui/trainers';
 import { MeasurementsProvider } from '../src/ui/measurements';
 import { PromosProvider } from '../src/ui/promos';
 import { GoalTrackerProvider } from '../src/ui/goalTracker';
+import { CoachNotesProvider } from '../src/ui/coachNotes';
+import { AnnouncementsProvider } from '../src/ui/announcements';
 import { HabitsProvider } from '../src/ui/habits';
 import { CheckInsProvider } from '../src/ui/checkins';
 import { AuthProvider } from '../src/ui/auth';
@@ -44,6 +46,8 @@ export default function RootLayout() {
                     <MeasurementsProvider>
                     <PromosProvider>
                     <GoalTrackerProvider>
+                    <CoachNotesProvider>
+                    <AnnouncementsProvider>
                     <HabitsProvider>
                       <CheckInsProvider>
                         <ErrorBoundary>
@@ -51,7 +55,9 @@ export default function RootLayout() {
                         </ErrorBoundary>
                       </CheckInsProvider>
                     </HabitsProvider>
-                  </GoalTrackerProvider>
+                  </AnnouncementsProvider>
+                    </CoachNotesProvider>
+                    </GoalTrackerProvider>
                     </PromosProvider>
                     </MeasurementsProvider>
                     </PlatformTrainersProvider>
