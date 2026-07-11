@@ -52,6 +52,7 @@ export default function ClientLayout() {
       <Tabs.Screen name="week" options={{ href: null, title: 'This Week' }} />
       <Tabs.Screen name="settings" options={{ href: null, title: 'Settings' }} />
       <Tabs.Screen name="cards" options={{ href: null, title: 'Milestone Cards' }} />
+      <Tabs.Screen name="consistency" options={{ href: null, title: 'Consistency' }} />
     </Tabs>
   );
 }

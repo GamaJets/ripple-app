@@ -105,6 +105,7 @@ const HUB: { icon: string; label: string; note: string; route: string }[] = [
   { icon: '📏', label: 'Body Measurements', note: 'Track waist, chest, arms over time', route: '/(client)/measurements' },
   { icon: '📈', label: 'Weekly Report', note: 'Your week at a glance · share it', route: '/(client)/report' },
   { icon: '🏆', label: 'Personal Records', note: 'Your best lifts, ranked', route: '/(client)/records' },
+  { icon: '🔥', label: 'Consistency', note: '12-week training heatmap', route: '/(client)/consistency' },
   { icon: '🎯', label: 'Goal Tracker', note: 'Target weight & projected finish', route: '/(client)/goal' },
   { icon: '🧮', label: 'Lifting Tools', note: '1RM, plate math & macro reference', route: '/(client)/tools' },
   { icon: '💧', label: 'Recovery', note: 'Hydration, sleep & mobility', route: '/(client)/recovery' },
