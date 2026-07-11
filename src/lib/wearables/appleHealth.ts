@@ -112,12 +112,15 @@ export const appleHealth: WearableProvider = {
   async fetchToday(): Promise<DailyMetrics | null> {
     if (!nativePresent()) return null;
     const options = { startDate: isoStartOfToday(), endDate: new Date().toISOString() };
+    // Sample-based reads need an explicit limit — without it react-native-health
+    // returns an empty array (aggregate reads like getStepCount do not).
+    const sampleOpts = { ...options, limit: 10000, ascending: true };
     const [active, steps, hr, rhr, workouts] = await Promise.all([
-      read('getActiveEnergyBurned', options),
+      read('getActiveEnergyBurned', sampleOpts),
       read('getStepCount', options),
-      read('getHeartRateSamples', { ...options, ascending: true }),
-      read('getRestingHeartRateSamples', options),
-      read('getSamples', { ...options, type: 'Workout' }),
+      read('getHeartRateSamples', sampleOpts),
+      read('getRestingHeartRateSamples', { ...sampleOpts, ascending: false }),
+      read('getSamples', { ...options, type: 'Workout', limit: 100 }),
     ]);
     const m = emptyMetrics('apple');
     m.activeKcal = sumValues(active);

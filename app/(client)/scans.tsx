@@ -58,7 +58,7 @@ function Stat({ t, label, value, unit, tint }: { t: Theme; label: string; value:
   return (
     <View style={{ flex: 1, backgroundColor: tint ? t.brand : t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 14 }}>
       <Text style={{ color: tint ? t.brandInk : t.ink3, fontSize: 12, fontWeight: '600', opacity: tint ? 0.8 : 1 }}>{label}</Text>
-      <Text style={{ color: tint ? t.brandInk : t.ink, fontSize: 22, fontWeight: '800', marginTop: 4 }}>{value}<Text style={{ fontSize: 12, fontWeight: '600', opacity: 0.7 }}> {unit}</Text></Text>
+      <Text style={{ color: tint ? t.brandInk : t.ink, fontSize: 22, fontWeight: '800', textTransform: 'capitalize', marginTop: 4 }}>{value}<Text style={{ fontSize: 12, fontWeight: '600', opacity: 0.7 }}> {unit}</Text></Text>
     </View>
   );
 }
@@ -118,7 +118,7 @@ export default function Scans() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
-        <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800' }}>Progress</Text>
+        <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800', textTransform: 'capitalize' }}>Progress</Text>
         <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 16 }}>InBody scans, photos &amp; body trends</Text>
 
         <View style={{ flexDirection: 'row', gap: 12, marginBottom: 14 }}>
@@ -128,7 +128,7 @@ export default function Scans() {
         </View>
 
         <View style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18, marginBottom: 14 }}>
-          <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16, marginBottom: 4 }}>Add an InBody scan</Text>
+          <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16, textTransform: 'capitalize', marginBottom: 4 }}>Add an InBody scan</Text>
           <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 14 }}>Snap or upload your report, pick the scan date, enter the numbers.</Text>
           <View style={{ flexDirection: 'row', gap: 10, marginBottom: 12 }}>
             <Pressable onPress={() => pick(true)} style={{ flex: 1, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingVertical: 16, alignItems: 'center', gap: 5 }}><Text style={{ fontSize: 22 }}>📷</Text><Text style={{ color: t.ink, fontWeight: '700', fontSize: 13 }}>Take photo</Text></Pressable>
@@ -153,7 +153,7 @@ export default function Scans() {
         </View>
 
         <View style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18, marginBottom: 14 }}>
-          <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16, marginBottom: 14 }}>Body-fat trend</Text>
+          <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16, textTransform: 'capitalize', marginBottom: 14 }}>Body-fat trend</Text>
           <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 8, height: 90 }}>
             {chrono.map((s, i, arr) => { const h = 20 + norm(s.bodyFatPct) * 60; const last = i === arr.length - 1; return (
               <View key={s.id} style={{ flex: 1, alignItems: 'center', gap: 5 }}>
@@ -166,7 +166,7 @@ export default function Scans() {
 
         <View style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18, marginBottom: 14 }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-            <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16 }}>Scan history</Text><Text style={{ color: t.ink3, fontSize: 12 }}>{scans.length} scans</Text>
+            <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16, textTransform: 'capitalize' }}>Scan history</Text><Text style={{ color: t.ink3, fontSize: 12 }}>{scans.length} scans</Text>
           </View>
           {[...chrono].reverse().map((s, i, arr) => (
             <View key={s.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, borderBottomWidth: i < arr.length - 1 ? 1 : 0, borderBottomColor: t.ring }}>
@@ -181,7 +181,7 @@ export default function Scans() {
 
         <View style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18 }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-            <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16 }}>Progress photos</Text>
+            <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16, textTransform: 'capitalize' }}>Progress photos</Text>
             <Pressable onPress={takePhoto} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 9, paddingHorizontal: 12, paddingVertical: 7 }}><Text style={{ color: t.ink, fontWeight: '700', fontSize: 12 }}>📷 Add</Text></Pressable>
           </View>
           {photos.length === 0 ? (

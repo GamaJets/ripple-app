@@ -38,12 +38,12 @@ export default function Calendar() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
         <Pressable onPress={() => router.push('/(client)/dashboard')} style={{ marginBottom: 8 }}>
-          <Text style={{ color: t.brand, fontWeight: '700', fontSize: 15 }}>‹ Home</Text>
+          <Text style={{ color: t.brand, fontWeight: '700', fontSize: 15, textTransform: 'capitalize' }}>‹ Home</Text>
         </Pressable>
-        <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800' }}>Book sessions</Text>
+        <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800', textTransform: 'capitalize' }}>Book sessions</Text>
         <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 16 }}>In-person training with {MOCK_TRAINER.name} · cancel 24h+ ahead to avoid the ${fee} fee</Text>
 
-        <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16, marginBottom: 8 }}>Your upcoming</Text>
+        <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16, textTransform: 'capitalize', marginBottom: 8 }}>Your upcoming</Text>
         {mine.length === 0 ? (
           <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 16, marginBottom: 16 }}>
             <Text style={{ color: t.ink3 }}>Nothing booked yet — grab an open slot below.</Text>
@@ -51,7 +51,7 @@ export default function Calendar() {
         ) : mine.map((s) => (
           <View key={s.id} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 16, marginBottom: 10, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
             <View>
-              <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15 }}>{fmt(s.startsAt)}</Text>
+              <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, textTransform: 'capitalize' }}>{fmt(s.startsAt)}</Text>
               <Text style={{ color: t.ink3, fontSize: 12, marginTop: 2 }}>{s.durationMin} min · confirmed</Text>
             </View>
             <Pressable onPress={() => cancel(s)} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 9, paddingHorizontal: 14, paddingVertical: 8 }}>
@@ -60,13 +60,13 @@ export default function Calendar() {
           </View>
         ))}
 
-        <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16, marginTop: 8, marginBottom: 8 }}>Open slots</Text>
+        <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16, textTransform: 'capitalize', marginTop: 8, marginBottom: 8 }}>Open slots</Text>
         {open.length === 0 ? (
           <Text style={{ color: t.ink3 }}>No open slots right now — check back soon.</Text>
         ) : open.map((s) => (
           <View key={s.id} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 16, marginBottom: 10, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
             <View>
-              <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15 }}>{fmt(s.startsAt)}</Text>
+              <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, textTransform: 'capitalize' }}>{fmt(s.startsAt)}</Text>
               <Text style={{ color: t.ink3, fontSize: 12, marginTop: 2 }}>{s.durationMin} min{s.released ? ' · just opened up' : ''}</Text>
             </View>
             <Pressable onPress={() => book(s.id)} style={{ backgroundColor: t.brand, borderRadius: 9, paddingHorizontal: 18, paddingVertical: 9 }}>

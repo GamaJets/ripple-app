@@ -25,7 +25,7 @@ export default function Library() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
         <Pressable onPress={() => router.back()} style={{ marginBottom: 8 }}><Text style={{ color: t.ink3, fontSize: 15 }}>‹ Back</Text></Pressable>
-        <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800' }}>Exercise Library</Text>
+        <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800', textTransform: 'capitalize' }}>Exercise Library</Text>
         <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 16 }}>How-to videos from your coach — tap to watch the form.</Text>
 
         <TextInput value={q} onChangeText={setQ} placeholder="Search exercises…" placeholderTextColor={t.ink3}
@@ -46,7 +46,7 @@ export default function Library() {
             style={{ flexDirection: 'row', alignItems: 'center', gap: 14, backgroundColor: t.surface, borderRadius: 14, borderWidth: 1, borderColor: t.ring, padding: 14, marginBottom: 10 }}>
             <View style={{ width: 56, height: 56, borderRadius: 12, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}><Text style={{ fontSize: 22 }}>{v.uploaded ? '▶️' : '🎬'}</Text></View>
             <View style={{ flex: 1 }}>
-              <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15 }}>{v.name}</Text>
+              <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, textTransform: 'capitalize' }}>{v.name}</Text>
               <Text style={{ color: t.ink3, fontSize: 12, marginTop: 2 }}>{v.group} · {v.dur}{v.uploaded ? '' : ' · coming soon'}</Text>
             </View>
             <Text style={{ color: t.ink3, fontSize: 20 }}>›</Text>

@@ -30,12 +30,12 @@ export default function Nutrition() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
-        <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800' }}>Meal plan</Text>
+        <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800', textTransform: 'capitalize' }}>Meal plan</Text>
         <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 16 }}>Built for your body & goal · tap a meal for the recipe</Text>
 
         <View style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18, marginBottom: 14 }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-            <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16 }}>Today · {tot.K.toLocaleString()} / {target.kcal.toLocaleString()} kcal</Text>
+            <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16, textTransform: 'capitalize' }}>Today · {tot.K.toLocaleString()} / {target.kcal.toLocaleString()} kcal</Text>
           </View>
           <View style={{ flexDirection: 'row', gap: 10 }}>
             {[['Protein', tot.P, target.protein, t.brand], ['Carbs', tot.C, target.carbs, t.s1], ['Fat', tot.F, target.fat, t.s3]].map(([k, v, tg, col]) => (
@@ -89,16 +89,16 @@ export default function Nutrition() {
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, borderColor: t.ring, maxHeight: '80%' }}>
           {recipe && (
             <ScrollView contentContainerStyle={{ padding: 20 }}>
-              <Text style={{ color: t.ink, fontSize: 20, fontWeight: '800' }}>{recipe.ico} {recipe.n}</Text>
+              <Text style={{ color: t.ink, fontSize: 20, fontWeight: '800', textTransform: 'capitalize' }}>{recipe.ico} {recipe.n}</Text>
               <Text style={{ color: t.ink3, fontSize: 13, marginTop: 4, marginBottom: 16 }}>{recipe.slot} · {recipe.K} kcal · P{recipe.P} / C{recipe.C} / F{recipe.F}</Text>
-              <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, marginBottom: 8 }}>🧺 Ingredients</Text>
+              <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, textTransform: 'capitalize', marginBottom: 8 }}>🧺 Ingredients</Text>
               {recipe.ing.map((ing, i) => (
                 <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: t.ring }}>
                   <Text style={{ color: t.ink2, fontSize: 14 }}>{ing[0]}</Text>
                   <Text style={{ color: t.ink, fontSize: 14, fontWeight: '600' }}>{Math.round(ing[1] * recipe.servings * 100) / 100}{ing[2] ? ' ' + ing[2] : ''}</Text>
                 </View>
               ))}
-              <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, marginTop: 18, marginBottom: 8 }}>👩‍🍳 Method</Text>
+              <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, textTransform: 'capitalize', marginTop: 18, marginBottom: 8 }}>👩‍🍳 Method</Text>
               {recipe.steps.map((s, i) => (
                 <View key={i} style={{ flexDirection: 'row', gap: 10, marginBottom: 10 }}>
                   <Text style={{ color: t.brand, fontWeight: '800' }}>{i + 1}</Text>
@@ -117,7 +117,7 @@ export default function Nutrition() {
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setShowGrocery(false)} />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, borderColor: t.ring, maxHeight: '82%' }}>
           <ScrollView contentContainerStyle={{ padding: 20 }}>
-            <Text style={{ color: t.ink, fontSize: 20, fontWeight: '800', marginBottom: 4 }}>🛒 Grocery list</Text>
+            <Text style={{ color: t.ink, fontSize: 20, fontWeight: '800', textTransform: 'capitalize', marginBottom: 4 }}>🛒 Grocery list</Text>
             <Text style={{ color: t.ink3, fontSize: 13, marginBottom: 16 }}>This week · {DIET_LABEL[diet]} · sorted by aisle</Text>
             {DEPTS.filter((d) => groc.byDept[d]?.length).map((d) => (
               <View key={d} style={{ marginBottom: 16 }}>

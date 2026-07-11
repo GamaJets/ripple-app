@@ -154,7 +154,7 @@ export default function Profile() {
             <Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 20 }}>{cd.init}</Text>
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={{ color: t.ink, fontSize: 22, fontWeight: '800' }}>{cd.name}</Text>
+            <Text style={{ color: t.ink, fontSize: 22, fontWeight: '800', textTransform: 'capitalize' }}>{cd.name}</Text>
             <Text style={{ color: t.ink3, fontSize: 13, marginTop: 2 }}>Weight changes recalculate your plan automatically</Text>
           </View>
         </View>
@@ -189,15 +189,15 @@ export default function Profile() {
         <View style={{ flexDirection: 'row', gap: 12, marginBottom: 12 }}>
           <View style={{ flex: 1, backgroundColor: t.surface, borderWidth: 1, borderColor: t.ring, borderRadius: 14, padding: 15 }}>
             <Text style={{ color: t.ink3, fontSize: 12, fontWeight: '600' }}>Age</Text>
-            <Text style={{ color: t.ink, fontSize: 24, fontWeight: '700', marginTop: 4 }}>{age != null ? String(age) : '—'}<Text style={{ color: t.ink3, fontSize: 13 }}> yrs</Text></Text>
+            <Text style={{ color: t.ink, fontSize: 24, fontWeight: '700', textTransform: 'capitalize', marginTop: 4 }}>{age != null ? String(age) : '—'}<Text style={{ color: t.ink3, fontSize: 13 }}> yrs</Text></Text>
           </View>
           <View style={{ flex: 1, backgroundColor: t.surface, borderWidth: 1, borderColor: t.ring, borderRadius: 14, padding: 15 }}>
             <Text style={{ color: t.ink3, fontSize: 12, fontWeight: '600' }}>Height</Text>
-            <Text style={{ color: t.ink, fontSize: 24, fontWeight: '700', marginTop: 4 }}>{heightVal}<Text style={{ color: t.ink3, fontSize: 13 }}> {heightUnit}</Text></Text>
+            <Text style={{ color: t.ink, fontSize: 24, fontWeight: '700', textTransform: 'capitalize', marginTop: 4 }}>{heightVal}<Text style={{ color: t.ink3, fontSize: 13 }}> {heightUnit}</Text></Text>
           </View>
           <View style={{ flex: 1, backgroundColor: t.surface, borderWidth: 1, borderColor: t.ring, borderRadius: 14, padding: 15 }}>
             <Text style={{ color: t.ink3, fontSize: 12, fontWeight: '600' }}>Weight</Text>
-            <Text style={{ color: t.ink, fontSize: 24, fontWeight: '700', marginTop: 4 }}>{weightVal}<Text style={{ color: t.ink3, fontSize: 13 }}> {weightUnit}</Text></Text>
+            <Text style={{ color: t.ink, fontSize: 24, fontWeight: '700', textTransform: 'capitalize', marginTop: 4 }}>{weightVal}<Text style={{ color: t.ink3, fontSize: 13 }}> {weightUnit}</Text></Text>
           </View>
         </View>
 
@@ -214,7 +214,7 @@ export default function Profile() {
               style={{ flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 16, paddingVertical: 15, borderTopWidth: i === 0 ? 0 : 1, borderTopColor: t.ring }}>
               <View style={{ width: 40, height: 40, borderRadius: 11, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}><Text style={{ fontSize: 20 }}>{h.icon}</Text></View>
               <View style={{ flex: 1 }}>
-                <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15 }}>{h.label}</Text>
+                <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, textTransform: 'capitalize' }}>{h.label}</Text>
                 <Text style={{ color: t.ink3, fontSize: 12, marginTop: 1 }}>{h.note}</Text>
               </View>
               <Text style={{ color: t.ink3, fontSize: 20 }}>›</Text>

@@ -35,7 +35,7 @@ export default function Train() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
-        <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800' }}>Train</Text>
+        <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800', textTransform: 'capitalize' }}>Train</Text>
         <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 14 }}>{program.title} · pick the day you're training</Text>
 
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginBottom: 14 }}>
@@ -61,7 +61,7 @@ export default function Train() {
         {mode === 'strength' ? (
           <View>
             <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 14, marginBottom: 12 }}>
-              <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15 }}>{workout.focus}</Text>
+              <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, textTransform: 'capitalize' }}>{workout.focus}</Text>
               <Text style={{ color: t.ink3, fontSize: 12, marginTop: 2 }}>🤖 {program.focus.join(' · ')}{workout.cardio ? ` · finish with ${workout.cardio}` : ''}</Text>
             </View>
             {workout.exercises.map((e) => {
@@ -70,7 +70,7 @@ export default function Train() {
                 <View key={e.key} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: done ? t.brand : t.ring, padding: 15, marginBottom: 10 }}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                     <View style={{ flex: 1 }}>
-                      <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15 }}>{done ? '✅ ' : ''}{nameOf(e)}</Text>
+                      <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, textTransform: 'capitalize' }}>{done ? '✅ ' : ''}{nameOf(e)}</Text>
                       <Text style={{ color: t.ink3, fontSize: 12, marginTop: 1 }}>{e.group} · target {e.sets} × {e.reps}</Text>
                     </View>
                     <View style={{ flexDirection: 'row', gap: 6 }}>
@@ -87,7 +87,7 @@ export default function Train() {
         ) : (
           <View>
             <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 16, marginBottom: 12 }}>
-              <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, marginBottom: 12 }}>Log a cardio session</Text>
+              <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, textTransform: 'capitalize', marginBottom: 12 }}>Log a cardio session</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginBottom: 10 }}>
                 {CARDIO.map((ct) => <Pressable key={ct} onPress={() => setCtype(ct)} style={{ paddingHorizontal: 13, paddingVertical: 8, borderRadius: 18, backgroundColor: ctype === ct ? t.brand : t.surface2, borderWidth: 1, borderColor: ctype === ct ? t.brand : t.ring }}><Text style={{ color: ctype === ct ? t.brandInk : t.ink2, fontWeight: '700', fontSize: 12 }}>{ct}</Text></Pressable>)}
               </ScrollView>
@@ -100,7 +100,7 @@ export default function Train() {
             </View>
             {cardioLog.length > 0 && (
               <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 16 }}>
-                <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, marginBottom: 10 }}>Today's cardio</Text>
+                <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, textTransform: 'capitalize', marginBottom: 10 }}>Today's cardio</Text>
                 {cardioLog.map((c, i) => (
                   <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: i < cardioLog.length - 1 ? 1 : 0, borderBottomColor: t.ring }}>
                     <Text style={{ color: t.ink, fontWeight: '600', fontSize: 14 }}>{c.type}</Text>

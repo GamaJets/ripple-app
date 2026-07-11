@@ -36,12 +36,12 @@ export default function FoodLog() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
-        <Pressable onPress={() => router.push('/(client)/profile')} style={{ marginBottom: 8 }}><Text style={{ color: t.brand, fontWeight: '700', fontSize: 15 }}>‹ Back</Text></Pressable>
-        <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800' }}>Food log</Text>
+        <Pressable onPress={() => router.push('/(client)/profile')} style={{ marginBottom: 8 }}><Text style={{ color: t.brand, fontWeight: '700', fontSize: 15, textTransform: 'capitalize' }}>‹ Back</Text></Pressable>
+        <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800', textTransform: 'capitalize' }}>Food log</Text>
         <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 16 }}>Log by search, barcode, or photo — macros update live</Text>
 
         <View style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18, marginBottom: 14 }}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 }}><Text style={{ color: t.ink, fontWeight: '700', fontSize: 16 }}>Today vs target</Text><Text style={{ color: t.brand, fontWeight: '800', fontSize: 18 }}>{tot.k}<Text style={{ color: t.ink3, fontSize: 12, fontWeight: '600' }}>/{target.kcal} kcal</Text></Text></View>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 }}><Text style={{ color: t.ink, fontWeight: '700', fontSize: 16, textTransform: 'capitalize' }}>Today vs target</Text><Text style={{ color: t.brand, fontWeight: '800', fontSize: 18 }}>{tot.k}<Text style={{ color: t.ink3, fontSize: 12, fontWeight: '600' }}>/{target.kcal} kcal</Text></Text></View>
           {[['Protein', tot.p, target.protein, t.brand], ['Carbs', tot.c, target.carbs, t.s1], ['Fat', tot.f, target.fat, t.s3]].map(([k, v, tg, col]) => (
             <View key={k as string} style={{ marginBottom: 10 }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}><Text style={{ color: t.ink2, fontSize: 13, fontWeight: '600' }}>{k as string}</Text><Text style={{ color: t.ink, fontSize: 13, fontWeight: '700' }}>{v as number}/{tg as number}g</Text></View>
@@ -61,7 +61,7 @@ export default function FoodLog() {
           </Pressable>
         ))}
 
-        <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16, marginTop: 10, marginBottom: 8 }}>Logged today</Text>
+        <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16, textTransform: 'capitalize', marginTop: 10, marginBottom: 8 }}>Logged today</Text>
         {log.map((f, i) => (
           <View key={i} style={{ backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 12, padding: 13, marginBottom: 6, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
             <View style={{ flex: 1 }}><Text style={{ color: t.ink, fontSize: 14, fontWeight: '600' }}>{f.n}</Text><Text style={{ color: t.ink3, fontSize: 12 }}>{f.k} kcal · P{f.p} C{f.c} F{f.f}</Text></View>

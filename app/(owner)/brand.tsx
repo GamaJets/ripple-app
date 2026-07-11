@@ -11,7 +11,7 @@ export default function OwnerBrand() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
-        <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800' }}>White-label studio</Text>
+        <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800', textTransform: 'capitalize' }}>White-label studio</Text>
         <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 16 }}>Rebrand the whole app — each trainer can inherit or set their own</Text>
         <View style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18, marginBottom: 14 }}>
           <Text style={{ color: t.ink2, fontSize: 13, fontWeight: '600', marginBottom: 6 }}>App name</Text>
@@ -30,7 +30,7 @@ export default function OwnerBrand() {
             <Text style={{ color: t.ink, fontWeight: '800', fontSize: 16 }}>{name}</Text>
           </View>
           <View style={{ padding: 16 }}>
-            <View style={{ backgroundColor: t.surface2, borderRadius: 12, padding: 14, marginBottom: 12 }}><Text style={{ color: t.ink3, fontSize: 12 }}>Daily target</Text><Text style={{ color: t.ink, fontSize: 22, fontWeight: '800' }}>1,980<Text style={{ fontSize: 12, color: t.ink3 }}> kcal</Text></Text></View>
+            <View style={{ backgroundColor: t.surface2, borderRadius: 12, padding: 14, marginBottom: 12 }}><Text style={{ color: t.ink3, fontSize: 12 }}>Daily target</Text><Text style={{ color: t.ink, fontSize: 22, fontWeight: '800', textTransform: 'capitalize' }}>1,980<Text style={{ fontSize: 12, color: t.ink3 }}> kcal</Text></Text></View>
             <View style={{ backgroundColor: color, borderRadius: 12, paddingVertical: 13, alignItems: 'center' }}><Text style={{ color: '#04211d', fontWeight: '800' }}>Start today's workout</Text></View>
           </View>
         </View>

@@ -12,7 +12,7 @@ function Stat({ t, label, value, unit }: { t: Theme; label: string; value: strin
   return (
     <View style={{ flex: 1, backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 14 }}>
       <Text style={{ color: t.ink3, fontSize: 12, fontWeight: '600' }}>{label}</Text>
-      <Text style={{ color: t.ink, fontSize: 21, fontWeight: '800', marginTop: 4 }}>{value}{unit ? <Text style={{ fontSize: 12, color: t.ink3, fontWeight: '600' }}> {unit}</Text> : null}</Text>
+      <Text style={{ color: t.ink, fontSize: 21, fontWeight: '800', textTransform: 'capitalize', marginTop: 4 }}>{value}{unit ? <Text style={{ fontSize: 12, color: t.ink3, fontWeight: '600' }}> {unit}</Text> : null}</Text>
     </View>
   );
 }
@@ -31,7 +31,7 @@ export default function TrainerClients() {
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
           <View>
             <Text style={{ color: t.ink3, fontSize: 14 }}>Coaching</Text>
-            <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800' }}>{MOCK_TRAINER.name.replace('Coach ', '')}</Text>
+            <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800', textTransform: 'capitalize' }}>{MOCK_TRAINER.name.replace('Coach ', '')}</Text>
           </View>
           <Pressable onPress={() => router.push('/')} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 7 }}>
             <Text style={{ color: t.ink2, fontWeight: '700', fontSize: 12 }}>Switch role</Text>
@@ -44,7 +44,7 @@ export default function TrainerClients() {
           <Stat t={t} label="Unread" value={String(unread)} />
         </View>
 
-        <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16, marginBottom: 10 }}>Your clients</Text>
+        <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16, textTransform: 'capitalize', marginBottom: 10 }}>Your clients</Text>
         {ROSTER.map((c) => (
           <Pressable key={c.id} onPress={() => setSel(c)} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 15, marginBottom: 10 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
@@ -53,7 +53,7 @@ export default function TrainerClients() {
               </View>
               <View style={{ flex: 1 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                  <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15 }}>{c.name}</Text>
+                  <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, textTransform: 'capitalize' }}>{c.name}</Text>
                   {c.unread > 0 && <View style={{ backgroundColor: t.s6, borderRadius: 8, minWidth: 16, height: 16, paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: '#fff', fontSize: 10, fontWeight: '800' }}>{c.unread}</Text></View>}
                 </View>
                 <Text style={{ color: t.ink3, fontSize: 12, marginTop: 1 }}>{c.goal} · {c.lastActive}</Text>
@@ -83,7 +83,7 @@ export default function TrainerClients() {
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, borderColor: t.ring, padding: 20 }}>
           {sel && (
             <View>
-              <Text style={{ color: t.ink, fontSize: 20, fontWeight: '800' }}>{sel.name}</Text>
+              <Text style={{ color: t.ink, fontSize: 20, fontWeight: '800', textTransform: 'capitalize' }}>{sel.name}</Text>
               <Text style={{ color: t.ink3, fontSize: 13, marginTop: 2, marginBottom: 16 }}>{sel.goal} · {sel.weightDelta > 0 ? '+' : ''}{sel.weightDelta} kg · {sel.adherence}% adherence</Text>
               {[['📋 Review program', 'Adjust sets, reps & exercises'], ['🥗 Review meal plan', 'Tweak macros & swaps'], ['📊 View progress & scans', 'Weight, body fat, photos'], ['💬 Message', 'Open the chat thread']].map(([label, sub]) => (
                 <Pressable key={label} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 10 }}>

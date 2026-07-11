@@ -7,7 +7,7 @@ import { TRAINERS } from '../../src/lib/ownerMock';
 function Big({ t, label, value, sub, tint }: { t: Theme; label: string; value: string; sub: string; tint?: boolean }) {
   return (<View style={{ flex: 1, backgroundColor: tint ? t.brand : t.surface, borderRadius: 18, borderWidth: 1, borderColor: t.ring, padding: 16 }}>
     <Text style={{ color: tint ? t.brandInk : t.ink3, fontSize: 12, fontWeight: '700', opacity: tint ? 0.85 : 1 }}>{label}</Text>
-    <Text style={{ color: tint ? t.brandInk : t.ink, fontSize: 26, fontWeight: '800', marginTop: 6 }}>{value}</Text>
+    <Text style={{ color: tint ? t.brandInk : t.ink, fontSize: 26, fontWeight: '800', textTransform: 'capitalize', marginTop: 6 }}>{value}</Text>
     <Text style={{ color: tint ? t.brandInk : t.ink3, fontSize: 11, marginTop: 2, opacity: tint ? 0.85 : 1 }}>{sub}</Text></View>);
 }
 export default function OwnerOverview() {
@@ -19,7 +19,7 @@ export default function OwnerOverview() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
-          <View><Text style={{ color: t.ink3, fontSize: 14 }}>Platform</Text><Text style={{ color: t.ink, fontSize: 24, fontWeight: '800' }}>Repple HQ</Text></View>
+          <View><Text style={{ color: t.ink3, fontSize: 14 }}>Platform</Text><Text style={{ color: t.ink, fontSize: 24, fontWeight: '800', textTransform: 'capitalize' }}>Repple HQ</Text></View>
           <Pressable onPress={() => router.push('/')} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 7 }}><Text style={{ color: t.ink2, fontWeight: '700', fontSize: 12 }}>Switch role</Text></Pressable>
         </View>
         <View style={{ flexDirection: 'row', gap: 12, marginBottom: 12 }}>
@@ -31,7 +31,7 @@ export default function OwnerOverview() {
           <Big t={t} label="ARR" value={'$' + (mrr * 12).toLocaleString()} sub="annualised" />
         </View>
         <View style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18 }}>
-          <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16, marginBottom: 14 }}>MRR growth</Text>
+          <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16, textTransform: 'capitalize', marginBottom: 14 }}>MRR growth</Text>
           <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 10, height: 90 }}>
             {months.map(([m, f]) => (<View key={m} style={{ flex: 1, alignItems: 'center', gap: 6 }}><View style={{ width: '62%', height: 18 + (f as number) * 60, borderRadius: 6, backgroundColor: m === 'Jul' ? t.brand : t.surface3 }} /><Text style={{ color: t.ink3, fontSize: 11 }}>{m}</Text></View>))}
           </View>

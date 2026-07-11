@@ -27,7 +27,7 @@ export default function Appearance() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
         <Pressable onPress={() => router.back()} style={{ marginBottom: 8 }}><Text style={{ color: t.ink3, fontSize: 15 }}>‹ Back</Text></Pressable>
-        <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800' }}>Appearance</Text>
+        <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800', textTransform: 'capitalize' }}>Appearance</Text>
         <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 18 }}>Make Repple yours — pick a theme and accent colour.</Text>
 
         <Text style={{ color: t.ink2, fontSize: 13, fontWeight: '700', marginBottom: 10 }}>Theme</Text>

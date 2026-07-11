@@ -35,7 +35,7 @@ export default function Social() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
         <Pressable onPress={() => router.back()} style={{ marginBottom: 8 }}><Text style={{ color: t.ink3, fontSize: 15 }}>‹ Back</Text></Pressable>
-        <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800' }}>Share & Social</Text>
+        <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800', textTransform: 'capitalize' }}>Share & Social</Text>
         <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 16 }}>Connect your accounts and share your story — you’re always in control of what goes out.</Text>
 
         <View style={{ backgroundColor: t.brand, borderRadius: 20, padding: 20, marginBottom: 18 }}>
@@ -53,7 +53,7 @@ export default function Social() {
             <View key={n.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 16, paddingVertical: 14, borderTopWidth: i === 0 ? 0 : 1, borderTopColor: t.ring }}>
               <View style={{ width: 40, height: 40, borderRadius: 11, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}><Text style={{ fontSize: 20 }}>{n.ico}</Text></View>
               <View style={{ flex: 1 }}>
-                <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15 }}>{n.name}</Text>
+                <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, textTransform: 'capitalize' }}>{n.name}</Text>
                 <Text style={{ color: t.ink3, fontSize: 12, marginTop: 1 }}>{n.note}</Text>
               </View>
               <Pressable onPress={() => setConn((p) => ({ ...p, [n.id]: !p[n.id] }))}

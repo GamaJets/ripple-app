@@ -10,7 +10,7 @@ function Big({ t, label, value, sub, tint }: { t: Theme; label: string; value: s
   return (
     <View style={{ flex: 1, backgroundColor: tint ? t.brand : t.surface, borderRadius: 18, borderWidth: 1, borderColor: t.ring, padding: 16 }}>
       <Text style={{ color: tint ? t.brandInk : t.ink3, fontSize: 12, fontWeight: '700', opacity: tint ? 0.85 : 1 }}>{label}</Text>
-      <Text style={{ color: tint ? t.brandInk : t.ink, fontSize: 26, fontWeight: '800', marginTop: 6 }}>{value}</Text>
+      <Text style={{ color: tint ? t.brandInk : t.ink, fontSize: 26, fontWeight: '800', textTransform: 'capitalize', marginTop: 6 }}>{value}</Text>
       <Text style={{ color: tint ? t.brandInk : t.ink3, fontSize: 11, marginTop: 2, opacity: tint ? 0.85 : 1 }}>{sub}</Text>
     </View>
   );
@@ -29,7 +29,7 @@ export default function TrainerAnalytics() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
-        <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800' }}>Analytics</Text>
+        <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800', textTransform: 'capitalize' }}>Analytics</Text>
         <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 16 }}>Your coaching business at a glance</Text>
 
         <View style={{ flexDirection: 'row', gap: 12, marginBottom: 12 }}>
@@ -42,7 +42,7 @@ export default function TrainerAnalytics() {
         </View>
 
         <View style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18, marginBottom: 14 }}>
-          <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16, marginBottom: 14 }}>Revenue trend</Text>
+          <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16, textTransform: 'capitalize', marginBottom: 14 }}>Revenue trend</Text>
           <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 10, height: 90 }}>
             {months.map(([mo, f]) => (
               <View key={mo} style={{ flex: 1, alignItems: 'center', gap: 6 }}>

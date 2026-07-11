@@ -27,7 +27,7 @@ export default function TrainerVideos() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
-        <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800' }}>Exercise videos</Text>
+        <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800', textTransform: 'capitalize' }}>Exercise videos</Text>
         <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 16 }}>{done} of {vids.length} recorded · clients see these in their program</Text>
 
         <View style={{ flexDirection: 'row', gap: 10, marginBottom: 18 }}>

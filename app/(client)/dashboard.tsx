@@ -23,7 +23,7 @@ function Stat({ t, label, value, unit }: { t: Theme; label: string; value: strin
   return (
     <View style={{ flex: 1, backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 14 }}>
       <Text style={{ color: t.ink3, fontSize: 12, fontWeight: '600', textTransform: 'capitalize' }}>{label}</Text>
-      <Text style={{ color: t.ink, fontSize: 22, fontWeight: '800', marginTop: 4 }}>{value}<Text style={{ fontSize: 12, color: t.ink3, fontWeight: '600' }}> {unit}</Text></Text>
+      <Text style={{ color: t.ink, fontSize: 22, fontWeight: '800', textTransform: 'capitalize', marginTop: 4 }}>{value}<Text style={{ fontSize: 12, color: t.ink3, fontWeight: '600' }}> {unit}</Text></Text>
     </View>
   );
 }
@@ -66,7 +66,7 @@ export default function Dashboard() {
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
           <View>
             <Text style={{ color: t.ink3, fontSize: 14 }}>Welcome back</Text>
-            <Text style={{ color: t.ink, fontSize: 26, fontWeight: '800', letterSpacing: -0.5 }}>{c.name.split(' ')[0]}</Text>
+            <Text style={{ color: t.ink, fontSize: 26, fontWeight: '800', textTransform: 'capitalize', letterSpacing: -0.5 }}>{c.name.split(' ')[0]}</Text>
           </View>
           <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
             <Pressable onPress={() => router.push('/(client)/messages')} style={{ width: 44, height: 44, borderRadius: 13, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, alignItems: 'center', justifyContent: 'center' }}><Text style={{ fontSize: 20 }}>💬</Text></Pressable>
