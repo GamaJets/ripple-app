@@ -9,6 +9,7 @@ import { macrosFor } from '../../src/lib/nutrition';
 import { ageFromDob } from '../../src/lib/age';
 import { seriesDelta } from '../../src/lib/format';
 import { useClientData } from '../../src/ui/clientData';
+import { useCoachFeedback } from '../../src/ui/feedback';
 import { TrendChart } from '../../src/ui/Chart';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { currentStreak, longestStreak, personalRecords, weekStats, streakMilestone } from '../../src/lib/streaks';
@@ -46,6 +47,7 @@ export default function Dashboard() {
   const t = useTheme();
   const router = useRouter();
   const c = useClientData();
+  const coachNotes = useCoachFeedback().getFeedback(c.id);
   const w = c.weightKg;
   const bf = c.bodyFatPct;
   const mus = c.muscleKg;
@@ -89,6 +91,13 @@ export default function Dashboard() {
         </View>
 
         {/* Streak & records */}
+        {coachNotes.length ? (
+          <View style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.brand, padding: 16, marginBottom: 14 }}>
+            <Text style={{ color: t.brand, fontSize: 11, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>💬 From your coach</Text>
+            <Text style={{ color: t.ink2, fontSize: 14, lineHeight: 20 }} numberOfLines={5}>{coachNotes[0].body}</Text>
+            <Text style={{ color: t.ink3, fontSize: 11, marginTop: 8 }}>{new Date(coachNotes[0].at).toLocaleDateString()}</Text>
+          </View>
+        ) : null}
         <Pressable onPress={() => setConfetti(true)} style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18, marginBottom: 14 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>

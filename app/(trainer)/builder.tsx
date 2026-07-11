@@ -5,6 +5,7 @@
 import { useEffect, useState } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, Modal, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useLocalSearchParams } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { useRoster } from '../../src/ui/roster';
@@ -42,7 +43,8 @@ export default function Builder() {
   const { roster } = useRoster();
   const { getProgram, assignProgram, clearProgram } = useAssignedPrograms();
 
-  const [clientId, setClientId] = useState(roster[0]?.id ?? '');
+  const params = useLocalSearchParams();
+  const [clientId, setClientId] = useState((params.clientId as string) || roster[0]?.id || '');
   const [title, setTitle] = useState('');
   const [note, setNote] = useState('');
   const [days, setDays] = useState<BDay[]>([]);

@@ -8,6 +8,7 @@ import type { Theme } from '../../src/theme/tokens';
 import { MOCK_TRAINER } from '../../src/lib/mockData';
 import { type RosterClient } from '../../src/lib/trainerMock';
 import { useRoster } from '../../src/ui/roster';
+import { useCoachFeedback } from '../../src/ui/feedback';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useCheckIns } from '../../src/ui/checkins';
 import { currentStreak, longestStreak, personalRecords, weekStats } from '../../src/lib/streaks';
@@ -32,6 +33,8 @@ export default function TrainerClients() {
   const t = useTheme();
   const router = useRouter();
   const { roster, addClient, removeClient } = useRoster();
+  const { getFeedback, addFeedback } = useCoachFeedback();
+  const [fb, setFb] = useState('');
   const [sel, setSel] = useState<RosterClient | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [newName, setNewName] = useState('');
@@ -166,8 +169,24 @@ export default function TrainerClients() {
                 </View>
               )}
 
+              <View style={{ marginBottom: 14 }}>
+                <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 7 }}>Coach Feedback</Text>
+                {getFeedback(sel.id).length === 0 ? (
+                  <Text style={{ color: t.ink3, fontSize: 13, marginBottom: 8 }}>No feedback yet. Leave {sel.name.split(' ')[0]} a note below.</Text>
+                ) : getFeedback(sel.id).map((fitem) => (
+                  <View key={fitem.id} style={{ backgroundColor: t.surface2, borderRadius: 12, borderWidth: 1, borderColor: t.ring, padding: 12, marginBottom: 8 }}>
+                    <Text style={{ color: t.ink2, fontSize: 13, lineHeight: 19 }}>{fitem.body}</Text>
+                    <Text style={{ color: t.ink3, fontSize: 11, marginTop: 6 }}>{new Date(fitem.at).toLocaleDateString()}</Text>
+                  </View>
+                ))}
+                <View style={{ flexDirection: 'row', gap: 8, marginTop: 2 }}>
+                  <TextInput value={fb} onChangeText={setFb} placeholder="Leave advice or a note…" placeholderTextColor={t.ink3} multiline style={{ flex: 1, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, minHeight: 44, textAlignVertical: 'top' }} />
+                  <Pressable onPress={() => { const id = sel.id; if (fb.trim()) { addFeedback(id, fb); setFb(''); } }} style={{ backgroundColor: t.brand, borderRadius: 12, paddingHorizontal: 16, justifyContent: 'center' }}><Text style={{ color: t.brandInk, fontWeight: '800' }}>Send</Text></Pressable>
+                </View>
+              </View>
+
               {[['📋 Review program', 'Adjust sets, reps & exercises'], ['🥗 Review meal plan', 'Tweak macros & swaps'], ['📊 View progress & scans', 'Weight, body fat, photos'], ['💬 Message', 'Open the chat thread']].map(([label, sub]) => (
-                <Pressable key={label} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 10 }}>
+                <Pressable key={label} onPress={() => { if (label.indexOf('Review program') >= 0) { const id = sel.id; setSel(null); router.push({ pathname: '/(trainer)/builder', params: { clientId: id } }); } }} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 10 }}>
                   <Text style={{ color: t.ink, fontWeight: '700', fontSize: 14 }}>{label}</Text>
                   <Text style={{ color: t.ink3, fontSize: 12, marginTop: 2 }}>{sub}</Text>
                 </Pressable>
