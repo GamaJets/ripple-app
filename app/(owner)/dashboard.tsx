@@ -3,7 +3,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
-import { TRAINERS } from '../../src/lib/ownerMock';
+import { usePlatformTrainers } from '../../src/ui/trainers';
 function Big({ t, label, value, sub, tint }: { t: Theme; label: string; value: string; sub: string; tint?: boolean }) {
   return (<View style={{ flex: 1, backgroundColor: tint ? t.brand : t.surface, borderRadius: 18, borderWidth: 1, borderColor: t.ring, padding: 16 }}>
     <Text style={{ color: tint ? t.brandInk : t.ink3, fontSize: 12, fontWeight: '700', opacity: tint ? 0.85 : 1 }}>{label}</Text>
@@ -12,8 +12,9 @@ function Big({ t, label, value, sub, tint }: { t: Theme; label: string; value: s
 }
 export default function OwnerOverview() {
   const t = useTheme(); const router = useRouter();
-  const mrr = TRAINERS.reduce((a, x) => a + x.mrr, 0);
-  const clients = TRAINERS.reduce((a, x) => a + x.clients, 0);
+  const { trainers, activeMrr } = usePlatformTrainers();
+  const mrr = activeMrr;
+  const clients = trainers.reduce((a, x) => a + x.clients, 0);
   const months = [['Feb', 0.3], ['Mar', 0.42], ['Apr', 0.55], ['May', 0.7], ['Jun', 0.85], ['Jul', 1]] as const;
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
@@ -24,7 +25,7 @@ export default function OwnerOverview() {
         </View>
         <View style={{ flexDirection: 'row', gap: 12, marginBottom: 12 }}>
           <Big t={t} label="Platform MRR" value={'$' + mrr.toLocaleString()} sub="from trainer fees" tint />
-          <Big t={t} label="Trainers" value={String(TRAINERS.length)} sub={TRAINERS.filter((x) => x.status === 'trial').length + ' on trial'} />
+          <Big t={t} label="Trainers" value={String(trainers.length)} sub={trainers.filter((x) => x.status === 'trial').length + ' on trial'} />
         </View>
         <View style={{ flexDirection: 'row', gap: 12, marginBottom: 16 }}>
           <Big t={t} label="End clients" value={String(clients)} sub="across all trainers" />
