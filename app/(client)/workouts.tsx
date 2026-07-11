@@ -8,7 +8,10 @@ import type { Theme } from '../../src/theme/tokens';
 import { buildProgram, type ProgramExercise } from '../../src/lib/programs';
 import { useClientData } from '../../src/ui/clientData';
 import { useWearables } from '../../src/ui/wearables';
-import { MOCK_CLIENT } from '../../src/lib/mockData';
+import { MOCK_CLIENT, type WorkoutEntry } from '../../src/lib/mockData';
+import { suggestForExercise, priorBest1RM } from '../../src/lib/progression';
+import { est1RM } from '../../src/lib/streaks';
+import { Confetti } from '../../src/ui/Confetti';
 
 const WEEK = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const CARDIO = ['Treadmill / Run', 'Cycling', 'Rowing', 'Ski erg', 'Elliptical', 'Swim', 'Walk', 'Stairs'];
@@ -119,6 +122,7 @@ export default function Train() {
             </View>
             {workout.exercises.map((e) => {
               const sets = logged[uid(e)] || []; const done = sets.length >= e.sets;
+              const sug = suggestForExercise(MOCK_CLIENT.log, nameOf(e), e.reps);
               return (
                 <View key={e.key} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: done ? t.brand : t.ring, padding: 15, marginBottom: 10 }}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -132,6 +136,14 @@ export default function Train() {
                     </View>
                   </View>
                   {sets.length > 0 && <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>{sets.map((s, i) => <View key={i} style={{ backgroundColor: t.surface2, borderRadius: 8, paddingHorizontal: 9, paddingVertical: 5 }}><Text style={{ color: t.ink2, fontSize: 12, fontWeight: '600' }}>{s.reps}×{s.kg || '–'}kg</Text></View>)}</View>}
+                  {sug ? (
+                    <View style={{ marginTop: 10, backgroundColor: t.surface2, borderRadius: 10, paddingVertical: 8, paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', gap: 7, borderWidth: 1, borderColor: t.ring }}>
+                      <Text style={{ fontSize: 13 }}>🎯</Text>
+                      <Text style={{ color: t.brand, fontWeight: '800', fontSize: 13 }}>{sug.weight} kg</Text>
+                      {sug.up ? <Text style={{ color: t.brand, fontWeight: '800', fontSize: 12 }}>↑</Text> : null}
+                      <Text style={{ color: t.ink3, fontSize: 11, flex: 1 }}>{sug.reason}</Text>
+                    </View>
+                  ) : null}
                   <LogRow t={t} onLog={(r, k) => logSet(e, r, k)} />
                 </View>
               );
@@ -256,7 +268,7 @@ export default function Train() {
       </Modal>
 
       <Modal visible={session} animationType="slide" onRequestClose={() => setSession(false)}>
-        <SessionRunner t={t} exercises={workout.exercises} focus={workout.focus} nameOf={nameOf} liveHr={w.today.heartRateAvg} onClose={() => setSession(false)} />
+        <SessionRunner t={t} exercises={workout.exercises} focus={workout.focus} nameOf={nameOf} liveHr={w.today.heartRateAvg} log={MOCK_CLIENT.log} onClose={() => setSession(false)} />
       </Modal>
     </SafeAreaView>
   );
@@ -275,7 +287,7 @@ function LogRow({ t, onLog }: { t: Theme; onLog: (reps: string, kg: string) => v
 }
 
 // ── Guided session runner: one exercise at a time, rest timer, live HR, summary ──
-function SessionRunner({ t, exercises, focus, nameOf, liveHr, onClose }: { t: Theme; exercises: ProgramExercise[]; focus: string; nameOf: (e: ProgramExercise) => string; liveHr: number | null; onClose: () => void }) {
+function SessionRunner({ t, exercises, focus, nameOf, liveHr, log, onClose }: { t: Theme; exercises: ProgramExercise[]; focus: string; nameOf: (e: ProgramExercise) => string; liveHr: number | null; log: WorkoutEntry[]; onClose: () => void }) {
   const insets = useSafeAreaInsets();
   const topPad = Math.max(insets.top, 44);
   const [idx, setIdx] = useState(0);
@@ -283,6 +295,8 @@ function SessionRunner({ t, exercises, focus, nameOf, liveHr, onClose }: { t: Th
   const [reps, setReps] = useState(''); const [kg, setKg] = useState('');
   const [rest, setRest] = useState(0);
   const [finished, setFinished] = useState(false);
+  const [confetti, setConfetti] = useState(false);
+  const [prMsg, setPrMsg] = useState<string | null>(null);
   const rid = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -291,14 +305,29 @@ function SessionRunner({ t, exercises, focus, nameOf, liveHr, onClose }: { t: Th
     return () => { if (rid.current) clearInterval(rid.current); };
   }, [rest > 0]);
 
+  // Auto-adjust: pre-fill the weight with the progressive-overload suggestion.
+  useEffect(() => {
+    const sug = suggestForExercise(log, nameOf(exercises[idx]), exercises[idx].reps);
+    setKg(sug ? String(sug.weight) : '');
+    setReps('');
+    setPrMsg(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [idx]);
+
   const ex = exercises[idx];
   const done = results[idx] || [];
   const logSet = () => {
     const r = parseInt(reps, 10) || 0; if (!r) return;
-    setResults((prev) => { const n = prev.map((a) => [...a]); n[idx].push({ reps: r, kg: parseFloat(kg) || 0 }); return n; });
+    const wkg = parseFloat(kg) || 0;
+    // Live PR detection vs all history + earlier sets this session.
+    const name = nameOf(exercises[idx]);
+    const newE1 = wkg && r ? est1RM(wkg, r) : 0;
+    const priorBest = Math.max(priorBest1RM(log, name), ...done.map((s) => (s.kg && s.reps ? est1RM(s.kg, s.reps) : 0)), 0);
+    if (newE1 > 0 && newE1 > priorBest) { setPrMsg(`🏆 New PR on ${name}! ${wkg}kg × ${r}`); setConfetti(true); }
+    setResults((prev) => { const n = prev.map((a) => [...a]); n[idx].push({ reps: r, kg: wkg }); return n; });
     setReps(''); setKg(''); setRest(90);
   };
-  const next = () => { if (idx < exercises.length - 1) { setIdx(idx + 1); setRest(0); } else setFinished(true); };
+  const next = () => { if (idx < exercises.length - 1) { setIdx(idx + 1); setRest(0); } else { setFinished(true); setConfetti(true); } };
   const inp = { color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 12, fontSize: 16, flex: 1 } as const;
 
   if (finished) {
@@ -323,6 +352,7 @@ function SessionRunner({ t, exercises, focus, nameOf, liveHr, onClose }: { t: Th
           <Text style={{ color: t.ink3, fontSize: 12, textAlign: 'center', marginBottom: 20 }}>Logged to your history — strength trends and your coach's dashboard update automatically.</Text>
           <Pressable onPress={onClose} style={{ backgroundColor: t.brand, borderRadius: 14, paddingVertical: 16, alignItems: 'center' }}><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 15 }}>Done</Text></Pressable>
         </ScrollView>
+        <Confetti show={confetti} onDone={() => setConfetti(false)} />
       </SafeAreaView>
     );
   }
@@ -341,6 +371,12 @@ function SessionRunner({ t, exercises, focus, nameOf, liveHr, onClose }: { t: Th
         {liveHr != null ? (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: t.surface2, borderRadius: 12, borderWidth: 1, borderColor: t.ring, padding: 12, marginBottom: 16 }}>
             <Text style={{ fontSize: 20 }}>❤️</Text><Text style={{ color: t.ink, fontSize: 18, fontWeight: '800' }}>{liveHr}</Text><Text style={{ color: t.ink3, fontSize: 13 }}>bpm · from your watch</Text>
+          </View>
+        ) : null}
+
+        {prMsg ? (
+          <View style={{ backgroundColor: 'rgba(245,158,11,0.15)', borderRadius: 12, padding: 12, marginBottom: 16 }}>
+            <Text style={{ color: t.s3, fontWeight: '800', fontSize: 14 }}>{prMsg}</Text>
           </View>
         ) : null}
 
@@ -372,6 +408,7 @@ function SessionRunner({ t, exercises, focus, nameOf, liveHr, onClose }: { t: Th
           <Text style={{ color: done.length >= ex.sets ? t.brandInk : t.ink, fontWeight: '800', fontSize: 15 }}>{idx < exercises.length - 1 ? 'Next Exercise →' : '🏁 Finish Session'}</Text>
         </Pressable>
       </ScrollView>
+      <Confetti show={confetti} onDone={() => setConfetti(false)} />
     </SafeAreaView>
   );
 }
