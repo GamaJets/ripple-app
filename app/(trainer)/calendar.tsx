@@ -9,14 +9,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { MOCK_TRAINER } from '../../src/lib/mockData';
-import { ROSTER } from '../../src/lib/trainerMock';
 import { cancelSession } from '../../src/lib/booking';
 import { useSessions } from '../../src/ui/sessions';
+import { useRoster } from '../../src/ui/roster';
 import type { TrainingSession } from '../../src/lib/types';
 
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MON = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-const nameOf = (id: string | null) => ROSTER.find((c) => c.id === id)?.name ?? 'Open slot';
 
 function dayKey(iso: string) {
   const d = new Date(iso);
@@ -33,6 +32,8 @@ export default function TrainerSchedule() {
   const t = useTheme();
   const now = new Date();
   const { sessions, addSession, releaseSession, removeSession } = useSessions();
+  const { roster } = useRoster();
+  const nameOf = (id: string | null) => roster.find((c) => c.id === id)?.name ?? 'Open slot';
   const [viewYear, setViewYear] = useState(now.getFullYear());
   const [viewMonth, setViewMonth] = useState(now.getMonth());
   const [selKey, setSelKey] = useState(`${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`);
@@ -88,8 +89,8 @@ export default function TrainerSchedule() {
   }
 
   function doCancel(s: TrainingSession) {
-    const others = ROSTER.filter((c) => c.id !== s.clientId).map((c) => c.name);
-    const res = cancelSession(s, MOCK_TRAINER.sessionFee, ROSTER.map((c) => c.id));
+    const others = roster.filter((c) => c.id !== s.clientId).map((c) => c.name);
+    const res = cancelSession(s, MOCK_TRAINER.sessionFee, roster.map((c) => c.id));
     releaseSession(s.id);
     Alert.alert(
       'Session cancelled',
@@ -248,7 +249,7 @@ export default function TrainerSchedule() {
               <Pressable onPress={() => setAddClient(null)} style={{ paddingHorizontal: 14, paddingVertical: 10, borderRadius: 12, backgroundColor: addClient === null ? t.brand : t.surface2, borderWidth: 1, borderColor: addClient === null ? t.brand : t.ring }}>
                 <Text style={{ color: addClient === null ? t.brandInk : t.ink2, fontWeight: '700', fontSize: 13 }}>Open slot</Text>
               </Pressable>
-              {ROSTER.map((c) => {
+              {roster.map((c) => {
                 const sel = c.id === addClient;
                 return (
                   <Pressable key={c.id} onPress={() => setAddClient(c.id)} style={{ paddingHorizontal: 14, paddingVertical: 10, borderRadius: 12, backgroundColor: sel ? t.brand : t.surface2, borderWidth: 1, borderColor: sel ? t.brand : t.ring }}>

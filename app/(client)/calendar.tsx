@@ -2,17 +2,17 @@
 // slot or cancel one you've booked (24h+ ahead avoids the late fee). Reads the
 // shared session store, so slots the coach opens appear here to book.
 import { useState } from 'react';
-import { View, Text, Pressable, ScrollView, Alert } from 'react-native';
+import { View, Text, Pressable, ScrollView, Alert, Image, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
-import { MOCK_TRAINER } from '../../src/lib/mockData';
 import { useSessions } from '../../src/ui/sessions';
+import { useCoachProfile } from '../../src/ui/coachProfile';
 import type { TrainingSession } from '../../src/lib/types';
 
 const CLIENT_ID = 'c1';
-const fee = MOCK_TRAINER.sessionFee;
+const initialsOf = (name: string) => name.replace('Coach ', '').split(' ').map((x) => x[0]).join('').slice(0, 2);
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MON = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
@@ -27,6 +27,9 @@ export default function Calendar() {
   const router = useRouter();
   const now = new Date();
   const { sessions, bookSession, releaseSession } = useSessions();
+  const coach = useCoachProfile();
+  const fee = coach.sessionFee;
+  const [showCoach, setShowCoach] = useState(false);
   const [viewYear, setViewYear] = useState(now.getFullYear());
   const [viewMonth, setViewMonth] = useState(now.getMonth());
   const [selKey, setSelKey] = useState(`${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`);
@@ -60,7 +63,7 @@ export default function Calendar() {
 
   function book(s: TrainingSession) {
     bookSession(s.id, CLIENT_ID);
-    Alert.alert('Session booked ✓', `${DOW[new Date(s.startsAt).getDay()]} ${timeLabel(s.startsAt)} with ${MOCK_TRAINER.name} is confirmed.\n\nA confirmation has been sent to you and your coach.`, [{ text: 'Great' }]);
+    Alert.alert('Session booked ✓', `${DOW[new Date(s.startsAt).getDay()]} ${timeLabel(s.startsAt)} with ${coach.name} is confirmed.\n\nA confirmation has been sent to you and your coach.`, [{ text: 'Great' }]);
   }
   function cancel(s: TrainingSession) {
     const late = Date.parse(s.startsAt) - Date.now() < 24 * 3600 * 1000;
@@ -79,7 +82,21 @@ export default function Calendar() {
           <Text style={{ color: t.brand, fontWeight: '700', fontSize: 15 }}>‹ Home</Text>
         </Pressable>
         <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800' }}>Book Sessions</Text>
-        <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 16 }}>With {MOCK_TRAINER.name} · tap a day to book or cancel</Text>
+        <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 14 }}>Tap a day to book or cancel</Text>
+
+        {/* Coach card */}
+        <Pressable onPress={() => setShowCoach(true)} style={{ backgroundColor: t.surface, borderRadius: 18, borderWidth: 1, borderColor: t.ring, padding: 14, marginBottom: 14, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+          {coach.photo ? (
+            <Image source={{ uri: coach.photo }} style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: t.surface2 }} />
+          ) : (
+            <View style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: t.ring }}><Text style={{ color: t.brand, fontWeight: '800', fontSize: 18 }}>{initialsOf(coach.name)}</Text></View>
+          )}
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: t.ink, fontWeight: '800', fontSize: 16 }}>{coach.name}</Text>
+            <Text style={{ color: t.ink3, fontSize: 12, marginTop: 1 }} numberOfLines={1}>{coach.tagline}</Text>
+          </View>
+          <Text style={{ color: t.brand, fontWeight: '700', fontSize: 12 }}>View ›</Text>
+        </Pressable>
 
         <View style={{ flexDirection: 'row', gap: 12, marginBottom: 16 }}>
           <View style={{ flex: 1, backgroundColor: t.brand, borderRadius: 16, padding: 14 }}>
@@ -161,6 +178,42 @@ export default function Calendar() {
           );
         })}
       </ScrollView>
+
+      <Modal visible={showCoach} transparent animationType="slide" onRequestClose={() => setShowCoach(false)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setShowCoach(false)} />
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, borderColor: t.ring, maxHeight: '82%' }}>
+          <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 30 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 14 }}>
+              {coach.photo ? (
+                <Image source={{ uri: coach.photo }} style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: t.surface2 }} />
+              ) : (
+                <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: t.ring }}><Text style={{ color: t.brand, fontWeight: '800', fontSize: 22 }}>{initialsOf(coach.name)}</Text></View>
+              )}
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: t.ink, fontSize: 19, fontWeight: '800' }}>{coach.name}</Text>
+                <Text style={{ color: t.ink3, fontSize: 13, marginTop: 2 }}>{coach.tagline}</Text>
+              </View>
+            </View>
+            {coach.specialties.length > 0 && (
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 14 }}>
+                {coach.specialties.map((s, i) => <View key={i} style={{ backgroundColor: 'rgba(45,212,191,0.12)', borderRadius: 14, paddingHorizontal: 10, paddingVertical: 5 }}><Text style={{ color: t.brand, fontWeight: '700', fontSize: 12 }}>{s}</Text></View>)}
+              </View>
+            )}
+            <Text style={{ color: t.ink2, fontSize: 14, lineHeight: 20, marginBottom: 14 }}>{coach.bio}</Text>
+            {coach.offers.length > 0 && (
+              <View style={{ marginBottom: 14 }}>
+                <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>What I Offer</Text>
+                {coach.offers.map((o, i) => <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 }}><Text style={{ color: t.brand, fontSize: 14 }}>✓</Text><Text style={{ color: t.ink, fontSize: 14 }}>{o}</Text></View>)}
+              </View>
+            )}
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 14, borderTopWidth: 1, borderTopColor: t.ring }}>
+              <Text style={{ color: t.ink3, fontSize: 13 }}>Session rate</Text>
+              <Text style={{ color: t.ink, fontSize: 18, fontWeight: '800' }}>${coach.sessionFee}<Text style={{ color: t.ink3, fontSize: 12, fontWeight: '600' }}> / session</Text></Text>
+            </View>
+            <Pressable onPress={() => setShowCoach(false)} style={{ backgroundColor: t.brand, borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginTop: 18 }}><Text style={{ color: t.brandInk, fontWeight: '800' }}>Close</Text></Pressable>
+          </ScrollView>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }

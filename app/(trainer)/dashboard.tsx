@@ -1,12 +1,13 @@
 // Trainer · Clients — roster with progress, tap a client for detail.
 import { useState } from 'react';
-import { View, Text, Pressable, ScrollView, Modal } from 'react-native';
+import { View, Text, Pressable, ScrollView, Modal, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { MOCK_TRAINER } from '../../src/lib/mockData';
-import { ROSTER, type RosterClient } from '../../src/lib/trainerMock';
+import { type RosterClient } from '../../src/lib/trainerMock';
+import { useRoster } from '../../src/ui/roster';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { currentStreak, longestStreak, personalRecords, weekStats } from '../../src/lib/streaks';
 
@@ -29,10 +30,14 @@ function timeAgo(iso: string) {
 export default function TrainerClients() {
   const t = useTheme();
   const router = useRouter();
+  const { roster, addClient, removeClient } = useRoster();
   const [sel, setSel] = useState<RosterClient | null>(null);
-  const active = ROSTER.length;
+  const [addOpen, setAddOpen] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [newGoal, setNewGoal] = useState('Fat loss');
+  const active = roster.length;
   const revenue = active * MOCK_TRAINER.sessionFee * 4;
-  const unread = ROSTER.reduce((a, c) => a + c.unread, 0);
+  const unread = roster.reduce((a, c) => a + c.unread, 0);
 
   // Live training data is available for the demo client (c1).
   const hasLog = sel?.id === 'c1';
@@ -62,8 +67,11 @@ export default function TrainerClients() {
           <Stat t={t} label="Unread" value={String(unread)} />
         </View>
 
-        <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16, textTransform: 'capitalize', marginBottom: 10 }}>Your clients</Text>
-        {ROSTER.map((c) => (
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+          <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16 }}>Your Clients</Text>
+          <Pressable onPress={() => { setNewName(''); setNewGoal('Fat loss'); setAddOpen(true); }} style={{ backgroundColor: t.brand, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 7 }}><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 12 }}>＋ Add Client</Text></Pressable>
+        </View>
+        {roster.map((c) => (
           <Pressable key={c.id} onPress={() => setSel(c)} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 15, marginBottom: 10 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
               <View style={{ width: 42, height: 42, borderRadius: 21, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
@@ -154,11 +162,38 @@ export default function TrainerClients() {
                   <Text style={{ color: t.ink3, fontSize: 12, marginTop: 2 }}>{sub}</Text>
                 </Pressable>
               ))}
-              <Pressable onPress={() => setSel(null)} style={{ backgroundColor: t.brand, borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginTop: 4 }}>
+              <Pressable
+                onPress={() => { const s = sel; Alert.alert('Remove client?', `Remove ${s.name} from your roster?`, [{ text: 'Keep', style: 'cancel' }, { text: 'Remove', style: 'destructive', onPress: () => { removeClient(s.id); setSel(null); } }]); }}
+                style={{ borderWidth: 1, borderColor: t.s6, borderRadius: 12, paddingVertical: 13, alignItems: 'center', marginTop: 4, marginBottom: 8 }}>
+                <Text style={{ color: t.s6, fontWeight: '800' }}>Remove Client</Text>
+              </Pressable>
+              <Pressable onPress={() => setSel(null)} style={{ backgroundColor: t.brand, borderRadius: 12, paddingVertical: 14, alignItems: 'center' }}>
                 <Text style={{ color: t.brandInk, fontWeight: '800' }}>Close</Text>
               </Pressable>
             </ScrollView>
           )}
+        </View>
+      </Modal>
+
+      <Modal visible={addOpen} transparent animationType="slide" onRequestClose={() => setAddOpen(false)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setAddOpen(false)} />
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, borderColor: t.ring, padding: 20, paddingBottom: 30 }}>
+          <Text style={{ color: t.ink, fontSize: 20, fontWeight: '800', marginBottom: 4 }}>Add Client</Text>
+          <Text style={{ color: t.ink3, fontSize: 13, marginBottom: 16 }}>They join your roster and become bookable in your schedule.</Text>
+          <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>Name</Text>
+          <TextInput value={newName} onChangeText={setNewName} placeholder="Client name" placeholderTextColor={t.ink3} style={{ color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, marginBottom: 16 }} />
+          <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>Goal</Text>
+          <View style={{ flexDirection: 'row', gap: 8, marginBottom: 20 }}>
+            {['Fat loss', 'Build muscle', 'Tone'].map((g) => (
+              <Pressable key={g} onPress={() => setNewGoal(g)} style={{ flex: 1, paddingVertical: 10, borderRadius: 12, alignItems: 'center', backgroundColor: newGoal === g ? t.brand : t.surface2, borderWidth: 1, borderColor: newGoal === g ? t.brand : t.ring }}>
+                <Text style={{ color: newGoal === g ? t.brandInk : t.ink2, fontWeight: '700', fontSize: 12 }}>{g}</Text>
+              </Pressable>
+            ))}
+          </View>
+          <View style={{ flexDirection: 'row', gap: 10 }}>
+            <Pressable onPress={() => setAddOpen(false)} style={{ flex: 1, paddingVertical: 15, borderRadius: 14, alignItems: 'center', backgroundColor: t.surface2, borderWidth: 1, borderColor: t.ring }}><Text style={{ color: t.ink2, fontWeight: '800' }}>Cancel</Text></Pressable>
+            <Pressable onPress={() => { if (!newName.trim()) { Alert.alert('Add a name', 'Enter the client name.'); return; } addClient(newName, newGoal); setAddOpen(false); Alert.alert('Client added ✓', `${newName.trim()} is now on your roster.`, [{ text: 'Great' }]); }} style={{ flex: 2, paddingVertical: 15, borderRadius: 14, alignItems: 'center', backgroundColor: t.brand }}><Text style={{ color: t.brandInk, fontWeight: '800' }}>Add Client</Text></Pressable>
+          </View>
         </View>
       </Modal>
     </SafeAreaView>

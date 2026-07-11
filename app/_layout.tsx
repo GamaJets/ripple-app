@@ -5,6 +5,7 @@ import { WearablesProvider } from '../src/ui/wearables';
 import { SessionsProvider } from '../src/ui/sessions';
 import { WorkoutLogProvider } from '../src/ui/workoutLog';
 import { CoachProfileProvider } from '../src/ui/coachProfile';
+import { RosterProvider } from '../src/ui/roster';
 import { AppThemeProvider, useTheme } from '../src/ui/components';
 
 function ThemedStack() {
@@ -21,7 +22,9 @@ export default function RootLayout() {
             <SessionsProvider>
               <WorkoutLogProvider>
                 <CoachProfileProvider>
-                  <ThemedStack />
+                  <RosterProvider>
+                    <ThemedStack />
+                  </RosterProvider>
                 </CoachProfileProvider>
               </WorkoutLogProvider>
             </SessionsProvider>

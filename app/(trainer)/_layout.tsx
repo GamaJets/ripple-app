@@ -1,6 +1,7 @@
 // Trainer portal tabs — Clients · Schedule · Videos · Analytics · Profile
 import { Tabs } from 'expo-router';
 import { Text } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
 
 function TabIcon({ emoji, focused }: { emoji: string; focused: boolean }) {
@@ -9,11 +10,13 @@ function TabIcon({ emoji, focused }: { emoji: string; focused: boolean }) {
 
 export default function TrainerLayout() {
   const t = useTheme();
+  const insets = useSafeAreaInsets();
+  const bottomPad = Math.max(insets.bottom, 10);
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarStyle: { backgroundColor: t.surface, borderTopColor: t.ring, height: 62, paddingTop: 6, paddingBottom: 8 },
+        tabBarStyle: { backgroundColor: t.surface, borderTopColor: t.ring, height: 56 + bottomPad, paddingTop: 8, paddingBottom: bottomPad },
         tabBarActiveTintColor: t.brand,
         tabBarInactiveTintColor: t.ink3,
         tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
