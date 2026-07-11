@@ -120,6 +120,7 @@ const HUB: { icon: string; label: string; note: string; route: string }[] = [
   { icon: '💬', label: 'Messages', note: 'Chat with your coach', route: '/(client)/messages' },
   { icon: '📣', label: 'Share & Social', note: 'Post progress to Instagram / TikTok', route: '/(client)/social' },
   { icon: '🎨', label: 'Appearance', note: 'Theme & accent colour', route: '/(client)/appearance' },
+  { icon: '⚙️', label: 'Settings', note: 'Notifications, units, legal & version', route: '/(client)/settings' },
 ];
 
 export default function Profile() {
