@@ -34,7 +34,7 @@ function daysAgo(n: number): string {
 
 export const MOCK_CLIENT: MockClient = {
   id: 'c1',
-  name: 'Maya K.',
+  name: 'Timothy',
   sex: 'f',
   dob: '1997-06-15',
   heightCm: 167,
@@ -73,7 +73,7 @@ export const MOCK_TRAINER = {
   id: 't1',
   name: 'Coach Daniel Reyes',
   sessionFee: 75,
-  clients: [{ id: 'c1', name: 'Maya K.', goal: 'fatloss' as Goal, weightDelta: -3.8 }],
+  clients: [{ id: 'c1', name: 'Timothy', goal: 'fatloss' as Goal, weightDelta: -3.8 }],
 };
 
 function at(days: number, hour: number): string {

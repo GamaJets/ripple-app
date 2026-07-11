@@ -162,6 +162,8 @@ export default function Profile() {
   const [heightVal, setHeightVal] = useState(String(cd.heightCm));
   const [weightUnit, setWeightUnit] = useState<'kg' | 'lb'>('kg');
   const [weightVal, setWeightVal] = useState(String(round1(cd.weightKg)));
+  const [nameVal, setNameVal] = useState(cd.name);
+  const [bfVal, setBfVal] = useState(String(round1(cd.bodyFatPct)));
   const [saved, setSaved] = useState(false);
 
   const toggleHeight = (u: string) => {
@@ -181,8 +183,11 @@ export default function Profile() {
   const weightKg = weightUnit === 'kg' ? parseFloat(weightVal) || 0 : (parseFloat(weightVal) || 0) / 2.20462;
 
   const save = () => {
+    cd.setName(nameVal.trim() || cd.name);
     cd.setHeightCm(round1(heightCm));
     cd.setWeightKg(round1(weightKg));
+    const bf = parseFloat(bfVal);
+    if (!isNaN(bf) && bf > 3 && bf < 70) cd.setBodyFat(round1(bf));
     setSaved(true);
     setTimeout(() => setSaved(false), 1800);
   };
@@ -239,6 +244,8 @@ export default function Profile() {
         </View>
 
         <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 16, marginBottom: 12 }}>
+          <Text style={{ color: t.ink2, fontSize: 13, fontWeight: '600', marginBottom: 6 }}>Name</Text>
+          <TextInput value={nameVal} onChangeText={setNameVal} placeholder="Your name" placeholderTextColor={t.ink3} autoCapitalize="words" style={{ color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, marginBottom: 14 }} />
           <Text style={{ color: t.ink2, fontSize: 13, fontWeight: '600', marginBottom: 6 }}>Date of birth</Text>
           <Pressable onPress={() => setShowDob(true)} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 13, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
             <Text style={{ color: t.ink, fontSize: 15, fontWeight: '600' }}>{dobLabel}</Text>
@@ -260,6 +267,11 @@ export default function Profile() {
             <Seg options={['kg', 'lb']} value={weightUnit} onChange={toggleWeight} t={t} />
           </View>
 
+          <Text style={{ color: t.ink2, fontSize: 13, fontWeight: '600', marginBottom: 6 }}>Body fat %</Text>
+          <View style={{ flexDirection: 'row', gap: 10, marginBottom: 16, alignItems: 'center' }}>
+            <TextInput value={bfVal} onChangeText={setBfVal} keyboardType="numeric" placeholder="e.g. 22" placeholderTextColor={t.ink3} style={{ flex: 1, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15 }} />
+            <Text style={{ color: t.ink3, fontSize: 12, flex: 1 }}>From your latest scan, or type it in.</Text>
+          </View>
           <Pressable style={{ backgroundColor: saved ? t.surface2 : t.brand, borderWidth: 1, borderColor: saved ? t.ring : t.brand, borderRadius: 12, paddingVertical: 14, alignItems: 'center' }} onPress={save}>
             <Text style={{ color: saved ? t.ink : t.brandInk, fontWeight: '800', fontSize: 15 }}>{saved ? '✓ Saved — plan updated' : 'Save'}</Text>
           </Pressable>
