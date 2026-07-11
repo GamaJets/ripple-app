@@ -63,6 +63,7 @@ function requestAuth(): Promise<void> {
   return new Promise((resolve, reject) => {
     const k = hk();
     if (!k || !k.Constants) return reject(new Error('HealthKit is not available in this build.'));
+    if (typeof k.initHealthKit !== 'function') return reject(new Error('The Apple Health module is not loaded in this build. A new build with the compatibility fix is needed.'));
     const P = k.Constants.Permissions;
     const permissions = {
       permissions: {
