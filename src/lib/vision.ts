@@ -3,14 +3,16 @@
 // Falls back gracefully (returns null) when the backend isn't configured yet,
 // so the UI keeps its editable-estimate path until you deploy the function.
 import { supabase } from './supabase';
-import { USE_SUPABASE } from './config';
+// Vision runs off its own flag so you can enable AI photo reading without
+// flipping the whole app to live Supabase data. Set EXPO_PUBLIC_ENABLE_VISION=1
+// once the vision-analyze function is deployed.
 
 export interface MealVision { name: string; kcal: number; protein: number; carbs: number; fat: number; confidence: number }
 export interface InBodyVision { weightKg: number | null; bodyFatPct: number | null; skeletalMuscleKg: number | null; takenAt: string | null }
 
 /** True when the live backend is on — the vision function lives there. */
 export function visionAvailable(): boolean {
-  return USE_SUPABASE;
+  return process.env.EXPO_PUBLIC_ENABLE_VISION === '1';
 }
 
 async function call(mode: 'meal' | 'inbody', imageBase64: string, mediaType = 'image/jpeg'): Promise<any | null> {
