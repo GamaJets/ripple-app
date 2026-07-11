@@ -100,30 +100,42 @@ function Seg({ options, value, onChange, t }: { options: string[]; value: string
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
 
-const HUB: { icon: string; label: string; note: string; route: string }[] = [
-  { icon: '🔔', label: 'Activity', note: 'Your training feed & updates', route: '/(client)/activity' },
-  { icon: '📏', label: 'Body Measurements', note: 'Track waist, chest, arms over time', route: '/(client)/measurements' },
-  { icon: '📈', label: 'Weekly Report', note: 'Your week at a glance · share it', route: '/(client)/report' },
-  { icon: '🏆', label: 'Personal Records', note: 'Your best lifts, ranked', route: '/(client)/records' },
-  { icon: '🔥', label: 'Consistency', note: '12-week training heatmap', route: '/(client)/consistency' },
-  { icon: '📊', label: 'Strength Standards', note: 'How your lifts stack up', route: '/(client)/standards' },
-  { icon: '🎯', label: 'Goal Tracker', note: 'Target weight & projected finish', route: '/(client)/goal' },
-  { icon: '🧮', label: 'Lifting Tools', note: '1RM, plate math & macro reference', route: '/(client)/tools' },
-  { icon: '💧', label: 'Recovery', note: 'Hydration, sleep & mobility', route: '/(client)/recovery' },
-  { icon: '🗓️', label: 'This Week', note: 'Your week of training at a glance', route: '/(client)/week' },
-  { icon: '✅', label: 'Daily Habits', note: 'Habits & water tracker', route: '/(client)/habits' },
-  { icon: '📝', label: 'Weekly Check-in', note: 'Send your coach a weekly pulse', route: '/(client)/checkin' },
-  { icon: '🏆', label: 'Achievements', note: 'Badges you\'ve unlocked', route: '/(client)/achievements' },
-  { icon: '🤖', label: 'AI Coach', note: 'Chat with your AI coach · knows your plan', route: '/(client)/coach' },
-  { icon: '⌚', label: 'Watch & Devices', note: 'Apple Watch, WHOOP, Garmin…', route: '/(client)/devices' },
-  { icon: '🍎', label: 'Food Log', note: 'Search, barcode or photo', route: '/(client)/foodlog' },
-  { icon: '🎬', label: 'Exercise Library', note: 'How-to videos from your coach', route: '/(client)/library' },
-  { icon: '🎧', label: 'Music & Playlists', note: 'AI workout playlists · Spotify / Apple Music', route: '/(client)/music' },
-  { icon: '💬', label: 'Messages', note: 'Chat with your coach', route: '/(client)/messages' },
-  { icon: '📣', label: 'Share & Social', note: 'Post progress to Instagram / TikTok', route: '/(client)/social' },
-  { icon: '🃏', label: 'Milestone Cards', note: 'Shareable cards of your wins', route: '/(client)/cards' },
-  { icon: '🎨', label: 'Appearance', note: 'Theme & accent colour', route: '/(client)/appearance' },
-  { icon: '⚙️', label: 'Settings', note: 'Notifications, units, legal & version', route: '/(client)/settings' },
+const HUB_GROUPS: { title: string; items: { icon: string; label: string; note: string; route: string }[] }[] = [
+  { title: 'Progress & Insights', items: [
+    { icon: '📈', label: 'Weekly Report', note: 'Your week at a glance · share it', route: '/(client)/report' },
+    { icon: '🔥', label: 'Consistency', note: '12-week training heatmap', route: '/(client)/consistency' },
+    { icon: '🏆', label: 'Personal Records', note: 'Your best lifts, ranked', route: '/(client)/records' },
+    { icon: '📊', label: 'Strength Standards', note: 'How your lifts stack up', route: '/(client)/standards' },
+    { icon: '🎯', label: 'Goal Tracker', note: 'Target weight & projected finish', route: '/(client)/goal' },
+    { icon: '📏', label: 'Body Measurements', note: 'Waist, chest, arms over time', route: '/(client)/measurements' },
+    { icon: '🎖️', label: 'Achievements', note: 'Badges and milestones', route: '/(client)/achievements' },
+    { icon: '🃏', label: 'Milestone Cards', note: 'Shareable cards of your wins', route: '/(client)/cards' },
+    { icon: '🔔', label: 'Activity', note: 'Your training feed & updates', route: '/(client)/activity' },
+  ] },
+  { title: 'Training', items: [
+    { icon: '🗓️', label: 'This Week', note: 'Your week of training at a glance', route: '/(client)/week' },
+    { icon: '🎬', label: 'Exercise Library', note: 'How-to videos from your coach', route: '/(client)/library' },
+    { icon: '🧮', label: 'Lifting Tools', note: '1RM, plate math & macro reference', route: '/(client)/tools' },
+    { icon: '💧', label: 'Recovery', note: 'Hydration, sleep & mobility', route: '/(client)/recovery' },
+  ] },
+  { title: 'Daily', items: [
+    { icon: '✅', label: 'Daily Habits', note: 'Habits & water tracker', route: '/(client)/habits' },
+    { icon: '📝', label: 'Weekly Check-in', note: 'Send your coach a weekly pulse', route: '/(client)/checkin' },
+    { icon: '🍎', label: 'Food Log', note: 'Search, barcode or photo', route: '/(client)/foodlog' },
+  ] },
+  { title: 'Connect', items: [
+    { icon: '🤖', label: 'AI Coach', note: 'Chat with your AI coach', route: '/(client)/coach' },
+    { icon: '💬', label: 'Messages', note: 'Chat with your coach', route: '/(client)/messages' },
+    { icon: '📣', label: 'Share & Social', note: 'Post progress to Instagram / TikTok', route: '/(client)/social' },
+  ] },
+  { title: 'Devices & Media', items: [
+    { icon: '⌚', label: 'Watch & Devices', note: 'Apple Watch, WHOOP, Garmin…', route: '/(client)/devices' },
+    { icon: '🎧', label: 'Music & Playlists', note: 'AI workout playlists', route: '/(client)/music' },
+  ] },
+  { title: 'Account', items: [
+    { icon: '🎨', label: 'Appearance', note: 'Theme & accent colour', route: '/(client)/appearance' },
+    { icon: '⚙️', label: 'Settings', note: 'Notifications, units, legal & version', route: '/(client)/settings' },
+  ] },
 ];
 
 export default function Profile() {
@@ -274,20 +286,24 @@ export default function Profile() {
           </Text>
         </View>
 
-        <Text style={{ color: t.ink, fontSize: 16, fontWeight: '800', marginBottom: 10 }}>More</Text>
-        <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, overflow: 'hidden' }}>
-          {HUB.map((h, i) => (
-            <Pressable key={h.route} onPress={() => router.push(h.route as any)}
-              style={{ flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 16, paddingVertical: 15, borderTopWidth: i === 0 ? 0 : 1, borderTopColor: t.ring }}>
-              <View style={{ width: 40, height: 40, borderRadius: 11, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}><Text style={{ fontSize: 20 }}>{h.icon}</Text></View>
-              <View style={{ flex: 1 }}>
-                <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, textTransform: 'capitalize' }}>{h.label}</Text>
-                <Text style={{ color: t.ink3, fontSize: 12, marginTop: 1 }}>{h.note}</Text>
-              </View>
-              <Text style={{ color: t.ink3, fontSize: 20 }}>›</Text>
-            </Pressable>
-          ))}
-        </View>
+        <Text style={{ color: t.ink, fontSize: 16, fontWeight: '800', marginBottom: 12 }}>More</Text>
+        {HUB_GROUPS.map((g) => (
+          <View key={g.title}>
+            <Text style={{ color: t.ink3, fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 8, marginTop: 4 }}>{g.title}</Text>
+            <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, overflow: 'hidden', marginBottom: 18 }}>
+              {g.items.map((h, i) => (
+                <Pressable key={h.route} onPress={() => router.push(h.route as any)} style={{ flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 16, paddingVertical: 14, borderTopWidth: i === 0 ? 0 : 1, borderTopColor: t.ring }}>
+                  <View style={{ width: 38, height: 38, borderRadius: 11, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}><Text style={{ fontSize: 19 }}>{h.icon}</Text></View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15 }}>{h.label}</Text>
+                    <Text style={{ color: t.ink3, fontSize: 12, marginTop: 1 }}>{h.note}</Text>
+                  </View>
+                  <Text style={{ color: t.ink3, fontSize: 20 }}>›</Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        ))}
       </ScrollView>
 
       <DobPicker visible={showDob} iso={cd.dob} onClose={() => setShowDob(false)} onSave={(v) => { cd.setDob(v); setShowDob(false); }} t={t} />
