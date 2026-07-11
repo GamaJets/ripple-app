@@ -1,0 +1,55 @@
+{
+  "expo": {
+    "name": "Repple",
+    "slug": "repple",
+    "scheme": "repple",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0f172a"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.repple.app",
+      "infoPlist": {
+        "NSHealthShareUsageDescription": "Repple reads your heart rate and calories to log workouts.",
+        "NSHealthUpdateUsageDescription": "Repple writes completed workouts to Apple Health.",
+        "NSCameraUsageDescription": "Repple uses the camera to capture InBody scans and progress photos.",
+        "NSPhotoLibraryUsageDescription": "Repple lets you upload InBody scans and progress photos."
+      }
+    },
+    "android": {
+      "package": "com.repple.app",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0d9488"
+      },
+      "permissions": [
+        "CAMERA",
+        "READ_MEDIA_IMAGES",
+        "health.READ_HEART_RATE"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-image-picker",
+      "expo-camera",
+      [
+        "react-native-health",
+        {
+          "isClinicalDataEnabled": false,
+          "healthSharePermission": "Repple reads your heart rate, calories, steps and workouts to track your training.",
+          "healthUpdatePermission": "Repple writes completed workouts to Apple Health."
+        }
+      ]
+    ]
+  }
+}

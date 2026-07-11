@@ -1,0 +1,49 @@
+// Wearable integration — one contract every device plugs into.
+// Apple Health (HealthKit), Google Health Connect, and cloud APIs (WHOOP, Oura,
+// Garmin, Fitbit) all implement WearableProvider, so the UI and the sync logic
+// never care which brand they're talking to.
+
+export type ProviderId = 'apple' | 'whoop' | 'garmin' | 'fitbit' | 'oura' | 'googlefit';
+export type ProviderKind = 'healthkit' | 'health-connect' | 'cloud';
+export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error';
+
+/** A single day's roll-up. Any field a provider can't supply is null. */
+export interface DailyMetrics {
+  date: string;                 // YYYY-MM-DD (local)
+  activeKcal: number | null;    // active energy burned
+  steps: number | null;
+  heartRateAvg: number | null;  // bpm, mean of today's samples
+  heartRateResting: number | null;
+  workoutMins: number | null;
+  updatedAt: string;            // ISO timestamp of the sync
+  source: ProviderId;
+}
+
+export interface ProviderMeta {
+  id: ProviderId;
+  name: string;
+  icon: string;
+  kind: ProviderKind;
+  blurb: string;
+  metrics: string[];            // human labels of what it can read
+}
+
+export interface WearableProvider {
+  meta: ProviderMeta;
+  /** Can this provider run in the *current* binary right now? (native module present / cloud reachable) */
+  isAvailable(): boolean;
+  /** If not available, a short human reason for the UI (else null). */
+  unavailableReason(): string | null;
+  /** Request permission / start OAuth. Resolves when connected, throws with a message otherwise. */
+  connect(): Promise<void>;
+  /** Forget the connection locally. */
+  disconnect(): Promise<void>;
+  /** Pull today's metrics, or null if not connected / nothing available. */
+  fetchToday(): Promise<DailyMetrics | null>;
+}
+
+export function emptyMetrics(source: ProviderId): DailyMetrics {
+  const d = new Date();
+  const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return { date, activeKcal: null, steps: null, heartRateAvg: null, heartRateResting: null, workoutMins: null, updatedAt: d.toISOString(), source };
+}
