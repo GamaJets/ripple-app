@@ -6,6 +6,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { useClientData } from '../../src/ui/clientData';
+import { analyzeInBody, visionAvailable } from '../../src/lib/vision';
 
 type Scan = { id: string; takenAt: string; weightKg: number; bodyFatPct: number; skeletalMuscleKg: number; source: string; image?: string };
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -84,9 +85,21 @@ export default function Scans() {
   const pick = async (fromCamera: boolean) => {
     const perm = fromCamera ? await ImagePicker.requestCameraPermissionsAsync() : await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!perm.granted) { Alert.alert('Permission needed', 'Allow access to ' + (fromCamera ? 'the camera' : 'your photos') + ' to add a scan.'); return; }
-    const res = fromCamera ? await ImagePicker.launchCameraAsync({ quality: 0.7 }) : await ImagePicker.launchImageLibraryAsync({ quality: 0.7 });
+    const res = fromCamera ? await ImagePicker.launchCameraAsync({ quality: 0.7, base64: true }) : await ImagePicker.launchImageLibraryAsync({ quality: 0.7, base64: true });
     if (!res.canceled && res.assets && res.assets[0]) {
-      const uri = res.assets[0].uri; setImg(uri); setReading(true); setOcrMsg(null);
+      const asset = res.assets[0]; const uri = asset.uri; setImg(uri); setReading(true); setOcrMsg(null);
+      // Accurate vision read when enabled; otherwise interim OCR.
+      if (visionAvailable() && asset.base64) {
+        const v = await analyzeInBody(asset.base64);
+        if (v && (v.weightKg != null || v.bodyFatPct != null || v.skeletalMuscleKg != null)) {
+          setReading(false);
+          if (v.weightKg != null) setWt(String(v.weightKg));
+          if (v.bodyFatPct != null) setBf(String(v.bodyFatPct));
+          if (v.skeletalMuscleKg != null) setSm(String(v.skeletalMuscleKg));
+          setOcrMsg('Read from your scan: ' + [v.weightKg != null ? 'weight ' + v.weightKg : '', v.bodyFatPct != null ? 'body fat ' + v.bodyFatPct + '%' : '', v.skeletalMuscleKg != null ? 'muscle ' + v.skeletalMuscleKg : ''].filter(Boolean).join(' · ') + '. Tap a field to correct.');
+          return;
+        }
+      }
       const r = await ocrInBody(uri);
       setReading(false);
       if (r.ok) { if (r.weight) setWt(r.weight); if (r.bf) setBf(r.bf); if (r.muscle) setSm(r.muscle);
