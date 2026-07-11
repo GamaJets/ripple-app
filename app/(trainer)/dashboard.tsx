@@ -240,12 +240,13 @@ export default function TrainerClients() {
                 </View>
               </View>
 
-              {[['📋 Review program', 'Adjust sets, reps & exercises'], ['🥗 Review meal plan', 'Tweak macros & swaps'], ['📊 View progress & scans', 'Weight, body fat, photos'], ['💬 Message', 'Open the chat thread']].map(([label, sub]) => (
-                <Pressable key={label} onPress={() => { if (label.indexOf('Review program') >= 0) { const id = sel.id; setSel(null); router.push({ pathname: '/(trainer)/builder', params: { clientId: id } }); } }} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 10 }}>
-                  <Text style={{ color: t.ink, fontWeight: '700', fontSize: 14 }}>{label}</Text>
-                  <Text style={{ color: t.ink3, fontSize: 12, marginTop: 2 }}>{sub}</Text>
-                </Pressable>
-              ))}
+              <Pressable onPress={() => { const id = sel.id; setSel(null); router.push({ pathname: '/(trainer)/builder', params: { clientId: id } }); }} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                <View>
+                  <Text style={{ color: t.ink, fontWeight: '700', fontSize: 14 }}>📋 Open Program Builder</Text>
+                  <Text style={{ color: t.ink3, fontSize: 12, marginTop: 2 }}>Edit sets, reps & exercises for {sel.name.split(' ')[0]}</Text>
+                </View>
+                <Text style={{ color: t.ink3, fontSize: 18 }}>›</Text>
+              </Pressable>
               <Pressable
                 onPress={() => { const s = sel; Alert.alert('Remove client?', `Remove ${s.name} from your roster?`, [{ text: 'Keep', style: 'cancel' }, { text: 'Remove', style: 'destructive', onPress: () => { removeClient(s.id); setSel(null); } }]); }}
                 style={{ borderWidth: 1, borderColor: t.s6, borderRadius: 12, paddingVertical: 13, alignItems: 'center', marginTop: 4, marginBottom: 8 }}>
