@@ -8,6 +8,7 @@ import type { Theme } from '../../src/theme/tokens';
 import { buildProgram, type ProgramExercise } from '../../src/lib/programs';
 import { useClientData } from '../../src/ui/clientData';
 import { useWearables } from '../../src/ui/wearables';
+import { MOCK_CLIENT } from '../../src/lib/mockData';
 
 const WEEK = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const CARDIO = ['Treadmill / Run', 'Cycling', 'Rowing', 'Ski erg', 'Elliptical', 'Swim', 'Walk', 'Stairs'];
@@ -27,6 +28,19 @@ export default function Train() {
   const [videoFor, setVideoFor] = useState<string | null>(null);
   const [session, setSession] = useState(false);
   const [ctype, setCtype] = useState(CARDIO[0]); const [mins, setMins] = useState('30'); const [dist, setDist] = useState('5'); const [unit, setUnit] = useState<'km' | 'mi'>('km');
+  const [showCal, setShowCal] = useState(false);
+  const today0 = new Date();
+  const monday0 = new Date(today0); monday0.setDate(today0.getDate() - jsToMon); monday0.setHours(0, 0, 0, 0);
+  const dateFor = (i: number) => { const d = new Date(monday0); d.setDate(monday0.getDate() + i); return d; };
+  const pad2 = (n: number) => String(n).padStart(2, '0');
+  const dstr = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+  const workedDates = new Set(MOCK_CLIENT.log.map((l) => dstr(new Date(l.t))));
+  Object.keys(logged).forEach((k) => { if ((logged[k] || []).length) workedDates.add(dstr(dateFor(parseInt(k.split(':')[0], 10)))); });
+  if (cardioLog.length) workedDates.add(dstr(today0));
+  const calMonth = monday0.getMonth(), calYear = monday0.getFullYear();
+  const firstDow = (new Date(calYear, calMonth, 1).getDay() + 6) % 7;
+  const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+  const monthLabel = monday0.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
 
   const workout = program.days[dayIdx % program.days.length];
   const uid = (e: ProgramExercise) => `${dayIdx}:${e.key}`;
@@ -41,13 +55,18 @@ export default function Train() {
         <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800', textTransform: 'capitalize' }}>Train</Text>
         <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 14 }}>{program.title} · pick the day you're training</Text>
 
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+          <Text style={{ color: t.ink2, fontSize: 13, fontWeight: '700', textTransform: 'capitalize' }}>{monthLabel}</Text>
+          <Pressable onPress={() => setShowCal(true)}><Text style={{ color: t.brand, fontWeight: '700', fontSize: 13 }}>📅 Month View</Text></Pressable>
+        </View>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginBottom: 14 }}>
           {WEEK.map((d, i) => {
-            const on = i === dayIdx; const today = i === jsToMon;
+            const on = i === dayIdx; const today = i === jsToMon; const dnum = dateFor(i).getDate(); const worked = workedDates.has(dstr(dateFor(i)));
             return (
-              <Pressable key={d} onPress={() => setDayIdx(i)} style={{ width: 46, paddingVertical: 10, borderRadius: 12, alignItems: 'center', backgroundColor: on ? t.brand : t.surface, borderWidth: 1, borderColor: on ? t.brand : t.ring }}>
-                <Text style={{ color: on ? t.brandInk : t.ink, fontWeight: '800', fontSize: 13 }}>{d}</Text>
-                <Text style={{ color: on ? t.brandInk : today ? t.brand : t.ink3, fontSize: 9, marginTop: 2 }}>{today ? 'today' : ''}</Text>
+              <Pressable key={d} onPress={() => setDayIdx(i)} style={{ width: 46, paddingVertical: 9, borderRadius: 12, alignItems: 'center', backgroundColor: on ? t.brand : t.surface, borderWidth: 1, borderColor: on ? t.brand : today ? t.brand : t.ring }}>
+                <Text style={{ color: on ? t.brandInk : t.ink3, fontWeight: '700', fontSize: 11 }}>{d}</Text>
+                <Text style={{ color: on ? t.brandInk : t.ink, fontWeight: '800', fontSize: 16, marginTop: 1 }}>{dnum}</Text>
+                <View style={{ width: 5, height: 5, borderRadius: 3, marginTop: 3, backgroundColor: worked ? (on ? t.brandInk : t.brand) : 'transparent' }} />
               </Pressable>
             );
           })}
@@ -140,6 +159,37 @@ export default function Train() {
           </View>
           <Text style={{ color: '#bbb', fontSize: 12, marginTop: 14 }}>Tap anywhere to close</Text>
         </Pressable>
+      </Modal>
+
+      <Modal visible={showCal} transparent animationType="slide" onRequestClose={() => setShowCal(false)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setShowCal(false)} />
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, borderColor: t.ring, padding: 20, paddingBottom: 30 }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+            <Text style={{ color: t.ink, fontSize: 18, fontWeight: '800', textTransform: 'capitalize' }}>{monthLabel}</Text>
+            <Pressable onPress={() => setShowCal(false)}><Text style={{ color: t.brand, fontSize: 16, fontWeight: '800' }}>Close</Text></Pressable>
+          </View>
+          <View style={{ flexDirection: 'row', marginBottom: 6 }}>
+            {WEEK.map((d) => <Text key={d} style={{ flex: 1, textAlign: 'center', color: t.ink3, fontSize: 11, fontWeight: '700' }}>{d[0]}</Text>)}
+          </View>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+            {Array.from({ length: firstDow }).map((_, i) => <View key={'e' + i} style={{ width: `${100 / 7}%`, aspectRatio: 1 }} />)}
+            {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((day) => {
+              const ds = `${calYear}-${pad2(calMonth + 1)}-${pad2(day)}`;
+              const worked = workedDates.has(ds); const isToday = ds === dstr(today0);
+              return (
+                <View key={day} style={{ width: `${100 / 7}%`, aspectRatio: 1, alignItems: 'center', justifyContent: 'center' }}>
+                  <View style={{ width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: worked ? t.brand : 'transparent', borderWidth: isToday && !worked ? 1 : 0, borderColor: t.brand }}>
+                    <Text style={{ color: worked ? t.brandInk : isToday ? t.brand : t.ink2, fontWeight: worked || isToday ? '800' : '500', fontSize: 13 }}>{day}</Text>
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 14 }}>
+            <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: t.brand }} />
+            <Text style={{ color: t.ink3, fontSize: 12 }}>Days you trained · {workedDates.size} sessions logged</Text>
+          </View>
+        </View>
       </Modal>
 
       <Modal visible={session} animationType="slide" onRequestClose={() => setSession(false)}>

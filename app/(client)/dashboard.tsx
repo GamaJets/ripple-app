@@ -117,6 +117,7 @@ export default function Dashboard() {
         </View>
 
         <View style={{ flexDirection: 'row', gap: 12 }}>
+          <Action t={t} icon="🤖" label="Ask AI Coach" onPress={() => router.push('/(client)/coach')} />
           <Action t={t} icon="🏋️" label="Log workout" onPress={() => router.push('/(client)/workouts')} />
           <Action t={t} icon="📅" label="Book session" onPress={() => router.push('/(client)/calendar')} />
         </View>

@@ -209,17 +209,31 @@ export function mealAt(diet: Diet, slot: Slot, idx: number): GeneratedMeal {
     const [base, top, boost, style] = parts as Comp[];
     n = `${cap(top.n)} ${base.n}${boost.n ? ' ' + boost.n : ''}${style.n ? ' — ' + style.n : ''}`;
     ico = base.ico ?? '🍽️';
-    steps = [base.step ?? '', `Top with ${top.n}${boost.n ? ' and stir in ' + boost.n.replace('+ ', '') : ''}${style.n ? ' (' + style.n + ')' : ''}.`];
+    steps = [
+      base.step ?? `Prepare the ${base.n}.`,
+      `Top with ${top.n}${boost.n ? ` and stir in the ${boost.n.replace('+ ', '')}` : ''}.`,
+      `Finish${style.n ? ` — ${style.n}` : ' with a pinch of cinnamon or sea salt to taste'}, then serve.`,
+    ];
   } else if (slot === 'Snack') {
     const [a, b, prep] = parts as Comp[];
     n = `${cap(a.n)} & ${b.n}${prep.n ? ' (' + prep.n + ')' : ''}`;
     ico = a.ico ?? '🍎';
-    steps = [`Serve the ${a.n} with ${b.n}.`];
+    steps = [
+      `Portion the ${a.n} into a bowl or container.`,
+      `Add the ${b.n} alongside${prep.n ? ` — ideal ${prep.n}` : ''}, then enjoy.`,
+    ];
   } else {
     const [pr, cb, vg, fl] = parts as Comp[];
     n = `${fl.n} ${pr.n} with ${cb.n} & ${vg.n}`;
     ico = pr.ico ?? '🍽️';
-    steps = [`Prepare the ${cb.n}.`, `Cook the ${pr.n} with ${fl.n.toLowerCase()} seasoning.`, `Cook the ${vg.n} and combine; finish the sauce and serve.`];
+    const cookTime = /salmon|fish|cod|prawn/i.test(pr.n) ? ' (about 3–4 min per side)' : /chicken|turkey|beef|steak/i.test(pr.n) ? ' (about 5–7 min per side)' : ' until cooked through';
+    steps = [
+      `Season the ${pr.n} with the ${fl.n.toLowerCase()} flavouring and rest 5 min while you prep.`,
+      `Cook the ${cb.n} until tender (per pack if applicable) and keep warm.`,
+      `Cook the ${pr.n} over medium-high heat${cookTime}.`,
+      `Meanwhile, steam or sauté the ${vg.n} for 3–4 min until bright and just tender.`,
+      `Plate the ${cb.n}, top with the ${pr.n} and ${vg.n}, spoon over any pan juices, and serve.`,
+    ];
   }
   return { n, slot, ico, k: sum('k'), p: sum('p'), c: sum('c'), f: sum('f'), ing, steps, diet, idx };
 }

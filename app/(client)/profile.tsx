@@ -93,6 +93,7 @@ function Seg({ options, value, onChange, t }: { options: string[]; value: string
 const round1 = (n: number) => Math.round(n * 10) / 10;
 
 const HUB: { icon: string; label: string; note: string; route: string }[] = [
+  { icon: '🤖', label: 'AI Coach', note: 'Chat with your AI coach · knows your plan', route: '/(client)/coach' },
   { icon: '⌚', label: 'Watch & Devices', note: 'Apple Watch, WHOOP, Garmin…', route: '/(client)/devices' },
   { icon: '🍎', label: 'Food Log', note: 'Search, barcode or photo', route: '/(client)/foodlog' },
   { icon: '🎬', label: 'Exercise Library', note: 'How-to videos from your coach', route: '/(client)/library' },
