@@ -1,6 +1,7 @@
 // Trainer · Analytics — revenue, clients, retention, platform fee.
-import { View, Text, ScrollView } from 'react-native';
+import { View, Text, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { MOCK_TRAINER } from '../../src/lib/mockData';
@@ -19,6 +20,7 @@ function Big({ t, label, value, sub, tint }: { t: Theme; label: string; value: s
 
 export default function TrainerAnalytics() {
   const t = useTheme();
+  const router = useRouter();
   const { roster } = useRoster();
   const staleDays = (str) => { const m = /([0-9]+)d/.exec(str); return m ? parseInt(m[1], 10) : 0; };
   const atRisk = roster.filter((c) => c.adherence < 82 || staleDays(c.lastActive) >= 2);
@@ -35,6 +37,7 @@ export default function TrainerAnalytics() {
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
         <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800', textTransform: 'capitalize' }}>Analytics</Text>
         <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 16 }}>Your coaching business at a glance</Text>
+        <Pressable onPress={() => router.push('/(trainer)/leaderboard')} style={{ backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 16, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}><Text style={{ color: t.ink, fontWeight: '700', fontSize: 14 }}>🏆 Client leaderboard</Text><Text style={{ color: t.ink3, fontSize: 18 }}>›</Text></Pressable>
 
         <View style={{ flexDirection: 'row', gap: 12, marginBottom: 12 }}>
           <Big t={t} label="Monthly revenue" value={'$' + revenue.toLocaleString()} sub={`${sessionsMo} sessions × $${MOCK_TRAINER.sessionFee}`} tint />
