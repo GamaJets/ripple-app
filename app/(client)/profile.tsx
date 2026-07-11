@@ -96,6 +96,7 @@ const HUB: { icon: string; label: string; note: string; route: string }[] = [
   { icon: '⌚', label: 'Watch & Devices', note: 'Apple Watch, WHOOP, Garmin…', route: '/(client)/devices' },
   { icon: '🍎', label: 'Food Log', note: 'Search, barcode or photo', route: '/(client)/foodlog' },
   { icon: '🎬', label: 'Exercise Library', note: 'How-to videos from your coach', route: '/(client)/library' },
+  { icon: '🎧', label: 'Music & Playlists', note: 'AI workout playlists · Spotify / Apple Music', route: '/(client)/music' },
   { icon: '💬', label: 'Messages', note: 'Chat with your coach', route: '/(client)/messages' },
   { icon: '📣', label: 'Share & Social', note: 'Post progress to Instagram / TikTok', route: '/(client)/social' },
   { icon: '🎨', label: 'Appearance', note: 'Theme & accent colour', route: '/(client)/appearance' },
