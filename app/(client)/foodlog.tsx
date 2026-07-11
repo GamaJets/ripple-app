@@ -10,6 +10,7 @@ import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { macrosFor } from '../../src/lib/nutrition';
 import { useClientData } from '../../src/ui/clientData';
+import { analyzeMeal, visionAvailable } from '../../src/lib/vision';
 
 type Food = { n: string; k: number; p: number; c: number; f: number };
 type Logged = Food & { via: string };
@@ -49,19 +50,21 @@ export default function FoodLog() {
   const tot = log.reduce((a, f) => ({ k: a.k + f.k, p: a.p + f.p, c: a.c + f.c, f: a.f + f.f }), { k: 0, p: 0, c: 0, f: 0 });
   const remK = target.kcal - tot.k;
 
+  const fillEst = (n: string, k: number, p: number, c: number, f: number) => { setEstN(n); setEstK(String(k)); setEstP(String(p)); setEstC(String(c)); setEstF(String(f)); setReading(false); };
   const takeMealPhoto = async (fromCamera: boolean) => {
     const perm = fromCamera ? await ImagePicker.requestCameraPermissionsAsync() : await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!perm.granted) { Alert.alert('Permission needed', 'Allow access to ' + (fromCamera ? 'the camera' : 'your photos') + ' to log a meal by photo.'); return; }
-    const res = fromCamera ? await ImagePicker.launchCameraAsync({ quality: 0.6 }) : await ImagePicker.launchImageLibraryAsync({ quality: 0.6 });
+    const res = fromCamera ? await ImagePicker.launchCameraAsync({ quality: 0.5, base64: true }) : await ImagePicker.launchImageLibraryAsync({ quality: 0.5, base64: true });
     if (res.canceled || !res.assets?.[0]) return;
-    setPhotoUri(res.assets[0].uri);
+    const asset = res.assets[0];
+    setPhotoUri(asset.uri);
     setReading(true); setServ(1);
-    // Interim: fill a baseline estimate. The vision backend will read the actual
-    // plate here and return real macros. User confirms/edits either way.
-    setTimeout(() => {
-      setEstN(PHOTO_GUESS.n); setEstK(String(PHOTO_GUESS.k)); setEstP(String(PHOTO_GUESS.p)); setEstC(String(PHOTO_GUESS.c)); setEstF(String(PHOTO_GUESS.f));
-      setReading(false);
-    }, 1200);
+    // Real vision read when the backend is live; otherwise an editable estimate.
+    if (visionAvailable() && asset.base64) {
+      const r = await analyzeMeal(asset.base64);
+      if (r) { fillEst(r.name, r.kcal, r.protein, r.carbs, r.fat); return; }
+    }
+    setTimeout(() => fillEst(PHOTO_GUESS.n, PHOTO_GUESS.k, PHOTO_GUESS.p, PHOTO_GUESS.c, PHOTO_GUESS.f), 900);
   };
 
   const logPhoto = () => {
