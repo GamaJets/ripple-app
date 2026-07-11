@@ -32,9 +32,8 @@ export default function Welcome() {
     if (!canGo || busy) return;
     setBusy(true);
     try {
-      if (mode === 'up') await auth.signUp(name, email, pw);
-      else await auth.signIn(email, pw);
-      router.replace('/');
+      if (mode === 'up') { await auth.signUp(name, email, pw); router.replace('/onboarding'); }
+      else { await auth.signIn(email, pw); router.replace('/'); }
     } finally { setBusy(false); }
   };
   const provider = async (p: 'apple' | 'google') => { await auth.signInWithProvider(p); router.replace('/'); };
