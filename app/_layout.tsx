@@ -10,6 +10,7 @@ import { AssignedProgramsProvider } from '../src/ui/assignedPrograms';
 import { CoachFeedbackProvider } from '../src/ui/feedback';
 import { CoachNutritionProvider } from '../src/ui/coachNutrition';
 import { PlatformTrainersProvider } from '../src/ui/trainers';
+import { MeasurementsProvider } from '../src/ui/measurements';
 import { HabitsProvider } from '../src/ui/habits';
 import { CheckInsProvider } from '../src/ui/checkins';
 import { AuthProvider } from '../src/ui/auth';
@@ -38,6 +39,7 @@ export default function RootLayout() {
                     <CoachFeedbackProvider>
                     <CoachNutritionProvider>
                     <PlatformTrainersProvider>
+                    <MeasurementsProvider>
                     <HabitsProvider>
                       <CheckInsProvider>
                         <ErrorBoundary>
@@ -45,7 +47,8 @@ export default function RootLayout() {
                         </ErrorBoundary>
                       </CheckInsProvider>
                     </HabitsProvider>
-                  </PlatformTrainersProvider>
+                  </MeasurementsProvider>
+                    </PlatformTrainersProvider>
                     </CoachNutritionProvider>
                     </CoachFeedbackProvider>
                     </AssignedProgramsProvider>
