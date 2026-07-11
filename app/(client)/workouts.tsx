@@ -60,7 +60,13 @@ export default function Train() {
   const uid = (e: ProgramExercise) => `${dayIdx}:${e.key}`;
   const nameOf = (e: ProgramExercise) => swaps[uid(e)] || e.name;
   const logSet = (e: ProgramExercise, reps: string, kg: string) => { if (!reps) return; setLogged({ ...logged, [uid(e)]: [...(logged[uid(e)] || []), { reps, kg }] }); };
-  const logCardio = () => { const m = parseInt(mins, 10) || 0, d = parseFloat(dist) || 0; if (!m) return; setCardioLog([{ type: ctype, mins: m, dist: d, unit, kcal: Math.round(m * 10) }, ...cardioLog]); setMins('30'); setDist('5'); };
+  const logCardio = () => {
+    const m = parseInt(mins, 10) || 0, d = parseFloat(dist) || 0; if (!m) return;
+    const kcal = Math.round(m * 10);
+    setCardioLog([{ type: ctype, mins: m, dist: d, unit, kcal }, ...cardioLog]);
+    addWorkouts([{ t: new Date().toISOString(), exercise: ctype, cardio: { mins: m, dist: d, unit }, kcal }]);
+    setMins('30'); setDist('5');
+  };
   const inp = { color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 9, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, flex: 1 } as const;
 
   return (
