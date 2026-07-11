@@ -7,6 +7,7 @@ import { WorkoutLogProvider } from '../src/ui/workoutLog';
 import { CoachProfileProvider } from '../src/ui/coachProfile';
 import { RosterProvider } from '../src/ui/roster';
 import { HabitsProvider } from '../src/ui/habits';
+import { AuthProvider } from '../src/ui/auth';
 import { ErrorBoundary } from '../src/ui/ErrorBoundary';
 import { AppThemeProvider, useTheme } from '../src/ui/components';
 
@@ -19,6 +20,7 @@ export default function RootLayout() {
   return (
     <SafeAreaProvider>
       <AppThemeProvider>
+        <AuthProvider>
         <ClientDataProvider>
           <WearablesProvider>
             <SessionsProvider>
@@ -36,6 +38,7 @@ export default function RootLayout() {
             </SessionsProvider>
           </WearablesProvider>
         </ClientDataProvider>
+        </AuthProvider>
       </AppThemeProvider>
     </SafeAreaProvider>
   );
