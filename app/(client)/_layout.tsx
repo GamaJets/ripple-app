@@ -53,6 +53,7 @@ export default function ClientLayout() {
       <Tabs.Screen name="settings" options={{ href: null, title: 'Settings' }} />
       <Tabs.Screen name="cards" options={{ href: null, title: 'Milestone Cards' }} />
       <Tabs.Screen name="consistency" options={{ href: null, title: 'Consistency' }} />
+      <Tabs.Screen name="standards" options={{ href: null, title: 'Strength Standards' }} />
     </Tabs>
   );
 }
