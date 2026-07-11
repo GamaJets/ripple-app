@@ -8,10 +8,11 @@ import type { Theme } from '../../src/theme/tokens';
 import { buildProgram, type ProgramExercise } from '../../src/lib/programs';
 import { useClientData } from '../../src/ui/clientData';
 import { useWearables } from '../../src/ui/wearables';
-import { MOCK_CLIENT, type WorkoutEntry } from '../../src/lib/mockData';
+import type { WorkoutEntry } from '../../src/lib/mockData';
 import { suggestForExercise, priorBest1RM } from '../../src/lib/progression';
 import { est1RM } from '../../src/lib/streaks';
 import { Confetti } from '../../src/ui/Confetti';
+import { useWorkoutLog } from '../../src/ui/workoutLog';
 
 const WEEK = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const CARDIO = ['Treadmill / Run', 'Cycling', 'Rowing', 'Ski erg', 'Elliptical', 'Swim', 'Walk', 'Stairs'];
@@ -20,6 +21,7 @@ export default function Train() {
   const t = useTheme();
   const cd = useClientData();
   const w = useWearables();
+  const { log: workoutLog, addWorkouts } = useWorkoutLog();
   const program = buildProgram(cd.goal, cd.bodyFatPct);
   const jsToMon = (new Date().getDay() + 6) % 7;
   const [dayIdx, setDayIdx] = useState(jsToMon);
@@ -38,7 +40,7 @@ export default function Train() {
   const dateFor = (i: number) => { const d = new Date(monday0); d.setDate(monday0.getDate() + i); return d; };
   const pad2 = (n: number) => String(n).padStart(2, '0');
   const dstr = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-  const workedDates = new Set(MOCK_CLIENT.log.map((l) => dstr(new Date(l.t))));
+  const workedDates = new Set(workoutLog.map((l) => dstr(new Date(l.t))));
   Object.keys(logged).forEach((k) => { if ((logged[k] || []).length) workedDates.add(dstr(dateFor(parseInt(k.split(':')[0], 10)))); });
   if (cardioLog.length) workedDates.add(dstr(today0));
   const calMonth = monday0.getMonth(), calYear = monday0.getFullYear();
@@ -48,7 +50,7 @@ export default function Train() {
 
   // Day-detail for the month view: which workouts were performed on the tapped day.
   const activeCalDay = selCalDay || dstr(today0);
-  const dayEntries = MOCK_CLIENT.log.filter((l) => dstr(new Date(l.t)) === activeCalDay);
+  const dayEntries = workoutLog.filter((l) => dstr(new Date(l.t)) === activeCalDay);
   const dayVolume = dayEntries.reduce((a, l) => a + (l.sets ? l.sets.reduce((x: number, s: number[]) => x + (s[0] || 0) * (s[1] || 0), 0) : 0), 0);
   const daySets = dayEntries.reduce((a, l) => a + (l.sets ? l.sets.length : 0), 0);
   const dayKcal = dayEntries.reduce((a, l) => a + (l.kcal || 0), 0);
@@ -87,7 +89,7 @@ export default function Train() {
         {/* What you did on the selected weekday */}
         {(() => {
           const selDayStr = dstr(dateFor(dayIdx));
-          const entries = MOCK_CLIENT.log.filter((l) => dstr(new Date(l.t)) === selDayStr);
+          const entries = workoutLog.filter((l) => dstr(new Date(l.t)) === selDayStr);
           if (entries.length === 0) return null;
           return (
             <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.brand, padding: 14, marginBottom: 14 }}>
@@ -122,7 +124,7 @@ export default function Train() {
             </View>
             {workout.exercises.map((e) => {
               const sets = logged[uid(e)] || []; const done = sets.length >= e.sets;
-              const sug = suggestForExercise(MOCK_CLIENT.log, nameOf(e), e.reps);
+              const sug = suggestForExercise(workoutLog, nameOf(e), e.reps);
               return (
                 <View key={e.key} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: done ? t.brand : t.ring, padding: 15, marginBottom: 10 }}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -268,7 +270,7 @@ export default function Train() {
       </Modal>
 
       <Modal visible={session} animationType="slide" onRequestClose={() => setSession(false)}>
-        <SessionRunner t={t} exercises={workout.exercises} focus={workout.focus} nameOf={nameOf} liveHr={w.today.heartRateAvg} log={MOCK_CLIENT.log} onClose={() => setSession(false)} />
+        <SessionRunner t={t} exercises={workout.exercises} focus={workout.focus} nameOf={nameOf} liveHr={w.today.heartRateAvg} log={workoutLog} onComplete={addWorkouts} onClose={() => setSession(false)} />
       </Modal>
     </SafeAreaView>
   );
@@ -287,7 +289,7 @@ function LogRow({ t, onLog }: { t: Theme; onLog: (reps: string, kg: string) => v
 }
 
 // ── Guided session runner: one exercise at a time, rest timer, live HR, summary ──
-function SessionRunner({ t, exercises, focus, nameOf, liveHr, log, onClose }: { t: Theme; exercises: ProgramExercise[]; focus: string; nameOf: (e: ProgramExercise) => string; liveHr: number | null; log: WorkoutEntry[]; onClose: () => void }) {
+function SessionRunner({ t, exercises, focus, nameOf, liveHr, log, onComplete, onClose }: { t: Theme; exercises: ProgramExercise[]; focus: string; nameOf: (e: ProgramExercise) => string; liveHr: number | null; log: WorkoutEntry[]; onComplete: (entries: WorkoutEntry[]) => void; onClose: () => void }) {
   const insets = useSafeAreaInsets();
   const topPad = Math.max(insets.top, 44);
   const [idx, setIdx] = useState(0);
@@ -327,7 +329,20 @@ function SessionRunner({ t, exercises, focus, nameOf, liveHr, log, onClose }: { 
     setResults((prev) => { const n = prev.map((a) => [...a]); n[idx].push({ reps: r, kg: wkg }); return n; });
     setReps(''); setKg(''); setRest(90);
   };
-  const next = () => { if (idx < exercises.length - 1) { setIdx(idx + 1); setRest(0); } else { setFinished(true); setConfetti(true); } };
+  const finish = () => {
+    const nowISO = new Date().toISOString();
+    const entries: WorkoutEntry[] = results
+      .map((sets, i) => (sets.length ? {
+        t: nowISO,
+        exercise: nameOf(exercises[i]),
+        sets: sets.map((s) => [s.reps, s.kg]) as [number, number][],
+        kcal: Math.round(sets.reduce((a, s) => a + s.reps * (s.kg || 0), 0) / 60) + sets.length * 8,
+      } : null))
+      .filter(Boolean) as WorkoutEntry[];
+    onComplete(entries);
+    setFinished(true); setConfetti(true);
+  };
+  const next = () => { if (idx < exercises.length - 1) { setIdx(idx + 1); setRest(0); } else finish(); };
   const inp = { color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 12, fontSize: 16, flex: 1 } as const;
 
   if (finished) {

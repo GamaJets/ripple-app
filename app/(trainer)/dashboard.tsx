@@ -5,8 +5,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
-import { MOCK_TRAINER, MOCK_CLIENT } from '../../src/lib/mockData';
+import { MOCK_TRAINER } from '../../src/lib/mockData';
 import { ROSTER, type RosterClient } from '../../src/lib/trainerMock';
+import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { currentStreak, longestStreak, personalRecords, weekStats } from '../../src/lib/streaks';
 
 function Stat({ t, label, value, unit }: { t: Theme; label: string; value: string; unit?: string }) {
@@ -35,7 +36,7 @@ export default function TrainerClients() {
 
   // Live training data is available for the demo client (c1).
   const hasLog = sel?.id === 'c1';
-  const log = MOCK_CLIENT.log;
+  const { log } = useWorkoutLog();
   const streak = hasLog ? currentStreak(log) : 0;
   const best = hasLog ? longestStreak(log) : 0;
   const wk = hasLog ? weekStats(log) : null;

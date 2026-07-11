@@ -3,6 +3,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ClientDataProvider } from '../src/ui/clientData';
 import { WearablesProvider } from '../src/ui/wearables';
 import { SessionsProvider } from '../src/ui/sessions';
+import { WorkoutLogProvider } from '../src/ui/workoutLog';
 import { AppThemeProvider, useTheme } from '../src/ui/components';
 
 function ThemedStack() {
@@ -17,7 +18,9 @@ export default function RootLayout() {
         <ClientDataProvider>
           <WearablesProvider>
             <SessionsProvider>
-              <ThemedStack />
+              <WorkoutLogProvider>
+                <ThemedStack />
+              </WorkoutLogProvider>
             </SessionsProvider>
           </WearablesProvider>
         </ClientDataProvider>

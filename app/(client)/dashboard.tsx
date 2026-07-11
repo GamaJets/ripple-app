@@ -10,7 +10,7 @@ import { ageFromDob } from '../../src/lib/age';
 import { seriesDelta } from '../../src/lib/format';
 import { useClientData } from '../../src/ui/clientData';
 import { TrendChart } from '../../src/ui/Chart';
-import { MOCK_CLIENT } from '../../src/lib/mockData';
+import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { currentStreak, longestStreak, personalRecords, weekStats, streakMilestone } from '../../src/lib/streaks';
 import { Confetti } from '../../src/ui/Confetti';
 
@@ -54,8 +54,8 @@ export default function Dashboard() {
   const dW = seriesDelta(c.weightSeries.map((x) => x.v));
   const goalLabel: Record<string, string> = { fatloss: 'Fat loss', tone: 'Tone', muscle: 'Build muscle' };
 
-  // Gamification: streak, personal records, this-week totals.
-  const log = MOCK_CLIENT.log;
+  // Gamification: streak, personal records, this-week totals (reactive log).
+  const { log } = useWorkoutLog();
   const streak = currentStreak(log);
   const longest = longestStreak(log);
   const prs = personalRecords(log).slice(0, 3);
