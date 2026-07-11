@@ -4,6 +4,7 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { usePlatformTrainers } from '../../src/ui/trainers';
+import { PLANS } from '../../src/lib/ownerMock';
 function Big({ t, label, value, sub, tint }: { t: Theme; label: string; value: string; sub: string; tint?: boolean }) {
   return (<View style={{ flex: 1, backgroundColor: tint ? t.brand : t.surface, borderRadius: 18, borderWidth: 1, borderColor: t.ring, padding: 16 }}>
     <Text style={{ color: tint ? t.brandInk : t.ink3, fontSize: 12, fontWeight: '700', opacity: tint ? 0.85 : 1 }}>{label}</Text>
@@ -15,6 +16,8 @@ export default function OwnerOverview() {
   const { trainers, activeMrr } = usePlatformTrainers();
   const mrr = activeMrr;
   const clients = trainers.reduce((a, x) => a + x.clients, 0);
+  const byPlan = PLANS.map((p) => ({ name: p.name, revenue: trainers.filter((x) => x.plan === p.name && x.status !== 'suspended').reduce((a, x) => a + x.mrr, 0) }));
+  const maxPlan = Math.max(1, ...byPlan.map((p) => p.revenue));
   const months = [['Feb', 0.3], ['Mar', 0.42], ['Apr', 0.55], ['May', 0.7], ['Jun', 0.85], ['Jul', 1]] as const;
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
@@ -31,6 +34,16 @@ export default function OwnerOverview() {
           <Big t={t} label="End clients" value={String(clients)} sub="across all trainers" />
           <Big t={t} label="ARR" value={'$' + (mrr * 12).toLocaleString()} sub="annualised" />
         </View>
+        <View style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18, marginBottom: 16 }}>
+          <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16, textTransform: 'capitalize', marginBottom: 14 }}>Revenue by plan</Text>
+          {byPlan.map((p) => (
+            <View key={p.name} style={{ marginBottom: 12 }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 }}><Text style={{ color: t.ink2, fontSize: 13, fontWeight: '600' }}>{p.name}</Text><Text style={{ color: t.ink, fontSize: 13, fontWeight: '700' }}>${p.revenue}/mo</Text></View>
+              <View style={{ height: 10, borderRadius: 5, backgroundColor: t.surface3, overflow: 'hidden' }}><View style={{ height: 10, borderRadius: 5, backgroundColor: t.brand, width: `${Math.round((p.revenue / maxPlan) * 100)}%` }} /></View>
+            </View>
+          ))}
+        </View>
+
         <View style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18 }}>
           <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16, textTransform: 'capitalize', marginBottom: 14 }}>MRR growth</Text>
           <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 10, height: 90 }}>
