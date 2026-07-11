@@ -20,16 +20,16 @@ export function AppThemeProvider({ children }: { children: ReactNode }) {
   useEffect(() => { (async () => {
     try {
       const p = await AsyncStorage.getItem('repple.palette');
-      const a = await AsyncStorage.getItem('repple.accent');
+      const a = await AsyncStorage.getItem('repple.accent.v2');
       if (p) setPaletteState(p);
       if (a) setAccentState(a);
     } catch {}
   })(); }, []);
-  const setPalette = (k: string) => { setPaletteState(k); AsyncStorage.setItem('repple.palette', k).catch(() => {}); };
+  const setPalette = (k: string) => { setPaletteState(k); setAccentState(null); AsyncStorage.setItem('repple.palette', k).catch(() => {}); AsyncStorage.removeItem('repple.accent.v2').catch(() => {}); };
   const setAccent = (c: string | null) => {
     setAccentState(c);
-    if (c) AsyncStorage.setItem('repple.accent', c).catch(() => {});
-    else AsyncStorage.removeItem('repple.accent').catch(() => {});
+    if (c) AsyncStorage.setItem('repple.accent.v2', c).catch(() => {});
+    else AsyncStorage.removeItem('repple.accent.v2').catch(() => {});
   };
   const base = paletteByKey(palette);
   const theme: Theme = accent ? { ...base, brand: accent, brandInk: brandInkFor(accent) } : base;
