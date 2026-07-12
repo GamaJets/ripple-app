@@ -5,6 +5,7 @@
 // on launch. Screens are unchanged — they just read { authed, user }.
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { USE_SUPABASE } from '../lib/config';
+import { registerForPush } from './pushNotifications';
 import {
   supabase,
   signIn as sbSignIn,
@@ -52,6 +53,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch { /* profile row may not exist yet — fall back to auth metadata */ }
     const next: AuthUser = { id: u.id, name, email: u.email || '', role };
     setUser(next);
+    registerForPush().catch(() => {});
     return next;
   }
 

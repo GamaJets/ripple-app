@@ -51,6 +51,12 @@
           "healthSharePermission": "Repple reads your heart rate, calories, steps and workouts to track your training.",
           "healthUpdatePermission": "Repple writes completed workouts to Apple Health."
         }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#16b8a6"
+        }
       ]
     ],
     "extra": {

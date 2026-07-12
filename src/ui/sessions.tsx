@@ -7,6 +7,7 @@ import { createContext, useContext, useState } from 'react';
 import { MOCK_SESSIONS } from '../lib/mockData';
 import { overlaps } from '../lib/booking';
 import type { TrainingSession } from '../lib/types';
+import { scheduleLocal } from './pushNotifications';
 
 interface SessionsValue {
   sessions: TrainingSession[];
@@ -28,8 +29,15 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
     setSessions((p) => [...p, s]);
     return { ok: true };
   };
-  const bookSession: SessionsValue['bookSession'] = (id, clientId) =>
+  const bookSession: SessionsValue['bookSession'] = (id, clientId) => {
     setSessions((p) => p.map((x) => (x.id === id ? { ...x, status: 'booked', clientId, released: false } : x)));
+    const s = sessions.find((x) => x.id === id);
+    if (s && s.startsAt) {
+      const start = new Date(s.startsAt);
+      const remind = new Date(start.getTime() - 60 * 60 * 1000);
+      scheduleLocal('Session in 1 hour', 'Your training session starts at ' + start.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) + '.', remind);
+    }
+  };
   const releaseSession: SessionsValue['releaseSession'] = (id) =>
     setSessions((p) => p.map((x) => (x.id === id ? { ...x, status: 'available', clientId: null, released: true } : x)));
   const removeSession: SessionsValue['removeSession'] = (id) =>
