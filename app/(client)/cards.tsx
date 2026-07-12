@@ -1,10 +1,11 @@
 // Client · Milestone Cards. Branded, screenshot-ready cards for streak, top PR,
 // and weight change. Uses the tenant brand (colour + app name). Profile hub.
 import { useState } from 'react';
-import { View, Text, Pressable, ScrollView } from 'react-native';
+import { View, Text, Pressable, ScrollView, Share, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
+import { Icon } from '../../src/ui/Icon';
 import type { Theme } from '../../src/theme/tokens';
 import { useClientData } from '../../src/ui/clientData';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
@@ -47,6 +48,14 @@ export default function Cards() {
  { kicker: 'Progress', big: `${wDelta > 0 ? '+' : ''}${wDelta}`, unit: 'kg', sub: `Since you started `, available: w.length > 1 },
  ];
  const card = cards[idx];
+ const shareText = (i: number) => {
+   if (i === 0) return `${streak}-day training streak on ${appName} (best: ${best}). Every rep ripples out.`;
+   if (i === 1) return topPr ? `New milestone on ${appName}: ${topPr.exercise} — estimated 1RM ${topPr.est1RM}kg. The work is working.` : `Chasing my first PR on ${appName}.`;
+   return `${wDelta > 0 ? '+' : ''}${wDelta}kg since I started with ${appName}. Progress you can measure.`;
+ };
+ const shareCard = async () => {
+   try { await Share.share({ message: shareText(idx) }); } catch { Alert.alert('Could not open share', 'Try screenshotting the card instead.'); }
+ };
 
  return (
  <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
@@ -67,10 +76,14 @@ export default function Cards() {
 
  <Card t={t} appName={appName} kicker={card.kicker} big={card.big} unit={card.unit} sub={card.sub} />
 
- <Pressable onPress={() => router.push('/(client)/social')} style={{ backgroundColor: t.brand, borderRadius: 14, paddingVertical: 15, alignItems: 'center' }}>
- <Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 15 }}> Share this card</Text>
+ <Pressable onPress={shareCard} accessibilityRole="button" accessibilityLabel={`Share ${card.kicker} card`} style={{ backgroundColor: t.brand, borderRadius: 14, paddingVertical: 15, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8 }}>
+ <Icon name="share" size={17} color={t.brandInk} />
+ <Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 15 }}>Share this card</Text>
  </Pressable>
- <Text style={{ color: t.ink3, fontSize: 12, textAlign: 'center', marginTop: 10 }}>Tip: screenshot the card above to post it anywhere.</Text>
+ <Pressable onPress={() => router.push('/(client)/social')} style={{ paddingVertical: 12, alignItems: 'center', marginTop: 4 }}>
+ <Text style={{ color: t.ink3, fontWeight: '700', fontSize: 13 }}>Connect Instagram / TikTok ›</Text>
+ </Pressable>
+ <Text style={{ color: t.ink3, fontSize: 12, textAlign: 'center', marginTop: 6 }}>Tip: screenshot the card above to post the visual too.</Text>
  </ScrollView>
  </SafeAreaView>
  );
