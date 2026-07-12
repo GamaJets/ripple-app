@@ -1,9 +1,10 @@
 // Owner · Operations. Announcements to trainers, support inbox, activity log.
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
 import { useOwnerOps } from '../../src/ui/ownerOps';
+import { fetchAllFeedback, type FeedbackRow } from '../../src/ui/appFeedback';
 import { usePlatformTrainers } from '../../src/ui/trainers';
 
 function ago(iso: string) {
@@ -15,6 +16,13 @@ function ago(iso: string) {
 export default function OwnerOps() {
   const t = useTheme();
   const { anns, addAnn, tickets, resolveTicket, activity, openTickets } = useOwnerOps();
+  const [fbRows, setFbRows] = useState<FeedbackRow[]>([]);
+  const [localResolved, setLocalResolved] = useState<Record<string, boolean>>({});
+  useEffect(() => { let c = false; (async () => { const d = await fetchAllFeedback(); if (!c) setFbRows(d); })(); return () => { c = true; }; }, []);
+  const fbTickets = fbRows.map((r) => ({ id: 'fb' + r.id, subject: (r.category || 'Feedback') + (r.rating ? ' · ' + '★'.repeat(r.rating) : ''), from: (r.role || 'Client') + (r.appVersion ? ' · v' + r.appVersion : ''), body: r.body, resolved: !!localResolved['fb' + r.id] }));
+  const allTickets = [...fbTickets, ...tickets];
+  const resolveAny = (id: string) => { if (id.startsWith('fb')) setLocalResolved((p) => ({ ...p, [id]: true })); else resolveTicket(id); };
+  const openCount = allTickets.filter((x) => !x.resolved).length;
   const { events } = usePlatformTrainers();
   const feed = [...events, ...activity].sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
   const [tab, setTab] = useState<'announce' | 'support' | 'activity'>('announce');
@@ -28,7 +36,7 @@ export default function OwnerOps() {
         <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 16 }}>Talk to trainers · support · platform activity</Text>
 
         <View style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: 10, padding: 3, marginBottom: 16, borderWidth: 1, borderColor: t.ring }}>
-          {([['announce', 'Announce'], ['support', `Support${openTickets ? ' (' + openTickets + ')' : ''}`], ['activity', 'Activity']] as const).map(([k, label]) => (
+          {([['announce', 'Announce'], ['support', `Support${openCount ? ' (' + openCount + ')' : ''}`], ['activity', 'Activity']] as const).map(([k, label]) => (
             <Pressable key={k} onPress={() => setTab(k)} style={{ flex: 1, paddingVertical: 9, borderRadius: 8, alignItems: 'center', backgroundColor: tab === k ? t.brand : 'transparent' }}>
               <Text style={{ color: tab === k ? t.brandInk : t.ink3, fontWeight: '700', fontSize: 12 }}>{label}</Text>
             </Pressable>
@@ -48,7 +56,7 @@ export default function OwnerOps() {
           </View>
         ) : tab === 'support' ? (
           <View>
-            {tickets.map((tk) => {
+            {allTickets.map((tk) => {
               const open = openT === tk.id;
               return (
                 <View key={tk.id} style={{ backgroundColor: t.surface, borderRadius: 14, borderWidth: 1, borderColor: tk.resolved ? t.ring : t.brand, padding: 14, marginBottom: 9, opacity: tk.resolved ? 0.6 : 1 }}>
@@ -63,7 +71,7 @@ export default function OwnerOps() {
                     <View style={{ marginTop: 10 }}>
                       <Text style={{ color: t.ink2, fontSize: 13, lineHeight: 19 }}>{tk.body}</Text>
                       {!tk.resolved ? (
-                        <Pressable onPress={() => resolveTicket(tk.id)} style={{ backgroundColor: t.brand, borderRadius: 10, paddingVertical: 10, alignItems: 'center', marginTop: 10 }}><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 13 }}>Mark resolved</Text></Pressable>
+                        <Pressable onPress={() => resolveAny(tk.id)} style={{ backgroundColor: t.brand, borderRadius: 10, paddingVertical: 10, alignItems: 'center', marginTop: 10 }}><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 13 }}>Mark resolved</Text></Pressable>
                       ) : null}
                     </View>
                   ) : null}
