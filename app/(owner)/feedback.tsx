@@ -1,6 +1,6 @@
 // Owner feedback inbox — every tester's in-app feedback, newest first.
 import { useEffect, useState } from 'react';
-import { View, Text, Pressable, ScrollView } from 'react-native';
+import { View, Text, Pressable, ScrollView, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -17,22 +17,21 @@ export default function OwnerFeedback() {
   const [loading, setLoading] = useState(true);
   const [errors, setErrors] = useState<AppErrorRow[]>([]);
   const [showErr, setShowErr] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const [data, errs] = await Promise.all([fetchAllFeedback(), fetchAppErrors(20)]);
-      if (!cancelled) { setRows(data); setErrors(errs); setLoading(false); }
-    })();
-    return () => { cancelled = true; };
-  }, []);
+  const load = async () => {
+    const [data, errs] = await Promise.all([fetchAllFeedback(), fetchAppErrors(20)]);
+    setRows(data); setErrors(errs); setLoading(false);
+  };
+  useEffect(() => { let cancelled = false; (async () => { if (!cancelled) await load(); })(); return () => { cancelled = true; }; }, []);
+  const onRefresh = async () => { setRefreshing(true); await load(); setRefreshing(false); };
 
   const fmt = (iso: string) => { try { return new Date(iso).toLocaleDateString(); } catch { return ''; } };
   const avg = rows.filter((r) => r.rating).length ? (rows.reduce((a, r) => a + (r.rating || 0), 0) / rows.filter((r) => r.rating).length) : 0;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={t.brand} />}>
         <Pressable onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Go back" style={{ marginBottom: 8 }}>
           <Text style={{ color: t.brand, fontWeight: '700', fontSize: 15 }}>‹ Back</Text>
         </Pressable>
