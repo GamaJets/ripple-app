@@ -9,6 +9,7 @@ import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { buildPlan, swapIndex, groceryData, DEPTS, DEPT_ICO, ALLERGENS, type PlannedMeal } from '../../src/lib/meals';
 import { mealPlanDoc, shareDoc } from '../../src/lib/exportShare';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Diet, Goal } from '../../src/lib/types';
 import { useClientData } from '../../src/ui/clientData';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
@@ -57,6 +58,8 @@ export default function Nutrition() {
   const [override, setOverride] = useState<Record<number, number>>({});
   const [recipe, setRecipe] = useState<PlannedMeal | null>(null);
   const [showGrocery, setShowGrocery] = useState(false);
+  const [checked, setChecked] = useState<Record<string, boolean>>({});
+  useEffect(() => { AsyncStorage.getItem('repple.grocery.checked').then((r) => { if (r) { try { setChecked(JSON.parse(r)); } catch { /* ignore */ } } }); }, []);
   const [view, setView] = useState<'today' | 'week'>('today');
   const [dayType, setDayType] = useState<'training' | 'rest' | 'off'>('off');
   const [batch, setBatch] = useState(1);
@@ -105,6 +108,20 @@ export default function Nutrition() {
   const swap = (pos: number, slot: PlannedMeal['slot'], idx: number) => setOverride({ ...override, [pos]: swapIndex(diet, slot, idx) });
   const groc = groceryData(input);
   const grocCount = DEPTS.reduce((a, d) => a + (groc.byDept[d]?.length ?? 0), 0);
+  const grocKeys = DEPTS.flatMap((d) => (groc.byDept[d] || []).map((it) => d + '|' + it.item));
+  const grocChecked = grocKeys.filter((k) => checked[k]).length;
+  const toggleGroc = (k: string) => setChecked((prev) => { const n = { ...prev, [k]: !prev[k] }; AsyncStorage.setItem('repple.grocery.checked', JSON.stringify(n)); return n; });
+  const shareGrocery = async () => {
+    const lines: string[] = ['Grocery list', ''];
+    let html = '<h2>Grocery list</h2>';
+    DEPTS.filter((d) => groc.byDept[d]?.length).forEach((d) => {
+      lines.push(d.toUpperCase());
+      html += '<h3>' + d + '</h3><ul>';
+      groc.byDept[d]!.forEach((it) => { const q = it.qty + (it.unit ? ' ' + it.unit : ''); lines.push('- ' + it.item + ' — ' + q); html += '<li>' + it.item + ' — ' + q + '</li>'; });
+      html += '</ul>'; lines.push('');
+    });
+    await shareDoc(html, lines.join('\n'), 'Grocery list');
+  };
   const WEEKD = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
   const sharePlan = async () => {
     const rows = plan.map((m) => ({ slot: m.slot, name: m.n, K: m.K, P: m.P, C: m.C, F: m.F }));
@@ -370,21 +387,35 @@ export default function Nutrition() {
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, borderColor: t.ring, maxHeight: '82%' }}>
           <ScrollView contentContainerStyle={{ padding: 20 }}>
             <Text style={{ color: t.ink, fontSize: 21, fontWeight: '700', fontFamily: SERIF, marginBottom: 4 }}>Grocery list</Text>
-            <Text style={{ color: t.ink3, fontSize: 13, marginBottom: 16 }}>This week · {DIET_LABEL[diet]} · sorted by aisle</Text>
+            <Text style={{ color: t.ink3, fontSize: 13, marginBottom: 10 }}>This week · {DIET_LABEL[diet]} · sorted by aisle</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+              <View style={{ flex: 1, height: 7, backgroundColor: t.surface2, borderRadius: 4, marginRight: 12, overflow: 'hidden' }}>
+                <View style={{ width: (grocCount ? Math.round((grocChecked / grocCount) * 100) : 0) + '%', height: 7, backgroundColor: t.brand }} />
+              </View>
+              <Text style={{ color: t.ink2, fontSize: 12, fontWeight: '700' }}>{grocChecked}/{grocCount} in cart</Text>
+            </View>
             {DEPTS.filter((d) => groc.byDept[d]?.length).map((d) => (
               <View key={d} style={{ marginBottom: 16 }}>
                 <Text style={{ color: t.ink, fontWeight: '700', fontSize: 14, marginBottom: 6 }}>{DEPT_ICO[d]} {d}</Text>
-                {groc.byDept[d]!.map((it, i) => (
-                  <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 5, borderBottomWidth: 1, borderBottomColor: t.ring }}>
-                    <Text style={{ color: t.ink2, fontSize: 14 }}>{it.item}</Text>
-                    <Text style={{ color: t.ink, fontSize: 13, fontWeight: '600' }}>{it.qty}{it.unit ? ' ' + it.unit : ''}</Text>
-                  </View>
-                ))}
+                {groc.byDept[d]!.map((it, i) => { const k = d + '|' + it.item; const on = !!checked[k]; return (
+                  <Pressable key={i} onPress={() => toggleGroc(k)} accessibilityRole="checkbox" accessibilityState={{ checked: on }} accessibilityLabel={it.item} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: t.ring }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+                      <View style={{ width: 20, height: 20, borderRadius: 6, borderWidth: 1.5, borderColor: on ? t.brand : t.ring, backgroundColor: on ? t.brand : 'transparent', alignItems: 'center', justifyContent: 'center' }}>{on ? <Icon name="check" size={13} color={t.brandInk} /> : null}</View>
+                      <Text style={{ color: on ? t.ink3 : t.ink2, fontSize: 14, textDecorationLine: on ? 'line-through' : 'none', flex: 1 }}>{it.item}</Text>
+                    </View>
+                    <Text style={{ color: on ? t.ink3 : t.ink, fontSize: 13, fontWeight: '600', textDecorationLine: on ? 'line-through' : 'none' }}>{it.qty}{it.unit ? ' ' + it.unit : ''}</Text>
+                  </Pressable>
+                ); })}
               </View>
             ))}
-            <Pressable onPress={() => setShowGrocery(false)} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingVertical: 14, alignItems: 'center' }}>
-              <Text style={{ color: t.ink, fontWeight: '700' }}>Close</Text>
-            </Pressable>
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              <Pressable onPress={shareGrocery} accessibilityLabel="Share grocery list" style={{ flex: 1, backgroundColor: t.brand, borderRadius: 12, paddingVertical: 14, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8 }}>
+                <Icon name="share" size={15} color={t.brandInk} /><Text style={{ color: t.brandInk, fontWeight: '800' }}>Share list</Text>
+              </Pressable>
+              <Pressable onPress={() => setShowGrocery(false)} style={{ flex: 1, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingVertical: 14, alignItems: 'center' }}>
+                <Text style={{ color: t.ink, fontWeight: '700' }}>Close</Text>
+              </Pressable>
+            </View>
           </ScrollView>
         </View>
       </Modal>
