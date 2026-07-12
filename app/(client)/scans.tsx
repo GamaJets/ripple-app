@@ -12,6 +12,7 @@ import { useClientData } from '../../src/ui/clientData';
 import { macrosFor } from '../../src/lib/nutrition';
 import { progressDoc, shareDoc } from '../../src/lib/exportShare';
 import { useRouter } from 'expo-router';
+import { useBrand } from '../../src/ui/brand';
 import { TrendChart } from '../../src/ui/Chart';
 import { Icon } from '../../src/ui/Icon';
 import { analyzeInBody, analyzePhysique, visionAvailable, type PhysiqueVision } from '../../src/lib/vision';
@@ -88,9 +89,10 @@ export default function Scans() {
   const t = useTheme();
   const router = useRouter();
   const cd = useClientData();
+  const { appName } = useBrand();
   const shareProgress = async () => {
     const rows = [...cd.scans].sort((a, b) => Date.parse(a.takenAt) - Date.parse(b.takenAt)).map((sc) => ({ date: new Date(sc.takenAt).toLocaleDateString(), weightKg: sc.weightKg, bodyFatPct: sc.bodyFatPct, muscleKg: sc.skeletalMuscleKg }));
-    const { html, text } = progressDoc(cd.name, rows);
+    const { html, text } = progressDoc(cd.name, rows, appName);
     await shareDoc(html, text, 'Progress');
   };
   const scans = cd.scans;

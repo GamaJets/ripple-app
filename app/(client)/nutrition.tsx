@@ -14,6 +14,7 @@ import { useClientData } from '../../src/ui/clientData';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
 import { Icon } from '../../src/ui/Icon';
 import { useRouter } from 'expo-router';
+import { useBrand } from '../../src/ui/brand';
 import * as ImagePicker from 'expo-image-picker';
 import { analyzeMeal, visionAvailable } from '../../src/lib/vision';
 import { parseFoodText, foodAIAvailable } from '../../src/lib/foodAI';
@@ -46,6 +47,7 @@ export default function Nutrition() {
   const t = useTheme();
   const c = useClientData();
   const router = useRouter();
+  const { appName } = useBrand();
   const _adj = useCoachNutrition().get(c.id);
   const coachAdjust = c.coachingMode === 'solo' ? null : _adj;
   const w = c.weightKg;
@@ -86,7 +88,7 @@ export default function Nutrition() {
   const sharePlan = async () => {
     const rows = plan.map((m) => ({ slot: m.slot, name: m.n, K: m.K, P: m.P, C: m.C, F: m.F }));
     const labels = c.avoid.map((a) => (ALLERGENS.find((x) => x.id === a)?.label ?? a));
-    const { html, text } = mealPlanDoc(c.name, target.kcal, rows, labels);
+    const { html, text } = mealPlanDoc(c.name, target.kcal, rows, labels, appName);
     await shareDoc(html, text, 'Meal plan');
   };
   const weekPlans = view === 'week' ? WEEKD.map((_, d) => { const ov: Record<number, number> = {}; plan.forEach((m) => { ov[m.pos] = m.idx + d; }); return buildPlan({ ...input, mealOverride: ov }); }) : [];

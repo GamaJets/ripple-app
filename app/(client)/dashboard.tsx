@@ -16,6 +16,7 @@ import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
 import { useCoachFeedback } from '../../src/ui/feedback';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
 import { useAnnouncements } from '../../src/ui/announcements';
+import { useHabits } from '../../src/ui/habits';
 import { useSessions } from '../../src/ui/sessions';
 import { useInvites } from '../../src/ui/invites';
 import { useFoodLog } from '../../src/ui/foodLog';
@@ -56,6 +57,7 @@ export default function Home() {
   const nutriAdjust = useCoachNutrition().get(c.id);
   const coachNotes = useCoachFeedback().getFeedback(c.id);
   const ann = useAnnouncements().latest;
+  const { water, waterGoal, addWater, removeWater } = useHabits();
   const { sessions } = useSessions();
   const { received: myInvites, acceptInvite: acceptCoachInvite, declineInvite: declineCoachInvite } = useInvites();
   const foodToday = useFoodLog().consumed;
@@ -198,6 +200,18 @@ export default function Home() {
           <View style={{ flexDirection: 'row', gap: 12 }}>
             <View style={{ flex: 1 }}>{macroBar('Carbs', consumed.cbs, macros.carbs, t.s1)}</View>
             <View style={{ flex: 1 }}>{macroBar('Fat', consumed.f, macros.fat, t.s3)}</View>
+          </View>
+        </View>
+
+        {/* water */}
+        <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 15, marginBottom: 11, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 11 }}>
+            <Icon name="water" size={20} color={t.brand} />
+            <View><Text style={{ color: t.ink, fontWeight: '800', fontSize: 14 }}>Water</Text><Text style={{ color: t.ink3, fontSize: 12 }}>{water} / {waterGoal} glasses</Text></View>
+          </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Pressable onPress={removeWater} style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: t.surface2, borderWidth: 1, borderColor: t.ring, alignItems: 'center', justifyContent: 'center' }}><Icon name="minus" size={16} color={t.ink2} /></Pressable>
+            <Pressable onPress={addWater} style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}><Icon name="plus" size={16} color={t.brandInk} /></Pressable>
           </View>
         </View>
 
