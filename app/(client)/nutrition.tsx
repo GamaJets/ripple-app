@@ -1,7 +1,7 @@
 // Meals — dense briefing that matches the approved mockup: serif header + gold
 // coach chip, calorie ring + macro bars hero, clean tappable meal cards, recipe
 // & grocery sheets. Meal-plan engine + swap + grocery logic unchanged.
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { View, Text, Pressable, ScrollView, Modal, TextInput, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Circle } from 'react-native-svg';
@@ -58,7 +58,11 @@ export default function Nutrition() {
   const [recipe, setRecipe] = useState<PlannedMeal | null>(null);
   const [showGrocery, setShowGrocery] = useState(false);
   const [view, setView] = useState<'today' | 'week'>('today');
+  const [batch, setBatch] = useState(1);
+  const [cook, setCook] = useState(false);
+  const [cookStep, setCookStep] = useState(0);
   const fl = useFoodLog();
+  useEffect(() => { setBatch(1); setCook(false); setCookStep(0); }, [recipe]);
   const [nl, setNl] = useState('');
   const [logBusy, setLogBusy] = useState(false);
   const [bcOpen, setBcOpen] = useState(false);
@@ -261,15 +265,28 @@ export default function Nutrition() {
             <ScrollView contentContainerStyle={{ padding: 20 }}>
               <Text style={{ color: t.brand, fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.8 }}>{recipe.slot}</Text>
               <Text style={{ color: t.ink, fontSize: 21, fontWeight: '700', fontFamily: SERIF, textTransform: 'capitalize', marginTop: 3 }}>{recipe.n}</Text>
-              <Text style={{ color: t.ink3, fontSize: 13, marginTop: 4, marginBottom: 14 }}>{recipe.K} kcal · P{recipe.P} / C{recipe.C} / F{recipe.F}</Text>
+              <Text style={{ color: t.ink3, fontSize: 13, marginTop: 4, marginBottom: 14 }}>{Math.round(recipe.K * batch)} kcal · P{Math.round(recipe.P * batch)} / C{Math.round(recipe.C * batch)} / F{Math.round(recipe.F * batch)}{batch > 1 ? '  · ' + batch + ' servings' : ''}</Text>
               <Pressable onPress={() => { swap(recipe.pos, recipe.slot, recipe.idx); setRecipe(null); }} style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 11, paddingVertical: 11, marginBottom: 16 }}>
                 <Icon name="swap" size={15} color={t.brand} /><Text style={{ color: t.ink, fontWeight: '700', fontSize: 14 }}>Swap this meal</Text>
               </Pressable>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+                <Text style={{ color: t.ink2, fontSize: 13, fontWeight: '700' }}>Servings</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 11, paddingHorizontal: 6, paddingVertical: 4 }}>
+                  <Pressable onPress={() => setBatch((b) => Math.max(1, b - 1))} style={{ width: 30, height: 30, borderRadius: 8, alignItems: 'center', justifyContent: 'center' }}><Icon name="minus" size={15} color={t.ink} /></Pressable>
+                  <Text style={{ color: t.ink, fontWeight: '800', fontSize: 16, minWidth: 18, textAlign: 'center' }}>{batch}</Text>
+                  <Pressable onPress={() => setBatch((b) => Math.min(8, b + 1))} style={{ width: 30, height: 30, borderRadius: 8, alignItems: 'center', justifyContent: 'center' }}><Icon name="plus" size={15} color={t.ink} /></Pressable>
+                </View>
+                {recipe.steps && recipe.steps.length > 0 ? (
+                  <Pressable onPress={() => { setCookStep(0); setCook(true); }} style={{ flex: 1, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 6, backgroundColor: t.brand, borderRadius: 11, paddingVertical: 11 }}>
+                    <Icon name="flame" size={15} color={t.brandInk} /><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 13 }}>Cook mode</Text>
+                  </Pressable>
+                ) : null}
+              </View>
               <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, marginBottom: 8 }}>Ingredients</Text>
               {recipe.ing.map((ing, i) => (
                 <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: t.ring }}>
                   <Text style={{ color: t.ink2, fontSize: 14 }}>{ing[0]}</Text>
-                  <Text style={{ color: t.ink, fontSize: 14, fontWeight: '600' }}>{Math.round(ing[1] * recipe.servings * 100) / 100}{ing[2] ? ' ' + ing[2] : ''}</Text>
+                  <Text style={{ color: t.ink, fontSize: 14, fontWeight: '600' }}>{Math.round(ing[1] * recipe.servings * batch * 100) / 100}{ing[2] ? ' ' + ing[2] : ''}</Text>
                 </View>
               ))}
               <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, marginTop: 18, marginBottom: 8 }}>Method</Text>
@@ -284,6 +301,43 @@ export default function Nutrition() {
               </Pressable>
             </ScrollView>
           )}
+        </View>
+      </Modal>
+
+      {/* Cook mode — one step at a time */}
+      <Modal visible={cook && !!recipe} transparent animationType="fade" onRequestClose={() => setCook(false)}>
+        <View style={{ flex: 1, backgroundColor: t.bg }}>
+          {recipe && recipe.steps && recipe.steps.length > 0 ? (
+            <View style={{ flex: 1, padding: 24, paddingTop: 60, justifyContent: 'space-between' }}>
+              <View>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+                  <Text style={{ color: t.ink3, fontSize: 13, fontWeight: '700', textTransform: 'capitalize' }}>{recipe.n}</Text>
+                  <Pressable onPress={() => setCook(false)} hitSlop={10}><Text style={{ color: t.ink3, fontWeight: '800', fontSize: 15 }}>Done</Text></Pressable>
+                </View>
+                <View style={{ flexDirection: 'row', gap: 5, marginBottom: 28 }}>
+                  {recipe.steps.map((_, i) => (
+                    <View key={i} style={{ flex: 1, height: 4, borderRadius: 2, backgroundColor: i <= cookStep ? t.brand : t.surface3 }} />
+                  ))}
+                </View>
+                <Text style={{ color: t.brand, fontSize: 13, fontWeight: '800', letterSpacing: 0.5, marginBottom: 10 }}>STEP {cookStep + 1} OF {recipe.steps.length}</Text>
+                <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', lineHeight: 36, fontFamily: SERIF }}>{recipe.steps[cookStep]}</Text>
+              </View>
+              <View style={{ flexDirection: 'row', gap: 12, marginBottom: 20 }}>
+                <Pressable onPress={() => setCookStep((x) => Math.max(0, x - 1))} disabled={cookStep === 0} style={{ flex: 1, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 14, paddingVertical: 16, alignItems: 'center', opacity: cookStep === 0 ? 0.4 : 1 }}>
+                  <Text style={{ color: t.ink, fontWeight: '800', fontSize: 15 }}>Back</Text>
+                </Pressable>
+                {cookStep < recipe.steps.length - 1 ? (
+                  <Pressable onPress={() => setCookStep((x) => x + 1)} style={{ flex: 2, backgroundColor: t.brand, borderRadius: 14, paddingVertical: 16, alignItems: 'center' }}>
+                    <Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 15 }}>Next step</Text>
+                  </Pressable>
+                ) : (
+                  <Pressable onPress={() => setCook(false)} style={{ flex: 2, backgroundColor: t.brand, borderRadius: 14, paddingVertical: 16, alignItems: 'center' }}>
+                    <Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 15 }}>Finish ✓</Text>
+                  </Pressable>
+                )}
+              </View>
+            </View>
+          ) : null}
         </View>
       </Modal>
 
