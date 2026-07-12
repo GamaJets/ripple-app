@@ -167,6 +167,11 @@ export default function TrainerClients() {
   const wk = hasLog ? weekStats(log) : null;
   const prs = hasLog ? personalRecords(log).slice(0, 3) : [];
   const recent = hasLog ? log.slice(0, 4) : [];
+  const timeline = sel ? [
+    ...getNotes(sel.id).map((n) => ({ id: 'n' + n.id, at: n.at, body: n.body, kind: 'Note' as const })),
+    ...getFeedback(sel.id).map((fb) => ({ id: 'f' + fb.id, at: fb.at, body: fb.body, kind: 'Feedback' as const })),
+    ...(hasLog && latestCheckIn ? [{ id: 'ci', at: latestCheckIn.at, body: `Check-in: ${latestCheckIn.weightKg}kg · energy ${latestCheckIn.energy}/5 · sleep ${latestCheckIn.sleep}/5${latestCheckIn.note ? ' — “' + latestCheckIn.note + '”' : ''}`, kind: 'Check-in' as const }] : []),
+  ].sort((a, b) => Date.parse(b.at) - Date.parse(a.at)) : [];
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
@@ -438,6 +443,27 @@ export default function TrainerClients() {
                   {aiBusy ? <ActivityIndicator color={t.brand} /> : <Icon name="sparkle" size={15} color={t.brand} />}
                   <Text style={{ color: t.brand, fontWeight: '800', fontSize: 13 }}>{aiBusy ? 'Generating…' : aiSummary ? 'Regenerate summary' : 'Generate AI weekly summary'}</Text>
                 </Pressable>
+              </View>
+
+              <View style={{ marginBottom: 14 }}>
+                <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 7 }}>Timeline</Text>
+                {timeline.length === 0 ? (
+                  <Text style={{ color: t.ink3, fontSize: 13 }}>No history yet — notes, feedback and check-ins appear here.</Text>
+                ) : timeline.slice(0, 8).map((ev) => (
+                  <View key={ev.id} style={{ flexDirection: 'row', gap: 10, marginBottom: 10 }}>
+                    <View style={{ alignItems: 'center' }}>
+                      <View style={{ width: 9, height: 9, borderRadius: 5, marginTop: 4, backgroundColor: ev.kind === 'Note' ? t.ink3 : ev.kind === 'Feedback' ? t.brand : t.warn }} />
+                      <View style={{ flex: 1, width: 1, backgroundColor: t.ring, marginTop: 2 }} />
+                    </View>
+                    <View style={{ flex: 1, paddingBottom: 2 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                        <Text style={{ color: ev.kind === 'Feedback' ? t.brand : ev.kind === 'Check-in' ? t.warn : t.ink3, fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.4 }}>{ev.kind}</Text>
+                        <Text style={{ color: t.ink3, fontSize: 10 }}>{new Date(ev.at).toLocaleDateString()}</Text>
+                      </View>
+                      <Text style={{ color: t.ink2, fontSize: 13, lineHeight: 18 }}>{ev.body}</Text>
+                    </View>
+                  </View>
+                ))}
               </View>
 
               <View style={{ marginBottom: 14 }}>
