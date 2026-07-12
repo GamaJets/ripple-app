@@ -1,25 +1,43 @@
-// Nutrition — personalised meal plan (engine) with recipes, swaps & grocery list.
+// Meals — dense briefing that matches the approved mockup: serif header + gold
+// coach chip, calorie ring + macro bars hero, clean tappable meal cards, recipe
+// & grocery sheets. Meal-plan engine + swap + grocery logic unchanged.
 import { useState } from 'react';
 import { View, Text, Pressable, ScrollView, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import Svg, { Circle } from 'react-native-svg';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { buildPlan, swapIndex, groceryData, DEPTS, DEPT_ICO, type PlannedMeal } from '../../src/lib/meals';
 import type { Diet, Goal } from '../../src/lib/types';
 import { useClientData } from '../../src/ui/clientData';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
-import { useRouter } from 'expo-router';
 import { Icon } from '../../src/ui/Icon';
 
+const SERIF = 'Georgia';
 const DIETS: Diet[] = ['meat', 'vegetarian', 'vegan', 'paleo', 'keto'];
 const DIET_LABEL: Record<Diet, string> = { meat: 'Meat', vegetarian: 'Veggie', vegan: 'Vegan', paleo: 'Paleo', keto: 'Keto' };
 const GOALS: Goal[] = ['fatloss', 'tone', 'muscle'];
-const GOAL_LABEL: Record<Goal, string> = { fatloss: 'Fat Loss', tone: 'Tone', muscle: 'Build Muscle' };
+const GOAL_LABEL: Record<Goal, string> = { fatloss: 'Fat loss', tone: 'Tone', muscle: 'Build muscle' };
+
+function CalRing({ t, val, target }: { t: Theme; val: number; target: number }) {
+  const r = 34, c = 2 * Math.PI * r, frac = Math.max(0, Math.min(1, target ? val / target : 0));
+  return (
+    <View style={{ alignItems: 'center', justifyContent: 'center' }}>
+      <Svg width={86} height={86} viewBox="0 0 90 90">
+        <Circle cx="45" cy="45" r={r} fill="none" stroke={t.surface3} strokeWidth={9} />
+        <Circle cx="45" cy="45" r={r} fill="none" stroke={t.brand} strokeWidth={9} strokeLinecap="round" strokeDasharray={c} strokeDashoffset={c * (1 - frac)} transform="rotate(-90 45 45)" />
+      </Svg>
+      <View style={{ position: 'absolute', alignItems: 'center' }}>
+        <Text style={{ color: t.ink, fontSize: 17, fontWeight: '800' }}>{val.toLocaleString()}</Text>
+        <Text style={{ color: t.ink3, fontSize: 9 }}>/ {target.toLocaleString()}</Text>
+      </View>
+    </View>
+  );
+}
 
 export default function Nutrition() {
   const t = useTheme();
   const c = useClientData();
-  const router = useRouter();
   const coachAdjust = useCoachNutrition().get(c.id);
   const w = c.weightKg;
   const bf = c.bodyFatPct;
@@ -34,95 +52,108 @@ export default function Nutrition() {
   const groc = groceryData(input);
   const grocCount = DEPTS.reduce((a, d) => a + (groc.byDept[d]?.length ?? 0), 0);
 
+  const macroBar = (label: string, val: number, tgt: number, col: string) => (
+    <View style={{ marginBottom: 9 }}>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+        <Text style={{ color: t.ink3, fontSize: 11 }}>{label}</Text>
+        <Text style={{ color: t.ink2, fontSize: 11, fontWeight: '700' }}>{val}/{tgt}g</Text>
+      </View>
+      <View style={{ height: 6, borderRadius: 3, backgroundColor: t.surface3, marginTop: 4, overflow: 'hidden' }}>
+        <View style={{ height: 6, borderRadius: 3, backgroundColor: col, width: `${Math.min(100, Math.round((val / (tgt || 1)) * 100))}%` }} />
+      </View>
+    </View>
+  );
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
-        <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800', textTransform: 'capitalize' }}>Meal plan</Text>
-        <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 16 }}>Built for your body & goal · tap a meal for the recipe</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginTop: 4, marginBottom: 4 }}>
-          {([["meals","Food Log","/(client)/foodlog"],["water","Recovery","/(client)/recovery"],["settings","Macros","/(client)/tools"]] as const).map(([ic, label, route]) => (
-            <Pressable key={route} onPress={() => router.push(route as any)} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 8 }}>
-              <Icon name={ic} size={14} color={t.brand} /><Text style={{ color: t.ink2, fontWeight: '700', fontSize: 13 }}>{label}</Text>
-            </Pressable>
-          ))}
-        </ScrollView>
-        {coachAdjust ? (<View style={{ backgroundColor: t.surface, borderColor: t.brand, borderWidth: 1, borderRadius: 14, padding: 12, marginBottom: 14 }}><Text style={{ color: t.brand, fontSize: 11, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5 }}>🥗 Adjusted by your coach</Text>{coachAdjust.note ? <Text style={{ color: t.ink2, fontSize: 13, marginTop: 5, lineHeight: 18 }}>{coachAdjust.note}</Text> : null}</View>) : null}
+      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
 
-        <View style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18, marginBottom: 14 }}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-            <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16, textTransform: 'capitalize' }}>Today · {tot.K.toLocaleString()} / {target.kcal.toLocaleString()} kcal</Text>
+        {/* header row: serif title + gold coach chip */}
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4, marginBottom: 14 }}>
+          <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: SERIF }}>Meals</Text>
+          {coachAdjust ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderColor: t.s3, borderRadius: 16, paddingHorizontal: 11, paddingVertical: 6 }}>
+              <Icon name="sparkle" size={13} color={t.s3} /><Text style={{ color: t.s3, fontSize: 11, fontWeight: '700' }}>Coach-adjusted</Text>
+            </View>
+          ) : null}
+        </View>
+
+        {/* hero: ring + macro bars */}
+        <View style={{ backgroundColor: t.surface, borderRadius: 18, borderWidth: 1, borderColor: t.ring, padding: 16, marginBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+          <CalRing t={t} val={tot.K} target={target.kcal} />
+          <View style={{ flex: 1 }}>
+            {macroBar('Protein', tot.P, target.protein, t.brand)}
+            {macroBar('Carbs', tot.C, target.carbs, t.s3)}
+            {macroBar('Fat', tot.F, target.fat, t.s1)}
           </View>
-          <View style={{ flexDirection: 'row', gap: 10 }}>
-            {[['Protein', tot.P, target.protein, t.brand], ['Carbs', tot.C, target.carbs, t.s1], ['Fat', tot.F, target.fat, t.s3]].map(([k, v, tg, col]) => (
-              <View key={k as string} style={{ flex: 1 }}>
-                <Text style={{ color: t.ink3, fontSize: 12 }}>{k as string}</Text>
-                <Text style={{ color: t.ink, fontSize: 18, fontWeight: '800' }}>{v as number}<Text style={{ color: t.ink3, fontSize: 11, fontWeight: '600' }}>/{tg as number}g</Text></Text>
-                <View style={{ height: 6, borderRadius: 3, backgroundColor: t.surface3, marginTop: 4, overflow: 'hidden' }}>
-                  <View style={{ height: 6, borderRadius: 3, backgroundColor: col as string, width: Math.min(100, Math.round(((v as number) / (tg as number)) * 100)) + '%' }} />
-                </View>
-              </View>
+        </View>
+
+        {coachAdjust?.note ? (
+          <View style={{ backgroundColor: t.surface, borderColor: t.s3, borderWidth: 1, borderRadius: 14, padding: 12, marginBottom: 12 }}>
+            <Text style={{ color: t.s3, fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6 }}>Note from your coach</Text>
+            <Text style={{ color: t.ink2, fontSize: 13, marginTop: 5, lineHeight: 18 }}>{coachAdjust.note}</Text>
+          </View>
+        ) : null}
+
+        {/* goal + diet selectors */}
+        <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 14, marginBottom: 12 }}>
+          <Text style={{ color: t.ink3, fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 8 }}>Goal</Text>
+          <View style={{ flexDirection: 'row', gap: 7, marginBottom: 12 }}>
+            {GOALS.map((g) => (
+              <Pressable key={g} onPress={() => { c.setGoal(g); setOverride({}); }} style={{ flex: 1, paddingVertical: 9, borderRadius: 10, alignItems: 'center', backgroundColor: c.goal === g ? t.brand : t.surface2, borderWidth: 1, borderColor: c.goal === g ? t.brand : t.ring }}>
+                <Text style={{ color: c.goal === g ? t.brandInk : t.ink2, fontWeight: '700', fontSize: 11.5 }}>{GOAL_LABEL[g]}</Text>
+              </Pressable>
             ))}
           </View>
+          <Text style={{ color: t.ink3, fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 8 }}>Diet</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 7 }}>
+            {DIETS.map((d) => (
+              <Pressable key={d} onPress={() => { c.setDiet(d); setOverride({}); }} style={{ paddingHorizontal: 15, paddingVertical: 8, borderRadius: 10, backgroundColor: diet === d ? t.brand : t.surface2, borderWidth: 1, borderColor: diet === d ? t.brand : t.ring }}>
+                <Text style={{ color: diet === d ? t.brandInk : t.ink2, fontWeight: '700', fontSize: 12 }}>{DIET_LABEL[d]}</Text>
+              </Pressable>
+            ))}
+          </ScrollView>
         </View>
 
-        <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>Goal</Text>
-        <View style={{ flexDirection: 'row', gap: 8, marginBottom: 14 }}>
-          {GOALS.map((g) => (
-            <Pressable key={g} onPress={() => { c.setGoal(g); setOverride({}); }} style={{ flex: 1, paddingVertical: 9, borderRadius: 20, alignItems: 'center', backgroundColor: c.goal === g ? t.brand : t.surface, borderWidth: 1, borderColor: c.goal === g ? t.brand : t.ring }}>
-              <Text style={{ color: c.goal === g ? t.brandInk : t.ink2, fontWeight: '700', fontSize: 13 }}>{GOAL_LABEL[g]}</Text>
-            </Pressable>
-          ))}
-        </View>
-        <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>Diet</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginBottom: 14 }}>
-          {DIETS.map((d) => (
-            <Pressable key={d} onPress={() => { c.setDiet(d); setOverride({}); }} style={{ paddingHorizontal: 16, paddingVertical: 9, borderRadius: 20, backgroundColor: diet === d ? t.brand : t.surface, borderWidth: 1, borderColor: diet === d ? t.brand : t.ring }}>
-              <Text style={{ color: diet === d ? t.brandInk : t.ink2, fontWeight: '700', fontSize: 13 }}>{DIET_LABEL[d]}</Text>
-            </Pressable>
-          ))}
-        </ScrollView>
-
+        <Text style={{ color: t.ink3, fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.9, marginBottom: 9 }}>Today's plan · {plan.length} meals</Text>
         {plan.map((m) => (
-          <View key={m.pos} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 14, marginBottom: 10 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-              <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}><Text style={{ fontSize: 22 }}>{m.ico}</Text></View>
-              <View style={{ flex: 1 }}>
-                <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 }}>{m.slot}</Text>
-                <Text style={{ color: t.ink, fontSize: 14, fontWeight: '600' }} numberOfLines={1}>{m.n}</Text>
-                <Text style={{ color: t.ink3, fontSize: 12, marginTop: 1 }}>{m.K} kcal · P{m.P} C{m.C} F{m.F}</Text>
-              </View>
+          <Pressable key={m.pos} onPress={() => setRecipe(m)} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 14, marginBottom: 9, flexDirection: 'row', alignItems: 'center' }}>
+            <View style={{ flex: 1, paddingRight: 12 }}>
+              <Text style={{ color: t.brand, fontSize: 9, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.8 }}>{m.slot}</Text>
+              <Text style={{ color: t.ink, fontSize: 14, fontWeight: '700', marginTop: 3 }} numberOfLines={2}>{m.n}</Text>
+              <Text style={{ color: t.ink3, fontSize: 12, marginTop: 3 }}>P{m.P} · C{m.C} · F{m.F}</Text>
             </View>
-            <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
-              <Pressable onPress={() => setRecipe(m)} style={{ flex: 1, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 9, paddingVertical: 9, alignItems: 'center' }}>
-                <Text style={{ color: t.ink, fontWeight: '700', fontSize: 13 }}>📖 Recipe</Text>
-              </Pressable>
-              <Pressable onPress={() => swap(m.pos, m.slot, m.idx)} style={{ flex: 1, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 9, paddingVertical: 9, alignItems: 'center' }}>
-                <Text style={{ color: t.ink, fontWeight: '700', fontSize: 13 }}>🔄 Swap</Text>
-              </Pressable>
+            <View style={{ alignItems: 'flex-end' }}>
+              <Text style={{ color: t.ink, fontSize: 18, fontWeight: '800' }}>{m.K}</Text>
+              <Text style={{ color: t.ink3, fontSize: 9 }}>kcal</Text>
             </View>
-          </View>
+          </Pressable>
         ))}
 
-        <Pressable onPress={() => setShowGrocery(true)} style={{ backgroundColor: t.brand, borderRadius: 14, paddingVertical: 15, alignItems: 'center', marginTop: 6 }}>
-          <Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 15 }}>🛒 Grocery list · {grocCount} items</Text>
+        <Pressable onPress={() => setShowGrocery(true)} style={{ backgroundColor: t.brand, borderRadius: 14, paddingVertical: 15, alignItems: 'center', marginTop: 6, flexDirection: 'row', justifyContent: 'center', gap: 8 }}>
+          <Icon name="check" size={16} color={t.brandInk} /><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 15 }}>Grocery list · {grocCount} items</Text>
         </Pressable>
       </ScrollView>
 
       <Modal visible={!!recipe} transparent animationType="slide" onRequestClose={() => setRecipe(null)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setRecipe(null)} />
-        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, borderColor: t.ring, maxHeight: '80%' }}>
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, borderColor: t.ring, maxHeight: '82%' }}>
           {recipe && (
             <ScrollView contentContainerStyle={{ padding: 20 }}>
-              <Text style={{ color: t.ink, fontSize: 20, fontWeight: '800', textTransform: 'capitalize' }}>{recipe.ico} {recipe.n}</Text>
-              <Text style={{ color: t.ink3, fontSize: 13, marginTop: 4, marginBottom: 16 }}>{recipe.slot} · {recipe.K} kcal · P{recipe.P} / C{recipe.C} / F{recipe.F}</Text>
-              <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, textTransform: 'capitalize', marginBottom: 8 }}>🧺 Ingredients</Text>
+              <Text style={{ color: t.brand, fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.8 }}>{recipe.slot}</Text>
+              <Text style={{ color: t.ink, fontSize: 21, fontWeight: '700', fontFamily: SERIF, textTransform: 'capitalize', marginTop: 3 }}>{recipe.n}</Text>
+              <Text style={{ color: t.ink3, fontSize: 13, marginTop: 4, marginBottom: 14 }}>{recipe.K} kcal · P{recipe.P} / C{recipe.C} / F{recipe.F}</Text>
+              <Pressable onPress={() => { swap(recipe.pos, recipe.slot, recipe.idx); setRecipe(null); }} style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 11, paddingVertical: 11, marginBottom: 16 }}>
+                <Icon name="swap" size={15} color={t.brand} /><Text style={{ color: t.ink, fontWeight: '700', fontSize: 14 }}>Swap this meal</Text>
+              </Pressable>
+              <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, marginBottom: 8 }}>Ingredients</Text>
               {recipe.ing.map((ing, i) => (
                 <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: t.ring }}>
                   <Text style={{ color: t.ink2, fontSize: 14 }}>{ing[0]}</Text>
                   <Text style={{ color: t.ink, fontSize: 14, fontWeight: '600' }}>{Math.round(ing[1] * recipe.servings * 100) / 100}{ing[2] ? ' ' + ing[2] : ''}</Text>
                 </View>
               ))}
-              <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, textTransform: 'capitalize', marginTop: 18, marginBottom: 8 }}>👩‍🍳 Method</Text>
+              <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, marginTop: 18, marginBottom: 8 }}>Method</Text>
               {recipe.steps.map((s, i) => (
                 <View key={i} style={{ flexDirection: 'row', gap: 10, marginBottom: 10 }}>
                   <Text style={{ color: t.brand, fontWeight: '800' }}>{i + 1}</Text>
@@ -141,7 +172,7 @@ export default function Nutrition() {
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setShowGrocery(false)} />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, borderColor: t.ring, maxHeight: '82%' }}>
           <ScrollView contentContainerStyle={{ padding: 20 }}>
-            <Text style={{ color: t.ink, fontSize: 20, fontWeight: '800', textTransform: 'capitalize', marginBottom: 4 }}>🛒 Grocery list</Text>
+            <Text style={{ color: t.ink, fontSize: 21, fontWeight: '700', fontFamily: SERIF, marginBottom: 4 }}>Grocery list</Text>
             <Text style={{ color: t.ink3, fontSize: 13, marginBottom: 16 }}>This week · {DIET_LABEL[diet]} · sorted by aisle</Text>
             {DEPTS.filter((d) => groc.byDept[d]?.length).map((d) => (
               <View key={d} style={{ marginBottom: 16 }}>

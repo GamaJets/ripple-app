@@ -1,5 +1,6 @@
-// Train — pick any weekday, follow your AI program (log/swap/video), run a guided
-// session with a rest timer + live heart rate, OR log cardio.
+// Train — matches the approved mockup: serif header, day strip, "Today" hero with
+// Start, clean exercise cards (video/swap line icons, target suggestion, Log set).
+// Guided session runner, cardio logging & month calendar preserved.
 import { useState, useEffect, useRef } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView, Modal, Alert } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -17,6 +18,7 @@ import { est1RM } from '../../src/lib/streaks';
 import { Confetti } from '../../src/ui/Confetti';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 
+const SERIF = 'Georgia';
 const WEEK = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const CARDIO = ['Treadmill / Run', 'Cycling', 'Rowing', 'Ski erg', 'Elliptical', 'Swim', 'Walk', 'Stairs'];
 
@@ -54,7 +56,6 @@ export default function Train() {
   const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
   const monthLabel = monday0.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
 
-  // Day-detail for the month view: which workouts were performed on the tapped day.
   const activeCalDay = selCalDay || dstr(today0);
   const dayEntries = workoutLog.filter((l) => dstr(new Date(l.t)) === activeCalDay);
   const dayVolume = dayEntries.reduce((a, l) => a + (l.sets ? l.sets.reduce((x: number, s: number[]) => x + (s[0] || 0) * (s[1] || 0), 0) : 0), 0);
@@ -63,6 +64,7 @@ export default function Train() {
   const prettyDay = (ds: string) => { const [y, m, d] = ds.split('-').map(Number); return new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' }); };
 
   const workout = program.days[dayIdx % program.days.length] || program.days[0] || { day: '', focus: 'Rest day', exercises: [] };
+  const estMin = Math.max(20, workout.exercises.length * 9);
   const uid = (e: ProgramExercise) => `${dayIdx}:${e.key}`;
   const nameOf = (e: ProgramExercise) => swaps[uid(e)] || e.name;
   const logSet = (e: ProgramExercise, reps: string, kg: string) => { if (!reps) return; setLogged({ ...logged, [uid(e)]: [...(logged[uid(e)] || []), { reps, kg }] }); };
@@ -73,7 +75,6 @@ export default function Train() {
     addWorkouts([{ t: new Date().toISOString(), exercise: ctype, cardio: { mins: m, dist: d, unit }, kcal }]);
     setMins('30'); setDist('5');
   };
-  // Save manually-logged strength sets to the shared log (updates streak/PRs).
   const saveManual = () => {
     const nowISO = new Date().toISOString();
     let pr = false;
@@ -89,96 +90,111 @@ export default function Train() {
     addWorkouts(entries);
     setLogged({});
     if (pr) setConfetti(true);
-    Alert.alert('Workout saved ✓', `${entries.length} exercise${entries.length === 1 ? '' : 's'} logged.${pr ? ' New personal record! 🏆' : ''} Your streak and records are updated.`, [{ text: 'Nice' }]);
+    Alert.alert('Workout saved', `${entries.length} exercise${entries.length === 1 ? '' : 's'} logged.${pr ? ' New personal record!' : ''} Your streak and records are updated.`, [{ text: 'Nice' }]);
   };
   const inp = { color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 9, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, flex: 1 } as const;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
-        <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800', textTransform: 'capitalize' }}>Train</Text>
-        {coachProgram ? (<View style={{ alignSelf: 'flex-start', backgroundColor: t.surface2, borderColor: t.brand, borderWidth: 1, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4, marginTop: 6 }}><Text style={{ color: t.brand, fontSize: 11, fontWeight: '800' }}>📋 Assigned by your coach</Text></View>) : null}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginTop: 12, marginBottom: 4 }}>
-          {([["calendar","This Week","/(client)/week"],["trophy","Records","/(client)/records"],["water","Recovery","/(client)/recovery"],["video","Library","/(client)/library"],["settings","Tools","/(client)/tools"]] as const).map(([ic, label, route]) => (
-            <Pressable key={route} onPress={() => router.push(route as any)} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 8 }}>
-              <Icon name={ic} size={14} color={t.brand} /><Text style={{ color: t.ink2, fontWeight: '700', fontSize: 13 }}>{label}</Text>
-            </Pressable>
-          ))}
-        </ScrollView>
-        <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 14 }}>{program.title} · pick the day you're training</Text>
+      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
 
+        {/* header: serif title + program split chip */}
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4, marginBottom: 14 }}>
+          <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: SERIF }}>Train</Text>
+          <View style={{ borderWidth: 1, borderColor: coachProgram ? t.brand : t.ring, borderRadius: 16, paddingHorizontal: 11, paddingVertical: 6 }}>
+            <Text style={{ color: coachProgram ? t.brand : t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'capitalize' }} numberOfLines={1}>{coachProgram ? 'Coach plan' : program.title}</Text>
+          </View>
+        </View>
+
+        {/* month label + month view */}
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
           <Text style={{ color: t.ink2, fontSize: 13, fontWeight: '700', textTransform: 'capitalize' }}>{monthLabel}</Text>
-          <Pressable onPress={() => { setSelCalDay(dstr(dateFor(dayIdx))); setShowCal(true); }}><Text style={{ color: t.brand, fontWeight: '700', fontSize: 13 }}>📅 Month View</Text></Pressable>
+          <Pressable onPress={() => { setSelCalDay(dstr(dateFor(dayIdx))); setShowCal(true); }} style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+            <Icon name="calendar" size={14} color={t.brand} /><Text style={{ color: t.brand, fontWeight: '700', fontSize: 13 }}>Month view</Text>
+          </Pressable>
         </View>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginBottom: 14 }}>
+
+        {/* day strip */}
+        <View style={{ flexDirection: 'row', gap: 6, marginBottom: 14 }}>
           {WEEK.map((d, i) => {
             const on = i === dayIdx; const today = i === jsToMon; const dnum = dateFor(i).getDate(); const worked = workedDates.has(dstr(dateFor(i)));
             return (
-              <Pressable key={d} onPress={() => setDayIdx(i)} style={{ width: 46, paddingVertical: 9, borderRadius: 12, alignItems: 'center', backgroundColor: on ? t.brand : t.surface, borderWidth: 1, borderColor: on ? t.brand : today ? t.brand : t.ring }}>
-                <Text style={{ color: on ? t.brandInk : t.ink3, fontWeight: '700', fontSize: 11 }}>{d}</Text>
-                <Text style={{ color: on ? t.brandInk : t.ink, fontWeight: '800', fontSize: 16, marginTop: 1 }}>{dnum}</Text>
+              <Pressable key={d} onPress={() => setDayIdx(i)} style={{ flex: 1, paddingVertical: 8, borderRadius: 11, alignItems: 'center', backgroundColor: on ? t.brand : t.surface, borderWidth: 1, borderColor: on ? t.brand : today ? t.brand : t.ring }}>
+                <Text style={{ color: on ? t.brandInk : t.ink3, fontWeight: '700', fontSize: 10 }}>{d}</Text>
+                <Text style={{ color: on ? t.brandInk : t.ink, fontWeight: '800', fontSize: 15, marginTop: 1 }}>{dnum}</Text>
                 <View style={{ width: 5, height: 5, borderRadius: 3, marginTop: 3, backgroundColor: worked ? (on ? t.brandInk : t.brand) : 'transparent' }} />
               </Pressable>
             );
           })}
-        </ScrollView>
+        </View>
 
-        {/* What you did on the selected weekday */}
+        {/* logged-on-this-day recap */}
         {(() => {
           const selDayStr = dstr(dateFor(dayIdx));
           const entries = workoutLog.filter((l) => dstr(new Date(l.t)) === selDayStr);
           if (entries.length === 0) return null;
           return (
             <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.brand, padding: 14, marginBottom: 14 }}>
-              <Text style={{ color: t.ink, fontWeight: '800', fontSize: 14 }}>✅ Logged {prettyDay(selDayStr)}</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
+                <Icon name="check" size={15} color={t.brand} />
+                <Text style={{ color: t.ink, fontWeight: '800', fontSize: 14 }}>Logged {prettyDay(selDayStr)}</Text>
+              </View>
               {entries.map((l, i) => (
                 <Text key={i} style={{ color: t.ink3, fontSize: 12, marginTop: 6 }}>
                   <Text style={{ color: t.ink2, fontWeight: '700' }}>{l.exercise}</Text>
                   {l.sets ? ` · ${l.sets.map((s: number[]) => `${s[0]}×${s[1]}kg`).join(', ')}` : l.cardio ? ` · ${l.cardio.mins} min · ${l.cardio.dist} ${l.cardio.unit}` : ''}
-                  {l.kcal ? ` · 🔥 ${l.kcal}` : ''}
+                  {l.kcal ? ` · ${l.kcal} kcal` : ''}
                 </Text>
               ))}
             </View>
           );
         })()}
 
-        <View style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: 10, padding: 3, marginBottom: 14, borderWidth: 1, borderColor: t.ring }}>
+        {/* strength / cardio toggle */}
+        <View style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: 11, padding: 3, marginBottom: 14, borderWidth: 1, borderColor: t.ring }}>
           {(['strength', 'cardio'] as const).map((mm) => (
-            <Pressable key={mm} onPress={() => setMode(mm)} style={{ flex: 1, paddingVertical: 9, borderRadius: 8, alignItems: 'center', backgroundColor: mode === mm ? t.brand : 'transparent' }}>
-              <Text style={{ color: mode === mm ? t.brandInk : t.ink3, fontWeight: '700', fontSize: 13 }}>{mm === 'strength' ? '🏋️ Strength' : '🏃 Cardio'}</Text>
+            <Pressable key={mm} onPress={() => setMode(mm)} style={{ flex: 1, paddingVertical: 9, borderRadius: 8, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6, backgroundColor: mode === mm ? t.brand : 'transparent' }}>
+              <Icon name={mm === 'strength' ? 'dumbbell' : 'heart'} size={15} color={mode === mm ? t.brandInk : t.ink3} />
+              <Text style={{ color: mode === mm ? t.brandInk : t.ink3, fontWeight: '700', fontSize: 13 }}>{mm === 'strength' ? 'Strength' : 'Cardio'}</Text>
             </Pressable>
           ))}
         </View>
 
         {mode === 'strength' ? (
           <View>
-            <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 14, marginBottom: 12 }}>
-              <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, textTransform: 'capitalize' }}>{workout.focus}</Text>
-              <Text style={{ color: t.ink3, fontSize: 12, marginTop: 2 }}>{coachProgram ? '📋 ' : '🤖 '}{program.focus.join(' · ')}{workout.cardio ? ` · finish with ${workout.cardio}` : ''}</Text>
-              <Pressable onPress={() => setSession(true)} style={{ backgroundColor: t.brand, borderRadius: 12, paddingVertical: 13, alignItems: 'center', marginTop: 12 }}>
-                <Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 15 }}>▶  Start Guided Session</Text>
+            {/* Today hero */}
+            <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 15, marginBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: t.brand, fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6 }}>Today · {workout.focus}</Text>
+                <Text style={{ color: t.ink, fontSize: 16, fontWeight: '800', marginTop: 2 }}>{workout.exercises.length} exercises · ~{estMin} min</Text>
+              </View>
+              <Pressable onPress={() => setSession(true)} style={{ backgroundColor: t.brand, borderRadius: 11, paddingVertical: 11, paddingHorizontal: 15, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Icon name="play" size={14} color={t.brandInk} /><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 13 }}>Start</Text>
               </Pressable>
             </View>
+
             {workout.exercises.map((e) => {
               const sets = logged[uid(e)] || []; const done = sets.length >= e.sets;
               const sug = suggestForExercise(workoutLog, nameOf(e), e.reps);
               return (
-                <View key={e.key} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: done ? t.brand : t.ring, padding: 15, marginBottom: 10 }}>
+                <View key={e.key} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: done ? t.brand : t.ring, padding: 14, marginBottom: 10 }}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, textTransform: 'capitalize' }}>{done ? '✅ ' : ''}{nameOf(e)}</Text>
-                      <Text style={{ color: t.ink3, fontSize: 12, marginTop: 1 }}>{e.group} · target {e.sets} × {e.reps}</Text>
+                    <View style={{ flex: 1, paddingRight: 10 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        {done ? <Icon name="check" size={15} color={t.brand} /> : null}
+                        <Text style={{ color: t.ink, fontWeight: '700', fontSize: 14.5, textTransform: 'capitalize' }} numberOfLines={1}>{nameOf(e)}</Text>
+                      </View>
+                      <Text style={{ color: t.ink3, fontSize: 11.5, marginTop: 2 }}>{e.group} · target {e.sets} × {e.reps}</Text>
                     </View>
                     <View style={{ flexDirection: 'row', gap: 6 }}>
-                      <Pressable onPress={() => setVideoFor(nameOf(e))} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 }}><Text style={{ color: t.ink, fontSize: 12, fontWeight: '700' }}>▶</Text></Pressable>
-                      <Pressable onPress={() => setSwapFor(e)} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 }}><Text style={{ color: t.ink, fontSize: 12, fontWeight: '700' }}>🔄</Text></Pressable>
+                      <Pressable onPress={() => setVideoFor(nameOf(e))} style={{ width: 30, height: 30, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 8, alignItems: 'center', justifyContent: 'center' }}><Icon name="video" size={15} color={t.ink2} /></Pressable>
+                      <Pressable onPress={() => setSwapFor(e)} style={{ width: 30, height: 30, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 8, alignItems: 'center', justifyContent: 'center' }}><Icon name="swap" size={15} color={t.ink2} /></Pressable>
                     </View>
                   </View>
                   {sets.length > 0 && <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>{sets.map((s, i) => <View key={i} style={{ backgroundColor: t.surface2, borderRadius: 8, paddingHorizontal: 9, paddingVertical: 5 }}><Text style={{ color: t.ink2, fontSize: 12, fontWeight: '600' }}>{s.reps}×{s.kg || '–'}kg</Text></View>)}</View>}
                   {sug ? (
                     <View style={{ marginTop: 10, backgroundColor: t.surface2, borderRadius: 10, paddingVertical: 8, paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', gap: 7, borderWidth: 1, borderColor: t.ring }}>
-                      <Text style={{ fontSize: 13 }}>🎯</Text>
+                      <Icon name="target" size={14} color={t.brand} />
                       <Text style={{ color: t.brand, fontWeight: '800', fontSize: 13 }}>{sug.weight} kg</Text>
                       {sug.up ? <Text style={{ color: t.brand, fontWeight: '800', fontSize: 12 }}>↑</Text> : null}
                       <Text style={{ color: t.ink3, fontSize: 11, flex: 1 }}>{sug.reason}</Text>
@@ -189,15 +205,15 @@ export default function Train() {
               );
             })}
             {Object.values(logged).some((a) => a.length > 0) ? (
-              <Pressable onPress={saveManual} style={{ backgroundColor: t.brand, borderRadius: 14, paddingVertical: 15, alignItems: 'center', marginTop: 4 }}>
-                <Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 15 }}>✓ Save Workout To Log</Text>
+              <Pressable onPress={saveManual} style={{ backgroundColor: t.brand, borderRadius: 14, paddingVertical: 15, alignItems: 'center', marginTop: 4, flexDirection: 'row', justifyContent: 'center', gap: 8 }}>
+                <Icon name="check" size={16} color={t.brandInk} /><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 15 }}>Save workout to log</Text>
               </Pressable>
             ) : null}
           </View>
         ) : (
           <View>
             <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 16, marginBottom: 12 }}>
-              <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, textTransform: 'capitalize', marginBottom: 12 }}>Log A Cardio Session</Text>
+              <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, marginBottom: 12 }}>Log a cardio session</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginBottom: 10 }}>
                 {CARDIO.map((ct) => <Pressable key={ct} onPress={() => setCtype(ct)} style={{ paddingHorizontal: 13, paddingVertical: 8, borderRadius: 18, backgroundColor: ctype === ct ? t.brand : t.surface2, borderWidth: 1, borderColor: ctype === ct ? t.brand : t.ring }}><Text style={{ color: ctype === ct ? t.brandInk : t.ink2, fontWeight: '700', fontSize: 12 }}>{ct}</Text></Pressable>)}
               </ScrollView>
@@ -210,11 +226,11 @@ export default function Train() {
             </View>
             {cardioLog.length > 0 && (
               <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 16 }}>
-                <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, textTransform: 'capitalize', marginBottom: 10 }}>Today's Cardio</Text>
+                <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, marginBottom: 10 }}>Today's cardio</Text>
                 {cardioLog.map((c, i) => (
                   <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: i < cardioLog.length - 1 ? 1 : 0, borderBottomColor: t.ring }}>
                     <Text style={{ color: t.ink, fontWeight: '600', fontSize: 14 }}>{c.type}</Text>
-                    <Text style={{ color: t.ink3, fontSize: 13 }}>{c.mins} min · {c.dist} {c.unit} · 🔥 {c.kcal}</Text>
+                    <Text style={{ color: t.ink3, fontSize: 13 }}>{c.mins} min · {c.dist} {c.unit} · {c.kcal} kcal</Text>
                   </View>
                 ))}
               </View>
@@ -230,8 +246,8 @@ export default function Train() {
             <Text style={{ color: t.ink, fontSize: 18, fontWeight: '800' }}>Swap {nameOf(swapFor)}</Text>
             <Text style={{ color: t.ink3, fontSize: 13, marginTop: 2, marginBottom: 14 }}>Alternatives that hit the same muscles</Text>
             {[swapFor.name, ...swapFor.alternatives].map((alt) => { const on = nameOf(swapFor) === alt; return (
-              <Pressable key={alt} onPress={() => { setSwaps({ ...swaps, [uid(swapFor)]: alt }); setSwapFor(null); }} style={{ backgroundColor: on ? t.surface2 : 'transparent', borderColor: on ? t.brand : t.ring, borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 8, flexDirection: 'row', justifyContent: 'space-between' }}>
-                <Text style={{ color: t.ink, fontWeight: '600', fontSize: 14 }}>{alt}</Text>{on && <Text style={{ color: t.brand, fontWeight: '800' }}>✓</Text>}
+              <Pressable key={alt} onPress={() => { setSwaps({ ...swaps, [uid(swapFor)]: alt }); setSwapFor(null); }} style={{ backgroundColor: on ? t.surface2 : 'transparent', borderColor: on ? t.brand : t.ring, borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 8, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={{ color: t.ink, fontWeight: '600', fontSize: 14 }}>{alt}</Text>{on && <Icon name="check" size={16} color={t.brand} />}
               </Pressable>); })}
           </View>)}
         </View>
@@ -240,7 +256,7 @@ export default function Train() {
       <Modal visible={!!videoFor} transparent animationType="fade" onRequestClose={() => setVideoFor(null)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', alignItems: 'center', justifyContent: 'center', padding: 24 }} onPress={() => setVideoFor(null)}>
           <View style={{ width: '100%', aspectRatio: 16 / 9, backgroundColor: '#000', borderRadius: 14, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: t.ring }}>
-            <Text style={{ fontSize: 40 }}>▶️</Text><Text style={{ color: '#fff', fontWeight: '700', marginTop: 8 }}>{videoFor}</Text><Text style={{ color: '#999', fontSize: 12, marginTop: 4 }}>Your coach's demo plays here</Text>
+            <Icon name="play" size={40} color="#fff" /><Text style={{ color: '#fff', fontWeight: '700', marginTop: 8 }}>{videoFor}</Text><Text style={{ color: '#999', fontSize: 12, marginTop: 4 }}>Your coach's demo plays here</Text>
           </View>
           <Text style={{ color: '#bbb', fontSize: 12, marginTop: 14 }}>Tap anywhere to close</Text>
         </Pressable>
@@ -272,7 +288,6 @@ export default function Train() {
               })}
             </View>
 
-            {/* Tapped-day detail: what was performed + stats */}
             <View style={{ borderTopWidth: 1, borderTopColor: t.ring, marginTop: 14, paddingTop: 14 }}>
               <Text style={{ color: t.ink, fontWeight: '800', fontSize: 15, marginBottom: 8 }}>{prettyDay(activeCalDay)}</Text>
               {dayEntries.length === 0 ? (
@@ -280,7 +295,7 @@ export default function Train() {
               ) : (
                 <View>
                   <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
-                    {([['Exercises', String(dayEntries.length)], ['Sets', String(daySets)], ['Volume', dayVolume ? `${(dayVolume / 1000).toFixed(1)}t` : '—'], ['🔥 kcal', String(dayKcal)]] as [string, string][]).map(([l, v]) => (
+                    {([['Exercises', String(dayEntries.length)], ['Sets', String(daySets)], ['Volume', dayVolume ? `${(dayVolume / 1000).toFixed(1)}t` : '—'], ['kcal', String(dayKcal)]] as [string, string][]).map(([l, v]) => (
                       <View key={l} style={{ flex: 1, backgroundColor: t.surface2, borderRadius: 12, borderWidth: 1, borderColor: t.ring, paddingVertical: 10, alignItems: 'center' }}>
                         <Text style={{ color: t.ink, fontWeight: '800', fontSize: 15 }}>{v}</Text>
                         <Text style={{ color: t.ink3, fontSize: 10, marginTop: 2 }}>{l}</Text>
@@ -297,7 +312,7 @@ export default function Train() {
                       ) : l.cardio ? (
                         <Text style={{ color: t.ink3, fontSize: 12, marginTop: 5 }}>{l.cardio.mins} min · {l.cardio.dist} {l.cardio.unit}</Text>
                       ) : null}
-                      {l.kcal ? <Text style={{ color: t.ink3, fontSize: 11, marginTop: 6 }}>🔥 {l.kcal} kcal</Text> : null}
+                      {l.kcal ? <Text style={{ color: t.ink3, fontSize: 11, marginTop: 6 }}>{l.kcal} kcal</Text> : null}
                     </View>
                   ))}
                 </View>
@@ -332,7 +347,6 @@ function LogRow({ t, onLog }: { t: Theme; onLog: (reps: string, kg: string) => v
   );
 }
 
-// ── Guided session runner: one exercise at a time, rest timer, live HR, summary ──
 function SessionRunner({ t, exercises, focus, nameOf, liveHr, log, onComplete, onClose }: { t: Theme; exercises: ProgramExercise[]; focus: string; nameOf: (e: ProgramExercise) => string; liveHr: number | null; log: WorkoutEntry[]; onComplete: (entries: WorkoutEntry[]) => void; onClose: () => void }) {
   const insets = useSafeAreaInsets();
   const topPad = Math.max(insets.top, 44);
@@ -351,7 +365,6 @@ function SessionRunner({ t, exercises, focus, nameOf, liveHr, log, onComplete, o
     return () => { if (rid.current) clearInterval(rid.current); };
   }, [rest > 0]);
 
-  // Auto-adjust: pre-fill the weight with the progressive-overload suggestion.
   useEffect(() => {
     const sug = suggestForExercise(log, nameOf(exercises[idx]), exercises[idx].reps);
     setKg(sug ? String(sug.weight) : '');
@@ -365,11 +378,10 @@ function SessionRunner({ t, exercises, focus, nameOf, liveHr, log, onComplete, o
   const logSet = () => {
     const r = parseInt(reps, 10) || 0; if (!r) return;
     const wkg = parseFloat(kg) || 0;
-    // Live PR detection vs all history + earlier sets this session.
     const name = nameOf(exercises[idx]);
     const newE1 = wkg && r ? est1RM(wkg, r) : 0;
     const priorBest = Math.max(priorBest1RM(log, name), ...done.map((s) => (s.kg && s.reps ? est1RM(s.kg, s.reps) : 0)), 0);
-    if (newE1 > 0 && newE1 > priorBest) { setPrMsg(`🏆 New PR on ${name}! ${wkg}kg × ${r}`); setConfetti(true); }
+    if (newE1 > 0 && newE1 > priorBest) { setPrMsg(`New PR on ${name}! ${wkg}kg × ${r}`); setConfetti(true); }
     setResults((prev) => { const n = prev.map((a) => [...a]); n[idx].push({ reps: r, kg: wkg }); return n; });
     setReps(''); setKg(''); setRest(90);
   };
@@ -396,9 +408,9 @@ function SessionRunner({ t, exercises, focus, nameOf, liveHr, log, onComplete, o
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
         <ScrollView contentContainerStyle={{ padding: 22, paddingTop: topPad + 10 }}>
-          <Text style={{ fontSize: 44, textAlign: 'center', marginTop: 20 }}>🎉</Text>
-          <Text style={{ color: t.ink, fontSize: 24, fontWeight: '900', textAlign: 'center', marginTop: 8 }}>Session Complete</Text>
-          <Text style={{ color: t.ink3, fontSize: 14, textAlign: 'center', marginTop: 4, marginBottom: 24 }}>{focus}</Text>
+          <View style={{ alignItems: 'center', marginTop: 20 }}><Icon name="trophy" size={44} color={t.brand} /></View>
+          <Text style={{ color: t.ink, fontSize: 24, fontWeight: '900', textAlign: 'center', marginTop: 8 }}>Session complete</Text>
+          <Text style={{ color: t.ink3, fontSize: 14, textAlign: 'center', marginTop: 4, marginBottom: 24, textTransform: 'capitalize' }}>{focus}</Text>
           <View style={{ flexDirection: 'row', gap: 12, marginBottom: 12 }}>
             {[['Exercises', `${exDone}/${exercises.length}`], ['Sets', String(totalSets)], ['Volume', `${(volume / 1000).toFixed(1)}t`]].map(([l, v]) => (
               <View key={l} style={{ flex: 1, backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 16, alignItems: 'center' }}>
@@ -407,7 +419,7 @@ function SessionRunner({ t, exercises, focus, nameOf, liveHr, log, onComplete, o
               </View>
             ))}
           </View>
-          {liveHr != null ? <View style={{ backgroundColor: t.surface2, borderRadius: 14, borderWidth: 1, borderColor: t.ring, padding: 14, marginBottom: 12 }}><Text style={{ color: t.ink2, fontSize: 13 }}>❤️ Avg heart rate today {liveHr} bpm · from your watch</Text></View> : null}
+          {liveHr != null ? <View style={{ backgroundColor: t.surface2, borderRadius: 14, borderWidth: 1, borderColor: t.ring, padding: 14, marginBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 8 }}><Icon name="heart" size={15} color={t.brand} /><Text style={{ color: t.ink2, fontSize: 13 }}>Avg heart rate today {liveHr} bpm · from your watch</Text></View> : null}
           <Text style={{ color: t.ink3, fontSize: 12, textAlign: 'center', marginBottom: 20 }}>Logged to your history — strength trends and your coach's dashboard update automatically.</Text>
           <Pressable onPress={onClose} style={{ backgroundColor: t.brand, borderRadius: 14, paddingVertical: 16, alignItems: 'center' }}><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 15 }}>Done</Text></Pressable>
         </ScrollView>
@@ -429,13 +441,13 @@ function SessionRunner({ t, exercises, focus, nameOf, liveHr, log, onComplete, o
 
         {liveHr != null ? (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: t.surface2, borderRadius: 12, borderWidth: 1, borderColor: t.ring, padding: 12, marginBottom: 16 }}>
-            <Text style={{ fontSize: 20 }}>❤️</Text><Text style={{ color: t.ink, fontSize: 18, fontWeight: '800' }}>{liveHr}</Text><Text style={{ color: t.ink3, fontSize: 13 }}>bpm · from your watch</Text>
+            <Icon name="heart" size={18} color={t.brand} /><Text style={{ color: t.ink, fontSize: 18, fontWeight: '800' }}>{liveHr}</Text><Text style={{ color: t.ink3, fontSize: 13 }}>bpm · from your watch</Text>
           </View>
         ) : null}
 
         {prMsg ? (
-          <View style={{ backgroundColor: 'rgba(245,158,11,0.15)', borderRadius: 12, padding: 12, marginBottom: 16 }}>
-            <Text style={{ color: t.s3, fontWeight: '800', fontSize: 14 }}>{prMsg}</Text>
+          <View style={{ backgroundColor: 'rgba(245,158,11,0.15)', borderRadius: 12, padding: 12, marginBottom: 16, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Icon name="trophy" size={16} color={t.s3} /><Text style={{ color: t.s3, fontWeight: '800', fontSize: 14 }}>{prMsg}</Text>
           </View>
         ) : null}
 
@@ -460,11 +472,11 @@ function SessionRunner({ t, exercises, focus, nameOf, liveHr, log, onComplete, o
         <View style={{ flexDirection: 'row', gap: 10, marginBottom: 20 }}>
           <TextInput value={reps} onChangeText={setReps} keyboardType="numeric" placeholder="reps" placeholderTextColor={t.ink3} style={inp} />
           <TextInput value={kg} onChangeText={setKg} keyboardType="numeric" placeholder="kg" placeholderTextColor={t.ink3} style={inp} />
-          <Pressable onPress={logSet} style={{ backgroundColor: t.brand, borderRadius: 10, paddingHorizontal: 22, justifyContent: 'center' }}><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 15 }}>✓</Text></Pressable>
+          <Pressable onPress={logSet} style={{ backgroundColor: t.brand, borderRadius: 10, paddingHorizontal: 22, justifyContent: 'center' }}><Icon name="check" size={18} color={t.brandInk} /></Pressable>
         </View>
 
         <Pressable onPress={next} style={{ backgroundColor: done.length >= ex.sets ? t.brand : t.surface2, borderWidth: 1, borderColor: done.length >= ex.sets ? t.brand : t.ring, borderRadius: 14, paddingVertical: 15, alignItems: 'center' }}>
-          <Text style={{ color: done.length >= ex.sets ? t.brandInk : t.ink, fontWeight: '800', fontSize: 15 }}>{idx < exercises.length - 1 ? 'Next Exercise →' : '🏁 Finish Session'}</Text>
+          <Text style={{ color: done.length >= ex.sets ? t.brandInk : t.ink, fontWeight: '800', fontSize: 15 }}>{idx < exercises.length - 1 ? 'Next exercise →' : 'Finish session'}</Text>
         </Pressable>
       </ScrollView>
       <Confetti show={confetti} onDone={() => setConfetti(false)} />
