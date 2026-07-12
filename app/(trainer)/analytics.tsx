@@ -3,10 +3,12 @@ import { View, Text, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
+import { Icon } from '../../src/ui/Icon';
 import type { Theme } from '../../src/theme/tokens';
 import { MOCK_TRAINER } from '../../src/lib/mockData';
 import { ROSTER } from '../../src/lib/trainerMock';
 import { useRoster } from '../../src/ui/roster';
+import { DistBar, DeltaBadge } from '../../src/ui/charts';
 
 function Big({ t, label, value, sub, tint }: { t: Theme; label: string; value: string; sub: string; tint?: boolean }) {
   return (
@@ -30,6 +32,10 @@ export default function TrainerAnalytics() {
   const platformFee = 99;
   const net = revenue - platformFee;
   const avgAdh = clients ? Math.round(roster.reduce((a, c) => a + c.adherence, 0) / clients) : 0;
+  const onTrack = roster.filter((c) => c.adherence >= 85).length;
+  const watch = roster.filter((c) => c.adherence >= 70 && c.adherence < 85).length;
+  const riskCount = roster.filter((c) => c.adherence < 70).length;
+  const atRiskRevenue = atRisk.length * MOCK_TRAINER.sessionFee * 4;
   const months = [['Feb', 0.55], ['Mar', 0.62], ['Apr', 0.7], ['May', 0.82], ['Jun', 0.9], ['Jul', 1]] as const;
 
   return (
@@ -46,6 +52,33 @@ export default function TrainerAnalytics() {
         <View style={{ flexDirection: 'row', gap: 12, marginBottom: 16 }}>
           <Big t={t} label="Active clients" value={String(clients)} sub="all retained" />
           <Big t={t} label="Avg adherence" value={avgAdh + '%'} sub="across clients" />
+        </View>
+
+        {atRisk.length > 0 ? (
+          <Pressable onPress={() => router.push('/(trainer)/dashboard')} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.warn, padding: 15, marginBottom: 14, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+            <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: 'rgba(250,178,25,0.16)', alignItems: 'center', justifyContent: 'center' }}><Icon name="target" size={20} color={t.warn} /></View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: t.ink, fontWeight: '800', fontSize: 15 }}>~${atRiskRevenue.toLocaleString()}/mo at risk</Text>
+              <Text style={{ color: t.ink3, fontSize: 12, marginTop: 1 }}>{atRisk.length} client{atRisk.length > 1 ? 's' : ''} slipping — check in before they churn.</Text>
+            </View>
+            <Text style={{ color: t.ink3, fontSize: 16 }}>›</Text>
+          </Pressable>
+        ) : null}
+
+        <View style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18, marginBottom: 14 }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16 }}>Roster health</Text>
+            <Text style={{ color: t.ink3, fontSize: 12 }}>{avgAdh}% avg adherence</Text>
+          </View>
+          <DistBar segments={[{ label: 'On track', value: onTrack, color: t.brand }, { label: 'Watch', value: watch, color: t.warn }, { label: 'At risk', value: riskCount, color: t.crit }]} />
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 }}>
+            {[['On track', onTrack, t.brand], ['Watch', watch, t.warn], ['At risk', riskCount, t.crit]].map(([l, v, c]) => (
+              <View key={l as string} style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                <View style={{ width: 9, height: 9, borderRadius: 5, backgroundColor: c as string }} />
+                <Text style={{ color: t.ink2, fontSize: 12, fontWeight: '600' }}>{l as string} {v as number}</Text>
+              </View>
+            ))}
+          </View>
         </View>
 
         <View style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18, marginBottom: 14 }}>
