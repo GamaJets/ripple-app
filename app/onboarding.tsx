@@ -29,6 +29,7 @@ export default function Onboarding() {
   const [role, setRole] = useState<'client' | 'trainer' | 'owner'>('client');
   const [weight, setWeight] = useState(String(Math.round(cd.weightKg)));
   const [height, setHeight] = useState(String(cd.heightCm));
+  const [cmode, setCmode] = useState<'online' | 'inperson' | 'solo'>('online');
 
   // Steps: 0 role. For client: 1 photo, 2 goal, 3 diet, 4 stats. Others finish at role.
   const clientSteps = 5;
@@ -45,6 +46,7 @@ export default function Onboarding() {
   const finish = () => {
     const w = parseFloat(weight); if (w > 20 && w < 400) cd.setWeightKg(w);
     const h = parseFloat(height); if (h > 80 && h < 260) cd.setHeightCm(h);
+    cd.setCoachingMode(cmode);
     router.replace('/(client)/dashboard');
   };
 
@@ -144,6 +146,12 @@ export default function Onboarding() {
             <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>Height (cm)</Text>
             <TextInput value={height} onChangeText={setHeight} keyboardType="numeric" placeholderTextColor={t.ink3} accessibilityLabel="Height in centimetres" style={{ color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 13, fontSize: 15 }} />
             <Text style={{ color: t.ink3, fontSize: 12, marginTop: 14 }}>You can refine these any time in your profile, and an InBody scan updates them automatically.</Text>
+            <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 18, marginBottom: 8 }}>How are you coaching?</Text>
+            {([['online', 'Online coach', 'Remote coaching & messaging'], ['inperson', 'In-person coach', 'Coach trains you in person'], ['solo', 'On my own', 'Self-managed with AI & tools']] as const).map(([id, label, note]) => { const on = cmode === id; return (
+              <Pressable key={id} onPress={() => setCmode(id)} style={{ flexDirection: 'row', alignItems: 'center', gap: 11, borderRadius: 12, padding: 13, marginBottom: 8, backgroundColor: on ? t.brand : t.surface, borderWidth: 1, borderColor: on ? t.brand : t.ring }}>
+                <View style={{ width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: on ? t.brandInk : t.ring, alignItems: 'center', justifyContent: 'center' }}>{on ? <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: t.brandInk }} /> : null}</View>
+                <View style={{ flex: 1 }}><Text style={{ color: on ? t.brandInk : t.ink, fontWeight: '700', fontSize: 14 }}>{label}</Text><Text style={{ color: on ? t.brandInk : t.ink3, fontSize: 11.5, opacity: on ? 0.85 : 1 }}>{note}</Text></View>
+              </Pressable>); })}
           </View>
         )}
 

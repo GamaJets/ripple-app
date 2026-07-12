@@ -233,7 +233,7 @@ export default function Home() {
         <View style={{ flexDirection: 'row', gap: 9 }}>
           {qa('plus', 'Log workout', '/(client)/workouts')}
           {qa('meals', 'Log food', '/(client)/foodlog')}
-          {qa('calendar', 'Book', '/(client)/calendar')}
+          {online ? qa('calendar', 'Book', '/(client)/calendar') : qa('chart', 'Report', '/(client)/report')}
           {qa('camera', 'Photo', '/(client)/scans')}
         </View>
 

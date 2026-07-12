@@ -8,7 +8,7 @@ let SEQ = 900;
 
 interface RosterValue {
   roster: RosterClient[];
-  addClient: (name: string, goal: string) => void;
+  addClient: (name: string, goal: string, mode?: 'online' | 'inperson') => void;
   removeClient: (id: string) => void;
 }
 
@@ -16,10 +16,10 @@ const Ctx = createContext<RosterValue | null>(null);
 
 export function RosterProvider({ children }: { children: ReactNode }) {
   const [roster, setRoster] = useState<RosterClient[]>(() => JSON.parse(JSON.stringify(ROSTER)));
-  const addClient = (name: string, goal: string) => {
+  const addClient = (name: string, goal: string, mode: 'online' | 'inperson' = 'online') => {
     const n = name.trim();
     if (!n) return;
-    setRoster((p) => [...p, { id: `c${SEQ++}`, name: n, goal, weightDelta: 0, adherence: 100, lastActive: 'just added', next: '—', unread: 0 }]);
+    setRoster((p) => [...p, { id: `c${SEQ++}`, name: n, goal, weightDelta: 0, adherence: 100, lastActive: 'just added', next: '—', unread: 0, mode }]);
   };
   const removeClient = (id: string) => setRoster((p) => p.filter((c) => c.id !== id));
   return <Ctx.Provider value={{ roster, addClient, removeClient }}>{children}</Ctx.Provider>;
