@@ -1,10 +1,10 @@
-// Coach-assigned training programs — a reactive store mapping clientId → Program.
-// When a trainer assigns a program in the builder, the client's Train tab uses it
-// instead of the auto-generated one. Lives at the app root so both portals share
-// it. Seeded empty: every client starts on their auto program until a coach
-// personalises it. Swap for Supabase (programs table) in the data migration.
-import { createContext, useContext, useState, type ReactNode } from 'react';
+// Coach-assigned training programs — clientId → Program. Persists to Supabase
+// `assigned_programs` (coach writes; client reads own) with an in-memory
+// fallback. When set, the client's Train tab uses it over the auto program.
+import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import type { Program } from '../lib/programs';
+import { supabase } from '../lib/supabase';
+import { USE_SUPABASE } from '../lib/config';
 
 interface AssignedProgramsValue {
   programs: Record<string, Program>;
@@ -17,12 +17,34 @@ const Ctx = createContext<AssignedProgramsValue | null>(null);
 
 export function AssignedProgramsProvider({ children }: { children: ReactNode }) {
   const [programs, setPrograms] = useState<Record<string, Program>>({});
+  const [uid, setUid] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!USE_SUPABASE) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data: auth } = await supabase.auth.getUser();
+        const id = auth?.user?.id; if (!id || cancelled) return; setUid(id);
+        const { data } = await supabase.from('assigned_programs').select('*').or('client_id.eq.' + id + ',coach_id.eq.' + id);
+        if (cancelled || !data) return;
+        const m: Record<string, Program> = {};
+        for (const r of data as any[]) { if (r.program) m[r.client_id] = r.program as Program; }
+        if (Object.keys(m).length) setPrograms((prev) => ({ ...prev, ...m }));
+      } catch { /* stay in-memory */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const getProgram = (clientId: string) => programs[clientId] ?? null;
-  const assignProgram = (clientId: string, program: Program) =>
+  const assignProgram = (clientId: string, program: Program) => {
     setPrograms((p) => ({ ...p, [clientId]: program }));
-  const clearProgram = (clientId: string) =>
+    if (USE_SUPABASE && uid) { try { supabase.from('assigned_programs').upsert({ client_id: clientId, coach_id: uid, program }, { onConflict: 'client_id' }).then(() => {}, () => {}); } catch { /* ignore */ } }
+  };
+  const clearProgram = (clientId: string) => {
     setPrograms((p) => { const n = { ...p }; delete n[clientId]; return n; });
+    if (USE_SUPABASE && uid) { try { supabase.from('assigned_programs').delete().eq('client_id', clientId).then(() => {}, () => {}); } catch { /* ignore */ } }
+  };
 
   return (
     <Ctx.Provider value={{ programs, getProgram, assignProgram, clearProgram }}>

@@ -99,7 +99,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
   const bodyFatPct = manualBodyFat != null ? manualBodyFat : latest.bodyFatPct;
 
   const value: Value = {
-    id: base.id, name, init: initials(name), setName,
+    id: sbUid ?? base.id, name, init: initials(name), setName,
     dob, setDob, photo, setPhoto, heightCm, setHeightCm,
     goal, setGoal, diet, setDiet,
     coachingMode, setCoachingMode,
