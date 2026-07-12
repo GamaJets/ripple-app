@@ -229,6 +229,18 @@ export default function Home() {
           </View>
         ) : null}
 
+        {/* find a coach (solo) */}
+        {solo ? (
+          <Pressable onPress={() => router.push('/(client)/trainers')} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.brand, padding: 14, marginBottom: 11, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+            <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}><Icon name="people" size={20} color={t.brand} /></View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: t.ink, fontWeight: '700', fontSize: 14 }}>Work with a coach</Text>
+              <Text style={{ color: t.ink3, fontSize: 11.5, marginTop: 1 }}>Browse trainers · online or in-person</Text>
+            </View>
+            <Icon name="chevron" size={18} color={t.ink3} />
+          </Pressable>
+        ) : null}
+
         {/* quick actions */}
         <View style={{ flexDirection: 'row', gap: 9 }}>
           {qa('plus', 'Log workout', '/(client)/workouts')}

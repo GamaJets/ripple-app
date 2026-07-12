@@ -118,7 +118,7 @@ const HUB_ICON: Record<string, IconName> = {
   '/(client)/recovery': 'water', '/(client)/habits': 'check', '/(client)/checkin': 'pencil',
   '/(client)/foodlog': 'meals', '/(client)/coach': 'chat', '/(client)/messages': 'message',
   '/(client)/social': 'share', '/(client)/devices': 'clock', '/(client)/music': 'play',
-  '/(client)/appearance': 'palette', '/(client)/settings': 'settings', '/': 'swap',
+  '/(client)/appearance': 'palette', '/(client)/settings': 'settings', '/': 'swap', '/(client)/trainers': 'people',
 };
 const HUB_GROUPS: { title: string; items: { label: string; note: string; route: string }[] }[] = [
   { title: 'Progress & Insights', items: [
@@ -144,6 +144,7 @@ const HUB_GROUPS: { title: string; items: { label: string; note: string; route: 
     { label: 'Food Log', note: 'Search, barcode or photo', route: '/(client)/foodlog' },
   ] },
   { title: 'Connect', items: [
+    { label: 'Find a trainer', note: 'Browse coaches · book online or in-person', route: '/(client)/trainers' },
     { label: 'AI Coach', note: 'Chat with your AI coach', route: '/(client)/coach' },
     { label: 'Messages', note: 'Chat with your coach', route: '/(client)/messages' },
     { label: 'Share & Social', note: 'Post progress to Instagram / TikTok', route: '/(client)/social' },
