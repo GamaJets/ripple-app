@@ -2,7 +2,7 @@
 // coach chip, calorie ring + macro bars hero, clean tappable meal cards, recipe
 // & grocery sheets. Meal-plan engine + swap + grocery logic unchanged.
 import { useState } from 'react';
-import { View, Text, Pressable, ScrollView, Modal } from 'react-native';
+import { View, Text, Pressable, ScrollView, Modal, TextInput, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Circle } from 'react-native-svg';
 import { useTheme } from '../../src/ui/components';
@@ -13,6 +13,11 @@ import { useClientData } from '../../src/ui/clientData';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
 import { Icon } from '../../src/ui/Icon';
 import { useRouter } from 'expo-router';
+import * as ImagePicker from 'expo-image-picker';
+import { analyzeMeal, visionAvailable } from '../../src/lib/vision';
+import { parseFoodText, foodAIAvailable } from '../../src/lib/foodAI';
+import { useFoodLog } from '../../src/ui/foodLog';
+import { notifySuccess } from '../../src/ui/haptics';
 
 const SERIF = 'Georgia';
 const DIETS: Diet[] = ['meat', 'vegetarian', 'vegan', 'paleo', 'keto'];
@@ -49,6 +54,27 @@ export default function Nutrition() {
   const [recipe, setRecipe] = useState<PlannedMeal | null>(null);
   const [showGrocery, setShowGrocery] = useState(false);
   const [view, setView] = useState<'today' | 'week'>('today');
+  const fl = useFoodLog();
+  const [nl, setNl] = useState('');
+  const [logBusy, setLogBusy] = useState(false);
+  const photoLog = async () => {
+    const perm = await ImagePicker.requestCameraPermissionsAsync();
+    if (!perm.granted) { Alert.alert('Camera needed', 'Allow camera to log a meal by photo.'); return; }
+    const res = await ImagePicker.launchCameraAsync({ quality: 0.5, base64: true });
+    if (res.canceled || !res.assets || !res.assets[0]) return;
+    const asset = res.assets[0];
+    setLogBusy(true); let done = false;
+    if (visionAvailable() && asset.base64) { const r = await analyzeMeal(asset.base64); if (r) { fl.addFood({ name: r.name, kcal: r.kcal, protein: r.protein, carbs: r.carbs, fat: r.fat, via: 'photo' }); notifySuccess(); Alert.alert('Logged', r.name + ' · ' + r.kcal + ' kcal added to today.'); done = true; } }
+    setLogBusy(false);
+    if (!done) { fl.addFood({ name: 'Meal (photo)', kcal: 520, protein: 40, carbs: 50, fat: 16, via: 'photo' }); Alert.alert('Logged an estimate', 'Added ~520 kcal — open Food Log to fine-tune.'); }
+  };
+  const barcodeLog = () => { fl.addFood({ name: 'Protein Bar (barcode)', kcal: 210, protein: 20, carbs: 21, fat: 7, via: 'barcode' }); notifySuccess(); Alert.alert('Barcode scanned', 'Protein Bar added to today.'); };
+  const describeLog = async () => {
+    const text = nl.trim(); if (!text) return;
+    setLogBusy(true); const items = await parseFoodText(text); setLogBusy(false);
+    if (items && items.length) { items.forEach((it) => fl.addFood({ name: it.name, kcal: it.kcal, protein: it.protein, carbs: it.carbs, fat: it.fat, via: 'manual' })); setNl(''); notifySuccess(); }
+    else { Alert.alert('Could not read that', foodAIAvailable() ? 'Try e.g. \"2 eggs, toast and a coffee\".' : 'AI logging turns on with the AI backend.'); }
+  };
 
   const input = { id: c.id, weightKg: w, bodyFatPct: bf, activity: c.activity, goal: c.goal, diet, mealsPerDay: c.mealsPerDay, mealOverride: override, coachAdjust: coachAdjust || undefined };
   const { plan, target, tot } = buildPlan(input);
@@ -92,6 +118,35 @@ export default function Nutrition() {
             {macroBar('Carbs', tot.C, target.carbs, t.s3)}
             {macroBar('Fat', tot.F, target.fat, t.s1)}
           </View>
+        </View>
+
+        {/* Log what you are actually eating */}
+        <View style={{ backgroundColor: t.surface, borderRadius: 18, borderWidth: 1, borderColor: t.ring, padding: 15, marginBottom: 12 }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3 }}>
+            <Text style={{ color: t.ink, fontWeight: '800', fontSize: 15 }}>Log what you ate</Text>
+            <Text style={{ color: t.ink3, fontSize: 12 }}>Eaten <Text style={{ color: t.ink, fontWeight: '700' }}>{fl.consumed.kcal}</Text> / {target.kcal} kcal</Text>
+          </View>
+          <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 12 }}>Eating something off-plan? Add it and it counts toward your day.</Text>
+          <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
+            <Pressable onPress={photoLog} style={{ flex: 1, backgroundColor: t.brand, borderRadius: 12, paddingVertical: 12, alignItems: 'center', gap: 4 }}><Icon name="camera" size={19} color={t.brandInk} /><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 12 }}>Photo</Text></Pressable>
+            <Pressable onPress={barcodeLog} style={{ flex: 1, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingVertical: 12, alignItems: 'center', gap: 4 }}><Icon name="search" size={19} color={t.ink} /><Text style={{ color: t.ink, fontWeight: '700', fontSize: 12 }}>Barcode</Text></Pressable>
+            <Pressable onPress={() => router.push('/(client)/foodlog')} style={{ flex: 1, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingVertical: 12, alignItems: 'center', gap: 4 }}><Icon name="plus" size={19} color={t.ink} /><Text style={{ color: t.ink, fontWeight: '700', fontSize: 12 }}>Search</Text></Pressable>
+          </View>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <TextInput value={nl} onChangeText={setNl} placeholder='Describe it — "chicken burrito & a coke"' placeholderTextColor={t.ink3} onSubmitEditing={describeLog} returnKeyType="done" style={{ flex: 1, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14 }} />
+            <Pressable onPress={describeLog} disabled={logBusy || !nl.trim()} style={{ backgroundColor: nl.trim() ? t.brand : t.surface2, borderRadius: 12, paddingHorizontal: 14, justifyContent: 'center', borderWidth: 1, borderColor: nl.trim() ? t.brand : t.ring }}>{logBusy ? <ActivityIndicator color={t.brandInk} /> : <Text style={{ color: nl.trim() ? t.brandInk : t.ink3, fontWeight: '800', fontSize: 13 }}>Log</Text>}</Pressable>
+          </View>
+          {fl.entries.length > 0 ? (
+            <View style={{ marginTop: 12, gap: 6 }}>
+              {fl.entries.map((fe) => (
+                <View key={fe.id} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: t.surface2, borderRadius: 10, paddingHorizontal: 11, paddingVertical: 8 }}>
+                  <Text style={{ color: t.ink2, fontSize: 12.5, flex: 1 }} numberOfLines={1}>{fe.name}</Text>
+                  <Text style={{ color: t.ink3, fontSize: 12, marginHorizontal: 8 }}>{fe.kcal} kcal</Text>
+                  <Pressable onPress={() => fl.removeFood(fe.id)} hitSlop={6}><Text style={{ color: t.ink3, fontSize: 15 }}>×</Text></Pressable>
+                </View>
+              ))}
+            </View>
+          ) : null}
         </View>
 
         {/* quick links */}

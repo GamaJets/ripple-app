@@ -20,6 +20,7 @@ import { OwnerOpsProvider } from '../src/ui/ownerOps';
 import { SettingsProvider } from '../src/ui/settings';
 import { HabitsProvider } from '../src/ui/habits';
 import { CheckInsProvider } from '../src/ui/checkins';
+import { FoodLogProvider } from '../src/ui/foodLog';
 import { InvitesProvider } from '../src/ui/invites';
 import { TrainerInvitesProvider } from '../src/ui/trainerInvites';
 import { AuthProvider } from '../src/ui/auth';
@@ -58,6 +59,7 @@ export default function RootLayout() {
                     <SettingsProvider>
                     <HabitsProvider>
                       <CheckInsProvider>
+                        <FoodLogProvider>
                         <InvitesProvider>
                         <TrainerInvitesProvider>
                         <ErrorBoundary>
@@ -65,6 +67,7 @@ export default function RootLayout() {
                         </ErrorBoundary>
                         </TrainerInvitesProvider>
                         </InvitesProvider>
+                        </FoodLogProvider>
                       </CheckInsProvider>
                     </HabitsProvider>
                   </SettingsProvider>

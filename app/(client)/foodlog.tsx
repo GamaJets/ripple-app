@@ -14,6 +14,7 @@ import { Icon } from '../../src/ui/Icon';
 import { analyzeMeal, visionAvailable } from '../../src/lib/vision';
 import { parseFoodText, foodAIAvailable } from '../../src/lib/foodAI';
 import { notifySuccess } from '../../src/ui/haptics';
+import { useFoodLog } from '../../src/ui/foodLog';
 
 type Food = { n: string; k: number; p: number; c: number; f: number };
 type Logged = Food & { via: string };
@@ -37,7 +38,7 @@ export default function FoodLog() {
  const cd = useClientData();
  const target = macrosFor({ weightKg: cd.weightKg, bodyFatPct: cd.bodyFatPct, activity: cd.activity, goal: cd.goal, diet: cd.diet });
 
- const [log, setLog] = useState<Logged[]>([{ ...FOOD_DB[1], via: 'search' }]);
+ const fl = useFoodLog();
  const [q, setQ] = useState('');
  const [nl, setNl] = useState(''); const [nlBusy, setNlBusy] = useState(false);
  const results = q ? FOOD_DB.filter((f) => f.n.toLowerCase().includes(q.toLowerCase())) : [];
@@ -48,7 +49,7 @@ export default function FoodLog() {
  const [estN, setEstN] = useState(''); const [estK, setEstK] = useState(''); const [estP, setEstP] = useState(''); const [estC, setEstC] = useState(''); const [estF, setEstF] = useState('');
  const [serv, setServ] = useState(1);
 
- const add = (f: Food, via: string) => setLog((l) => [...l, { ...f, via }]);
+ const add = (f: Food, via: string) => fl.addFood({ name: f.n, kcal: f.k, protein: f.p, carbs: f.c, fat: f.f, via: via as any });
  const logNL = async () => {
    const text = nl.trim(); if (!text) return;
    setNlBusy(true);
@@ -57,9 +58,9 @@ export default function FoodLog() {
    if (items && items.length) { items.forEach((it) => add({ n: it.name, k: it.kcal, p: it.protein, c: it.carbs, f: it.fat }, 'ai')); setNl(''); notifySuccess(); }
    else { Alert.alert('Could not read that', foodAIAvailable() ? 'Try describing it differently, e.g. \"2 eggs, toast and a coffee\".' : 'AI food logging turns on with the AI backend.'); }
  };
- const remove = (i: number) => setLog((l) => l.filter((_, x) => x !== i));
+ // removal handled via fl.removeFood(id) in the list below
 
- const tot = log.reduce((a, f) => ({ k: a.k + f.k, p: a.p + f.p, c: a.c + f.c, f: a.f + f.f }), { k: 0, p: 0, c: 0, f: 0 });
+ const tot = { k: fl.consumed.kcal, p: fl.consumed.protein, c: fl.consumed.carbs, f: fl.consumed.fat };
  const remK = target.kcal - tot.k;
 
  const fillEst = (n: string, k: number, p: number, c: number, f: number) => { setEstN(n); setEstK(String(k)); setEstP(String(p)); setEstC(String(c)); setEstF(String(f)); setReading(false); };
@@ -142,13 +143,13 @@ export default function FoodLog() {
  ))}
 
  <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16, textTransform: 'capitalize', marginTop: 10, marginBottom: 8 }}>Logged Today</Text>
- {log.length === 0 ? <Text style={{ color: t.ink3, fontSize: 13 }}>Nothing logged yet today.</Text> : log.map((f, i) => (
- <View key={i} style={{ backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 12, padding: 13, marginBottom: 6, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+ {fl.entries.length === 0 ? <Text style={{ color: t.ink3, fontSize: 13 }}>Nothing logged yet today.</Text> : fl.entries.map((fe) => (
+ <View key={fe.id} style={{ backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 12, padding: 13, marginBottom: 6, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
  <View style={{ flex: 1 }}>
- <Text style={{ color: t.ink, fontSize: 14, fontWeight: '600' }}>{f.via === 'photo' ? ' ' : f.via === 'barcode' ? ' ' : ''}{f.n}</Text>
- <Text style={{ color: t.ink3, fontSize: 12 }}>{f.k} kcal · P{f.p} C{f.c} F{f.f}</Text>
+ <Text style={{ color: t.ink, fontSize: 14, fontWeight: '600' }}>{fe.name}</Text>
+ <Text style={{ color: t.ink3, fontSize: 12 }}>{fe.kcal} kcal · P{fe.protein} C{fe.carbs} F{fe.fat}</Text>
  </View>
- <Pressable onPress={() => remove(i)} style={{ padding: 6 }}><Text style={{ color: t.ink3, fontSize: 16 }}>×</Text></Pressable>
+ <Pressable onPress={() => fl.removeFood(fe.id)} style={{ padding: 6 }}><Text style={{ color: t.ink3, fontSize: 16 }}>×</Text></Pressable>
  </View>
  ))}
  </ScrollView>
