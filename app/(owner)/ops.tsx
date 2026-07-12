@@ -4,6 +4,7 @@ import { View, Text, Pressable, ScrollView, TextInput, Alert } from 'react-nativ
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
 import { useOwnerOps } from '../../src/ui/ownerOps';
+import { usePlatformTrainers } from '../../src/ui/trainers';
 
 function ago(iso: string) {
   const h = Math.round((Date.now() - Date.parse(iso)) / 3600000);
@@ -14,6 +15,8 @@ function ago(iso: string) {
 export default function OwnerOps() {
   const t = useTheme();
   const { anns, addAnn, tickets, resolveTicket, activity, openTickets } = useOwnerOps();
+  const { events } = usePlatformTrainers();
+  const feed = [...events, ...activity].sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
   const [tab, setTab] = useState<'announce' | 'support' | 'activity'>('announce');
   const [text, setText] = useState('');
   const [openT, setOpenT] = useState<string | null>(null);
@@ -70,7 +73,7 @@ export default function OwnerOps() {
           </View>
         ) : (
           <View>
-            {activity.map((e) => (
+            {feed.map((e) => (
               <View key={e.id} style={{ flexDirection: 'row', gap: 12, backgroundColor: t.surface, borderRadius: 14, borderWidth: 1, borderColor: t.ring, padding: 13, marginBottom: 8 }}>
                 <Text style={{ fontSize: 20 }}>{e.icon}</Text>
                 <Text style={{ color: t.ink2, fontSize: 14, flex: 1 }}>{e.text}</Text>
