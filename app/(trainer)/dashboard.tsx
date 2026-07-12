@@ -56,6 +56,7 @@ export default function TrainerClients() {
   const [invOpen, setInvOpen] = useState(false);
   const [invEmail, setInvEmail] = useState('');
   const [invMode, setInvMode] = useState<'online' | 'inperson'>('online');
+  const [newEmail, setNewEmail] = useState('');
   const active = roster.length;
   const revenue = active * MOCK_TRAINER.sessionFee * 4;
   const unread = roster.reduce((a, c) => a + c.unread, 0);
@@ -105,7 +106,7 @@ export default function TrainerClients() {
           <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16 }}>Your Clients</Text>
           <View style={{ flexDirection: 'row', gap: 8 }}>
             <Pressable onPress={() => { setInvEmail(''); setInvMode('online'); setInvOpen(true); }} style={{ backgroundColor: t.surface2, borderWidth: 1, borderColor: t.ring, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 7 }}><Text style={{ color: t.ink2, fontWeight: '800', fontSize: 12 }}>Invite by email</Text></Pressable>
-            <Pressable onPress={() => { setNewName(''); setNewGoal('Fat loss'); setNewMode('online'); setAddOpen(true); }} style={{ backgroundColor: t.brand, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 7 }}><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 12 }}>Add client</Text></Pressable>
+            <Pressable onPress={() => { setNewName(''); setNewEmail(''); setNewGoal('Fat loss'); setNewMode('online'); setAddOpen(true); }} style={{ backgroundColor: t.brand, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 7 }}><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 12 }}>Add client</Text></Pressable>
           </View>
         </View>
         {sentInvites.filter((i) => i.status === 'pending').length > 0 ? (
@@ -303,6 +304,8 @@ export default function TrainerClients() {
           <Text style={{ color: t.ink3, fontSize: 13, marginBottom: 16 }}>They join your roster and become bookable in your schedule.</Text>
           <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>Name</Text>
           <TextInput value={newName} onChangeText={setNewName} placeholder="Client name" placeholderTextColor={t.ink3} style={{ color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, marginBottom: 16 }} />
+          <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>Email <Text style={{ color: t.ink3, fontWeight: '600' }}>(optional — sends an app invite)</Text></Text>
+          <TextInput value={newEmail} onChangeText={setNewEmail} placeholder="client@email.com" placeholderTextColor={t.ink3} autoCapitalize="none" keyboardType="email-address" style={{ color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, marginBottom: 16 }} />
           <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>Goal</Text>
           <View style={{ flexDirection: 'row', gap: 8, marginBottom: 16 }}>
             {['Fat loss', 'Build muscle', 'Tone'].map((g) => (
@@ -321,7 +324,7 @@ export default function TrainerClients() {
           </View>
           <View style={{ flexDirection: 'row', gap: 10 }}>
             <Pressable onPress={() => setAddOpen(false)} style={{ flex: 1, paddingVertical: 15, borderRadius: 14, alignItems: 'center', backgroundColor: t.surface2, borderWidth: 1, borderColor: t.ring }}><Text style={{ color: t.ink2, fontWeight: '800' }}>Cancel</Text></Pressable>
-            <Pressable onPress={() => { if (!newName.trim()) { Alert.alert('Add a name', 'Enter the client name.'); return; } addClient(newName, newGoal, newMode); setAddOpen(false); Alert.alert('Client added', `${newName.trim()} is now on your roster.`, [{ text: 'Great' }]); }} style={{ flex: 2, paddingVertical: 15, borderRadius: 14, alignItems: 'center', backgroundColor: t.brand }}><Text style={{ color: t.brandInk, fontWeight: '800' }}>Add Client</Text></Pressable>
+            <Pressable onPress={() => { if (!newName.trim()) { Alert.alert('Add a name', 'Enter the client name.'); return; } addClient(newName, newGoal, newMode); const em = newEmail.trim(); const invited = !!em && em.includes('@'); if (invited) { sendInvite(em, newMode); } setAddOpen(false); Alert.alert('Client added', invited ? newName.trim() + ' is on your roster and an invite was sent to ' + em + '. They link to you through the app when they accept.' : newName.trim() + ' is now on your roster.', [{ text: 'Great' }]); }} style={{ flex: 2, paddingVertical: 15, borderRadius: 14, alignItems: 'center', backgroundColor: t.brand }}><Text style={{ color: t.brandInk, fontWeight: '800' }}>Add Client</Text></Pressable>
           </View>
         </View>
       </Modal>
