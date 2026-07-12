@@ -19,6 +19,7 @@ import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useCheckIns } from '../../src/ui/checkins';
 import { useInvites } from '../../src/ui/invites';
 import { useTrainerInvites } from '../../src/ui/trainerInvites';
+import { useClientTags } from '../../src/ui/clientTags';
 import { currentStreak, longestStreak, personalRecords, weekStats } from '../../src/lib/streaks';
 
 function Stat({ t, label, value, unit }: { t: Theme; label: string; value: string; unit?: string }) {
@@ -47,6 +48,9 @@ export default function TrainerClients() {
   const { addAnnouncement } = useAnnouncements();
   const { sent: sentInvites, sendInvite, revokeInvite } = useInvites();
   const { received: trainerInvites, acceptTrainerInvite, declineTrainerInvite } = useTrainerInvites();
+  const { tagsFor, allTags, addTag, removeTag } = useClientTags();
+  const [seg, setSeg] = useState<string>('all');
+  const [tagDraft, setTagDraft] = useState('');
   const acceptJoin = async (id: string, ownerName: string | null) => {
     await acceptTrainerInvite(id);
     Alert.alert('Welcome to the platform', 'You have joined ' + (ownerName || 'the platform') + ' as a trainer. Let us set up your profile.', [{ text: 'Set up profile', onPress: () => router.push('/(trainer)/profile') }, { text: 'Later' }]);
@@ -84,6 +88,19 @@ export default function TrainerClients() {
   const revenue = active * MOCK_TRAINER.sessionFee * 4;
   const unread = roster.reduce((a, c) => a + c.unread, 0);
   const atRisk = roster.filter((c) => c.adherence < 80).length;
+  const AUTO_SEGS = [
+    { key: 'all', label: 'All', n: roster.length },
+    { key: 'atrisk', label: 'At-risk', n: roster.filter((c) => c.adherence < 80).length },
+    { key: 'online', label: 'Online', n: roster.filter((c) => c.mode === 'online').length },
+    { key: 'inperson', label: 'In-person', n: roster.filter((c) => c.mode === 'inperson').length },
+  ];
+  const matchSeg = (c: RosterClient) =>
+    seg === 'all' ? true
+    : seg === 'atrisk' ? c.adherence < 80
+    : seg === 'online' ? c.mode === 'online'
+    : seg === 'inperson' ? c.mode === 'inperson'
+    : tagsFor(c.id).includes(seg);
+  const shownRoster = roster.filter(matchSeg);
   const sendNudge = (client: RosterClient) => {
     const body = 'Hey ' + client.name.split(' ')[0] + ' — checking in! How is your week going? Let me know if you need anything.';
     try { supabase.from('messages').insert({ client_id: client.id, sender: 'coach', body }).then(() => {}, () => {}); } catch { /* ignore */ }
@@ -184,7 +201,25 @@ export default function TrainerClients() {
             ))}
           </View>
         ) : null}
-        {roster.map((c) => (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12, marginHorizontal: -2 }} contentContainerStyle={{ gap: 8, paddingHorizontal: 2 }}>
+          {AUTO_SEGS.map((sg) => (
+            <Pressable key={sg.key} onPress={() => setSeg(sg.key)} style={{ backgroundColor: seg === sg.key ? t.brand : t.surface2, borderWidth: 1, borderColor: seg === sg.key ? t.brand : t.ring, borderRadius: 20, paddingHorizontal: 13, paddingVertical: 7 }}>
+              <Text style={{ color: seg === sg.key ? t.brandInk : t.ink2, fontWeight: '800', fontSize: 12 }}>{sg.label} {sg.n}</Text>
+            </Pressable>
+          ))}
+          {allTags.map((tg) => (
+            <Pressable key={tg} onPress={() => setSeg(tg)} style={{ backgroundColor: seg === tg ? t.brand : t.surface2, borderWidth: 1, borderColor: seg === tg ? t.brand : t.ring, borderRadius: 20, paddingHorizontal: 13, paddingVertical: 7, flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+              <Text style={{ color: seg === tg ? t.brandInk : t.ink3, fontSize: 11 }}>#</Text>
+              <Text style={{ color: seg === tg ? t.brandInk : t.ink2, fontWeight: '700', fontSize: 12, textTransform: 'capitalize' }}>{tg}</Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+        {shownRoster.length === 0 ? (
+          <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 22, alignItems: 'center', marginBottom: 10 }}>
+            <Text style={{ color: t.ink3, fontSize: 13 }}>No clients in this segment.</Text>
+          </View>
+        ) : null}
+        {shownRoster.map((c) => (
           <Pressable key={c.id} onPress={() => setSel(c)} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 15, marginBottom: 10 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
               <View style={{ width: 42, height: 42, borderRadius: 21, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
@@ -198,6 +233,15 @@ export default function TrainerClients() {
                   {['c1', 'c2', 'c3', 'c4', 'c5'].includes(c.id) ? <View style={{ backgroundColor: t.surface3, borderRadius: 8, paddingHorizontal: 7, paddingVertical: 2 }}><Text style={{ color: t.ink3, fontSize: 10, fontWeight: '800' }}>DEMO</Text></View> : null}
                 </View>
                 <Text style={{ color: t.ink3, fontSize: 12, marginTop: 1 }}>{c.goal} · {c.mode === 'inperson' ? 'In-person' : 'Online'} · {c.lastActive}</Text>
+                {tagsFor(c.id).length > 0 ? (
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginTop: 6 }}>
+                    {tagsFor(c.id).map((tg) => (
+                      <View key={tg} style={{ backgroundColor: t.surface3, borderRadius: 7, paddingHorizontal: 7, paddingVertical: 2 }}>
+                        <Text style={{ color: t.ink3, fontSize: 10, fontWeight: '700', textTransform: 'capitalize' }}>{tg}</Text>
+                      </View>
+                    ))}
+                  </View>
+                ) : null}
               </View>
               <View style={{ alignItems: 'flex-end' }}>
                 <View style={{ backgroundColor: c.weightDelta <= 0 ? 'rgba(45,212,191,0.15)' : 'rgba(224,103,103,0.15)', paddingHorizontal: 9, paddingVertical: 4, borderRadius: 14 }}>
@@ -226,6 +270,34 @@ export default function TrainerClients() {
             <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 30 }} showsVerticalScrollIndicator={false}>
               <Text style={{ color: t.ink, fontSize: 20, fontWeight: '800', textTransform: 'capitalize' }}>{sel.name}</Text>
               <Text style={{ color: t.ink3, fontSize: 13, marginTop: 2, marginBottom: 16 }}>{sel.goal} · {sel.mode === 'inperson' ? 'In-person' : 'Online'} · {sel.weightDelta > 0 ? '+' : ''}{sel.weightDelta} kg · {sel.adherence}% adherence</Text>
+
+              <View style={{ marginBottom: 16 }}>
+                <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>Tags</Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+                  {tagsFor(sel.id).length === 0 ? <Text style={{ color: t.ink3, fontSize: 12, fontStyle: 'italic' }}>No tags yet.</Text> : null}
+                  {tagsFor(sel.id).map((tg) => (
+                    <Pressable key={tg} onPress={() => removeTag(sel.id, tg)} style={{ backgroundColor: t.surface3, borderRadius: 8, paddingHorizontal: 9, paddingVertical: 5, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Text style={{ color: t.ink2, fontSize: 12, fontWeight: '700', textTransform: 'capitalize' }}>{tg}</Text>
+                      <Icon name="minus" size={12} color={t.ink3} />
+                    </Pressable>
+                  ))}
+                </View>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <TextInput value={tagDraft} onChangeText={setTagDraft} placeholder="Add a tag — e.g. comp prep" placeholderTextColor={t.ink3} autoCapitalize="none" returnKeyType="done" onSubmitEditing={() => { if (tagDraft.trim()) { addTag(sel.id, tagDraft); setTagDraft(''); } }} style={{ flex: 1, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 9, fontSize: 13 }} />
+                  <Pressable onPress={() => { if (tagDraft.trim()) { addTag(sel.id, tagDraft); setTagDraft(''); } }} disabled={!tagDraft.trim()} style={{ backgroundColor: tagDraft.trim() ? t.brand : t.surface2, borderColor: tagDraft.trim() ? t.brand : t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, justifyContent: 'center' }}>
+                    <Text style={{ color: tagDraft.trim() ? t.brandInk : t.ink3, fontWeight: '800', fontSize: 13 }}>Add</Text>
+                  </Pressable>
+                </View>
+                {allTags.filter((tg) => !tagsFor(sel.id).includes(tg)).length > 0 ? (
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+                    {allTags.filter((tg) => !tagsFor(sel.id).includes(tg)).map((tg) => (
+                      <Pressable key={tg} onPress={() => addTag(sel.id, tg)} style={{ borderColor: t.ring, borderWidth: 1, borderRadius: 8, paddingHorizontal: 9, paddingVertical: 4 }}>
+                        <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '600', textTransform: 'capitalize' }}>+ {tg}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                ) : null}
+              </View>
 
               {hasLog ? (
                 <View>
