@@ -5,11 +5,13 @@
 import { useEffect, useState } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, Modal, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
+import { Icon } from '../../src/ui/Icon';
 import type { Theme } from '../../src/theme/tokens';
 import { useRoster } from '../../src/ui/roster';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
+import { useProgramTemplates } from '../../src/ui/programTemplates';
 import { buildProgram, type Program } from '../../src/lib/programs';
 import type { Goal } from '../../src/lib/types';
 
@@ -42,6 +44,8 @@ export default function Builder() {
   const t = useTheme();
   const { roster } = useRoster();
   const { getProgram, assignProgram, clearProgram } = useAssignedPrograms();
+  const { templates, saveTemplate } = useProgramTemplates();
+  const router = useRouter();
 
   const params = useLocalSearchParams();
   const [clientId, setClientId] = useState((params.clientId as string) || roster[0]?.id || '');
@@ -50,6 +54,9 @@ export default function Builder() {
   const [days, setDays] = useState<BDay[]>([]);
   const [pickerDay, setPickerDay] = useState<number | null>(null);
   const [custom, setCustom] = useState('');
+  const [tplPick, setTplPick] = useState(false);
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [tplName, setTplName] = useState('');
 
   const client = roster.find((c) => c.id === clientId);
   const assignedNow = !!getProgram(clientId);
@@ -72,6 +79,15 @@ export default function Builder() {
     else loadFrom(buildProgram(goalToEnum(client?.goal ?? ''), 25));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientId]);
+
+  // If opened from the template library with a templateId, load it once.
+  useEffect(() => {
+    const tid = params.templateId as string;
+    if (!tid) return;
+    const tpl = templates.find((x) => x.id === tid);
+    if (tpl) { loadFrom(tpl.program); setTplName(tpl.name); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params.templateId, templates.length]);
 
   const setDayFocus = (di: number, focus: string) =>
     setDays((ds) => ds.map((d, i) => (i === di ? { ...d, focus } : d)));
@@ -96,6 +112,21 @@ export default function Builder() {
   const totalExercises = days.reduce((a, d) => a + d.exercises.length, 0);
   const canAssign = !!clientId && totalExercises > 0;
 
+  const composeProgram = (): Program => ({
+    title: title.trim() || 'Custom program',
+    focus: ['Coach-assigned', 'Personalised for you'],
+    note: note.trim() || 'Your coach built this program for you. Progress the weight when you hit the top of the rep range.',
+    days: days.filter((d) => d.exercises.length).map((d) => ({
+      day: d.day, focus: d.focus.trim() || 'Training', cardio: d.cardio,
+      exercises: d.exercises.map((e, i) => ({ key: d.day + '-' + i, name: e.name, group: e.group || '', sets: e.sets, reps: e.reps || '8-12', alternatives: [] })),
+    })),
+  });
+  const doSaveTemplate = () => {
+    if (totalExercises === 0) { Alert.alert('Nothing to save', 'Add at least one exercise first.'); return; }
+    saveTemplate(tplName.trim() || title.trim() || 'Untitled template', composeProgram());
+    setSaveOpen(false); setTplName('');
+    Alert.alert('Template saved', 'It is in your Program Templates — assign it to as many clients as you like.');
+  };
   const assign = () => {
     if (!canAssign) return;
     const program: Program = {
@@ -139,6 +170,18 @@ export default function Builder() {
         </ScrollView>
         <View style={{ backgroundColor: t.surface2, borderRadius: 10, borderWidth: 1, borderColor: t.ring, padding: 10, marginTop: 8, marginBottom: 16 }}>
           <Text style={{ color: t.ink3, fontSize: 12 }}>{assignedNow ? 'Currently on a coach-assigned program' : 'Currently on their auto-generated program'} · goal: {client?.goal ?? '—'}</Text>
+        </View>
+
+        {/* Template actions */}
+        <View style={{ flexDirection: 'row', gap: 8, marginBottom: 16 }}>
+          <Pressable onPress={() => setTplPick(true)} style={{ flex: 1, backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 11, paddingVertical: 11, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6 }}>
+            <Icon name="grid" size={15} color={t.ink2} />
+            <Text style={{ color: t.ink2, fontWeight: '700', fontSize: 13 }}>Start from template</Text>
+          </Pressable>
+          <Pressable onPress={() => { setTplName(title); setSaveOpen(true); }} style={{ flex: 1, backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 11, paddingVertical: 11, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6 }}>
+            <Icon name="plus" size={15} color={t.brand} />
+            <Text style={{ color: t.brand, fontWeight: '700', fontSize: 13 }}>Save as template</Text>
+          </Pressable>
         </View>
 
         {/* Program title + note */}
@@ -221,6 +264,50 @@ export default function Builder() {
               </Pressable>
             ))}
           </ScrollView>
+        </View>
+      </Modal>
+
+      {/* Start-from-template picker */}
+      <Modal visible={tplPick} transparent animationType="slide" onRequestClose={() => setTplPick(false)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setTplPick(false)} />
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, borderColor: t.ring, padding: 20, paddingBottom: 30, maxHeight: '80%' }}>
+          <Text style={{ color: t.ink, fontSize: 18, fontWeight: '800', marginBottom: 4 }}>Start from a template</Text>
+          <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 14 }}>Loads into the builder for {client?.name ?? 'this client'} — tweak, then assign.</Text>
+          <ScrollView showsVerticalScrollIndicator={false}>
+            {templates.map((tpl) => {
+              const dc = tpl.program.days.length;
+              const ec = tpl.program.days.reduce((a, d) => a + d.exercises.length, 0);
+              return (
+                <Pressable key={tpl.id} onPress={() => { loadFrom(tpl.program); setTplName(tpl.name); setTplPick(false); }} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: t.ring }}>
+                  <View style={{ width: 40, height: 40, borderRadius: 11, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}><Icon name="grid" size={18} color={t.brand} /></View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15 }}>{tpl.name}</Text>
+                    <Text style={{ color: t.ink3, fontSize: 12 }}>{dc} days · {ec} exercises</Text>
+                  </View>
+                  <Text style={{ color: t.brand, fontWeight: '800', fontSize: 13 }}>Use</Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+          <Pressable onPress={() => { setTplPick(false); router.push('/(trainer)/templates'); }} style={{ paddingVertical: 12, alignItems: 'center', marginTop: 4 }}>
+            <Text style={{ color: t.ink3, fontWeight: '700', fontSize: 13 }}>Manage all templates ›</Text>
+          </Pressable>
+        </View>
+      </Modal>
+
+      {/* Save-as-template */}
+      <Modal visible={saveOpen} transparent animationType="slide" onRequestClose={() => setSaveOpen(false)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setSaveOpen(false)} />
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, borderColor: t.ring, padding: 20, paddingBottom: 30 }}>
+          <Text style={{ color: t.ink, fontSize: 18, fontWeight: '800', marginBottom: 4 }}>Save as template</Text>
+          <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 14 }}>Reuse this program with other clients — {totalExercises} exercises across {days.filter((d) => d.exercises.length).length} days.</Text>
+          <TextInput value={tplName} onChangeText={setTplName} placeholder="Template name — e.g. Push · Pull · Legs" placeholderTextColor={t.ink3} style={[inp, { marginBottom: 14 }]} />
+          <Pressable onPress={doSaveTemplate} style={{ backgroundColor: t.brand, borderRadius: 12, paddingVertical: 14, alignItems: 'center' }}>
+            <Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 14 }}>Save template</Text>
+          </Pressable>
+          <Pressable onPress={() => setSaveOpen(false)} style={{ paddingVertical: 12, alignItems: 'center' }}>
+            <Text style={{ color: t.ink3, fontWeight: '700', fontSize: 13 }}>Cancel</Text>
+          </Pressable>
         </View>
       </Modal>
     </SafeAreaView>

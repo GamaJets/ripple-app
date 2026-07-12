@@ -6,3 +6,6 @@ dist/
 *.log
 ios/
 android/
+
+# transient edit scripts (device fs cannot rm)
+.scratch*

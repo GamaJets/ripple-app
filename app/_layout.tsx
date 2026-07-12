@@ -25,6 +25,7 @@ import { InvitesProvider } from '../src/ui/invites';
 import { TrainerInvitesProvider } from '../src/ui/trainerInvites';
 import { ClientTagsProvider } from '../src/ui/clientTags';
 import { ChallengesProvider } from '../src/ui/challenges';
+import { ProgramTemplatesProvider } from '../src/ui/programTemplates';
 import { AuthProvider } from '../src/ui/auth';
 import { ErrorBoundary } from '../src/ui/ErrorBoundary';
 import { AppThemeProvider, useTheme } from '../src/ui/components';
@@ -66,9 +67,11 @@ export default function RootLayout() {
                         <TrainerInvitesProvider>
                         <ClientTagsProvider>
                         <ChallengesProvider>
+                        <ProgramTemplatesProvider>
                         <ErrorBoundary>
                           <ThemedStack />
                         </ErrorBoundary>
+                        </ProgramTemplatesProvider>
                         </ChallengesProvider>
                         </ClientTagsProvider>
                         </TrainerInvitesProvider>

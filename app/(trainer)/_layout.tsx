@@ -33,6 +33,7 @@ export default function TrainerLayout() {
       <Tabs.Screen name="leaderboard" options={{ href: null, title: 'Leaderboard' }} />
       <Tabs.Screen name="explore" options={{ href: null, title: 'Explore' }} />
       <Tabs.Screen name="chat" options={{ href: null, title: 'Chat' }} />
+      <Tabs.Screen name="templates" options={{ href: null, title: 'Program Templates' }} />
       <Tabs.Screen name="feedback" options={{ href: null, title: 'Send Feedback' }} />
       <Tabs.Screen name="profile" options={{ title: 'Profile', tabBarIcon: ({ color }) => <Icon name="me" size={23} color={color} /> }} />
     </Tabs>

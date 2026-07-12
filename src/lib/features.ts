@@ -81,6 +81,7 @@ export interface NavItem {
 export const TRAINER_NAV: NavItem[] = [
   { key: 'clients', label: 'Clients', note: 'Your roster, progress & detail', route: '/(trainer)/dashboard', icon: 'people', keywords: 'roster invite add' },
   { key: 'builder', label: 'Programs', note: 'Build & assign training programs', route: '/(trainer)/builder', icon: 'train', keywords: 'program template workout' },
+  { key: 'templates', label: 'Program Templates', note: 'Build once, assign to many clients', route: '/(trainer)/templates', icon: 'grid', keywords: 'template library bulk assign program reuse' },
   { key: 'schedule', label: 'Schedule', note: 'Calendar, availability & bookings', route: '/(trainer)/calendar', icon: 'calendar', keywords: 'sessions availability booking' },
   { key: 'videos', label: 'Videos', note: 'Exercise video library', route: '/(trainer)/videos', icon: 'video', keywords: 'exercise demo upload' },
   { key: 'analytics', label: 'Analytics', note: 'Adherence, revenue & at-risk clients', route: '/(trainer)/analytics', icon: 'chart', keywords: 'stats retention revenue' },
