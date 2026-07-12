@@ -2,7 +2,7 @@
 // delta, ARR, trainers, clients), an at-risk-MRR churn callout, a trainer-health
 // board (score + risk, tap for detail), and an accumulating MRR trend.
 import { useState } from 'react';
-import { View, Text, ScrollView, Pressable, Modal } from 'react-native';
+import { View, Text, ScrollView, Pressable, Modal, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Icon } from '../../src/ui/Icon';
@@ -13,6 +13,8 @@ import { PLANS } from '../../src/lib/ownerMock';
 import { platformRollup, trainerHealth, type TrainerLike } from '../../src/lib/ownerAnalytics';
 import { Sparkline, DeltaBadge, HealthPill } from '../../src/ui/charts';
 import { useMrrHistory } from '../../src/ui/useMrrHistory';
+import { cohorts } from '../../src/lib/ownerAnalytics';
+import { ownerReportDoc, shareDoc } from '../../src/lib/exportShare';
 
 function Big({ t, label, value, sub, tint, extra }: { t: Theme; label: string; value: string; sub: string; tint?: boolean; extra?: React.ReactNode }) {
   return (<View style={{ flex: 1, backgroundColor: tint ? t.brand : t.surface, borderRadius: 18, borderWidth: 1, borderColor: t.ring, padding: 16 }}>
@@ -39,13 +41,23 @@ export default function OwnerOverview() {
   // Trainers sorted worst-health first so problems surface at the top.
   const ranked = [...(trainers as TrainerLike[])].map((tr) => ({ tr, h: trainerHealth(tr) })).sort((a, b) => a.h.score - b.h.score);
   const selHealth = sel ? trainerHealth(sel) : null;
+  const exportReport = async () => {
+    const doc = ownerReportDoc({
+      mrr: roll.mrr, arr: roll.arr, trainers: roll.trainers, paying: roll.paying, trial: roll.trial,
+      clients: roll.clients, atRiskMrr: roll.atRiskMrr, trialConversionPct: roll.trialConversionPct,
+      cohorts: cohorts(trainers as TrainerLike[]),
+      generatedOn: new Date().toLocaleDateString(),
+    });
+    const how = await shareDoc(doc.html, doc.text, 'Platform report');
+    if (how === 'text') Alert.alert('Report shared', 'Shared as text — branded PDF export turns on after the next native build.');
+  };
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
           <View><Text style={{ color: t.ink3, fontSize: 14 }}>Platform</Text><Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia', textTransform: 'capitalize' }}>Repple HQ</Text></View>
-          <View style={{ flexDirection: 'row', gap: 8 }}><Pressable onPress={() => router.push('/(owner)/explore')} accessibilityLabel="Search" style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 7 }}><Icon name="search" size={14} color={t.ink2} /></Pressable><Pressable onPress={() => router.push('/')} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 7 }}><Text style={{ color: t.ink2, fontWeight: '700', fontSize: 12 }}>Switch role</Text></Pressable></View>
+          <View style={{ flexDirection: 'row', gap: 8 }}><Pressable onPress={() => router.push('/(owner)/explore')} accessibilityLabel="Search" style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 7 }}><Icon name="search" size={14} color={t.ink2} /></Pressable><Pressable onPress={exportReport} accessibilityLabel="Export report" style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 7 }}><Icon name="share" size={14} color={t.ink2} /></Pressable><Pressable onPress={() => router.push('/')} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 7 }}><Text style={{ color: t.ink2, fontWeight: '700', fontSize: 12 }}>Switch role</Text></Pressable></View>
         </View>
 
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginBottom: 16 }}>

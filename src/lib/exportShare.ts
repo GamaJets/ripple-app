@@ -65,3 +65,34 @@ export function progressDoc(name: string, rows: ProgressRow[], brand = 'Repple')
   const text = `${first}'s progress (${brand})\n` + rows.map((r) => `• ${r.date}: ${r.weightKg}kg · ${r.bodyFatPct}% BF · ${r.muscleKg}kg muscle`).join('\n');
   return { html: page('Progress', body, brand), text };
 }
+
+// ── Owner investor/board report ──────────────────────────────────────────────
+export interface OwnerReportData {
+  mrr: number; arr: number; trainers: number; paying: number; trial: number;
+  clients: number; atRiskMrr: number; trialConversionPct: number | null;
+  cohorts: { label: string; total: number; active: number; pct: number }[];
+  generatedOn: string;
+}
+
+export function ownerReportDoc(d: OwnerReportData, brand = 'Repple'): { html: string; text: string } {
+  const metrics: [string, string][] = [
+    ['MRR', '$' + d.mrr.toLocaleString()],
+    ['ARR', '$' + d.arr.toLocaleString()],
+    ['Trainers', String(d.trainers)],
+    ['Paying', String(d.paying)],
+    ['On trial', String(d.trial)],
+    ['End clients', String(d.clients)],
+    ['Trial→paid', d.trialConversionPct != null ? d.trialConversionPct + '%' : '—'],
+    ['At-risk MRR', '$' + d.atRiskMrr.toLocaleString()],
+  ];
+  const mRows = metrics.map(([k, v]) => `<tr><td>${k}</td><td class="r">${v}</td></tr>`).join('');
+  const cRows = d.cohorts.map((c) => `<tr><td>${c.label}</td><td class="r">${c.active}/${c.total}</td><td class="r">${c.pct}%</td></tr>`).join('');
+  const body = `
+    <table><thead><tr><th>Metric</th><th class="r">Value</th></tr></thead><tbody>${mRows}</tbody></table>
+    <table><thead><tr><th>Cohort (signup)</th><th class="r">Active</th><th class="r">Retention</th></tr></thead><tbody>${cRows || '<tr><td colspan="3">No cohorts yet</td></tr>'}</tbody></table>`;
+  const html = page(`Platform report — ${d.generatedOn}`, body, brand);
+  const text = `${brand} — Platform report (${d.generatedOn})\n` +
+    metrics.map(([k, v]) => `${k}: ${v}`).join('\n') +
+    (d.cohorts.length ? '\n\nCohort retention:\n' + d.cohorts.map((c) => `${c.label}: ${c.active}/${c.total} (${c.pct}%)`).join('\n') : '');
+  return { html, text };
+}
