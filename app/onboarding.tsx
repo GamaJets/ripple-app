@@ -47,7 +47,9 @@ export default function Onboarding() {
     const w = parseFloat(weight); if (w > 20 && w < 400) cd.setWeightKg(w);
     const h = parseFloat(height); if (h > 80 && h < 260) cd.setHeightCm(h);
     cd.setCoachingMode(cmode);
-    router.replace('/(client)/dashboard');
+    // Connect-a-coach on first run: coached clients land on Find a Trainer so they
+    // can pick a coach right away; solo clients go straight to their dashboard.
+    router.replace(cmode === 'solo' ? '/(client)/dashboard' : '/(client)/trainers');
   };
 
   const next = () => {
