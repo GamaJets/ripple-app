@@ -20,6 +20,8 @@ import { useCheckIns } from '../../src/ui/checkins';
 import { useInvites } from '../../src/ui/invites';
 import { useTrainerInvites } from '../../src/ui/trainerInvites';
 import { useClientTags } from '../../src/ui/clientTags';
+import { useProgramTemplates } from '../../src/ui/programTemplates';
+import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
 import { currentStreak, longestStreak, personalRecords, weekStats } from '../../src/lib/streaks';
 
 function Stat({ t, label, value, unit }: { t: Theme; label: string; value: string; unit?: string }) {
@@ -49,6 +51,9 @@ export default function TrainerClients() {
   const { sent: sentInvites, sendInvite, revokeInvite } = useInvites();
   const { received: trainerInvites, acceptTrainerInvite, declineTrainerInvite } = useTrainerInvites();
   const { tagsFor, allTags, addTag, removeTag } = useClientTags();
+  const { templates } = useProgramTemplates();
+  const { assignProgram } = useAssignedPrograms();
+  const [bulkTplOpen, setBulkTplOpen] = useState(false);
   const [seg, setSeg] = useState<string>('all');
   const [tagDraft, setTagDraft] = useState('');
   const acceptJoin = async (id: string, ownerName: string | null) => {
@@ -133,6 +138,17 @@ export default function TrainerClients() {
     try { supabase.functions.invoke('send-push', { body: { user_ids: [client.id], title: 'A note from your coach', body } }).then(() => {}, () => {}); } catch { /* ignore */ }
     setDraftClient(null); setDraftText('');
     Alert.alert('Sent', 'Your check-in was sent to ' + client.name.split(' ')[0] + '.');
+  };
+  const bulkMessage = () => {
+    const list = shownRoster;
+    if (!list.length) return;
+    Alert.alert('Message ' + list.length + ' clients?', 'Send a check-in nudge to everyone in this segment.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Send', onPress: () => { list.forEach((c) => sendNudge(c)); } }]);
+  };
+  const bulkAssign = (tpl) => {
+    const list = shownRoster;
+    list.forEach((c) => assignProgram(c.id, tpl.program));
+    setBulkTplOpen(false);
+    Alert.alert('Assigned', '"' + tpl.name + '" assigned to ' + list.length + ' client' + (list.length > 1 ? 's' : '') + ' in this segment.');
   };
   const genSummary = async (client: RosterClient) => {
     setAiBusy(true); setAiSummary('');
@@ -266,6 +282,18 @@ export default function TrainerClients() {
             </Pressable>
           ))}
         </ScrollView>
+        {seg !== 'all' && shownRoster.length > 0 ? (
+          <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
+            <Pressable onPress={bulkMessage} style={{ flex: 1, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 6, backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 11, paddingVertical: 10 }}>
+              <Icon name="message" size={14} color={t.brand} />
+              <Text style={{ color: t.ink2, fontWeight: '700', fontSize: 12 }}>Message {shownRoster.length}</Text>
+            </Pressable>
+            <Pressable onPress={() => setBulkTplOpen(true)} style={{ flex: 1, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 6, backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 11, paddingVertical: 10 }}>
+              <Icon name="grid" size={14} color={t.brand} />
+              <Text style={{ color: t.ink2, fontWeight: '700', fontSize: 12 }}>Assign program</Text>
+            </Pressable>
+          </View>
+        ) : null}
         {shownRoster.length === 0 ? (
           <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 22, alignItems: 'center', marginBottom: 10 }}>
             <Text style={{ color: t.ink3, fontSize: 13 }}>No clients in this segment.</Text>
@@ -612,6 +640,30 @@ export default function TrainerClients() {
               </Pressable>
             </>
           )}
+        </View>
+      </Modal>
+
+      <Modal visible={bulkTplOpen} transparent animationType="slide" onRequestClose={() => setBulkTplOpen(false)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setBulkTplOpen(false)} />
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, borderColor: t.ring, padding: 20, paddingBottom: 30, maxHeight: '78%' }}>
+          <Text style={{ color: t.ink, fontSize: 20, fontWeight: '800' }}>Assign to {shownRoster.length} clients</Text>
+          <Text style={{ color: t.ink3, fontSize: 13, marginTop: 2, marginBottom: 14 }}>Pick a program template for everyone in this segment.</Text>
+          <ScrollView showsVerticalScrollIndicator={false}>
+            {templates.map((tpl) => {
+              const dc = tpl.program.days.length; const ec = tpl.program.days.reduce((a, d) => a + d.exercises.length, 0);
+              return (
+                <Pressable key={tpl.id} onPress={() => bulkAssign(tpl)} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: t.ring }}>
+                  <View style={{ width: 40, height: 40, borderRadius: 11, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}><Icon name="grid" size={18} color={t.brand} /></View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15 }}>{tpl.name}</Text>
+                    <Text style={{ color: t.ink3, fontSize: 12 }}>{dc} days · {ec} exercises</Text>
+                  </View>
+                  <Text style={{ color: t.brand, fontWeight: '800', fontSize: 13 }}>Assign</Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+          <Pressable onPress={() => setBulkTplOpen(false)} style={{ paddingVertical: 12, alignItems: 'center', marginTop: 6 }}><Text style={{ color: t.ink3, fontWeight: '700', fontSize: 13 }}>Cancel</Text></Pressable>
         </View>
       </Modal>
     </SafeAreaView>
