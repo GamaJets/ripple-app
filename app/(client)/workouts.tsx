@@ -63,8 +63,10 @@ export default function Train() {
   const dayKcal = dayEntries.reduce((a, l) => a + (l.kcal || 0), 0);
   const prettyDay = (ds: string) => { const [y, m, d] = ds.split('-').map(Number); return new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' }); };
 
-  const workout = program.days[dayIdx % program.days.length] || program.days[0] || { day: '', focus: 'Rest day', exercises: [] };
-  const estMin = Math.max(20, workout.exercises.length * 9);
+  const programDays = Array.isArray(program && program.days) ? program.days : [];
+  const workout = programDays[dayIdx % (programDays.length || 1)] || programDays[0] || { day: '', focus: 'Rest day', exercises: [] };
+  const exercises = Array.isArray(workout && workout.exercises) ? workout.exercises : [];
+  const estMin = Math.max(20, exercises.length * 9);
   const uid = (e: ProgramExercise) => `${dayIdx}:${e.key}`;
   const nameOf = (e: ProgramExercise) => swaps[uid(e)] || e.name;
   const logSet = (e: ProgramExercise, reps: string, kg: string) => { if (!reps) return; setLogged({ ...logged, [uid(e)]: [...(logged[uid(e)] || []), { reps, kg }] }); };
@@ -79,7 +81,7 @@ export default function Train() {
   const saveManual = () => {
     const nowISO = new Date().toISOString();
     let pr = false;
-    const entries: WorkoutEntry[] = workout.exercises.map((e) => {
+    const entries: WorkoutEntry[] = exercises.map((e) => {
       const s = logged[uid(e)] || [];
       if (!s.length) return null;
       const setPairs = s.map((x) => [parseInt(x.reps, 10) || 0, parseFloat(x.kg) || 0] as [number, number]);
@@ -127,14 +129,14 @@ export default function Train() {
             <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 15, marginBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
               <View style={{ flex: 1 }}>
                 <Text style={{ color: t.brand, fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6 }}>Today · {workout.focus}</Text>
-                <Text style={{ color: t.ink, fontSize: 16, fontWeight: '800', marginTop: 2 }}>{workout.exercises.length} exercises · ~{estMin} min</Text>
+                <Text style={{ color: t.ink, fontSize: 16, fontWeight: '800', marginTop: 2 }}>{exercises.length} exercises · ~{estMin} min</Text>
               </View>
               <Pressable onPress={() => setSession(true)} style={{ backgroundColor: t.brand, borderRadius: 11, paddingVertical: 11, paddingHorizontal: 15, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                 <Icon name="play" size={14} color={t.brandInk} /><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 13 }}>Start</Text>
               </Pressable>
             </View>
 
-            {workout.exercises.map((e) => {
+            {exercises.map((e) => {
               const sets = logged[uid(e)] || []; const done = sets.length >= e.sets;
               const sug = suggestForExercise(workoutLog, nameOf(e), e.reps);
               return (
@@ -291,7 +293,7 @@ export default function Train() {
       </Modal>
 
       <Modal visible={session} animationType="slide" onRequestClose={() => setSession(false)}>
-        <SessionRunner t={t} exercises={workout.exercises} focus={workout.focus} nameOf={nameOf} liveHr={w.today.heartRateAvg} log={workoutLog} onComplete={addWorkouts} onClose={() => setSession(false)} />
+        <SessionRunner t={t} exercises={exercises} focus={workout.focus} nameOf={nameOf} liveHr={w && w.today ? w.today.heartRateAvg : null} log={workoutLog} onComplete={addWorkouts} onClose={() => setSession(false)} />
       </Modal>
       <Confetti show={confetti} onDone={() => setConfetti(false)} />
     </SafeAreaView>
@@ -364,6 +366,7 @@ function SessionRunner({ t, exercises, focus, nameOf, liveHr, log, onComplete, o
   const next = () => { if (idx < exercises.length - 1) { setIdx(idx + 1); setRest(0); } else finish(); };
   const inp = { color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 12, fontSize: 16, flex: 1 } as const;
 
+  if (!exercises || exercises.length === 0) return null;
   if (finished) {
     const totalSets = results.reduce((a, r) => a + r.length, 0);
     const volume = results.reduce((a, r) => a + r.reduce((x, s) => x + s.reps * s.kg, 0), 0);
