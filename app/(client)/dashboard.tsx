@@ -18,6 +18,7 @@ import { useCoachNutrition } from '../../src/ui/coachNutrition';
 import { useAnnouncements } from '../../src/ui/announcements';
 import { useSessions } from '../../src/ui/sessions';
 import { useInvites } from '../../src/ui/invites';
+import { useFoodLog } from '../../src/ui/foodLog';
 import { currentStreak, weekStats, personalRecords } from '../../src/lib/streaks';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -57,6 +58,7 @@ export default function Home() {
   const ann = useAnnouncements().latest;
   const { sessions } = useSessions();
   const { received: myInvites, acceptInvite: acceptCoachInvite, declineInvite: declineCoachInvite } = useInvites();
+  const foodToday = useFoodLog().consumed;
 
   const solo = c.coachingMode === 'solo';
   const online = c.coachingMode === 'online';
@@ -70,7 +72,8 @@ export default function Home() {
   const goalDays = program.days.length || 4;
 
   const macros = applyCoachAdjust(macrosFor({ weightKg: c.weightKg, bodyFatPct: c.bodyFatPct, activity: c.activity, goal: c.goal, diet: c.diet }), nutriAdjust || undefined);
-  const consumed = { kcal: Math.round(macros.kcal * 0.67), p: Math.round(macros.protein * 0.66), cbs: Math.round(macros.carbs * 0.6), f: Math.round(macros.fat * 0.7) };
+  // Real logged intake (shared with the Meals tab + Food Log); reflects what was actually eaten today.
+  const consumed = { kcal: foodToday.kcal, p: foodToday.protein, cbs: foodToday.carbs, f: foodToday.fat };
 
   const ws = c.weightSeries.map((x) => x.v);
   const scSort = [...c.scans].sort((a, b) => Date.parse(a.takenAt) - Date.parse(b.takenAt));
@@ -188,7 +191,7 @@ export default function Home() {
         {/* nutrition */}
         <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 15, marginBottom: 11 }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Text style={{ color: t.ink, fontWeight: '800', fontSize: 14 }}>Today's nutrition</Text>
+            <Pressable onPress={() => router.push('/(client)/nutrition')} hitSlop={6}><Text style={{ color: t.ink, fontWeight: '800', fontSize: 14 }}>Today's nutrition ›</Text></Pressable>
             <Text style={{ color: t.ink3, fontSize: 12 }}><Text style={{ color: t.ink, fontWeight: '700' }}>{consumed.kcal.toLocaleString()}</Text> / {macros.kcal.toLocaleString()} kcal</Text>
           </View>
           {macroBar('Protein', consumed.p, macros.protein, t.brand)}
