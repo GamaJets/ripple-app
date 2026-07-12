@@ -68,6 +68,7 @@ export default function Train() {
   const uid = (e: ProgramExercise) => `${dayIdx}:${e.key}`;
   const nameOf = (e: ProgramExercise) => swaps[uid(e)] || e.name;
   const logSet = (e: ProgramExercise, reps: string, kg: string) => { if (!reps) return; setLogged({ ...logged, [uid(e)]: [...(logged[uid(e)] || []), { reps, kg }] }); };
+  const quickLog = (e: ProgramExercise) => { const sg = suggestForExercise(workoutLog, nameOf(e), e.reps); logSet(e, String(parseInt(e.reps, 10) || 8), sg ? String(sg.weight) : ''); };
   const logCardio = () => {
     const m = parseInt(mins, 10) || 0, d = parseFloat(dist) || 0; if (!m) return;
     const kcal = Math.round(m * 10);
@@ -106,14 +107,6 @@ export default function Train() {
           </View>
         </View>
 
-        {/* month label + month view */}
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-          <Text style={{ color: t.ink2, fontSize: 13, fontWeight: '700', textTransform: 'capitalize' }}>{monthLabel}</Text>
-          <Pressable onPress={() => { setSelCalDay(dstr(dateFor(dayIdx))); setShowCal(true); }} style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-            <Icon name="calendar" size={14} color={t.brand} /><Text style={{ color: t.brand, fontWeight: '700', fontSize: 13 }}>Month view</Text>
-          </Pressable>
-        </View>
-
         {/* day strip */}
         <View style={{ flexDirection: 'row', gap: 6, marginBottom: 14 }}>
           {WEEK.map((d, i) => {
@@ -126,38 +119,6 @@ export default function Train() {
               </Pressable>
             );
           })}
-        </View>
-
-        {/* logged-on-this-day recap */}
-        {(() => {
-          const selDayStr = dstr(dateFor(dayIdx));
-          const entries = workoutLog.filter((l) => dstr(new Date(l.t)) === selDayStr);
-          if (entries.length === 0) return null;
-          return (
-            <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.brand, padding: 14, marginBottom: 14 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
-                <Icon name="check" size={15} color={t.brand} />
-                <Text style={{ color: t.ink, fontWeight: '800', fontSize: 14 }}>Logged {prettyDay(selDayStr)}</Text>
-              </View>
-              {entries.map((l, i) => (
-                <Text key={i} style={{ color: t.ink3, fontSize: 12, marginTop: 6 }}>
-                  <Text style={{ color: t.ink2, fontWeight: '700' }}>{l.exercise}</Text>
-                  {l.sets ? ` · ${l.sets.map((s: number[]) => `${s[0]}×${s[1]}kg`).join(', ')}` : l.cardio ? ` · ${l.cardio.mins} min · ${l.cardio.dist} ${l.cardio.unit}` : ''}
-                  {l.kcal ? ` · ${l.kcal} kcal` : ''}
-                </Text>
-              ))}
-            </View>
-          );
-        })()}
-
-        {/* strength / cardio toggle */}
-        <View style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: 11, padding: 3, marginBottom: 14, borderWidth: 1, borderColor: t.ring }}>
-          {(['strength', 'cardio'] as const).map((mm) => (
-            <Pressable key={mm} onPress={() => setMode(mm)} style={{ flex: 1, paddingVertical: 9, borderRadius: 8, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6, backgroundColor: mode === mm ? t.brand : 'transparent' }}>
-              <Icon name={mm === 'strength' ? 'dumbbell' : 'heart'} size={15} color={mode === mm ? t.brandInk : t.ink3} />
-              <Text style={{ color: mode === mm ? t.brandInk : t.ink3, fontWeight: '700', fontSize: 13 }}>{mm === 'strength' ? 'Strength' : 'Cardio'}</Text>
-            </Pressable>
-          ))}
         </View>
 
         {mode === 'strength' ? (
@@ -192,15 +153,17 @@ export default function Train() {
                     </View>
                   </View>
                   {sets.length > 0 && <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>{sets.map((s, i) => <View key={i} style={{ backgroundColor: t.surface2, borderRadius: 8, paddingHorizontal: 9, paddingVertical: 5 }}><Text style={{ color: t.ink2, fontSize: 12, fontWeight: '600' }}>{s.reps}×{s.kg || '–'}kg</Text></View>)}</View>}
-                  {sug ? (
-                    <View style={{ marginTop: 10, backgroundColor: t.surface2, borderRadius: 10, paddingVertical: 8, paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', gap: 7, borderWidth: 1, borderColor: t.ring }}>
-                      <Icon name="target" size={14} color={t.brand} />
-                      <Text style={{ color: t.brand, fontWeight: '800', fontSize: 13 }}>{sug.weight} kg</Text>
-                      {sug.up ? <Text style={{ color: t.brand, fontWeight: '800', fontSize: 12 }}>↑</Text> : null}
-                      <Text style={{ color: t.ink3, fontSize: 11, flex: 1 }}>{sug.reason}</Text>
-                    </View>
-                  ) : null}
-                  <LogRow t={t} onLog={(r, k) => logSet(e, r, k)} />
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10 }}>
+                    {sug ? (
+                      <View style={{ flex: 1, backgroundColor: t.surface2, borderRadius: 10, paddingVertical: 9, paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', gap: 7, borderWidth: 1, borderColor: t.ring }}>
+                        <Icon name="target" size={14} color={t.brand} />
+                        <Text style={{ color: t.brand, fontWeight: '800', fontSize: 13 }}>{sug.weight} kg</Text>
+                        {sug.up ? <Text style={{ color: t.brand, fontWeight: '800', fontSize: 12 }}>↑</Text> : null}
+                        <Text style={{ color: t.ink3, fontSize: 11, flex: 1 }} numberOfLines={1}>{sug.reason}</Text>
+                      </View>
+                    ) : <View style={{ flex: 1 }} />}
+                    <Pressable onPress={() => quickLog(e)} style={{ backgroundColor: t.brand, borderRadius: 10, paddingVertical: 10, paddingHorizontal: 16 }}><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 13 }}>Log set</Text></Pressable>
+                  </View>
                 </View>
               );
             })}

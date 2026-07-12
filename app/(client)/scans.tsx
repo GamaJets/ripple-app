@@ -161,13 +161,7 @@ export default function Scans() {
         {/* weight trend */}
         <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 16, marginBottom: 12 }}>
           <Text style={{ color: t.ink3, fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 8 }}>Weight trend</Text>
-          <TrendChart data={cd.weightSeries} unit="kg" color={t.brand} goodDown height={130} />
-        </View>
-
-        {/* body-fat trend */}
-        <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 16, marginBottom: 12 }}>
-          <Text style={{ color: t.ink3, fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 8 }}>Body-fat trend</Text>
-          <TrendChart data={cd.bodyFatSeries} unit="%" color={t.s3} goodDown height={130} />
+          <TrendChart data={cd.weightSeries} unit="kg" color={t.brand} goodDown height={110} />
         </View>
 
         {/* progress photos */}

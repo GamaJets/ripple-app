@@ -95,26 +95,6 @@ export default function Nutrition() {
           </View>
         ) : null}
 
-        {/* goal + diet selectors */}
-        <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 14, marginBottom: 12 }}>
-          <Text style={{ color: t.ink3, fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 8 }}>Goal</Text>
-          <View style={{ flexDirection: 'row', gap: 7, marginBottom: 12 }}>
-            {GOALS.map((g) => (
-              <Pressable key={g} onPress={() => { c.setGoal(g); setOverride({}); }} style={{ flex: 1, paddingVertical: 9, borderRadius: 10, alignItems: 'center', backgroundColor: c.goal === g ? t.brand : t.surface2, borderWidth: 1, borderColor: c.goal === g ? t.brand : t.ring }}>
-                <Text style={{ color: c.goal === g ? t.brandInk : t.ink2, fontWeight: '700', fontSize: 11.5 }}>{GOAL_LABEL[g]}</Text>
-              </Pressable>
-            ))}
-          </View>
-          <Text style={{ color: t.ink3, fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 8 }}>Diet</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 7 }}>
-            {DIETS.map((d) => (
-              <Pressable key={d} onPress={() => { c.setDiet(d); setOverride({}); }} style={{ paddingHorizontal: 15, paddingVertical: 8, borderRadius: 10, backgroundColor: diet === d ? t.brand : t.surface2, borderWidth: 1, borderColor: diet === d ? t.brand : t.ring }}>
-                <Text style={{ color: diet === d ? t.brandInk : t.ink2, fontWeight: '700', fontSize: 12 }}>{DIET_LABEL[d]}</Text>
-              </Pressable>
-            ))}
-          </ScrollView>
-        </View>
-
         <Text style={{ color: t.ink3, fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.9, marginBottom: 9 }}>Today's plan · {plan.length} meals</Text>
         {plan.map((m) => (
           <Pressable key={m.pos} onPress={() => setRecipe(m)} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 14, marginBottom: 9, flexDirection: 'row', alignItems: 'center' }}>

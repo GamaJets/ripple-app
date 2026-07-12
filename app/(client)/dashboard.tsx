@@ -69,6 +69,11 @@ export default function Home() {
   const consumed = { kcal: Math.round(macros.kcal * 0.67), p: Math.round(macros.protein * 0.66), cbs: Math.round(macros.carbs * 0.6), f: Math.round(macros.fat * 0.7) };
 
   const ws = c.weightSeries.map((x) => x.v);
+  const scSort = [...c.scans].sort((a, b) => Date.parse(a.takenAt) - Date.parse(b.takenAt));
+  const scPrev = scSort.length > 1 ? scSort[scSort.length - 2] : null;
+  const scLast = scSort[scSort.length - 1];
+  const bfD = scPrev && scLast ? +(scLast.bodyFatPct - scPrev.bodyFatPct).toFixed(1) : 0;
+  const muD = scPrev && scLast ? +(scLast.skeletalMuscleKg - scPrev.skeletalMuscleKg).toFixed(1) : 0;
   const wDelta = ws.length > 1 ? +(ws[ws.length - 1] - ws[0]).toFixed(1) : 0;
 
   const now = Date.now();
@@ -143,8 +148,8 @@ export default function Home() {
         {/* body stats */}
         <View style={{ flexDirection: 'row', gap: 9, marginBottom: 11 }}>
           {stat('Weight', `${c.weightKg}`, wDelta !== 0 ? `${wDelta < 0 ? '▼' : '▲'} ${Math.abs(wDelta)} kg` : '—', wDelta <= 0)}
-          {stat('Body fat', `${c.bodyFatPct}%`, '', true)}
-          {stat('Muscle', `${c.muscleKg}`, '', true)}
+          {stat('Body fat', `${c.bodyFatPct}%`, bfD !== 0 ? `${bfD < 0 ? '▼' : '▲'} ${Math.abs(bfD)}` : '—', bfD <= 0)}
+          {stat('Muscle', `${c.muscleKg}`, muD !== 0 ? `${muD < 0 ? '▼' : '▲'} ${Math.abs(muD)}` : '—', muD >= 0)}
         </View>
 
         {/* weight trend */}

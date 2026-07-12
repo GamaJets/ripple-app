@@ -12,13 +12,16 @@ import { ageFromDob } from '../../src/lib/age';
 import { macrosFor } from '../../src/lib/nutrition';
 import { useClientData } from '../../src/ui/clientData';
 import { Icon, type IconName } from '../../src/ui/Icon';
-import type { Goal } from '../../src/lib/types';
+import type { Goal, Diet } from '../../src/lib/types';
 
 const SERIF = 'Georgia';
 const GOALS: { id: Goal; label: string }[] = [
   { id: 'fatloss', label: 'Fat loss' },
   { id: 'tone', label: 'Tone' },
   { id: 'muscle', label: 'Build muscle' },
+];
+const DIETS: { id: Diet; label: string }[] = [
+  { id: 'meat', label: 'Meat' }, { id: 'vegetarian', label: 'Veggie' }, { id: 'vegan', label: 'Vegan' }, { id: 'paleo', label: 'Paleo' }, { id: 'keto', label: 'Keto' },
 ];
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -318,6 +321,14 @@ export default function Profile() {
             <Text style={{ color: t.ink2, fontSize: 13, fontWeight: '600', marginBottom: 6 }}>Body fat %</Text>
             <TextInput value={bfVal} onChangeText={setBfVal} keyboardType="numeric" placeholder="e.g. 22" placeholderTextColor={t.ink3} style={{ color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, marginBottom: 6 }} />
             <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 16 }}>From your latest scan, or type it in. Changes recalculate your plan.</Text>
+            <Text style={{ color: t.ink2, fontSize: 13, fontWeight: '600', marginBottom: 6 }}>Diet</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 7, marginBottom: 16 }}>
+              {DIETS.map((d) => (
+                <Pressable key={d.id} onPress={() => cd.setDiet(d.id)} style={{ paddingHorizontal: 15, paddingVertical: 8, borderRadius: 10, backgroundColor: cd.diet === d.id ? t.brand : t.surface2, borderWidth: 1, borderColor: cd.diet === d.id ? t.brand : t.ring }}>
+                  <Text style={{ color: cd.diet === d.id ? t.brandInk : t.ink2, fontWeight: '700', fontSize: 12 }}>{d.label}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
 
             <View style={{ backgroundColor: t.surface2, borderRadius: 12, borderWidth: 1, borderColor: t.ring, padding: 13, marginBottom: 16 }}>
               <Text style={{ color: t.ink3, fontSize: 12 }}>New target · <Text style={{ color: t.ink, fontWeight: '700' }}>{macros.kcal.toLocaleString()} kcal</Text> · P{macros.protein} / C{macros.carbs} / F{macros.fat}</Text>
