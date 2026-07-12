@@ -90,6 +90,16 @@ export default function Home() {
   const macros = applyCoachAdjust(macrosFor({ weightKg: c.weightKg, bodyFatPct: c.bodyFatPct, activity: c.activity, goal: c.goal, diet: c.diet }), nutriAdjust || undefined);
   // Real logged intake (shared with the Meals tab + Food Log); reflects what was actually eaten today.
   const consumed = { kcal: foodToday.kcal, p: foodToday.protein, cbs: foodToday.carbs, f: foodToday.fat };
+  const _todayKey = new Date().toISOString().slice(0, 10);
+  const trainedToday = log.some((e) => (e.t || '').slice(0, 10) === _todayKey);
+  const kcalLeft = Math.max(0, macros.kcal - consumed.kcal);
+  const today = readiness.tone === 'low'
+    ? { headline: 'Recover today', tip: 'Under-recovered — keep it light or take a rest day.', cta: 'Recovery', route: '/(client)/recovery', tone: t.warn }
+    : !trainedToday
+    ? { headline: 'Ready to train', tip: readiness.tip, cta: 'Start workout', route: '/(client)/workouts', tone: t.brand }
+    : kcalLeft > 200
+    ? { headline: 'Fuel up', tip: kcalLeft + ' kcal left to hit your target today.', cta: 'Log a meal', route: '/(client)/nutrition', tone: t.brand }
+    : { headline: 'On track', tip: 'Session done and your macros are on point. Nice work.', cta: 'View plan', route: '/(client)/nutrition', tone: t.brand };
 
   const ws = c.weightSeries.map((x) => x.v);
   const scSort = [...c.scans].sort((a, b) => Date.parse(a.takenAt) - Date.parse(b.takenAt));
@@ -162,6 +172,27 @@ export default function Home() {
             {(coachNotes.length > 0 || !!ann) ? <View style={{ position: 'absolute', top: 8, right: 9, width: 9, height: 9, borderRadius: 5, backgroundColor: t.brand, borderWidth: 2, borderColor: t.surface }} /> : null}
           </Pressable>
           </View>
+        </View>
+
+        {/* Today — one adaptive card */}
+        <View style={{ backgroundColor: t.surface, borderRadius: 18, borderWidth: 1, borderColor: today.tone, padding: 16, marginBottom: 12 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 3 }}>
+            <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: today.tone }} />
+            <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.8 }}>Today</Text>
+          </View>
+          <Text style={{ color: t.ink, fontSize: 20, fontWeight: '800' }}>{today.headline}</Text>
+          <Text style={{ color: t.ink3, fontSize: 13, marginTop: 3, lineHeight: 18 }}>{today.tip}</Text>
+          <View style={{ flexDirection: 'row', gap: 8, marginTop: 12, marginBottom: 12 }}>
+            {[['Train', (wk.workouts) + '/' + goalDays], ['Kcal left', kcalLeft.toLocaleString()], ['Readiness', String(readiness.score)]].map(([l, v]) => (
+              <View key={l as string} style={{ flex: 1, backgroundColor: t.surface2, borderRadius: 11, borderWidth: 1, borderColor: t.ring, paddingVertical: 9, alignItems: 'center' }}>
+                <Text style={{ color: t.ink, fontWeight: '800', fontSize: 15 }}>{v as string}</Text>
+                <Text style={{ color: t.ink3, fontSize: 10, marginTop: 1 }}>{l as string}</Text>
+              </View>
+            ))}
+          </View>
+          <Pressable onPress={() => router.push(today.route as any)} style={{ backgroundColor: today.tone, borderRadius: 12, paddingVertical: 13, alignItems: 'center' }}>
+            <Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 14 }}>{today.cta}</Text>
+          </Pressable>
         </View>
 
         {myInvites.length > 0 ? (
