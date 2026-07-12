@@ -12,6 +12,7 @@ import type { Diet, Goal } from '../../src/lib/types';
 import { useClientData } from '../../src/ui/clientData';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
 import { Icon } from '../../src/ui/Icon';
+import { useRouter } from 'expo-router';
 
 const SERIF = 'Georgia';
 const DIETS: Diet[] = ['meat', 'vegetarian', 'vegan', 'paleo', 'keto'];
@@ -38,6 +39,7 @@ function CalRing({ t, val, target }: { t: Theme; val: number; target: number }) 
 export default function Nutrition() {
   const t = useTheme();
   const c = useClientData();
+  const router = useRouter();
   const _adj = useCoachNutrition().get(c.id);
   const coachAdjust = c.coachingMode === 'solo' ? null : _adj;
   const w = c.weightKg;
@@ -88,6 +90,15 @@ export default function Nutrition() {
             {macroBar('Fat', tot.F, target.fat, t.s1)}
           </View>
         </View>
+
+        {/* quick links */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginBottom: 12 }}>
+          {([['meals', 'Food Log', '/(client)/foodlog'], ['water', 'Recovery', '/(client)/recovery'], ['settings', 'Macros', '/(client)/tools']] as const).map(([ic, label, route]) => (
+            <Pressable key={route} onPress={() => router.push(route as any)} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 18, paddingHorizontal: 12, paddingVertical: 8 }}>
+              <Icon name={ic} size={14} color={t.brand} /><Text style={{ color: t.ink2, fontWeight: '700', fontSize: 13 }}>{label}</Text>
+            </Pressable>
+          ))}
+        </ScrollView>
 
         {coachAdjust?.note ? (
           <View style={{ backgroundColor: t.surface, borderColor: t.s3, borderWidth: 1, borderRadius: 14, padding: 12, marginBottom: 12 }}>
