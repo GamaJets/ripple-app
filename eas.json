@@ -31,7 +31,12 @@
     },
     "production": {
       "autoIncrement": true,
-      "channel": "production"
+      "channel": "preview",
+      "env": {
+        "EXPO_PUBLIC_ENABLE_VISION": "1",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://phgfwzpkkwdysftlgkoq.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_Td-L1IVNMzPpQsa30hUExQ_K--w76RZ"
+      }
     }
   },
   "submit": {
