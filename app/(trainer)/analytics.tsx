@@ -9,6 +9,8 @@ import { MOCK_TRAINER } from '../../src/lib/mockData';
 import { ROSTER } from '../../src/lib/trainerMock';
 import { useRoster } from '../../src/ui/roster';
 import { DistBar, DeltaBadge } from '../../src/ui/charts';
+import { Sparkline } from '../../src/ui/charts';
+import { useMonthlyHistory } from '../../src/ui/useMrrHistory';
 
 function Big({ t, label, value, sub, tint }: { t: Theme; label: string; value: string; sub: string; tint?: boolean }) {
   return (
@@ -36,6 +38,7 @@ export default function TrainerAnalytics() {
   const watch = roster.filter((c) => c.adherence >= 70 && c.adherence < 85).length;
   const riskCount = roster.filter((c) => c.adherence < 70).length;
   const atRiskRevenue = atRisk.length * MOCK_TRAINER.sessionFee * 4;
+  const revHist = useMonthlyHistory('repple.trainer.revHistory', revenue);
   const months = [['Feb', 0.55], ['Mar', 0.62], ['Apr', 0.7], ['May', 0.82], ['Jun', 0.9], ['Jul', 1]] as const;
 
   return (
@@ -82,14 +85,13 @@ export default function TrainerAnalytics() {
         </View>
 
         <View style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18, marginBottom: 14 }}>
-          <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16, textTransform: 'capitalize', marginBottom: 14 }}>Revenue trend</Text>
-          <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 10, height: 90 }}>
-            {months.map(([mo, f]) => (
-              <View key={mo} style={{ flex: 1, alignItems: 'center', gap: 6 }}>
-                <View style={{ width: '62%', height: 18 + (f as number) * 60, borderRadius: 6, backgroundColor: mo === 'Jul' ? t.brand : t.surface3 }} />
-                <Text style={{ color: t.ink3, fontSize: 11 }}>{mo}</Text>
-              </View>
-            ))}
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+            <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16 }}>Revenue trend</Text>
+            {revHist.delta !== 0 ? <DeltaBadge value={revHist.delta} unit="" suffix="vs last mo" /> : <Text style={{ color: t.ink3, fontSize: 11 }}>tracking started</Text>}
+          </View>
+          <Sparkline data={revHist.series} w={300} h={64} />
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 }}>
+            {revHist.labels.map((l, i) => (<Text key={i} style={{ color: t.ink3, fontSize: 10 }}>{l}</Text>))}
           </View>
         </View>
 
