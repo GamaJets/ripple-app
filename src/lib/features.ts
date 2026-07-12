@@ -70,3 +70,36 @@ export function searchFeatures(list: Feature[], q: string): Feature[] {
     AREA_LABEL[f.area].toLowerCase().includes(s)
   );
 }
+
+// ── Trainer & Owner portal directories (flat, searchable) ────────────────────
+export interface NavItem {
+  key: string; label: string; note: string; route: string; icon: IconName; keywords?: string;
+}
+
+export const TRAINER_NAV: NavItem[] = [
+  { key: 'clients', label: 'Clients', note: 'Your roster, progress & detail', route: '/(trainer)/dashboard', icon: 'people', keywords: 'roster invite add' },
+  { key: 'builder', label: 'Programs', note: 'Build & assign training programs', route: '/(trainer)/builder', icon: 'train', keywords: 'program template workout' },
+  { key: 'schedule', label: 'Schedule', note: 'Calendar, availability & bookings', route: '/(trainer)/calendar', icon: 'calendar', keywords: 'sessions availability booking' },
+  { key: 'videos', label: 'Videos', note: 'Exercise video library', route: '/(trainer)/videos', icon: 'video', keywords: 'exercise demo upload' },
+  { key: 'analytics', label: 'Analytics', note: 'Adherence, revenue & at-risk clients', route: '/(trainer)/analytics', icon: 'chart', keywords: 'stats retention revenue' },
+  { key: 'leaderboard', label: 'Leaderboard', note: 'Rank clients by consistency', route: '/(trainer)/leaderboard', icon: 'trophy', keywords: 'ranking standings' },
+  { key: 'profile', label: 'Profile', note: 'Your bio, offers & rate', route: '/(trainer)/profile', icon: 'me', keywords: 'bio rate offers settings' },
+];
+
+export const OWNER_NAV: NavItem[] = [
+  { key: 'overview', label: 'Overview', note: 'Platform health at a glance', route: '/(owner)/dashboard', icon: 'grid', keywords: 'dashboard home metrics' },
+  { key: 'trainers', label: 'Trainers & Billing', note: 'Roster, invites, plans & MRR', route: '/(owner)/trainers', icon: 'people', keywords: 'billing invite mrr plans' },
+  { key: 'brand', label: 'Brand Studio', note: 'White-label theme & logo', route: '/(owner)/brand', icon: 'palette', keywords: 'white label logo colour theme' },
+  { key: 'growth', label: 'Growth', note: 'Signups, funnel & promos', route: '/(owner)/growth', icon: 'trending', keywords: 'marketing funnel promos' },
+  { key: 'ops', label: 'Operations', note: 'Announcements, support & activity', route: '/(owner)/ops', icon: 'wrench', keywords: 'support inbox announce activity log' },
+];
+
+export function searchNav(list: NavItem[], q: string): NavItem[] {
+  const s = q.trim().toLowerCase();
+  if (!s) return list;
+  return list.filter((f) =>
+    f.label.toLowerCase().includes(s) ||
+    f.note.toLowerCase().includes(s) ||
+    (f.keywords ? f.keywords.toLowerCase().includes(s) : false)
+  );
+}

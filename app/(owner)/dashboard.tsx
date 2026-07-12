@@ -25,7 +25,7 @@ export default function OwnerOverview() {
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
           <View><Text style={{ color: t.ink3, fontSize: 14 }}>Platform</Text><Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia', textTransform: 'capitalize' }}>Repple HQ</Text></View>
-          <Pressable onPress={() => router.push('/')} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 7 }}><Text style={{ color: t.ink2, fontWeight: '700', fontSize: 12 }}>Switch role</Text></Pressable>
+          <View style={{ flexDirection: 'row', gap: 8 }}><Pressable onPress={() => router.push('/(owner)/explore')} accessibilityLabel="Search" style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 7, alignItems: 'center', justifyContent: 'center' }}><Icon name="search" size={14} color={t.ink2} /></Pressable><Pressable onPress={() => router.push('/')} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 7 }}><Text style={{ color: t.ink2, fontWeight: '700', fontSize: 12 }}>Switch role</Text></Pressable></View>
         </View>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginBottom: 16 }}>
           {([["people","Trainers","/(owner)/trainers"],["palette","Brand","/(owner)/brand"],["trending","Growth","/(owner)/growth"],["wrench","Ops","/(owner)/ops"]] as const).map(([ic, label, route]) => (
