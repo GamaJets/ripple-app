@@ -52,7 +52,7 @@ export default function TrainerClients() {
   const { received: trainerInvites, acceptTrainerInvite, declineTrainerInvite } = useTrainerInvites();
   const { tagsFor, allTags, addTag, removeTag } = useClientTags();
   const { templates } = useProgramTemplates();
-  const { assignProgram } = useAssignedPrograms();
+  const { assignProgram, getProgram } = useAssignedPrograms();
   const [bulkTplOpen, setBulkTplOpen] = useState(false);
   const [seg, setSeg] = useState<string>('all');
   const [tagDraft, setTagDraft] = useState('');
@@ -165,6 +165,9 @@ export default function TrainerClients() {
   const streak = hasLog ? currentStreak(log) : 0;
   const best = hasLog ? longestStreak(log) : 0;
   const wk = hasLog ? weekStats(log) : null;
+  const selProgram = sel ? getProgram(sel.id) : null;
+  const plannedDays = selProgram ? selProgram.days.length : 3;
+  const adhPct = plannedDays > 0 ? Math.max(0, Math.min(1, (wk?.workouts ?? 0) / plannedDays)) : 0;
   const prs = hasLog ? personalRecords(log).slice(0, 3) : [];
   const recent = hasLog ? log.slice(0, 4) : [];
   const timeline = sel ? [
@@ -394,6 +397,15 @@ export default function TrainerClients() {
                         <Text style={{ color: t.ink3, fontSize: 10, marginTop: 2 }}>{l}</Text>
                       </View>
                     ))}
+                  </View>
+
+                  <View style={{ backgroundColor: t.surface2, borderRadius: 12, borderWidth: 1, borderColor: t.ring, padding: 12, marginBottom: 14 }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
+                      <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 }}>Program adherence</Text>
+                      <Text style={{ color: adhPct >= 1 ? t.brand : t.ink2, fontSize: 12, fontWeight: '800' }}>{wk?.workouts ?? 0} / {plannedDays} sessions</Text>
+                    </View>
+                    <View style={{ height: 8, borderRadius: 4, backgroundColor: t.surface3, overflow: 'hidden' }}><View style={{ height: 8, borderRadius: 4, backgroundColor: adhPct >= 0.85 ? t.brand : t.warn, width: (adhPct * 100) + '%' }} /></View>
+                    <Text style={{ color: t.ink3, fontSize: 11, marginTop: 5 }}>{selProgram ? 'vs assigned program' : 'vs default 3-day week'} · this week</Text>
                   </View>
 
                   {latestCheckIn ? (
