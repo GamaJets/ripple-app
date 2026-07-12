@@ -183,6 +183,7 @@ export default function TrainerClients() {
                   <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, textTransform: 'capitalize' }}>{c.name}</Text>
                   {c.unread > 0 && <View style={{ backgroundColor: t.s6, borderRadius: 8, minWidth: 16, height: 16, paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: '#fff', fontSize: 10, fontWeight: '800' }}>{c.unread}</Text></View>}
                   {c.adherence < 80 && <View style={{ backgroundColor: 'rgba(250,178,25,0.18)', borderRadius: 8, paddingHorizontal: 7, paddingVertical: 2 }}><Text style={{ color: t.warn, fontSize: 10, fontWeight: '800' }}>CHECK IN</Text></View>}
+                  {['c1', 'c2', 'c3', 'c4', 'c5'].includes(c.id) ? <View style={{ backgroundColor: t.surface3, borderRadius: 8, paddingHorizontal: 7, paddingVertical: 2 }}><Text style={{ color: t.ink3, fontSize: 10, fontWeight: '800' }}>DEMO</Text></View> : null}
                 </View>
                 <Text style={{ color: t.ink3, fontSize: 12, marginTop: 1 }}>{c.goal} · {c.mode === 'inperson' ? 'In-person' : 'Online'} · {c.lastActive}</Text>
               </View>
