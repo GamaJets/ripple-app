@@ -2,6 +2,7 @@
 // three) — every lift's best estimated 1RM, sorted, with the set that set it.
 // Read-only from the workout log via personalRecords().
 import { View, Text, Pressable, ScrollView } from 'react-native';
+import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -20,12 +21,12 @@ export default function Records() {
  <Pressable onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Go back" style={{ marginBottom: 8 }}>
  <Text style={{ color: t.brand, fontWeight: '700', fontSize: 15 }}>‹ Back</Text>
  </Pressable>
- <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia' }}>Personal Records </Text>
+ <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia' }}>Personal Records</Text>
  <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 18 }}>Your best estimated 1-rep max per lift</Text>
 
  {prs.length === 0 ? (
  <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 24, alignItems: 'center' }}>
- <Text style={{ fontSize: 30, marginBottom: 8 }}></Text>
+ <View style={{ marginBottom: 8 }}><Icon name="trophy" size={30} color={t.ink3} /></View>
  <Text style={{ color: t.ink3, fontSize: 14, textAlign: 'center' }}>No records yet — log a strength workout to set your first PR.</Text>
  </View>
  ) : prs.map((pr, i) => (

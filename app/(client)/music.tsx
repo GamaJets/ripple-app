@@ -129,7 +129,7 @@ export default function Music() {
  </View>
  ) : (
  <View style={{ backgroundColor: t.surface, borderRadius: 18, borderWidth: 1, borderColor: t.ring, padding: 24, alignItems: 'center' }}>
- <Text style={{ fontSize: 34 }}></Text>
+ <Icon name="play" size={34} color={t.ink3} />
  <Text style={{ color: t.ink3, fontSize: 13, marginTop: 8, textAlign: 'center' }}>Pick a workout type and tap Generate — the AI matches track tempo and energy to your session.</Text>
  </View>
  )}

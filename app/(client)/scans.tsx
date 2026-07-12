@@ -68,6 +68,19 @@ function StatCard({ t, label, value, unit, delta, good }: { t: Theme; label: str
   );
 }
 
+function Spark({ t, data, w = 250, h = 54 }: { t: Theme; data: number[]; w?: number; h?: number }) {
+  if (data.length < 2) return null;
+  const min = Math.min(...data), max = Math.max(...data), rng = max - min || 1;
+  const pts = data.map((v, i) => `${(i / (data.length - 1)) * w},${h - ((v - min) / rng) * (h - 8) - 4}`).join(' ');
+  const lx = w, ly = h - ((data[data.length - 1] - min) / rng) * (h - 8) - 4;
+  return (
+    <Svg width="100%" height={h} viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
+      <Polyline points={pts} fill="none" stroke={t.brand} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
+      <Circle cx={lx} cy={ly} r={3.5} fill={t.brand} />
+    </Svg>
+  );
+}
+
 export default function Scans() {
   const t = useTheme();
   const router = useRouter();
@@ -131,6 +144,8 @@ export default function Scans() {
   const chrono = [...scans].sort((a, b) => Date.parse(a.takenAt) - Date.parse(b.takenAt));
   const latest = chrono[chrono.length - 1];
   const prev = chrono.length > 1 ? chrono[chrono.length - 2] : null;
+  const wsv = cd.weightSeries.map((x) => x.v);
+  const wDelta = wsv.length > 1 ? +(wsv[wsv.length - 1] - wsv[0]).toFixed(1) : null;
   const fmt = (iso: string) => { const d = new Date(iso); return `${d.getDate()}/${d.getMonth() + 1}/${String(d.getFullYear()).slice(2)}`; };
   const daysAgo = latest ? Math.max(0, Math.round((Date.now() - Date.parse(latest.takenAt)) / 86400000)) : 0;
   const dlt = (cur: number, was: number | undefined, unit: string) => (was == null ? null : `${cur - was < 0 ? '▼' : cur - was > 0 ? '▲' : ''} ${Math.abs(+(cur - was).toFixed(1))} ${unit}`.trim());
@@ -160,8 +175,11 @@ export default function Scans() {
 
         {/* weight trend */}
         <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 16, marginBottom: 12 }}>
-          <Text style={{ color: t.ink3, fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 8 }}>Weight trend</Text>
-          <TrendChart data={cd.weightSeries} unit="kg" color={t.brand} goodDown height={110} />
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <Text style={{ color: t.ink3, fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.6 }}>Weight · {wsv.length} check-ins</Text>
+            {wDelta !== null ? <Text style={{ color: t.brand, fontSize: 11, fontWeight: '700' }}>{wDelta > 0 ? '+' : ''}{wDelta} kg</Text> : null}
+          </View>
+          <Spark t={t} data={wsv} />
         </View>
 
         {/* progress photos */}

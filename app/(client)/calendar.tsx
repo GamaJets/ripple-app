@@ -154,7 +154,7 @@ export default function Calendar() {
  <Text style={{ color: t.ink, fontWeight: '800', fontSize: 16, marginBottom: 10 }}>{DOW[selDate.getDay()]}, {MON[selM].slice(0, 3)} {selD}</Text>
  {selDaySessions.length === 0 ? (
  <View style={{ backgroundColor: t.surface, borderRadius: 14, borderWidth: 1, borderColor: t.ring, padding: 22, alignItems: 'center' }}>
- <Text style={{ fontSize: 26, marginBottom: 6 }}></Text>
+ <View style={{ marginBottom: 6 }}><Icon name="calendar" size={26} color={t.ink3} /></View>
  <Text style={{ color: t.ink3, fontSize: 13, textAlign: 'center' }}>No sessions this day. Days with a grey dot have open slots you can book.</Text>
  </View>
  ) : selDaySessions.map((s) => {

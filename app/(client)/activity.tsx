@@ -76,7 +76,7 @@ export default function Activity() {
 
  {feed.length === 0 ? (
  <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 24, alignItems: 'center' }}>
- <Text style={{ fontSize: 30, marginBottom: 8 }}></Text>
+ <View style={{ marginBottom: 8 }}><Icon name="bell" size={30} color={t.ink3} /></View>
  <Text style={{ color: t.ink3, fontSize: 14, textAlign: 'center' }}>Nothing yet — log a workout or send a check-in to get started.</Text>
  </View>
  ) : feed.map((e, i) => (
