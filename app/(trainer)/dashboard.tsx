@@ -1,5 +1,5 @@
 // Trainer · Clients — roster with progress, tap a client for detail.
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { View, Text, Pressable, ScrollView, Modal, TextInput, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -8,6 +8,7 @@ import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { MOCK_TRAINER } from '../../src/lib/mockData';
 import { type RosterClient } from '../../src/lib/trainerMock';
+import { supabase } from '../../src/lib/supabase';
 import { useRoster } from '../../src/ui/roster';
 import { useCoachFeedback } from '../../src/ui/feedback';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
@@ -63,6 +64,18 @@ export default function TrainerClients() {
   const [invEmail, setInvEmail] = useState('');
   const [invMode, setInvMode] = useState<'online' | 'inperson'>('online');
   const [newEmail, setNewEmail] = useState('');
+  const [clientMeals, setClientMeals] = useState<{ name: string; kcal: number; via: string }[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    if (!sel) { setClientMeals([]); return; }
+    (async () => {
+      try {
+        const { data } = await supabase.from('food_logs').select('name, kcal, via').eq('client_id', sel.id).order('logged_at', { ascending: false }).limit(6);
+        if (!cancelled) setClientMeals((data || []).map((r: any) => ({ name: r.name, kcal: r.kcal, via: r.via })));
+      } catch { if (!cancelled) setClientMeals([]); }
+    })();
+    return () => { cancelled = true; };
+  }, [sel]);
   const active = roster.length;
   const revenue = active * MOCK_TRAINER.sessionFee * 4;
   const unread = roster.reduce((a, c) => a + c.unread, 0);
@@ -271,6 +284,18 @@ export default function TrainerClients() {
                   <Pressable onPress={() => { clearNutri(sel.id); setNnote(''); }} style={{ paddingVertical: 8, marginTop: 2 }}><Text style={{ color: t.ink3, fontSize: 12, fontWeight: '700' }}>Clear adjustment</Text></Pressable>
                 ) : null}
               </View>
+
+              {clientMeals.length > 0 ? (
+                <View style={{ marginBottom: 14 }}>
+                  <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 7 }}>Recent Meals Logged</Text>
+                  {clientMeals.map((m, i) => (
+                    <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', backgroundColor: t.surface2, borderRadius: 10, borderWidth: 1, borderColor: t.ring, paddingHorizontal: 12, paddingVertical: 9, marginBottom: 6 }}>
+                      <Text style={{ color: t.ink2, fontSize: 13, flex: 1 }} numberOfLines={1}>{m.name}</Text>
+                      <Text style={{ color: t.ink3, fontSize: 12, marginLeft: 8 }}>{m.kcal} kcal · {m.via}</Text>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
 
               <View style={{ marginBottom: 14 }}>
                 <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 7 }}>Coach Feedback</Text>
