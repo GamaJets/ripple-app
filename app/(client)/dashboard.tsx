@@ -218,7 +218,7 @@ export default function Home() {
           <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.brand, padding: 14, marginBottom: 11 }}>
             <Text style={{ color: t.brand, fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 6 }}>From your coach</Text>
             {coachNotes.length > 0 ? <Text style={{ color: t.ink2, fontSize: 13, lineHeight: 19 }} numberOfLines={4}>{coachNotes[0].body}</Text> : null}
-            {ann ? <Text style={{ color: t.ink2, fontSize: 13, lineHeight: 19, marginTop: coachNotes.length > 0 ? 10 : 0 }}>📣 {ann.body}</Text> : null}
+            {ann ? <Text style={{ color: t.ink2, fontSize: 13, lineHeight: 19, marginTop: coachNotes.length > 0 ? 10 : 0 }}>{ann.body}</Text> : null}
           </View>
         ) : null}
 
