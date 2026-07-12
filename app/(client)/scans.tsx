@@ -9,6 +9,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { useClientData } from '../../src/ui/clientData';
+import { macrosFor } from '../../src/lib/nutrition';
 import { useRouter } from 'expo-router';
 import { TrendChart } from '../../src/ui/Chart';
 import { Icon } from '../../src/ui/Icon';
@@ -133,9 +134,17 @@ export default function Scans() {
   const saveScan = () => {
     const w = parseFloat(wt) || 0, f = parseFloat(bf) || 0, m = parseFloat(sm) || 0;
     if (!w || !f) { Alert.alert('Add the numbers', 'Enter at least weight and body-fat % from your InBody report.'); return; }
+    const before = macrosFor({ weightKg: cd.weightKg, bodyFatPct: cd.bodyFatPct, activity: cd.activity, goal: cd.goal, diet: cd.diet });
+    const after = macrosFor({ weightKg: w, bodyFatPct: f, activity: cd.activity, goal: cd.goal, diet: cd.diet });
+    const pw = cd.weightKg, pf = cd.bodyFatPct;
     cd.addScan({ id: 's' + Date.now(), takenAt: scanDateISO(), weightKg: w, bodyFatPct: f, skeletalMuscleKg: m, source: 'InBody (manual)', image: img || undefined });
     setImg(null); setWt(''); setBf(''); setSm(''); setShowAdd(false);
-    Alert.alert('Scan saved', 'Added to your history and charts for ' + scanDateLabel() + '.');
+    const dK = after.kcal - before.kcal, dP = after.protein - before.protein;
+    const sign = (x: number) => (x > 0 ? '+' + x : String(x));
+    const changed = Math.abs(dK) >= 5 || Math.abs(dP) >= 2;
+    Alert.alert(changed ? 'Scan saved — plan auto-tuned' : 'Scan saved', changed
+      ? 'Your stats updated (weight ' + pw + '→' + w + 'kg, body fat ' + pf + '%→' + f + '%), so your daily targets adjusted: ' + sign(dK) + ' kcal (now ' + after.kcal + '), protein ' + sign(dP) + 'g (now ' + after.protein + 'g). Your meal plan regenerated to match.'
+      : 'Added to your history and charts. Targets are essentially unchanged (' + after.kcal + ' kcal / ' + after.protein + 'g protein).');
   };
   const physiqueCheck = async (fromCamera: boolean) => {
     const perm = fromCamera ? await ImagePicker.requestCameraPermissionsAsync() : await ImagePicker.requestMediaLibraryPermissionsAsync();
