@@ -25,7 +25,7 @@ export default function OwnerTrainers() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
-        <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800', textTransform: 'capitalize' }}>Trainers &amp; billing</Text>
+        <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia', textTransform: 'capitalize' }}>Trainers &amp; billing</Text>
         <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 16 }}>Everyone paying to run Repple</Text>
 
         <View style={{ flexDirection: 'row', gap: 12, marginBottom: 16 }}>
@@ -119,7 +119,7 @@ export default function OwnerTrainers() {
           </View>
           <View style={{ flexDirection: 'row', gap: 10 }}>
             <Pressable onPress={() => setAddOpen(false)} style={{ flex: 1, paddingVertical: 15, borderRadius: 14, alignItems: 'center', backgroundColor: t.surface2, borderWidth: 1, borderColor: t.ring }}><Text style={{ color: t.ink2, fontWeight: '800' }}>Cancel</Text></Pressable>
-            <Pressable onPress={() => { if (!newName.trim()) { Alert.alert('Add a name', 'Enter the trainer name.'); return; } addTrainer(newName, newPlan); setAddOpen(false); Alert.alert('Trainer added ✓', `${newName.trim()} is now on your platform.`); }} style={{ flex: 2, paddingVertical: 15, borderRadius: 14, alignItems: 'center', backgroundColor: t.brand }}><Text style={{ color: t.brandInk, fontWeight: '800' }}>Add Trainer</Text></Pressable>
+            <Pressable onPress={() => { if (!newName.trim()) { Alert.alert('Add a name', 'Enter the trainer name.'); return; } addTrainer(newName, newPlan); setAddOpen(false); Alert.alert('Trainer added', `${newName.trim()} is now on your platform.`); }} style={{ flex: 2, paddingVertical: 15, borderRadius: 14, alignItems: 'center', backgroundColor: t.brand }}><Text style={{ color: t.brandInk, fontWeight: '800' }}>Add Trainer</Text></Pressable>
           </View>
         </View>
       </Modal>

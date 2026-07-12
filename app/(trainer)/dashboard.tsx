@@ -70,11 +70,11 @@ export default function TrainerClients() {
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
           <View>
             <Text style={{ color: t.ink3, fontSize: 14 }}>Coaching</Text>
-            <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800', textTransform: 'capitalize' }}>{MOCK_TRAINER.name.replace('Coach ', '')}</Text>
+            <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia', textTransform: 'capitalize' }}>{MOCK_TRAINER.name.replace('Coach ', '')}</Text>
           </View>
           <View style={{ flexDirection: 'row', gap: 8 }}>
           <Pressable onPress={() => { setBcText(''); setBcOpen(true); }} style={{ backgroundColor: t.brand, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 7 }}>
-            <Text style={{ color: t.brandInk, fontWeight: '700', fontSize: 12 }}>📣 Broadcast</Text>
+            <Text style={{ color: t.brandInk, fontWeight: '700', fontSize: 12 }}>Broadcast</Text>
           </Pressable>
           <Pressable onPress={() => router.push('/')} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 7 }}>
             <Text style={{ color: t.ink2, fontWeight: '700', fontSize: 12 }}>Switch role</Text>
@@ -97,7 +97,7 @@ export default function TrainerClients() {
 
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
           <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16 }}>Your Clients</Text>
-          <Pressable onPress={() => { setNewName(''); setNewGoal('Fat loss'); setAddOpen(true); }} style={{ backgroundColor: t.brand, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 7 }}><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 12 }}>＋ Add Client</Text></Pressable>
+          <Pressable onPress={() => { setNewName(''); setNewGoal('Fat loss'); setAddOpen(true); }} style={{ backgroundColor: t.brand, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 7 }}><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 12 }}>Add client</Text></Pressable>
         </View>
         {roster.map((c) => (
           <Pressable key={c.id} onPress={() => setSel(c)} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 15, marginBottom: 10 }}>
@@ -144,7 +144,7 @@ export default function TrainerClients() {
                 <View>
                   {/* Live training snapshot */}
                   <View style={{ flexDirection: 'row', gap: 8, marginBottom: 14 }}>
-                    {[['🔥 Streak', `${streak}`], ['Best', `${best}`], ['This wk', `${wk?.workouts ?? 0}`], ['Volume', wk ? `${(wk.volumeKg / 1000).toFixed(1)}t` : '—']].map(([l, v]) => (
+                    {[['Streak', `${streak}`], ['Best', `${best}`], ['This wk', `${wk?.workouts ?? 0}`], ['Volume', wk ? `${(wk.volumeKg / 1000).toFixed(1)}t` : '—']].map(([l, v]) => (
                       <View key={l} style={{ flex: 1, backgroundColor: t.surface2, borderRadius: 12, borderWidth: 1, borderColor: t.ring, paddingVertical: 10, alignItems: 'center' }}>
                         <Text style={{ color: t.ink, fontWeight: '800', fontSize: 16 }}>{v}</Text>
                         <Text style={{ color: t.ink3, fontSize: 10, marginTop: 2 }}>{l}</Text>
@@ -162,7 +162,7 @@ export default function TrainerClients() {
 
                   {prs.length > 0 && (
                     <View style={{ marginBottom: 14 }}>
-                      <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 7 }}>Personal Records 🏆</Text>
+                      <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 7 }}>Personal records</Text>
                       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 7 }}>
                         {prs.map((pr) => (
                           <View key={pr.exercise} style={{ backgroundColor: t.surface2, borderRadius: 10, borderWidth: 1, borderColor: t.ring, paddingHorizontal: 10, paddingVertical: 7 }}>
@@ -239,7 +239,7 @@ export default function TrainerClients() {
                 {getNotes(sel.id).map((n) => (
                   <View key={n.id} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8, backgroundColor: t.surface2, borderRadius: 12, borderWidth: 1, borderColor: t.ring, padding: 12, marginBottom: 8 }}>
                     <Text style={{ color: t.ink2, fontSize: 13, flex: 1, lineHeight: 19 }}>{n.body}</Text>
-                    <Pressable onPress={() => removeNote(sel.id, n.id)}><Text style={{ color: t.ink3, fontWeight: '800', fontSize: 14 }}>✕</Text></Pressable>
+                    <Pressable onPress={() => removeNote(sel.id, n.id)}><Text style={{ color: t.ink3, fontWeight: '800', fontSize: 14 }}>×</Text></Pressable>
                   </View>
                 ))}
                 <View style={{ flexDirection: 'row', gap: 8, marginTop: 2 }}>
@@ -250,7 +250,7 @@ export default function TrainerClients() {
 
               <Pressable onPress={() => { const id = sel.id; setSel(null); router.push({ pathname: '/(trainer)/builder', params: { clientId: id } }); }} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
                 <View>
-                  <Text style={{ color: t.ink, fontWeight: '700', fontSize: 14 }}>📋 Open Program Builder</Text>
+                  <Text style={{ color: t.ink, fontWeight: '700', fontSize: 14 }}>Open program builder</Text>
                   <Text style={{ color: t.ink3, fontSize: 12, marginTop: 2 }}>Edit sets, reps & exercises for {sel.name.split(' ')[0]}</Text>
                 </View>
                 <Text style={{ color: t.ink3, fontSize: 18 }}>›</Text>
@@ -285,7 +285,7 @@ export default function TrainerClients() {
           </View>
           <View style={{ flexDirection: 'row', gap: 10 }}>
             <Pressable onPress={() => setAddOpen(false)} style={{ flex: 1, paddingVertical: 15, borderRadius: 14, alignItems: 'center', backgroundColor: t.surface2, borderWidth: 1, borderColor: t.ring }}><Text style={{ color: t.ink2, fontWeight: '800' }}>Cancel</Text></Pressable>
-            <Pressable onPress={() => { if (!newName.trim()) { Alert.alert('Add a name', 'Enter the client name.'); return; } addClient(newName, newGoal); setAddOpen(false); Alert.alert('Client added ✓', `${newName.trim()} is now on your roster.`, [{ text: 'Great' }]); }} style={{ flex: 2, paddingVertical: 15, borderRadius: 14, alignItems: 'center', backgroundColor: t.brand }}><Text style={{ color: t.brandInk, fontWeight: '800' }}>Add Client</Text></Pressable>
+            <Pressable onPress={() => { if (!newName.trim()) { Alert.alert('Add a name', 'Enter the client name.'); return; } addClient(newName, newGoal); setAddOpen(false); Alert.alert('Client added', `${newName.trim()} is now on your roster.`, [{ text: 'Great' }]); }} style={{ flex: 2, paddingVertical: 15, borderRadius: 14, alignItems: 'center', backgroundColor: t.brand }}><Text style={{ color: t.brandInk, fontWeight: '800' }}>Add Client</Text></Pressable>
           </View>
         </View>
       </Modal>
@@ -295,7 +295,7 @@ export default function TrainerClients() {
           <Text style={{ color: t.ink, fontSize: 20, fontWeight: '800', marginBottom: 4 }}>Broadcast to all clients</Text>
           <Text style={{ color: t.ink3, fontSize: 13, marginBottom: 16 }}>Everyone on your roster sees this on their dashboard.</Text>
           <TextInput value={bcText} onChangeText={setBcText} placeholder="Your announcement…" placeholderTextColor={t.ink3} multiline style={{ color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, minHeight: 90, textAlignVertical: 'top', marginBottom: 16 }} />
-          <Pressable onPress={() => { if (!bcText.trim()) { Alert.alert('Write something', 'Enter your announcement.'); return; } addAnnouncement(bcText); setBcOpen(false); Alert.alert('Sent ✓', 'Your clients will see this on their dashboard.'); }} style={{ backgroundColor: t.brand, borderRadius: 14, paddingVertical: 15, alignItems: 'center' }}><Text style={{ color: t.brandInk, fontWeight: '800' }}>Send to all clients</Text></Pressable>
+          <Pressable onPress={() => { if (!bcText.trim()) { Alert.alert('Write something', 'Enter your announcement.'); return; } addAnnouncement(bcText); setBcOpen(false); Alert.alert('Sent', 'Your clients will see this on their dashboard.'); }} style={{ backgroundColor: t.brand, borderRadius: 14, paddingVertical: 15, alignItems: 'center' }}><Text style={{ color: t.brandInk, fontWeight: '800' }}>Send to all clients</Text></Pressable>
         </View>
       </Modal>
     </SafeAreaView>

@@ -5,6 +5,7 @@
 // and re-offers it to the coach's other clients.
 import { useState } from 'react';
 import { View, Text, Pressable, ScrollView, Alert, Modal } from 'react-native';
+import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
@@ -84,7 +85,7 @@ export default function TrainerSchedule() {
     }
     setAddOpen(false);
     if (addClient) {
-      Alert.alert('Session booked ✓', `${timeLabel(s.startsAt)} with ${nameOf(addClient)} confirmed.\n\nA confirmation push has been sent to both your app and ${nameOf(addClient)}'s client app.`, [{ text: 'Great' }]);
+      Alert.alert('Session booked', `${timeLabel(s.startsAt)} with ${nameOf(addClient)} confirmed.\n\nA confirmation push has been sent to both your app and ${nameOf(addClient)}'s client app.`, [{ text: 'Great' }]);
     }
   }
 
@@ -119,7 +120,7 @@ export default function TrainerSchedule() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
-        <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800' }}>Schedule</Text>
+        <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia' }}>Schedule</Text>
         <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 16 }}>Tap a day to see sessions · add or cancel any time</Text>
 
         <View style={{ flexDirection: 'row', gap: 12, marginBottom: 16 }}>
@@ -132,7 +133,7 @@ export default function TrainerSchedule() {
             <Text style={{ color: t.ink, fontSize: 22, fontWeight: '800', marginTop: 4 }}>{open.length}</Text>
           </View>
           <Pressable onPress={() => { setAddClient(null); setAddOpen(true); }} style={{ flex: 1, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 16, padding: 14, justifyContent: 'center', alignItems: 'center' }}>
-            <Text style={{ fontSize: 20 }}>➕</Text>
+            <Icon name="plus" size={20} color={t.brand} />
             <Text style={{ color: t.ink2, fontSize: 12, fontWeight: '700', marginTop: 4 }}>Add Session</Text>
           </Pressable>
         </View>
@@ -187,7 +188,7 @@ export default function TrainerSchedule() {
 
         {selDaySessions.length === 0 ? (
           <View style={{ backgroundColor: t.surface, borderRadius: 14, borderWidth: 1, borderColor: t.ring, padding: 22, alignItems: 'center' }}>
-            <Text style={{ fontSize: 26, marginBottom: 6 }}>🗓️</Text>
+            <View style={{ marginBottom: 6 }}><Icon name="calendar" size={26} color={t.ink3} /></View>
             <Text style={{ color: t.ink3, fontSize: 13 }}>No sessions this day. Tap Add to book one.</Text>
           </View>
         ) : selDaySessions.map((s) => (

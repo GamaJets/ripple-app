@@ -35,9 +35,9 @@ export default function TrainerAnalytics() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
-        <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800', textTransform: 'capitalize' }}>Analytics</Text>
+        <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia', textTransform: 'capitalize' }}>Analytics</Text>
         <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 16 }}>Your coaching business at a glance</Text>
-        <Pressable onPress={() => router.push('/(trainer)/leaderboard')} style={{ backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 16, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}><Text style={{ color: t.ink, fontWeight: '700', fontSize: 14 }}>🏆 Client leaderboard</Text><Text style={{ color: t.ink3, fontSize: 18 }}>›</Text></Pressable>
+        <Pressable onPress={() => router.push('/(trainer)/leaderboard')} style={{ backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 16, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}><Text style={{ color: t.ink, fontWeight: '700', fontSize: 14 }}>Client leaderboard</Text><Text style={{ color: t.ink3, fontSize: 18 }}>›</Text></Pressable>
 
         <View style={{ flexDirection: 'row', gap: 12, marginBottom: 12 }}>
           <Big t={t} label="Monthly revenue" value={'$' + revenue.toLocaleString()} sub={`${sessionsMo} sessions × $${MOCK_TRAINER.sessionFee}`} tint />
@@ -64,7 +64,7 @@ export default function TrainerAnalytics() {
           <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16, marginBottom: 4 }}>At-risk clients</Text>
           <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 12 }}>Low adherence or inactive 2+ days — reach out</Text>
           {atRisk.length === 0 ? (
-            <Text style={{ color: t.ink3, fontSize: 13 }}>Everyone's on track — nice coaching. 👏</Text>
+            <Text style={{ color: t.ink3, fontSize: 13 }}>Everyone's on track — nice coaching.</Text>
           ) : atRisk.map((c) => (
             <View key={c.id} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 10, borderTopWidth: 1, borderTopColor: t.ring }}>
               <View style={{ flex: 1 }}>

@@ -2,6 +2,7 @@
 // what they offer, and session fee. A live preview shows how clients see it.
 import { useState } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, Image, Alert } from 'react-native';
+import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
@@ -33,7 +34,7 @@ function ChipEditor({ t, items, onAdd, onRemove, value, setValue, placeholder }:
         {items.map((it, i) => (
           <Pressable key={i} onPress={() => onRemove(i)} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 8 }}>
             <Text style={{ color: t.ink2, fontWeight: '700', fontSize: 13 }}>{it}</Text>
-            <Text style={{ color: t.ink3, fontSize: 14 }}>✕</Text>
+            <Text style={{ color: t.ink3, fontSize: 14 }}>×</Text>
           </Pressable>
         ))}
       </View>
@@ -105,7 +106,7 @@ export default function CoachProfile() {
               <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>What I Offer</Text>
               {p.offers.map((o, i) => (
                 <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                  <Text style={{ color: t.brand, fontSize: 14 }}>✓</Text>
+                  <Icon name="check" size={14} color={t.brand} />
                   <Text style={{ color: t.ink, fontSize: 14 }}>{o}</Text>
                 </View>
               ))}
@@ -122,9 +123,9 @@ export default function CoachProfile() {
 
         <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>Photo</Text>
         <View style={{ flexDirection: 'row', gap: 10, marginBottom: 16 }}>
-          <Pressable onPress={() => pickPhoto(false)} style={{ flex: 1, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingVertical: 14, alignItems: 'center', gap: 4 }}><Text style={{ fontSize: 20 }}>🖼</Text><Text style={{ color: t.ink, fontWeight: '700', fontSize: 13 }}>Upload</Text></Pressable>
-          <Pressable onPress={() => pickPhoto(true)} style={{ flex: 1, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingVertical: 14, alignItems: 'center', gap: 4 }}><Text style={{ fontSize: 20 }}>📷</Text><Text style={{ color: t.ink, fontWeight: '700', fontSize: 13 }}>Take Photo</Text></Pressable>
-          {p.photo ? <Pressable onPress={() => p.setPhoto(null)} style={{ flex: 1, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingVertical: 14, alignItems: 'center', gap: 4 }}><Text style={{ fontSize: 20 }}>🗑</Text><Text style={{ color: t.ink3, fontWeight: '700', fontSize: 13 }}>Remove</Text></Pressable> : null}
+          <Pressable onPress={() => pickPhoto(false)} style={{ flex: 1, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingVertical: 14, alignItems: 'center', gap: 4 }}><Icon name="plus" size={20} color={t.ink} /><Text style={{ color: t.ink, fontWeight: '700', fontSize: 13 }}>Upload</Text></Pressable>
+          <Pressable onPress={() => pickPhoto(true)} style={{ flex: 1, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingVertical: 14, alignItems: 'center', gap: 4 }}><Icon name="camera" size={20} color={t.ink} /><Text style={{ color: t.ink, fontWeight: '700', fontSize: 13 }}>Take Photo</Text></Pressable>
+          {p.photo ? <Pressable onPress={() => p.setPhoto(null)} style={{ flex: 1, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingVertical: 14, alignItems: 'center', gap: 4 }}><Icon name="minus" size={20} color={t.ink3} /><Text style={{ color: t.ink3, fontWeight: '700', fontSize: 13 }}>Remove</Text></Pressable> : null}
         </View>
 
         <Field t={t} label="Name" value={p.name} onChangeText={p.setName} placeholder="Coach name" />

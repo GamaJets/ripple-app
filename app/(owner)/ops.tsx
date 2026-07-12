@@ -21,7 +21,7 @@ export default function OwnerOps() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
-        <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800', textTransform: 'capitalize' }}>Operations</Text>
+        <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia', textTransform: 'capitalize' }}>Operations</Text>
         <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 16 }}>Talk to trainers · support · platform activity</Text>
 
         <View style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: 10, padding: 3, marginBottom: 16, borderWidth: 1, borderColor: t.ring }}>
@@ -35,7 +35,7 @@ export default function OwnerOps() {
         {tab === 'announce' ? (
           <View>
             <TextInput value={text} onChangeText={setText} placeholder="Announcement to all trainers…" placeholderTextColor={t.ink3} multiline style={{ color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, minHeight: 80, textAlignVertical: 'top', marginBottom: 12 }} />
-            <Pressable onPress={() => { if (!text.trim()) { Alert.alert('Write something', 'Enter an announcement.'); return; } addAnn(text); setText(''); Alert.alert('Sent ✓', 'All trainers will see this.'); }} style={{ backgroundColor: t.brand, borderRadius: 14, paddingVertical: 15, alignItems: 'center', marginBottom: 18 }}><Text style={{ color: t.brandInk, fontWeight: '800' }}>Send to all trainers</Text></Pressable>
+            <Pressable onPress={() => { if (!text.trim()) { Alert.alert('Write something', 'Enter an announcement.'); return; } addAnn(text); setText(''); Alert.alert('Sent', 'All trainers will see this.'); }} style={{ backgroundColor: t.brand, borderRadius: 14, paddingVertical: 15, alignItems: 'center', marginBottom: 18 }}><Text style={{ color: t.brandInk, fontWeight: '800' }}>Send to all trainers</Text></Pressable>
             {anns.map((a) => (
               <View key={a.id} style={{ backgroundColor: t.surface, borderRadius: 14, borderWidth: 1, borderColor: t.ring, padding: 14, marginBottom: 9 }}>
                 <Text style={{ color: t.ink2, fontSize: 14, lineHeight: 20 }}>{a.body}</Text>

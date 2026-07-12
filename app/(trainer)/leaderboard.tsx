@@ -6,7 +6,7 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { useRoster } from '../../src/ui/roster';
 
-const MEDALS = ['🥇', '🥈', '🥉'];
+const MEDALS = ['1', '2', '3'];
 
 export default function Leaderboard() {
   const t = useTheme();
@@ -30,7 +30,7 @@ export default function Leaderboard() {
         <Pressable onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Go back" style={{ marginBottom: 8 }}>
           <Text style={{ color: t.brand, fontWeight: '700', fontSize: 15 }}>‹ Back</Text>
         </Pressable>
-        <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800' }}>Leaderboard</Text>
+        <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia' }}>Leaderboard</Text>
         <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 18 }}>Adherence + progress toward goal</Text>
 
         {scored.map(({ c, score }, i) => (
@@ -50,7 +50,7 @@ export default function Leaderboard() {
             <Text style={{ color: t.ink, fontWeight: '800', fontSize: 16 }}>{score}</Text>
           </View>
         ))}
-        <Text style={{ color: t.ink3, fontSize: 11, textAlign: 'center', marginTop: 6 }}>Use the 📣 Broadcast button on Clients to celebrate the top of the board.</Text>
+        <Text style={{ color: t.ink3, fontSize: 11, textAlign: 'center', marginTop: 6 }}>Use the Broadcast button on Clients to celebrate the top of the board.</Text>
       </ScrollView>
     </SafeAreaView>
   );

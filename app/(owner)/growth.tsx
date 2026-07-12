@@ -19,13 +19,13 @@ export default function OwnerGrowth() {
     const r = addPromo(code, disc);
     if (!r.ok) { Alert.alert('Cannot create', r.reason ?? 'Try a different code.'); return; }
     setCode('');
-    Alert.alert('Code created ✓', `${code.trim().toUpperCase()} · ${disc}% off is now live.`);
+    Alert.alert('Code created', `${code.trim().toUpperCase()} · ${disc}% off is now live.`);
   };
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
-        <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800', textTransform: 'capitalize' }}>Growth</Text>
+        <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia', textTransform: 'capitalize' }}>Growth</Text>
         <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 16 }}>Acquisition &amp; retention</Text>
 
         <View style={{ flexDirection: 'row', gap: 12, marginBottom: 16 }}>
@@ -69,7 +69,7 @@ export default function OwnerGrowth() {
               <Pressable onPress={() => toggleActive(p.id)} style={{ backgroundColor: p.active ? 'rgba(45,212,191,0.15)' : t.surface3, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 6 }}>
                 <Text style={{ color: p.active ? t.brand : t.ink3, fontWeight: '800', fontSize: 11 }}>{p.active ? 'ACTIVE' : 'OFF'}</Text>
               </Pressable>
-              <Pressable onPress={() => removePromo(p.id)} accessibilityLabel="Delete code" style={{ paddingHorizontal: 4, paddingVertical: 4 }}><Text style={{ color: t.ink3, fontWeight: '800', fontSize: 15 }}>✕</Text></Pressable>
+              <Pressable onPress={() => removePromo(p.id)} accessibilityLabel="Delete code" style={{ paddingHorizontal: 4, paddingVertical: 4 }}><Text style={{ color: t.ink3, fontWeight: '800', fontSize: 15 }}>×</Text></Pressable>
             </View>
           ))}
         </View>

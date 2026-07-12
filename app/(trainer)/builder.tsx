@@ -108,7 +108,7 @@ export default function Builder() {
       })),
     };
     assignProgram(clientId, program);
-    Alert.alert('Program assigned ✓', `${client?.name ?? 'Your client'} will now see this in their Train tab.`, [{ text: 'Done' }]);
+    Alert.alert('Program assigned', `${client?.name ?? 'Your client'} will now see this in their Train tab.`, [{ text: 'Done' }]);
   };
 
   const revert = () => {
@@ -122,7 +122,7 @@ export default function Builder() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 48 }} keyboardShouldPersistTaps="handled">
-        <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800' }}>Program Builder</Text>
+        <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia' }}>Program builder</Text>
         <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 14 }}>Build a weekly plan and assign it to a client</Text>
 
         {/* Client picker */}
@@ -138,7 +138,7 @@ export default function Builder() {
           })}
         </ScrollView>
         <View style={{ backgroundColor: t.surface2, borderRadius: 10, borderWidth: 1, borderColor: t.ring, padding: 10, marginTop: 8, marginBottom: 16 }}>
-          <Text style={{ color: t.ink3, fontSize: 12 }}>{assignedNow ? '📋 Currently on a coach-assigned program' : '🤖 Currently on their auto-generated program'} · goal: {client?.goal ?? '—'}</Text>
+          <Text style={{ color: t.ink3, fontSize: 12 }}>{assignedNow ? 'Currently on a coach-assigned program' : 'Currently on their auto-generated program'} · goal: {client?.goal ?? '—'}</Text>
         </View>
 
         {/* Program title + note */}
@@ -156,7 +156,7 @@ export default function Builder() {
               </Pressable>
               <TextInput value={d.focus} onChangeText={(v) => setDayFocus(di, v)} placeholder="Focus (e.g. Push)" placeholderTextColor={t.ink3} style={[inp, { flex: 1 }]} />
               <Pressable onPress={() => removeDay(di)} accessibilityLabel="Remove day" style={{ paddingHorizontal: 8, paddingVertical: 8 }}>
-                <Text style={{ color: t.crit, fontWeight: '800', fontSize: 16 }}>✕</Text>
+                <Text style={{ color: t.crit, fontWeight: '800', fontSize: 16 }}>×</Text>
               </Pressable>
             </View>
 
@@ -168,7 +168,7 @@ export default function Builder() {
                     {e.group ? <Text style={{ color: t.ink3, fontSize: 11, marginTop: 1 }}>{e.group}</Text> : null}
                   </View>
                   <Pressable onPress={() => removeExercise(di, e.key)} accessibilityLabel="Remove exercise" style={{ paddingHorizontal: 8, paddingVertical: 4 }}>
-                    <Text style={{ color: t.ink3, fontWeight: '800', fontSize: 15 }}>✕</Text>
+                    <Text style={{ color: t.ink3, fontWeight: '800', fontSize: 15 }}>×</Text>
                   </Pressable>
                 </View>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 8 }}>

@@ -1,6 +1,7 @@
 // Trainer · Videos — exercise library the client app pulls from. Upload your own.
 import { useState } from 'react';
 import { View, Text, Pressable, ScrollView, Alert } from 'react-native';
+import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { useTheme } from '../../src/ui/components';
@@ -27,22 +28,22 @@ export default function TrainerVideos() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
-        <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800', textTransform: 'capitalize' }}>Exercise videos</Text>
+        <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia', textTransform: 'capitalize' }}>Exercise videos</Text>
         <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 16 }}>{done} of {vids.length} recorded · clients see these in their program</Text>
 
         <View style={{ flexDirection: 'row', gap: 10, marginBottom: 18 }}>
           <Pressable onPress={() => upload(true)} style={{ flex: 1, backgroundColor: t.brand, borderRadius: 14, paddingVertical: 15, alignItems: 'center', gap: 4 }}>
-            <Text style={{ fontSize: 20 }}>🎥</Text><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 13 }}>Record</Text>
+            <Icon name="video" size={20} color={t.brandInk} /><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 13 }}>Record</Text>
           </Pressable>
           <Pressable onPress={() => upload(false)} style={{ flex: 1, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 14, paddingVertical: 15, alignItems: 'center', gap: 4 }}>
-            <Text style={{ fontSize: 20 }}>⬆️</Text><Text style={{ color: t.ink, fontWeight: '800', fontSize: 13 }}>Upload</Text>
+            <Icon name="plus" size={20} color={t.ink} /><Text style={{ color: t.ink, fontWeight: '800', fontSize: 13 }}>Upload</Text>
           </Pressable>
         </View>
 
         {vids.map((v) => (
           <View key={v.id} style={{ backgroundColor: t.surface, borderRadius: 14, borderWidth: 1, borderColor: t.ring, padding: 14, marginBottom: 9, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
             <View style={{ width: 54, height: 40, borderRadius: 8, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-              <Text style={{ fontSize: 18 }}>{v.uploaded ? '▶️' : '➕'}</Text>
+              {v.uploaded ? <Icon name="play" size={18} color={t.brand} /> : <Icon name="plus" size={18} color={t.ink3} />}
             </View>
             <View style={{ flex: 1 }}>
               <Text style={{ color: t.ink, fontWeight: '700', fontSize: 14 }}>{v.name}</Text>
