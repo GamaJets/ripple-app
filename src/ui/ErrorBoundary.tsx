@@ -2,8 +2,13 @@
 // fallback with a Reload action instead of a white screen. componentDidCatch is
 // the hook where a crash reporter (Sentry) is wired in Phase 8 / release.
 import { Component, type ReactNode } from 'react';
-import { View, Text, Pressable, ScrollView } from 'react-native';
+import { View, Text, Pressable, ScrollView, Platform } from 'react-native';
 import { Icon } from './Icon';
+import { supabase } from '../lib/supabase';
+import { USE_SUPABASE } from '../lib/config';
+
+let APP_VERSION = 'unknown';
+try { APP_VERSION = require('expo-constants').default?.expoConfig?.version ?? 'unknown'; } catch { /* not available */ }
 
 interface Props { children: ReactNode }
 interface State { error: Error | null }
@@ -15,8 +20,22 @@ export class ErrorBoundary extends Component<Props, State> {
     return { error };
   }
 
-  componentDidCatch(_error: Error, _info: unknown) {
-    // Hook for crash reporting (Sentry.captureException) once the SDK is added.
+  componentDidCatch(error: Error, _info: unknown) {
+    // Lightweight crash log → Supabase `app_errors` (owner reviews). No Sentry
+    // native SDK needed, so this ships over-the-air. Best-effort; never throws.
+    if (!USE_SUPABASE) return;
+    try {
+      supabase.auth.getUser().then(({ data }) => {
+        const uid = data?.user?.id ?? null;
+        supabase.from('app_errors').insert({
+          user_id: uid,
+          message: String(error?.message || '').slice(0, 500),
+          stack: String(error?.stack || '').slice(0, 4000),
+          platform: Platform.OS,
+          app_version: APP_VERSION,
+        }).then(() => {}, () => {});
+      }, () => {});
+    } catch { /* swallow */ }
   }
 
   reset = () => this.setState({ error: null });

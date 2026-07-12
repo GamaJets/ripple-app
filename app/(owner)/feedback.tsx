@@ -5,7 +5,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { fetchAllFeedback, type FeedbackRow } from '../../src/ui/appFeedback';
+import { fetchAllFeedback, fetchAppErrors, type FeedbackRow, type AppErrorRow } from '../../src/ui/appFeedback';
+import { SkeletonList } from '../../src/ui/Skeleton';
 
 const CAT_COLOR = (t: any, c: string | null) => c === 'Bug' ? t.crit : c === 'Praise' ? t.brand : c === 'Confusing' ? t.warn : t.ink3;
 
@@ -14,12 +15,14 @@ export default function OwnerFeedback() {
   const router = useRouter();
   const [rows, setRows] = useState<FeedbackRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [errors, setErrors] = useState<AppErrorRow[]>([]);
+  const [showErr, setShowErr] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const data = await fetchAllFeedback();
-      if (!cancelled) { setRows(data); setLoading(false); }
+      const [data, errs] = await Promise.all([fetchAllFeedback(), fetchAppErrors(20)]);
+      if (!cancelled) { setRows(data); setErrors(errs); setLoading(false); }
     })();
     return () => { cancelled = true; };
   }, []);
@@ -48,7 +51,7 @@ export default function OwnerFeedback() {
         </View>
 
         {loading ? (
-          <Text style={{ color: t.ink3, fontSize: 14, textAlign: 'center', paddingVertical: 30 }}>Loading…</Text>
+          <SkeletonList n={4} />
         ) : rows.length === 0 ? (
           <View style={{ alignItems: 'center', paddingVertical: 40 }}>
             <Icon name="message" size={26} color={t.ink3} />
@@ -69,6 +72,23 @@ export default function OwnerFeedback() {
             {r.appVersion ? <Text style={{ color: t.ink3, fontSize: 10, marginTop: 6 }}>v{r.appVersion}</Text> : null}
           </View>
         ))}
+
+        {errors.length > 0 ? (
+          <View style={{ marginTop: 18 }}>
+            <Pressable onPress={() => setShowErr((v) => !v)} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+              <Icon name="wrench" size={15} color={t.crit} />
+              <Text style={{ color: t.ink, fontWeight: '800', fontSize: 14 }}>Recent errors ({errors.length})</Text>
+              <View style={{ flex: 1 }} />
+              <Text style={{ color: t.ink3, fontSize: 12, fontWeight: '700' }}>{showErr ? 'Hide' : 'Show'}</Text>
+            </Pressable>
+            {showErr ? errors.map((e) => (
+              <View key={e.id} style={{ backgroundColor: t.surface, borderRadius: 12, borderWidth: 1, borderColor: t.ring, padding: 12, marginBottom: 8 }}>
+                <Text style={{ color: t.ink2, fontSize: 12, fontFamily: 'Courier' }} numberOfLines={3}>{e.message}</Text>
+                <Text style={{ color: t.ink3, fontSize: 10, marginTop: 6 }}>{e.platform || '—'}{e.appVersion ? ' · v' + e.appVersion : ''} · {fmt(e.createdAt)}</Text>
+              </View>
+            )) : null}
+          </View>
+        ) : null}
       </ScrollView>
     </SafeAreaView>
   );

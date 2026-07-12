@@ -39,3 +39,14 @@ export async function fetchAllFeedback(): Promise<FeedbackRow[]> {
     }));
   } catch { return []; }
 }
+
+export interface AppErrorRow { id: string; message: string; platform: string | null; appVersion: string | null; createdAt: string; }
+
+// Owner-only: recent captured crashes/errors (RLS restricts to the owner).
+export async function fetchAppErrors(limit = 20): Promise<AppErrorRow[]> {
+  if (!USE_SUPABASE) return [];
+  try {
+    const { data } = await supabase.from('app_errors').select('id, message, platform, app_version, created_at').order('created_at', { ascending: false }).limit(limit);
+    return (data ?? []).map((r: any) => ({ id: String(r.id), message: r.message, platform: r.platform, appVersion: r.app_version, createdAt: r.created_at }));
+  } catch { return []; }
+}
