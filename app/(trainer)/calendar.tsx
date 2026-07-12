@@ -12,6 +12,7 @@ import type { Theme } from '../../src/theme/tokens';
 import { MOCK_TRAINER } from '../../src/lib/mockData';
 import { cancelSession } from '../../src/lib/booking';
 import { useSessions } from '../../src/ui/sessions';
+import { useAvailability, upcomingDates } from '../../src/ui/availability';
 import { useRoster } from '../../src/ui/roster';
 import type { TrainingSession } from '../../src/lib/types';
 
@@ -42,6 +43,22 @@ export default function TrainerSchedule() {
   const [addHour, setAddHour] = useState(9);
   const [addDur, setAddDur] = useState(60);
   const [addClient, setAddClient] = useState<string | null>(null);
+  const { slots: availSlots, addSlot: addAvail, removeSlot: removeAvail } = useAvailability();
+  const [availOpen, setAvailOpen] = useState(false);
+  const [avDow, setAvDow] = useState(1);
+  const [avHour, setAvHour] = useState(9);
+  const generateSlots = () => {
+    if (!availSlots.length) { Alert.alert('No availability set', 'Add at least one weekly slot first.'); return; }
+    let added = 0;
+    for (const sl of availSlots) {
+      for (const d of upcomingDates(sl.dow, sl.hour, 4)) {
+        const ses: TrainingSession = { id: 'ms' + (SEQ++), trainerId: MOCK_TRAINER.id, clientId: null, startsAt: d.toISOString(), durationMin: sl.dur, status: 'available', released: false };
+        if (addSession(ses).ok) added++;
+      }
+    }
+    setAvailOpen(false);
+    Alert.alert('Slots generated', added + ' open slot' + (added === 1 ? '' : 's') + ' added across the next 4 weeks (existing/overlapping times were skipped).');
+  };
 
   const booked = sessions.filter((s) => s.status === 'booked');
   const open = sessions.filter((s) => s.status === 'available');
@@ -138,6 +155,12 @@ export default function TrainerSchedule() {
           </Pressable>
         </View>
 
+        <Pressable onPress={() => setAvailOpen(true)} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingVertical: 11, paddingHorizontal: 14, marginBottom: 16 }}>
+          <Icon name="calendar" size={16} color={t.brand} />
+          <Text style={{ color: t.ink2, fontWeight: '700', fontSize: 13, flex: 1 }}>Weekly availability{availSlots.length ? ' · ' + availSlots.length + ' slot' + (availSlots.length === 1 ? '' : 's') : ''}</Text>
+          <Text style={{ color: t.brand, fontWeight: '800', fontSize: 12 }}>Set up ›</Text>
+        </Pressable>
+
         {/* Month calendar */}
         <View style={{ backgroundColor: t.surface, borderRadius: 18, borderWidth: 1, borderColor: t.ring, padding: 14, marginBottom: 16 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
@@ -212,6 +235,33 @@ export default function TrainerSchedule() {
       </ScrollView>
 
       {/* Add-session modal */}
+      <Modal visible={availOpen} animationType="slide" transparent onRequestClose={() => setAvailOpen(false)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setAvailOpen(false)} />
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, borderColor: t.ring, padding: 20, paddingBottom: 30, maxHeight: '82%' }}>
+          <Text style={{ color: t.ink, fontSize: 20, fontWeight: '800' }}>Weekly availability</Text>
+          <Text style={{ color: t.ink3, fontSize: 13, marginTop: 2, marginBottom: 14 }}>Set the times you offer every week, then generate open slots.</Text>
+          <ScrollView showsVerticalScrollIndicator={false}>
+            {availSlots.length === 0 ? <Text style={{ color: t.ink3, fontSize: 13, marginBottom: 10 }}>No weekly slots yet.</Text> : availSlots.map((sl) => (
+              <View key={sl.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: t.surface2, borderRadius: 12, borderWidth: 1, borderColor: t.ring, padding: 12, marginBottom: 8 }}>
+                <Icon name="calendar" size={16} color={t.brand} />
+                <Text style={{ color: t.ink, fontWeight: '700', fontSize: 14, flex: 1 }}>{DOW[sl.dow]} · {sl.hour % 12 || 12}{sl.hour >= 12 ? 'pm' : 'am'} · {sl.dur}min</Text>
+                <Pressable onPress={() => removeAvail(sl.id)} hitSlop={8}><Text style={{ color: t.ink3, fontWeight: '800', fontSize: 16 }}>×</Text></Pressable>
+              </View>
+            ))}
+            <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 8, marginBottom: 8 }}>Add a weekly slot</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, marginBottom: 8 }}>
+              {DOW.map((d, i) => (<Pressable key={d} onPress={() => setAvDow(i)} style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, backgroundColor: avDow === i ? t.brand : t.surface2, borderWidth: 1, borderColor: avDow === i ? t.brand : t.ring }}><Text style={{ color: avDow === i ? t.brandInk : t.ink2, fontWeight: '700', fontSize: 12 }}>{d}</Text></Pressable>))}
+            </ScrollView>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, marginBottom: 12 }}>
+              {[6,7,8,9,10,11,12,13,14,15,16,17,18,19,20].map((h) => (<Pressable key={h} onPress={() => setAvHour(h)} style={{ paddingHorizontal: 11, paddingVertical: 8, borderRadius: 10, backgroundColor: avHour === h ? t.brand : t.surface2, borderWidth: 1, borderColor: avHour === h ? t.brand : t.ring }}><Text style={{ color: avHour === h ? t.brandInk : t.ink2, fontWeight: '700', fontSize: 12 }}>{h % 12 || 12}{h >= 12 ? 'pm' : 'am'}</Text></Pressable>))}
+            </ScrollView>
+            <Pressable onPress={() => addAvail(avDow, avHour, 60)} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingVertical: 12, alignItems: 'center', marginBottom: 8 }}><Text style={{ color: t.ink, fontWeight: '800', fontSize: 13 }}>+ Add {DOW[avDow]} {avHour % 12 || 12}{avHour >= 12 ? 'pm' : 'am'}</Text></Pressable>
+          </ScrollView>
+          <Pressable onPress={generateSlots} style={{ backgroundColor: t.brand, borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginTop: 6 }}><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 14 }}>Generate open slots · next 4 weeks</Text></Pressable>
+          <Pressable onPress={() => setAvailOpen(false)} style={{ paddingVertical: 12, alignItems: 'center' }}><Text style={{ color: t.ink3, fontWeight: '700', fontSize: 13 }}>Done</Text></Pressable>
+        </View>
+      </Modal>
+
       <Modal visible={addOpen} animationType="slide" transparent onRequestClose={() => setAddOpen(false)}>
         <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' }}>
           <View style={{ backgroundColor: t.bg, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, paddingBottom: 34, borderTopWidth: 1, borderColor: t.ring }}>
