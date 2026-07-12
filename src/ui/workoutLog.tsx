@@ -1,8 +1,10 @@
-// Shared, reactive workout log. Seeded from mock history; guided sessions and
-// manual logs append to it so streaks, PRs, the Train day-detail and the coach's
-// client view all update live. Swap the seed for Supabase queries later.
-import { createContext, useContext, useState } from 'react';
+// Shared, reactive workout log. Persists to Supabase per signed-in user when
+// available (hydrate-or-seed on mount + optimistic insert on log), and always
+// falls back to the in-memory mock so the app never blanks or crashes offline.
+import { createContext, useContext, useEffect, useState } from 'react';
 import { MOCK_CLIENT, type WorkoutEntry } from '../lib/mockData';
+import { supabase } from '../lib/supabase';
+import { USE_SUPABASE } from '../lib/config';
 
 interface WorkoutLogValue {
   log: WorkoutEntry[];
@@ -12,10 +14,50 @@ interface WorkoutLogValue {
 
 const Ctx = createContext<WorkoutLogValue | null>(null);
 
+const rowToEntry = (r: any): WorkoutEntry => ({
+  t: r.performed_at, exercise: r.exercise,
+  sets: r.sets ?? undefined, cardio: r.cardio ?? undefined, kcal: r.kcal ?? undefined,
+});
+const entryToRow = (uid: string, e: WorkoutEntry) => ({
+  user_id: uid, performed_at: e.t, exercise: e.exercise,
+  sets: e.sets ?? null, cardio: e.cardio ?? null, kcal: e.kcal ?? null,
+});
+
 export function WorkoutLogProvider({ children }: { children: React.ReactNode }) {
   const [log, setLog] = useState<WorkoutEntry[]>(() => JSON.parse(JSON.stringify(MOCK_CLIENT.log)));
-  const addWorkout = (entry: WorkoutEntry) => setLog((p) => [entry, ...p]);
-  const addWorkouts = (entries: WorkoutEntry[]) => { if (entries.length) setLog((p) => [...entries, ...p]); };
+  const [uid, setUid] = useState<string | null>(null);
+
+  // Hydrate from Supabase (or seed it with the demo history) — never throws.
+  useEffect(() => {
+    if (!USE_SUPABASE) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data: auth } = await supabase.auth.getUser();
+        const id = auth?.user?.id;
+        if (!id || cancelled) return;
+        setUid(id);
+        const { data, error } = await supabase
+          .from('workouts').select('*').eq('user_id', id).order('performed_at', { ascending: false });
+        if (error || cancelled) return;
+        if (data && data.length) {
+          setLog(data.map(rowToEntry));
+        } else {
+          // First run for this user: seed the demo history so it persists.
+          await supabase.from('workouts').insert(MOCK_CLIENT.log.map((e) => entryToRow(id, e)));
+        }
+      } catch { /* stay on local mock */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const persist = (entries: WorkoutEntry[]) => {
+    if (!USE_SUPABASE || !uid || !entries.length) return;
+    try { supabase.from('workouts').insert(entries.map((e) => entryToRow(uid, e))).then(() => {}, () => {}); } catch { /* ignore */ }
+  };
+  const addWorkout = (entry: WorkoutEntry) => { setLog((p) => [entry, ...p]); persist([entry]); };
+  const addWorkouts = (entries: WorkoutEntry[]) => { if (entries.length) { setLog((p) => [...entries, ...p]); persist(entries); } };
+
   return <Ctx.Provider value={{ log, addWorkout, addWorkouts }}>{children}</Ctx.Provider>;
 }
 
