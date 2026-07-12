@@ -1,6 +1,7 @@
 // Client · Daily Habits & Water (Phase 7). Check off habits and log water; the
 // water goal auto-completes the water habit. Reachable from the profile hub.
 import { View, Text, Pressable, ScrollView } from 'react-native';
+import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -18,7 +19,7 @@ export default function Habits() {
  <Pressable onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Go back" style={{ marginBottom: 8 }}>
  <Text style={{ color: t.brand, fontWeight: '700', fontSize: 15 }}>‹ Back</Text>
  </Pressable>
- <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800' }}>Daily Habits</Text>
+ <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia' }}>Daily Habits</Text>
  <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 18 }}>Small wins, every day — {h.doneCount}/{h.habits.length} done</Text>
 
  {/* Progress ring-ish bar */}
@@ -66,10 +67,10 @@ export default function Habits() {
  accessibilityLabel={hb.label}
  style={{ flexDirection: 'row', alignItems: 'center', gap: 14, backgroundColor: t.surface, borderRadius: 14, borderWidth: 1, borderColor: hb.done ? t.brand : t.ring, padding: 15, marginBottom: 9 }}
  >
- <Text style={{ fontSize: 22 }}>{hb.icon}</Text>
+ <Icon name="check" size={18} color={hb.done ? t.brand : t.ink3} />
  <Text style={{ flex: 1, color: t.ink, fontWeight: '700', fontSize: 15 }}>{hb.label}</Text>
  <View style={{ width: 26, height: 26, borderRadius: 13, borderWidth: 2, borderColor: hb.done ? t.brand : t.ring, backgroundColor: hb.done ? t.brand : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
- {hb.done ? <Text style={{ color: t.brandInk, fontWeight: '900', fontSize: 14 }}></Text> : null}
+ {hb.done ? <Icon name="check" size={14} color={t.brandInk} /> : null}
  </View>
  </Pressable>
  ))}

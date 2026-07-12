@@ -53,7 +53,7 @@ export default function CheckIn() {
  <Pressable onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Go back" style={{ marginBottom: 8 }}>
  <Text style={{ color: t.brand, fontWeight: '700', fontSize: 15 }}>‹ Back</Text>
  </Pressable>
- <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800' }}>Weekly Check-in</Text>
+ <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia' }}>Weekly Check-in</Text>
  <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 20 }}>A quick pulse for your coach — takes 30 seconds.</Text>
 
  <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>Current Weight (kg)</Text>

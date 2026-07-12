@@ -3,6 +3,7 @@
 // shared session store, so slots the coach opens appear here to book.
 import { useState } from 'react';
 import { View, Text, Pressable, ScrollView, Alert, Image, Modal } from 'react-native';
+import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -81,7 +82,7 @@ export default function Calendar() {
  <Pressable onPress={() => router.push('/(client)/dashboard')} style={{ marginBottom: 8 }}>
  <Text style={{ color: t.brand, fontWeight: '700', fontSize: 15 }}>‹ Home</Text>
  </Pressable>
- <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800' }}>Book Sessions</Text>
+ <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia' }}>Book Sessions</Text>
  <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 14 }}>Tap a day to book or cancel</Text>
 
  {/* Coach card */}
@@ -203,7 +204,7 @@ export default function Calendar() {
  {coach.offers.length > 0 && (
  <View style={{ marginBottom: 14 }}>
  <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>What I Offer</Text>
- {coach.offers.map((o, i) => <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 }}><Text style={{ color: t.brand, fontSize: 14 }}></Text><Text style={{ color: t.ink, fontSize: 14 }}>{o}</Text></View>)}
+ {coach.offers.map((o, i) => <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 }}><Icon name="check" size={13} color={t.brand} /><Text style={{ color: t.ink, fontSize: 14 }}>{o}</Text></View>)}
  </View>
  )}
  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 14, borderTopWidth: 1, borderTopColor: t.ring }}>

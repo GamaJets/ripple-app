@@ -2,6 +2,7 @@
 // Powered by the coach-chat edge function; graceful canned reply until deployed.
 import { useState, useRef } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
+import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -51,7 +52,7 @@ export default function Coach() {
  <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={8}>
  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 18, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: t.ring }}>
  <Pressable onPress={() => router.back()}><Text style={{ color: t.brand, fontWeight: '700', fontSize: 15 }}>‹</Text></Pressable>
- <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}><Text style={{ fontSize: 17 }}></Text></View>
+ <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}><Icon name="sparkle" size={17} color={t.brandInk} /></View>
  <View><Text style={{ color: t.ink, fontWeight: '800', fontSize: 16 }}>AI Coach</Text><Text style={{ color: t.ink3, fontSize: 11 }}>Knows your plan &amp; numbers</Text></View>
  </View>
 

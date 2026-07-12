@@ -16,7 +16,7 @@ function Metric({ t, label, value, delta, deltaGood }: { t: Theme; label: string
  return (
  <View style={{ flex: 1, minWidth: 100, backgroundColor: t.surface2, borderRadius: 14, borderWidth: 1, borderColor: t.ring, padding: 14 }}>
  <Text style={{ color: t.ink3, fontSize: 12 }}>{label}</Text>
- <Text style={{ color: t.ink, fontSize: 22, fontWeight: '800', marginTop: 3 }}>{value}</Text>
+ <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia', marginTop: 3 }}>{value}</Text>
  {delta ? <Text style={{ color: deltaGood ? t.brand : t.ink3, fontSize: 12, fontWeight: '700', marginTop: 2 }}>{delta}</Text> : null}
  </View>
  );

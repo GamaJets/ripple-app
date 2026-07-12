@@ -19,7 +19,7 @@ function Card({ t, appName, kicker, big, unit, sub }: { t: Theme; appName: strin
  <Text style={{ color: t.brandInk, fontSize: 13, opacity: 0.8, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 1 }}>{kicker}</Text>
  </View>
  <View>
- <Text style={{ color: t.brandInk, fontSize: 64, fontWeight: '900', letterSpacing: -2 }}>{big}<Text style={{ fontSize: 24, fontWeight: '800' }}> {unit}</Text></Text>
+ <Text style={{ color: t.brandInk, fontSize: 64, fontWeight: '900', letterSpacing: -2 }}>{big}<Text style={{ fontSize: 26, fontWeight: '700', fontFamily: 'Georgia' }}> {unit}</Text></Text>
  <Text style={{ color: t.brandInk, fontSize: 16, fontWeight: '700', opacity: 0.9, marginTop: 4 }}>{sub}</Text>
  </View>
  </View>

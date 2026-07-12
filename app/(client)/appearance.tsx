@@ -17,7 +17,7 @@ export default function Appearance() {
         <Pressable onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Go back" style={{ marginBottom: 8, flexDirection: 'row', alignItems: 'center' }}>
           <Icon name="back" size={18} color={t.brand} /><Text style={{ color: t.brand, fontWeight: '700', fontSize: 15, marginLeft: 2 }}>Back</Text>
         </Pressable>
-        <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800' }}>Appearance</Text>
+        <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia' }}>Appearance</Text>
         <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 18 }}>Pick a colour theme — applies instantly across the app.</Text>
 
         {palettes.map((p) => {

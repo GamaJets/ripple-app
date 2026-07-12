@@ -34,7 +34,7 @@ export default function Social() {
  <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
  <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
  <Pressable onPress={() => router.back()} style={{ marginBottom: 8 }}><Text style={{ color: t.ink3, fontSize: 15 }}>‹ Back</Text></Pressable>
- <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800', textTransform: 'capitalize' }}>Share & Social</Text>
+ <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia', textTransform: 'capitalize' }}>Share & Social</Text>
  <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 16 }}>Connect your accounts and share your story — you’re always in control of what goes out.</Text>
 
  <View style={{ backgroundColor: t.brand, borderRadius: 20, padding: 20, marginBottom: 18 }}>

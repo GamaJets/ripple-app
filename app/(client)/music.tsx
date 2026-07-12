@@ -3,6 +3,7 @@
 // phase; this builds the list and (then) pushes it to the client's service.
 import { useState } from 'react';
 import { View, Text, Pressable, ScrollView, Alert, Linking } from 'react-native';
+import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -64,14 +65,14 @@ export default function Music() {
  <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
  <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
  <Pressable onPress={() => router.push('/(client)/profile')} style={{ marginBottom: 8 }}><Text style={{ color: t.brand, fontWeight: '700', fontSize: 15 }}>‹ Back</Text></Pressable>
- <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800' }}>Music &amp; Playlists</Text>
+ <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia' }}>Music &amp; Playlists</Text>
  <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 16 }}>Link your music and let the AI build a playlist matched to your workout — the right energy for every set.</Text>
 
  <Text style={{ color: t.ink2, fontSize: 13, fontWeight: '700', marginBottom: 10, textTransform: 'capitalize' }}>Your Music</Text>
  <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, overflow: 'hidden', marginBottom: 20 }}>
  {SERVICES.map((s, i) => (
  <View key={s.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 16, paddingVertical: 14, borderTopWidth: i === 0 ? 0 : 1, borderTopColor: t.ring }}>
- <View style={{ width: 40, height: 40, borderRadius: 11, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}><Text style={{ fontSize: 20 }}>{s.ico}</Text></View>
+ <View style={{ width: 40, height: 40, borderRadius: 11, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}><Icon name="play" size={18} color={t.brand} /></View>
  <View style={{ flex: 1 }}>
  <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15 }}>{s.name}</Text>
  <Text style={{ color: t.ink3, fontSize: 12, marginTop: 1 }}>{s.note}</Text>
@@ -85,7 +86,7 @@ export default function Music() {
  </View>
 
  <Text style={{ color: t.ink2, fontSize: 13, fontWeight: '700', marginBottom: 10, textTransform: 'capitalize' }}>Build For</Text>
- <Seg>{MODES.map((m) => <Chip key={m.id} on={mode === m.id} label={`${m.ico} ${m.label}`} onPress={() => setMode(m.id)} t={t} />)}</Seg>
+ <Seg>{MODES.map((m) => <Chip key={m.id} on={mode === m.id} label={m.label} onPress={() => setMode(m.id)} t={t} />)}</Seg>
  <Text style={{ color: t.ink3, fontSize: 12, fontWeight: '600', marginBottom: 6 }}>Intensity</Text>
  <Seg>{INTENSITY.map((x) => <Chip key={x.v} on={intensity === x.v} label={x.label} onPress={() => setIntensity(x.v)} t={t} />)}</Seg>
  <Text style={{ color: t.ink3, fontSize: 12, fontWeight: '600', marginBottom: 6 }}>Length</Text>

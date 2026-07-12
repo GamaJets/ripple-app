@@ -51,7 +51,7 @@ export default function Consistency() {
         <Pressable onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Go back" style={{ marginBottom: 8 }}>
           <Text style={{ color: t.brand, fontWeight: '700', fontSize: 15 }}>‹ Back</Text>
         </Pressable>
-        <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800' }}>Consistency</Text>
+        <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia' }}>Consistency</Text>
         <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 18 }}>Last {WEEKS} weeks of training</Text>
 
         <View style={{ flexDirection: 'row', gap: 10, marginBottom: 18 }}>

@@ -2,6 +2,7 @@
 // Apple Health reads the paired Apple Watch; live tiles are tappable for detail.
 import { useState } from 'react';
 import { View, Text, Pressable, ScrollView, Alert, ActivityIndicator, Modal } from 'react-native';
+import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -20,7 +21,7 @@ function Metric({ t, ico, label, value, unit, onPress }: { t: Theme; ico: string
  return (
  <Pressable onPress={onPress} style={{ flex: 1, backgroundColor: t.surface2, borderRadius: 14, padding: 14, borderWidth: 1, borderColor: t.ring }}>
  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
- <Text style={{ fontSize: 18 }}>{ico}</Text>
+ <Icon name={(ico || 'chart') as any} size={18} color={t.brand} />
  <Text style={{ color: t.ink3, fontSize: 16 }}>›</Text>
  </View>
  <Text style={{ color: t.ink, fontSize: 20, fontWeight: '800', textTransform: 'capitalize', marginTop: 6 }}>{value}<Text style={{ color: t.ink3, fontSize: 11, fontWeight: '600' }}> {unit}</Text></Text>
@@ -49,17 +50,17 @@ export default function Devices() {
  const showLive = connected.length > 0 && (w.today.activeKcal != null || w.today.heartRateAvg != null || w.today.steps != null);
 
  const DETAILS: Record<MetricKey, { ico: string; title: string; value: string; blurb: string }> = {
- kcal: { ico: '', title: 'Calories Burned', value: `${num(w.today.activeKcal)} kcal`, blurb: 'Active energy your watch recorded today. It feeds into your daily calorie target — on training days you can eat back what you earn.' },
- hr: { ico: '', title: 'Average Heart Rate', value: `${num(w.today.heartRateAvg)} bpm`, blurb: 'The mean of today’s heart-rate samples from your watch. During a workout, live heart rate is written into that session.' },
- steps: { ico: '', title: 'Steps', value: num(w.today.steps), blurb: 'Total steps today across your connected devices. A simple daily-movement signal that complements your training.' },
- source: { ico: '', title: 'Connected Sources', value: `${connected.length} ${connected.length === 1 ? 'device' : 'devices'}`, blurb: connected.map((p) => `• ${p.meta.name}`).join('\n') || 'No devices connected yet.' },
+ kcal: { ico: 'flame', title: 'Calories Burned', value: `${num(w.today.activeKcal)} kcal`, blurb: 'Active energy your watch recorded today. It feeds into your daily calorie target — on training days you can eat back what you earn.' },
+ hr: { ico: 'heart', title: 'Average Heart Rate', value: `${num(w.today.heartRateAvg)} bpm`, blurb: 'The mean of today’s heart-rate samples from your watch. During a workout, live heart rate is written into that session.' },
+ steps: { ico: 'trending', title: 'Steps', value: num(w.today.steps), blurb: 'Total steps today across your connected devices. A simple daily-movement signal that complements your training.' },
+ source: { ico: 'clock', title: 'Connected Sources', value: `${connected.length} ${connected.length === 1 ? 'device' : 'devices'}`, blurb: connected.map((p) => `• ${p.meta.name}`).join('\n') || 'No devices connected yet.' },
  };
 
  return (
  <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
  <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
  <Pressable onPress={() => router.push('/(client)/profile')} style={{ marginBottom: 8 }}><Text style={{ color: t.brand, fontWeight: '700', fontSize: 15, textTransform: 'capitalize' }}>‹ Back</Text></Pressable>
- <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800', textTransform: 'capitalize' }}>Watch &amp; Devices</Text>
+ <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia', textTransform: 'capitalize' }}>Watch &amp; Devices</Text>
  <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 16 }}>Connect a wearable to auto-track heart rate and calories burned.</Text>
 
  {showLive ? (
@@ -89,7 +90,7 @@ export default function Devices() {
  return (
  <View key={p.meta.id} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: on ? t.brand : t.ring, padding: 15, marginBottom: 10 }}>
  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
- <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}><Text style={{ fontSize: 22 }}>{p.meta.icon}</Text></View>
+ <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}><Icon name="clock" size={20} color={t.brand} /></View>
  <View style={{ flex: 1 }}>
  <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, textTransform: 'capitalize' }}>{p.meta.name}</Text>
  <Text style={{ color: t.ink3, fontSize: 12, marginTop: 1 }}>{p.meta.blurb}</Text>
@@ -138,7 +139,7 @@ export default function Devices() {
  {detail ? (
  <>
  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
- <Text style={{ color: t.ink, fontSize: 18, fontWeight: '800' }}>{DETAILS[detail].ico} {DETAILS[detail].title}</Text>
+ <Text style={{ color: t.ink, fontSize: 18, fontWeight: '800' }}>{DETAILS[detail].title}</Text>
  <Pressable onPress={() => setDetail(null)}><Text style={{ color: t.brand, fontSize: 16, fontWeight: '800' }}>Close</Text></Pressable>
  </View>
  <Text style={{ color: t.ink, fontSize: 34, fontWeight: '800', marginBottom: 12 }}>{DETAILS[detail].value}</Text>

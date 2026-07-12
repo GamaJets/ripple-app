@@ -102,7 +102,7 @@ export default function Tools() {
  <Pressable onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Go back" style={{ marginBottom: 8 }}>
  <Text style={{ color: t.brand, fontWeight: '700', fontSize: 15 }}>‹ Back</Text>
  </Pressable>
- <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800' }}>Lifting Tools</Text>
+ <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia' }}>Lifting Tools</Text>
  <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 16 }}>Calculators for the gym floor</Text>
  <View style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: 10, padding: 3, marginBottom: 16, borderWidth: 1, borderColor: t.ring }}>
  {([['1rm', '1RM'], ['plates', 'Plates'], ['macros', 'Macros']] as const).map(([k, label]) => (
