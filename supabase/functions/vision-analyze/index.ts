@@ -24,6 +24,10 @@ const PROMPTS: Record<string, string> = {
     'You are a nutrition estimator. Identify the food in this photo and estimate the nutrition for the portion shown. ' +
     'Respond with ONLY valid JSON, no prose: {"name": string, "kcal": number, "protein": number, "carbs": number, "fat": number, "confidence": number (0-1)}. ' +
     'Protein/carbs/fat are grams. If unclear, give your best estimate and lower the confidence.',
+  physique:
+    'This is a physique / body progress photo taken for fitness tracking. Estimate visible body composition to guide training. ' +
+    'Respond with ONLY valid JSON, no prose: {"bodyFatPct": number, "notes": string, "focusAreas": [string]}. ' +
+    'bodyFatPct is your best visual estimate (%), notes is one or two encouraging sentences on what stands out, focusAreas lists 2-3 muscle groups or areas to prioritise next. This is a fitness estimate only, not medical or diagnostic advice.',
   inbody:
     'This is an InBody (or similar) body-composition scan. Extract these fields. ' +
     'Respond with ONLY valid JSON, no prose: {"weightKg": number, "bodyFatPct": number, "skeletalMuscleKg": number, "takenAt": string|null}. ' +
@@ -47,7 +51,7 @@ Deno.serve(async (req: Request) => {
   let mode = 'meal', imageBase64 = '', mediaType = 'image/jpeg';
   try {
     const b = await req.json();
-    mode = b.mode === 'inbody' ? 'inbody' : 'meal';
+    mode = (b.mode === 'inbody' || b.mode === 'physique') ? b.mode : 'meal';
     imageBase64 = String(b.imageBase64 || '').replace(/^data:image\/\w+;base64,/, '');
     if (b.mediaType) mediaType = b.mediaType;
   } catch { return json({ error: 'Invalid JSON body' }, 400); }

@@ -15,7 +15,7 @@ export function visionAvailable(): boolean {
   return process.env.EXPO_PUBLIC_ENABLE_VISION === '1';
 }
 
-async function call(mode: 'meal' | 'inbody', imageBase64: string, mediaType = 'image/jpeg'): Promise<any | null> {
+async function call(mode: string, imageBase64: string, mediaType = 'image/jpeg'): Promise<any | null> {
   if (!visionAvailable() || !imageBase64) return null;
   try {
     const { data, error } = await supabase.functions.invoke('vision-analyze', {
@@ -36,6 +36,13 @@ export async function analyzeMeal(imageBase64: string, mediaType?: string): Prom
     kcal: Math.round(r.kcal), protein: Math.round(r.protein ?? 0), carbs: Math.round(r.carbs ?? 0), fat: Math.round(r.fat ?? 0),
     confidence: typeof r.confidence === 'number' ? r.confidence : 0.6,
   };
+}
+
+export interface PhysiqueVision { bodyFatPct: number | null; notes: string; focusAreas: string[] }
+export async function analyzePhysique(imageBase64: string, mediaType?: string): Promise<PhysiqueVision | null> {
+  const r = await call('physique', imageBase64, mediaType);
+  if (!r) return null;
+  return { bodyFatPct: typeof r.bodyFatPct === 'number' ? r.bodyFatPct : null, notes: String(r.notes ?? ''), focusAreas: Array.isArray(r.focusAreas) ? r.focusAreas.map(String).slice(0, 4) : [] };
 }
 
 export async function analyzeInBody(imageBase64: string, mediaType?: string): Promise<InBodyVision | null> {

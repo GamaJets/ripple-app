@@ -12,7 +12,7 @@ import { useClientData } from '../../src/ui/clientData';
 import { useRouter } from 'expo-router';
 import { TrendChart } from '../../src/ui/Chart';
 import { Icon } from '../../src/ui/Icon';
-import { analyzeInBody, visionAvailable } from '../../src/lib/vision';
+import { analyzeInBody, analyzePhysique, visionAvailable, type PhysiqueVision } from '../../src/lib/vision';
 
 const SERIF = 'Georgia';
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -90,6 +90,9 @@ export default function Scans() {
   const [img, setImg] = useState<string | null>(null);
   const [wt, setWt] = useState(''); const [bf, setBf] = useState(''); const [sm, setSm] = useState('');
   const [photos, setPhotos] = useState<{ uri: string; at: string }[]>([]);
+  const [phys, setPhys] = useState<PhysiqueVision | null>(null);
+  const [physBusy, setPhysBusy] = useState(false);
+  const [physOpen, setPhysOpen] = useState(false);
   const [cmp, setCmp] = useState<number[]>([]);
   const [reading, setReading] = useState(false);
   const [ocrMsg, setOcrMsg] = useState<string | null>(null);
@@ -134,6 +137,20 @@ export default function Scans() {
     setImg(null); setWt(''); setBf(''); setSm(''); setShowAdd(false);
     Alert.alert('Scan saved', 'Added to your history and charts for ' + scanDateLabel() + '.');
   };
+  const physiqueCheck = async (fromCamera: boolean) => {
+    const perm = fromCamera ? await ImagePicker.requestCameraPermissionsAsync() : await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) { Alert.alert('Permission needed', 'Allow ' + (fromCamera ? 'camera' : 'photo library') + ' access.'); return; }
+    const res = fromCamera ? await ImagePicker.launchCameraAsync({ quality: 0.5, base64: true }) : await ImagePicker.launchImageLibraryAsync({ quality: 0.5, base64: true });
+    if (res.canceled || !res.assets || !res.assets[0]) return;
+    const asset = res.assets[0];
+    setPhotos((p) => [{ uri: asset.uri, at: new Date().toISOString() }, ...p]); setCmp([]);
+    if (!visionAvailable() || !asset.base64) { Alert.alert('AI not on yet', 'Physique analysis turns on with the AI backend.'); return; }
+    setPhys(null); setPhysOpen(true); setPhysBusy(true);
+    const r = await analyzePhysique(asset.base64);
+    setPhysBusy(false);
+    if (r) setPhys(r); else { setPhysOpen(false); Alert.alert('Could not analyze', 'Try a clearer, well-lit full-body photo.'); }
+  };
+
   const addPhoto = async (fromCamera: boolean) => {
     const perm = fromCamera ? await ImagePicker.requestCameraPermissionsAsync() : await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!perm.granted) { Alert.alert('Permission needed', 'Allow ' + (fromCamera ? 'camera' : 'photo library') + ' access to add a progress photo.'); return; }
@@ -190,6 +207,7 @@ export default function Scans() {
             <View style={{ flexDirection: 'row', gap: 8 }}>
               <Pressable onPress={() => addPhoto(false)} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 9, paddingHorizontal: 12, paddingVertical: 7 }}><Text style={{ color: t.ink, fontWeight: '700', fontSize: 12 }}>Upload</Text></Pressable>
               <Pressable onPress={() => addPhoto(true)} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 9, paddingHorizontal: 12, paddingVertical: 7 }}><Text style={{ color: t.ink, fontWeight: '700', fontSize: 12 }}>Photo</Text></Pressable>
+              <Pressable onPress={() => physiqueCheck(false)} style={{ backgroundColor: t.brand, borderRadius: 9, paddingHorizontal: 12, paddingVertical: 7 }}><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 12 }}>AI check</Text></Pressable>
             </View>
           </View>
           {photos.length === 0 ? (
@@ -319,6 +337,37 @@ export default function Scans() {
               <Wheel items={YEARS.map(String)} index={dY} onChange={setDY} t={t} />
             </View>
           </View>
+        </View>
+      </Modal>
+      <Modal visible={physOpen} transparent animationType="slide" onRequestClose={() => setPhysOpen(false)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)' }} onPress={() => setPhysOpen(false)} />
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, borderColor: t.ring, padding: 20, paddingBottom: 30 }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+            <Text style={{ color: t.ink, fontSize: 20, fontWeight: '800' }}>{physBusy ? 'Analyzing…' : 'AI physique read'}</Text>
+            <Pressable onPress={() => setPhysOpen(false)}><Text style={{ color: t.brand, fontSize: 16, fontWeight: '800' }}>Close</Text></Pressable>
+          </View>
+          {physBusy ? (
+            <Text style={{ color: t.ink3, fontSize: 14, paddingVertical: 14 }}>Reading your photo for body composition and focus areas…</Text>
+          ) : phys ? (
+            <View>
+              {phys.bodyFatPct != null ? (
+                <View style={{ backgroundColor: t.surface2, borderRadius: 14, borderWidth: 1, borderColor: t.ring, padding: 16, marginBottom: 12 }}>
+                  <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 }}>Estimated body fat</Text>
+                  <Text style={{ color: t.ink, fontSize: 30, fontWeight: '900', marginTop: 2 }}>{phys.bodyFatPct}%</Text>
+                </View>
+              ) : null}
+              {phys.notes ? <Text style={{ color: t.ink2, fontSize: 14, lineHeight: 21, marginBottom: 14 }}>{phys.notes}</Text> : null}
+              {phys.focusAreas.length > 0 ? (
+                <View>
+                  <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>Focus next on</Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                    {phys.focusAreas.map((a) => (<View key={a} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 16, paddingHorizontal: 13, paddingVertical: 8 }}><Text style={{ color: t.ink2, fontSize: 13, fontWeight: '700' }}>{a}</Text></View>))}
+                  </View>
+                </View>
+              ) : null}
+              <Text style={{ color: t.ink3, fontSize: 11, marginTop: 16 }}>AI estimate for training guidance only — not medical advice.</Text>
+            </View>
+          ) : null}
         </View>
       </Modal>
     </SafeAreaView>
