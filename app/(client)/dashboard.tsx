@@ -56,7 +56,9 @@ export default function Home() {
   const ann = useAnnouncements().latest;
   const { sessions } = useSessions();
 
-  const program = coachProgram ?? buildProgram(c.goal, c.bodyFatPct);
+  const solo = c.coachingMode === 'solo';
+  const online = c.coachingMode === 'online';
+  const program = (solo ? null : coachProgram) ?? buildProgram(c.goal, c.bodyFatPct);
   const jsToMon = (new Date().getDay() + 6) % 7;
   const workout = program.days[jsToMon % program.days.length] || program.days[0] || { focus: 'Rest day', exercises: [] };
 
@@ -197,8 +199,8 @@ export default function Home() {
           </View>
         </View>
 
-        {/* next session */}
-        <Pressable onPress={() => router.push('/(client)/calendar')} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 14, marginBottom: 11, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+        {/* next session (online booking) */}
+        {online ? <Pressable onPress={() => router.push('/(client)/calendar')} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 14, marginBottom: 11, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
           <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
             <Icon name="calendar" size={20} color={t.brand} />
           </View>
@@ -216,10 +218,10 @@ export default function Home() {
             )}
           </View>
           <Icon name="chevron" size={18} color={t.ink3} />
-        </Pressable>
+        </Pressable> : null}
 
         {/* coach note */}
-        {(coachNotes.length > 0 || !!ann) ? (
+        {(!solo && (coachNotes.length > 0 || !!ann)) ? (
           <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.brand, padding: 14, marginBottom: 11 }}>
             <Text style={{ color: t.brand, fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 6 }}>From your coach</Text>
             {coachNotes.length > 0 ? <Text style={{ color: t.ink2, fontSize: 13, lineHeight: 19 }} numberOfLines={4}>{coachNotes[0].body}</Text> : null}

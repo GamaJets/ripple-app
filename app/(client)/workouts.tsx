@@ -26,7 +26,8 @@ export default function Train() {
   const t = useTheme();
   const router = useRouter();
   const cd = useClientData();
-  const coachProgram = useAssignedPrograms().getProgram(cd.id);
+  const _cp = useAssignedPrograms().getProgram(cd.id);
+  const coachProgram = cd.coachingMode === 'solo' ? null : _cp;
   const w = useWearables();
   const { log: workoutLog, addWorkouts } = useWorkoutLog();
   const program = coachProgram ?? buildProgram(cd.goal, cd.bodyFatPct);

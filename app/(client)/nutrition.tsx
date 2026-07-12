@@ -38,7 +38,8 @@ function CalRing({ t, val, target }: { t: Theme; val: number; target: number }) 
 export default function Nutrition() {
   const t = useTheme();
   const c = useClientData();
-  const coachAdjust = useCoachNutrition().get(c.id);
+  const _adj = useCoachNutrition().get(c.id);
+  const coachAdjust = c.coachingMode === 'solo' ? null : _adj;
   const w = c.weightKg;
   const bf = c.bodyFatPct;
   const diet = c.diet;

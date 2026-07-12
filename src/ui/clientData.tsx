@@ -8,6 +8,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MOCK_CLIENT } from '../lib/mockData';
 import type { Goal, Diet } from '../lib/types';
 
+export type CoachingMode = 'online' | 'inperson' | 'solo';
 export interface ScanRec { id: string; takenAt: string; weightKg: number; bodyFatPct: number; skeletalMuscleKg: number; source: string; image?: string }
 interface Series { t: string; v: number }
 interface Value {
@@ -16,6 +17,7 @@ interface Value {
   photo: string | null; setPhoto: (v: string | null) => void;
   heightCm: number; setHeightCm: (v: number) => void;
   goal: Goal; setGoal: (v: Goal) => void;
+  coachingMode: CoachingMode; setCoachingMode: (v: CoachingMode) => void;
   diet: Diet; setDiet: (v: Diet) => void;
   activity: number; mealsPerDay: 3 | 4 | 5;
   weightKg: number; bodyFatPct: number; muscleKg: number;
@@ -35,6 +37,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
   const [photo, setPhoto] = useState<string | null>(null);
   const [heightCm, setHeightCm] = useState(base.heightCm);
   const [goal, setGoal] = useState<Goal>(base.goal);
+  const [coachingMode, setCoachingMode] = useState<CoachingMode>('online');
   const [diet, setDiet] = useState<Diet>(base.diet);
   const [scans, setScans] = useState<ScanRec[]>(base.scans.map((s) => ({ id: s.id, takenAt: s.takenAt, weightKg: s.weightKg, bodyFatPct: s.bodyFatPct, skeletalMuscleKg: s.skeletalMuscleKg, source: s.source })));
   const [manualWeight, setManualWeight] = useState<number | null>(null);
@@ -51,6 +54,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
         if (typeof p.dob === 'string' && p.dob) setDob(p.dob);
         if (typeof p.heightCm === 'number') setHeightCm(p.heightCm);
         if (typeof p.goal === 'string') setGoal(p.goal);
+        if (p.coachingMode === 'online' || p.coachingMode === 'inperson' || p.coachingMode === 'solo') setCoachingMode(p.coachingMode);
         if (typeof p.diet === 'string') setDiet(p.diet);
         if (typeof p.weightKg === 'number') setManualWeight(p.weightKg);
         if (typeof p.bodyFatPct === 'number') setManualBodyFat(p.bodyFatPct);
@@ -63,8 +67,8 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
   // Persist edits once hydrated (avoids clobbering saved data with defaults on boot).
   useEffect(() => {
     if (!hydrated) return;
-    AsyncStorage.setItem(KEY, JSON.stringify({ name, dob, heightCm, goal, diet, weightKg: manualWeight, bodyFatPct: manualBodyFat, photo })).catch(() => {});
-  }, [hydrated, name, dob, heightCm, goal, diet, manualWeight, manualBodyFat, photo]);
+    AsyncStorage.setItem(KEY, JSON.stringify({ name, dob, heightCm, goal, diet, coachingMode, weightKg: manualWeight, bodyFatPct: manualBodyFat, photo })).catch(() => {});
+  }, [hydrated, name, dob, heightCm, goal, diet, coachingMode, manualWeight, manualBodyFat, photo]);
 
   const sorted = useMemo(() => [...scans].sort((a, b) => Date.parse(a.takenAt) - Date.parse(b.takenAt)), [scans]);
   const latest = sorted[sorted.length - 1];
@@ -75,6 +79,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
     id: base.id, name, init: initials(name), setName,
     dob, setDob, photo, setPhoto, heightCm, setHeightCm,
     goal, setGoal, diet, setDiet,
+    coachingMode, setCoachingMode,
     activity: base.activity, mealsPerDay: base.mealsPerDay as 3 | 4 | 5,
     weightKg, bodyFatPct, muscleKg: latest.skeletalMuscleKg,
     setWeightKg: (v) => setManualWeight(v), setBodyFat: (v) => setManualBodyFat(v),

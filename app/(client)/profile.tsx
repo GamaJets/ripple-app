@@ -10,7 +10,7 @@ import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { ageFromDob } from '../../src/lib/age';
 import { macrosFor } from '../../src/lib/nutrition';
-import { useClientData } from '../../src/ui/clientData';
+import { useClientData, type CoachingMode } from '../../src/ui/clientData';
 import { Icon, type IconName } from '../../src/ui/Icon';
 import type { Goal, Diet } from '../../src/lib/types';
 
@@ -19,6 +19,11 @@ const GOALS: { id: Goal; label: string }[] = [
   { id: 'fatloss', label: 'Fat loss' },
   { id: 'tone', label: 'Tone' },
   { id: 'muscle', label: 'Build muscle' },
+];
+const COACH_MODES: { id: CoachingMode; label: string; note: string }[] = [
+  { id: 'online', label: 'Online coach', note: 'Remote coaching · plan, check-ins & messaging' },
+  { id: 'inperson', label: 'In-person coach', note: 'Coach trains you in person; app tracks progress' },
+  { id: 'solo', label: 'Solo', note: 'Self-managed with AI plans & tools' },
 ];
 const DIETS: { id: Diet; label: string }[] = [
   { id: 'meat', label: 'Meat' }, { id: 'vegetarian', label: 'Veggie' }, { id: 'vegan', label: 'Vegan' }, { id: 'paleo', label: 'Paleo' }, { id: 'keto', label: 'Keto' },
@@ -219,6 +224,8 @@ export default function Profile() {
   })();
 
   const statsLine = `${age != null ? age + ' yrs' : '—'} · ${cd.heightCm} cm · ${round1(cd.weightKg)} kg`;
+  const soloHidden = new Set(['/(client)/messages', '/(client)/checkin']);
+  const hubGroups = HUB_GROUPS.map((g) => ({ ...g, items: g.items.filter((it) => cd.coachingMode !== 'solo' || !soloHidden.has(it.route)) }));
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
@@ -262,13 +269,30 @@ export default function Profile() {
           </View>
         </View>
 
+        {/* coaching mode */}
+        <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 14, marginTop: 12 }}>
+          <Text style={{ color: t.ink3, fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 4 }}>Coaching</Text>
+          {COACH_MODES.map((mm) => {
+            const on = cd.coachingMode === mm.id;
+            return (
+              <Pressable key={mm.id} onPress={() => cd.setCoachingMode(mm.id)} style={{ flexDirection: 'row', alignItems: 'center', gap: 11, paddingVertical: 11, borderTopWidth: mm.id === 'online' ? 0 : 1, borderTopColor: t.ring }}>
+                <View style={{ width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: on ? t.brand : t.ring, alignItems: 'center', justifyContent: 'center' }}>{on ? <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: t.brand }} /> : null}</View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: t.ink, fontWeight: '700', fontSize: 14 }}>{mm.label}</Text>
+                  <Text style={{ color: t.ink3, fontSize: 11.5, marginTop: 1 }}>{mm.note}</Text>
+                </View>
+              </Pressable>
+            );
+          })}
+        </View>
+
         {/* live target strip */}
         <View style={{ backgroundColor: t.surface2, borderRadius: 14, borderWidth: 1, borderColor: t.ring, padding: 13, marginTop: 12, marginBottom: 18 }}>
           <Text style={{ color: t.ink3, fontSize: 12 }}>Daily target · <Text style={{ color: t.ink, fontWeight: '700' }}>{macros.kcal.toLocaleString()} kcal</Text> · P{macros.protein} / C{macros.carbs} / F{macros.fat}</Text>
         </View>
 
         {/* hub groups */}
-        {HUB_GROUPS.map((g) => (
+        {hubGroups.map((g) => (
           <View key={g.title}>
             <Text style={{ color: t.ink3, fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.7, marginBottom: 8, marginTop: 4 }}>{g.title}</Text>
             <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, overflow: 'hidden', marginBottom: 16 }}>
