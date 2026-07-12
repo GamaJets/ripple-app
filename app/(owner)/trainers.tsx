@@ -1,7 +1,7 @@
 // Owner · Trainers & billing. Live roster of paying trainers: add, re-plan,
 // suspend/reactivate, or remove — the platform MRR updates instantly.
 import { useState } from 'react';
-import { View, Text, ScrollView, Pressable, Modal, TextInput, Alert } from 'react-native';
+import { View, Text, ScrollView, Pressable, Modal, TextInput, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
 import { PLANS } from '../../src/lib/ownerMock';
@@ -127,6 +127,7 @@ export default function OwnerTrainers() {
 
       {/* Add trainer */}
       <Modal visible={addOpen} transparent animationType="slide" onRequestClose={() => setAddOpen(false)}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end' }}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setAddOpen(false)} />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, borderColor: t.ring, padding: 20, paddingBottom: 30 }}>
           <Text style={{ color: t.ink, fontSize: 20, fontWeight: '800', marginBottom: 4 }}>Add Trainer</Text>
@@ -145,8 +146,10 @@ export default function OwnerTrainers() {
             <Pressable onPress={() => { if (!newName.trim()) { Alert.alert('Add a name', 'Enter the trainer name.'); return; } addTrainer(newName, newPlan); setAddOpen(false); Alert.alert('Trainer added', `${newName.trim()} is now on your platform.`); }} style={{ flex: 2, paddingVertical: 15, borderRadius: 14, alignItems: 'center', backgroundColor: t.brand }}><Text style={{ color: t.brandInk, fontWeight: '800' }}>Add Trainer</Text></Pressable>
           </View>
         </View>
+              </KeyboardAvoidingView>
       </Modal>
       <Modal visible={invOpen} transparent animationType="slide" onRequestClose={() => setInvOpen(false)}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end' }}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setInvOpen(false)} />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, borderColor: t.ring, padding: 20, paddingBottom: 30 }}>
           <Text style={{ color: t.ink, fontSize: 20, fontWeight: '800', marginBottom: 4 }}>Invite a trainer</Text>
@@ -158,6 +161,7 @@ export default function OwnerTrainers() {
             <Pressable onPress={() => { const e = invEmail.trim(); if (!e || !e.includes('@')) { Alert.alert('Enter an email', 'Add a valid trainer email address.'); return; } sendTrainerInvite(e); setInvOpen(false); Alert.alert('Invitation sent', e + ' will see your invite when they sign in to Repple.', [{ text: 'Done' }]); }} style={{ flex: 2, paddingVertical: 15, borderRadius: 14, alignItems: 'center', backgroundColor: t.brand }}><Text style={{ color: t.brandInk, fontWeight: '800' }}>Send invite</Text></Pressable>
           </View>
         </View>
+              </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );
