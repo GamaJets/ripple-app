@@ -28,6 +28,28 @@ interface Comp {
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 const forDiet = (arr: Comp[], diet: Diet) => arr.filter((x) => x.d.includes(diet));
 
+export type Allergen = 'dairy' | 'gluten' | 'nuts' | 'shellfish' | 'egg' | 'soy';
+export const ALLERGENS: { id: Allergen; label: string }[] = [
+  { id: 'dairy', label: 'Dairy' }, { id: 'gluten', label: 'Gluten' }, { id: 'nuts', label: 'Nuts' },
+  { id: 'shellfish', label: 'Shellfish' }, { id: 'egg', label: 'Egg' }, { id: 'soy', label: 'Soy' },
+];
+function componentAllergens(comp: Comp): Allergen[] {
+  const text = (comp.n + ' ' + comp.ing.map((i) => i[0]).join(' ')).toLowerCase();
+  const out: Allergen[] = [];
+  if (/milk|yogurt|yoghurt|cheese|whey|butter|cream|greek/.test(text)) out.push('dairy');
+  if (/bread|pasta|couscous|wheat|barley|\brye|tortilla|wrap|\bbun|noodle|cracker|\boat|granola|cereal|toast/.test(text)) out.push('gluten');
+  if (/almond|walnut|cashew|pecan|macadamia|peanut|hazelnut|pistachio|\bnut|trail mix/.test(text)) out.push('nuts');
+  if (/prawn|shrimp|crab|lobster|scallop|mussel|oyster|shellfish/.test(text)) out.push('shellfish');
+  if (/\begg/.test(text)) out.push('egg');
+  if (/tofu|tempeh|edamame|\bsoy|miso/.test(text)) out.push('soy');
+  return out;
+}
+function poolFilter(pool: Comp[], avoid: Allergen[]): Comp[] {
+  if (!avoid.length) return pool;
+  const filtered = pool.filter((cp) => !componentAllergens(cp).some((a) => avoid.includes(a)));
+  return filtered.length ? filtered : pool;
+}
+
 // ── LUNCH / DINNER components ──
 const PROTEINS: Comp[] = [
   { n: 'grilled chicken', ico: '🍗', k: 220, p: 40, c: 0, f: 6,  ing: [['Chicken breast', 180, 'g', 'Meat & Seafood']], d: ['meat', 'paleo', 'keto'] },
@@ -179,20 +201,21 @@ export interface PlannedMeal extends GeneratedMeal {
 }
 
 /** Component pools for a given diet + slot (mixed-radix dimensions). */
-function dims(diet: Diet, slot: Slot): Comp[][] {
-  if (slot === 'Breakfast') return [forDiet(BREK_BASE, diet), forDiet(BREK_TOP, diet), forDiet(BREK_BOOST, diet), forDiet(BREK_STYLE, diet)];
-  if (slot === 'Snack')     return [forDiet(SNACK_A, diet), forDiet(SNACK_B, diet), forDiet(SNACK_PREP, diet)];
-  return [forDiet(PROTEINS, diet), forDiet(CARBS, diet), forDiet(VEGS, diet), forDiet(FLAVORS, diet)];
+function dims(diet: Diet, slot: Slot, avoid: Allergen[] = []): Comp[][] {
+  const f = (arr: Comp[]) => poolFilter(forDiet(arr, diet), avoid);
+  if (slot === 'Breakfast') return [f(BREK_BASE), f(BREK_TOP), f(BREK_BOOST), f(BREK_STYLE)];
+  if (slot === 'Snack')     return [f(SNACK_A), f(SNACK_B), f(SNACK_PREP)];
+  return [f(PROTEINS), f(CARBS), f(VEGS), f(FLAVORS)];
 }
 
 /** Number of distinct meals available for a diet + slot. */
-export function catalogSize(diet: Diet, slot: Slot): number {
-  return dims(diet, slot).reduce((a, p) => a * Math.max(1, p.length), 1);
+export function catalogSize(diet: Diet, slot: Slot, avoid: Allergen[] = []): number {
+  return dims(diet, slot, avoid).reduce((a, p) => a * Math.max(1, p.length), 1);
 }
 
 /** Deterministic index → concrete meal (macros, ingredients, method). */
-export function mealAt(diet: Diet, slot: Slot, idx: number): GeneratedMeal {
-  const pools = dims(diet, slot);
+export function mealAt(diet: Diet, slot: Slot, idx: number, avoid: Allergen[] = []): GeneratedMeal {
+  const pools = dims(diet, slot, avoid);
   const sizes = pools.map((p) => Math.max(1, p.length));
   const total = sizes.reduce((a, b) => a * b, 1);
   idx = ((idx % total) + total) % total;
@@ -245,6 +268,7 @@ export interface PlanInput extends BodyStats {
   mealsPerDay: 3 | 4 | 5;
   mealOverride?: Record<number, number>;
   coachAdjust?: CoachAdjust;
+  avoid?: Allergen[];
 }
 
 export function slotsFor(mealsPerDay: number): Slot[] {
@@ -263,10 +287,11 @@ export function buildPlan(c: PlanInput): { plan: PlannedMeal[]; target: ReturnTy
   const target = applyCoachAdjust(macrosFor(c), c.coachAdjust);
   const slots = slotsFor(c.mealsPerDay);
   const override = c.mealOverride ?? {};
+  const avoid = c.avoid ?? [];
   let plan: PlannedMeal[] = slots.map((slot, i) => {
-    const size = catalogSize(c.diet, slot);
+    const size = catalogSize(c.diet, slot, avoid);
     const idx = (override[i] != null ? override[i] : mealSeed(c, i)) % size;
-    const meal = mealAt(c.diet, slot, idx);
+    const meal = mealAt(c.diet, slot, idx, avoid);
     return { ...meal, pos: i, servings: 1, K: meal.k, P: meal.p, C: meal.c, F: meal.f };
   });
   const base = plan.reduce((a, x) => a + x.k, 0) || 1;
@@ -283,18 +308,18 @@ export function buildPlan(c: PlanInput): { plan: PlannedMeal[]; target: ReturnTy
 }
 
 /** Next meal in the catalog for a slot (the "swap" action). */
-export function swapIndex(diet: Diet, slot: Slot, currentIdx: number): number {
-  return (currentIdx + 1) % catalogSize(diet, slot);
+export function swapIndex(diet: Diet, slot: Slot, currentIdx: number, avoid: Allergen[] = []): number {
+  return (currentIdx + 1) % catalogSize(diet, slot, avoid);
 }
 
 /** Search a slot's catalog by name (used by the "choose a meal" picker). */
-export function searchMeals(diet: Diet, slot: Slot, query: string, limit = 40): GeneratedMeal[] {
-  const size = catalogSize(diet, slot);
+export function searchMeals(diet: Diet, slot: Slot, query: string, limit = 40, avoid: Allergen[] = []): GeneratedMeal[] {
+  const size = catalogSize(diet, slot, avoid);
   const scan = Math.min(size, 800);
   const q = (query || '').toLowerCase();
   const rows: GeneratedMeal[] = [];
   for (let i = 0; i < scan && rows.length < limit; i++) {
-    const m = mealAt(diet, slot, i);
+    const m = mealAt(diet, slot, i, avoid);
     if (!q || m.n.toLowerCase().includes(q)) rows.push(m);
   }
   return rows;
@@ -305,9 +330,10 @@ function planForDay(c: PlanInput, dayOffset: number): (GeneratedMeal & { serving
   const target = applyCoachAdjust(macrosFor(c), c.coachAdjust);
   const slots = slotsFor(c.mealsPerDay);
   const plan = slots.map((slot, i) => {
-    const size = catalogSize(c.diet, slot);
+    const av = c.avoid ?? [];
+    const size = catalogSize(c.diet, slot, av);
     const idx = (mealSeed(c, i) + dayOffset * 17 + i * 3) % size;
-    return mealAt(c.diet, slot, idx);
+    return mealAt(c.diet, slot, idx, av);
   });
   const base = plan.reduce((a, x) => a + x.k, 0) || 1;
   const scale = target.kcal / base;

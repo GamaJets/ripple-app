@@ -7,7 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Circle } from 'react-native-svg';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
-import { buildPlan, swapIndex, groceryData, DEPTS, DEPT_ICO, type PlannedMeal } from '../../src/lib/meals';
+import { buildPlan, swapIndex, groceryData, DEPTS, DEPT_ICO, ALLERGENS, type PlannedMeal } from '../../src/lib/meals';
 import type { Diet, Goal } from '../../src/lib/types';
 import { useClientData } from '../../src/ui/clientData';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
@@ -76,7 +76,7 @@ export default function Nutrition() {
     else { Alert.alert('Could not read that', foodAIAvailable() ? 'Try e.g. \"2 eggs, toast and a coffee\".' : 'AI logging turns on with the AI backend.'); }
   };
 
-  const input = { id: c.id, weightKg: w, bodyFatPct: bf, activity: c.activity, goal: c.goal, diet, mealsPerDay: c.mealsPerDay, mealOverride: override, coachAdjust: coachAdjust || undefined };
+  const input = { id: c.id, weightKg: w, bodyFatPct: bf, activity: c.activity, goal: c.goal, diet, mealsPerDay: c.mealsPerDay, mealOverride: override, coachAdjust: coachAdjust || undefined, avoid: c.avoid };
   const { plan, target, tot } = buildPlan(input);
   const swap = (pos: number, slot: PlannedMeal['slot'], idx: number) => setOverride({ ...override, [pos]: swapIndex(diet, slot, idx) });
   const groc = groceryData(input);
@@ -147,6 +147,19 @@ export default function Nutrition() {
               ))}
             </View>
           ) : null}
+        </View>
+
+        {/* allergen / intolerance filter */}
+        <View style={{ marginBottom: 12 }}>
+          <Text style={{ color: t.ink3, fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.9, marginBottom: 7 }}>Avoiding{c.avoid.length ? ' · plan filtered' : ''}</Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+            {ALLERGENS.map((al) => { const on = c.avoid.includes(al.id); return (
+              <Pressable key={al.id} onPress={() => c.setAvoid(on ? c.avoid.filter((x) => x !== al.id) : [...c.avoid, al.id])} style={{ paddingHorizontal: 13, paddingVertical: 8, borderRadius: 18, backgroundColor: on ? t.crit : t.surface, borderWidth: 1, borderColor: on ? t.crit : t.ring, flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                {on ? <Icon name="check" size={12} color="#fff" /> : null}
+                <Text style={{ color: on ? '#fff' : t.ink2, fontWeight: '700', fontSize: 12.5 }}>{al.label}</Text>
+              </Pressable>
+            ); })}
+          </View>
         </View>
 
         {/* quick links */}
