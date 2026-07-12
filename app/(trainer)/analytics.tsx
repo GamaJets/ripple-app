@@ -1,5 +1,5 @@
 // Trainer · Analytics — revenue, clients, retention, platform fee.
-import { View, Text, ScrollView, Pressable, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, ScrollView, Pressable, ActivityIndicator, Alert, Modal, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useState } from 'react';
 import { useRouter } from 'expo-router';
@@ -12,6 +12,7 @@ import { useRoster } from '../../src/ui/roster';
 import { DistBar, DeltaBadge } from '../../src/ui/charts';
 import { Sparkline } from '../../src/ui/charts';
 import { askCoach } from '../../src/lib/coach';
+import { useTrainerGoals, goalPct } from '../../src/ui/trainerGoals';
 import { useMonthlyHistory } from '../../src/ui/useMrrHistory';
 
 function Big({ t, label, value, sub, tint }: { t: Theme; label: string; value: string; sub: string; tint?: boolean }) {
@@ -40,6 +41,10 @@ export default function TrainerAnalytics() {
   const watch = roster.filter((c) => c.adherence >= 70 && c.adherence < 85).length;
   const riskCount = roster.filter((c) => c.adherence < 70).length;
   const atRiskRevenue = atRisk.length * MOCK_TRAINER.sessionFee * 4;
+  const { goals, setGoals } = useTrainerGoals();
+  const [goalOpen, setGoalOpen] = useState(false);
+  const [gRev, setGRev] = useState('');
+  const [gCli, setGCli] = useState('');
   const [digest, setDigest] = useState('');
   const [digestBusy, setDigestBusy] = useState(false);
   const genDigest = async () => {
@@ -66,6 +71,22 @@ export default function TrainerAnalytics() {
         <View style={{ flexDirection: 'row', gap: 12, marginBottom: 16 }}>
           <Big t={t} label="Active clients" value={String(clients)} sub="all retained" />
           <Big t={t} label="Avg adherence" value={avgAdh + '%'} sub="across clients" />
+        </View>
+
+        <View style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18, marginBottom: 14 }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16 }}>Your goals</Text>
+            <Pressable onPress={() => { setGRev(String(goals.revenue)); setGCli(String(goals.clients)); setGoalOpen(true); }}><Text style={{ color: t.brand, fontWeight: '800', fontSize: 12 }}>Edit</Text></Pressable>
+          </View>
+          {[{ label: 'Monthly revenue', cur: revenue, goal: goals.revenue, money: true }, { label: 'Active clients', cur: clients, goal: goals.clients, money: false }].map((g) => { const pc = goalPct(g.cur, g.goal); return (
+            <View key={g.label} style={{ marginBottom: 12 }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 }}>
+                <Text style={{ color: t.ink2, fontSize: 13, fontWeight: '600' }}>{g.label}</Text>
+                <Text style={{ color: t.ink, fontSize: 13, fontWeight: '700' }}>{g.money ? '$' + g.cur.toLocaleString() : g.cur} / {g.money ? '$' + g.goal.toLocaleString() : g.goal}</Text>
+              </View>
+              <View style={{ height: 10, borderRadius: 5, backgroundColor: t.surface3, overflow: 'hidden' }}><View style={{ height: 10, borderRadius: 5, backgroundColor: pc >= 1 ? t.brand : t.s3, width: (pc * 100) + '%' }} /></View>
+              <Text style={{ color: pc >= 1 ? t.brand : t.ink3, fontSize: 11, marginTop: 4, fontWeight: pc >= 1 ? '800' : '400' }}>{pc >= 1 ? 'Goal reached!' : Math.round(pc * 100) + '% there'}</Text>
+            </View>); })}
         </View>
 
         {atRisk.length > 0 ? (
@@ -143,6 +164,19 @@ export default function TrainerAnalytics() {
           </Text>
         </View>
       </ScrollView>
+
+      <Modal visible={goalOpen} transparent animationType="slide" onRequestClose={() => setGoalOpen(false)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setGoalOpen(false)} />
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, borderColor: t.ring, padding: 20, paddingBottom: 30 }}>
+          <Text style={{ color: t.ink, fontSize: 20, fontWeight: '800', marginBottom: 14 }}>Set your goals</Text>
+          <Text style={{ color: t.ink2, fontSize: 12, fontWeight: '700', marginBottom: 6 }}>Monthly revenue target ($)</Text>
+          <TextInput value={gRev} onChangeText={setGRev} keyboardType="number-pad" placeholder="4000" placeholderTextColor={t.ink3} style={{ color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 11, fontSize: 15, marginBottom: 12 }} />
+          <Text style={{ color: t.ink2, fontSize: 12, fontWeight: '700', marginBottom: 6 }}>Client target</Text>
+          <TextInput value={gCli} onChangeText={setGCli} keyboardType="number-pad" placeholder="12" placeholderTextColor={t.ink3} style={{ color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 11, fontSize: 15, marginBottom: 16 }} />
+          <Pressable onPress={() => { setGoals({ revenue: parseInt(gRev, 10) || 0, clients: parseInt(gCli, 10) || 0 }); setGoalOpen(false); }} style={{ backgroundColor: t.brand, borderRadius: 12, paddingVertical: 14, alignItems: 'center' }}><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 14 }}>Save goals</Text></Pressable>
+          <Pressable onPress={() => setGoalOpen(false)} style={{ paddingVertical: 12, alignItems: 'center' }}><Text style={{ color: t.ink3, fontWeight: '700', fontSize: 13 }}>Cancel</Text></Pressable>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
