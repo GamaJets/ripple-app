@@ -75,3 +75,30 @@ export function platformRollup(trainers: TrainerLike[]): PlatformRollup {
     avgClientsPerTrainer: trainers.length ? Math.round((clients / trainers.length) * 10) / 10 : 0,
   };
 }
+
+export interface Cohort { label: string; total: number; active: number; pct: number }
+
+const MONTH_IDX: Record<string, number> = { jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11 };
+function sinceKey(since?: string): number {
+  if (!since) return 0;
+  const m = /([A-Za-z]{3})\s+(\d{4})/.exec(since);
+  if (!m) return 0;
+  const mi = MONTH_IDX[m[1].toLowerCase()] ?? 0;
+  return parseInt(m[2], 10) * 12 + mi;
+}
+
+/** Group trainers by signup month → retention (% still active). Oldest first. */
+export function cohorts(trainers: TrainerLike[]): Cohort[] {
+  const map = new Map<string, { total: number; active: number; key: number }>();
+  for (const t of trainers) {
+    const label = t.since || "Unknown";
+    const cur = map.get(label) || { total: 0, active: 0, key: sinceKey(t.since) };
+    cur.total++;
+    if (t.status !== "suspended") cur.active++;
+    map.set(label, cur);
+  }
+  return [...map.entries()]
+    .map(([label, v]) => ({ label, total: v.total, active: v.active, pct: Math.round((v.active / v.total) * 100), key: v.key }))
+    .sort((a, b) => a.key - b.key)
+    .map(({ key, ...rest }) => rest);
+}

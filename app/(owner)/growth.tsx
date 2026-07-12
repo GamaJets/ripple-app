@@ -5,12 +5,20 @@ import { View, Text, ScrollView, Pressable, TextInput, Alert } from 'react-nativ
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
 import { usePromos } from '../../src/ui/promos';
+import { usePlatformTrainers } from '../../src/ui/trainers';
+import { platformRollup, cohorts, type TrainerLike } from '../../src/lib/ownerAnalytics';
 
 const DISCOUNTS = [10, 20, 30, 50];
 
 export default function OwnerGrowth() {
   const t = useTheme();
   const { promos, addPromo, toggleActive, removePromo } = usePromos();
+  const { trainers } = usePlatformTrainers();
+  const roll = platformRollup(trainers as TrainerLike[]);
+  const coh = cohorts(trainers as TrainerLike[]);
+  const thisMonth = new Date().toLocaleString(undefined, { month: 'short' }) + ' ' + new Date().getFullYear();
+  const newThisMonth = trainers.filter((x) => x.since === thisMonth).length;
+  const churnPct = trainers.length ? Math.round((roll.suspended / trainers.length) * 100) : 0;
   const [code, setCode] = useState('');
   const [disc, setDisc] = useState(20);
   const funnel = [['Visited site', 100], ['Started trial', 38], ['Activated', 24], ['Paying', 18]] as const;
@@ -29,9 +37,23 @@ export default function OwnerGrowth() {
         <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 16 }}>Acquisition &amp; retention</Text>
 
         <View style={{ flexDirection: 'row', gap: 12, marginBottom: 16 }}>
-          <View style={{ flex: 1, backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 14 }}><Text style={{ color: t.ink3, fontSize: 12, fontWeight: '700' }}>New this month</Text><Text style={{ color: t.ink, fontSize: 22, fontWeight: '800', textTransform: 'capitalize', marginTop: 4 }}>+2</Text></View>
-          <View style={{ flex: 1, backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 14 }}><Text style={{ color: t.ink3, fontSize: 12, fontWeight: '700' }}>Churn</Text><Text style={{ color: t.brand, fontSize: 22, fontWeight: '800', textTransform: 'capitalize', marginTop: 4 }}>0%</Text></View>
-          <View style={{ flex: 1, backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 14 }}><Text style={{ color: t.ink3, fontSize: 12, fontWeight: '700' }}>Trial→paid</Text><Text style={{ color: t.ink, fontSize: 22, fontWeight: '800', textTransform: 'capitalize', marginTop: 4 }}>47%</Text></View>
+          <View style={{ flex: 1, backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 14 }}><Text style={{ color: t.ink3, fontSize: 12, fontWeight: '700' }}>New this month</Text><Text style={{ color: t.ink, fontSize: 22, fontWeight: '800', marginTop: 4 }}>+{newThisMonth}</Text></View>
+          <View style={{ flex: 1, backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 14 }}><Text style={{ color: t.ink3, fontSize: 12, fontWeight: '700' }}>Churn</Text><Text style={{ color: churnPct > 0 ? t.crit : t.brand, fontSize: 22, fontWeight: '800', marginTop: 4 }}>{churnPct}%</Text></View>
+          <View style={{ flex: 1, backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 14 }}><Text style={{ color: t.ink3, fontSize: 12, fontWeight: '700' }}>Trial→paid</Text><Text style={{ color: t.ink, fontSize: 22, fontWeight: '800', marginTop: 4 }}>{roll.trialConversionPct != null ? roll.trialConversionPct + '%' : '—'}</Text></View>
+        </View>
+
+        <View style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18, marginBottom: 16 }}>
+          <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16, marginBottom: 4 }}>Cohort retention</Text>
+          <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 14 }}>Trainers by signup month · % still active</Text>
+          {coh.map((c) => (
+            <View key={c.label} style={{ marginBottom: 12 }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 }}>
+                <Text style={{ color: t.ink2, fontSize: 13, fontWeight: '600' }}>{c.label}</Text>
+                <Text style={{ color: c.pct === 100 ? t.brand : c.pct >= 60 ? t.ink : t.crit, fontSize: 13, fontWeight: '700' }}>{c.pct}% · {c.active}/{c.total}</Text>
+              </View>
+              <View style={{ height: 10, borderRadius: 5, backgroundColor: t.surface3, overflow: 'hidden' }}><View style={{ height: 10, borderRadius: 5, backgroundColor: c.pct >= 60 ? t.brand : t.warn, width: c.pct + '%' }} /></View>
+            </View>
+          ))}
         </View>
 
         <View style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18, marginBottom: 16 }}>
