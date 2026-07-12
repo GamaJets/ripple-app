@@ -302,6 +302,13 @@ export default function TrainerClients() {
                 </View>
               </View>
 
+              <Pressable onPress={() => { const id = sel.id; const nm = sel.name; setSel(null); router.push({ pathname: '/(trainer)/chat', params: { clientId: id, name: nm } }); }} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                <View>
+                  <Text style={{ color: t.ink, fontWeight: '700', fontSize: 14 }}>Message {sel.name.split(' ')[0]}</Text>
+                  <Text style={{ color: t.ink3, fontSize: 12, marginTop: 2 }}>Open your chat thread</Text>
+                </View>
+                <Text style={{ color: t.ink3, fontSize: 18 }}>›</Text>
+              </Pressable>
               <Pressable onPress={() => { const id = sel.id; setSel(null); router.push({ pathname: '/(trainer)/builder', params: { clientId: id } }); }} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
                 <View>
                   <Text style={{ color: t.ink, fontWeight: '700', fontSize: 14 }}>Open program builder</Text>
