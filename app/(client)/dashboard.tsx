@@ -17,6 +17,8 @@ import { useCoachFeedback } from '../../src/ui/feedback';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
 import { useAnnouncements } from '../../src/ui/announcements';
 import { useHabits } from '../../src/ui/habits';
+import { useWellness } from '../../src/ui/wellness';
+import { readinessScore } from '../../src/lib/readiness';
 import { useSessions } from '../../src/ui/sessions';
 import { useInvites } from '../../src/ui/invites';
 import { useFoodLog } from '../../src/ui/foodLog';
@@ -58,6 +60,13 @@ export default function Home() {
   const coachNotes = useCoachFeedback().getFeedback(c.id);
   const ann = useAnnouncements().latest;
   const { water, waterGoal, addWater, removeWater } = useHabits();
+  const { sleep } = useWellness();
+  const _recentSleep = sleep.slice(0, 3);
+  const _avgSleep = _recentSleep.length ? _recentSleep.reduce((a, x) => a + x.hours, 0) / _recentSleep.length : 7;
+  const _since2d = Date.now() - 2 * 86400000;
+  const _load2d = new Set(log.filter((e) => Date.parse(e.t) >= _since2d).map((e) => e.t.slice(0, 10))).size;
+  const readiness = readinessScore({ avgSleepHours: _avgSleep, hydrationPct: waterGoal ? water / waterGoal : 0, workoutsLast2Days: _load2d });
+  const readinessColor = readiness.tone === 'good' ? t.brand : readiness.tone === 'moderate' ? t.warn : t.crit;
   const { sessions } = useSessions();
   const { received: myInvites, acceptInvite: acceptCoachInvite, declineInvite: declineCoachInvite } = useInvites();
   const foodToday = useFoodLog().consumed;
@@ -202,6 +211,18 @@ export default function Home() {
             <View style={{ flex: 1 }}>{macroBar('Fat', consumed.f, macros.fat, t.s3)}</View>
           </View>
         </View>
+
+        {/* readiness */}
+        <Pressable onPress={() => router.push('/(client)/recovery')} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 15, marginBottom: 11, flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+          <View style={{ width: 52, height: 52, borderRadius: 26, borderWidth: 3, borderColor: readinessColor, alignItems: 'center', justifyContent: 'center' }}>
+            <Text style={{ color: t.ink, fontWeight: '800', fontSize: 17 }}>{readiness.score}</Text>
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: t.ink, fontWeight: '800', fontSize: 14 }}>Readiness · {readiness.label}</Text>
+            <Text style={{ color: t.ink3, fontSize: 12, marginTop: 2, lineHeight: 16 }}>{readiness.tip}</Text>
+          </View>
+          <Icon name="chevron" size={18} color={t.ink3} />
+        </Pressable>
 
         {/* water */}
         <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 15, marginBottom: 11, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
