@@ -21,6 +21,12 @@ import { useWorkoutLog } from '../../src/ui/workoutLog';
 const SERIF = 'Georgia';
 const WEEK = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const CARDIO = ['Treadmill / Run', 'Cycling', 'Rowing', 'Ski erg', 'Elliptical', 'Swim', 'Walk', 'Stairs'];
+const SESSION_TYPES: Record<'cardio' | 'hiit' | 'mobility', string[]> = {
+  cardio: CARDIO,
+  hiit: ['Circuit', 'Tabata', 'EMOM', 'AMRAP', 'Sprint intervals', 'Bike intervals', 'Bag work'],
+  mobility: ['Stretching', 'Yoga', 'Foam rolling', 'Dynamic warm-up', 'Pilates'],
+};
+const WTYPES = [['strength', 'Program'], ['cardio', 'Cardio'], ['hiit', 'HIIT'], ['mobility', 'Mobility']] as const;
 
 export default function Train() {
   const t = useTheme();
@@ -33,7 +39,7 @@ export default function Train() {
   const program = coachProgram ?? buildProgram(cd.goal, cd.bodyFatPct);
   const jsToMon = (new Date().getDay() + 6) % 7;
   const [dayIdx, setDayIdx] = useState(jsToMon);
-  const [mode, setMode] = useState<'strength' | 'cardio'>('strength');
+  const [mode, setMode] = useState<'strength' | 'cardio' | 'hiit' | 'mobility'>('strength');
   const [swaps, setSwaps] = useState<Record<string, string>>({});
   const [logged, setLogged] = useState<Record<string, { reps: string; kg: string }[]>>({});
   const [cardioLog, setCardioLog] = useState<{ type: string; mins: number; dist: number; unit: string; kcal: number }[]>([]);
@@ -124,6 +130,18 @@ export default function Train() {
           })}
         </View>
 
+        {/* workout-type switcher */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginBottom: 14 }}>
+          {WTYPES.map(([id, label]) => {
+            const on = mode === id;
+            return (
+              <Pressable key={id} onPress={() => { setMode(id); if (id !== 'strength') setCtype(SESSION_TYPES[id][0]); }} style={{ paddingHorizontal: 16, paddingVertical: 9, borderRadius: 18, backgroundColor: on ? t.brand : t.surface, borderWidth: 1, borderColor: on ? t.brand : t.ring }}>
+                <Text style={{ color: on ? t.brandInk : t.ink2, fontWeight: '700', fontSize: 13 }}>{label}</Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+
         {mode === 'strength' ? (
           <View>
             {/* Today hero */}
@@ -179,9 +197,9 @@ export default function Train() {
         ) : (
           <View>
             <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 16, marginBottom: 12 }}>
-              <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, marginBottom: 12 }}>Log a cardio session</Text>
+              <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, marginBottom: 12 }}>Log a {mode === 'hiit' ? 'HIIT' : mode === 'mobility' ? 'mobility' : 'cardio'} session</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginBottom: 10 }}>
-                {CARDIO.map((ct) => <Pressable key={ct} onPress={() => setCtype(ct)} style={{ paddingHorizontal: 13, paddingVertical: 8, borderRadius: 18, backgroundColor: ctype === ct ? t.brand : t.surface2, borderWidth: 1, borderColor: ctype === ct ? t.brand : t.ring }}><Text style={{ color: ctype === ct ? t.brandInk : t.ink2, fontWeight: '700', fontSize: 12 }}>{ct}</Text></Pressable>)}
+                {(SESSION_TYPES[(mode === 'strength' ? 'cardio' : mode) as 'cardio' | 'hiit' | 'mobility'] || CARDIO).map((ct) => <Pressable key={ct} onPress={() => setCtype(ct)} style={{ paddingHorizontal: 13, paddingVertical: 8, borderRadius: 18, backgroundColor: ctype === ct ? t.brand : t.surface2, borderWidth: 1, borderColor: ctype === ct ? t.brand : t.ring }}><Text style={{ color: ctype === ct ? t.brandInk : t.ink2, fontWeight: '700', fontSize: 12 }}>{ct}</Text></Pressable>)}
               </ScrollView>
               <View style={{ flexDirection: 'row', gap: 8 }}>
                 <TextInput value={mins} onChangeText={setMins} keyboardType="numeric" placeholder="mins" placeholderTextColor={t.ink3} style={inp} />
@@ -192,7 +210,7 @@ export default function Train() {
             </View>
             {cardioLog.length > 0 && (
               <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 16 }}>
-                <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, marginBottom: 10 }}>Today's cardio</Text>
+                <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, marginBottom: 10 }}>Today's sessions</Text>
                 {cardioLog.map((c, i) => (
                   <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: i < cardioLog.length - 1 ? 1 : 0, borderBottomColor: t.ring }}>
                     <Text style={{ color: t.ink, fontWeight: '600', fontSize: 14 }}>{c.type}</Text>
