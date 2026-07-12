@@ -1,6 +1,7 @@
 // Trainer · Analytics — revenue, clients, retention, platform fee.
-import { View, Text, ScrollView, Pressable } from 'react-native';
+import { View, Text, ScrollView, Pressable, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useState } from 'react';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
@@ -10,6 +11,7 @@ import { ROSTER } from '../../src/lib/trainerMock';
 import { useRoster } from '../../src/ui/roster';
 import { DistBar, DeltaBadge } from '../../src/ui/charts';
 import { Sparkline } from '../../src/ui/charts';
+import { askCoach } from '../../src/lib/coach';
 import { useMonthlyHistory } from '../../src/ui/useMrrHistory';
 
 function Big({ t, label, value, sub, tint }: { t: Theme; label: string; value: string; sub: string; tint?: boolean }) {
@@ -38,6 +40,15 @@ export default function TrainerAnalytics() {
   const watch = roster.filter((c) => c.adherence >= 70 && c.adherence < 85).length;
   const riskCount = roster.filter((c) => c.adherence < 70).length;
   const atRiskRevenue = atRisk.length * MOCK_TRAINER.sessionFee * 4;
+  const [digest, setDigest] = useState('');
+  const [digestBusy, setDigestBusy] = useState(false);
+  const genDigest = async () => {
+    setDigestBusy(true); setDigest('');
+    const ctx = { revenueUsd: revenue, netUsd: net, clients, avgAdherence: avgAdh + '%', atRiskClients: atRisk.length, onTrack, watch, atRiskLow: riskCount };
+    const reply = await askCoach([{ role: 'user', content: 'You are my fitness-coaching business assistant. Write a short Monday digest (3-4 sentences) from these numbers (revenueUsd/netUsd are US dollars/month): one line on revenue and clients, one on roster health (on-track vs at-risk), and one concrete action to grow or retain. Encouraging and specific.' }], ctx);
+    setDigestBusy(false);
+    setDigest(reply || 'Could not generate the digest right now — the AI backend may be unavailable.');
+  };
   const revHist = useMonthlyHistory('repple.trainer.revHistory', revenue);
   const months = [['Feb', 0.55], ['Mar', 0.62], ['Apr', 0.7], ['May', 0.82], ['Jun', 0.9], ['Jul', 1]] as const;
 
@@ -111,6 +122,19 @@ export default function TrainerAnalytics() {
               </View>
             </View>
           ))}
+        </View>
+
+        <View style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18, marginBottom: 14 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+            <Icon name="sparkle" size={16} color={t.brand} />
+            <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16 }}>Weekly business digest</Text>
+          </View>
+          <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 12 }}>An AI Monday summary of your coaching business.</Text>
+          {digest ? <View style={{ backgroundColor: t.surface2, borderRadius: 12, borderWidth: 1, borderColor: t.ring, padding: 12, marginBottom: 10 }}><Text style={{ color: t.ink2, fontSize: 13, lineHeight: 19 }}>{digest}</Text></View> : null}
+          <Pressable onPress={genDigest} disabled={digestBusy} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingVertical: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+            {digestBusy ? <ActivityIndicator color={t.brand} /> : <Icon name="sparkle" size={15} color={t.brand} />}
+            <Text style={{ color: t.brand, fontWeight: '800', fontSize: 13 }}>{digestBusy ? 'Writing…' : digest ? 'Regenerate' : 'Generate digest'}</Text>
+          </Pressable>
         </View>
 
         <View style={{ backgroundColor: t.surface2, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 16 }}>
