@@ -80,6 +80,11 @@ export default function TrainerClients() {
   const revenue = active * MOCK_TRAINER.sessionFee * 4;
   const unread = roster.reduce((a, c) => a + c.unread, 0);
   const atRisk = roster.filter((c) => c.adherence < 80).length;
+  const sendNudge = (client: RosterClient) => {
+    const body = 'Hey ' + client.name.split(' ')[0] + ' — checking in! How is your week going? Let me know if you need anything.';
+    try { supabase.from('messages').insert({ client_id: client.id, sender: 'coach', body }).then(() => {}, () => {}); } catch { /* ignore */ }
+    Alert.alert('Nudge sent', 'A check-in message was sent to ' + client.name.split(' ')[0] + '.');
+  };
 
   // Live training data is available for the demo client (c1).
   const hasLog = sel?.id === 'c1';
@@ -329,6 +334,13 @@ export default function TrainerClients() {
                 </View>
               </View>
 
+              <Pressable onPress={() => sendNudge(sel)} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                <View>
+                  <Text style={{ color: t.ink, fontWeight: '700', fontSize: 14 }}>Send a check-in nudge</Text>
+                  <Text style={{ color: t.ink3, fontSize: 12, marginTop: 2 }}>A quick "how is it going?" message</Text>
+                </View>
+                <Icon name="bell" size={17} color={t.brand} />
+              </Pressable>
               <Pressable onPress={() => { const id = sel.id; const nm = sel.name; setSel(null); router.push({ pathname: '/(trainer)/chat', params: { clientId: id, name: nm } }); }} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
                 <View>
                   <Text style={{ color: t.ink, fontWeight: '700', fontSize: 14 }}>Message {sel.name.split(' ')[0]}</Text>
