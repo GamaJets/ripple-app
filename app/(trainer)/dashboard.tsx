@@ -1,6 +1,6 @@
 // Trainer · Clients — roster with progress, tap a client for detail.
 import { useEffect, useState } from 'react';
-import { View, Text, Pressable, ScrollView, Modal, TextInput, Alert, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, Pressable, ScrollView, Modal, TextInput, Alert, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Icon } from '../../src/ui/Icon';
@@ -9,6 +9,7 @@ import type { Theme } from '../../src/theme/tokens';
 import { MOCK_TRAINER } from '../../src/lib/mockData';
 import { type RosterClient } from '../../src/lib/trainerMock';
 import { supabase } from '../../src/lib/supabase';
+import { askCoach } from '../../src/lib/coach';
 import { useRoster } from '../../src/ui/roster';
 import { useCoachFeedback } from '../../src/ui/feedback';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
@@ -65,8 +66,11 @@ export default function TrainerClients() {
   const [invMode, setInvMode] = useState<'online' | 'inperson'>('online');
   const [newEmail, setNewEmail] = useState('');
   const [clientMeals, setClientMeals] = useState<{ name: string; kcal: number; via: string }[]>([]);
+  const [aiSummary, setAiSummary] = useState('');
+  const [aiBusy, setAiBusy] = useState(false);
   useEffect(() => {
     let cancelled = false;
+    setAiSummary('');
     if (!sel) { setClientMeals([]); return; }
     (async () => {
       try {
@@ -85,6 +89,13 @@ export default function TrainerClients() {
     try { supabase.from('messages').insert({ client_id: client.id, sender: 'coach', body }).then(() => {}, () => {}); } catch { /* ignore */ }
     try { supabase.functions.invoke('send-push', { body: { user_ids: [client.id], title: 'A nudge from your coach', body } }).then(() => {}, () => {}); } catch { /* ignore */ }
     Alert.alert('Nudge sent', 'A check-in message was sent to ' + client.name.split(' ')[0] + '.');
+  };
+  const genSummary = async (client: RosterClient) => {
+    setAiBusy(true); setAiSummary('');
+    const ctx = { name: client.name, goal: client.goal, adherence: client.adherence + '%', recentMeals: clientMeals.map((mm) => mm.name).join(', ') || 'no meals logged yet' };
+    const reply = await askCoach([{ role: 'user', content: 'Write a concise 3-4 sentence weekly coaching summary for this client: what is going well, one concern to watch, and one focus for next week. Use their adherence and recent meals.' }], ctx);
+    setAiBusy(false);
+    setAiSummary(reply || 'Could not generate a summary right now — the AI backend may be unavailable.');
   };
 
   // Live training data is available for the demo client (c1).
@@ -267,6 +278,15 @@ export default function TrainerClients() {
                   <Text style={{ color: t.ink3, fontSize: 13 }}>Last active {sel.lastActive} · next session {sel.next}. Detailed session history appears here once {sel.name.split(' ')[0]} logs workouts.</Text>
                 </View>
               )}
+
+              <View style={{ marginBottom: 14 }}>
+                <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 7 }}>AI Weekly Summary</Text>
+                {aiSummary ? <View style={{ backgroundColor: t.surface2, borderRadius: 12, borderWidth: 1, borderColor: t.ring, padding: 12, marginBottom: 8 }}><Text style={{ color: t.ink2, fontSize: 13, lineHeight: 19 }}>{aiSummary}</Text></View> : null}
+                <Pressable onPress={() => genSummary(sel)} disabled={aiBusy} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingVertical: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                  {aiBusy ? <ActivityIndicator color={t.brand} /> : <Icon name="sparkle" size={15} color={t.brand} />}
+                  <Text style={{ color: t.brand, fontWeight: '800', fontSize: 13 }}>{aiBusy ? 'Generating…' : aiSummary ? 'Regenerate summary' : 'Generate AI weekly summary'}</Text>
+                </Pressable>
+              </View>
 
               <View style={{ marginBottom: 14 }}>
                 <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 7 }}>Meal Plan Targets</Text>
