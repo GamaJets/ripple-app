@@ -25,7 +25,8 @@ import { ONBOARD_KEY } from './onboarding';
 import { useSessions } from '../../src/ui/sessions';
 import { useInvites } from '../../src/ui/invites';
 import { useFoodLog } from '../../src/ui/foodLog';
-import { currentStreak, weekStats, personalRecords } from '../../src/lib/streaks';
+import { currentStreak, weekStats, personalRecords, streakRisk } from '../../src/lib/streaks';
+import { scheduleLocal, pushAvailable } from '../../src/ui/pushNotifications';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -83,6 +84,12 @@ export default function Home() {
   const workout = program.days[jsToMon % program.days.length] || program.days[0] || { focus: 'Rest day', exercises: [] };
 
   const streak = currentStreak(log);
+  const risk = streakRisk(log);
+  const remindTonight = async () => {
+    const when = new Date(); when.setHours(19, 0, 0, 0);
+    if (when.getTime() <= Date.now()) when.setTime(Date.now() + 60 * 60 * 1000);
+    try { await scheduleLocal('Keep your streak alive', 'One session today keeps your ' + risk.streak + '-day streak going.', when); } catch { /* ignore */ }
+  };
   const wk = weekStats(log);
   const prs = personalRecords(log);
   const goalDays = program.days.length || 4;
@@ -194,6 +201,22 @@ export default function Home() {
             <Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 14 }}>{today.cta}</Text>
           </Pressable>
         </View>
+
+        {risk.atRisk ? (
+          <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.s3, padding: 15, marginBottom: 12 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <View style={{ width: 42, height: 42, borderRadius: 12, backgroundColor: 'rgba(201,133,0,0.16)', alignItems: 'center', justifyContent: 'center' }}><Icon name="flame" size={22} color={t.s3} /></View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: t.ink, fontWeight: '800', fontSize: 15 }}>Your {risk.streak}-day streak is on the line</Text>
+                <Text style={{ color: t.ink3, fontSize: 12.5, marginTop: 1 }}>Log one session today to keep it alive.</Text>
+              </View>
+            </View>
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
+              <Pressable onPress={() => router.push('/(client)/workouts')} style={{ flex: 1, backgroundColor: t.s3, borderRadius: 11, paddingVertical: 12, alignItems: 'center' }}><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 13.5 }}>Start now</Text></Pressable>
+              {pushAvailable() ? <Pressable onPress={remindTonight} style={{ flex: 1, backgroundColor: t.surface2, borderWidth: 1, borderColor: t.ring, borderRadius: 11, paddingVertical: 12, alignItems: 'center' }}><Text style={{ color: t.ink, fontWeight: '800', fontSize: 13.5 }}>Remind me tonight</Text></Pressable> : null}
+            </View>
+          </View>
+        ) : null}
 
         {myInvites.length > 0 ? (
           <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.brand, padding: 14, marginBottom: 11 }}>

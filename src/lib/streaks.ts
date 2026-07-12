@@ -30,6 +30,21 @@ export function currentStreak(log: WorkoutEntry[], now: number = Date.now()): nu
   return streak;
 }
 
+export interface StreakRisk { atRisk: boolean; streak: number; trainedToday: boolean }
+/**
+ * Retention signal: an active streak (>=2) that will break tonight because the
+ * user trained yesterday but not yet today. Pure; mirrors currentStreak's day math.
+ */
+export function streakRisk(log: WorkoutEntry[], now: number = Date.now()): StreakRisk {
+  const days = new Set(activeDays(log));
+  const midnight = new Date(now); midnight.setHours(0, 0, 0, 0);
+  const todayK = dayKey(new Date(midnight.getTime()).toISOString());
+  const yestK = dayKey(new Date(midnight.getTime() - DAY).toISOString());
+  const trainedToday = days.has(todayK);
+  const streak = currentStreak(log, now);
+  return { atRisk: !trainedToday && days.has(yestK) && streak >= 2, streak, trainedToday };
+}
+
 /** Longest run of consecutive active days anywhere in the history. */
 export function longestStreak(log: WorkoutEntry[]): number {
   const days = activeDays(log).slice().sort(); // oldest first
