@@ -58,6 +58,7 @@ export default function Nutrition() {
   const [recipe, setRecipe] = useState<PlannedMeal | null>(null);
   const [showGrocery, setShowGrocery] = useState(false);
   const [view, setView] = useState<'today' | 'week'>('today');
+  const [dayType, setDayType] = useState<'training' | 'rest' | 'off'>('off');
   const [batch, setBatch] = useState(1);
   const [cook, setCook] = useState(false);
   const [cookStep, setCookStep] = useState(0);
@@ -95,7 +96,11 @@ export default function Nutrition() {
     else { Alert.alert('Could not read that', foodAIAvailable() ? 'Try e.g. \"2 eggs, toast and a coffee\".' : 'AI logging turns on with the AI backend.'); }
   };
 
-  const input = { id: c.id, weightKg: w, bodyFatPct: bf, activity: c.activity, goal: c.goal, diet, mealsPerDay: c.mealsPerDay, mealOverride: override, coachAdjust: coachAdjust || undefined, avoid: c.avoid };
+  const cycleDelta = dayType === 'training' ? 250 : dayType === 'rest' ? -250 : 0;
+  const cyclingAdjust = (coachAdjust || cycleDelta)
+    ? { kcalDelta: (coachAdjust?.kcalDelta || 0) + cycleDelta, proteinDelta: coachAdjust?.proteinDelta }
+    : undefined;
+  const input = { id: c.id, weightKg: w, bodyFatPct: bf, activity: c.activity, goal: c.goal, diet, mealsPerDay: c.mealsPerDay, mealOverride: override, coachAdjust: cyclingAdjust, avoid: c.avoid };
   const { plan, target, tot } = buildPlan(input);
   const swap = (pos: number, slot: PlannedMeal['slot'], idx: number) => setOverride({ ...override, [pos]: swapIndex(diet, slot, idx) });
   const groc = groceryData(input);
@@ -145,6 +150,25 @@ export default function Nutrition() {
             {macroBar('Protein', tot.P, target.protein, t.brand)}
             {macroBar('Carbs', tot.C, target.carbs, t.s3)}
             {macroBar('Fat', tot.F, target.fat, t.s1)}
+          </View>
+        </View>
+
+        {/* Macro cycling: training vs rest day */}
+        <View style={{ backgroundColor: t.surface, borderRadius: 14, borderWidth: 1, borderColor: t.ring, padding: 12, marginBottom: 12 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 9 }}>
+            <Icon name="flame" size={14} color={t.brand} />
+            <Text style={{ color: t.ink2, fontSize: 12, fontWeight: '800' }}>Today is a…</Text>
+            {dayType !== 'off' ? <Text style={{ color: t.ink3, fontSize: 11 }}>· {dayType === 'training' ? '+250 kcal, more carbs' : '−250 kcal, fewer carbs'}</Text> : null}
+          </View>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            {([['training', 'Training day'], ['off', 'Standard'], ['rest', 'Rest day']] as const).map(([key, label]) => {
+              const on = dayType === key;
+              return (
+                <Pressable key={key} onPress={() => setDayType(key)} style={{ flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: 'center', backgroundColor: on ? t.brand : t.surface2, borderWidth: 1, borderColor: on ? t.brand : t.ring }}>
+                  <Text style={{ color: on ? t.brandInk : t.ink2, fontWeight: '800', fontSize: 12 }}>{label}</Text>
+                </Pressable>
+              );
+            })}
           </View>
         </View>
 
