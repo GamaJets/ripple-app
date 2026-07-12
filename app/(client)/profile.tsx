@@ -1,6 +1,6 @@
-// My Profile — hub: DOB wheel picker + unit toggles (cm/in, kg/lb), wired to the
-// shared client context so a weight edit here recalculates macros everywhere,
-// plus links out to every secondary screen (Devices, Food Log, Library, …).
+// Me — matches the mockup: avatar + serif name + stats line + edit pencil, a clean
+// 3-pill goal card, then the grouped icon hub. The full edit form (name, DOB wheel,
+// height/weight/body-fat with unit toggles, live macro preview) lives in a sheet.
 import { useState, useRef, useEffect } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView, Modal, Image, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -14,16 +14,17 @@ import { useClientData } from '../../src/ui/clientData';
 import { Icon, type IconName } from '../../src/ui/Icon';
 import type { Goal } from '../../src/lib/types';
 
-const GOALS: { id: Goal; label: string; note: string; icon: string }[] = [
-  { id: 'fatloss', label: 'Fat Loss', note: 'Lose fat, keep muscle', icon: '🔥' },
-  { id: 'tone', label: 'Tone', note: 'Lean & defined', icon: '✨' },
-  { id: 'muscle', label: 'Build Muscle', note: 'Add size & strength', icon: '💪' },
+const SERIF = 'Georgia';
+const GOALS: { id: Goal; label: string }[] = [
+  { id: 'fatloss', label: 'Fat loss' },
+  { id: 'tone', label: 'Tone' },
+  { id: 'muscle', label: 'Build muscle' },
 ];
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const ITEM_H = 44;
 const VISIBLE = 5;
-const YEARS = Array.from({ length: 100 }, (_, i) => 1926 + i); // 1926..2025
+const YEARS = Array.from({ length: 100 }, (_, i) => 1926 + i);
 const daysIn = (m: number, y: number) => new Date(y, m + 1, 0).getDate();
 
 function Wheel({ items, index, onChange, t }: { items: string[]; index: number; onChange: (i: number) => void; t: Theme }) {
@@ -111,42 +112,42 @@ const HUB_ICON: Record<string, IconName> = {
   '/(client)/social': 'share', '/(client)/devices': 'clock', '/(client)/music': 'play',
   '/(client)/appearance': 'palette', '/(client)/settings': 'settings', '/': 'swap',
 };
-const HUB_GROUPS: { title: string; items: { icon: string; label: string; note: string; route: string }[] }[] = [
+const HUB_GROUPS: { title: string; items: { label: string; note: string; route: string }[] }[] = [
   { title: 'Progress & Insights', items: [
-    { icon: '📈', label: 'Weekly Report', note: 'Your week at a glance · share it', route: '/(client)/report' },
-    { icon: '🔥', label: 'Consistency', note: '12-week training heatmap', route: '/(client)/consistency' },
-    { icon: '🏆', label: 'Personal Records', note: 'Your best lifts, ranked', route: '/(client)/records' },
-    { icon: '📊', label: 'Strength Standards', note: 'How your lifts stack up', route: '/(client)/standards' },
-    { icon: '🎯', label: 'Goal Tracker', note: 'Target weight & projected finish', route: '/(client)/goal' },
-    { icon: '📏', label: 'Body Measurements', note: 'Waist, chest, arms over time', route: '/(client)/measurements' },
-    { icon: '🎖️', label: 'Achievements', note: 'Badges and milestones', route: '/(client)/achievements' },
-    { icon: '🃏', label: 'Milestone Cards', note: 'Shareable cards of your wins', route: '/(client)/cards' },
-    { icon: '🔔', label: 'Activity', note: 'Your training feed & updates', route: '/(client)/activity' },
+    { label: 'Weekly Report', note: 'Your week at a glance · share it', route: '/(client)/report' },
+    { label: 'Consistency', note: '12-week training heatmap', route: '/(client)/consistency' },
+    { label: 'Personal Records', note: 'Your best lifts, ranked', route: '/(client)/records' },
+    { label: 'Strength Standards', note: 'How your lifts stack up', route: '/(client)/standards' },
+    { label: 'Goal Tracker', note: 'Target weight & projected finish', route: '/(client)/goal' },
+    { label: 'Body Measurements', note: 'Waist, chest, arms over time', route: '/(client)/measurements' },
+    { label: 'Achievements', note: 'Badges and milestones', route: '/(client)/achievements' },
+    { label: 'Milestone Cards', note: 'Shareable cards of your wins', route: '/(client)/cards' },
+    { label: 'Activity', note: 'Your training feed & updates', route: '/(client)/activity' },
   ] },
   { title: 'Training', items: [
-    { icon: '🗓️', label: 'This Week', note: 'Your week of training at a glance', route: '/(client)/week' },
-    { icon: '🎬', label: 'Exercise Library', note: 'How-to videos from your coach', route: '/(client)/library' },
-    { icon: '🧮', label: 'Lifting Tools', note: '1RM, plate math & macro reference', route: '/(client)/tools' },
-    { icon: '💧', label: 'Recovery', note: 'Hydration, sleep & mobility', route: '/(client)/recovery' },
+    { label: 'This Week', note: 'Your week of training at a glance', route: '/(client)/week' },
+    { label: 'Exercise Library', note: 'How-to videos from your coach', route: '/(client)/library' },
+    { label: 'Lifting Tools', note: '1RM, plate math & macro reference', route: '/(client)/tools' },
+    { label: 'Recovery', note: 'Hydration, sleep & mobility', route: '/(client)/recovery' },
   ] },
   { title: 'Daily', items: [
-    { icon: '✅', label: 'Daily Habits', note: 'Habits & water tracker', route: '/(client)/habits' },
-    { icon: '📝', label: 'Weekly Check-in', note: 'Send your coach a weekly pulse', route: '/(client)/checkin' },
-    { icon: '🍎', label: 'Food Log', note: 'Search, barcode or photo', route: '/(client)/foodlog' },
+    { label: 'Daily Habits', note: 'Habits & water tracker', route: '/(client)/habits' },
+    { label: 'Weekly Check-in', note: 'Send your coach a weekly pulse', route: '/(client)/checkin' },
+    { label: 'Food Log', note: 'Search, barcode or photo', route: '/(client)/foodlog' },
   ] },
   { title: 'Connect', items: [
-    { icon: '🤖', label: 'AI Coach', note: 'Chat with your AI coach', route: '/(client)/coach' },
-    { icon: '💬', label: 'Messages', note: 'Chat with your coach', route: '/(client)/messages' },
-    { icon: '📣', label: 'Share & Social', note: 'Post progress to Instagram / TikTok', route: '/(client)/social' },
+    { label: 'AI Coach', note: 'Chat with your AI coach', route: '/(client)/coach' },
+    { label: 'Messages', note: 'Chat with your coach', route: '/(client)/messages' },
+    { label: 'Share & Social', note: 'Post progress to Instagram / TikTok', route: '/(client)/social' },
   ] },
   { title: 'Devices & Media', items: [
-    { icon: '⌚', label: 'Watch & Devices', note: 'Apple Watch, WHOOP, Garmin…', route: '/(client)/devices' },
-    { icon: '🎧', label: 'Music & Playlists', note: 'AI workout playlists', route: '/(client)/music' },
+    { label: 'Watch & Devices', note: 'Apple Watch, WHOOP, Garmin…', route: '/(client)/devices' },
+    { label: 'Music & Playlists', note: 'AI workout playlists', route: '/(client)/music' },
   ] },
   { title: 'Account', items: [
-    { icon: '🔁', label: 'Switch portal', note: 'Client · Trainer · Owner', route: '/' },
-    { icon: '🎨', label: 'Appearance', note: 'Theme & accent colour', route: '/(client)/appearance' },
-    { icon: '⚙️', label: 'Settings', note: 'Notifications, units, legal & version', route: '/(client)/settings' },
+    { label: 'Switch portal', note: 'Client · Trainer · Owner', route: '/' },
+    { label: 'Appearance', note: 'Theme & accent colour', route: '/(client)/appearance' },
+    { label: 'Settings', note: 'Notifications, units, legal & version', route: '/(client)/settings' },
   ] },
 ];
 
@@ -161,7 +162,7 @@ export default function Profile() {
     const res = fromCamera ? await ImagePicker.launchCameraAsync({ quality: 0.7, allowsEditing: true, aspect: [1, 1] }) : await ImagePicker.launchImageLibraryAsync({ quality: 0.7, allowsEditing: true, aspect: [1, 1] });
     if (!res.canceled && res.assets && res.assets[0]) cd.setPhoto(res.assets[0].uri);
   };
-  const changePhoto = () => Alert.alert('Profile Photo', undefined, [
+  const changePhoto = () => Alert.alert('Profile photo', undefined, [
     { text: 'Take Photo', onPress: () => pickPhoto(true) },
     { text: 'Choose From Library', onPress: () => pickPhoto(false) },
     ...(cd.photo ? [{ text: 'Remove', style: 'destructive' as const, onPress: () => cd.setPhoto(null) }] : []),
@@ -169,6 +170,7 @@ export default function Profile() {
   ]);
 
   const [showDob, setShowDob] = useState(false);
+  const [showEdit, setShowEdit] = useState(false);
 
   const [heightUnit, setHeightUnit] = useState<'cm' | 'in'>('cm');
   const [heightVal, setHeightVal] = useState(String(cd.heightCm));
@@ -201,7 +203,7 @@ export default function Profile() {
     const bf = parseFloat(bfVal);
     if (!isNaN(bf) && bf > 3 && bf < 70) cd.setBodyFat(round1(bf));
     setSaved(true);
-    setTimeout(() => setSaved(false), 1800);
+    setTimeout(() => { setSaved(false); setShowEdit(false); }, 900);
   };
 
   const age = ageFromDob(cd.dob);
@@ -213,16 +215,20 @@ export default function Profile() {
     return `${dd.getDate()} ${MONTHS[dd.getMonth()]} ${dd.getFullYear()}`;
   })();
 
+  const statsLine = `${age != null ? age + ' yrs' : '—'} · ${cd.heightCm} cm · ${round1(cd.weightKg)} kg`;
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 16 }}>
+      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+
+        {/* header: avatar + serif name + stats + edit pencil */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, marginTop: 4, marginBottom: 16 }}>
           <Pressable onPress={changePhoto}>
             {cd.photo ? (
-              <Image source={{ uri: cd.photo }} style={{ width: 54, height: 54, borderRadius: 27, backgroundColor: t.surface2 }} />
+              <Image source={{ uri: cd.photo }} style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: t.surface2 }} />
             ) : (
-              <View style={{ width: 54, height: 54, borderRadius: 27, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}>
-                <Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 20 }}>{cd.init}</Text>
+              <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}>
+                <Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 21 }}>{cd.init}</Text>
               </View>
             )}
             <View style={{ position: 'absolute', bottom: -2, right: -2, width: 22, height: 22, borderRadius: 11, backgroundColor: t.surface, borderWidth: 1, borderColor: t.ring, alignItems: 'center', justifyContent: 'center' }}>
@@ -230,105 +236,100 @@ export default function Profile() {
             </View>
           </Pressable>
           <View style={{ flex: 1 }}>
-            <Text style={{ color: t.ink, fontSize: 22, fontWeight: '800', textTransform: 'capitalize' }}>{cd.name}</Text>
-            <Text style={{ color: t.ink3, fontSize: 13, marginTop: 2 }}>Weight changes recalculate your plan automatically</Text>
+            <Text style={{ color: t.ink, fontSize: 22, fontWeight: '700', fontFamily: SERIF, textTransform: 'capitalize' }}>{cd.name}</Text>
+            <Text style={{ color: t.ink3, fontSize: 12, marginTop: 2 }}>{statsLine}</Text>
           </View>
+          <Pressable onPress={() => setShowEdit(true)} style={{ width: 36, height: 36, borderWidth: 1, borderColor: t.ring, borderRadius: 10, alignItems: 'center', justifyContent: 'center' }}>
+            <Icon name="pencil" size={16} color={t.ink2} />
+          </Pressable>
         </View>
 
-        <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 16, marginBottom: 12 }}>
-          <Text style={{ color: t.ink, fontSize: 15, fontWeight: '800', marginBottom: 3 }}>Your Goal</Text>
-          <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 12 }}>We tailor your workouts and meal targets to this.</Text>
-          <View style={{ gap: 8 }}>
+        {/* goal pills */}
+        <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 14, marginBottom: 6 }}>
+          <Text style={{ color: t.ink3, fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 8 }}>Your goal</Text>
+          <View style={{ flexDirection: 'row', gap: 7 }}>
             {GOALS.map((g) => {
               const on = cd.goal === g.id;
               return (
-                <Pressable key={g.id} onPress={() => cd.setGoal(g.id)} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 12, padding: 12, backgroundColor: on ? t.brand : t.surface2, borderWidth: 1, borderColor: on ? t.brand : t.ring }}>
-                  <Text style={{ fontSize: 20 }}>{g.icon}</Text>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ color: on ? t.brandInk : t.ink, fontWeight: '800', fontSize: 15 }}>{g.label}</Text>
-                    <Text style={{ color: on ? t.brandInk : t.ink3, fontSize: 12, opacity: on ? 0.85 : 1 }}>{g.note}</Text>
-                  </View>
-                  {on ? <Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 16 }}>✓</Text> : null}
+                <Pressable key={g.id} onPress={() => cd.setGoal(g.id)} style={{ flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 10, backgroundColor: on ? t.brand : t.surface2, borderWidth: 1, borderColor: on ? t.brand : t.ring }}>
+                  <Text style={{ color: on ? t.brandInk : t.ink2, fontWeight: '700', fontSize: 12.5 }}>{g.label}</Text>
                 </Pressable>
               );
             })}
           </View>
         </View>
 
-        <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 16, marginBottom: 12 }}>
-          <Text style={{ color: t.ink2, fontSize: 13, fontWeight: '600', marginBottom: 6 }}>Name</Text>
-          <TextInput value={nameVal} onChangeText={setNameVal} placeholder="Your name" placeholderTextColor={t.ink3} autoCapitalize="words" style={{ color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, marginBottom: 14 }} />
-          <Text style={{ color: t.ink2, fontSize: 13, fontWeight: '600', marginBottom: 6 }}>Date of birth</Text>
-          <Pressable onPress={() => setShowDob(true)} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 13, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Text style={{ color: t.ink, fontSize: 15, fontWeight: '600' }}>{dobLabel}</Text>
-            <Text style={{ color: t.ink3, fontSize: 13 }}>{age != null ? `${age} yrs` : ''}  ▾</Text>
-          </Pressable>
-          <Text style={{ color: t.ink3, fontSize: 12, marginTop: 6, marginBottom: 14 }}>Tap to pick — age updates automatically.</Text>
-
-          <Text style={{ color: t.ink2, fontSize: 13, fontWeight: '600', marginBottom: 6 }}>Height</Text>
-          <View style={{ flexDirection: 'row', gap: 10, marginBottom: 14 }}>
-            <TextInput value={heightVal} onChangeText={setHeightVal} keyboardType="numeric" placeholderTextColor={t.ink3}
-              style={{ flex: 1, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15 }} />
-            <Seg options={['cm', 'in']} value={heightUnit} onChange={toggleHeight} t={t} />
-          </View>
-
-          <Text style={{ color: t.ink2, fontSize: 13, fontWeight: '600', marginBottom: 6 }}>Current weight</Text>
-          <View style={{ flexDirection: 'row', gap: 10, marginBottom: 16 }}>
-            <TextInput value={weightVal} onChangeText={setWeightVal} keyboardType="numeric" placeholderTextColor={t.ink3}
-              style={{ flex: 1, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15 }} />
-            <Seg options={['kg', 'lb']} value={weightUnit} onChange={toggleWeight} t={t} />
-          </View>
-
-          <Text style={{ color: t.ink2, fontSize: 13, fontWeight: '600', marginBottom: 6 }}>Body fat %</Text>
-          <View style={{ flexDirection: 'row', gap: 10, marginBottom: 16, alignItems: 'center' }}>
-            <TextInput value={bfVal} onChangeText={setBfVal} keyboardType="numeric" placeholder="e.g. 22" placeholderTextColor={t.ink3} style={{ flex: 1, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15 }} />
-            <Text style={{ color: t.ink3, fontSize: 12, flex: 1 }}>From your latest scan, or type it in.</Text>
-          </View>
-          <Pressable style={{ backgroundColor: saved ? t.surface2 : t.brand, borderWidth: 1, borderColor: saved ? t.ring : t.brand, borderRadius: 12, paddingVertical: 14, alignItems: 'center' }} onPress={save}>
-            <Text style={{ color: saved ? t.ink : t.brandInk, fontWeight: '800', fontSize: 15 }}>{saved ? '✓ Saved — plan updated' : 'Save'}</Text>
-          </Pressable>
+        {/* live target strip */}
+        <View style={{ backgroundColor: t.surface2, borderRadius: 14, borderWidth: 1, borderColor: t.ring, padding: 13, marginTop: 12, marginBottom: 18 }}>
+          <Text style={{ color: t.ink3, fontSize: 12 }}>Daily target · <Text style={{ color: t.ink, fontWeight: '700' }}>{macros.kcal.toLocaleString()} kcal</Text> · P{macros.protein} / C{macros.carbs} / F{macros.fat}</Text>
         </View>
 
-        <View style={{ flexDirection: 'row', gap: 12, marginBottom: 12 }}>
-          <View style={{ flex: 1, backgroundColor: t.surface, borderWidth: 1, borderColor: t.ring, borderRadius: 14, padding: 15 }}>
-            <Text style={{ color: t.ink3, fontSize: 12, fontWeight: '600' }}>Age</Text>
-            <Text style={{ color: t.ink, fontSize: 24, fontWeight: '700', textTransform: 'capitalize', marginTop: 4 }}>{age != null ? String(age) : '—'}<Text style={{ color: t.ink3, fontSize: 13 }}> yrs</Text></Text>
-          </View>
-          <View style={{ flex: 1, backgroundColor: t.surface, borderWidth: 1, borderColor: t.ring, borderRadius: 14, padding: 15 }}>
-            <Text style={{ color: t.ink3, fontSize: 12, fontWeight: '600' }}>Height</Text>
-            <Text style={{ color: t.ink, fontSize: 24, fontWeight: '700', textTransform: 'capitalize', marginTop: 4 }}>{heightVal}<Text style={{ color: t.ink3, fontSize: 13 }}> {heightUnit}</Text></Text>
-          </View>
-          <View style={{ flex: 1, backgroundColor: t.surface, borderWidth: 1, borderColor: t.ring, borderRadius: 14, padding: 15 }}>
-            <Text style={{ color: t.ink3, fontSize: 12, fontWeight: '600' }}>Weight</Text>
-            <Text style={{ color: t.ink, fontSize: 24, fontWeight: '700', textTransform: 'capitalize', marginTop: 4 }}>{weightVal}<Text style={{ color: t.ink3, fontSize: 13 }}> {weightUnit}</Text></Text>
-          </View>
-        </View>
-
-        <View style={{ backgroundColor: t.surface2, borderRadius: 14, borderWidth: 1, borderColor: t.ring, padding: 16, marginBottom: 18 }}>
-          <Text style={{ color: t.ink2 }}>
-            Daily target recalculated live: {macros.kcal.toLocaleString()} kcal · P{macros.protein} / C{macros.carbs} / F{macros.fat}
-          </Text>
-        </View>
-
-        <Text style={{ color: t.ink, fontSize: 16, fontWeight: '800', marginBottom: 12 }}>More</Text>
+        {/* hub groups */}
         {HUB_GROUPS.map((g) => (
           <View key={g.title}>
-            <Text style={{ color: t.ink3, fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 8, marginTop: 4 }}>{g.title}</Text>
-            <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, overflow: 'hidden', marginBottom: 18 }}>
+            <Text style={{ color: t.ink3, fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.7, marginBottom: 8, marginTop: 4 }}>{g.title}</Text>
+            <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, overflow: 'hidden', marginBottom: 16 }}>
               {g.items.map((h, i) => (
-                <Pressable key={h.route} onPress={() => router.push(h.route as any)} style={{ flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 16, paddingVertical: 14, borderTopWidth: i === 0 ? 0 : 1, borderTopColor: t.ring }}>
-                  <View style={{ width: 38, height: 38, borderRadius: 11, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}><Icon name={HUB_ICON[h.route] || 'chevron'} size={18} color={t.brand} /></View>
+                <Pressable key={h.route} onPress={() => router.push(h.route as any)} style={{ flexDirection: 'row', alignItems: 'center', gap: 13, paddingHorizontal: 14, paddingVertical: 13, borderTopWidth: i === 0 ? 0 : 1, borderTopColor: t.ring }}>
+                  <View style={{ width: 34, height: 34, borderRadius: 9, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}><Icon name={HUB_ICON[h.route] || 'chevron'} size={16} color={t.brand} /></View>
                   <View style={{ flex: 1 }}>
-                    <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15 }}>{h.label}</Text>
-                    <Text style={{ color: t.ink3, fontSize: 12, marginTop: 1 }}>{h.note}</Text>
+                    <Text style={{ color: t.ink, fontWeight: '700', fontSize: 14 }}>{h.label}</Text>
+                    <Text style={{ color: t.ink3, fontSize: 11.5, marginTop: 1 }}>{h.note}</Text>
                   </View>
-                  <Icon name="chevron" size={18} color={t.ink3} />
+                  <Icon name="chevron" size={17} color={t.ink3} />
                 </Pressable>
               ))}
             </View>
           </View>
         ))}
       </ScrollView>
+
+      {/* edit profile sheet */}
+      <Modal visible={showEdit} transparent animationType="slide" onRequestClose={() => setShowEdit(false)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setShowEdit(false)} />
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, borderColor: t.ring, maxHeight: '90%' }}>
+          <ScrollView contentContainerStyle={{ padding: 20 }} showsVerticalScrollIndicator={false}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <Text style={{ color: t.ink, fontSize: 20, fontWeight: '700', fontFamily: SERIF }}>Edit profile</Text>
+              <Pressable onPress={() => setShowEdit(false)}><Text style={{ color: t.brand, fontSize: 15, fontWeight: '800' }}>Close</Text></Pressable>
+            </View>
+
+            <Text style={{ color: t.ink2, fontSize: 13, fontWeight: '600', marginBottom: 6 }}>Name</Text>
+            <TextInput value={nameVal} onChangeText={setNameVal} placeholder="Your name" placeholderTextColor={t.ink3} autoCapitalize="words" style={{ color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, marginBottom: 14 }} />
+
+            <Text style={{ color: t.ink2, fontSize: 13, fontWeight: '600', marginBottom: 6 }}>Date of birth</Text>
+            <Pressable onPress={() => setShowDob(true)} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 13, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+              <Text style={{ color: t.ink, fontSize: 15, fontWeight: '600' }}>{dobLabel}</Text>
+              <Text style={{ color: t.ink3, fontSize: 13 }}>{age != null ? `${age} yrs  ▾` : '▾'}</Text>
+            </Pressable>
+
+            <Text style={{ color: t.ink2, fontSize: 13, fontWeight: '600', marginBottom: 6 }}>Height</Text>
+            <View style={{ flexDirection: 'row', gap: 10, marginBottom: 14 }}>
+              <TextInput value={heightVal} onChangeText={setHeightVal} keyboardType="numeric" placeholderTextColor={t.ink3} style={{ flex: 1, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15 }} />
+              <Seg options={['cm', 'in']} value={heightUnit} onChange={toggleHeight} t={t} />
+            </View>
+
+            <Text style={{ color: t.ink2, fontSize: 13, fontWeight: '600', marginBottom: 6 }}>Current weight</Text>
+            <View style={{ flexDirection: 'row', gap: 10, marginBottom: 14 }}>
+              <TextInput value={weightVal} onChangeText={setWeightVal} keyboardType="numeric" placeholderTextColor={t.ink3} style={{ flex: 1, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15 }} />
+              <Seg options={['kg', 'lb']} value={weightUnit} onChange={toggleWeight} t={t} />
+            </View>
+
+            <Text style={{ color: t.ink2, fontSize: 13, fontWeight: '600', marginBottom: 6 }}>Body fat %</Text>
+            <TextInput value={bfVal} onChangeText={setBfVal} keyboardType="numeric" placeholder="e.g. 22" placeholderTextColor={t.ink3} style={{ color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, marginBottom: 6 }} />
+            <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 16 }}>From your latest scan, or type it in. Changes recalculate your plan.</Text>
+
+            <View style={{ backgroundColor: t.surface2, borderRadius: 12, borderWidth: 1, borderColor: t.ring, padding: 13, marginBottom: 16 }}>
+              <Text style={{ color: t.ink3, fontSize: 12 }}>New target · <Text style={{ color: t.ink, fontWeight: '700' }}>{macros.kcal.toLocaleString()} kcal</Text> · P{macros.protein} / C{macros.carbs} / F{macros.fat}</Text>
+            </View>
+
+            <Pressable style={{ backgroundColor: saved ? t.surface2 : t.brand, borderWidth: 1, borderColor: saved ? t.ring : t.brand, borderRadius: 12, paddingVertical: 14, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8 }} onPress={save}>
+              {saved ? <Icon name="check" size={16} color={t.ink} /> : null}
+              <Text style={{ color: saved ? t.ink : t.brandInk, fontWeight: '800', fontSize: 15 }}>{saved ? 'Saved — plan updated' : 'Save'}</Text>
+            </Pressable>
+          </ScrollView>
+        </View>
+      </Modal>
 
       <DobPicker visible={showDob} iso={cd.dob} onClose={() => setShowDob(false)} onSave={(v) => { cd.setDob(v); setShowDob(false); }} t={t} />
     </SafeAreaView>
