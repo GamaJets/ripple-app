@@ -10,11 +10,12 @@ import * as ImagePicker from 'expo-image-picker';
 import { useTheme } from '../src/ui/components';
 import { useClientData } from '../src/ui/clientData';
 import type { Goal, Diet } from '../src/lib/types';
+import { Icon } from '../src/ui/Icon';
 
 const GOALS: { id: Goal; label: string; icon: string }[] = [
-  { id: 'fatloss', label: 'Fat Loss', icon: '🔥' },
-  { id: 'tone', label: 'Tone', icon: '✨' },
-  { id: 'muscle', label: 'Build Muscle', icon: '💪' },
+  { id: 'fatloss', label: 'Fat Loss', icon: '' },
+  { id: 'tone', label: 'Tone', icon: '' },
+  { id: 'muscle', label: 'Build Muscle', icon: '' },
 ];
 const DIETS: { id: Diet; label: string }[] = [
   { id: 'meat', label: 'Meat' }, { id: 'vegetarian', label: 'Vegetarian' }, { id: 'vegan', label: 'Vegan' }, { id: 'paleo', label: 'Paleo' }, { id: 'keto', label: 'Keto' },
@@ -71,18 +72,18 @@ export default function Onboarding() {
 
         {step === 0 && (
           <View>
-            <Text style={{ color: t.ink, fontSize: 26, fontWeight: '800', marginBottom: 6 }}>Welcome to Repple 👋</Text>
+            <Text style={{ color: t.ink, fontSize: 26, fontWeight: '800', marginBottom: 6 }}>Welcome to Repple</Text>
             <Text style={{ color: t.ink3, fontSize: 15, marginBottom: 24 }}>How will you use the app?</Text>
-            {([['client', '🏃', 'I\'m training', 'Follow a program, meals & progress'], ['trainer', '🧑‍🏫', 'I\'m a coach', 'Manage clients & schedule'], ['owner', '👑', 'I run the platform', 'Trainers, billing & white-label']] as const).map(([id, icon, title, sub]) => {
+            {([['client', 'me', 'I\'m training', 'Follow a program, meals & progress'], ['trainer', 'people', 'I\'m a coach', 'Manage clients & schedule'], ['owner', 'grid', 'I run the platform', 'Trainers, billing & white-label']] as const).map(([id, icon, title, sub]) => {
               const on = role === id;
               return (
                 <Pressable key={id} onPress={() => setRole(id as any)} accessibilityRole="button" style={{ flexDirection: 'row', alignItems: 'center', gap: 14, borderRadius: 16, padding: 16, marginBottom: 12, backgroundColor: on ? t.brand : t.surface, borderWidth: 1, borderColor: on ? t.brand : t.ring }}>
-                  <Text style={{ fontSize: 26 }}>{icon}</Text>
+                  <Icon name={icon as any} size={24} color={on ? t.brandInk : t.brand} />
                   <View style={{ flex: 1 }}>
                     <Text style={{ color: on ? t.brandInk : t.ink, fontWeight: '800', fontSize: 16 }}>{title}</Text>
                     <Text style={{ color: on ? t.brandInk : t.ink3, fontSize: 12, opacity: on ? 0.85 : 1 }}>{sub}</Text>
                   </View>
-                  {on ? <Text style={{ color: t.brandInk, fontWeight: '900', fontSize: 16 }}>✓</Text> : null}
+                  {on ? <Icon name="check" size={16} color={t.brandInk} /> : null}
                 </Pressable>
               );
             })}
@@ -93,10 +94,10 @@ export default function Onboarding() {
           <View style={{ alignItems: 'center' }}>
             <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800', marginBottom: 6, alignSelf: 'flex-start' }}>Add a photo</Text>
             <Text style={{ color: t.ink3, fontSize: 15, marginBottom: 24, alignSelf: 'flex-start' }}>Optional — helps your coach recognise you.</Text>
-            {cd.photo ? <Image source={{ uri: cd.photo }} style={{ width: 120, height: 120, borderRadius: 60, marginBottom: 20 }} /> : <View style={{ width: 120, height: 120, borderRadius: 60, backgroundColor: t.surface2, borderWidth: 1, borderColor: t.ring, alignItems: 'center', justifyContent: 'center', marginBottom: 20 }}><Text style={{ fontSize: 40 }}>📷</Text></View>}
+            {cd.photo ? <Image source={{ uri: cd.photo }} style={{ width: 120, height: 120, borderRadius: 60, marginBottom: 20 }} /> : <View style={{ width: 120, height: 120, borderRadius: 60, backgroundColor: t.surface2, borderWidth: 1, borderColor: t.ring, alignItems: 'center', justifyContent: 'center', marginBottom: 20 }}><Icon name="camera" size={40} color={t.ink3} /></View>}
             <View style={{ flexDirection: 'row', gap: 10, alignSelf: 'stretch' }}>
-              <Btn label="🖼 Upload" onPress={() => pickPhoto(false)} />
-              <Btn label="📷 Take Photo" onPress={() => pickPhoto(true)} />
+              <Btn label="Upload" onPress={() => pickPhoto(false)} />
+              <Btn label="Take Photo" onPress={() => pickPhoto(true)} />
             </View>
           </View>
         )}
@@ -109,9 +110,8 @@ export default function Onboarding() {
               const on = cd.goal === g.id;
               return (
                 <Pressable key={g.id} onPress={() => cd.setGoal(g.id)} accessibilityRole="button" style={{ flexDirection: 'row', alignItems: 'center', gap: 14, borderRadius: 16, padding: 16, marginBottom: 12, backgroundColor: on ? t.brand : t.surface, borderWidth: 1, borderColor: on ? t.brand : t.ring }}>
-                  <Text style={{ fontSize: 24 }}>{g.icon}</Text>
                   <Text style={{ flex: 1, color: on ? t.brandInk : t.ink, fontWeight: '800', fontSize: 16 }}>{g.label}</Text>
-                  {on ? <Text style={{ color: t.brandInk, fontWeight: '900', fontSize: 16 }}>✓</Text> : null}
+                  {on ? <Icon name="check" size={16} color={t.brandInk} /> : null}
                 </Pressable>
               );
             })}

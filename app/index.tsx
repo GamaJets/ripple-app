@@ -7,6 +7,7 @@ import { useTheme } from '../src/ui/components';
 import type { Theme } from '../src/theme/tokens';
 import { useAuth } from '../src/ui/auth';
 import { useBrand } from '../src/ui/brand';
+import { Icon, type IconName } from '../src/ui/Icon';
 
 function Ripple({ size, color }: { size: number; color: string }) {
   return (
@@ -18,10 +19,10 @@ function Ripple({ size, color }: { size: number; color: string }) {
   );
 }
 
-function Portal({ t, icon, title, sub, onPress }: { t: Theme; icon: string; title: string; sub: string; onPress: () => void }) {
+function Portal({ t, icon, title, sub, onPress }: { t: Theme; icon: IconName; title: string; sub: string; onPress: () => void }) {
   return (
     <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={title} style={{ backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 18, padding: 18, marginBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 14 }}>
-      <View style={{ width: 48, height: 48, borderRadius: 14, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}><Text style={{ fontSize: 24 }}>{icon}</Text></View>
+      <View style={{ width: 48, height: 48, borderRadius: 14, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}><Icon name={icon} size={24} color={t.brand} /></View>
       <View style={{ flex: 1 }}>
         <Text style={{ color: t.ink, fontSize: 17, fontWeight: '800' }}>{title}</Text>
         <Text style={{ color: t.ink3, fontSize: 13, marginTop: 2 }}>{sub}</Text>
@@ -57,9 +58,9 @@ export default function Home() {
         </View>
         <Text style={{ color: t.ink3, fontSize: 14, marginBottom: 30 }}>Signed in as {user?.email}</Text>
         <Text style={{ color: t.ink2, fontSize: 13, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 12 }}>Choose a portal</Text>
-        <Portal t={t} icon="🏃" title="Client App" sub="Program, meals, progress, booking" onPress={() => router.push('/(client)/dashboard')} />
-        <Portal t={t} icon="🧑‍🏫" title="Trainer Portal" sub="Clients, schedule, videos, analytics" onPress={() => router.push('/(trainer)/dashboard')} />
-        <Portal t={t} icon="👑" title="Platform Owner" sub="Trainers, billing, white-label, growth" onPress={() => router.push('/(owner)/dashboard')} />
+        <Portal t={t} icon="me" title="Client App" sub="Program, meals, progress, booking" onPress={() => router.push('/(client)/dashboard')} />
+        <Portal t={t} icon="people" title="Trainer Portal" sub="Clients, schedule, videos, analytics" onPress={() => router.push('/(trainer)/dashboard')} />
+        <Portal t={t} icon="grid" title="Platform Owner" sub="Trainers, billing, white-label, growth" onPress={() => router.push('/(owner)/dashboard')} />
 
         <Pressable onPress={signOut} accessibilityRole="button" accessibilityLabel="Sign out" style={{ marginTop: 18, alignSelf: 'center', paddingVertical: 10, paddingHorizontal: 18 }}>
           <Text style={{ color: t.ink3, fontWeight: '700', fontSize: 13 }}>Sign out</Text>
