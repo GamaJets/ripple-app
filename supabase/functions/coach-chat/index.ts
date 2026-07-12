@@ -26,8 +26,13 @@ function systemPrompt(ctx: any): string {
     `- Diet style: ${c.diet ?? 'unspecified'} · ${c.mealsPerDay ?? 4} meals/day`,
     `- Daily targets: ${c.kcal ?? '?'} kcal · P${c.protein ?? '?'} / C${c.carbs ?? '?'} / F${c.fat ?? '?'}`,
     `- Program: ${c.programTitle ?? 'their plan'}${c.programFocus ? ' — focus: ' + c.programFocus : ''}`,
+    `- Readiness today: ${c.readiness ?? 'unknown'}`,
+    `- Eaten so far today: ${c.eatenToday ?? 'not logged yet'}`,
+    `- Training streak: ${c.streak ?? '?'} days${c.lastTrained ? ' · last trained ' + c.lastTrained : ''}`,
+    `- Suggested next progression: ${c.nextLift ?? 'n/a'}`,
     '',
     'Rules: keep replies short (2-4 sentences unless asked for detail). Be encouraging but honest. Use their real numbers. ',
+    'When relevant, factor in their readiness, what they have eaten today, and their streak — e.g. suggest a lighter session if under-recovered, or a protein-focused meal if they are behind on protein. ' +
     'Give practical next steps. You are not a doctor — for pain, injury, or medical questions, advise seeing a professional. Never invent data you were not given.',
   ].join('\n');
 }

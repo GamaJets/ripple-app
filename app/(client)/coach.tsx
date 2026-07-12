@@ -11,6 +11,13 @@ import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
 import { macrosFor } from '../../src/lib/nutrition';
 import { buildProgram } from '../../src/lib/programs';
 import { askCoach, coachAvailable, type ChatMsg } from '../../src/lib/coach';
+import { useWellness } from '../../src/ui/wellness';
+import { useHabits } from '../../src/ui/habits';
+import { useWorkoutLog } from '../../src/ui/workoutLog';
+import { useFoodLog } from '../../src/ui/foodLog';
+import { readinessScore } from '../../src/lib/readiness';
+import { suggestProgression } from '../../src/lib/progression';
+import { currentStreak } from '../../src/lib/streaks';
 
 const SUGGESTIONS = ['What should I eat post-workout?', "I'm sore today — should I still train?", 'Am I on track for my goal?', 'Give me a quick high-protein snack'];
 
@@ -21,11 +28,28 @@ export default function Coach() {
  const coachProgram = useAssignedPrograms().getProgram(cd.id);
  const macros = macrosFor({ weightKg: cd.weightKg, bodyFatPct: cd.bodyFatPct, activity: cd.activity, goal: cd.goal, diet: cd.diet });
  const program = coachProgram ?? buildProgram(cd.goal, cd.bodyFatPct);
+ const { sleep } = useWellness();
+ const { water, waterGoal } = useHabits();
+ const { log } = useWorkoutLog();
+ const { consumed } = useFoodLog();
+ const _recentSleep = sleep.slice(0, 3);
+ const _avgSleep = _recentSleep.length ? _recentSleep.reduce((a, x) => a + x.hours, 0) / _recentSleep.length : 7;
+ const _since2d = Date.now() - 2 * 86400000;
+ const _load2d = new Set(log.filter((e) => Date.parse(e.t) >= _since2d).map((e) => e.t.slice(0, 10))).size;
+ const _readiness = readinessScore({ avgSleepHours: _avgSleep, hydrationPct: waterGoal ? water / waterGoal : 0, workoutsLast2Days: _load2d });
+ const _streak = currentStreak(log);
+ const _lastEx = log.length ? log[0].exercise : '';
+ const _prog = suggestProgression(log)[0];
  const context = {
  name: cd.name, goal: cd.goal, diet: cd.diet, weightKg: Math.round(cd.weightKg * 10) / 10,
  bodyFatPct: cd.bodyFatPct, muscleKg: cd.muscleKg, mealsPerDay: cd.mealsPerDay,
  kcal: macros.kcal, protein: macros.protein, carbs: macros.carbs, fat: macros.fat,
  programTitle: program.title, programFocus: program.focus.join(', '),
+ readiness: `${_readiness.score}/100 (${_readiness.label})`,
+ eatenToday: `${consumed.kcal}/${macros.kcal} kcal, protein ${consumed.protein}/${macros.protein}g`,
+ streak: _streak,
+ lastTrained: _lastEx || undefined,
+ nextLift: _prog ? `${_prog.exercise}: ${_prog.nextWeight}kg x ${_prog.nextReps} (${_prog.action})` : undefined,
  };
 
  const [msgs, setMsgs] = useState<ChatMsg[]>([
