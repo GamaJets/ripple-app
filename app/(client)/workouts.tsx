@@ -2,7 +2,7 @@
 // Start, clean exercise cards (video/swap line icons, target suggestion, Log set).
 // Guided session runner, cardio logging & month calendar preserved.
 import { useState, useEffect, useRef } from 'react';
-import { View, Text, TextInput, Pressable, ScrollView, Modal, Alert } from 'react-native';
+import { View, Text, TextInput, Pressable, ScrollView, Modal, Alert, Linking } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { tapLight } from '../../src/ui/haptics';
@@ -18,6 +18,7 @@ import { suggestForExercise, priorBest1RM } from '../../src/lib/progression';
 import { est1RM } from '../../src/lib/streaks';
 import { Confetti } from '../../src/ui/Confetti';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
+import { useExerciseVideos } from '../../src/ui/exerciseVideos';
 
 const SERIF = 'Georgia';
 const WEEK = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -46,6 +47,7 @@ export default function Train() {
   const [cardioLog, setCardioLog] = useState<{ type: string; mins: number; dist: number; unit: string; kcal: number }[]>([]);
   const [swapFor, setSwapFor] = useState<ProgramExercise | null>(null);
   const [videoFor, setVideoFor] = useState<string | null>(null);
+  const { videos: exVideos } = useExerciseVideos();
   const [session, setSession] = useState(false);
   const [ctype, setCtype] = useState(CARDIO[0]); const [mins, setMins] = useState('30'); const [dist, setDist] = useState('5'); const [unit, setUnit] = useState<'km' | 'mi'>('km');
   const [showCal, setShowCal] = useState(false);
@@ -259,10 +261,31 @@ export default function Train() {
 
       <Modal visible={!!videoFor} transparent animationType="fade" onRequestClose={() => setVideoFor(null)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', alignItems: 'center', justifyContent: 'center', padding: 24 }} onPress={() => setVideoFor(null)}>
-          <View style={{ width: '100%', aspectRatio: 16 / 9, backgroundColor: '#000', borderRadius: 14, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: t.ring }}>
-            <Icon name="play" size={40} color="#fff" /><Text style={{ color: '#fff', fontWeight: '700', marginTop: 8 }}>{videoFor}</Text><Text style={{ color: '#999', fontSize: 12, marginTop: 4 }}>Your coach's demo plays here</Text>
-          </View>
-          <Text style={{ color: '#bbb', fontSize: 12, marginTop: 14 }}>Tap anywhere to close</Text>
+          {(() => {
+            const nm = videoFor || '';
+            const norm = (x: string) => x.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
+            const n = norm(nm);
+            const vid = n ? (exVideos.find((v) => { const vn = norm(v.name); return vn === n || vn.includes(n) || n.includes(vn); }) || null) : null;
+            return (
+              <Pressable onPress={() => {}} style={{ width: '100%' }}>
+                <View style={{ width: '100%', aspectRatio: 16 / 9, backgroundColor: '#000', borderRadius: 14, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: t.ring }}>
+                  <Icon name="play" size={40} color="#fff" />
+                  <Text style={{ color: '#fff', fontWeight: '700', marginTop: 8, textTransform: 'capitalize' }}>{nm}</Text>
+                  <Text style={{ color: '#999', fontSize: 12, marginTop: 4 }}>{vid ? (vid.url ? 'Demo from your coach' : "Your coach's clip — streams once hosting is on") : 'No coach demo yet'}</Text>
+                </View>
+                {vid && vid.url ? (
+                  <Pressable onPress={() => Linking.openURL(vid.url as string)} style={{ marginTop: 14, backgroundColor: t.brand, borderRadius: 12, paddingVertical: 14, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8 }}>
+                    <Icon name="play" size={16} color={t.brandInk} /><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 15 }}>Play demo</Text>
+                  </Pressable>
+                ) : (
+                  <Pressable onPress={() => Linking.openURL('https://www.youtube.com/results?search_query=' + encodeURIComponent('how to ' + nm + ' proper form'))} style={{ marginTop: 14, backgroundColor: t.surface2, borderWidth: 1, borderColor: t.ring, borderRadius: 12, paddingVertical: 14, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8 }}>
+                    <Icon name="video" size={16} color={t.ink} /><Text style={{ color: t.ink, fontWeight: '800', fontSize: 14 }}>Watch a how-to on YouTube</Text>
+                  </Pressable>
+                )}
+                <Text style={{ color: '#bbb', fontSize: 12, marginTop: 14, textAlign: 'center' }}>Tap outside to close</Text>
+              </Pressable>
+            );
+          })()}
         </Pressable>
       </Modal>
 
