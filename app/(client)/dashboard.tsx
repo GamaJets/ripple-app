@@ -1,6 +1,7 @@
 // Client · Home — a dense daily briefing: today's plan, body stats, weight trend,
 // nutrition, this week, next session, coach note, quick actions. Rebuilt on the
 // palette theme + SVG icon set. Reads the live providers.
+import { useState, useEffect } from 'react';
 import { View, Text, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -19,6 +20,8 @@ import { useAnnouncements } from '../../src/ui/announcements';
 import { useHabits } from '../../src/ui/habits';
 import { useWellness } from '../../src/ui/wellness';
 import { readinessScore } from '../../src/lib/readiness';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { ONBOARD_KEY } from './onboarding';
 import { useSessions } from '../../src/ui/sessions';
 import { useInvites } from '../../src/ui/invites';
 import { useFoodLog } from '../../src/ui/foodLog';
@@ -67,6 +70,8 @@ export default function Home() {
   const _load2d = new Set(log.filter((e) => Date.parse(e.t) >= _since2d).map((e) => e.t.slice(0, 10))).size;
   const readiness = readinessScore({ avgSleepHours: _avgSleep, hydrationPct: waterGoal ? water / waterGoal : 0, workoutsLast2Days: _load2d });
   const readinessColor = readiness.tone === 'good' ? t.brand : readiness.tone === 'moderate' ? t.warn : t.crit;
+  const [needsOnboard, setNeedsOnboard] = useState(false);
+  useEffect(() => { let c = false; (async () => { try { const v = await AsyncStorage.getItem(ONBOARD_KEY); if (!c) setNeedsOnboard(!v); } catch { /* ignore */ } })(); return () => { c = true; }; }, []);
   const { sessions } = useSessions();
   const { received: myInvites, acceptInvite: acceptCoachInvite, declineInvite: declineCoachInvite } = useInvites();
   const foodToday = useFoodLog().consumed;
@@ -132,6 +137,17 @@ export default function Home() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 34 }} showsVerticalScrollIndicator={false}>
+
+        {needsOnboard ? (
+          <Pressable onPress={() => router.push('/(client)/onboarding')} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.brand, padding: 15, marginTop: 4, marginBottom: 4, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+            <View style={{ width: 42, height: 42, borderRadius: 12, backgroundColor: 'rgba(45,212,191,0.15)', alignItems: 'center', justifyContent: 'center' }}><Icon name="sparkle" size={20} color={t.brand} /></View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: t.ink, fontWeight: '800', fontSize: 14 }}>Personalise your plan</Text>
+              <Text style={{ color: t.ink3, fontSize: 12, marginTop: 1 }}>1 minute — tailors your workouts &amp; meals to you.</Text>
+            </View>
+            <Text style={{ color: t.brand, fontWeight: '800', fontSize: 13 }}>Start ›</Text>
+          </Pressable>
+        ) : null}
 
         {/* header */}
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4, marginBottom: 16 }}>
