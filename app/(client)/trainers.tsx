@@ -10,6 +10,7 @@ import type { Theme } from '../../src/theme/tokens';
 import { Icon } from '../../src/ui/Icon';
 import { useClientData } from '../../src/ui/clientData';
 import { useInvites } from '../../src/ui/invites';
+import { notifySuccess } from '../../src/ui/haptics';
 
 const SERIF = 'Georgia';
 type Mode = 'online' | 'inperson';
@@ -48,6 +49,7 @@ export default function FindTrainer() {
   const acceptCoach = async (id: string, coachName: string | null, mode: string) => {
     const m = await acceptInvite(id);
     cd.setCoachingMode(m);
+    notifySuccess();
     Alert.alert('You are connected', (coachName || 'Your coach') + ' is now your ' + (m === 'inperson' ? 'in-person' : 'online') + ' coach. Their plan, feedback and messaging are now on your app.', [{ text: 'Great' }]);
   };
   const [filter, setFilter] = useState<'all' | Mode>('all');

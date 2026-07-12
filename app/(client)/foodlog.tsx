@@ -13,6 +13,7 @@ import { useClientData } from '../../src/ui/clientData';
 import { Icon } from '../../src/ui/Icon';
 import { analyzeMeal, visionAvailable } from '../../src/lib/vision';
 import { parseFoodText, foodAIAvailable } from '../../src/lib/foodAI';
+import { notifySuccess } from '../../src/ui/haptics';
 
 type Food = { n: string; k: number; p: number; c: number; f: number };
 type Logged = Food & { via: string };
@@ -53,7 +54,7 @@ export default function FoodLog() {
    setNlBusy(true);
    const items = await parseFoodText(text);
    setNlBusy(false);
-   if (items && items.length) { items.forEach((it) => add({ n: it.name, k: it.kcal, p: it.protein, c: it.carbs, f: it.fat }, 'ai')); setNl(''); }
+   if (items && items.length) { items.forEach((it) => add({ n: it.name, k: it.kcal, p: it.protein, c: it.carbs, f: it.fat }, 'ai')); setNl(''); notifySuccess(); }
    else { Alert.alert('Could not read that', foodAIAvailable() ? 'Try describing it differently, e.g. \"2 eggs, toast and a coffee\".' : 'AI food logging turns on with the AI backend.'); }
  };
  const remove = (i: number) => setLog((l) => l.filter((_, x) => x !== i));

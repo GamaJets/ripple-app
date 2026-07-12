@@ -7,6 +7,7 @@ import { useRouter } from 'expo-router';
 import { useTheme } from './components';
 import { Icon } from './Icon';
 import { submitAppFeedback } from './appFeedback';
+import { notifySuccess } from './haptics';
 
 const CATS = ['Bug', 'Confusing', 'Idea', 'Praise'];
 
@@ -23,6 +24,7 @@ export default function FeedbackScreen({ audience }: { audience: string }) {
     setBusy(true);
     const ok = await submitAppFeedback(rating || 0, cat, body);
     setBusy(false);
+    if (ok) notifySuccess();
     Alert.alert(ok ? 'Thank you' : 'Saved', ok ? 'Your feedback went to the Repple team.' : 'Thanks - your feedback was recorded.', [{ text: 'Done', onPress: () => router.back() }]);
   };
 
