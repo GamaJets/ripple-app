@@ -18,6 +18,7 @@ import { useBrand } from '../../src/ui/brand';
 import * as ImagePicker from 'expo-image-picker';
 import { analyzeMeal, visionAvailable } from '../../src/lib/vision';
 import { parseFoodText, foodAIAvailable } from '../../src/lib/foodAI';
+import { lookupBarcode, normalizeBarcode } from '../../src/lib/openfoodfacts';
 import { useFoodLog } from '../../src/ui/foodLog';
 import { notifySuccess } from '../../src/ui/haptics';
 
@@ -60,6 +61,9 @@ export default function Nutrition() {
   const fl = useFoodLog();
   const [nl, setNl] = useState('');
   const [logBusy, setLogBusy] = useState(false);
+  const [bcOpen, setBcOpen] = useState(false);
+  const [bcCode, setBcCode] = useState('');
+  const [bcBusy, setBcBusy] = useState(false);
   const photoLog = async () => {
     const perm = await ImagePicker.requestCameraPermissionsAsync();
     if (!perm.granted) { Alert.alert('Camera needed', 'Allow camera to log a meal by photo.'); return; }
@@ -71,7 +75,15 @@ export default function Nutrition() {
     setLogBusy(false);
     if (!done) { fl.addFood({ name: 'Meal (photo)', kcal: 520, protein: 40, carbs: 50, fat: 16, via: 'photo' }); Alert.alert('Logged an estimate', 'Added ~520 kcal — open Food Log to fine-tune.'); }
   };
-  const barcodeLog = () => { fl.addFood({ name: 'Protein Bar (barcode)', kcal: 210, protein: 20, carbs: 21, fat: 7, via: 'barcode' }); notifySuccess(); Alert.alert('Barcode scanned', 'Protein Bar added to today.'); };
+  const barcodeLog = () => { setBcCode(''); setBcOpen(true); };
+  const runBarcodeLookup = async () => {
+    if (!normalizeBarcode(bcCode)) { Alert.alert('Enter a barcode', 'Type the 8–13 digit number under the barcode.'); return; }
+    setBcBusy(true); const p = await lookupBarcode(bcCode); setBcBusy(false);
+    if (!p) { Alert.alert('Not found', 'No match in the Open Food Facts database for that barcode. Try “Describe it” instead.'); return; }
+    fl.addFood({ name: p.name, kcal: p.kcal, protein: p.protein, carbs: p.carbs, fat: p.fat, via: 'barcode' });
+    notifySuccess(); setBcOpen(false);
+    Alert.alert('Logged', p.name + ' · ' + p.kcal + ' kcal (' + p.serving + ') added to today.');
+  };
   const describeLog = async () => {
     const text = nl.trim(); if (!text) return;
     setLogBusy(true); const items = await parseFoodText(text); setLogBusy(false);
@@ -296,6 +308,21 @@ export default function Nutrition() {
               <Text style={{ color: t.ink, fontWeight: '700' }}>Close</Text>
             </Pressable>
           </ScrollView>
+        </View>
+      </Modal>
+
+      <Modal visible={bcOpen} transparent animationType="slide" onRequestClose={() => setBcOpen(false)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setBcOpen(false)} />
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, borderColor: t.ring, padding: 20, paddingBottom: 30 }}>
+          <Text style={{ color: t.ink, fontSize: 21, fontWeight: '700', fontFamily: SERIF, marginBottom: 4 }}>Scan a barcode</Text>
+          <Text style={{ color: t.ink3, fontSize: 13, marginBottom: 16 }}>Type the number under the barcode — we look it up in Open Food Facts and add the real macros.</Text>
+          <TextInput value={bcCode} onChangeText={setBcCode} placeholder="e.g. 0049000042566" placeholderTextColor={t.ink3} keyboardType="number-pad" returnKeyType="done" onSubmitEditing={runBarcodeLookup} autoFocus style={{ color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 13, fontSize: 17, letterSpacing: 1, marginBottom: 14 }} />
+          <Pressable onPress={runBarcodeLookup} disabled={bcBusy} style={{ backgroundColor: t.brand, borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginBottom: 10 }}>
+            {bcBusy ? <ActivityIndicator color={t.brandInk} /> : <Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 15 }}>Look up &amp; log</Text>}
+          </Pressable>
+          <Pressable onPress={() => setBcOpen(false)} style={{ paddingVertical: 10, alignItems: 'center' }}>
+            <Text style={{ color: t.ink3, fontWeight: '700', fontSize: 13 }}>Cancel</Text>
+          </Pressable>
         </View>
       </Modal>
     </SafeAreaView>
