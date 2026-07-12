@@ -72,6 +72,9 @@ export default function TrainerClients() {
   const [clientMeals, setClientMeals] = useState<{ name: string; kcal: number; via: string }[]>([]);
   const [aiSummary, setAiSummary] = useState('');
   const [aiBusy, setAiBusy] = useState(false);
+  const [draftClient, setDraftClient] = useState<RosterClient | null>(null);
+  const [draftText, setDraftText] = useState('');
+  const [draftBusy, setDraftBusy] = useState(false);
   useEffect(() => {
     let cancelled = false;
     setAiSummary('');
@@ -106,6 +109,30 @@ export default function TrainerClients() {
     try { supabase.from('messages').insert({ client_id: client.id, sender: 'coach', body }).then(() => {}, () => {}); } catch { /* ignore */ }
     try { supabase.functions.invoke('send-push', { body: { user_ids: [client.id], title: 'A nudge from your coach', body } }).then(() => {}, () => {}); } catch { /* ignore */ }
     Alert.alert('Nudge sent', 'A check-in message was sent to ' + client.name.split(' ')[0] + '.');
+  };
+  // Who needs proactive attention, and why — drives the suggested check-ins.
+  const attnReason = (c: RosterClient): string | null => {
+    if (c.adherence < 80) return 'Adherence ' + c.adherence + '% — below target';
+    if (c.unread > 0) return c.unread + ' unread message' + (c.unread > 1 ? 's' : '');
+    return null;
+  };
+  const needsAttention = roster.filter((c) => attnReason(c)).sort((a, b) => a.adherence - b.adherence);
+  // AI-draft a personalised check-in the coach reviews before sending.
+  const draftNudge = async (client: RosterClient) => {
+    setDraftClient(client); setDraftText(''); setDraftBusy(true);
+    const reason = attnReason(client) || 'general check-in';
+    const ctx = { name: client.name, goal: client.goal, adherence: client.adherence + '%', reason };
+    const reply = await askCoach([{ role: 'user', content: 'Draft a short, warm, personalised check-in message (2-3 sentences) I can send to this client as their coach. Reason for reaching out: ' + reason + '. Encourage them, reference their goal, and invite a reply. Write only the message, no preamble.' }], ctx);
+    setDraftBusy(false);
+    setDraftText(reply || ('Hey ' + client.name.split(' ')[0] + ' — checking in on how your week is going. You are working toward ' + client.goal.toLowerCase() + ', and I am here to help. What can I do to make this week easier?'));
+  };
+  const sendDraft = () => {
+    const client = draftClient; const body = draftText.trim();
+    if (!client || !body) return;
+    try { supabase.from('messages').insert({ client_id: client.id, sender: 'coach', body }).then(() => {}, () => {}); } catch { /* ignore */ }
+    try { supabase.functions.invoke('send-push', { body: { user_ids: [client.id], title: 'A note from your coach', body } }).then(() => {}, () => {}); } catch { /* ignore */ }
+    setDraftClient(null); setDraftText('');
+    Alert.alert('Sent', 'Your check-in was sent to ' + client.name.split(' ')[0] + '.');
   };
   const genSummary = async (client: RosterClient) => {
     setAiBusy(true); setAiSummary('');
@@ -174,6 +201,31 @@ export default function TrainerClients() {
           <Stat t={t} label="Est. revenue" value={'$' + revenue.toLocaleString()} unit="/mo" />
           <Stat t={t} label="Unread" value={String(unread)} />
         </View>
+
+        {needsAttention.length > 0 ? (
+          <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.warn, padding: 14, marginBottom: 16 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+              <Icon name="sparkle" size={15} color={t.warn} />
+              <Text style={{ color: t.ink, fontWeight: '800', fontSize: 14 }}>Suggested check-ins</Text>
+            </View>
+            <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 12 }}>{needsAttention.length} client{needsAttention.length > 1 ? 's' : ''} could use a nudge. Draft one with AI, review, then send.</Text>
+            {needsAttention.slice(0, 4).map((c) => (
+              <View key={c.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 9, borderTopWidth: 1, borderTopColor: t.ring }}>
+                <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+                  <Text style={{ color: t.brand, fontWeight: '800', fontSize: 12 }}>{c.name.split(' ').map((x) => x[0]).join('')}</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: t.ink, fontWeight: '700', fontSize: 14, textTransform: 'capitalize' }}>{c.name}</Text>
+                  <Text style={{ color: t.warn, fontSize: 11, marginTop: 1 }}>{attnReason(c)}</Text>
+                </View>
+                <Pressable onPress={() => draftNudge(c)} style={{ backgroundColor: t.brand, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                  <Icon name="sparkle" size={13} color={t.brandInk} />
+                  <Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 12 }}>Draft</Text>
+                </Pressable>
+              </View>
+            ))}
+          </View>
+        ) : null}
 
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
           <View><Text style={{ color: t.ink, fontWeight: '700', fontSize: 16 }}>Your Clients</Text>{atRisk > 0 ? <Text style={{ color: t.warn, fontSize: 11, fontWeight: '700', marginTop: 1 }}>{atRisk} need a check-in</Text> : null}</View>
@@ -528,6 +580,39 @@ export default function TrainerClients() {
           </View>
         </View>
               </KeyboardAvoidingView>
+      </Modal>
+
+      {/* AI check-in draft review */}
+      <Modal visible={!!draftClient} transparent animationType="slide" onRequestClose={() => setDraftClient(null)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setDraftClient(null)} />
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, borderColor: t.ring, padding: 20, paddingBottom: 30 }}>
+          {draftClient && (
+            <>
+              <Text style={{ color: t.ink, fontSize: 20, fontWeight: '800', textTransform: 'capitalize' }}>Check in with {draftClient.name.split(' ')[0]}</Text>
+              <Text style={{ color: t.ink3, fontSize: 13, marginTop: 2, marginBottom: 14 }}>{attnReason(draftClient)} · edit the draft before sending.</Text>
+              {draftBusy ? (
+                <View style={{ backgroundColor: t.surface2, borderRadius: 12, borderWidth: 1, borderColor: t.ring, padding: 20, alignItems: 'center', marginBottom: 14, flexDirection: 'row', justifyContent: 'center', gap: 10 }}>
+                  <ActivityIndicator color={t.brand} />
+                  <Text style={{ color: t.ink3, fontSize: 13 }}>Drafting a personalised check-in…</Text>
+                </View>
+              ) : (
+                <TextInput value={draftText} onChangeText={setDraftText} multiline placeholder="Your message…" placeholderTextColor={t.ink3} style={{ color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, padding: 14, fontSize: 14, minHeight: 110, textAlignVertical: 'top', marginBottom: 14, lineHeight: 20 }} />
+              )}
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                <Pressable onPress={() => draftNudge(draftClient)} disabled={draftBusy} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 16, justifyContent: 'center', flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Icon name="sparkle" size={14} color={t.brand} />
+                  <Text style={{ color: t.brand, fontWeight: '700', fontSize: 13 }}>Redraft</Text>
+                </Pressable>
+                <Pressable onPress={sendDraft} disabled={draftBusy || !draftText.trim()} style={{ flex: 1, backgroundColor: (!draftBusy && draftText.trim()) ? t.brand : t.surface2, borderColor: (!draftBusy && draftText.trim()) ? t.brand : t.ring, borderWidth: 1, borderRadius: 12, paddingVertical: 14, alignItems: 'center' }}>
+                  <Text style={{ color: (!draftBusy && draftText.trim()) ? t.brandInk : t.ink3, fontWeight: '800', fontSize: 14 }}>Send check-in</Text>
+                </Pressable>
+              </View>
+              <Pressable onPress={() => setDraftClient(null)} style={{ paddingVertical: 12, alignItems: 'center' }}>
+                <Text style={{ color: t.ink3, fontWeight: '700', fontSize: 13 }}>Cancel</Text>
+              </Pressable>
+            </>
+          )}
+        </View>
       </Modal>
     </SafeAreaView>
   );
