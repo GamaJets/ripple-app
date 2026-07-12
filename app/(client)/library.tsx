@@ -5,7 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
-import { EX_VIDEOS } from '../../src/lib/trainerMock';
+import { useExerciseVideos, type VideoItem } from '../../src/ui/exerciseVideos';
 
 const GROUPS = ['All', 'Legs', 'Chest', 'Back', 'Shoulders', 'Hamstrings'];
 
@@ -14,9 +14,10 @@ export default function Library() {
  const router = useRouter();
  const [q, setQ] = useState('');
  const [group, setGroup] = useState('All');
- const [open, setOpen] = useState<typeof EX_VIDEOS[number] | null>(null);
+ const { videos } = useExerciseVideos();
+ const [open, setOpen] = useState<VideoItem | null>(null);
 
- const list = EX_VIDEOS.filter((v) =>
+ const list = videos.filter((v) =>
  (group === 'All' || v.group === group) &&
  (q.trim() === '' || v.name.toLowerCase().includes(q.toLowerCase()))
  );
@@ -61,12 +62,12 @@ export default function Library() {
  <Text style={{ color: t.ink, fontSize: 18, fontWeight: '800' }}>{open?.name}</Text>
  <Pressable onPress={() => setOpen(null)}><Text style={{ color: t.brand, fontSize: 16, fontWeight: '800' }}>Close</Text></Pressable>
  </View>
- <Pressable onPress={() => open && Linking.openURL('https://www.youtube.com/results?search_query=' + encodeURIComponent(open.name + ' proper form technique'))} style={{ height: 200, borderRadius: 14, backgroundColor: '#000', borderWidth: 1, borderColor: t.ring, alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
+ <Pressable onPress={() => open && Linking.openURL(open.url || ('https://www.youtube.com/results?search_query=' + encodeURIComponent(open.name + ' proper form technique')))} style={{ height: 200, borderRadius: 14, backgroundColor: '#000', borderWidth: 1, borderColor: t.ring, alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
  <View style={{ width: 62, height: 62, borderRadius: 31, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}><Text style={{ fontSize: 26, color: t.brandInk }}>▶</Text></View>
  <Text style={{ color: '#bbb', fontSize: 13, marginTop: 10 }}>{open ? `${open.group} · ${open.dur}` : ''}</Text>
  </Pressable>
- <Pressable onPress={() => open && Linking.openURL('https://www.youtube.com/results?search_query=' + encodeURIComponent(open.name + ' proper form technique'))} style={{ backgroundColor: t.brand, borderRadius: 12, paddingVertical: 13, alignItems: 'center', marginBottom: 12 }}>
- <Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 15 }}>▶ Watch Demo Video</Text>
+ <Pressable onPress={() => open && Linking.openURL(open.url || ('https://www.youtube.com/results?search_query=' + encodeURIComponent(open.name + ' proper form technique')))} style={{ backgroundColor: t.brand, borderRadius: 12, paddingVertical: 13, alignItems: 'center', marginBottom: 12 }}>
+ <Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 15 }}>▶ {open?.url ? "Watch coach's video" : 'Watch Demo Video'}</Text>
  </Pressable>
  <Text style={{ color: t.ink2, fontSize: 13, lineHeight: 19 }}>Watch the movement, then head to Train to log your sets. When your coach uploads their own clip it plays here; for now this opens a trusted demo. If a lift bothers you, use “Swap” on the workout screen for an alternative.</Text>
  </View>
