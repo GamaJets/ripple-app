@@ -1,14 +1,15 @@
 // Music & Playlists — connect Spotify / Apple Music and let the AI build a
 // workout-matched playlist. Live OAuth/MusicKit linking lands in the backend
 // phase; this builds the list and (then) pushes it to the client's service.
-import { useState } from 'react';
-import { View, Text, Pressable, ScrollView, Alert, Linking } from 'react-native';
+import { useState, useEffect } from 'react';
+import { View, Text, Pressable, ScrollView, Alert, Linking, ActivityIndicator } from 'react-native';
 import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { generatePlaylist, type Service, type GenParams, type Playlist } from '../../src/lib/music';
+import { connectSpotify, spotifyStatus, spotifyDisconnect, createSpotifyPlaylist } from '../../src/lib/spotify';
 
 const SERVICES: { id: Service; name: string; ico: string; note: string }[] = [
  { id: 'apple', name: 'Apple Music', ico: '', note: 'Plays natively on your iPhone' },
@@ -46,6 +47,17 @@ export default function Music() {
  const [minutes, setMinutes] = useState(45);
  const [salt, setSalt] = useState(0);
  const [pl, setPl] = useState<Playlist | null>(null);
+ const [spotifyBusy, setSpotifyBusy] = useState(false);
+ const [spotifyName, setSpotifyName] = useState<string | undefined>(undefined);
+ useEffect(() => { (async () => { const st = await spotifyStatus(); if (st.connected) { setConn((p) => ({ ...p, spotify: true })); setSpotifyName(st.name); } })(); }, []);
+ const toggleService = async (id: Service) => {
+   if (id !== 'spotify') { setConn((p) => ({ ...p, apple: !p.apple })); return; }
+   if (conn.spotify) { await spotifyDisconnect(); setConn((p) => ({ ...p, spotify: false })); setSpotifyName(undefined); return; }
+   setSpotifyBusy(true);
+   try { const r = await connectSpotify(); setConn((p) => ({ ...p, spotify: true })); setSpotifyName(r.name); }
+   catch (e) { Alert.alert('Spotify', (e && e.message) || 'Could not connect.'); }
+   finally { setSpotifyBusy(false); }
+ };
 
  const anyConnected = conn.apple || conn.spotify;
  const openInSpotify = (q: string) => { Linking.openURL('https://open.spotify.com/search/' + encodeURIComponent(q)).catch(() => Alert.alert('Open Spotify', 'Install the Spotify app, then search "' + q + '".')); };
@@ -55,10 +67,19 @@ export default function Music() {
  setPl(generatePlaylist({ mode, intensity, minutes }, nextSalt));
  };
 
- const push = () => {
- const to = SERVICES.filter((s) => conn[s.id]).map((s) => s.name);
- if (!to.length) { Alert.alert('Connect a service', 'Turn on Apple Music or Spotify above to save this playlist.'); return; }
- Alert.alert('Playlist ready', `Saving "${pl?.title}" to ${to.join(' & ')}.\n\nLive linking to your ${to.join('/')} account arrives with the backend rollout — the list is built and ready to push.`);
+ const push = async () => {
+ if (!pl) return;
+ if (conn.spotify) {
+   setSpotifyBusy(true);
+   try {
+     const url = await createSpotifyPlaylist(pl.title, pl.tracks.map((tr) => ({ title: tr.title, artist: tr.artist })));
+     Alert.alert('Saved to Spotify', pl.title + ' is in your Spotify library.', [{ text: 'Open', onPress: () => Linking.openURL(url).catch(() => {}) }, { text: 'Done' }]);
+   } catch (e) { Alert.alert('Spotify', (e && e.message) || 'Could not save the playlist.'); }
+   finally { setSpotifyBusy(false); }
+   return;
+ }
+ if (conn.apple) { Alert.alert('Apple Music', 'Apple Music saving uses MusicKit, which arrives with the Apple Music connect. For now, tap a track to open it.'); return; }
+ Alert.alert('Connect a service', 'Connect Spotify above to save this playlist to your account.');
  };
 
  return (
@@ -77,9 +98,9 @@ export default function Music() {
  <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15 }}>{s.name}</Text>
  <Text style={{ color: t.ink3, fontSize: 12, marginTop: 1 }}>{s.note}</Text>
  </View>
- <Pressable onPress={() => setConn((p) => ({ ...p, [s.id]: !p[s.id] }))}
- style={{ paddingHorizontal: 14, paddingVertical: 8, borderRadius: 9, backgroundColor: conn[s.id] ? t.surface2 : t.brand, borderWidth: 1, borderColor: conn[s.id] ? t.ring : t.brand }}>
- <Text style={{ color: conn[s.id] ? t.ink : t.brandInk, fontWeight: '700', fontSize: 13 }}>{conn[s.id] ? 'Connected' : 'Connect'}</Text>
+ <Pressable onPress={() => toggleService(s.id)} disabled={s.id === 'spotify' && spotifyBusy}
+ style={{ paddingHorizontal: 14, paddingVertical: 8, borderRadius: 9, minWidth: 96, alignItems: 'center', backgroundColor: conn[s.id] ? t.surface2 : t.brand, borderWidth: 1, borderColor: conn[s.id] ? t.ring : t.brand }}>
+ {s.id === 'spotify' && spotifyBusy ? <ActivityIndicator color={t.brandInk} size="small" /> : <Text numberOfLines={1} style={{ color: conn[s.id] ? t.ink : t.brandInk, fontWeight: '700', fontSize: 13 }}>{conn[s.id] ? ((s.id === 'spotify' && spotifyName) ? spotifyName : 'Connected') : 'Connect'}</Text>}
  </Pressable>
  </View>
  ))}
@@ -125,7 +146,7 @@ export default function Music() {
  <Text style={{ color: t.ink, fontWeight: '700', fontSize: 14 }}>Harder </Text>
  </Pressable>
  </View>
- <Text style={{ color: t.ink3, fontSize: 11, textAlign: 'center', marginTop: 10 }}>Tap any track to play it in Spotify. Saving the full playlist to your account arrives with the Spotify connect.</Text>
+ <Text style={{ color: t.ink3, fontSize: 11, textAlign: 'center', marginTop: 10 }}>Tap any track to play it in Spotify. Connect Spotify above, then Save adds the whole playlist to your account.</Text>
  </View>
  ) : (
  <View style={{ backgroundColor: t.surface, borderRadius: 18, borderWidth: 1, borderColor: t.ring, padding: 24, alignItems: 'center' }}>
