@@ -10,6 +10,7 @@ import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { useClientData } from '../../src/ui/clientData';
 import { macrosFor } from '../../src/lib/nutrition';
+import { progressDoc, shareDoc } from '../../src/lib/exportShare';
 import { useRouter } from 'expo-router';
 import { TrendChart } from '../../src/ui/Chart';
 import { Icon } from '../../src/ui/Icon';
@@ -87,6 +88,11 @@ export default function Scans() {
   const t = useTheme();
   const router = useRouter();
   const cd = useClientData();
+  const shareProgress = async () => {
+    const rows = [...cd.scans].sort((a, b) => Date.parse(a.takenAt) - Date.parse(b.takenAt)).map((sc) => ({ date: new Date(sc.takenAt).toLocaleDateString(), weightKg: sc.weightKg, bodyFatPct: sc.bodyFatPct, muscleKg: sc.skeletalMuscleKg }));
+    const { html, text } = progressDoc(cd.name, rows);
+    await shareDoc(html, text, 'Progress');
+  };
   const scans = cd.scans;
   const [img, setImg] = useState<string | null>(null);
   const [wt, setWt] = useState(''); const [bf, setBf] = useState(''); const [sm, setSm] = useState('');
@@ -183,7 +189,10 @@ export default function Scans() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
 
-        <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: SERIF, marginTop: 4, marginBottom: 12 }}>Progress</Text>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4, marginBottom: 12 }}>
+          <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: SERIF }}>Progress</Text>
+          <Pressable onPress={shareProgress} accessibilityLabel="Share progress" style={{ width: 38, height: 38, borderRadius: 12, backgroundColor: t.surface, borderWidth: 1, borderColor: t.ring, alignItems: 'center', justifyContent: 'center' }}><Icon name="share" size={16} color={t.ink2} /></Pressable>
+        </View>
 
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginBottom: 14 }}>
           {([['chart', 'Report', '/(client)/report'], ['trophy', 'Records', '/(client)/records'], ['flame', 'Consistency', '/(client)/consistency'], ['chart', 'Standards', '/(client)/standards'], ['ruler', 'Measurements', '/(client)/measurements'], ['target', 'Goal', '/(client)/goal']] as const).map(([ic, label, route]) => (

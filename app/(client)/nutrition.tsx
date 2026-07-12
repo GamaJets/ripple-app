@@ -8,6 +8,7 @@ import Svg, { Circle } from 'react-native-svg';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { buildPlan, swapIndex, groceryData, DEPTS, DEPT_ICO, ALLERGENS, type PlannedMeal } from '../../src/lib/meals';
+import { mealPlanDoc, shareDoc } from '../../src/lib/exportShare';
 import type { Diet, Goal } from '../../src/lib/types';
 import { useClientData } from '../../src/ui/clientData';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
@@ -82,6 +83,12 @@ export default function Nutrition() {
   const groc = groceryData(input);
   const grocCount = DEPTS.reduce((a, d) => a + (groc.byDept[d]?.length ?? 0), 0);
   const WEEKD = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const sharePlan = async () => {
+    const rows = plan.map((m) => ({ slot: m.slot, name: m.n, K: m.K, P: m.P, C: m.C, F: m.F }));
+    const labels = c.avoid.map((a) => (ALLERGENS.find((x) => x.id === a)?.label ?? a));
+    const { html, text } = mealPlanDoc(c.name, target.kcal, rows, labels);
+    await shareDoc(html, text, 'Meal plan');
+  };
   const weekPlans = view === 'week' ? WEEKD.map((_, d) => { const ov: Record<number, number> = {}; plan.forEach((m) => { ov[m.pos] = m.idx + d; }); return buildPlan({ ...input, mealOverride: ov }); }) : [];
 
   const macroBar = (label: string, val: number, tgt: number, col: string) => (
@@ -103,11 +110,14 @@ export default function Nutrition() {
         {/* header row: serif title + gold coach chip */}
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4, marginBottom: 14 }}>
           <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: SERIF }}>Meals</Text>
-          {coachAdjust ? (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderColor: t.s3, borderRadius: 16, paddingHorizontal: 11, paddingVertical: 6 }}>
-              <Icon name="sparkle" size={13} color={t.s3} /><Text style={{ color: t.s3, fontSize: 11, fontWeight: '700' }}>Coach-adjusted</Text>
-            </View>
-          ) : null}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            {coachAdjust ? (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderColor: t.s3, borderRadius: 16, paddingHorizontal: 11, paddingVertical: 6 }}>
+                <Icon name="sparkle" size={13} color={t.s3} /><Text style={{ color: t.s3, fontSize: 11, fontWeight: '700' }}>Coach-adjusted</Text>
+              </View>
+            ) : null}
+            <Pressable onPress={sharePlan} accessibilityLabel="Share plan" style={{ width: 38, height: 38, borderRadius: 12, backgroundColor: t.surface, borderWidth: 1, borderColor: t.ring, alignItems: 'center', justifyContent: 'center' }}><Icon name="share" size={16} color={t.ink2} /></Pressable>
+          </View>
         </View>
 
         {/* hero: ring + macro bars */}
