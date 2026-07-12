@@ -79,6 +79,7 @@ export default function TrainerClients() {
   const active = roster.length;
   const revenue = active * MOCK_TRAINER.sessionFee * 4;
   const unread = roster.reduce((a, c) => a + c.unread, 0);
+  const atRisk = roster.filter((c) => c.adherence < 80).length;
 
   // Live training data is available for the demo client (c1).
   const hasLog = sel?.id === 'c1';
@@ -141,7 +142,7 @@ export default function TrainerClients() {
         </View>
 
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-          <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16 }}>Your Clients</Text>
+          <View><Text style={{ color: t.ink, fontWeight: '700', fontSize: 16 }}>Your Clients</Text>{atRisk > 0 ? <Text style={{ color: t.warn, fontSize: 11, fontWeight: '700', marginTop: 1 }}>{atRisk} need a check-in</Text> : null}</View>
           <View style={{ flexDirection: 'row', gap: 8 }}>
             <Pressable onPress={() => { setInvEmail(''); setInvMode('online'); setInvOpen(true); }} style={{ backgroundColor: t.surface2, borderWidth: 1, borderColor: t.ring, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 7 }}><Text style={{ color: t.ink2, fontWeight: '800', fontSize: 12 }}>Invite by email</Text></Pressable>
             <Pressable onPress={() => { setNewName(''); setNewEmail(''); setNewGoal('Fat loss'); setNewMode('online'); setAddOpen(true); }} style={{ backgroundColor: t.brand, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 7 }}><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 12 }}>Add client</Text></Pressable>
@@ -176,6 +177,7 @@ export default function TrainerClients() {
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                   <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, textTransform: 'capitalize' }}>{c.name}</Text>
                   {c.unread > 0 && <View style={{ backgroundColor: t.s6, borderRadius: 8, minWidth: 16, height: 16, paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: '#fff', fontSize: 10, fontWeight: '800' }}>{c.unread}</Text></View>}
+                  {c.adherence < 80 && <View style={{ backgroundColor: 'rgba(250,178,25,0.18)', borderRadius: 8, paddingHorizontal: 7, paddingVertical: 2 }}><Text style={{ color: t.warn, fontSize: 10, fontWeight: '800' }}>CHECK IN</Text></View>}
                 </View>
                 <Text style={{ color: t.ink3, fontSize: 12, marginTop: 1 }}>{c.goal} · {c.mode === 'inperson' ? 'In-person' : 'Online'} · {c.lastActive}</Text>
               </View>
