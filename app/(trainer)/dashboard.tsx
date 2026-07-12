@@ -115,7 +115,7 @@ export default function TrainerClients() {
           </View>
         ) : null}
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginBottom: 16 }}>
-          {([["train","Programs","/(trainer)/builder"],["calendar","Schedule","/(trainer)/calendar"],["video","Videos","/(trainer)/videos"],["chart","Analytics","/(trainer)/analytics"],["trophy","Leaderboard","/(trainer)/leaderboard"]] as const).map(([ic, label, route]) => (
+          {([["train","Programs","/(trainer)/builder"],["calendar","Schedule","/(trainer)/calendar"],["video","Videos","/(trainer)/videos"],["chart","Analytics","/(trainer)/analytics"],["trophy","Leaderboard","/(trainer)/leaderboard"],["message","Feedback","/(trainer)/feedback"]] as const).map(([ic, label, route]) => (
             <Pressable key={route} onPress={() => router.push(route as any)} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 8 }}>
               <Icon name={ic} size={14} color={t.brand} /><Text style={{ color: t.ink2, fontWeight: '700', fontSize: 13 }}>{label}</Text>
             </Pressable>

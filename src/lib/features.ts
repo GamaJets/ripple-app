@@ -58,6 +58,7 @@ export const CLIENT_FEATURES: Feature[] = [
   { key: 'appearance', label: 'Appearance', note: 'Theme & accent colour', route: '/(client)/appearance', icon: 'palette', area: 'me', keywords: 'theme dark light colour' },
   { key: 'settings', label: 'Settings', note: 'Notifications, units, legal & version', route: '/(client)/settings', icon: 'settings', area: 'me', keywords: 'notifications units legal about' },
   { key: 'switch', label: 'Switch portal', note: 'Client · Trainer · Owner', route: '/', icon: 'swap', area: 'me', keywords: 'role trainer owner' },
+  { key: 'feedback', label: 'Send Feedback', note: 'Tell us what to improve', route: '/(client)/feedback', icon: 'message', area: 'me', keywords: 'feedback bug idea report suggest' },
 ];
 
 export function searchFeatures(list: Feature[], q: string): Feature[] {
@@ -83,6 +84,7 @@ export const TRAINER_NAV: NavItem[] = [
   { key: 'videos', label: 'Videos', note: 'Exercise video library', route: '/(trainer)/videos', icon: 'video', keywords: 'exercise demo upload' },
   { key: 'analytics', label: 'Analytics', note: 'Adherence, revenue & at-risk clients', route: '/(trainer)/analytics', icon: 'chart', keywords: 'stats retention revenue' },
   { key: 'leaderboard', label: 'Leaderboard', note: 'Rank clients by consistency', route: '/(trainer)/leaderboard', icon: 'trophy', keywords: 'ranking standings' },
+  { key: 'feedback', label: 'Send Feedback', note: 'Report a bug or share an idea', route: '/(trainer)/feedback', icon: 'message', keywords: 'feedback bug idea report suggest' },
   { key: 'profile', label: 'Profile', note: 'Your bio, offers & rate', route: '/(trainer)/profile', icon: 'me', keywords: 'bio rate offers settings' },
 ];
 
@@ -92,6 +94,7 @@ export const OWNER_NAV: NavItem[] = [
   { key: 'brand', label: 'Brand Studio', note: 'White-label theme & logo', route: '/(owner)/brand', icon: 'palette', keywords: 'white label logo colour theme' },
   { key: 'growth', label: 'Growth', note: 'Signups, funnel & promos', route: '/(owner)/growth', icon: 'trending', keywords: 'marketing funnel promos' },
   { key: 'ops', label: 'Operations', note: 'Announcements, support & activity', route: '/(owner)/ops', icon: 'wrench', keywords: 'support inbox announce activity log' },
+  { key: 'feedback', label: 'Feedback Inbox', note: 'What testers are saying', route: '/(owner)/feedback', icon: 'message', keywords: 'feedback testers bugs ideas reviews' },
 ];
 
 export function searchNav(list: NavItem[], q: string): NavItem[] {

@@ -58,6 +58,7 @@ export default function ClientLayout() {
       <Tabs.Screen name="standards" options={{ href: null, title: 'Strength Standards' }} />
       <Tabs.Screen name="trainers" options={{ href: null, title: 'Find a Trainer' }} />
       <Tabs.Screen name="explore" options={{ href: null, title: 'Explore' }} />
+      <Tabs.Screen name="feedback" options={{ href: null, title: 'Send Feedback' }} />
     </Tabs>
   );
 }
