@@ -59,6 +59,12 @@
         "projectId": "7d4ca6bf-2f1c-4b87-94f4-9b6bdd008aad"
       }
     },
-    "owner": "repple"
+    "owner": "repple",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/7d4ca6bf-2f1c-4b87-94f4-9b6bdd008aad"
+    }
   }
 }
