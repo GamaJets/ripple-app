@@ -109,6 +109,11 @@ export default function Welcome() {
  <Text style={{ fontSize: 15 }}></Text><Text style={{ color: t.ink, fontWeight: '700', fontSize: 15 }}>Continue with Google</Text>
  </Pressable>
 
+ <Pressable onPress={() => { auth.enterDemo(); router.replace('/'); }} accessibilityRole="button" accessibilityLabel="Explore the demo" style={{ marginTop: 18, alignItems: 'center', paddingVertical: 12, borderTopWidth: 1, borderTopColor: t.ring }}>
+ <Text style={{ color: t.brand, fontWeight: '800', fontSize: 14, marginTop: 10 }}>Explore the demo →</Text>
+ <Text style={{ color: t.ink3, fontSize: 11, marginTop: 3 }}>See the full app with sample data — no sign-up needed</Text>
+ </Pressable>
+
  <Text style={{ color: t.ink3, fontSize: 11, textAlign: 'center', marginTop: 22, lineHeight: 16 }}>{USE_SUPABASE ? 'Your account is securely stored. By continuing you agree to the Terms & Privacy Policy.' : 'Demo mode — any email/password works. Real accounts activate when the backend is connected.'}</Text>
  </ScrollView>
  </KeyboardAvoidingView>

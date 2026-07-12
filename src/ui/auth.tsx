@@ -24,6 +24,8 @@ interface AuthValue {
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (name: string, email: string, password: string) => Promise<SignUpResult>;
   signInWithProvider: (provider: 'apple' | 'google') => Promise<void>;
+  demo: boolean;
+  enterDemo: () => void;
   signOut: () => void;
 }
 
@@ -35,6 +37,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   // In live mode we don't know the persisted session until we've checked storage.
   const [loading, setLoading] = useState<boolean>(USE_SUPABASE);
+  const [demo, setDemo] = useState(false);
 
   // Build an AuthUser from the current Supabase session (+ profile row if present).
   async function refreshFromSession(): Promise<AuthUser | null> {
@@ -96,13 +99,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     throw new Error('Social sign-in is not set up yet — please use email for now.');
   };
 
+  const enterDemo = () => {
+    // Guest/demo entry: no Supabase session, so every provider falls back to its
+    // rich in-memory sample data. Great for trial + App Store review (no login).
+    setDemo(true);
+    setUser({ id: 'demo-guest', name: 'Demo User', email: 'demo@repple.app', role: 'client' });
+  };
+
   const signOut = () => {
     if (USE_SUPABASE) sbSignOut().catch(() => {});
-    setUser(null);
+    setUser(null); setDemo(false);
   };
 
   return (
-    <Ctx.Provider value={{ authed: !!user, user, loading, signIn, signUp, signInWithProvider, signOut }}>
+    <Ctx.Provider value={{ authed: !!user, user, loading, demo, enterDemo, signIn, signUp, signInWithProvider, signOut }}>
       {children}
     </Ctx.Provider>
   );
