@@ -15,6 +15,7 @@ export default function TrainerLayout() {
   const bottomPad = Math.max(insets.bottom, 10);
   return (
     <Tabs
+      backBehavior="history"
       screenOptions={{
         headerShown: false,
         tabBarStyle: { backgroundColor: t.surface, borderTopColor: t.ring, height: 56 + bottomPad, paddingTop: 8, paddingBottom: bottomPad },

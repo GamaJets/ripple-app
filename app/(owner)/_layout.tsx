@@ -6,7 +6,7 @@ function TabIcon({ emoji, focused }: { emoji: string; focused: boolean }) { retu
 export default function OwnerLayout() {
   const t = useTheme();
   return (
-    <Tabs screenOptions={{ headerShown: false, tabBarStyle: { backgroundColor: t.surface, borderTopColor: t.ring, height: 62, paddingTop: 6, paddingBottom: 8 }, tabBarActiveTintColor: t.brand, tabBarInactiveTintColor: t.ink3, tabBarLabelStyle: { fontSize: 11, fontWeight: '600' }, sceneStyle: { backgroundColor: t.bg } }}>
+    <Tabs backBehavior="history" screenOptions={{ headerShown: false, tabBarStyle: { backgroundColor: t.surface, borderTopColor: t.ring, height: 62, paddingTop: 6, paddingBottom: 8 }, tabBarActiveTintColor: t.brand, tabBarInactiveTintColor: t.ink3, tabBarLabelStyle: { fontSize: 11, fontWeight: '600' }, sceneStyle: { backgroundColor: t.bg } }}>
       <Tabs.Screen name="dashboard" options={{ title: 'Overview', tabBarIcon: ({ color }) => <Icon name="grid" size={23} color={color} /> }} />
       <Tabs.Screen name="trainers" options={{ title: 'Trainers', tabBarIcon: ({ color }) => <Icon name="people" size={23} color={color} /> }} />
       <Tabs.Screen name="brand" options={{ title: 'Brand', tabBarIcon: ({ color }) => <Icon name="palette" size={23} color={color} /> }} />

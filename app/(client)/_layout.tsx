@@ -15,6 +15,7 @@ export default function ClientLayout() {
   const bottomPad = Math.max(insets.bottom, 10);
   return (
     <Tabs
+      backBehavior="history"
       screenOptions={{
         headerStyle: { backgroundColor: t.surface },
         headerTintColor: t.ink,
