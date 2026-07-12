@@ -15,6 +15,7 @@ import { useCoachNotes } from '../../src/ui/coachNotes';
 import { useAnnouncements } from '../../src/ui/announcements';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useCheckIns } from '../../src/ui/checkins';
+import { useInvites } from '../../src/ui/invites';
 import { currentStreak, longestStreak, personalRecords, weekStats } from '../../src/lib/streaks';
 
 function Stat({ t, label, value, unit }: { t: Theme; label: string; value: string; unit?: string }) {
@@ -41,6 +42,7 @@ export default function TrainerClients() {
   const { get: getNutri, setAdjust: setNutri, clear: clearNutri } = useCoachNutrition();
   const { getNotes, addNote, removeNote } = useCoachNotes();
   const { addAnnouncement } = useAnnouncements();
+  const { sent: sentInvites, sendInvite, revokeInvite } = useInvites();
   const [pnote, setPnote] = useState('');
   const [bcOpen, setBcOpen] = useState(false);
   const [bcText, setBcText] = useState('');
@@ -51,6 +53,9 @@ export default function TrainerClients() {
   const [newName, setNewName] = useState('');
   const [newGoal, setNewGoal] = useState('Fat loss');
   const [newMode, setNewMode] = useState<'online' | 'inperson'>('online');
+  const [invOpen, setInvOpen] = useState(false);
+  const [invEmail, setInvEmail] = useState('');
+  const [invMode, setInvMode] = useState<'online' | 'inperson'>('online');
   const active = roster.length;
   const revenue = active * MOCK_TRAINER.sessionFee * 4;
   const unread = roster.reduce((a, c) => a + c.unread, 0);
@@ -98,8 +103,30 @@ export default function TrainerClients() {
 
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
           <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16 }}>Your Clients</Text>
-          <Pressable onPress={() => { setNewName(''); setNewGoal('Fat loss'); setNewMode('online'); setAddOpen(true); }} style={{ backgroundColor: t.brand, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 7 }}><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 12 }}>Add client</Text></Pressable>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <Pressable onPress={() => { setInvEmail(''); setInvMode('online'); setInvOpen(true); }} style={{ backgroundColor: t.surface2, borderWidth: 1, borderColor: t.ring, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 7 }}><Text style={{ color: t.ink2, fontWeight: '800', fontSize: 12 }}>Invite by email</Text></Pressable>
+            <Pressable onPress={() => { setNewName(''); setNewGoal('Fat loss'); setNewMode('online'); setAddOpen(true); }} style={{ backgroundColor: t.brand, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 7 }}><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 12 }}>Add client</Text></Pressable>
+          </View>
         </View>
+        {sentInvites.filter((i) => i.status === 'pending').length > 0 ? (
+          <View style={{ marginBottom: 12 }}>
+            <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>Pending invites</Text>
+            {sentInvites.filter((i) => i.status === 'pending').map((i) => (
+              <View key={i.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: t.surface, borderRadius: 14, borderWidth: 1, borderColor: t.ring, borderStyle: 'dashed', padding: 13, marginBottom: 8 }}>
+                <View style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+                  <Icon name="message" size={16} color={t.brand} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: t.ink, fontWeight: '700', fontSize: 14 }}>{i.email}</Text>
+                  <Text style={{ color: t.ink3, fontSize: 12, marginTop: 1 }}>{i.mode === 'inperson' ? 'In-person' : 'Online'} · awaiting sign-up / accept</Text>
+                </View>
+                <Pressable onPress={() => revokeInvite(i.id)} style={{ paddingHorizontal: 10, paddingVertical: 7, borderRadius: 9, borderWidth: 1, borderColor: t.ring }}>
+                  <Text style={{ color: t.ink3, fontWeight: '700', fontSize: 12 }}>Cancel</Text>
+                </Pressable>
+              </View>
+            ))}
+          </View>
+        ) : null}
         {roster.map((c) => (
           <Pressable key={c.id} onPress={() => setSel(c)} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 15, marginBottom: 10 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
@@ -305,6 +332,27 @@ export default function TrainerClients() {
           <Text style={{ color: t.ink3, fontSize: 13, marginBottom: 16 }}>Everyone on your roster sees this on their dashboard.</Text>
           <TextInput value={bcText} onChangeText={setBcText} placeholder="Your announcement…" placeholderTextColor={t.ink3} multiline style={{ color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, minHeight: 90, textAlignVertical: 'top', marginBottom: 16 }} />
           <Pressable onPress={() => { if (!bcText.trim()) { Alert.alert('Write something', 'Enter your announcement.'); return; } addAnnouncement(bcText); setBcOpen(false); Alert.alert('Sent', 'Your clients will see this on their dashboard.'); }} style={{ backgroundColor: t.brand, borderRadius: 14, paddingVertical: 15, alignItems: 'center' }}><Text style={{ color: t.brandInk, fontWeight: '800' }}>Send to all clients</Text></Pressable>
+        </View>
+      </Modal>
+      <Modal visible={invOpen} transparent animationType="slide" onRequestClose={() => setInvOpen(false)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setInvOpen(false)} />
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, borderColor: t.ring, padding: 20, paddingBottom: 30 }}>
+          <Text style={{ color: t.ink, fontSize: 20, fontWeight: '800', marginBottom: 4 }}>Invite a client by email</Text>
+          <Text style={{ color: t.ink3, fontSize: 13, marginBottom: 16 }}>They see your invitation in the Repple app when they sign in with this email; accepting links them to you.</Text>
+          <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>Email</Text>
+          <TextInput value={invEmail} onChangeText={setInvEmail} placeholder="client@email.com" placeholderTextColor={t.ink3} autoCapitalize="none" keyboardType="email-address" style={{ color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, marginBottom: 16 }} />
+          <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>Coaching type</Text>
+          <View style={{ flexDirection: 'row', gap: 8, marginBottom: 20 }}>
+            {([['online', 'Online'], ['inperson', 'In-person']] as const).map(([id, label]) => (
+              <Pressable key={id} onPress={() => setInvMode(id)} style={{ flex: 1, paddingVertical: 10, borderRadius: 12, alignItems: 'center', backgroundColor: invMode === id ? t.brand : t.surface2, borderWidth: 1, borderColor: invMode === id ? t.brand : t.ring }}>
+                <Text style={{ color: invMode === id ? t.brandInk : t.ink2, fontWeight: '700', fontSize: 12 }}>{label}</Text>
+              </Pressable>
+            ))}
+          </View>
+          <View style={{ flexDirection: 'row', gap: 10 }}>
+            <Pressable onPress={() => setInvOpen(false)} style={{ flex: 1, paddingVertical: 15, borderRadius: 14, alignItems: 'center', backgroundColor: t.surface2, borderWidth: 1, borderColor: t.ring }}><Text style={{ color: t.ink2, fontWeight: '800' }}>Cancel</Text></Pressable>
+            <Pressable onPress={() => { const e = invEmail.trim(); if (!e || !e.includes('@')) { Alert.alert('Enter an email', 'Add a valid client email address.'); return; } sendInvite(e, invMode); setInvOpen(false); Alert.alert('Invitation sent', e + ' will see your ' + (invMode === 'inperson' ? 'in-person' : 'online') + ' coaching invite when they sign in to Repple.', [{ text: 'Done' }]); }} style={{ flex: 2, paddingVertical: 15, borderRadius: 14, alignItems: 'center', backgroundColor: t.brand }}><Text style={{ color: t.brandInk, fontWeight: '800' }}>Send invite</Text></Pressable>
+          </View>
         </View>
       </Modal>
     </SafeAreaView>

@@ -17,6 +17,7 @@ import { useCoachFeedback } from '../../src/ui/feedback';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
 import { useAnnouncements } from '../../src/ui/announcements';
 import { useSessions } from '../../src/ui/sessions';
+import { useInvites } from '../../src/ui/invites';
 import { currentStreak, weekStats, personalRecords } from '../../src/lib/streaks';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -55,6 +56,7 @@ export default function Home() {
   const coachNotes = useCoachFeedback().getFeedback(c.id);
   const ann = useAnnouncements().latest;
   const { sessions } = useSessions();
+  const { received: myInvites, acceptInvite: acceptCoachInvite, declineInvite: declineCoachInvite } = useInvites();
 
   const solo = c.coachingMode === 'solo';
   const online = c.coachingMode === 'online';
@@ -128,6 +130,21 @@ export default function Home() {
             {(coachNotes.length > 0 || !!ann) ? <View style={{ position: 'absolute', top: 8, right: 9, width: 9, height: 9, borderRadius: 5, backgroundColor: t.brand, borderWidth: 2, borderColor: t.surface }} /> : null}
           </Pressable>
         </View>
+
+        {myInvites.length > 0 ? (
+          <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.brand, padding: 14, marginBottom: 11 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+              <Icon name="sparkle" size={15} color={t.brand} />
+              <Text style={{ color: t.brand, fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6 }}>Coaching invitation{myInvites[0].demo ? ' · sample' : ''}</Text>
+            </View>
+            <Text style={{ color: t.ink, fontSize: 15, fontWeight: '800' }}>{myInvites[0].coachName || 'A coach'} invited you</Text>
+            <Text style={{ color: t.ink3, fontSize: 12.5, marginTop: 2, marginBottom: 11 }}>{myInvites[0].mode === 'inperson' ? 'In-person' : 'Online'} coaching. Accept to connect.</Text>
+            <View style={{ flexDirection: 'row', gap: 9 }}>
+              <Pressable onPress={() => declineCoachInvite(myInvites[0].id)} style={{ flex: 1, paddingVertical: 11, borderRadius: 11, alignItems: 'center', backgroundColor: t.surface2, borderWidth: 1, borderColor: t.ring }}><Text style={{ color: t.ink2, fontWeight: '800', fontSize: 13 }}>Decline</Text></Pressable>
+              <Pressable onPress={async () => { const iv = myInvites[0]; const m = await acceptCoachInvite(iv.id); c.setCoachingMode(m); }} style={{ flex: 2, paddingVertical: 11, borderRadius: 11, alignItems: 'center', backgroundColor: t.brand }}><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 13 }}>Accept</Text></Pressable>
+            </View>
+          </View>
+        ) : null}
 
         {/* today's plan hero */}
         <View style={{ backgroundColor: t.surface, borderRadius: 18, borderWidth: 1, borderColor: t.ring, padding: 15, marginBottom: 11, flexDirection: 'row', alignItems: 'center', gap: 14 }}>

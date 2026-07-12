@@ -9,6 +9,7 @@ import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { Icon } from '../../src/ui/Icon';
 import { useClientData } from '../../src/ui/clientData';
+import { useInvites } from '../../src/ui/invites';
 
 const SERIF = 'Georgia';
 type Mode = 'online' | 'inperson';
@@ -43,6 +44,12 @@ export default function FindTrainer() {
   const t = useTheme();
   const router = useRouter();
   const cd = useClientData();
+  const { received, acceptInvite, declineInvite } = useInvites();
+  const acceptCoach = async (id: string, coachName: string | null, mode: string) => {
+    const m = await acceptInvite(id);
+    cd.setCoachingMode(m);
+    Alert.alert('You are connected', (coachName || 'Your coach') + ' is now your ' + (m === 'inperson' ? 'in-person' : 'online') + ' coach. Their plan, feedback and messaging are now on your app.', [{ text: 'Great' }]);
+  };
   const [filter, setFilter] = useState<'all' | Mode>('all');
   const [sel, setSel] = useState<Coach | null>(null);
 
@@ -64,6 +71,25 @@ export default function FindTrainer() {
         <Pressable onPress={() => router.back()} style={{ marginBottom: 8 }}><Text style={{ color: t.brand, fontWeight: '700', fontSize: 15 }}>‹ Back</Text></Pressable>
         <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: SERIF }}>Find a trainer</Text>
         <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 14 }}>Browse coaches on Repple and start online or in-person.</Text>
+
+        {received.length > 0 ? (
+          <View style={{ marginBottom: 16 }}>
+            {received.map((iv) => (
+              <View key={iv.id} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.brand, padding: 15, marginBottom: 10 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                  <Icon name="sparkle" size={15} color={t.brand} />
+                  <Text style={{ color: t.brand, fontSize: 11, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6 }}>Coaching invitation{iv.demo ? ' · sample' : ''}</Text>
+                </View>
+                <Text style={{ color: t.ink, fontSize: 16, fontWeight: '800' }}>{iv.coachName || 'A coach'} invited you</Text>
+                <Text style={{ color: t.ink3, fontSize: 13, marginTop: 2, marginBottom: 12 }}>{iv.mode === 'inperson' ? 'In-person' : 'Online'} coaching. Accept to connect — their program, feedback and messaging turn on for you.</Text>
+                <View style={{ flexDirection: 'row', gap: 10 }}>
+                  <Pressable onPress={() => declineInvite(iv.id)} style={{ flex: 1, paddingVertical: 12, borderRadius: 12, alignItems: 'center', backgroundColor: t.surface2, borderWidth: 1, borderColor: t.ring }}><Text style={{ color: t.ink2, fontWeight: '800' }}>Decline</Text></Pressable>
+                  <Pressable onPress={() => acceptCoach(iv.id, iv.coachName, iv.mode)} style={{ flex: 2, paddingVertical: 12, borderRadius: 12, alignItems: 'center', backgroundColor: t.brand }}><Text style={{ color: t.brandInk, fontWeight: '800' }}>Accept invitation</Text></Pressable>
+                </View>
+              </View>
+            ))}
+          </View>
+        ) : null}
 
         <View style={{ flexDirection: 'row', gap: 8, marginBottom: 16 }}>
           {([['all', 'All'], ['online', 'Online'], ['inperson', 'In-person']] as const).map(([id, label]) => {

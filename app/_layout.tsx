@@ -20,6 +20,7 @@ import { OwnerOpsProvider } from '../src/ui/ownerOps';
 import { SettingsProvider } from '../src/ui/settings';
 import { HabitsProvider } from '../src/ui/habits';
 import { CheckInsProvider } from '../src/ui/checkins';
+import { InvitesProvider } from '../src/ui/invites';
 import { AuthProvider } from '../src/ui/auth';
 import { ErrorBoundary } from '../src/ui/ErrorBoundary';
 import { AppThemeProvider, useTheme } from '../src/ui/components';
@@ -56,9 +57,11 @@ export default function RootLayout() {
                     <SettingsProvider>
                     <HabitsProvider>
                       <CheckInsProvider>
+                        <InvitesProvider>
                         <ErrorBoundary>
                           <ThemedStack />
                         </ErrorBoundary>
+                        </InvitesProvider>
                       </CheckInsProvider>
                     </HabitsProvider>
                   </SettingsProvider>
