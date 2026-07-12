@@ -226,7 +226,8 @@ export default function Profile() {
 
   const statsLine = `${age != null ? age + ' yrs' : '—'} · ${cd.heightCm} cm · ${round1(cd.weightKg)} kg`;
   const soloHidden = new Set(['/(client)/messages', '/(client)/checkin']);
-  const hubGroups = HUB_GROUPS.map((g) => ({ ...g, items: g.items.filter((it) => cd.coachingMode !== 'solo' || !soloHidden.has(it.route)) }));
+  const HUB_KEEP = new Set(['Connect', 'Devices & Media', 'Account']);
+  const hubGroups = HUB_GROUPS.filter((g) => HUB_KEEP.has(g.title)).map((g) => ({ ...g, items: g.items.filter((it) => cd.coachingMode !== 'solo' || !soloHidden.has(it.route)) }));
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
@@ -291,6 +292,15 @@ export default function Profile() {
         <View style={{ backgroundColor: t.surface2, borderRadius: 14, borderWidth: 1, borderColor: t.ring, padding: 13, marginTop: 12, marginBottom: 18 }}>
           <Text style={{ color: t.ink3, fontSize: 12 }}>Daily target · <Text style={{ color: t.ink, fontWeight: '700' }}>{macros.kcal.toLocaleString()} kcal</Text> · P{macros.protein} / C{macros.carbs} / F{macros.fat}</Text>
         </View>
+
+        <Pressable onPress={() => router.push('/(client)/explore')} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 13, marginBottom: 16 }}>
+          <View style={{ width: 34, height: 34, borderRadius: 9, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}><Icon name="search" size={16} color={t.brand} /></View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: t.ink, fontWeight: '700', fontSize: 14 }}>Explore all features</Text>
+            <Text style={{ color: t.ink3, fontSize: 11.5, marginTop: 1 }}>Search anything in the app</Text>
+          </View>
+          <Icon name="chevron" size={17} color={t.ink3} />
+        </Pressable>
 
         {/* hub groups */}
         {hubGroups.map((g) => (

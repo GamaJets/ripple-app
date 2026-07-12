@@ -125,10 +125,13 @@ export default function Home() {
             <Text style={{ color: t.ink3, fontSize: 11, textTransform: 'uppercase', letterSpacing: 1 }}>{DAYS[d.getDay()]} {d.getDate()} {MONTHS[d.getMonth()]} · {hi}</Text>
             <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800', letterSpacing: -0.4, marginTop: 2, textTransform: 'capitalize' }}>{c.name.split(' ')[0]}</Text>
           </View>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+          <Pressable onPress={() => router.push('/(client)/explore')} accessibilityLabel="Search" style={{ width: 42, height: 42, borderRadius: 21, backgroundColor: t.surface, borderWidth: 1, borderColor: t.ring, alignItems: 'center', justifyContent: 'center' }}><Icon name="search" size={20} color={t.ink2} /></Pressable>
           <Pressable onPress={() => router.push('/(client)/messages')} style={{ width: 42, height: 42, borderRadius: 21, backgroundColor: t.surface, borderWidth: 1, borderColor: t.ring, alignItems: 'center', justifyContent: 'center' }}>
             <Icon name="bell" size={20} color={t.ink2} />
             {(coachNotes.length > 0 || !!ann) ? <View style={{ position: 'absolute', top: 8, right: 9, width: 9, height: 9, borderRadius: 5, backgroundColor: t.brand, borderWidth: 2, borderColor: t.surface }} /> : null}
           </Pressable>
+          </View>
         </View>
 
         {myInvites.length > 0 ? (
