@@ -1,39 +1,53 @@
 // Cloud-API providers (WHOOP, Oura, Garmin, Fitbit) and Android Health Connect.
 //
-// These devices never talk to the phone directly — they expose an OAuth-guarded
-// REST API. The real flow is: connect() opens the vendor's OAuth page, the user
-// approves, a Supabase edge function stores the refresh token, and fetchToday()
-// asks that function for the latest day. The plumbing/slot is here now; the
-// edge function lands with the backend phase, so connect() reports that clearly
-// rather than pretending. Swapping in the live calls touches only this file.
+// These devices expose an OAuth-guarded REST API. connect() runs the vendor's
+// OAuth in a browser (via ./oauth), a Supabase edge function stores the refresh
+// token, and fetchToday() asks that function for the latest day. A provider is
+// only "available" to connect once its client ID is configured (env var) — until
+// then the UI shows exactly what the owner needs to register.
 import { Platform } from 'react-native';
 import type { WearableProvider, ProviderMeta, DailyMetrics } from './types';
+import { emptyMetrics } from './types';
+import { vendorFor, isConfigured } from './oauthConfig';
+import { connectVendor, fetchVendorDay } from './oauth';
 
 export function makeCloudProvider(meta: ProviderMeta): WearableProvider {
   const isHealthConnect = meta.kind === 'health-connect';
+  const vendor = vendorFor(meta.id);
+
   return {
     meta,
     isAvailable() {
       if (isHealthConnect) return Platform.OS === 'android';
-      return true; // cloud APIs are reachable from any build
+      return true; // cloud APIs are reachable from any build (once configured)
     },
     unavailableReason() {
-      if (isHealthConnect && Platform.OS !== 'android') return 'Health Connect is Android-only.';
+      if (isHealthConnect && Platform.OS !== 'android') return 'Health Connect is Android-only — connect it from an Android device.';
+      if (vendor?.special === 'partnership') return vendor.note;
+      if (vendor && !isConfigured(meta.id)) return `Not set up yet. ${vendor.note}`;
       return null;
     },
     async connect() {
-      if (isHealthConnect && Platform.OS !== 'android') {
-        throw new Error('Health Connect is Android-only.');
+      if (isHealthConnect) {
+        if (Platform.OS !== 'android') throw new Error('Health Connect is Android-only.');
+        throw new Error('Health Connect connects on Android via the native module — added in the Android build.');
       }
-      // TODO(backend): open OAuth (expo-web-browser) → Supabase fn stores token.
-      throw new Error(`${meta.name} connects through the Repple cloud — turning on ${meta.name} sync is part of the backend rollout. Apple Watch works today.`);
+      await connectVendor(meta.id);
     },
     async disconnect() {
-      // TODO(backend): revoke token via Supabase fn.
+      // Token revocation handled server-side; the context drops the local flag.
     },
     async fetchToday(): Promise<DailyMetrics | null> {
-      // TODO(backend): supabase.functions.invoke('wearable-day', { provider: meta.id })
-      return null;
+      if (isHealthConnect) return null;
+      const raw = await fetchVendorDay(meta.id);
+      if (!raw) return null;
+      const m = emptyMetrics(meta.id);
+      m.activeKcal = typeof raw.activeKcal === 'number' ? raw.activeKcal : null;
+      m.steps = typeof raw.steps === 'number' ? raw.steps : null;
+      m.heartRateAvg = typeof raw.heartRateAvg === 'number' ? raw.heartRateAvg : null;
+      m.heartRateResting = typeof raw.heartRateResting === 'number' ? raw.heartRateResting : null;
+      m.workoutMins = typeof raw.workoutMins === 'number' ? raw.workoutMins : null;
+      return m;
     },
   };
 }
