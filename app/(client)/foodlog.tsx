@@ -12,6 +12,7 @@ import { macrosFor } from '../../src/lib/nutrition';
 import { useClientData } from '../../src/ui/clientData';
 import { Icon } from '../../src/ui/Icon';
 import { analyzeMeal, visionAvailable } from '../../src/lib/vision';
+import { parseFoodText, foodAIAvailable } from '../../src/lib/foodAI';
 
 type Food = { n: string; k: number; p: number; c: number; f: number };
 type Logged = Food & { via: string };
@@ -37,6 +38,7 @@ export default function FoodLog() {
 
  const [log, setLog] = useState<Logged[]>([{ ...FOOD_DB[1], via: 'search' }]);
  const [q, setQ] = useState('');
+ const [nl, setNl] = useState(''); const [nlBusy, setNlBusy] = useState(false);
  const results = q ? FOOD_DB.filter((f) => f.n.toLowerCase().includes(q.toLowerCase())) : [];
 
  // photo estimate modal state
@@ -46,6 +48,14 @@ export default function FoodLog() {
  const [serv, setServ] = useState(1);
 
  const add = (f: Food, via: string) => setLog((l) => [...l, { ...f, via }]);
+ const logNL = async () => {
+   const text = nl.trim(); if (!text) return;
+   setNlBusy(true);
+   const items = await parseFoodText(text);
+   setNlBusy(false);
+   if (items && items.length) { items.forEach((it) => add({ n: it.name, k: it.kcal, p: it.protein, c: it.carbs, f: it.fat }, 'ai')); setNl(''); }
+   else { Alert.alert('Could not read that', foodAIAvailable() ? 'Try describing it differently, e.g. \"2 eggs, toast and a coffee\".' : 'AI food logging turns on with the AI backend.'); }
+ };
  const remove = (i: number) => setLog((l) => l.filter((_, x) => x !== i));
 
  const tot = log.reduce((a, f) => ({ k: a.k + f.k, p: a.p + f.p, c: a.c + f.c, f: a.f + f.f }), { k: 0, p: 0, c: 0, f: 0 });
@@ -119,6 +129,10 @@ export default function FoodLog() {
  <Pressable onPress={() => takeMealPhoto(false)} style={{ flex: 1, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingVertical: 14, alignItems: 'center', gap: 4 }}><Icon name="plus" size={20} color={t.ink} /><Text style={{ color: t.ink, fontWeight: '700', fontSize: 12 }}>Upload</Text></Pressable>
  </View>
 
+ <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
+ <TextInput value={nl} onChangeText={setNl} placeholder='Describe your meal — "chicken burrito & a coke"' placeholderTextColor={t.ink3} onSubmitEditing={logNL} returnKeyType="done" style={{ flex: 1, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15 }} />
+ <Pressable onPress={logNL} disabled={nlBusy || !nl.trim()} style={{ backgroundColor: nl.trim() ? t.brand : t.surface2, borderRadius: 12, paddingHorizontal: 16, justifyContent: 'center', borderWidth: 1, borderColor: nl.trim() ? t.brand : t.ring }}>{nlBusy ? <ActivityIndicator color={t.brandInk} /> : <Text style={{ color: nl.trim() ? t.brandInk : t.ink3, fontWeight: '800', fontSize: 13 }}>Log AI</Text>}</Pressable>
+ </View>
  <TextInput value={q} onChangeText={setQ} placeholder="Search foods…" placeholderTextColor={t.ink3} style={{ color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, marginBottom: 8 }} />
  {results.map((f) => (
  <Pressable key={f.n} onPress={() => { add(f, 'search'); setQ(''); }} style={{ backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 12, padding: 13, marginBottom: 6, flexDirection: 'row', justifyContent: 'space-between' }}>
