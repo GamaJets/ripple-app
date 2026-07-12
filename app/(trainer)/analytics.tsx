@@ -36,6 +36,9 @@ export default function TrainerAnalytics() {
   const revenue = sessionsMo * MOCK_TRAINER.sessionFee;
   const platformFee = 99;
   const net = revenue - platformFee;
+  const valuePerClient = clients ? Math.round(revenue / clients) : 0;
+  const estTenureMonths = Math.max(3, Math.min(24, Math.round(6 + (avgAdh - 70) / 10 * 3)));
+  const estLtv = valuePerClient * estTenureMonths;
   const avgAdh = clients ? Math.round(roster.reduce((a, c) => a + c.adherence, 0) / clients) : 0;
   const onTrack = roster.filter((c) => c.adherence >= 85).length;
   const watch = roster.filter((c) => c.adherence >= 70 && c.adherence < 85).length;
@@ -125,6 +128,20 @@ export default function TrainerAnalytics() {
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 }}>
             {revHist.labels.map((l, i) => (<Text key={i} style={{ color: t.ink3, fontSize: 10 }}>{l}</Text>))}
           </View>
+        </View>
+
+        <View style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18, marginBottom: 14 }}>
+          <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16, marginBottom: 4 }}>Client value</Text>
+          <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 14 }}>Estimated from revenue and adherence-based retention.</Text>
+          <View style={{ flexDirection: 'row', gap: 10 }}>
+            {[['Value / client', '$' + valuePerClient.toLocaleString() + '/mo'], ['Est. tenure', estTenureMonths + ' mo'], ['Est. LTV', '$' + estLtv.toLocaleString()]].map(([l, v]) => (
+              <View key={l as string} style={{ flex: 1, backgroundColor: t.surface2, borderRadius: 12, borderWidth: 1, borderColor: t.ring, paddingVertical: 12, alignItems: 'center' }}>
+                <Text style={{ color: t.ink, fontWeight: '800', fontSize: 16 }}>{v as string}</Text>
+                <Text style={{ color: t.ink3, fontSize: 10, marginTop: 3, textAlign: 'center' }}>{l as string}</Text>
+              </View>
+            ))}
+          </View>
+          <Text style={{ color: t.ink3, fontSize: 11, marginTop: 10, lineHeight: 15 }}>Higher adherence lifts estimated tenure — better retention compounds LTV. Real per-client tenure tracks once clients link accounts.</Text>
         </View>
 
         <View style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18, marginBottom: 14 }}>
