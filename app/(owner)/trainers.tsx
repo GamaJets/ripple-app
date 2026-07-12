@@ -6,12 +6,16 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
 import { PLANS } from '../../src/lib/ownerMock';
 import { usePlatformTrainers, type PlatformTrainerX } from '../../src/ui/trainers';
+import { useTrainerInvites } from '../../src/ui/trainerInvites';
 
 const PLAN_NAMES = PLANS.map((p) => p.name);
 
 export default function OwnerTrainers() {
   const t = useTheme();
   const { trainers, activeMrr, addTrainer, removeTrainer, setPlan, toggleSuspend } = usePlatformTrainers();
+  const { sent: sentInvites, sendTrainerInvite, revokeTrainerInvite } = useTrainerInvites();
+  const [invOpen, setInvOpen] = useState(false);
+  const [invEmail, setInvEmail] = useState('');
   const [sel, setSel] = useState<PlatformTrainerX | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [newName, setNewName] = useState('');
@@ -42,9 +46,28 @@ export default function OwnerTrainers() {
 
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
           <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16 }}>Roster</Text>
-          <Pressable onPress={() => { setNewName(''); setNewPlan('Pro'); setAddOpen(true); }} style={{ backgroundColor: t.brand, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 7 }}><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 12 }}>＋ Add Trainer</Text></Pressable>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <Pressable onPress={() => { setInvEmail(''); setInvOpen(true); }} style={{ backgroundColor: t.surface, borderWidth: 1, borderColor: t.ring, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 7 }}><Text style={{ color: t.ink2, fontWeight: '800', fontSize: 12 }}>Invite by email</Text></Pressable>
+            <Pressable onPress={() => { setNewName(''); setNewPlan('Pro'); setAddOpen(true); }} style={{ backgroundColor: t.brand, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 7 }}><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 12 }}>＋ Add Trainer</Text></Pressable>
+          </View>
         </View>
 
+        {sentInvites.filter((i) => i.status === 'pending').length > 0 ? (
+          <View style={{ marginBottom: 12 }}>
+            <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>Pending trainer invites</Text>
+            {sentInvites.filter((i) => i.status === 'pending').map((i) => (
+              <View key={i.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: t.surface, borderRadius: 14, borderWidth: 1, borderColor: t.ring, borderStyle: 'dashed', padding: 13, marginBottom: 8 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: t.ink, fontWeight: '700', fontSize: 14 }}>{i.email}</Text>
+                  <Text style={{ color: t.ink3, fontSize: 12, marginTop: 1 }}>Invited to join · awaiting sign-up / accept</Text>
+                </View>
+                <Pressable onPress={() => revokeTrainerInvite(i.id)} style={{ paddingHorizontal: 10, paddingVertical: 7, borderRadius: 9, borderWidth: 1, borderColor: t.ring }}>
+                  <Text style={{ color: t.ink3, fontWeight: '700', fontSize: 12 }}>Cancel</Text>
+                </Pressable>
+              </View>
+            ))}
+          </View>
+        ) : null}
         {trainers.map((tr) => {
           const susp = tr.status === 'suspended';
           return (
@@ -120,6 +143,19 @@ export default function OwnerTrainers() {
           <View style={{ flexDirection: 'row', gap: 10 }}>
             <Pressable onPress={() => setAddOpen(false)} style={{ flex: 1, paddingVertical: 15, borderRadius: 14, alignItems: 'center', backgroundColor: t.surface2, borderWidth: 1, borderColor: t.ring }}><Text style={{ color: t.ink2, fontWeight: '800' }}>Cancel</Text></Pressable>
             <Pressable onPress={() => { if (!newName.trim()) { Alert.alert('Add a name', 'Enter the trainer name.'); return; } addTrainer(newName, newPlan); setAddOpen(false); Alert.alert('Trainer added', `${newName.trim()} is now on your platform.`); }} style={{ flex: 2, paddingVertical: 15, borderRadius: 14, alignItems: 'center', backgroundColor: t.brand }}><Text style={{ color: t.brandInk, fontWeight: '800' }}>Add Trainer</Text></Pressable>
+          </View>
+        </View>
+      </Modal>
+      <Modal visible={invOpen} transparent animationType="slide" onRequestClose={() => setInvOpen(false)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setInvOpen(false)} />
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, borderColor: t.ring, padding: 20, paddingBottom: 30 }}>
+          <Text style={{ color: t.ink, fontSize: 20, fontWeight: '800', marginBottom: 4 }}>Invite a trainer</Text>
+          <Text style={{ color: t.ink3, fontSize: 13, marginBottom: 16 }}>They get an invite in the Repple app when they sign in with this email. Accepting joins them to your platform and prompts them to set up their profile.</Text>
+          <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>Email</Text>
+          <TextInput value={invEmail} onChangeText={setInvEmail} placeholder="trainer@email.com" placeholderTextColor={t.ink3} autoCapitalize="none" keyboardType="email-address" style={{ color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, marginBottom: 20 }} />
+          <View style={{ flexDirection: 'row', gap: 10 }}>
+            <Pressable onPress={() => setInvOpen(false)} style={{ flex: 1, paddingVertical: 15, borderRadius: 14, alignItems: 'center', backgroundColor: t.surface2, borderWidth: 1, borderColor: t.ring }}><Text style={{ color: t.ink2, fontWeight: '800' }}>Cancel</Text></Pressable>
+            <Pressable onPress={() => { const e = invEmail.trim(); if (!e || !e.includes('@')) { Alert.alert('Enter an email', 'Add a valid trainer email address.'); return; } sendTrainerInvite(e); setInvOpen(false); Alert.alert('Invitation sent', e + ' will see your invite when they sign in to Repple.', [{ text: 'Done' }]); }} style={{ flex: 2, paddingVertical: 15, borderRadius: 14, alignItems: 'center', backgroundColor: t.brand }}><Text style={{ color: t.brandInk, fontWeight: '800' }}>Send invite</Text></Pressable>
           </View>
         </View>
       </Modal>

@@ -16,6 +16,7 @@ import { useAnnouncements } from '../../src/ui/announcements';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useCheckIns } from '../../src/ui/checkins';
 import { useInvites } from '../../src/ui/invites';
+import { useTrainerInvites } from '../../src/ui/trainerInvites';
 import { currentStreak, longestStreak, personalRecords, weekStats } from '../../src/lib/streaks';
 
 function Stat({ t, label, value, unit }: { t: Theme; label: string; value: string; unit?: string }) {
@@ -43,6 +44,11 @@ export default function TrainerClients() {
   const { getNotes, addNote, removeNote } = useCoachNotes();
   const { addAnnouncement } = useAnnouncements();
   const { sent: sentInvites, sendInvite, revokeInvite } = useInvites();
+  const { received: trainerInvites, acceptTrainerInvite, declineTrainerInvite } = useTrainerInvites();
+  const acceptJoin = async (id: string, ownerName: string | null) => {
+    await acceptTrainerInvite(id);
+    Alert.alert('Welcome to the platform', 'You have joined ' + (ownerName || 'the platform') + ' as a trainer. Let us set up your profile.', [{ text: 'Set up profile', onPress: () => router.push('/(trainer)/profile') }, { text: 'Later' }]);
+  };
   const [pnote, setPnote] = useState('');
   const [bcOpen, setBcOpen] = useState(false);
   const [bcText, setBcText] = useState('');
@@ -89,6 +95,24 @@ export default function TrainerClients() {
           </View>
         </View>
 
+                {trainerInvites.length > 0 ? (
+          <View style={{ marginBottom: 14 }}>
+            {trainerInvites.map((iv) => (
+              <View key={iv.id} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.brand, padding: 15, marginBottom: 10 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                  <Icon name="sparkle" size={15} color={t.brand} />
+                  <Text style={{ color: t.brand, fontSize: 11, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6 }}>Platform invitation{iv.demo ? ' · sample' : ''}</Text>
+                </View>
+                <Text style={{ color: t.ink, fontSize: 16, fontWeight: '800' }}>{iv.ownerName || 'Repple'} invited you to coach</Text>
+                <Text style={{ color: t.ink3, fontSize: 13, marginTop: 2, marginBottom: 12 }}>Accept to join the platform as a trainer and set up your coaching profile.</Text>
+                <View style={{ flexDirection: 'row', gap: 10 }}>
+                  <Pressable onPress={() => declineTrainerInvite(iv.id)} style={{ flex: 1, paddingVertical: 12, borderRadius: 12, alignItems: 'center', backgroundColor: t.surface2, borderWidth: 1, borderColor: t.ring }}><Text style={{ color: t.ink2, fontWeight: '800' }}>Decline</Text></Pressable>
+                  <Pressable onPress={() => acceptJoin(iv.id, iv.ownerName)} style={{ flex: 2, paddingVertical: 12, borderRadius: 12, alignItems: 'center', backgroundColor: t.brand }}><Text style={{ color: t.brandInk, fontWeight: '800' }}>Accept &amp; set up profile</Text></Pressable>
+                </View>
+              </View>
+            ))}
+          </View>
+        ) : null}
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginBottom: 16 }}>
           {([["train","Programs","/(trainer)/builder"],["calendar","Schedule","/(trainer)/calendar"],["video","Videos","/(trainer)/videos"],["chart","Analytics","/(trainer)/analytics"],["trophy","Leaderboard","/(trainer)/leaderboard"]] as const).map(([ic, label, route]) => (
             <Pressable key={route} onPress={() => router.push(route as any)} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 8 }}>
