@@ -36,7 +36,7 @@ export default function OwnerOverview() {
   const { series, delta } = useMrrHistory(activeMrr);
   const [sel, setSel] = useState<TrainerLike | null>(null);
 
-  const byPlan = PLANS.map((p) => ({ name: p.name, revenue: trainers.filter((x) => x.plan === p.name && x.status !== 'suspended').reduce((a, x) => a + x.mrr, 0) }));
+  const byPlan = PLANS.map((p) => ({ name: p.name, revenue: trainers.filter((x) => x.plan === p.name && x.status !== 'suspended').reduce((a, x) => a + x.mrr, 0), clients: trainers.filter((x) => x.plan === p.name).reduce((a, x) => a + x.clients, 0) }));
   const maxPlan = Math.max(1, ...byPlan.map((p) => p.revenue));
   // Trainers sorted worst-health first so problems surface at the top.
   const ranked = [...(trainers as TrainerLike[])].map((tr) => ({ tr, h: trainerHealth(tr) })).sort((a, b) => a.h.score - b.h.score);
@@ -119,7 +119,7 @@ export default function OwnerOverview() {
           <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16, marginBottom: 14 }}>Revenue by plan</Text>
           {byPlan.map((p) => (
             <View key={p.name} style={{ marginBottom: 12 }}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 }}><Text style={{ color: t.ink2, fontSize: 13, fontWeight: '600' }}>{p.name}</Text><Text style={{ color: t.ink, fontSize: 13, fontWeight: '700' }}>${p.revenue}/mo</Text></View>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 }}><Text style={{ color: t.ink2, fontSize: 13, fontWeight: '600' }}>{p.name} · {p.clients} clients</Text><Text style={{ color: t.ink, fontSize: 13, fontWeight: '700' }}>${p.revenue}/mo</Text></View>
               <View style={{ height: 10, borderRadius: 5, backgroundColor: t.surface3, overflow: 'hidden' }}><View style={{ height: 10, borderRadius: 5, backgroundColor: t.brand, width: `${Math.round((p.revenue / maxPlan) * 100)}%` }} /></View>
             </View>
           ))}
