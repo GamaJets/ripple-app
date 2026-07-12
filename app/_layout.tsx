@@ -24,6 +24,7 @@ import { FoodLogProvider } from '../src/ui/foodLog';
 import { InvitesProvider } from '../src/ui/invites';
 import { TrainerInvitesProvider } from '../src/ui/trainerInvites';
 import { ClientTagsProvider } from '../src/ui/clientTags';
+import { ChallengesProvider } from '../src/ui/challenges';
 import { AuthProvider } from '../src/ui/auth';
 import { ErrorBoundary } from '../src/ui/ErrorBoundary';
 import { AppThemeProvider, useTheme } from '../src/ui/components';
@@ -64,9 +65,11 @@ export default function RootLayout() {
                         <InvitesProvider>
                         <TrainerInvitesProvider>
                         <ClientTagsProvider>
+                        <ChallengesProvider>
                         <ErrorBoundary>
                           <ThemedStack />
                         </ErrorBoundary>
+                        </ChallengesProvider>
                         </ClientTagsProvider>
                         </TrainerInvitesProvider>
                         </InvitesProvider>

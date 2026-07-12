@@ -257,6 +257,18 @@ export default function Home() {
           <Icon name="chevron" size={18} color={t.ink3} />
         </Pressable> : null}
 
+        {/* challenges */}
+        <Pressable onPress={() => router.push('/(client)/challenges')} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 14, marginBottom: 11, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+          <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+            <Icon name="trophy" size={20} color={t.brand} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: t.ink, fontWeight: '700', fontSize: 13 }}>Challenges &amp; leaderboards</Text>
+            <Text style={{ color: t.ink3, fontSize: 11, marginTop: 1 }}>Join a challenge and climb the board</Text>
+          </View>
+          <Icon name="chevron" size={18} color={t.ink3} />
+        </Pressable>
+
         {/* coach note */}
         {(!solo && (coachNotes.length > 0 || !!ann)) ? (
           <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.brand, padding: 14, marginBottom: 11 }}>
