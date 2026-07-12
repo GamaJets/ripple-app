@@ -358,6 +358,8 @@ function SessionRunner({ t, exercises, focus, nameOf, liveHr, log, onComplete, o
   const [results, setResults] = useState<{ reps: number; kg: number }[][]>(() => exercises.map(() => []));
   const [reps, setReps] = useState(''); const [kg, setKg] = useState('');
   const [rest, setRest] = useState(0);
+  const [rpes, setRpes] = useState<('easy' | 'ok' | 'hard')[][]>(() => exercises.map(() => []));
+  const [pendingFeel, setPendingFeel] = useState<number | null>(null);
   const [finished, setFinished] = useState(false);
   const [confetti, setConfetti] = useState(false);
   const [prMsg, setPrMsg] = useState<string | null>(null);
@@ -374,6 +376,7 @@ function SessionRunner({ t, exercises, focus, nameOf, liveHr, log, onComplete, o
     setKg(sug ? String(sug.weight) : '');
     setReps('');
     setPrMsg(null);
+    setPendingFeel(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [idx]);
 
@@ -387,7 +390,17 @@ function SessionRunner({ t, exercises, focus, nameOf, liveHr, log, onComplete, o
     const priorBest = Math.max(priorBest1RM(log, name), ...done.map((s) => (s.kg && s.reps ? est1RM(s.kg, s.reps) : 0)), 0);
     if (newE1 > 0 && newE1 > priorBest) { setPrMsg(`New PR on ${name}! ${wkg}kg × ${r}`); setConfetti(true); }
     setResults((prev) => { const n = prev.map((a) => [...a]); n[idx].push({ reps: r, kg: wkg }); return n; });
-    setReps(''); setKg(''); setRest(90);
+    setReps(''); setRest(90); setPendingFeel(wkg);
+  };
+  const feelStep = (base: number) => (base >= 60 ? 5 : base >= 20 ? 2.5 : base > 0 ? 1 : 0);
+  const chooseFeel = (f: 'easy' | 'ok' | 'hard') => {
+    setRpes((prev) => { const n = prev.map((a) => [...a]); n[idx].push(f); return n; });
+    const base = pendingFeel || 0;
+    const st = feelStep(base);
+    const nextKg = f === 'easy' ? base + st : f === 'hard' ? Math.max(0, base - st) : base;
+    setKg(nextKg ? String(nextKg) : '');
+    setPendingFeel(null);
+    tapLight();
   };
   const finish = () => {
     const nowISO = new Date().toISOString();
@@ -469,7 +482,7 @@ function SessionRunner({ t, exercises, focus, nameOf, liveHr, log, onComplete, o
 
         {done.length > 0 ? (
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
-            {done.map((s, i) => <View key={i} style={{ backgroundColor: t.surface2, borderRadius: 9, paddingHorizontal: 11, paddingVertical: 7, borderWidth: 1, borderColor: t.ring }}><Text style={{ color: t.ink2, fontWeight: '700', fontSize: 13 }}>Set {i + 1}: {s.reps}×{s.kg || '–'}kg</Text></View>)}
+            {done.map((s, i) => { const f = (rpes[idx] || [])[i]; const fc = f === 'easy' ? t.good : f === 'hard' ? t.crit : t.ink3; return (<View key={i} style={{ backgroundColor: t.surface2, borderRadius: 9, paddingHorizontal: 11, paddingVertical: 7, borderWidth: 1, borderColor: t.ring, flexDirection: 'row', alignItems: 'center', gap: 6 }}>{f ? <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: fc }} /> : null}<Text style={{ color: t.ink2, fontWeight: '700', fontSize: 13 }}>Set {i + 1}: {s.reps}×{s.kg || '–'}kg</Text></View>); })}
           </View>
         ) : null}
 
@@ -479,6 +492,20 @@ function SessionRunner({ t, exercises, focus, nameOf, liveHr, log, onComplete, o
           <TextInput value={kg} onChangeText={setKg} keyboardType="numeric" placeholder="kg" placeholderTextColor={t.ink3} style={inp} />
           <Pressable onPress={logSet} style={{ backgroundColor: t.brand, borderRadius: 10, paddingHorizontal: 22, justifyContent: 'center' }}><Icon name="check" size={18} color={t.brandInk} /></Pressable>
         </View>
+
+        {pendingFeel != null ? (
+          <View style={{ backgroundColor: t.surface, borderRadius: 14, borderWidth: 1, borderColor: t.ring, padding: 14, marginBottom: 20 }}>
+            <Text style={{ color: t.ink2, fontSize: 13, fontWeight: '700', marginBottom: 10 }}>How did that set feel?</Text>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              {(([['easy', 'Easy', t.good], ['ok', 'Just right', t.brand], ['hard', 'Hard', t.crit]]) as ['easy' | 'ok' | 'hard', string, string][]).map(([f, lbl, c]) => (
+                <Pressable key={f} onPress={() => chooseFeel(f)} style={{ flex: 1, backgroundColor: t.surface2, borderWidth: 1, borderColor: t.ring, borderRadius: 11, paddingVertical: 12, alignItems: 'center' }}>
+                  <Text style={{ color: c, fontWeight: '800', fontSize: 14 }}>{lbl}</Text>
+                </Pressable>
+              ))}
+            </View>
+            <Text style={{ color: t.ink3, fontSize: 11.5, marginTop: 8 }}>Tunes your next set — Easy adds weight, Hard eases it back.</Text>
+          </View>
+        ) : null}
 
         <Pressable onPress={next} style={{ backgroundColor: done.length >= ex.sets ? t.brand : t.surface2, borderWidth: 1, borderColor: done.length >= ex.sets ? t.brand : t.ring, borderRadius: 14, paddingVertical: 15, alignItems: 'center' }}>
           <Text style={{ color: done.length >= ex.sets ? t.brandInk : t.ink, fontWeight: '800', fontSize: 15 }}>{idx < exercises.length - 1 ? 'Next exercise →' : 'Finish session'}</Text>
