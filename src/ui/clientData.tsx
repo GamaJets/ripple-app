@@ -6,6 +6,8 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MOCK_CLIENT } from '../lib/mockData';
+import { supabase } from '../lib/supabase';
+import { USE_SUPABASE } from '../lib/config';
 import type { Goal, Diet } from '../lib/types';
 
 export type CoachingMode = 'online' | 'inperson' | 'solo';
@@ -43,6 +45,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
   const [manualWeight, setManualWeight] = useState<number | null>(null);
   const [manualBodyFat, setManualBodyFat] = useState<number | null>(null);
   const [hydrated, setHydrated] = useState(false);
+  const [sbUid, setSbUid] = useState<string | null>(null);
 
   // Load the user's saved profile on first mount.
   useEffect(() => { (async () => {
@@ -70,6 +73,26 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
     AsyncStorage.setItem(KEY, JSON.stringify({ name, dob, heightCm, goal, diet, coachingMode, weightKg: manualWeight, bodyFatPct: manualBodyFat, photo })).catch(() => {});
   }, [hydrated, name, dob, heightCm, goal, diet, coachingMode, manualWeight, manualBodyFat, photo]);
 
+  // Sync body scans with Supabase (per user) — hydrate-or-seed, defensive.
+  useEffect(() => {
+    if (!USE_SUPABASE) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data: auth } = await supabase.auth.getUser();
+        const id = auth?.user?.id; if (!id || cancelled) return; setSbUid(id);
+        const { data, error } = await supabase.from('scans').select('*').eq('client_id', id).order('taken_at', { ascending: true });
+        if (error || cancelled) return;
+        if (data && data.length) {
+          setScans(data.map((r: any) => ({ id: r.id, takenAt: r.taken_at, weightKg: Number(r.weight_kg), bodyFatPct: Number(r.body_fat_pct), skeletalMuscleKg: r.skeletal_muscle_kg != null ? Number(r.skeletal_muscle_kg) : 0, source: r.source ?? '' })));
+        } else {
+          await supabase.from('scans').insert(base.scans.map((sc) => ({ client_id: id, taken_at: String(sc.takenAt).slice(0, 10), weight_kg: sc.weightKg, body_fat_pct: sc.bodyFatPct, skeletal_muscle_kg: sc.skeletalMuscleKg, source: sc.source })));
+        }
+      } catch { /* stay on mock */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   const sorted = useMemo(() => [...scans].sort((a, b) => Date.parse(a.takenAt) - Date.parse(b.takenAt)), [scans]);
   const latest = sorted[sorted.length - 1];
   const weightKg = manualWeight != null ? manualWeight : latest.weightKg;
@@ -83,7 +106,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
     activity: base.activity, mealsPerDay: base.mealsPerDay as 3 | 4 | 5,
     weightKg, bodyFatPct, muscleKg: latest.skeletalMuscleKg,
     setWeightKg: (v) => setManualWeight(v), setBodyFat: (v) => setManualBodyFat(v),
-    scans: sorted, addScan: (s) => { setScans((p) => [...p, s]); setManualWeight(null); setManualBodyFat(null); },
+    scans: sorted, addScan: (s) => { setScans((p) => [...p, s]); setManualWeight(null); setManualBodyFat(null); if (USE_SUPABASE && sbUid) { try { supabase.from('scans').insert({ client_id: sbUid, taken_at: String(s.takenAt).slice(0, 10), weight_kg: s.weightKg, body_fat_pct: s.bodyFatPct, skeletal_muscle_kg: s.skeletalMuscleKg, source: s.source }).then(() => {}, () => {}); } catch { /* ignore */ } } },
     weightSeries: sorted.map((s) => ({ t: s.takenAt, v: s.weightKg })),
     bodyFatSeries: sorted.map((s) => ({ t: s.takenAt, v: s.bodyFatPct })),
     muscleSeries: sorted.map((s) => ({ t: s.takenAt, v: s.skeletalMuscleKg })),

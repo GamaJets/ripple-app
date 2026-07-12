@@ -48,12 +48,15 @@ export default function Nutrition() {
   const [override, setOverride] = useState<Record<number, number>>({});
   const [recipe, setRecipe] = useState<PlannedMeal | null>(null);
   const [showGrocery, setShowGrocery] = useState(false);
+  const [view, setView] = useState<'today' | 'week'>('today');
 
   const input = { id: c.id, weightKg: w, bodyFatPct: bf, activity: c.activity, goal: c.goal, diet, mealsPerDay: c.mealsPerDay, mealOverride: override, coachAdjust: coachAdjust || undefined };
   const { plan, target, tot } = buildPlan(input);
   const swap = (pos: number, slot: PlannedMeal['slot'], idx: number) => setOverride({ ...override, [pos]: swapIndex(diet, slot, idx) });
   const groc = groceryData(input);
   const grocCount = DEPTS.reduce((a, d) => a + (groc.byDept[d]?.length ?? 0), 0);
+  const WEEKD = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const weekPlans = view === 'week' ? WEEKD.map((_, d) => { const ov: Record<number, number> = {}; plan.forEach((m) => { ov[m.pos] = m.idx + d; }); return buildPlan({ ...input, mealOverride: ov }); }) : [];
 
   const macroBar = (label: string, val: number, tgt: number, col: string) => (
     <View style={{ marginBottom: 9 }}>
@@ -107,6 +110,17 @@ export default function Nutrition() {
           </View>
         ) : null}
 
+        {/* today / week toggle */}
+        <View style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: 11, padding: 3, marginBottom: 12, borderWidth: 1, borderColor: t.ring }}>
+          {(['today', 'week'] as const).map((v) => (
+            <Pressable key={v} onPress={() => setView(v)} style={{ flex: 1, paddingVertical: 9, borderRadius: 8, alignItems: 'center', backgroundColor: view === v ? t.brand : 'transparent' }}>
+              <Text style={{ color: view === v ? t.brandInk : t.ink3, fontWeight: '700', fontSize: 13 }}>{v === 'today' ? 'Today' : 'This week'}</Text>
+            </Pressable>
+          ))}
+        </View>
+
+        {view === 'today' ? (
+          <>
         <Text style={{ color: t.ink3, fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.9, marginBottom: 9 }}>Today's plan · {plan.length} meals</Text>
         {plan.map((m) => (
           <Pressable key={m.pos} onPress={() => setRecipe(m)} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 14, marginBottom: 9, flexDirection: 'row', alignItems: 'center' }}>
@@ -121,6 +135,27 @@ export default function Nutrition() {
             </View>
           </Pressable>
         ))}
+
+          </>
+        ) : (
+          weekPlans.map((wp, d) => (
+            <View key={d} style={{ marginBottom: 14 }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <Text style={{ color: t.ink, fontWeight: '800', fontSize: 14 }}>{WEEKD[d]}</Text>
+                <Text style={{ color: t.ink3, fontSize: 12 }}>{wp.tot.K.toLocaleString()} kcal</Text>
+              </View>
+              {wp.plan.map((m) => (
+                <Pressable key={m.pos} onPress={() => setRecipe(m)} style={{ backgroundColor: t.surface, borderRadius: 14, borderWidth: 1, borderColor: t.ring, padding: 12, marginBottom: 7, flexDirection: 'row', alignItems: 'center' }}>
+                  <View style={{ flex: 1, paddingRight: 10 }}>
+                    <Text style={{ color: t.brand, fontSize: 8.5, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.7 }}>{m.slot}</Text>
+                    <Text style={{ color: t.ink, fontSize: 13, fontWeight: '600', marginTop: 2 }} numberOfLines={1}>{m.n}</Text>
+                  </View>
+                  <Text style={{ color: t.ink2, fontSize: 13, fontWeight: '700' }}>{m.K}</Text>
+                </Pressable>
+              ))}
+            </View>
+          ))
+        )}
 
         <Pressable onPress={() => setShowGrocery(true)} style={{ backgroundColor: t.brand, borderRadius: 14, paddingVertical: 15, alignItems: 'center', marginTop: 6, flexDirection: 'row', justifyContent: 'center', gap: 8 }}>
           <Icon name="check" size={16} color={t.brandInk} /><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 15 }}>Grocery list · {grocCount} items</Text>

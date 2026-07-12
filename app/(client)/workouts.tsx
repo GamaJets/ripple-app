@@ -116,6 +116,16 @@ export default function Train() {
           </View>
         </View>
 
+        {/* month calendar + book a session */}
+        <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
+          <Pressable onPress={() => { setSelCalDay(dstr(dateFor(dayIdx))); setShowCal(true); }} style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingVertical: 11 }}>
+            <Icon name="calendar" size={15} color={t.brand} /><Text style={{ color: t.ink2, fontWeight: '700', fontSize: 13 }}>Month calendar</Text>
+          </Pressable>
+          <Pressable onPress={() => router.push('/(client)/calendar')} style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: t.brand, borderRadius: 12, paddingVertical: 11 }}>
+            <Icon name="plus" size={15} color={t.brandInk} /><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 13 }}>Book session</Text>
+          </Pressable>
+        </View>
+
         {/* quick links */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginBottom: 14 }}>
           {([['calendar', 'This Week', '/(client)/week'], ['trophy', 'Records', '/(client)/records'], ['water', 'Recovery', '/(client)/recovery'], ['video', 'Library', '/(client)/library'], ['settings', 'Tools', '/(client)/tools']] as const).map(([ic, label, route]) => (
