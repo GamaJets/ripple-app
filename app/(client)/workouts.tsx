@@ -20,6 +20,7 @@ import { Confetti } from '../../src/ui/Confetti';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useExerciseVideos } from '../../src/ui/exerciseVideos';
 import { injuryFlag, areaLabel, type Injury } from '../../src/lib/injuries';
+import { warmupSets, deloadCheck } from '../../src/lib/training';
 
 const SERIF = 'Georgia';
 const WEEK = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -49,6 +50,7 @@ export default function Train() {
   const [swapFor, setSwapFor] = useState<ProgramExercise | null>(null);
   const [videoFor, setVideoFor] = useState<string | null>(null);
   const [injRevealed, setInjRevealed] = useState<string[]>([]);
+  const [deloadDismiss, setDeloadDismiss] = useState(false);
   const { videos: exVideos } = useExerciseVideos();
   const [session, setSession] = useState(false);
   const [ctype, setCtype] = useState(CARDIO[0]); const [mins, setMins] = useState('30'); const [dist, setDist] = useState('5'); const [unit, setUnit] = useState<'km' | 'mi'>('km');
@@ -98,6 +100,7 @@ export default function Train() {
   const nameOf = (e: ProgramExercise) => swaps[uid(e)] || injAutoMap[uid(e)] || e.name;
   // Progress-photo focus areas bubble matching muscle groups to the top of today.
   const orderedExercises = cd.focusAreas.length ? [...exercises].sort((a, b) => (cd.focusAreas.includes(b.group) ? 1 : 0) - (cd.focusAreas.includes(a.group) ? 1 : 0)) : exercises;
+  const deload = deloadCheck(workoutLog);
   const logSet = (e: ProgramExercise, reps: string, kg: string) => { if (!reps) return; setLogged({ ...logged, [uid(e)]: [...(logged[uid(e)] || []), { reps, kg }] }); tapLight(); };
   const quickLog = (e: ProgramExercise) => { const sg = suggestForExercise(workoutLog, nameOf(e), e.reps); logSet(e, String(parseInt(e.reps, 10) || 8), sg ? String(sg.weight) : ''); };
   const logCardio = () => {
@@ -196,6 +199,16 @@ export default function Train() {
               </Pressable>
             </View>
 
+            {deload.due && !deloadDismiss ? (
+              <View style={{ backgroundColor: 'rgba(201,133,0,0.12)', borderRadius: 14, borderWidth: 1, borderColor: t.s3, padding: 13, marginBottom: 10, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <Icon name="moon" size={16} color={t.s3} />
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: t.ink, fontWeight: '800', fontSize: 13.5 }}>Time for a deload week</Text>
+                  <Text style={{ color: t.ink3, fontSize: 11.5, marginTop: 1 }}>{deload.reason} Drop to ~60% of your usual sets or weight this week.</Text>
+                </View>
+                <Pressable onPress={() => setDeloadDismiss(true)} hitSlop={8}><Text style={{ color: t.ink3, fontWeight: '700', fontSize: 12 }}>Dismiss</Text></Pressable>
+              </View>
+            ) : null}
             {cd.focusAreas.length > 0 ? (
               <View style={{ backgroundColor: t.surface, borderRadius: 14, borderWidth: 1, borderColor: t.brand, padding: 13, marginBottom: 10, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                 <Icon name="target" size={16} color={t.brand} />
@@ -572,6 +585,15 @@ function SessionRunner({ t, exercises, focus, nameOf, liveHr, log, injuries, onC
           </View>
         ) : null}
 
+        {done.length === 0 ? (() => { const wu = warmupSets(parseFloat(kg) || 0); return wu.length ? (
+          <View style={{ backgroundColor: t.surface, borderRadius: 12, borderWidth: 1, borderColor: t.ring, padding: 12, marginBottom: 14 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}><Icon name="flame" size={14} color={t.s3} /><Text style={{ color: t.ink2, fontSize: 12.5, fontWeight: '800' }}>Warm-up ramp</Text></View>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+              {wu.map((ws, i) => <View key={i} style={{ backgroundColor: t.surface2, borderRadius: 9, borderWidth: 1, borderColor: t.ring, paddingHorizontal: 10, paddingVertical: 6 }}><Text style={{ color: t.ink2, fontSize: 12, fontWeight: '700' }}>{ws.kg}kg × {ws.reps}</Text></View>)}
+            </View>
+            <Text style={{ color: t.ink3, fontSize: 11, marginTop: 8 }}>Ramp up first — these don't count as working sets.</Text>
+          </View>
+        ) : null; })() : null}
         <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 6 }}>Log set {done.length + 1}</Text>
         <View style={{ flexDirection: 'row', gap: 10, marginBottom: 20 }}>
           <TextInput value={reps} onChangeText={setReps} keyboardType="numeric" placeholder="reps" placeholderTextColor={t.ink3} style={inp} />
