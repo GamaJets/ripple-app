@@ -90,7 +90,7 @@ export default function Devices() {
  </View>
  ) : null}
 
- <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16, textTransform: 'capitalize', marginBottom: 10, textTransform: 'capitalize' }}>Available Devices</Text>
+ <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16, textTransform: 'capitalize', marginBottom: 10 }}>Available Devices</Text>
  {PROVIDERS.map((p) => {
  const st = w.states[p.meta.id] || 'disconnected';
  const on = st === 'connected';
