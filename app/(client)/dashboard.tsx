@@ -25,6 +25,7 @@ import { ONBOARD_KEY } from './onboarding';
 import { useSessions } from '../../src/ui/sessions';
 import { useInvites } from '../../src/ui/invites';
 import { useFoodLog } from '../../src/ui/foodLog';
+import { useWearables } from '../../src/ui/wearables';
 import { currentStreak, weekStats, personalRecords, streakRisk } from '../../src/lib/streaks';
 import { severeSummary } from '../../src/lib/injuries';
 import { scheduleLocal, pushAvailable } from '../../src/ui/pushNotifications';
@@ -77,6 +78,7 @@ export default function Home() {
   const { sessions } = useSessions();
   const { received: myInvites, acceptInvite: acceptCoachInvite, declineInvite: declineCoachInvite } = useInvites();
   const foodToday = useFoodLog().consumed;
+  const burnedToday = useWearables().today.activeKcal || 0;
 
   const solo = c.coachingMode === 'solo';
   const online = c.coachingMode === 'online';
@@ -101,13 +103,13 @@ export default function Home() {
   const consumed = { kcal: foodToday.kcal, p: foodToday.protein, cbs: foodToday.carbs, f: foodToday.fat };
   const _todayKey = new Date().toISOString().slice(0, 10);
   const trainedToday = log.some((e) => (e.t || '').slice(0, 10) === _todayKey);
-  const kcalLeft = Math.max(0, macros.kcal - consumed.kcal);
+  const kcalLeft = Math.max(0, macros.kcal + burnedToday - consumed.kcal);
   const today = readiness.tone === 'low'
     ? { headline: 'Recover today', tip: 'Under-recovered — keep it light or take a rest day.', cta: 'Recovery', route: '/(client)/recovery', tone: t.warn }
     : !trainedToday
     ? { headline: 'Ready to train', tip: readiness.tip, cta: 'Start workout', route: '/(client)/workouts', tone: t.brand }
     : kcalLeft > 200
-    ? { headline: 'Fuel up', tip: kcalLeft + ' kcal left to hit your target today.', cta: 'Log a meal', route: '/(client)/nutrition', tone: t.brand }
+    ? { headline: 'Fuel up', tip: kcalLeft + ' kcal left today' + (burnedToday > 0 ? ' (incl. ' + burnedToday + ' burned)' : '') + '.', cta: 'Log a meal', route: '/(client)/nutrition', tone: t.brand }
     : { headline: 'On track', tip: 'Session done and your macros are on point. Nice work.', cta: 'View plan', route: '/(client)/nutrition', tone: t.brand };
 
   const ws = c.weightSeries.map((x) => x.v);
