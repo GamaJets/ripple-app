@@ -13,6 +13,7 @@ interface Value {
   states: Record<string, ConnectionState>;
   metrics: Record<string, DailyMetrics | null>;
   busy: Record<string, boolean>;
+  lastSync: Record<string, number>;
   connect: (id: ProviderId) => Promise<void>;
   disconnect: (id: ProviderId) => Promise<void>;
   sync: (id: ProviderId) => Promise<void>;
@@ -26,6 +27,7 @@ export function WearablesProvider({ children }: { children: ReactNode }) {
   const [states, setStates] = useState<Record<string, ConnectionState>>({});
   const [metrics, setMetrics] = useState<Record<string, DailyMetrics | null>>({});
   const [busy, setBusy] = useState<Record<string, boolean>>({});
+  const [lastSync, setLastSync] = useState<Record<string, number>>({});
 
   const setState = (id: string, s: ConnectionState) => setStates((p) => ({ ...p, [id]: s }));
   const setBusyFor = (id: string, b: boolean) => setBusy((p) => ({ ...p, [id]: b }));
@@ -37,6 +39,7 @@ export function WearablesProvider({ children }: { children: ReactNode }) {
     try {
       const m = await p.fetchToday();
       setMetrics((prev) => ({ ...prev, [id]: m }));
+      setLastSync((prev) => ({ ...prev, [id]: Date.now() }));
     } catch {
       /* leave last metrics in place */
     } finally {
@@ -110,7 +113,7 @@ export function WearablesProvider({ children }: { children: ReactNode }) {
     heartRateAvg: hrs ? Math.round(hrs.reduce((a, b) => a + b, 0) / hrs.length) : null,
   };
 
-  return <Ctx.Provider value={{ states, metrics, busy, connect, disconnect, sync, today }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ states, metrics, busy, lastSync, connect, disconnect, sync, today }}>{children}</Ctx.Provider>;
 }
 
 export function useWearables(): Value {

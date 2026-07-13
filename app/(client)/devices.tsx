@@ -10,9 +10,18 @@ import type { Theme } from '../../src/theme/tokens';
 import { PROVIDERS } from '../../src/lib/wearables/registry';
 import type { WearableProvider } from '../../src/lib/wearables/types';
 import { useWearables } from '../../src/ui/wearables';
+import { tapLight } from '../../src/ui/haptics';
 
 type MetricKey = 'kcal' | 'hr' | 'steps' | 'source';
 
+function ago(ts?: number): string {
+ if (!ts) return '';
+ const s = Math.floor((Date.now() - ts) / 1000);
+ if (s < 60) return 'just now';
+ const m = Math.floor(s / 60); if (m < 60) return m + 'm ago';
+ const h = Math.floor(m / 60); if (h < 24) return h + 'h ago';
+ return Math.floor(h / 24) + 'd ago';
+}
 function num(n: number | null | undefined, dashes = '—'): string {
  return typeof n === 'number' ? n.toLocaleString() : dashes;
 }
@@ -123,9 +132,12 @@ export default function Devices() {
  </View>
  );
  })()}
- <Pressable onPress={() => w.sync(p.meta.id)} style={{ marginTop: 12, alignSelf: 'flex-start', backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 9, paddingHorizontal: 12, paddingVertical: 7 }}>
+ <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 12 }}>
+ <Pressable accessibilityLabel={'Sync ' + p.meta.name} accessibilityRole="button" onPress={() => { tapLight(); w.sync(p.meta.id); }} style={{ alignSelf: 'flex-start', backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 9, paddingHorizontal: 12, paddingVertical: 7 }}>
  <Text style={{ color: t.ink, fontWeight: '700', fontSize: 12 }}>↻ Sync Now</Text>
  </Pressable>
+ {w.lastSync[p.meta.id] ? <Text style={{ color: t.ink3, fontSize: 11 }}>Synced {ago(w.lastSync[p.meta.id])}</Text> : null}
+ </View>
  </View>
  ) : null}
  </View>
