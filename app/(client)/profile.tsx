@@ -116,7 +116,7 @@ const HUB_ICON: Record<string, IconName> = {
   '/(client)/achievements': 'trophy', '/(client)/cards': 'share', '/(client)/activity': 'bell',
   '/(client)/week': 'calendar', '/(client)/library': 'video', '/(client)/tools': 'settings',
   '/(client)/recovery': 'water', '/(client)/habits': 'check', '/(client)/checkin': 'pencil', '/(client)/injuries': 'heart',
-  '/(client)/foodlog': 'meals', '/(client)/coach': 'chat', '/(client)/messages': 'message', '/(client)/reminders': 'bell',
+  '/(client)/foodlog': 'meals', '/(client)/coach': 'chat', '/(client)/messages': 'message', '/(client)/reminders': 'bell', '/(client)/packages': 'trophy',
   '/(client)/social': 'share', '/(client)/devices': 'clock', '/(client)/music': 'play',
   '/(client)/appearance': 'palette', '/(client)/settings': 'settings', '/': 'swap', '/(client)/trainers': 'people', '/(client)/feedback': 'message',
 };
@@ -147,6 +147,7 @@ const HUB_GROUPS: { title: string; items: { label: string; note: string; route: 
   ] },
   { title: 'Connect', items: [
     { label: 'Find a trainer', note: 'Browse coaches · book online or in-person', route: '/(client)/trainers' },
+    { label: 'Memberships & packs', note: 'Your session packs & payments', route: '/(client)/packages' },
     { label: 'AI Coach', note: 'Chat with your AI coach', route: '/(client)/coach' },
     { label: 'Messages', note: 'Chat with your coach', route: '/(client)/messages' },
     { label: 'Share & Social', note: 'Post progress to Instagram / TikTok', route: '/(client)/social' },

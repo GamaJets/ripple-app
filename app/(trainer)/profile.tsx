@@ -144,6 +144,15 @@ export default function CoachProfile() {
 
         <Field t={t} label="Session Rate ($)" value={String(p.sessionFee)} onChangeText={(v) => p.setSessionFee(parseInt(v.replace(/[^0-9]/g, ''), 10) || 0)} placeholder="75" keyboardType="numeric" />
 
+        <Pressable onPress={() => router.push('/(trainer)/payments')} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 14, padding: 15, marginTop: 6, marginBottom: 12 }}>
+          <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}><Icon name="people" size={19} color={t.brand} /></View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: t.ink, fontWeight: '800', fontSize: 14 }}>Payments</Text>
+            <Text style={{ color: t.ink3, fontSize: 12, marginTop: 1 }}>Get paid by clients — memberships & packs</Text>
+          </View>
+          <Text style={{ color: t.brand, fontWeight: '800', fontSize: 16 }}>›</Text>
+        </Pressable>
+
         <Pressable onPress={() => router.push('/(trainer)/billing')} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 14, padding: 15, marginTop: 6, marginBottom: 12 }}>
           <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}><Icon name="chart" size={19} color={t.brand} /></View>
           <View style={{ flex: 1 }}>

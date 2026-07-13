@@ -48,6 +48,7 @@ export default function ClientLayout() {
       <Tabs.Screen name="measurements" options={{ href: null, title: 'Body Measurements' }} />
       <Tabs.Screen name="injuries" options={{ href: null, title: 'Injuries & limitations' }} />
       <Tabs.Screen name="reminders" options={{ href: null, title: 'Reminders' }} />
+      <Tabs.Screen name="packages" options={{ href: null, title: 'Memberships & packs' }} />
       <Tabs.Screen name="report" options={{ href: null, title: 'Weekly Report' }} />
       <Tabs.Screen name="records" options={{ href: null, title: 'Personal Records' }} />
       <Tabs.Screen name="goal" options={{ href: null, title: 'Goal Tracker' }} />
