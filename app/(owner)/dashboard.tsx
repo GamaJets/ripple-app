@@ -122,6 +122,15 @@ export default function OwnerOverview() {
           <Sparkline data={series} w={300} h={64} />
         </View>
 
+        <Pressable onPress={() => router.push('/(owner)/revenue')} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 16, padding: 15, marginBottom: 16 }}>
+          <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}><Icon name="trending" size={19} color={t.brand} /></View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: t.ink, fontWeight: '800', fontSize: 14 }}>Revenue analytics</Text>
+            <Text style={{ color: t.ink3, fontSize: 12, marginTop: 1 }}>Forecast, plan mix, LTV & revenue at risk</Text>
+          </View>
+          <Icon name="chevron" size={18} color={t.ink3} />
+        </Pressable>
+
         {/* Trainer health board */}
         <View style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18, marginBottom: 16 }}>
           <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16, marginBottom: 4 }}>Trainer health</Text>
