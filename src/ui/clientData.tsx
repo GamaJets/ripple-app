@@ -10,6 +10,7 @@ import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import type { Goal, Diet } from '../lib/types';
 import type { Allergen } from '../lib/meals';
+import type { Injury } from '../lib/injuries';
 
 export type CoachingMode = 'online' | 'inperson' | 'solo';
 export interface ScanRec { id: string; takenAt: string; weightKg: number; bodyFatPct: number; skeletalMuscleKg: number; source: string; image?: string }
@@ -23,6 +24,7 @@ interface Value {
   coachingMode: CoachingMode; setCoachingMode: (v: CoachingMode) => void;
   diet: Diet; setDiet: (v: Diet) => void;
   avoid: Allergen[]; setAvoid: (v: Allergen[]) => void;
+  injuries: Injury[]; addInjury: (v: Injury) => void; updateInjury: (id: string, patch: Partial<Injury>) => void; removeInjury: (id: string) => void;
   activity: number; mealsPerDay: 3 | 4 | 5;
   weightKg: number; bodyFatPct: number; muscleKg: number;
   setWeightKg: (v: number) => void; setBodyFat: (v: number) => void;
@@ -44,6 +46,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
   const [coachingMode, setCoachingMode] = useState<CoachingMode>('online');
   const [diet, setDiet] = useState<Diet>(base.diet);
   const [avoid, setAvoid] = useState<Allergen[]>([]);
+  const [injuries, setInjuries] = useState<Injury[]>([]);
   const [scans, setScans] = useState<ScanRec[]>(base.scans.map((s) => ({ id: s.id, takenAt: s.takenAt, weightKg: s.weightKg, bodyFatPct: s.bodyFatPct, skeletalMuscleKg: s.skeletalMuscleKg, source: s.source })));
   const [manualWeight, setManualWeight] = useState<number | null>(null);
   const [manualBodyFat, setManualBodyFat] = useState<number | null>(null);
@@ -63,6 +66,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
         if (p.coachingMode === 'online' || p.coachingMode === 'inperson' || p.coachingMode === 'solo') setCoachingMode(p.coachingMode);
         if (typeof p.diet === 'string') setDiet(p.diet);
         if (Array.isArray(p.avoid)) setAvoid(p.avoid);
+        if (Array.isArray(p.injuries)) setInjuries(p.injuries);
         if (typeof p.weightKg === 'number') setManualWeight(p.weightKg);
         if (typeof p.bodyFatPct === 'number') setManualBodyFat(p.bodyFatPct);
         if (typeof p.photo === 'string') setPhoto(p.photo);
@@ -74,8 +78,8 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
   // Persist edits once hydrated (avoids clobbering saved data with defaults on boot).
   useEffect(() => {
     if (!hydrated) return;
-    AsyncStorage.setItem(KEY, JSON.stringify({ name, dob, heightCm, goal, diet, avoid, coachingMode, weightKg: manualWeight, bodyFatPct: manualBodyFat, photo })).catch(() => {});
-  }, [hydrated, name, dob, heightCm, goal, diet, avoid, coachingMode, manualWeight, manualBodyFat, photo]);
+    AsyncStorage.setItem(KEY, JSON.stringify({ name, dob, heightCm, goal, diet, avoid, injuries, coachingMode, weightKg: manualWeight, bodyFatPct: manualBodyFat, photo })).catch(() => {});
+  }, [hydrated, name, dob, heightCm, goal, diet, avoid, injuries, coachingMode, manualWeight, manualBodyFat, photo]);
 
   // Sync body scans with Supabase (per user) — hydrate-or-seed, defensive.
   useEffect(() => {
@@ -106,6 +110,10 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
     id: sbUid ?? base.id, name, init: initials(name), setName,
     dob, setDob, photo, setPhoto, heightCm, setHeightCm,
     goal, setGoal, diet, setDiet, avoid, setAvoid,
+    injuries,
+    addInjury: (v) => setInjuries((p) => [v, ...p]),
+    updateInjury: (id, patch) => setInjuries((p) => p.map((i) => (i.id === id ? { ...i, ...patch } : i))),
+    removeInjury: (id) => setInjuries((p) => p.filter((i) => i.id !== id)),
     coachingMode, setCoachingMode,
     activity: base.activity, mealsPerDay: base.mealsPerDay as 3 | 4 | 5,
     weightKg, bodyFatPct, muscleKg: latest.skeletalMuscleKg,

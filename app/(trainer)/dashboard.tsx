@@ -8,6 +8,7 @@ import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { MOCK_TRAINER } from '../../src/lib/mockData';
 import { type RosterClient } from '../../src/lib/trainerMock';
+import { areaLabel } from '../../src/lib/injuries';
 import { supabase } from '../../src/lib/supabase';
 import { askCoach } from '../../src/lib/coach';
 import { useRoster } from '../../src/ui/roster';
@@ -318,6 +319,7 @@ export default function TrainerClients() {
                   <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, textTransform: 'capitalize' }}>{c.name}</Text>
                   {c.unread > 0 && <View style={{ backgroundColor: t.s6, borderRadius: 8, minWidth: 16, height: 16, paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: '#fff', fontSize: 10, fontWeight: '800' }}>{c.unread}</Text></View>}
                   {c.adherence < 80 && <View style={{ backgroundColor: 'rgba(250,178,25,0.18)', borderRadius: 8, paddingHorizontal: 7, paddingVertical: 2 }}><Text style={{ color: t.warn, fontSize: 10, fontWeight: '800' }}>CHECK IN</Text></View>}
+                  {c.injuries && c.injuries.length ? <View style={{ backgroundColor: 'rgba(201,133,0,0.18)', borderRadius: 8, paddingHorizontal: 7, paddingVertical: 2, flexDirection: 'row', alignItems: 'center', gap: 3 }}><Icon name="heart" size={9} color={t.s3} /><Text style={{ color: t.s3, fontSize: 10, fontWeight: '800' }}>{c.injuries.some((x) => x.isNew) ? 'NEW INJURY' : 'INJURY'}</Text></View> : null}
                   {['c1', 'c2', 'c3', 'c4', 'c5'].includes(c.id) ? <View style={{ backgroundColor: t.surface3, borderRadius: 8, paddingHorizontal: 7, paddingVertical: 2 }}><Text style={{ color: t.ink3, fontSize: 10, fontWeight: '800' }}>DEMO</Text></View> : null}
                 </View>
                 <Text style={{ color: t.ink3, fontSize: 12, marginTop: 1 }}>{c.goal} · {c.mode === 'inperson' ? 'In-person' : 'Online'} · {c.lastActive}</Text>
@@ -386,6 +388,26 @@ export default function TrainerClients() {
                   </View>
                 ) : null}
               </View>
+
+              {sel.injuries && sel.injuries.length ? (
+                <View style={{ marginBottom: 16 }}>
+                  <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>Injuries & limitations · disclosed at onboarding</Text>
+                  {sel.injuries.map((inj, i) => (
+                    <View key={i} style={{ backgroundColor: 'rgba(201,133,0,0.12)', borderRadius: 10, borderWidth: 1, borderColor: 'rgba(201,133,0,0.35)', padding: 11, marginBottom: 8, flexDirection: 'row', alignItems: 'flex-start', gap: 8 }}>
+                      <Icon name="heart" size={14} color={t.s3} />
+                      <View style={{ flex: 1 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          <Text style={{ color: t.ink, fontWeight: '800', fontSize: 13.5 }}>{areaLabel(inj.area)}</Text>
+                          <Text style={{ color: t.s3, fontSize: 12, fontWeight: '700', textTransform: 'capitalize' }}>· {inj.severity}</Text>
+                          {inj.isNew ? <View style={{ backgroundColor: t.s3, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 1 }}><Text style={{ color: t.brandInk, fontSize: 9, fontWeight: '900' }}>NEW</Text></View> : null}
+                        </View>
+                        {inj.note ? <Text style={{ color: t.ink3, fontSize: 12, marginTop: 2 }}>{inj.note}</Text> : null}
+                      </View>
+                    </View>
+                  ))}
+                  <Text style={{ color: t.ink3, fontSize: 11.5, marginTop: 2 }}>Their plan automatically flags and swaps moves that load these areas.</Text>
+                </View>
+              ) : null}
 
               {hasLog ? (
                 <View>

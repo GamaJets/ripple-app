@@ -12,6 +12,7 @@ import { Icon } from '../../src/ui/Icon';
 import { useClientData } from '../../src/ui/clientData';
 import { ALLERGENS, type Allergen } from '../../src/lib/meals';
 import type { Goal, Diet } from '../../src/lib/types';
+import { INJURY_AREAS, newInjuryId } from '../../src/lib/injuries';
 
 export const ONBOARD_KEY = 'repple.onboarded';
 
@@ -37,6 +38,7 @@ export default function Onboarding() {
   const [bf, setBf] = useState(String(Math.round(c.bodyFatPct)));
   const [diet, setDiet] = useState<Diet>(c.diet);
   const [avoid, setAvoid] = useState<Allergen[]>(c.avoid || []);
+  const [injAreas, setInjAreas] = useState<string[]>([]);
 
   const finish = async () => {
     if (name.trim()) c.setName(name.trim());
@@ -46,6 +48,7 @@ export default function Onboarding() {
     const b = parseFloat(bf); if (b > 0) c.setBodyFat(b);
     c.setDiet(diet);
     c.setAvoid(avoid);
+    injAreas.forEach((area) => c.addInjury({ id: newInjuryId(), area, severity: 'moderate', status: 'active', at: new Date().toISOString() }));
     try { await AsyncStorage.setItem(ONBOARD_KEY, '1'); } catch { /* ignore */ }
     router.replace('/(client)/dashboard');
   };
@@ -97,6 +100,22 @@ export default function Onboarding() {
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
           {ALLERGENS.map((al) => { const on = avoid.includes(al.id); return (<Pressable key={al.id} onPress={() => setAvoid(on ? avoid.filter((x) => x !== al.id) : [...avoid, al.id])} style={{ paddingHorizontal: 14, paddingVertical: 10, borderRadius: 18, backgroundColor: on ? t.crit : t.surface, borderWidth: 1, borderColor: on ? t.crit : t.ring }}><Text style={{ color: on ? '#fff' : t.ink2, fontWeight: '700', fontSize: 13 }}>{al.label}</Text></Pressable>); })}
         </View>
+      </View>
+    ),
+    // 3 — injuries / limitations
+    (
+      <View>
+        <Text style={{ color: t.ink, fontSize: 27, fontWeight: '800', fontFamily: 'Georgia' }}>Any injuries?</Text>
+        <Text style={{ color: t.ink3, fontSize: 14, marginTop: 4, marginBottom: 8 }}>Tell us what to train around. Your coach and your plan will avoid loading these areas and offer safer swaps.</Text>
+        <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 18 }}>Guidance only, not medical advice — see a professional for pain or a diagnosis.</Text>
+        <Text style={{ color: t.ink2, fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>Tap any that apply</Text>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+          {INJURY_AREAS.filter((a) => a.id !== 'other').map((a) => { const on = injAreas.includes(a.id); return (
+            <Pressable key={a.id} onPress={() => setInjAreas((prev) => (on ? prev.filter((x) => x !== a.id) : [...prev, a.id]))} style={{ paddingHorizontal: 14, paddingVertical: 10, borderRadius: 18, backgroundColor: on ? t.s3 : t.surface, borderWidth: 1, borderColor: on ? t.s3 : t.ring }}>
+              <Text style={{ color: on ? t.brandInk : t.ink2, fontWeight: '700', fontSize: 13 }}>{a.label}</Text>
+            </Pressable>); })}
+        </View>
+        <Text style={{ color: t.ink3, fontSize: 12.5, marginTop: 16 }}>{injAreas.length > 0 ? 'You can add severity, notes, and mark these recovered anytime in Me › Injuries & limitations.' : 'No injuries? Leave this blank — you can add them later in Me › Injuries.'}</Text>
       </View>
     ),
   ];

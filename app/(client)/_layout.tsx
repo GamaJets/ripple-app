@@ -46,6 +46,7 @@ export default function ClientLayout() {
       <Tabs.Screen name="checkin" options={{ href: null, title: 'Weekly Check-in' }} />
       <Tabs.Screen name="activity" options={{ href: null, title: 'Activity' }} />
       <Tabs.Screen name="measurements" options={{ href: null, title: 'Body Measurements' }} />
+      <Tabs.Screen name="injuries" options={{ href: null, title: 'Injuries & limitations' }} />
       <Tabs.Screen name="report" options={{ href: null, title: 'Weekly Report' }} />
       <Tabs.Screen name="records" options={{ href: null, title: 'Personal Records' }} />
       <Tabs.Screen name="goal" options={{ href: null, title: 'Goal Tracker' }} />

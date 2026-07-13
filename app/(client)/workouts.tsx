@@ -19,6 +19,7 @@ import { est1RM } from '../../src/lib/streaks';
 import { Confetti } from '../../src/ui/Confetti';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useExerciseVideos } from '../../src/ui/exerciseVideos';
+import { injuryFlag, type Injury } from '../../src/lib/injuries';
 
 const SERIF = 'Georgia';
 const WEEK = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -180,8 +181,9 @@ export default function Train() {
             {exercises.map((e) => {
               const sets = logged[uid(e)] || []; const done = sets.length >= e.sets;
               const sug = suggestForExercise(workoutLog, nameOf(e), e.reps);
+              const flag = injuryFlag(nameOf(e), e.group, cd.injuries);
               return (
-                <View key={e.key} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: done ? t.brand : t.ring, padding: 14, marginBottom: 10 }}>
+                <View key={e.key} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: done ? t.brand : flag ? t.s3 : t.ring, padding: 14, marginBottom: 10 }}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                     <View style={{ flex: 1, paddingRight: 10 }}>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
@@ -189,10 +191,15 @@ export default function Train() {
                         <Text style={{ color: t.ink, fontWeight: '700', fontSize: 14.5, textTransform: 'capitalize' }} numberOfLines={1}>{nameOf(e)}</Text>
                       </View>
                       <Text style={{ color: t.ink3, fontSize: 11.5, marginTop: 2 }}>{e.group} · target {e.sets} × {e.reps}</Text>
+                      {flag ? (
+                        <Pressable onPress={() => setSwapFor(e)} style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 6, backgroundColor: 'rgba(201,133,0,0.14)', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 5, alignSelf: 'flex-start' }}>
+                          <Icon name="heart" size={12} color={t.s3} /><Text style={{ color: t.s3, fontSize: 11, fontWeight: '800' }}>{flag.reason} · tap to swap</Text>
+                        </Pressable>
+                      ) : null}
                     </View>
                     <View style={{ flexDirection: 'row', gap: 6 }}>
                       <Pressable onPress={() => setVideoFor(nameOf(e))} style={{ width: 30, height: 30, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 8, alignItems: 'center', justifyContent: 'center' }}><Icon name="video" size={15} color={t.ink2} /></Pressable>
-                      <Pressable onPress={() => setSwapFor(e)} style={{ width: 30, height: 30, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 8, alignItems: 'center', justifyContent: 'center' }}><Icon name="swap" size={15} color={t.ink2} /></Pressable>
+                      <Pressable onPress={() => setSwapFor(e)} style={{ width: 30, height: 30, backgroundColor: t.surface2, borderColor: flag ? t.s3 : t.ring, borderWidth: 1, borderRadius: 8, alignItems: 'center', justifyContent: 'center' }}><Icon name="swap" size={15} color={flag ? t.s3 : t.ink2} /></Pressable>
                     </View>
                   </View>
                   {sets.length > 0 && <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>{sets.map((s, i) => <View key={i} style={{ backgroundColor: t.surface2, borderRadius: 8, paddingHorizontal: 9, paddingVertical: 5 }}><Text style={{ color: t.ink2, fontSize: 12, fontWeight: '600' }}>{s.reps}×{s.kg || '–'}kg</Text></View>)}</View>}
@@ -355,7 +362,7 @@ export default function Train() {
       </Modal>
 
       <Modal visible={session} animationType="slide" onRequestClose={() => setSession(false)}>
-        <SessionRunner t={t} exercises={exercises} focus={workout.focus} nameOf={nameOf} liveHr={w && w.today ? w.today.heartRateAvg : null} log={workoutLog} onComplete={addWorkouts} onClose={() => setSession(false)} />
+        <SessionRunner t={t} exercises={exercises} focus={workout.focus} nameOf={nameOf} liveHr={w && w.today ? w.today.heartRateAvg : null} log={workoutLog} injuries={cd.injuries} onComplete={addWorkouts} onClose={() => setSession(false)} />
       </Modal>
       <Confetti show={confetti} onDone={() => setConfetti(false)} />
     </SafeAreaView>
@@ -374,7 +381,7 @@ function LogRow({ t, onLog }: { t: Theme; onLog: (reps: string, kg: string) => v
   );
 }
 
-function SessionRunner({ t, exercises, focus, nameOf, liveHr, log, onComplete, onClose }: { t: Theme; exercises: ProgramExercise[]; focus: string; nameOf: (e: ProgramExercise) => string; liveHr: number | null; log: WorkoutEntry[]; onComplete: (entries: WorkoutEntry[]) => void; onClose: () => void }) {
+function SessionRunner({ t, exercises, focus, nameOf, liveHr, log, injuries, onComplete, onClose }: { t: Theme; exercises: ProgramExercise[]; focus: string; nameOf: (e: ProgramExercise) => string; liveHr: number | null; log: WorkoutEntry[]; injuries: Injury[]; onComplete: (entries: WorkoutEntry[]) => void; onClose: () => void }) {
   const insets = useSafeAreaInsets();
   const topPad = Math.max(insets.top, 44);
   const [idx, setIdx] = useState(0);
@@ -494,6 +501,11 @@ function SessionRunner({ t, exercises, focus, nameOf, liveHr, log, onComplete, o
 
         <Text style={{ color: t.ink, fontSize: 26, fontWeight: '900', textTransform: 'capitalize' }}>{nameOf(ex)}</Text>
         <Text style={{ color: t.ink3, fontSize: 14, marginTop: 4, marginBottom: 20 }}>{ex.group} · target {ex.sets} × {ex.reps}</Text>
+        {(() => { const f = injuryFlag(nameOf(ex), ex.group, injuries); return f ? (
+          <View style={{ backgroundColor: 'rgba(201,133,0,0.14)', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(201,133,0,0.4)', padding: 12, marginBottom: 16, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Icon name="heart" size={15} color={t.s3} /><Text style={{ color: t.ink2, fontSize: 12.5, flex: 1 }}>{f.reason}. Ease off, keep it pain-free, or swap this move.</Text>
+          </View>
+        ) : null; })()}
 
         {rest > 0 ? (
           <View style={{ backgroundColor: t.brand, borderRadius: 16, padding: 20, alignItems: 'center', marginBottom: 20 }}>

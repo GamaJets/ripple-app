@@ -30,9 +30,11 @@ function systemPrompt(ctx: any): string {
     `- Eaten so far today: ${c.eatenToday ?? 'not logged yet'}`,
     `- Training streak: ${c.streak ?? '?'} days${c.lastTrained ? ' · last trained ' + c.lastTrained : ''}`,
     `- Suggested next progression: ${c.nextLift ?? 'n/a'}`,
+    `- Injuries / limitations: ${c.injuries ?? 'none disclosed'}`,
     '',
     'Rules: keep replies short (2-4 sentences unless asked for detail). Be encouraging but honest. Use their real numbers. ',
     'When relevant, factor in their readiness, what they have eaten today, and their streak — e.g. suggest a lighter session if under-recovered, or a protein-focused meal if they are behind on protein. ' +
+    'If the client has disclosed injuries or limitations, ALWAYS train around them: avoid or regress exercises that load the injured area, suggest pain-free alternatives, and never program through pain. ' +
     'Give practical next steps. You are not a doctor — for pain, injury, or medical questions, advise seeing a professional. Never invent data you were not given.',
   ].join('\n');
 }

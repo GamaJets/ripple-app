@@ -115,7 +115,7 @@ const HUB_ICON: Record<string, IconName> = {
   '/(client)/standards': 'chart', '/(client)/goal': 'target', '/(client)/measurements': 'ruler',
   '/(client)/achievements': 'trophy', '/(client)/cards': 'share', '/(client)/activity': 'bell',
   '/(client)/week': 'calendar', '/(client)/library': 'video', '/(client)/tools': 'settings',
-  '/(client)/recovery': 'water', '/(client)/habits': 'check', '/(client)/checkin': 'pencil',
+  '/(client)/recovery': 'water', '/(client)/habits': 'check', '/(client)/checkin': 'pencil', '/(client)/injuries': 'heart',
   '/(client)/foodlog': 'meals', '/(client)/coach': 'chat', '/(client)/messages': 'message',
   '/(client)/social': 'share', '/(client)/devices': 'clock', '/(client)/music': 'play',
   '/(client)/appearance': 'palette', '/(client)/settings': 'settings', '/': 'swap', '/(client)/trainers': 'people', '/(client)/feedback': 'message',
@@ -137,6 +137,7 @@ const HUB_GROUPS: { title: string; items: { label: string; note: string; route: 
     { label: 'Exercise Library', note: 'How-to videos from your coach', route: '/(client)/library' },
     { label: 'Lifting Tools', note: '1RM, plate math & macro reference', route: '/(client)/tools' },
     { label: 'Recovery', note: 'Hydration, sleep & mobility', route: '/(client)/recovery' },
+    { label: 'Injuries & limitations', note: 'Train around injuries — safer swaps', route: '/(client)/injuries' },
   ] },
   { title: 'Daily', items: [
     { label: 'Daily Habits', note: 'Habits & water tracker', route: '/(client)/habits' },

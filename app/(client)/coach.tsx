@@ -7,6 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { useClientData } from '../../src/ui/clientData';
+import { injurySummary } from '../../src/lib/injuries';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
 import { macrosFor } from '../../src/lib/nutrition';
 import { buildProgram } from '../../src/lib/programs';
@@ -50,6 +51,7 @@ export default function Coach() {
  streak: _streak,
  lastTrained: _lastEx || undefined,
  nextLift: _prog ? `${_prog.exercise}: ${_prog.nextWeight}kg x ${_prog.nextReps} (${_prog.action})` : undefined,
+ injuries: injurySummary(cd.injuries) || 'none disclosed',
  };
 
  const [msgs, setMsgs] = useState<ChatMsg[]>([
