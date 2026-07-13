@@ -39,5 +39,15 @@
     "@types/react": "~19.1.0",
     "typescript": "~5.9.2"
   },
-  "//deferred-native-deps": "Added at the dev-build/EAS stage (they require native code and do NOT run in Expo Go): @stripe/stripe-react-native"
+  "//deferred-native-deps": "Added at the dev-build/EAS stage (they require native code and do NOT run in Expo Go): @stripe/stripe-react-native",
+  "expo": {
+    "doctor": {
+      "reactNativeDirectoryCheck": {
+        "exclude": [
+          "react-native-health"
+        ],
+        "listUnknownPackages": false
+      }
+    }
+  }
 }
