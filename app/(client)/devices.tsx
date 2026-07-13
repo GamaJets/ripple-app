@@ -17,7 +17,7 @@ function num(n: number | null | undefined, dashes = '—'): string {
  return typeof n === 'number' ? n.toLocaleString() : dashes;
 }
 
-function Metric({ t, ico, label, value, unit, onPress }: { t: Theme; ico: string; label: string; value: string; unit: string; onPress: () => void }) {
+function Metric({ t, ico, label, value, unit, onPress, hint }: { t: Theme; ico: string; label: string; value: string; unit: string; onPress: () => void; hint?: string }) {
  return (
  <Pressable onPress={onPress} style={{ flex: 1, backgroundColor: t.surface2, borderRadius: 14, padding: 14, borderWidth: 1, borderColor: t.ring }}>
  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -26,6 +26,7 @@ function Metric({ t, ico, label, value, unit, onPress }: { t: Theme; ico: string
  </View>
  <Text style={{ color: t.ink, fontSize: 20, fontWeight: '800', textTransform: 'capitalize', marginTop: 6 }}>{value}<Text style={{ color: t.ink3, fontSize: 11, fontWeight: '600' }}> {unit}</Text></Text>
  <Text style={{ color: t.ink3, fontSize: 11, marginTop: 1, textTransform: 'capitalize' }}>{label}</Text>
+ {hint ? <Text style={{ color: t.s3, fontSize: 10, marginTop: 3, fontWeight: '700' }}>{hint}</Text> : null}
  </Pressable>
  );
 }
@@ -69,14 +70,14 @@ export default function Devices() {
  <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: t.good }} /><Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, textTransform: 'capitalize' }}>Live Today</Text>
  </View>
  <View style={{ flexDirection: 'row', gap: 10, marginBottom: 10 }}>
- <Metric t={t} ico="" label="Calories Burned" value={num(w.today.activeKcal)} unit="kcal" onPress={() => setDetail('kcal')} />
- <Metric t={t} ico="" label="Avg Heart Rate" value={num(w.today.heartRateAvg)} unit="bpm" onPress={() => setDetail('hr')} />
+ <Metric t={t} ico="" label="Calories Burned" value={num(w.today.activeKcal)} unit="kcal" hint={w.today.activeKcal == null ? 'Wear your Apple Watch' : undefined} onPress={() => setDetail('kcal')} />
+ <Metric t={t} ico="" label="Avg Heart Rate" value={num(w.today.heartRateAvg)} unit="bpm" hint={w.today.heartRateAvg == null ? 'Wear your Apple Watch' : undefined} onPress={() => setDetail('hr')} />
  </View>
  <View style={{ flexDirection: 'row', gap: 10 }}>
  <Metric t={t} ico="" label="Steps" value={num(w.today.steps)} unit="" onPress={() => setDetail('steps')} />
  <Metric t={t} ico="" label="Source" value={String(connected.length)} unit={connected.length === 1 ? 'device' : 'devices'} onPress={() => setDetail('source')} />
  </View>
- <Text style={{ color: t.ink3, fontSize: 11, marginTop: 12 }}>Tap any tile for detail. Calories burned feed into your daily target — eat back what you earn on training days.</Text>
+ <Text style={{ color: t.ink3, fontSize: 11, marginTop: 12, lineHeight: 16 }}>Steps come from your iPhone. Heart rate &amp; calories need an Apple Watch — wear it, then tap Sync Now. Calories feed your daily target.</Text>
  </View>
  ) : null}
 
