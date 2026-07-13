@@ -51,3 +51,25 @@ export async function scheduleLocal(title: string, body: string, date: Date): Pr
     await Notifications.scheduleNotificationAsync({ content: { title, body }, trigger: { type: 'date', date } });
   } catch { /* ignore */ }
 }
+
+/** Schedule a reminder that repeats every day at hour:minute. Returns the
+ *  notification id so it can be cancelled individually (leaving other
+ *  scheduled notifications, e.g. booked sessions, untouched). No-ops until the
+ *  notifications-enabled build. */
+export async function scheduleDailyReminder(title: string, body: string, hour: number, minute: number): Promise<string | null> {
+  if (!Notifications) return null;
+  try {
+    if (Notifications.getPermissionsAsync) {
+      let status = (await Notifications.getPermissionsAsync())?.status;
+      if (status !== 'granted') status = (await Notifications.requestPermissionsAsync())?.status;
+      if (status !== 'granted') return null;
+    }
+    return await Notifications.scheduleNotificationAsync({ content: { title, body }, trigger: { type: 'daily', hour, minute } });
+  } catch { return null; }
+}
+
+/** Cancel specific scheduled reminders by id (from scheduleDailyReminder). */
+export async function cancelReminders(ids: string[]): Promise<void> {
+  if (!Notifications || !ids || !ids.length) return;
+  for (const id of ids) { try { await Notifications.cancelScheduledNotificationAsync(id); } catch { /* ignore */ } }
+}

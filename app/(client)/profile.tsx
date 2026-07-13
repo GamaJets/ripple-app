@@ -116,7 +116,7 @@ const HUB_ICON: Record<string, IconName> = {
   '/(client)/achievements': 'trophy', '/(client)/cards': 'share', '/(client)/activity': 'bell',
   '/(client)/week': 'calendar', '/(client)/library': 'video', '/(client)/tools': 'settings',
   '/(client)/recovery': 'water', '/(client)/habits': 'check', '/(client)/checkin': 'pencil', '/(client)/injuries': 'heart',
-  '/(client)/foodlog': 'meals', '/(client)/coach': 'chat', '/(client)/messages': 'message',
+  '/(client)/foodlog': 'meals', '/(client)/coach': 'chat', '/(client)/messages': 'message', '/(client)/reminders': 'bell',
   '/(client)/social': 'share', '/(client)/devices': 'clock', '/(client)/music': 'play',
   '/(client)/appearance': 'palette', '/(client)/settings': 'settings', '/': 'swap', '/(client)/trainers': 'people', '/(client)/feedback': 'message',
 };
@@ -143,6 +143,7 @@ const HUB_GROUPS: { title: string; items: { label: string; note: string; route: 
     { label: 'Daily Habits', note: 'Habits & water tracker', route: '/(client)/habits' },
     { label: 'Weekly Check-in', note: 'Send your coach a weekly pulse', route: '/(client)/checkin' },
     { label: 'Food Log', note: 'Search, barcode or photo', route: '/(client)/foodlog' },
+    { label: 'Reminders', note: 'Hydration & supplement nudges', route: '/(client)/reminders' },
   ] },
   { title: 'Connect', items: [
     { label: 'Find a trainer', note: 'Browse coaches · book online or in-person', route: '/(client)/trainers' },
