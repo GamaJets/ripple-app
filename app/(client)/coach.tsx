@@ -1,10 +1,10 @@
 // AI Coach — a chat that knows the client's stats, goal, program & targets.
 // Powered by the coach-chat edge function; graceful canned reply until deployed.
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
 import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { useClientData } from '../../src/ui/clientData';
 import { injurySummary } from '../../src/lib/injuries';
@@ -61,6 +61,8 @@ export default function Coach() {
  const [busy, setBusy] = useState(false);
  const scroller = useRef<ScrollView>(null);
 
+ const params = useLocalSearchParams<{ ask?: string }>();
+ const seeded = useRef(false);
  const send = async (text: string) => {
  const q = text.trim();
  if (!q || busy) return;
@@ -72,6 +74,14 @@ export default function Coach() {
  setMsgs((m) => [...m, { role: 'assistant', content: reply ?? (coachAvailable() ? "I hit a snag reaching the coach service — try again in a moment." : "The AI coach turns on once your team deploys the coach-chat function and enables AI features. Until then, here's a tip: hit your protein target first — it protects muscle and keeps you full.") }]);
  setTimeout(() => scroller.current?.scrollToEnd({ animated: true }), 50);
  };
+
+ useEffect(() => {
+   if (!seeded.current && params.ask === 'injury') {
+     seeded.current = true;
+     send('I have an injury logged that limits some exercises. Build me a safe workout plan for today that trains around it, and tell me what to avoid.');
+   }
+   // eslint-disable-next-line react-hooks/exhaustive-deps
+ }, [params.ask]);
 
  return (
  <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>

@@ -26,6 +26,7 @@ import { useSessions } from '../../src/ui/sessions';
 import { useInvites } from '../../src/ui/invites';
 import { useFoodLog } from '../../src/ui/foodLog';
 import { currentStreak, weekStats, personalRecords, streakRisk } from '../../src/lib/streaks';
+import { severeSummary } from '../../src/lib/injuries';
 import { scheduleLocal, pushAvailable } from '../../src/ui/pushNotifications';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -85,6 +86,7 @@ export default function Home() {
 
   const streak = currentStreak(log);
   const risk = streakRisk(log);
+  const sevInj = severeSummary(c.injuries);
   const remindTonight = async () => {
     const when = new Date(); when.setHours(19, 0, 0, 0);
     if (when.getTime() <= Date.now()) when.setTime(Date.now() + 60 * 60 * 1000);
@@ -201,6 +203,23 @@ export default function Home() {
             <Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 14 }}>{today.cta}</Text>
           </Pressable>
         </View>
+
+        {sevInj ? (
+          <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.crit, padding: 15, marginBottom: 12 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+              <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}><Icon name="chat" size={17} color={t.brandInk} /></View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: t.ink, fontWeight: '800', fontSize: 14 }}>Your coach</Text>
+                <Text style={{ color: t.ink3, fontSize: 11 }}>Plan adjusted for your injury</Text>
+              </View>
+            </View>
+            <Text style={{ color: t.ink2, fontSize: 13.5, lineHeight: 20 }}>I've eased off {sevInj.groups.join(' & ').toLowerCase()} while your {sevInj.areas.join(' & ').toLowerCase()} {sevInj.areas.length > 1 ? 'are' : 'is'} severe — risky moves are swapped or paused in your plan. Let's train safely around it.</Text>
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
+              <Pressable onPress={() => router.push('/(client)/coach?ask=injury')} style={{ flex: 1, backgroundColor: t.brand, borderRadius: 11, paddingVertical: 12, alignItems: 'center' }}><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 13.5 }}>Get a safe plan</Text></Pressable>
+              <Pressable onPress={() => router.push('/(client)/injuries')} style={{ backgroundColor: t.surface2, borderWidth: 1, borderColor: t.ring, borderRadius: 11, paddingVertical: 12, paddingHorizontal: 16, alignItems: 'center' }}><Text style={{ color: t.ink, fontWeight: '800', fontSize: 13.5 }}>Update</Text></Pressable>
+            </View>
+          </View>
+        ) : null}
 
         {risk.atRisk ? (
           <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.s3, padding: 15, marginBottom: 12 }}>

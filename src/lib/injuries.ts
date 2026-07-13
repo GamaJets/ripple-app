@@ -65,3 +65,14 @@ export function injurySummary(injs: Injury[] = []): string {
 }
 
 export const newInjuryId = (): string => 'inj_' + Math.random().toString(36).slice(2, 9);
+
+// Proactive-coaching signal: the muscle groups eased off because of a SEVERE
+// active injury, so the client dashboard can surface a coach message and the
+// plan's auto-hide has something to explain. Null when nothing is severe.
+export function severeSummary(injs: Injury[] = []): { areas: string[]; groups: string[] } | null {
+  const sev = activeInjuries(injs).filter((i) => i.severity === 'severe');
+  if (!sev.length) return null;
+  const areas = Array.from(new Set(sev.map((i) => areaLabel(i.area))));
+  const groups = Array.from(new Set(sev.flatMap((i) => INJURY_AREAS.find((a) => a.id === i.area)?.groups || [])));
+  return { areas, groups };
+}
