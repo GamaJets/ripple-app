@@ -197,9 +197,9 @@ export default function Nutrition() {
           </View>
           <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 12 }}>Eating something off-plan? Add it and it counts toward your day.</Text>
           <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
-            <Pressable onPress={photoLog} style={{ flex: 1, backgroundColor: t.brand, borderRadius: 12, paddingVertical: 12, alignItems: 'center', gap: 4 }}><Icon name="camera" size={19} color={t.brandInk} /><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 12 }}>Photo</Text></Pressable>
-            <Pressable onPress={barcodeLog} style={{ flex: 1, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingVertical: 12, alignItems: 'center', gap: 4 }}><Icon name="search" size={19} color={t.ink} /><Text style={{ color: t.ink, fontWeight: '700', fontSize: 12 }}>Barcode</Text></Pressable>
-            <Pressable onPress={() => router.push('/(client)/foodlog')} style={{ flex: 1, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingVertical: 12, alignItems: 'center', gap: 4 }}><Icon name="plus" size={19} color={t.ink} /><Text style={{ color: t.ink, fontWeight: '700', fontSize: 12 }}>Search</Text></Pressable>
+            <Pressable accessibilityLabel="Log a meal from a photo" accessibilityRole="button" onPress={photoLog} style={{ flex: 1, backgroundColor: t.brand, borderRadius: 12, paddingVertical: 12, alignItems: 'center', gap: 4 }}><Icon name="camera" size={19} color={t.brandInk} /><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 12 }}>Photo</Text></Pressable>
+            <Pressable accessibilityLabel="Scan a barcode" accessibilityRole="button" onPress={barcodeLog} style={{ flex: 1, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingVertical: 12, alignItems: 'center', gap: 4 }}><Icon name="search" size={19} color={t.ink} /><Text style={{ color: t.ink, fontWeight: '700', fontSize: 12 }}>Barcode</Text></Pressable>
+            <Pressable accessibilityLabel="Open food log" accessibilityRole="button" onPress={() => router.push('/(client)/foodlog')} style={{ flex: 1, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingVertical: 12, alignItems: 'center', gap: 4 }}><Icon name="plus" size={19} color={t.ink} /><Text style={{ color: t.ink, fontWeight: '700', fontSize: 12 }}>Search</Text></Pressable>
           </View>
           <View style={{ flexDirection: 'row', gap: 8 }}>
             <TextInput value={nl} onChangeText={setNl} placeholder='Describe it — "chicken burrito & a coke"' placeholderTextColor={t.ink3} onSubmitEditing={describeLog} returnKeyType="done" style={{ flex: 1, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14 }} />
@@ -313,9 +313,9 @@ export default function Nutrition() {
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 16 }}>
                 <Text style={{ color: t.ink2, fontSize: 13, fontWeight: '700' }}>Servings</Text>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 11, paddingHorizontal: 6, paddingVertical: 4 }}>
-                  <Pressable onPress={() => setBatch((b) => Math.max(1, b - 1))} style={{ width: 30, height: 30, borderRadius: 8, alignItems: 'center', justifyContent: 'center' }}><Icon name="minus" size={15} color={t.ink} /></Pressable>
+                  <Pressable accessibilityLabel="Fewer servings" accessibilityRole="button" onPress={() => setBatch((b) => Math.max(1, b - 1))} style={{ width: 30, height: 30, borderRadius: 8, alignItems: 'center', justifyContent: 'center' }}><Icon name="minus" size={15} color={t.ink} /></Pressable>
                   <Text style={{ color: t.ink, fontWeight: '800', fontSize: 16, minWidth: 18, textAlign: 'center' }}>{batch}</Text>
-                  <Pressable onPress={() => setBatch((b) => Math.min(8, b + 1))} style={{ width: 30, height: 30, borderRadius: 8, alignItems: 'center', justifyContent: 'center' }}><Icon name="plus" size={15} color={t.ink} /></Pressable>
+                  <Pressable accessibilityLabel="More servings" accessibilityRole="button" onPress={() => setBatch((b) => Math.min(8, b + 1))} style={{ width: 30, height: 30, borderRadius: 8, alignItems: 'center', justifyContent: 'center' }}><Icon name="plus" size={15} color={t.ink} /></Pressable>
                 </View>
                 {recipe.steps && recipe.steps.length > 0 ? (
                   <Pressable onPress={() => { setCookStep(0); setCook(true); }} style={{ flex: 1, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 6, backgroundColor: t.brand, borderRadius: 11, paddingVertical: 11 }}>

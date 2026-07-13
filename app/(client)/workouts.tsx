@@ -192,11 +192,13 @@ export default function Train() {
             <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 15, marginBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
               <View style={{ flex: 1 }}>
                 <Text style={{ color: t.brand, fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6 }}>Today · {workout.focus}</Text>
-                <Text style={{ color: t.ink, fontSize: 16, fontWeight: '800', marginTop: 2 }}>{exercises.length} exercises · ~{estMin} min</Text>
+                <Text style={{ color: t.ink, fontSize: 16, fontWeight: '800', marginTop: 2 }}>{exercises.length > 0 ? (exercises.length + ' exercises · ~' + estMin + ' min') : 'Rest day — recover'}</Text>
               </View>
-              <Pressable onPress={() => setSession(true)} style={{ backgroundColor: t.brand, borderRadius: 11, paddingVertical: 11, paddingHorizontal: 15, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              {exercises.length > 0 ? (
+              <Pressable accessibilityLabel="Start guided workout" accessibilityRole="button" onPress={() => setSession(true)} style={{ backgroundColor: t.brand, borderRadius: 11, paddingVertical: 11, paddingHorizontal: 15, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                 <Icon name="play" size={14} color={t.brandInk} /><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 13 }}>Start</Text>
               </Pressable>
+              ) : null}
             </View>
 
             {deload.due && !deloadDismiss ? (
@@ -262,8 +264,8 @@ export default function Train() {
                       ) : null}
                     </View>
                     <View style={{ flexDirection: 'row', gap: 6 }}>
-                      <Pressable onPress={() => setVideoFor(nameOf(e))} style={{ width: 30, height: 30, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 8, alignItems: 'center', justifyContent: 'center' }}><Icon name="video" size={15} color={t.ink2} /></Pressable>
-                      <Pressable onPress={() => setSwapFor(e)} style={{ width: 30, height: 30, backgroundColor: t.surface2, borderColor: flag ? t.s3 : t.ring, borderWidth: 1, borderRadius: 8, alignItems: 'center', justifyContent: 'center' }}><Icon name="swap" size={15} color={flag ? t.s3 : t.ink2} /></Pressable>
+                      <Pressable accessibilityLabel="Watch exercise demo" accessibilityRole="button" onPress={() => setVideoFor(nameOf(e))} style={{ width: 30, height: 30, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 8, alignItems: 'center', justifyContent: 'center' }}><Icon name="video" size={15} color={t.ink2} /></Pressable>
+                      <Pressable accessibilityLabel="Swap exercise" accessibilityRole="button" onPress={() => setSwapFor(e)} style={{ width: 30, height: 30, backgroundColor: t.surface2, borderColor: flag ? t.s3 : t.ring, borderWidth: 1, borderRadius: 8, alignItems: 'center', justifyContent: 'center' }}><Icon name="swap" size={15} color={flag ? t.s3 : t.ink2} /></Pressable>
                     </View>
                   </View>
                   {sets.length > 0 && <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>{sets.map((s, i) => <View key={i} style={{ backgroundColor: t.surface2, borderRadius: 8, paddingHorizontal: 9, paddingVertical: 5 }}><Text style={{ color: t.ink2, fontSize: 12, fontWeight: '600' }}>{s.reps}×{s.kg || '–'}kg</Text></View>)}</View>}
@@ -281,6 +283,13 @@ export default function Train() {
                 </View>
               );
             })}
+            {exercises.length === 0 ? (
+              <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 22, alignItems: 'center', marginBottom: 10 }}>
+                <Icon name="moon" size={28} color={t.brand} />
+                <Text style={{ color: t.ink, fontWeight: '800', fontSize: 16, marginTop: 8 }}>Rest day</Text>
+                <Text style={{ color: t.ink3, fontSize: 13, textAlign: 'center', marginTop: 4, lineHeight: 19 }}>Nothing scheduled today — recovery is where the gains happen. Pick another day above to train, or switch to Cardio to log a session.</Text>
+              </View>
+            ) : null}
             {Object.values(logged).some((a) => a.length > 0) ? (
               <Pressable onPress={saveManual} style={{ backgroundColor: t.brand, borderRadius: 14, paddingVertical: 15, alignItems: 'center', marginTop: 4, flexDirection: 'row', justifyContent: 'center', gap: 8 }}>
                 <Icon name="check" size={16} color={t.brandInk} /><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 15 }}>Save workout to log</Text>
@@ -598,7 +607,7 @@ function SessionRunner({ t, exercises, focus, nameOf, liveHr, log, injuries, onC
         <View style={{ flexDirection: 'row', gap: 10, marginBottom: 20 }}>
           <TextInput value={reps} onChangeText={setReps} keyboardType="numeric" placeholder="reps" placeholderTextColor={t.ink3} style={inp} />
           <TextInput value={kg} onChangeText={setKg} keyboardType="numeric" placeholder="kg" placeholderTextColor={t.ink3} style={inp} />
-          <Pressable onPress={logSet} style={{ backgroundColor: t.brand, borderRadius: 10, paddingHorizontal: 22, justifyContent: 'center' }}><Icon name="check" size={18} color={t.brandInk} /></Pressable>
+          <Pressable accessibilityLabel="Log set" accessibilityRole="button" onPress={logSet} style={{ backgroundColor: t.brand, borderRadius: 10, paddingHorizontal: 22, justifyContent: 'center' }}><Icon name="check" size={18} color={t.brandInk} /></Pressable>
         </View>
 
         {pendingFeel != null ? (

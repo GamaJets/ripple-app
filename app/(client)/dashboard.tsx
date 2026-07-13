@@ -320,8 +320,8 @@ export default function Home() {
             <View><Text style={{ color: t.ink, fontWeight: '800', fontSize: 14 }}>Water</Text><Text style={{ color: t.ink3, fontSize: 12 }}>{water} / {waterGoal} glasses</Text></View>
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <Pressable onPress={removeWater} style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: t.surface2, borderWidth: 1, borderColor: t.ring, alignItems: 'center', justifyContent: 'center' }}><Icon name="minus" size={16} color={t.ink2} /></Pressable>
-            <Pressable onPress={addWater} style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}><Icon name="plus" size={16} color={t.brandInk} /></Pressable>
+            <Pressable accessibilityLabel="Remove a glass of water" accessibilityRole="button" onPress={removeWater} style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: t.surface2, borderWidth: 1, borderColor: t.ring, alignItems: 'center', justifyContent: 'center' }}><Icon name="minus" size={16} color={t.ink2} /></Pressable>
+            <Pressable accessibilityLabel="Add a glass of water" accessibilityRole="button" onPress={addWater} style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}><Icon name="plus" size={16} color={t.brandInk} /></Pressable>
           </View>
         </View>
 

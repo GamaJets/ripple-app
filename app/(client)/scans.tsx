@@ -306,8 +306,8 @@ export default function Scans() {
             </View>
             <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 14 }}>Snap or upload your report, pick the scan date, enter the numbers.</Text>
             <View style={{ flexDirection: 'row', gap: 10, marginBottom: 12 }}>
-              <Pressable onPress={() => pick(true)} style={{ flex: 1, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingVertical: 16, alignItems: 'center', gap: 5 }}><Icon name="camera" size={22} color={t.ink} /><Text style={{ color: t.ink, fontWeight: '700', fontSize: 13 }}>Take photo</Text></Pressable>
-              <Pressable onPress={() => pick(false)} style={{ flex: 1, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingVertical: 16, alignItems: 'center', gap: 5 }}><Icon name="plus" size={22} color={t.ink} /><Text style={{ color: t.ink, fontWeight: '700', fontSize: 13 }}>Upload scan</Text></Pressable>
+              <Pressable accessibilityLabel="Take a progress photo" accessibilityRole="button" onPress={() => pick(true)} style={{ flex: 1, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingVertical: 16, alignItems: 'center', gap: 5 }}><Icon name="camera" size={22} color={t.ink} /><Text style={{ color: t.ink, fontWeight: '700', fontSize: 13 }}>Take photo</Text></Pressable>
+              <Pressable accessibilityLabel="Add photo from library" accessibilityRole="button" onPress={() => pick(false)} style={{ flex: 1, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingVertical: 16, alignItems: 'center', gap: 5 }}><Icon name="plus" size={22} color={t.ink} /><Text style={{ color: t.ink, fontWeight: '700', fontSize: 13 }}>Upload scan</Text></Pressable>
             </View>
             {img && (
               <View style={{ marginBottom: 12 }}>

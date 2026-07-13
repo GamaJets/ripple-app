@@ -126,9 +126,9 @@ export default function FoodLog() {
  </View>
 
  <View style={{ flexDirection: 'row', gap: 10, marginBottom: 12 }}>
- <Pressable onPress={() => { add(BARCODE, 'barcode'); Alert.alert('Barcode Scanned', BARCODE.n + ' added.'); }} style={{ flex: 1, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingVertical: 14, alignItems: 'center', gap: 4 }}><Icon name="search" size={20} color={t.ink} /><Text style={{ color: t.ink, fontWeight: '700', fontSize: 12 }}>Barcode</Text></Pressable>
- <Pressable onPress={() => takeMealPhoto(true)} style={{ flex: 1, backgroundColor: t.brand, borderRadius: 12, paddingVertical: 14, alignItems: 'center', gap: 4 }}><Icon name="camera" size={20} color={t.brandInk} /><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 12 }}>Photo a meal</Text></Pressable>
- <Pressable onPress={() => takeMealPhoto(false)} style={{ flex: 1, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingVertical: 14, alignItems: 'center', gap: 4 }}><Icon name="plus" size={20} color={t.ink} /><Text style={{ color: t.ink, fontWeight: '700', fontSize: 12 }}>Upload</Text></Pressable>
+ <Pressable accessibilityLabel="Scan barcode" accessibilityRole="button" onPress={() => { add(BARCODE, 'barcode'); Alert.alert('Barcode Scanned', BARCODE.n + ' added.'); }} style={{ flex: 1, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingVertical: 14, alignItems: 'center', gap: 4 }}><Icon name="search" size={20} color={t.ink} /><Text style={{ color: t.ink, fontWeight: '700', fontSize: 12 }}>Barcode</Text></Pressable>
+ <Pressable accessibilityLabel="Take a meal photo" accessibilityRole="button" onPress={() => takeMealPhoto(true)} style={{ flex: 1, backgroundColor: t.brand, borderRadius: 12, paddingVertical: 14, alignItems: 'center', gap: 4 }}><Icon name="camera" size={20} color={t.brandInk} /><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 12 }}>Photo a meal</Text></Pressable>
+ <Pressable accessibilityLabel="Add meal photo from library" accessibilityRole="button" onPress={() => takeMealPhoto(false)} style={{ flex: 1, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingVertical: 14, alignItems: 'center', gap: 4 }}><Icon name="plus" size={20} color={t.ink} /><Text style={{ color: t.ink, fontWeight: '700', fontSize: 12 }}>Upload</Text></Pressable>
  </View>
 
  <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>

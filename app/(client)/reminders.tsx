@@ -119,7 +119,7 @@ export default function Reminders() {
             <View key={s.id} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: t.ring }}>
               <Text style={{ color: t.ink2, fontSize: 14, flex: 1 }}>{s.name}</Text>
               <Text style={{ color: t.ink, fontSize: 13, fontWeight: '700', marginRight: 12 }}>{fmt(s.hour, s.minute)}</Text>
-              <Pressable onPress={() => removeSupp(s.id)} hitSlop={6}><Icon name="minus" size={16} color={t.ink3} /></Pressable>
+              <Pressable accessibilityLabel="Remove reminder" accessibilityRole="button" onPress={() => removeSupp(s.id)} hitSlop={6}><Icon name="minus" size={16} color={t.ink3} /></Pressable>
             </View>
           ))}
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12 }}>
