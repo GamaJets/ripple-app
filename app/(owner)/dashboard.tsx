@@ -1,7 +1,7 @@
 // Owner · Overview — the platform operating console. Real roll-ups (MRR + MoM
 // delta, ARR, trainers, clients), an at-risk-MRR churn callout, a trainer-health
 // board (score + risk, tap for detail), and an accumulating MRR trend.
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { View, Text, ScrollView, Pressable, Modal, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -15,6 +15,8 @@ import { Sparkline, DeltaBadge, HealthPill } from '../../src/ui/charts';
 import { useMrrHistory } from '../../src/ui/useMrrHistory';
 import { cohorts } from '../../src/lib/ownerAnalytics';
 import { ownerReportDoc, shareDoc } from '../../src/lib/exportShare';
+import { fetchFailedInvoices, money, type Invoice } from '../../src/lib/billing';
+import { Linking } from 'react-native';
 
 function Big({ t, label, value, sub, tint, extra }: { t: Theme; label: string; value: string; sub: string; tint?: boolean; extra?: React.ReactNode }) {
   return (<View style={{ flex: 1, backgroundColor: tint ? t.brand : t.surface, borderRadius: 18, borderWidth: 1, borderColor: t.ring, padding: 16 }}>
@@ -41,6 +43,9 @@ export default function OwnerOverview() {
   // Trainers sorted worst-health first so problems surface at the top.
   const ranked = [...(trainers as TrainerLike[])].map((tr) => ({ tr, h: trainerHealth(tr) })).sort((a, b) => a.h.score - b.h.score);
   const selHealth = sel ? trainerHealth(sel) : null;
+  const [dunning, setDunning] = useState<Invoice[]>([]);
+  useEffect(() => { let c = false; fetchFailedInvoices().then((r) => { if (!c) setDunning(r); }); return () => { c = true; }; }, []);
+  const dunningTotal = dunning.reduce((a, i) => a + (i.amount_due || 0), 0);
   const exportReport = async () => {
     const doc = ownerReportDoc({
       mrr: roll.mrr, arr: roll.arr, trainers: roll.trainers, paying: roll.paying, trial: roll.trial,
@@ -87,6 +92,25 @@ export default function OwnerOverview() {
             </View>
             <Icon name="chevron" size={18} color={t.ink3} />
           </Pressable>
+        ) : null}
+
+        {dunning.length > 0 ? (
+          <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.crit, padding: 15, marginBottom: 16 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+              <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: 'rgba(208,59,59,0.14)', alignItems: 'center', justifyContent: 'center' }}><Icon name="target" size={19} color={t.crit} /></View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: t.ink, fontWeight: '800', fontSize: 15 }}>{money(dunningTotal)} in failed payments</Text>
+                <Text style={{ color: t.ink3, fontSize: 12, marginTop: 1 }}>{dunning.length} unpaid invoice{dunning.length > 1 ? 's' : ''} — retry or chase before they churn.</Text>
+              </View>
+            </View>
+            {dunning.slice(0, 4).map((inv) => (
+              <Pressable key={inv.id} onPress={() => inv.hosted_invoice_url && Linking.openURL(inv.hosted_invoice_url)} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8, borderTopWidth: 1, borderTopColor: t.ring }}>
+                <Text style={{ color: t.ink2, fontSize: 13, flex: 1 }} numberOfLines={1}>Invoice {inv.id.slice(-8)} · {inv.attempt_count || 0} attempt{(inv.attempt_count || 0) === 1 ? '' : 's'}</Text>
+                <Text style={{ color: t.crit, fontSize: 13, fontWeight: '800', marginRight: 8 }}>{money(inv.amount_due, inv.currency)}</Text>
+                {inv.hosted_invoice_url ? <Icon name="chevron" size={16} color={t.ink3} /> : null}
+              </Pressable>
+            ))}
+          </View>
         ) : null}
 
         {/* MRR trend (real, accumulating) */}

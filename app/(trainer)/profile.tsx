@@ -144,6 +144,15 @@ export default function CoachProfile() {
 
         <Field t={t} label="Session Rate ($)" value={String(p.sessionFee)} onChangeText={(v) => p.setSessionFee(parseInt(v.replace(/[^0-9]/g, ''), 10) || 0)} placeholder="75" keyboardType="numeric" />
 
+        <Pressable onPress={() => router.push('/(trainer)/billing')} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 14, padding: 15, marginTop: 6, marginBottom: 12 }}>
+          <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}><Icon name="chart" size={19} color={t.brand} /></View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: t.ink, fontWeight: '800', fontSize: 14 }}>Billing & subscription</Text>
+            <Text style={{ color: t.ink3, fontSize: 12, marginTop: 1 }}>Your plan, payment method & invoices</Text>
+          </View>
+          <Text style={{ color: t.brand, fontWeight: '800', fontSize: 16 }}>›</Text>
+        </Pressable>
+
         <View style={{ backgroundColor: t.surface2, borderRadius: 12, borderWidth: 1, borderColor: t.ring, padding: 14, marginTop: 4 }}>
           <Text style={{ color: t.ink3, fontSize: 12, lineHeight: 18 }}>Changes save automatically and appear on your clients' booking screen. Tap a chip to remove it.</Text>
         </View>
