@@ -161,14 +161,15 @@ export default function Nutrition() {
         </View>
 
         {/* hero: ring + macro bars */}
-        <View style={{ backgroundColor: t.surface, borderRadius: 18, borderWidth: 1, borderColor: t.ring, padding: 16, marginBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+        <Pressable onPress={() => router.push('/(client)/foodlog')} accessibilityRole="button" accessibilityLabel="Open food log to see and edit everything you've eaten" style={{ backgroundColor: t.surface, borderRadius: 18, borderWidth: 1, borderColor: t.ring, padding: 16, marginBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 14 }}>
           <CalRing t={t} val={tot.K} target={target.kcal} />
           <View style={{ flex: 1 }}>
             {macroBar('Protein', tot.P, target.protein, t.brand)}
             {macroBar('Carbs', tot.C, target.carbs, t.s3)}
             {macroBar('Fat', tot.F, target.fat, t.s1)}
           </View>
-        </View>
+          <Icon name="chevron" size={18} color={t.ink3} />
+        </Pressable>
 
         {/* Macro cycling: training vs rest day */}
         <View style={{ backgroundColor: t.surface, borderRadius: 14, borderWidth: 1, borderColor: t.ring, padding: 12, marginBottom: 12 }}>

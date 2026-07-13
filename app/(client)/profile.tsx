@@ -251,10 +251,11 @@ export default function Profile() {
               <Icon name="camera" size={12} color={t.ink2} />
             </View>
           </Pressable>
-          <View style={{ flex: 1 }}>
+          <Pressable onPress={() => setShowEdit(true)} accessibilityRole="button" accessibilityLabel="Edit your profile and stats" style={{ flex: 1 }}>
             <Text style={{ color: t.ink, fontSize: 22, fontWeight: '700', fontFamily: SERIF, textTransform: 'capitalize' }}>{cd.name}</Text>
             <Text style={{ color: t.ink3, fontSize: 12, marginTop: 2 }}>{statsLine}</Text>
-          </View>
+            <Text style={{ color: t.brand, fontSize: 11, fontWeight: '700', marginTop: 3 }}>Tap to edit ›</Text>
+          </Pressable>
           <Pressable onPress={() => setShowEdit(true)} style={{ width: 36, height: 36, borderWidth: 1, borderColor: t.ring, borderRadius: 10, alignItems: 'center', justifyContent: 'center' }}>
             <Icon name="pencil" size={16} color={t.ink2} />
           </Pressable>

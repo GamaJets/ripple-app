@@ -245,7 +245,7 @@ export default function Train() {
               return (
                 <View key={e.key} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: done ? t.brand : flag ? t.s3 : t.ring, padding: 14, marginBottom: 10 }}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                    <View style={{ flex: 1, paddingRight: 10 }}>
+                    <Pressable onPress={() => setVideoFor(nameOf(e))} accessibilityRole="button" accessibilityLabel={'View ' + nameOf(e) + ' demo'} style={{ flex: 1, paddingRight: 10 }}>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                         {done ? <Icon name="check" size={15} color={t.brand} /> : null}
                         <Text style={{ color: t.ink, fontWeight: '700', fontSize: 14.5, textTransform: 'capitalize' }} numberOfLines={1}>{nameOf(e)}</Text>
@@ -262,7 +262,7 @@ export default function Train() {
                           <Icon name="heart" size={12} color={t.s3} /><Text style={{ color: t.s3, fontSize: 11, fontWeight: '800' }}>{flag.reason} · tap to swap</Text>
                         </Pressable>
                       ) : null}
-                    </View>
+                    </Pressable>
                     <View style={{ flexDirection: 'row', gap: 6 }}>
                       <Pressable accessibilityLabel="Watch exercise demo" accessibilityRole="button" onPress={() => setVideoFor(nameOf(e))} style={{ width: 30, height: 30, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 8, alignItems: 'center', justifyContent: 'center' }}><Icon name="video" size={15} color={t.ink2} /></Pressable>
                       <Pressable accessibilityLabel="Swap exercise" accessibilityRole="button" onPress={() => setSwapFor(e)} style={{ width: 30, height: 30, backgroundColor: t.surface2, borderColor: flag ? t.s3 : t.ring, borderWidth: 1, borderRadius: 8, alignItems: 'center', justifyContent: 'center' }}><Icon name="swap" size={15} color={flag ? t.s3 : t.ink2} /></Pressable>
