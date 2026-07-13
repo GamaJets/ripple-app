@@ -19,7 +19,7 @@ import { est1RM } from '../../src/lib/streaks';
 import { Confetti } from '../../src/ui/Confetti';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useExerciseVideos } from '../../src/ui/exerciseVideos';
-import { injuryFlag, type Injury } from '../../src/lib/injuries';
+import { injuryFlag, areaLabel, type Injury } from '../../src/lib/injuries';
 
 const SERIF = 'Georgia';
 const WEEK = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -48,6 +48,7 @@ export default function Train() {
   const [cardioLog, setCardioLog] = useState<{ type: string; mins: number; dist: number; unit: string; kcal: number }[]>([]);
   const [swapFor, setSwapFor] = useState<ProgramExercise | null>(null);
   const [videoFor, setVideoFor] = useState<string | null>(null);
+  const [injRevealed, setInjRevealed] = useState<string[]>([]);
   const { videos: exVideos } = useExerciseVideos();
   const [session, setSession] = useState(false);
   const [ctype, setCtype] = useState(CARDIO[0]); const [mins, setMins] = useState('30'); const [dist, setDist] = useState('5'); const [unit, setUnit] = useState<'km' | 'mi'>('km');
@@ -79,7 +80,22 @@ export default function Train() {
   const exercises = Array.isArray(workout && workout.exercises) ? workout.exercises : [];
   const estMin = Math.max(20, exercises.length * 9);
   const uid = (e: ProgramExercise) => `${dayIdx}:${e.key}`;
-  const nameOf = (e: ProgramExercise) => swaps[uid(e)] || e.name;
+  // Severe active injuries auto-manage the plan: swap to a safe alternative, or
+  // hide the movement entirely when no alternative avoids the injured area.
+  const injAutoMap: Record<string, string> = {};
+  const injHidden: string[] = [];
+  for (const _e of exercises) {
+    const _id = `${dayIdx}:${_e.key}`;
+    if (swaps[_id]) continue; // a manual swap always wins
+    const _f = injuryFlag(_e.name, _e.group, cd.injuries);
+    if (_f && _f.injury.severity === 'severe') {
+      const _alt = (_e.alternatives || []).find((a) => !injuryFlag(a, _e.group, cd.injuries));
+      if (_alt) injAutoMap[_id] = _alt; else injHidden.push(_id);
+    }
+  }
+  const injHiddenSet = new Set(injHidden);
+  const isInjHidden = (e: ProgramExercise) => injHiddenSet.has(uid(e)) && !injRevealed.includes(uid(e));
+  const nameOf = (e: ProgramExercise) => swaps[uid(e)] || injAutoMap[uid(e)] || e.name;
   const logSet = (e: ProgramExercise, reps: string, kg: string) => { if (!reps) return; setLogged({ ...logged, [uid(e)]: [...(logged[uid(e)] || []), { reps, kg }] }); tapLight(); };
   const quickLog = (e: ProgramExercise) => { const sg = suggestForExercise(workoutLog, nameOf(e), e.reps); logSet(e, String(parseInt(e.reps, 10) || 8), sg ? String(sg.weight) : ''); };
   const logCardio = () => {
@@ -179,9 +195,26 @@ export default function Train() {
             </View>
 
             {exercises.map((e) => {
-              const sets = logged[uid(e)] || []; const done = sets.length >= e.sets;
+              const _id = uid(e);
+              if (isInjHidden(e)) {
+                const inj = injuryFlag(e.name, e.group, cd.injuries);
+                return (
+                  <View key={e.key} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, borderStyle: 'dashed', padding: 14, marginBottom: 10 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                      <Icon name="heart" size={15} color={t.crit} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ color: t.ink2, fontWeight: '700', fontSize: 14, textDecorationLine: 'line-through' }} numberOfLines={1}>{e.name}</Text>
+                        <Text style={{ color: t.ink3, fontSize: 11.5, marginTop: 2 }}>Hidden to protect your {inj ? areaLabel(inj.injury.area).toLowerCase() : 'injury'} (severe) — no safe swap in your plan.</Text>
+                      </View>
+                      <Pressable onPress={() => setInjRevealed((prev) => [...prev, _id])} style={{ backgroundColor: t.surface2, borderWidth: 1, borderColor: t.ring, borderRadius: 9, paddingHorizontal: 10, paddingVertical: 7 }}><Text style={{ color: t.ink2, fontWeight: '700', fontSize: 12 }}>Show anyway</Text></Pressable>
+                    </View>
+                  </View>
+                );
+              }
+              const sets = logged[_id] || []; const done = sets.length >= e.sets;
               const sug = suggestForExercise(workoutLog, nameOf(e), e.reps);
               const flag = injuryFlag(nameOf(e), e.group, cd.injuries);
+              const autoFrom = injAutoMap[_id];
               return (
                 <View key={e.key} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: done ? t.brand : flag ? t.s3 : t.ring, padding: 14, marginBottom: 10 }}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -191,6 +224,11 @@ export default function Train() {
                         <Text style={{ color: t.ink, fontWeight: '700', fontSize: 14.5, textTransform: 'capitalize' }} numberOfLines={1}>{nameOf(e)}</Text>
                       </View>
                       <Text style={{ color: t.ink3, fontSize: 11.5, marginTop: 2 }}>{e.group} · target {e.sets} × {e.reps}</Text>
+                      {autoFrom ? (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 6, backgroundColor: 'rgba(22,184,166,0.12)', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 5, alignSelf: 'flex-start' }}>
+                          <Icon name="swap" size={12} color={t.brand} /><Text style={{ color: t.brand, fontSize: 11, fontWeight: '800' }}>Auto-swapped from {e.name} to protect you</Text>
+                        </View>
+                      ) : null}
                       {flag ? (
                         <Pressable onPress={() => setSwapFor(e)} style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 6, backgroundColor: 'rgba(201,133,0,0.14)', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 5, alignSelf: 'flex-start' }}>
                           <Icon name="heart" size={12} color={t.s3} /><Text style={{ color: t.s3, fontSize: 11, fontWeight: '800' }}>{flag.reason} · tap to swap</Text>
@@ -362,7 +400,7 @@ export default function Train() {
       </Modal>
 
       <Modal visible={session} animationType="slide" onRequestClose={() => setSession(false)}>
-        <SessionRunner t={t} exercises={exercises} focus={workout.focus} nameOf={nameOf} liveHr={w && w.today ? w.today.heartRateAvg : null} log={workoutLog} injuries={cd.injuries} onComplete={addWorkouts} onClose={() => setSession(false)} />
+        <SessionRunner t={t} exercises={exercises.filter((e) => !isInjHidden(e))} focus={workout.focus} nameOf={nameOf} liveHr={w && w.today ? w.today.heartRateAvg : null} log={workoutLog} injuries={cd.injuries} onComplete={addWorkouts} onClose={() => setSession(false)} />
       </Modal>
       <Confetti show={confetti} onDone={() => setConfetti(false)} />
     </SafeAreaView>
