@@ -102,3 +102,37 @@ export function cohorts(trainers: TrainerLike[]): Cohort[] {
     .sort((a, b) => a.key - b.key)
     .map(({ key, ...rest }) => rest);
 }
+
+// Platform-wide end-client analytics (owner #7): total end-clients, an
+// engagement proxy (clients served by a healthy vs at-risk trainer), average
+// per trainer, and the client distribution by plan. Pure over the roster.
+export interface ClientAnalytics {
+  total: number;
+  engaged: number;      // clients on trainers whose health.risk is 'ok'
+  atRisk: number;       // clients on watch/high/suspended trainers
+  engagementPct: number;
+  avgPerTrainer: number;
+  byPlan: { plan: string; clients: number; pct: number }[];
+}
+
+export function clientAnalytics(trainers: TrainerLike[]): ClientAnalytics {
+  const total = trainers.reduce((a, t) => a + (t.clients || 0), 0);
+  let engaged = 0, atRisk = 0;
+  const planMap: Record<string, number> = {};
+  for (const tr of trainers) {
+    const c = tr.clients || 0;
+    const h = trainerHealth(tr);
+    if (tr.status !== 'suspended' && h.risk === 'ok') engaged += c; else atRisk += c;
+    const key = tr.plan || '—';
+    planMap[key] = (planMap[key] || 0) + c;
+  }
+  const byPlan = Object.entries(planMap)
+    .map(([plan, clients]) => ({ plan, clients, pct: total ? Math.round((clients / total) * 100) : 0 }))
+    .sort((a, b) => b.clients - a.clients);
+  return {
+    total, engaged, atRisk,
+    engagementPct: total ? Math.round((engaged / total) * 100) : 0,
+    avgPerTrainer: trainers.length ? Math.round((total / trainers.length) * 10) / 10 : 0,
+    byPlan,
+  };
+}

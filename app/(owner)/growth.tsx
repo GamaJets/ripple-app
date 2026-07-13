@@ -6,7 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
 import { usePromos } from '../../src/ui/promos';
 import { usePlatformTrainers } from '../../src/ui/trainers';
-import { platformRollup, cohorts, type TrainerLike } from '../../src/lib/ownerAnalytics';
+import { platformRollup, cohorts, clientAnalytics, type TrainerLike } from '../../src/lib/ownerAnalytics';
 
 const DISCOUNTS = [10, 20, 30, 50];
 
@@ -16,6 +16,7 @@ export default function OwnerGrowth() {
   const { trainers } = usePlatformTrainers();
   const roll = platformRollup(trainers as TrainerLike[]);
   const coh = cohorts(trainers as TrainerLike[]);
+  const ca = clientAnalytics(trainers as TrainerLike[]);
   const thisMonth = new Date().toLocaleString(undefined, { month: 'short' }) + ' ' + new Date().getFullYear();
   const newThisMonth = trainers.filter((x) => x.since === thisMonth).length;
   const churnPct = trainers.length ? Math.round((roll.suspended / trainers.length) * 100) : 0;
@@ -40,6 +41,33 @@ export default function OwnerGrowth() {
           <View style={{ flex: 1, backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 14 }}><Text style={{ color: t.ink3, fontSize: 12, fontWeight: '700' }}>New this month</Text><Text style={{ color: t.ink, fontSize: 22, fontWeight: '800', marginTop: 4 }}>+{newThisMonth}</Text></View>
           <View style={{ flex: 1, backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 14 }}><Text style={{ color: t.ink3, fontSize: 12, fontWeight: '700' }}>Churn</Text><Text style={{ color: churnPct > 0 ? t.crit : t.brand, fontSize: 22, fontWeight: '800', marginTop: 4 }}>{churnPct}%</Text></View>
           <View style={{ flex: 1, backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 14 }}><Text style={{ color: t.ink3, fontSize: 12, fontWeight: '700' }}>Trial→paid</Text><Text style={{ color: t.ink, fontSize: 22, fontWeight: '800', marginTop: 4 }}>{roll.trialConversionPct != null ? roll.trialConversionPct + '%' : '—'}</Text></View>
+        </View>
+
+        <View style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18, marginBottom: 16 }}>
+          <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16, marginBottom: 4 }}>Platform client analytics</Text>
+          <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 14 }}>End-clients across every trainer</Text>
+          <View style={{ flexDirection: 'row', gap: 10, marginBottom: 16 }}>
+            {[['Active clients', String(ca.total)], ['Engaged', ca.engagementPct + '%'], ['Avg / trainer', String(ca.avgPerTrainer)]].map(([l, v]) => (
+              <View key={l} style={{ flex: 1, backgroundColor: t.surface2, borderRadius: 12, borderWidth: 1, borderColor: t.ring, paddingVertical: 12, alignItems: 'center' }}>
+                <Text style={{ color: t.ink, fontWeight: '800', fontSize: 18 }}>{v}</Text>
+                <Text style={{ color: t.ink3, fontSize: 10.5, marginTop: 2 }}>{l}</Text>
+              </View>
+            ))}
+          </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+            <View style={{ flex: 1, height: 10, borderRadius: 5, backgroundColor: t.surface3, overflow: 'hidden', flexDirection: 'row' }}>
+              <View style={{ height: 10, backgroundColor: t.brand, width: ca.engagementPct + '%' }} />
+              <View style={{ height: 10, backgroundColor: t.warn, width: (100 - ca.engagementPct) + '%' }} />
+            </View>
+            <Text style={{ color: t.ink3, fontSize: 11 }}>{ca.engaged} engaged · {ca.atRisk} at-risk</Text>
+          </View>
+          <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>Clients by plan</Text>
+          {ca.byPlan.map((bp) => (
+            <View key={bp.plan} style={{ marginBottom: 10 }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}><Text style={{ color: t.ink2, fontSize: 13, fontWeight: '600' }}>{bp.plan}</Text><Text style={{ color: t.ink, fontSize: 13, fontWeight: '700' }}>{bp.clients} · {bp.pct}%</Text></View>
+              <View style={{ height: 8, borderRadius: 4, backgroundColor: t.surface3, overflow: 'hidden' }}><View style={{ height: 8, borderRadius: 4, backgroundColor: t.brand, width: bp.pct + '%' }} /></View>
+            </View>
+          ))}
         </View>
 
         <View style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18, marginBottom: 16 }}>
