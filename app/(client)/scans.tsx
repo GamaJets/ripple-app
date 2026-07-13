@@ -16,6 +16,7 @@ import { useBrand } from '../../src/ui/brand';
 import { TrendChart } from '../../src/ui/Chart';
 import { Icon } from '../../src/ui/Icon';
 import { analyzeInBody, analyzePhysique, visionAvailable, type PhysiqueVision } from '../../src/lib/vision';
+import { focusToGroups } from '../../src/lib/focus';
 
 const SERIF = 'Georgia';
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -383,6 +384,11 @@ export default function Scans() {
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                     {phys.focusAreas.map((a) => (<View key={a} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 16, paddingHorizontal: 13, paddingVertical: 8 }}><Text style={{ color: t.ink2, fontSize: 13, fontWeight: '700' }}>{a}</Text></View>))}
                   </View>
+                  {focusToGroups(phys.focusAreas).length > 0 ? (
+                    <Pressable onPress={() => { cd.setFocusAreas(focusToGroups(phys.focusAreas)); setPhysOpen(false); Alert.alert('Plan updated', 'Your Train tab now emphasises ' + focusToGroups(phys.focusAreas).join(', ') + ' — those exercises are tagged and prioritised until your next photo.'); }} style={{ marginTop: 14, backgroundColor: t.brand, borderRadius: 12, paddingVertical: 14, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8 }}>
+                      <Icon name="target" size={16} color={t.brandInk} /><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 15 }}>Emphasise these in my plan</Text>
+                    </Pressable>
+                  ) : null}
                 </View>
               ) : null}
               <Text style={{ color: t.ink3, fontSize: 11, marginTop: 16 }}>AI estimate for training guidance only — not medical advice.</Text>

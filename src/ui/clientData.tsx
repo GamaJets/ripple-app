@@ -25,6 +25,7 @@ interface Value {
   diet: Diet; setDiet: (v: Diet) => void;
   avoid: Allergen[]; setAvoid: (v: Allergen[]) => void;
   injuries: Injury[]; addInjury: (v: Injury) => void; updateInjury: (id: string, patch: Partial<Injury>) => void; removeInjury: (id: string) => void;
+  focusAreas: string[]; setFocusAreas: (v: string[]) => void;
   activity: number; mealsPerDay: 3 | 4 | 5;
   weightKg: number; bodyFatPct: number; muscleKg: number;
   setWeightKg: (v: number) => void; setBodyFat: (v: number) => void;
@@ -47,6 +48,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
   const [diet, setDiet] = useState<Diet>(base.diet);
   const [avoid, setAvoid] = useState<Allergen[]>([]);
   const [injuries, setInjuries] = useState<Injury[]>([]);
+  const [focusAreas, setFocusAreas] = useState<string[]>([]);
   const [scans, setScans] = useState<ScanRec[]>(base.scans.map((s) => ({ id: s.id, takenAt: s.takenAt, weightKg: s.weightKg, bodyFatPct: s.bodyFatPct, skeletalMuscleKg: s.skeletalMuscleKg, source: s.source })));
   const [manualWeight, setManualWeight] = useState<number | null>(null);
   const [manualBodyFat, setManualBodyFat] = useState<number | null>(null);
@@ -67,6 +69,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
         if (typeof p.diet === 'string') setDiet(p.diet);
         if (Array.isArray(p.avoid)) setAvoid(p.avoid);
         if (Array.isArray(p.injuries)) setInjuries(p.injuries);
+        if (Array.isArray(p.focusAreas)) setFocusAreas(p.focusAreas);
         if (typeof p.weightKg === 'number') setManualWeight(p.weightKg);
         if (typeof p.bodyFatPct === 'number') setManualBodyFat(p.bodyFatPct);
         if (typeof p.photo === 'string') setPhoto(p.photo);
@@ -78,8 +81,8 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
   // Persist edits once hydrated (avoids clobbering saved data with defaults on boot).
   useEffect(() => {
     if (!hydrated) return;
-    AsyncStorage.setItem(KEY, JSON.stringify({ name, dob, heightCm, goal, diet, avoid, injuries, coachingMode, weightKg: manualWeight, bodyFatPct: manualBodyFat, photo })).catch(() => {});
-  }, [hydrated, name, dob, heightCm, goal, diet, avoid, injuries, coachingMode, manualWeight, manualBodyFat, photo]);
+    AsyncStorage.setItem(KEY, JSON.stringify({ name, dob, heightCm, goal, diet, avoid, injuries, focusAreas, coachingMode, weightKg: manualWeight, bodyFatPct: manualBodyFat, photo })).catch(() => {});
+  }, [hydrated, name, dob, heightCm, goal, diet, avoid, injuries, focusAreas, coachingMode, manualWeight, manualBodyFat, photo]);
 
   // Sync body scans with Supabase (per user) — hydrate-or-seed, defensive.
   useEffect(() => {
@@ -111,6 +114,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
     dob, setDob, photo, setPhoto, heightCm, setHeightCm,
     goal, setGoal, diet, setDiet, avoid, setAvoid,
     injuries,
+    focusAreas, setFocusAreas,
     addInjury: (v) => setInjuries((p) => [v, ...p]),
     updateInjury: (id, patch) => setInjuries((p) => p.map((i) => (i.id === id ? { ...i, ...patch } : i))),
     removeInjury: (id) => setInjuries((p) => p.filter((i) => i.id !== id)),

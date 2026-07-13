@@ -52,6 +52,7 @@ export default function Coach() {
  lastTrained: _lastEx || undefined,
  nextLift: _prog ? `${_prog.exercise}: ${_prog.nextWeight}kg x ${_prog.nextReps} (${_prog.action})` : undefined,
  injuries: injurySummary(cd.injuries) || 'none disclosed',
+ focusAreas: cd.focusAreas.length ? cd.focusAreas.join(', ') : 'none set',
  };
 
  const [msgs, setMsgs] = useState<ChatMsg[]>([

@@ -31,6 +31,7 @@ function systemPrompt(ctx: any): string {
     `- Training streak: ${c.streak ?? '?'} days${c.lastTrained ? ' · last trained ' + c.lastTrained : ''}`,
     `- Suggested next progression: ${c.nextLift ?? 'n/a'}`,
     `- Injuries / limitations: ${c.injuries ?? 'none disclosed'}`,
+    `- Focus areas to emphasise (from progress photo): ${c.focusAreas ?? 'none set'}`,
     '',
     'Rules: keep replies short (2-4 sentences unless asked for detail). Be encouraging but honest. Use their real numbers. ',
     'When relevant, factor in their readiness, what they have eaten today, and their streak — e.g. suggest a lighter session if under-recovered, or a protein-focused meal if they are behind on protein. ' +

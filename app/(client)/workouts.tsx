@@ -96,6 +96,8 @@ export default function Train() {
   const injHiddenSet = new Set(injHidden);
   const isInjHidden = (e: ProgramExercise) => injHiddenSet.has(uid(e)) && !injRevealed.includes(uid(e));
   const nameOf = (e: ProgramExercise) => swaps[uid(e)] || injAutoMap[uid(e)] || e.name;
+  // Progress-photo focus areas bubble matching muscle groups to the top of today.
+  const orderedExercises = cd.focusAreas.length ? [...exercises].sort((a, b) => (cd.focusAreas.includes(b.group) ? 1 : 0) - (cd.focusAreas.includes(a.group) ? 1 : 0)) : exercises;
   const logSet = (e: ProgramExercise, reps: string, kg: string) => { if (!reps) return; setLogged({ ...logged, [uid(e)]: [...(logged[uid(e)] || []), { reps, kg }] }); tapLight(); };
   const quickLog = (e: ProgramExercise) => { const sg = suggestForExercise(workoutLog, nameOf(e), e.reps); logSet(e, String(parseInt(e.reps, 10) || 8), sg ? String(sg.weight) : ''); };
   const logCardio = () => {
@@ -194,7 +196,17 @@ export default function Train() {
               </Pressable>
             </View>
 
-            {exercises.map((e) => {
+            {cd.focusAreas.length > 0 ? (
+              <View style={{ backgroundColor: t.surface, borderRadius: 14, borderWidth: 1, borderColor: t.brand, padding: 13, marginBottom: 10, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <Icon name="target" size={16} color={t.brand} />
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: t.ink, fontWeight: '800', fontSize: 13.5 }}>Emphasising {cd.focusAreas.join(' · ')}</Text>
+                  <Text style={{ color: t.ink3, fontSize: 11.5, marginTop: 1 }}>From your progress photo — these moves come first.</Text>
+                </View>
+                <Pressable onPress={() => cd.setFocusAreas([])} hitSlop={8}><Text style={{ color: t.ink3, fontWeight: '700', fontSize: 12 }}>Clear</Text></Pressable>
+              </View>
+            ) : null}
+            {orderedExercises.map((e) => {
               const _id = uid(e);
               if (isInjHidden(e)) {
                 const inj = injuryFlag(e.name, e.group, cd.injuries);
@@ -222,6 +234,7 @@ export default function Train() {
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                         {done ? <Icon name="check" size={15} color={t.brand} /> : null}
                         <Text style={{ color: t.ink, fontWeight: '700', fontSize: 14.5, textTransform: 'capitalize' }} numberOfLines={1}>{nameOf(e)}</Text>
+                        {cd.focusAreas.includes(e.group) ? <View style={{ backgroundColor: 'rgba(22,184,166,0.16)', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 1 }}><Text style={{ color: t.brand, fontSize: 9, fontWeight: '900' }}>FOCUS</Text></View> : null}
                       </View>
                       <Text style={{ color: t.ink3, fontSize: 11.5, marginTop: 2 }}>{e.group} · target {e.sets} × {e.reps}</Text>
                       {autoFrom ? (
@@ -400,7 +413,7 @@ export default function Train() {
       </Modal>
 
       <Modal visible={session} animationType="slide" onRequestClose={() => setSession(false)}>
-        <SessionRunner t={t} exercises={exercises.filter((e) => !isInjHidden(e))} focus={workout.focus} nameOf={nameOf} liveHr={w && w.today ? w.today.heartRateAvg : null} log={workoutLog} injuries={cd.injuries} onComplete={addWorkouts} onClose={() => setSession(false)} />
+        <SessionRunner t={t} exercises={orderedExercises.filter((e) => !isInjHidden(e))} focus={workout.focus} nameOf={nameOf} liveHr={w && w.today ? w.today.heartRateAvg : null} log={workoutLog} injuries={cd.injuries} onComplete={addWorkouts} onClose={() => setSession(false)} />
       </Modal>
       <Confetti show={confetti} onDone={() => setConfetti(false)} />
     </SafeAreaView>
