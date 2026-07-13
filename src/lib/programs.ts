@@ -24,7 +24,7 @@ export function focusAreas(bodyFatPct: number, goal: Goal): string[] {
 
 export function buildProgram(goal: Goal, bodyFatPct: number): Program {
   const focus = focusAreas(bodyFatPct, goal);
-  const note = `Built from your latest InBody scan (${bodyFatPct}% body fat) and goal. Your coach flagged ${focus[focus.length - 1].toLowerCase()} as a priority — extra volume added there. Progress the weight when you hit the top of the rep range.`;
+  const note = `Built from your latest InBody scan (${bodyFatPct}% body fat) and goal. Your coach flagged ${(focus[focus.length - 1] || "strength").toLowerCase()} as a priority — extra volume added there. Progress the weight when you hit the top of the rep range.`;
 
   if (goal === 'muscle') {
     return {
