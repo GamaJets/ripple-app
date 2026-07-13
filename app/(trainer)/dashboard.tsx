@@ -113,7 +113,7 @@ export default function TrainerClients() {
   const sendNudge = (client: RosterClient) => {
     const body = 'Hey ' + client.name.split(' ')[0] + ' — checking in! How is your week going? Let me know if you need anything.';
     try { supabase.from('messages').insert({ client_id: client.id, sender: 'coach', body }).then(() => {}, () => {}); } catch { /* ignore */ }
-    try { supabase.functions.invoke('send-push', { body: { user_ids: [client.id], title: 'A nudge from your coach', body } }).then(() => {}, () => {}); } catch { /* ignore */ }
+    try { supabase.functions.invoke('send-push', { body: { user_ids: [client.id], title: 'A nudge from your coach', body, data: { route: '/(client)/messages' } } }).then(() => {}, () => {}); } catch { /* ignore */ }
     Alert.alert('Nudge sent', 'A check-in message was sent to ' + client.name.split(' ')[0] + '.');
   };
   // Who needs proactive attention, and why — drives the suggested check-ins.
@@ -136,7 +136,7 @@ export default function TrainerClients() {
     const client = draftClient; const body = draftText.trim();
     if (!client || !body) return;
     try { supabase.from('messages').insert({ client_id: client.id, sender: 'coach', body }).then(() => {}, () => {}); } catch { /* ignore */ }
-    try { supabase.functions.invoke('send-push', { body: { user_ids: [client.id], title: 'A note from your coach', body } }).then(() => {}, () => {}); } catch { /* ignore */ }
+    try { supabase.functions.invoke('send-push', { body: { user_ids: [client.id], title: 'A note from your coach', body, data: { route: '/(client)/messages' } } }).then(() => {}, () => {}); } catch { /* ignore */ }
     setDraftClient(null); setDraftText('');
     Alert.alert('Sent', 'Your check-in was sent to ' + client.name.split(' ')[0] + '.');
   };

@@ -44,11 +44,11 @@ export async function registerForPush(): Promise<string | null> {
 }
 
 /** Schedule a local reminder (e.g. a booked session) at a future date. */
-export async function scheduleLocal(title: string, body: string, date: Date): Promise<void> {
+export async function scheduleLocal(title: string, body: string, date: Date, data?: Record<string, unknown>): Promise<void> {
   if (!Notifications) return;
   try {
     if (date.getTime() <= Date.now()) return;
-    await Notifications.scheduleNotificationAsync({ content: { title, body }, trigger: { type: 'date', date } });
+    await Notifications.scheduleNotificationAsync({ content: { title, body, data: data || {} }, trigger: { type: 'date', date } });
   } catch { /* ignore */ }
 }
 
@@ -56,7 +56,7 @@ export async function scheduleLocal(title: string, body: string, date: Date): Pr
  *  notification id so it can be cancelled individually (leaving other
  *  scheduled notifications, e.g. booked sessions, untouched). No-ops until the
  *  notifications-enabled build. */
-export async function scheduleDailyReminder(title: string, body: string, hour: number, minute: number): Promise<string | null> {
+export async function scheduleDailyReminder(title: string, body: string, hour: number, minute: number, data?: Record<string, unknown>): Promise<string | null> {
   if (!Notifications) return null;
   try {
     if (Notifications.getPermissionsAsync) {
@@ -64,7 +64,7 @@ export async function scheduleDailyReminder(title: string, body: string, hour: n
       if (status !== 'granted') status = (await Notifications.requestPermissionsAsync())?.status;
       if (status !== 'granted') return null;
     }
-    return await Notifications.scheduleNotificationAsync({ content: { title, body }, trigger: { type: 'daily', hour, minute } });
+    return await Notifications.scheduleNotificationAsync({ content: { title, body, data: data || {} }, trigger: { type: 'daily', hour, minute } });
   } catch { return null; }
 }
 
@@ -72,4 +72,17 @@ export async function scheduleDailyReminder(title: string, body: string, hour: n
 export async function cancelReminders(ids: string[]): Promise<void> {
   if (!Notifications || !ids || !ids.length) return;
   for (const id of ids) { try { await Notifications.cancelScheduledNotificationAsync(id); } catch { /* ignore */ } }
+}
+
+/** Route when a notification is tapped (content.data.route). Handles both a tap
+ *  while running and the tap that cold-launches the app. Returns an unsubscribe. */
+export function addNotificationTapListener(onRoute: (route: string) => void): () => void {
+  if (!Notifications?.addNotificationResponseReceivedListener) return () => {};
+  const handle = (resp: any) => {
+    const r = resp?.notification?.request?.content?.data?.route;
+    if (r) onRoute(String(r));
+  };
+  const sub = Notifications.addNotificationResponseReceivedListener(handle);
+  try { Notifications.getLastNotificationResponseAsync?.().then((resp: any) => { if (resp) handle(resp); }); } catch { /* ignore */ }
+  return () => { try { sub?.remove?.(); } catch { /* ignore */ } };
 }

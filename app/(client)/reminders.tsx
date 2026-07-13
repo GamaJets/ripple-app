@@ -49,12 +49,12 @@ export default function Reminders() {
     const newIds: string[] = [];
     if (hydration) {
       for (let h = startH; h <= endH; h += every) {
-        const id = await scheduleDailyReminder('Time to hydrate', 'Sip some water — small and often keeps you on target.', h, 0);
+        const id = await scheduleDailyReminder('Time to hydrate', 'Sip some water — small and often keeps you on target.', h, 0, { route: '/(client)/recovery' });
         if (id) newIds.push(id);
       }
     }
     for (const s of supps) {
-      const id = await scheduleDailyReminder(s.name, `Reminder: ${s.name}`, s.hour, s.minute);
+      const id = await scheduleDailyReminder(s.name, `Reminder: ${s.name}`, s.hour, s.minute, { route: '/(client)/reminders' });
       if (id) newIds.push(id);
     }
     const payload: Saved = { hydration, every, startH, endH, supps, ids: newIds };

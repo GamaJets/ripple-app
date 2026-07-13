@@ -1,4 +1,6 @@
-import { Stack } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
+import { useEffect } from 'react';
+import { addNotificationTapListener } from '../src/ui/pushNotifications';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ClientDataProvider } from '../src/ui/clientData';
 import { WearablesProvider } from '../src/ui/wearables';
@@ -33,6 +35,9 @@ import { BrandProvider } from '../src/ui/brand';
 
 function ThemedStack() {
   const t = useTheme();
+  const router = useRouter();
+  // Tapping a notification (reminder or coach push) opens the right screen.
+  useEffect(() => addNotificationTapListener((route) => { try { router.push(route as any); } catch { /* ignore */ } }), []);
   return <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: t.bg } }} />;
 }
 

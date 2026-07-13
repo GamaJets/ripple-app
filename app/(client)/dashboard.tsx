@@ -92,7 +92,7 @@ export default function Home() {
   const remindTonight = async () => {
     const when = new Date(); when.setHours(19, 0, 0, 0);
     if (when.getTime() <= Date.now()) when.setTime(Date.now() + 60 * 60 * 1000);
-    try { await scheduleLocal('Keep your streak alive', 'One session today keeps your ' + risk.streak + '-day streak going.', when); } catch { /* ignore */ }
+    try { await scheduleLocal('Keep your streak alive', 'One session today keeps your ' + risk.streak + '-day streak going.', when, { route: '/(client)/workouts' }); } catch { /* ignore */ }
   };
   const wk = weekStats(log);
   const prs = personalRecords(log);

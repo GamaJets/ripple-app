@@ -70,7 +70,7 @@ export function useThread(clientId: string | null, role: ChatRole) {
         const { data } = await supabase.from('messages').insert({ client_id: tid.current, sender: role, body: b }).select().single();
         if (data) { seen.current.add(String(data.id)); setMessages((p) => p.map((m) => (m.id === optimistic.id ? rowToMsg(data) : m))); }
         // notify the other side (coach -> client push; client side needs the coach id, skipped)
-        if (role === 'coach' && tid.current) { try { supabase.functions.invoke('send-push', { body: { user_ids: [tid.current], title: 'New message from your coach', body: b } }).then(() => {}, () => {}); } catch { /* ignore */ } }
+        if (role === 'coach' && tid.current) { try { supabase.functions.invoke('send-push', { body: { user_ids: [tid.current], title: 'New message from your coach', body: b, data: { route: '/(client)/messages' } } }).then(() => {}, () => {}); } catch { /* ignore */ } }
       } catch { /* keep optimistic */ }
     }
   };
