@@ -2,7 +2,7 @@
 // today?" and "is a device connected?". Holds per-provider connection state and
 // today's metrics, persists which providers were connected (AsyncStorage), and
 // re-syncs available ones on launch.
-import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, useCallback, useRef, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { PROVIDERS, providerById } from '../lib/wearables/registry';
 import type { ConnectionState, DailyMetrics, ProviderId } from '../lib/wearables/types';
@@ -93,6 +93,18 @@ export function WearablesProvider({ children }: { children: ReactNode }) {
         }
       } catch {}
     })();
+  }, [sync]);
+
+  // Auto-refresh connected devices every 60s so Live Today updates on its own.
+  const statesRef = useRef(states);
+  useEffect(() => { statesRef.current = states; }, [states]);
+  useEffect(() => {
+    const timer = setInterval(() => {
+      for (const p of PROVIDERS) {
+        if (statesRef.current[p.meta.id] === 'connected' && p.isAvailable()) sync(p.meta.id as ProviderId);
+      }
+    }, 60000);
+    return () => clearInterval(timer);
   }, [sync]);
 
   const connectedMetrics = PROVIDERS

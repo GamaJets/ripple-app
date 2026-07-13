@@ -1,10 +1,10 @@
 // Watch & Devices — real wearable connections through the provider layer.
 // Apple Health reads the paired Apple Watch; live tiles are tappable for detail.
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { View, Text, Pressable, ScrollView, Alert, ActivityIndicator, Modal } from 'react-native';
 import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { PROVIDERS } from '../../src/lib/wearables/registry';
@@ -45,6 +45,8 @@ export default function Devices() {
  const router = useRouter();
  const w = useWearables();
  const [detail, setDetail] = useState<MetricKey | null>(null);
+ // Auto-refresh whenever this screen opens (plus the 60s auto-sync in the store).
+ useFocusEffect(useCallback(() => { for (const pv of PROVIDERS) { if (pv.isAvailable()) w.sync(pv.meta.id); } }, [w.sync]));
 
  const onConnect = async (p: WearableProvider) => {
  const reason = p.unavailableReason();
@@ -86,7 +88,7 @@ export default function Devices() {
  <Metric t={t} ico="" label="Steps" value={num(w.today.steps)} unit="" onPress={() => setDetail('steps')} />
  <Metric t={t} ico="" label="Source" value={String(connected.length)} unit={connected.length === 1 ? 'device' : 'devices'} onPress={() => setDetail('source')} />
  </View>
- <Text style={{ color: t.ink3, fontSize: 11, marginTop: 12, lineHeight: 16 }}>Steps come from your iPhone. Heart rate &amp; calories need an Apple Watch — wear it, then tap Sync Now. Calories feed your daily target.</Text>
+ <Text style={{ color: t.ink3, fontSize: 11, marginTop: 12, lineHeight: 16 }}>Updates automatically. Steps come from your iPhone; heart rate &amp; calories need an Apple Watch (wear it). Calories feed your daily target.</Text>
  </View>
  ) : null}
 

@@ -46,6 +46,30 @@ Deno.serve(async (req) => {
           updated_at: new Date().toISOString(),
         });
       }
+    } else if (event.type === 'account.updated') {
+      // Stripe Connect: a trainer's Express account status changed.
+      const acct = event.data.object as Stripe.Account;
+      await service.from('connect_accounts').update({
+        charges_enabled: !!acct.charges_enabled,
+        details_submitted: !!acct.details_submitted,
+        updated_at: new Date().toISOString(),
+      }).eq('stripe_account_id', acct.id);
+    } else if (event.type === 'checkout.session.completed') {
+      // A client bought a trainer's package (Connect checkout).
+      const sess = event.data.object as Stripe.Checkout.Session;
+      const meta = (sess.metadata || {}) as Record<string, string>;
+      if (meta.package_id) {
+        const sessions = meta.sessions ? parseInt(meta.sessions, 10) : null;
+        await service.from('client_purchases').upsert({
+          client_id: meta.client_id || null,
+          trainer_id: meta.trainer_id || null,
+          package_id: meta.package_id,
+          stripe_session_id: sess.id,
+          amount_cents: sess.amount_total,
+          sessions_total: isNaN(sessions as number) ? null : sessions,
+          status: 'paid',
+        }, { onConflict: 'stripe_session_id' });
+      }
     } else if (event.type.startsWith('invoice.')) {
       const inv = event.data.object as Stripe.Invoice;
       const trainerId = await trainerOf(inv.customer as string, (inv.subscription_details?.metadata as any)?.trainer_id);
