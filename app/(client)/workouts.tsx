@@ -502,6 +502,7 @@ function SessionRunner({ t, exercises, focus, nameOf, age, log, injuries, onComp
   const startKcalRef = useRef<number | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const [hrPeak, setHrPeak] = useState<number | null>(null);
+  const [finalElapsed, setFinalElapsed] = useState(0);
   if (startKcalRef.current == null && typeof w.today.activeKcal === 'number') startKcalRef.current = w.today.activeKcal;
   const sessionKcal = (typeof w.today.activeKcal === 'number' && startKcalRef.current != null) ? Math.max(0, Math.round(w.today.activeKcal - startKcalRef.current)) : null;
   useEffect(() => {
@@ -571,7 +572,7 @@ function SessionRunner({ t, exercises, focus, nameOf, age, log, injuries, onComp
       } : null))
       .filter(Boolean) as WorkoutEntry[];
     onComplete(entries);
-    setFinished(true); setConfetti(true);
+    setFinalElapsed(elapsed); setFinished(true); setConfetti(true);
   };
   const next = () => { if (idx < exercises.length - 1) { setIdx(idx + 1); setRest(0); } else finish(); };
   const inp = { color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 12, fontSize: 16, flex: 1 } as const;
@@ -595,11 +596,12 @@ function SessionRunner({ t, exercises, focus, nameOf, age, log, injuries, onComp
               </View>
             ))}
           </View>
-          {(sessionKcal != null || hrPeak != null) ? <View style={{ backgroundColor: t.surface2, borderRadius: 14, borderWidth: 1, borderColor: t.ring, padding: 14, marginBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 18, justifyContent: 'center' }}>
+          <View style={{ backgroundColor: t.surface2, borderRadius: 14, borderWidth: 1, borderColor: t.ring, padding: 14, marginBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 18, justifyContent: 'center' }}>
+            <View style={{ alignItems: 'center' }}><Text style={{ color: t.ink, fontSize: 18, fontWeight: '800' }}>{Math.floor(finalElapsed / 60)}:{String(finalElapsed % 60).padStart(2, '0')}</Text><Text style={{ color: t.ink3, fontSize: 11 }}>time</Text></View>
             {sessionKcal != null ? <View style={{ alignItems: 'center' }}><Text style={{ color: t.ink, fontSize: 18, fontWeight: '800' }}>{sessionKcal}</Text><Text style={{ color: t.ink3, fontSize: 11 }}>kcal burned</Text></View> : null}
             {hrPeak != null ? <View style={{ alignItems: 'center' }}><Text style={{ color: hrColor(hrPeak, age), fontSize: 18, fontWeight: '800' }}>{hrPeak}</Text><Text style={{ color: t.ink3, fontSize: 11 }}>peak bpm</Text></View> : null}
             {typeof w.today.heartRateAvg === 'number' ? <View style={{ alignItems: 'center' }}><Text style={{ color: t.ink, fontSize: 18, fontWeight: '800' }}>{w.today.heartRateAvg}</Text><Text style={{ color: t.ink3, fontSize: 11 }}>avg bpm</Text></View> : null}
-          </View> : null}
+          </View>
           <Text style={{ color: t.ink3, fontSize: 12, textAlign: 'center', marginBottom: 20 }}>Logged to your history — strength trends and your coach's dashboard update automatically.</Text>
           <Pressable onPress={onClose} style={{ backgroundColor: t.brand, borderRadius: 14, paddingVertical: 16, alignItems: 'center' }}><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 15 }}>Done</Text></Pressable>
         </ScrollView>
