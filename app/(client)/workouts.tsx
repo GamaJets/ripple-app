@@ -41,7 +41,7 @@ export default function Train() {
   const _cp = useAssignedPrograms().getProgram(cd.id);
   const coachProgram = cd.coachingMode === 'solo' ? null : _cp;
   const w = useWearables();
-  const { log: workoutLog, addWorkouts } = useWorkoutLog();
+  const { log: workoutLog, addWorkouts, removeWorkout } = useWorkoutLog();
   const program = coachProgram ?? buildProgram(cd.goal, cd.bodyFatPct);
   const jsToMon = (new Date().getDay() + 6) % 7;
   const [dayIdx, setDayIdx] = useState(jsToMon);
@@ -429,7 +429,10 @@ export default function Train() {
                   </View>
                   {dayEntries.map((l, i) => (
                     <View key={i} style={{ backgroundColor: t.surface2, borderRadius: 12, borderWidth: 1, borderColor: t.ring, padding: 12, marginBottom: 8 }}>
-                      <Text style={{ color: t.ink, fontWeight: '700', fontSize: 14, textTransform: 'capitalize' }}>{l.exercise}</Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <Text style={{ color: t.ink, fontWeight: '700', fontSize: 14, textTransform: 'capitalize', flex: 1 }}>{l.exercise}</Text>
+                        <Pressable accessibilityLabel={'Delete ' + l.exercise} onPress={() => Alert.alert('Delete this entry?', l.exercise + ' will be removed from your log.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Delete', style: 'destructive', onPress: () => removeWorkout(l) }])} hitSlop={8} style={{ padding: 4, marginRight: -4 }}><Icon name="minus" size={16} color={t.crit} /></Pressable>
+                      </View>
                       {l.sets ? (
                         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 7 }}>
                           {l.sets.map((s: number[], j: number) => <View key={j} style={{ backgroundColor: t.surface, borderRadius: 8, paddingHorizontal: 9, paddingVertical: 5, borderWidth: 1, borderColor: t.ring }}><Text style={{ color: t.ink2, fontSize: 12, fontWeight: '600' }}>{s[0]}×{s[1]}kg</Text></View>)}

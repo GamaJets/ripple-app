@@ -10,6 +10,7 @@ interface WorkoutLogValue {
   log: WorkoutEntry[];
   addWorkout: (entry: WorkoutEntry) => void;
   addWorkouts: (entries: WorkoutEntry[]) => void;
+  removeWorkout: (entry: WorkoutEntry) => void;
 }
 
 const Ctx = createContext<WorkoutLogValue | null>(null);
@@ -57,8 +58,14 @@ export function WorkoutLogProvider({ children }: { children: React.ReactNode }) 
   };
   const addWorkout = (entry: WorkoutEntry) => { setLog((p) => [entry, ...p]); persist([entry]); };
   const addWorkouts = (entries: WorkoutEntry[]) => { if (entries.length) { setLog((p) => [...entries, ...p]); persist(entries); } };
+  const removeWorkout = (entry: WorkoutEntry) => {
+    setLog((p) => p.filter((e) => !(e.t === entry.t && e.exercise === entry.exercise)));
+    if (USE_SUPABASE && uid) {
+      try { supabase.from('workouts').delete().eq('user_id', uid).eq('performed_at', entry.t).eq('exercise', entry.exercise).then(() => {}, () => {}); } catch { /* ignore */ }
+    }
+  };
 
-  return <Ctx.Provider value={{ log, addWorkout, addWorkouts }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ log, addWorkout, addWorkouts, removeWorkout }}>{children}</Ctx.Provider>;
 }
 
 export function useWorkoutLog(): WorkoutLogValue {
