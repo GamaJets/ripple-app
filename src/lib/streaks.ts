@@ -6,7 +6,8 @@
 import type { WorkoutEntry } from './mockData';
 
 const DAY = 86_400_000;
-const dayKey = (iso: string) => iso.slice(0, 10);
+// LOCAL calendar day (not UTC): an evening workout must count as today for the user even after its ISO timestamp rolls into tomorrow in UTC.
+const dayKey = (iso: string) => { const d = new Date(iso); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 
 /** Unique calendar days (YYYY-MM-DD) that have at least one workout, newest first. */
 export function activeDays(log: WorkoutEntry[]): string[] {

@@ -124,7 +124,7 @@ export function WearablesProvider({ children }: { children: ReactNode }) {
   const hrs = pick('heartRateAvg');
   const hrl = pick('heartRateLatest');
   const today = {
-    activeKcal: kcals ? kcals.reduce((a, b) => a + b, 0) : null,
+    activeKcal: kcals ? Math.max(...kcals) : null,
     steps: steps ? Math.max(...steps) : null,
     heartRateAvg: hrs ? Math.round(hrs.reduce((a, b) => a + b, 0) / hrs.length) : null,
     heartRateLatest: hrl && hrl.length ? Math.round(hrl[hrl.length - 1]) : null,

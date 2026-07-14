@@ -44,7 +44,7 @@ export function FoodLogProvider({ children }: { children: ReactNode }) {
         const { data, error } = await supabase.from('food_logs').select('*')
           .eq('client_id', id).gte('logged_at', startOfTodayISO()).order('logged_at', { ascending: true });
         if (error || cancelled) return;
-        if (data && data.length) setEntries(data.map(rowToEntry));
+        setEntries(data && data.length ? data.map(rowToEntry) : []);
       } catch { /* stay on seed */ }
     })();
     return () => { cancelled = true; };
