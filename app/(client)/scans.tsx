@@ -207,9 +207,9 @@ export default function Scans() {
 
         {/* stat cards with deltas */}
         <View style={{ flexDirection: 'row', gap: 9, marginBottom: 12 }}>
-          <StatCard t={t} label="Weight" value={String(latest.weightKg)} unit="kg" delta={dlt(latest.weightKg, prev?.weightKg, 'kg')} good={!prev || latest.weightKg <= prev.weightKg} onPress={() => router.push('/(client)/measurements')} />
-          <StatCard t={t} label="Body fat" value={String(latest.bodyFatPct)} unit="%" delta={dlt(latest.bodyFatPct, prev?.bodyFatPct, '')} good={!prev || latest.bodyFatPct <= prev.bodyFatPct} onPress={() => router.push('/(client)/measurements')} />
-          <StatCard t={t} label="Muscle" value={String(latest.skeletalMuscleKg)} unit="kg" delta={dlt(latest.skeletalMuscleKg, prev?.skeletalMuscleKg, 'kg')} good={!prev || latest.skeletalMuscleKg >= prev.skeletalMuscleKg} onPress={() => router.push('/(client)/measurements')} />
+          <StatCard t={t} label="Weight" value={String(cd.weightKg)} unit="kg" delta={dlt(cd.weightKg, prev?.weightKg, 'kg')} good={!prev || cd.weightKg <= prev.weightKg} onPress={() => router.push('/(client)/measurements')} />
+          <StatCard t={t} label="Body fat" value={String(cd.bodyFatPct)} unit="%" delta={dlt(cd.bodyFatPct, prev?.bodyFatPct, '')} good={!prev || cd.bodyFatPct <= prev.bodyFatPct} onPress={() => router.push('/(client)/measurements')} />
+          <StatCard t={t} label="Muscle" value={String(cd.muscleKg)} unit="kg" delta={dlt(cd.muscleKg, prev?.skeletalMuscleKg, 'kg')} good={!prev || cd.muscleKg >= prev.skeletalMuscleKg} onPress={() => router.push('/(client)/measurements')} />
         </View>
 
         {/* weight trend */}

@@ -52,6 +52,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
   const [scans, setScans] = useState<ScanRec[]>(base.scans.map((s) => ({ id: s.id, takenAt: s.takenAt, weightKg: s.weightKg, bodyFatPct: s.bodyFatPct, skeletalMuscleKg: s.skeletalMuscleKg, source: s.source })));
   const [manualWeight, setManualWeight] = useState<number | null>(null);
   const [manualBodyFat, setManualBodyFat] = useState<number | null>(null);
+  const [manualAt, setManualAt] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(false);
   const [sbUid, setSbUid] = useState<string | null>(null);
 
@@ -72,6 +73,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
         if (Array.isArray(p.focusAreas)) setFocusAreas(p.focusAreas);
         if (typeof p.weightKg === 'number') setManualWeight(p.weightKg);
         if (typeof p.bodyFatPct === 'number') setManualBodyFat(p.bodyFatPct);
+        if (typeof p.manualAt === 'string') setManualAt(p.manualAt);
         if (typeof p.photo === 'string') setPhoto(p.photo);
       }
     } catch {}
@@ -81,8 +83,8 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
   // Persist edits once hydrated (avoids clobbering saved data with defaults on boot).
   useEffect(() => {
     if (!hydrated) return;
-    AsyncStorage.setItem(KEY, JSON.stringify({ name, dob, heightCm, goal, diet, avoid, injuries, focusAreas, coachingMode, weightKg: manualWeight, bodyFatPct: manualBodyFat, photo })).catch(() => {});
-  }, [hydrated, name, dob, heightCm, goal, diet, avoid, injuries, focusAreas, coachingMode, manualWeight, manualBodyFat, photo]);
+    AsyncStorage.setItem(KEY, JSON.stringify({ name, dob, heightCm, goal, diet, avoid, injuries, focusAreas, coachingMode, weightKg: manualWeight, bodyFatPct: manualBodyFat, manualAt, photo })).catch(() => {});
+  }, [hydrated, name, dob, heightCm, goal, diet, avoid, injuries, focusAreas, coachingMode, manualWeight, manualBodyFat, manualAt, photo]);
 
   // Sync body scans with Supabase (per user) — hydrate-or-seed, defensive.
   useEffect(() => {
@@ -106,8 +108,10 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
 
   const sorted = useMemo(() => [...scans].sort((a, b) => Date.parse(a.takenAt) - Date.parse(b.takenAt)), [scans]);
   const latest = sorted[sorted.length - 1];
-  const weightKg = manualWeight != null ? manualWeight : latest.weightKg;
-  const bodyFatPct = manualBodyFat != null ? manualBodyFat : latest.bodyFatPct;
+  // Single source of truth: the most RECENT of {manual edit, latest scan} wins.
+  const manualIsCurrent = manualAt != null && Date.parse(manualAt) >= Date.parse(latest.takenAt);
+  const weightKg = (manualWeight != null && manualIsCurrent) ? manualWeight : latest.weightKg;
+  const bodyFatPct = (manualBodyFat != null && manualIsCurrent) ? manualBodyFat : latest.bodyFatPct;
 
   const value: Value = {
     id: sbUid ?? base.id, name, init: initials(name), setName,
@@ -121,10 +125,10 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
     coachingMode, setCoachingMode,
     activity: base.activity, mealsPerDay: base.mealsPerDay as 3 | 4 | 5,
     weightKg, bodyFatPct, muscleKg: latest.skeletalMuscleKg,
-    setWeightKg: (v) => setManualWeight(v), setBodyFat: (v) => setManualBodyFat(v),
+    setWeightKg: (v) => { setManualWeight(v); setManualAt(new Date().toISOString()); }, setBodyFat: (v) => { setManualBodyFat(v); setManualAt(new Date().toISOString()); },
     scans: sorted, addScan: (s) => { setScans((p) => [...p, s]); setManualWeight(null); setManualBodyFat(null); if (USE_SUPABASE && sbUid) { try { supabase.from('scans').insert({ client_id: sbUid, taken_at: String(s.takenAt).slice(0, 10), weight_kg: s.weightKg, body_fat_pct: s.bodyFatPct, skeletal_muscle_kg: s.skeletalMuscleKg, source: s.source }).then(() => {}, () => {}); } catch { /* ignore */ } } },
-    weightSeries: sorted.map((s) => ({ t: s.takenAt, v: s.weightKg })),
-    bodyFatSeries: sorted.map((s) => ({ t: s.takenAt, v: s.bodyFatPct })),
+    weightSeries: [...sorted.map((s) => ({ t: s.takenAt, v: s.weightKg })), ...(manualIsCurrent && manualWeight != null ? [{ t: manualAt as string, v: manualWeight }] : [])],
+    bodyFatSeries: [...sorted.map((s) => ({ t: s.takenAt, v: s.bodyFatPct })), ...(manualIsCurrent && manualBodyFat != null ? [{ t: manualAt as string, v: manualBodyFat }] : [])],
     muscleSeries: sorted.map((s) => ({ t: s.takenAt, v: s.skeletalMuscleKg })),
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
