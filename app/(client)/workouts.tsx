@@ -190,10 +190,10 @@ export default function Train() {
           <View>
             {/* Today hero */}
             <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 15, marginBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-              <View style={{ flex: 1 }}>
+              <Pressable onPress={() => router.push('/(client)/week')} accessibilityRole="button" accessibilityLabel="See this week's plan" style={{ flex: 1 }}>
                 <Text style={{ color: t.brand, fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6 }}>Today · {workout.focus}</Text>
                 <Text style={{ color: t.ink, fontSize: 16, fontWeight: '800', marginTop: 2 }}>{exercises.length > 0 ? (exercises.length + ' exercises · ~' + estMin + ' min') : 'Rest day — recover'}</Text>
-              </View>
+              </Pressable>
               {exercises.length > 0 ? (
               <Pressable accessibilityLabel="Start guided workout" accessibilityRole="button" onPress={() => setSession(true)} style={{ backgroundColor: t.brand, borderRadius: 11, paddingVertical: 11, paddingHorizontal: 15, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                 <Icon name="play" size={14} color={t.brandInk} /><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 13 }}>Start</Text>

@@ -294,9 +294,10 @@ export default function Profile() {
         </View>
 
         {/* live target strip */}
-        <View style={{ backgroundColor: t.surface2, borderRadius: 14, borderWidth: 1, borderColor: t.ring, padding: 13, marginTop: 12, marginBottom: 18 }}>
-          <Text style={{ color: t.ink3, fontSize: 12 }}>Daily target · <Text style={{ color: t.ink, fontWeight: '700' }}>{macros.kcal.toLocaleString()} kcal</Text> · P{macros.protein} / C{macros.carbs} / F{macros.fat}</Text>
-        </View>
+        <Pressable onPress={() => router.push('/(client)/nutrition')} accessibilityRole="button" accessibilityLabel="See your meal plan" style={{ backgroundColor: t.surface2, borderRadius: 14, borderWidth: 1, borderColor: t.ring, padding: 13, marginTop: 12, marginBottom: 18, flexDirection: 'row', alignItems: 'center' }}>
+          <Text style={{ color: t.ink3, fontSize: 12, flex: 1 }}>Daily target · <Text style={{ color: t.ink, fontWeight: '700' }}>{macros.kcal.toLocaleString()} kcal</Text> · P{macros.protein} / C{macros.carbs} / F{macros.fat}</Text>
+          <Icon name="chevron" size={16} color={t.ink3} />
+        </Pressable>
 
         <Pressable onPress={() => router.push('/(client)/explore')} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 13, marginBottom: 16 }}>
           <View style={{ width: 34, height: 34, borderRadius: 9, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}><Icon name="search" size={16} color={t.brand} /></View>
