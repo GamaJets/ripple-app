@@ -107,6 +107,8 @@ export default function Train() {
   // Progress-photo focus areas bubble matching muscle groups to the top of today.
   const orderedExercises = cd.focusAreas.length ? [...exercises].sort((a, b) => (cd.focusAreas.includes(b.group) ? 1 : 0) - (cd.focusAreas.includes(a.group) ? 1 : 0)) : exercises;
   const deload = deloadCheck(workoutLog);
+  // Default: expand the first not-yet-finished exercise, collapse the rest (until the user taps).
+  const firstOpenId = (() => { for (const _e of [...orderedExercises, ...customEx]) { const _u = `${dayIdx}:${_e.key}`; if ((logged[_u] || []).length < _e.sets) return _u; } return null; })();
   const logSet = (e: ProgramExercise, reps: string, kg: string) => { if (!reps) return; setLogged({ ...logged, [uid(e)]: [...(logged[uid(e)] || []), { reps, kg }] }); tapLight(); };
   const quickLog = (e: ProgramExercise) => { const sg = suggestForExercise(workoutLog, nameOf(e), e.reps); logSet(e, String(parseInt(e.reps, 10) || 8), sg ? String(sg.weight) : ''); };
   const logCardio = () => {
@@ -248,7 +250,7 @@ export default function Train() {
               const sug = suggestForExercise(workoutLog, nameOf(e), e.reps);
               const flag = injuryFlag(nameOf(e), e.group, cd.injuries);
               const autoFrom = injAutoMap[_id];
-              const open = expanded[_id] ?? false;
+              const open = expanded[_id] ?? (_id === firstOpenId);
               const isCustom = e.key.indexOf('custom-') === 0;
               return (
                 <View key={e.key} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: done ? t.brand : flag ? t.s3 : t.ring, padding: 14, marginBottom: 10 }}>
