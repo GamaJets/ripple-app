@@ -13,6 +13,10 @@ export const ROSTER: RosterClient[] = [
   { id: 'c5', name: 'Priya N.', goal: 'Build muscle', weightDelta: 3.6, adherence: 81, lastActive: '2d ago', next: 'Fri · 6pm', unread: 0, mode: 'online' },
 ];
 export interface ExVideo { id: string; name: string; group: string; dur: string; uploaded: boolean; }
+
+// Shared "at-risk" definition so every trainer screen agrees (adherence low OR inactive 2+ days).
+export function staleDays(str: string): number { const m = /([0-9]+)d/.exec(str || ''); return m ? parseInt(m[1], 10) : 0; }
+export function atRiskClient(c: { adherence: number; lastActive: string }): boolean { return c.adherence < 80 || staleDays(c.lastActive) >= 2; }
 export const EX_VIDEOS: ExVideo[] = [
   { id: 'v1', name: 'Back Squat', group: 'Legs', dur: '1:12', uploaded: true },
   { id: 'v2', name: 'Barbell Bench Press', group: 'Chest', dur: '0:58', uploaded: true },

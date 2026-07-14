@@ -8,6 +8,7 @@ import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { MOCK_TRAINER } from '../../src/lib/mockData';
 import { useCoachProfile } from '../../src/ui/coachProfile';
+import { atRiskClient } from '../../src/lib/trainerMock';
 import { type RosterClient } from '../../src/lib/trainerMock';
 import { areaLabel } from '../../src/lib/injuries';
 import { supabase } from '../../src/lib/supabase';
@@ -98,16 +99,16 @@ export default function TrainerClients() {
   const active = roster.length;
   const revenue = active * sessionFee * 4;
   const unread = roster.reduce((a, c) => a + c.unread, 0);
-  const atRisk = roster.filter((c) => c.adherence < 80).length;
+  const atRisk = roster.filter(atRiskClient).length;
   const AUTO_SEGS = [
     { key: 'all', label: 'All', n: roster.length },
-    { key: 'atrisk', label: 'At-risk', n: roster.filter((c) => c.adherence < 80).length },
+    { key: 'atrisk', label: 'At-risk', n: roster.filter(atRiskClient).length },
     { key: 'online', label: 'Online', n: roster.filter((c) => c.mode === 'online').length },
     { key: 'inperson', label: 'In-person', n: roster.filter((c) => c.mode === 'inperson').length },
   ];
   const matchSeg = (c: RosterClient) =>
     seg === 'all' ? true
-    : seg === 'atrisk' ? c.adherence < 80
+    : seg === 'atrisk' ? atRiskClient(c)
     : seg === 'online' ? c.mode === 'online'
     : seg === 'inperson' ? c.mode === 'inperson'
     : tagsFor(c.id).includes(seg);
@@ -120,7 +121,7 @@ export default function TrainerClients() {
   };
   // Who needs proactive attention, and why — drives the suggested check-ins.
   const attnReason = (c: RosterClient): string | null => {
-    if (c.adherence < 80) return 'Adherence ' + c.adherence + '% — below target';
+    if (atRiskClient(c)) return c.adherence < 80 ? 'Adherence ' + c.adherence + '% — below target' : 'Inactive ' + c.lastActive + ' — check in';
     if (c.unread > 0) return c.unread + ' unread message' + (c.unread > 1 ? 's' : '');
     return null;
   };
@@ -320,7 +321,7 @@ export default function TrainerClients() {
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                   <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, textTransform: 'capitalize' }}>{c.name}</Text>
                   {c.unread > 0 && <View style={{ backgroundColor: t.s6, borderRadius: 8, minWidth: 16, height: 16, paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: '#fff', fontSize: 10, fontWeight: '800' }}>{c.unread}</Text></View>}
-                  {c.adherence < 80 && <View style={{ backgroundColor: 'rgba(250,178,25,0.18)', borderRadius: 8, paddingHorizontal: 7, paddingVertical: 2 }}><Text style={{ color: t.warn, fontSize: 10, fontWeight: '800' }}>CHECK IN</Text></View>}
+                  {atRiskClient(c) && <View style={{ backgroundColor: 'rgba(250,178,25,0.18)', borderRadius: 8, paddingHorizontal: 7, paddingVertical: 2 }}><Text style={{ color: t.warn, fontSize: 10, fontWeight: '800' }}>CHECK IN</Text></View>}
                   {c.injuries && c.injuries.length ? <View style={{ backgroundColor: 'rgba(201,133,0,0.18)', borderRadius: 8, paddingHorizontal: 7, paddingVertical: 2, flexDirection: 'row', alignItems: 'center', gap: 3 }}><Icon name="heart" size={9} color={t.s3} /><Text style={{ color: t.s3, fontSize: 10, fontWeight: '800' }}>{c.injuries.some((x) => x.isNew) ? 'NEW INJURY' : 'INJURY'}</Text></View> : null}
                   {['c1', 'c2', 'c3', 'c4', 'c5'].includes(c.id) ? <View style={{ backgroundColor: t.surface3, borderRadius: 8, paddingHorizontal: 7, paddingVertical: 2 }}><Text style={{ color: t.ink3, fontSize: 10, fontWeight: '800' }}>DEMO</Text></View> : null}
                 </View>

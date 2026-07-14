@@ -8,6 +8,7 @@ import { Icon } from '../../src/ui/Icon';
 import type { Theme } from '../../src/theme/tokens';
 import { MOCK_TRAINER } from '../../src/lib/mockData';
 import { useCoachProfile } from '../../src/ui/coachProfile';
+import { atRiskClient } from '../../src/lib/trainerMock';
 import { ROSTER } from '../../src/lib/trainerMock';
 import { useRoster } from '../../src/ui/roster';
 import { DistBar, DeltaBadge } from '../../src/ui/charts';
@@ -31,8 +32,7 @@ export default function TrainerAnalytics() {
   const router = useRouter();
   const { roster } = useRoster();
   const { sessionFee } = useCoachProfile();
-  const staleDays = (str) => { const m = /([0-9]+)d/.exec(str); return m ? parseInt(m[1], 10) : 0; };
-  const atRisk = roster.filter((c) => c.adherence < 82 || staleDays(c.lastActive) >= 2);
+  const atRisk = roster.filter(atRiskClient);
   const clients = roster.length;
   const sessionsMo = clients * 4;
   const revenue = sessionsMo * sessionFee;

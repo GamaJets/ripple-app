@@ -23,7 +23,7 @@ export default function TrainerVideos() {
       : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['videos'] });
     if (!res.canceled && res.assets && res.assets[0]) {
       addVideo({ name: 'New exercise clip', group: 'Uncategorised' });
-      Alert.alert('Video added', 'Your clip is now in the library — clients will see it in their exercise library.');
+      Alert.alert('Clip saved', 'Saved to your library on this device. Direct video hosting (so clients on other devices can watch) is coming — for now use "Add a link" for a YouTube/Vimeo URL your clients can reliably view.');
     }
   };
 
