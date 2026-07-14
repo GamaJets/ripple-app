@@ -63,13 +63,13 @@ function Wheel({ items, index, onChange, t }: { items: string[]; index: number; 
   );
 }
 
-function StatCard({ t, label, value, unit, delta, good }: { t: Theme; label: string; value: string; unit: string; delta: string | null; good: boolean }) {
+function StatCard({ t, label, value, unit, delta, good, onPress }: { t: Theme; label: string; value: string; unit: string; delta: string | null; good: boolean; onPress?: () => void }) {
   return (
-    <View style={{ flex: 1, backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 13 }}>
+    <Pressable disabled={!onPress} onPress={onPress} style={{ flex: 1, backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 13 }}>
       <Text style={{ color: t.ink3, fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.6 }}>{label}</Text>
       <Text style={{ color: t.ink, fontSize: 20, fontWeight: '800', marginTop: 3 }}>{value}<Text style={{ fontSize: 11, fontWeight: '600', color: t.ink3 }}> {unit}</Text></Text>
       {delta ? <Text style={{ color: good ? t.brand : t.ink3, fontSize: 11, fontWeight: '700', marginTop: 1 }}>{delta}</Text> : <Text style={{ color: t.ink3, fontSize: 11, marginTop: 1 }}>—</Text>}
-    </View>
+    </Pressable>
   );
 }
 
@@ -207,19 +207,19 @@ export default function Scans() {
 
         {/* stat cards with deltas */}
         <View style={{ flexDirection: 'row', gap: 9, marginBottom: 12 }}>
-          <StatCard t={t} label="Weight" value={String(latest.weightKg)} unit="kg" delta={dlt(latest.weightKg, prev?.weightKg, 'kg')} good={!prev || latest.weightKg <= prev.weightKg} />
-          <StatCard t={t} label="Body fat" value={String(latest.bodyFatPct)} unit="%" delta={dlt(latest.bodyFatPct, prev?.bodyFatPct, '')} good={!prev || latest.bodyFatPct <= prev.bodyFatPct} />
-          <StatCard t={t} label="Muscle" value={String(latest.skeletalMuscleKg)} unit="kg" delta={dlt(latest.skeletalMuscleKg, prev?.skeletalMuscleKg, 'kg')} good={!prev || latest.skeletalMuscleKg >= prev.skeletalMuscleKg} />
+          <StatCard t={t} label="Weight" value={String(latest.weightKg)} unit="kg" delta={dlt(latest.weightKg, prev?.weightKg, 'kg')} good={!prev || latest.weightKg <= prev.weightKg} onPress={() => router.push('/(client)/measurements')} />
+          <StatCard t={t} label="Body fat" value={String(latest.bodyFatPct)} unit="%" delta={dlt(latest.bodyFatPct, prev?.bodyFatPct, '')} good={!prev || latest.bodyFatPct <= prev.bodyFatPct} onPress={() => router.push('/(client)/measurements')} />
+          <StatCard t={t} label="Muscle" value={String(latest.skeletalMuscleKg)} unit="kg" delta={dlt(latest.skeletalMuscleKg, prev?.skeletalMuscleKg, 'kg')} good={!prev || latest.skeletalMuscleKg >= prev.skeletalMuscleKg} onPress={() => router.push('/(client)/measurements')} />
         </View>
 
         {/* weight trend */}
-        <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 16, marginBottom: 12 }}>
+        <Pressable onPress={() => router.push('/(client)/measurements')} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 16, marginBottom: 12 }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
             <Text style={{ color: t.ink3, fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.6 }}>Weight · {wsv.length} check-ins</Text>
             {wDelta !== null ? <Text style={{ color: t.brand, fontSize: 11, fontWeight: '700' }}>{wDelta > 0 ? '+' : ''}{wDelta} kg</Text> : null}
           </View>
           <Spark t={t} data={wsv} />
-        </View>
+        </Pressable>
 
         {/* progress photos */}
         <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 16, marginBottom: 12 }}>
