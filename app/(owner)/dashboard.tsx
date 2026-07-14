@@ -114,13 +114,13 @@ export default function OwnerOverview() {
         ) : null}
 
         {/* MRR trend (real, accumulating) */}
-        <View style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18, marginBottom: 16 }}>
+        <Pressable onPress={() => router.push('/(owner)/revenue')} style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18, marginBottom: 16 }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
             <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16 }}>MRR trend</Text>
             {delta !== 0 ? <DeltaBadge value={delta} suffix="vs last mo" /> : <Text style={{ color: t.ink3, fontSize: 11 }}>tracking started</Text>}
           </View>
           <Sparkline data={series} w={300} h={64} />
-        </View>
+        </Pressable>
 
         <Pressable onPress={() => router.push('/(owner)/revenue')} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 16, padding: 15, marginBottom: 16 }}>
           <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}><Icon name="trending" size={19} color={t.brand} /></View>
@@ -148,7 +148,7 @@ export default function OwnerOverview() {
         </View>
 
         {/* Revenue by plan */}
-        <View style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18 }}>
+        <Pressable onPress={() => router.push('/(owner)/revenue')} style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18 }}>
           <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16, marginBottom: 14 }}>Revenue by plan</Text>
           {byPlan.map((p) => (
             <View key={p.name} style={{ marginBottom: 12 }}>
@@ -156,7 +156,7 @@ export default function OwnerOverview() {
               <View style={{ height: 10, borderRadius: 5, backgroundColor: t.surface3, overflow: 'hidden' }}><View style={{ height: 10, borderRadius: 5, backgroundColor: t.brand, width: `${Math.round((p.revenue / maxPlan) * 100)}%` }} /></View>
             </View>
           ))}
-        </View>
+        </Pressable>
       </ScrollView>
 
       {/* Trainer drill-down */}

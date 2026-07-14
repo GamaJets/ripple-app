@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { View, Text, ScrollView, Pressable, Modal, TextInput, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { PLANS } from '../../src/lib/ownerMock';
 import { usePlatformTrainers, type PlatformTrainerX } from '../../src/ui/trainers';
@@ -12,6 +13,7 @@ const PLAN_NAMES = PLANS.map((p) => p.name);
 
 export default function OwnerTrainers() {
   const t = useTheme();
+  const router = useRouter();
   const { trainers, activeMrr, addTrainer, removeTrainer, setPlan, toggleSuspend } = usePlatformTrainers();
   const { sent: sentInvites, sendTrainerInvite, revokeTrainerInvite } = useTrainerInvites();
   const [invOpen, setInvOpen] = useState(false);
@@ -33,10 +35,10 @@ export default function OwnerTrainers() {
         <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 16 }}>Everyone paying to run Repple</Text>
 
         <View style={{ flexDirection: 'row', gap: 12, marginBottom: 16 }}>
-          <View style={{ flex: 1, backgroundColor: t.brand, borderRadius: 16, padding: 15 }}>
+          <Pressable onPress={() => router.push('/(owner)/revenue')} style={{ flex: 1, backgroundColor: t.brand, borderRadius: 16, padding: 15 }}>
             <Text style={{ color: t.brandInk, fontSize: 12, fontWeight: '700', opacity: 0.85 }}>Platform MRR</Text>
             <Text style={{ color: t.brandInk, fontSize: 24, fontWeight: '800', marginTop: 4 }}>${activeMrr.toLocaleString()}</Text>
-          </View>
+          </Pressable>
           <View style={{ flex: 1, backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 15 }}>
             <Text style={{ color: t.ink3, fontSize: 12, fontWeight: '700' }}>Trainers</Text>
             <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800', marginTop: 4 }}>{trainers.length}</Text>

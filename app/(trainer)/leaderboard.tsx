@@ -34,7 +34,7 @@ export default function Leaderboard() {
         <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 18 }}>Adherence + progress toward goal</Text>
 
         {scored.map(({ c, score }, i) => (
-          <View key={c.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: i === 0 ? t.brand : t.ring, padding: 15, marginBottom: 10 }}>
+          <Pressable key={c.id} onPress={() => router.push('/(trainer)/analytics')} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: i === 0 ? t.brand : t.ring, padding: 15, marginBottom: 10 }}>
             <Text style={{ fontSize: 20, width: 30, textAlign: 'center' }}>{i < 3 ? MEDALS[i] : ''}</Text>
             {i >= 3 ? <Text style={{ color: t.ink3, fontWeight: '800', width: 0, marginLeft: -30, textAlign: 'center' }}>{i + 1}</Text> : null}
             <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
@@ -48,7 +48,7 @@ export default function Leaderboard() {
               </View>
             </View>
             <Text style={{ color: t.ink, fontWeight: '800', fontSize: 16 }}>{score}</Text>
-          </View>
+          </Pressable>
         ))}
         <Text style={{ color: t.ink3, fontSize: 11, textAlign: 'center', marginTop: 6 }}>Use the Broadcast button on Clients to celebrate the top of the board.</Text>
       </ScrollView>

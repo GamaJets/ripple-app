@@ -103,7 +103,7 @@ export default function TrainerAnalytics() {
           </Pressable>
         ) : null}
 
-        <View style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18, marginBottom: 14 }}>
+        <Pressable onPress={() => router.push('/(trainer)/leaderboard')} style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18, marginBottom: 14 }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
             <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16 }}>Roster health</Text>
             <Text style={{ color: t.ink3, fontSize: 12 }}>{avgAdh}% avg adherence</Text>
@@ -117,9 +117,9 @@ export default function TrainerAnalytics() {
               </View>
             ))}
           </View>
-        </View>
+        </Pressable>
 
-        <View style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18, marginBottom: 14 }}>
+        <Pressable onPress={() => router.push('/(trainer)/payments')} style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18, marginBottom: 14 }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
             <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16 }}>Revenue trend</Text>
             {revHist.delta !== 0 ? <DeltaBadge value={revHist.delta} unit="" suffix="vs last mo" /> : <Text style={{ color: t.ink3, fontSize: 11 }}>tracking started</Text>}
@@ -128,7 +128,7 @@ export default function TrainerAnalytics() {
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 }}>
             {revHist.labels.map((l, i) => (<Text key={i} style={{ color: t.ink3, fontSize: 10 }}>{l}</Text>))}
           </View>
-        </View>
+        </Pressable>
 
         <View style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18, marginBottom: 14 }}>
           <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16, marginBottom: 4 }}>Client value</Text>

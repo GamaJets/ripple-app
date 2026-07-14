@@ -101,11 +101,11 @@ export default function OwnerRevenue() {
         </View>
 
         {/* Revenue at risk */}
-        <View style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: roll.atRiskMrr > 0 ? t.warn : t.ring, padding: 18 }}>
+        <Pressable onPress={() => router.push('/(owner)/trainers')} style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: roll.atRiskMrr > 0 ? t.warn : t.ring, padding: 18 }}>
           <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16, marginBottom: 6 }}>Revenue at risk</Text>
           <Text style={{ color: roll.atRiskMrr > 0 ? t.s3 : t.ink, fontSize: 24, fontWeight: '900' }}>{usd(roll.atRiskMrr)}<Text style={{ color: t.ink3, fontSize: 13, fontWeight: '600' }}>/mo</Text></Text>
           <Text style={{ color: t.ink3, fontSize: 12.5, marginTop: 4 }}>{roll.atRiskCount} trainer{roll.atRiskCount === 1 ? '' : 's'} flagged watch/high — that's {usd(roll.atRiskMrr * 12)} of ARR to defend.</Text>
-        </View>
+        </Pressable>
       </ScrollView>
     </SafeAreaView>
   );
