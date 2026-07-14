@@ -82,6 +82,7 @@ export default function Home() {
 
   const solo = c.coachingMode === 'solo';
   const online = c.coachingMode === 'online';
+  const inperson = c.coachingMode === 'inperson';
   const program = (solo ? null : coachProgram) ?? buildProgram(c.goal, c.bodyFatPct);
   const jsToMon = (new Date().getDay() + 6) % 7;
   const workout = program.days[jsToMon % program.days.length] || program.days[0] || { focus: 'Rest day', exercises: [] };
@@ -348,8 +349,8 @@ export default function Home() {
           </View>
         </View>
 
-        {/* next session (online booking) */}
-        {online ? <Pressable onPress={() => router.push('/(client)/calendar')} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 14, marginBottom: 11, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+        {/* next session — online (video) or in-person */}
+        {(online || inperson) ? <Pressable onPress={() => router.push('/(client)/calendar')} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 14, marginBottom: 11, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
           <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
             <Icon name="calendar" size={20} color={t.brand} />
           </View>
@@ -357,12 +358,12 @@ export default function Home() {
             {nextSession ? (
               <>
                 <Text style={{ color: t.ink, fontWeight: '700', fontSize: 13 }}>Next session · {new Date(nextSession.startsAt).toLocaleDateString(undefined, { weekday: 'short' })} {(() => { let h = new Date(nextSession.startsAt).getHours(); const ap = h >= 12 ? 'pm' : 'am'; h = h % 12 || 12; return `${h}${ap}`; })()}</Text>
-                <Text style={{ color: t.ink3, fontSize: 11, marginTop: 1 }}>with your coach · {nextSession.durationMin} min</Text>
+                <Text style={{ color: t.ink3, fontSize: 11, marginTop: 1 }}>{inperson ? 'In-person' : 'Online'} · {nextSession.durationMin} min with your coach</Text>
               </>
             ) : (
               <>
                 <Text style={{ color: t.ink, fontWeight: '700', fontSize: 13 }}>No sessions booked</Text>
-                <Text style={{ color: t.ink3, fontSize: 11, marginTop: 1 }}>Tap to book with your coach</Text>
+                <Text style={{ color: t.ink3, fontSize: 11, marginTop: 1 }}>Tap to book {inperson ? 'an in-person session' : 'with your coach'}</Text>
               </>
             )}
           </View>
@@ -406,7 +407,7 @@ export default function Home() {
         <View style={{ flexDirection: 'row', gap: 9 }}>
           {qa('plus', 'Log workout', '/(client)/workouts')}
           {qa('meals', 'Log food', '/(client)/foodlog')}
-          {online ? qa('calendar', 'Book', '/(client)/calendar') : qa('chart', 'Report', '/(client)/report')}
+          {(online || inperson) ? qa('calendar', 'Book', '/(client)/calendar') : qa('chart', 'Report', '/(client)/report')}
           {qa('camera', 'Photo', '/(client)/scans')}
         </View>
 
