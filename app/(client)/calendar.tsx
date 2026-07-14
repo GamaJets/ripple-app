@@ -1,7 +1,7 @@
 // Book — month calendar of your in-person sessions. Tap a day to book an open
 // slot or cancel one you've booked (24h+ ahead avoids the late fee). Reads the
 // shared session store, so slots the coach opens appear here to book.
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { View, Text, Pressable, ScrollView, Alert, Image, Modal } from 'react-native';
 import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -11,6 +11,7 @@ import type { Theme } from '../../src/theme/tokens';
 import { useSessions } from '../../src/ui/sessions';
 import { useCoachProfile } from '../../src/ui/coachProfile';
 import type { TrainingSession } from '../../src/lib/types';
+import { sessionsRemaining, redeemSession } from '../../src/lib/connect';
 
 const CLIENT_ID = 'c1';
 const initialsOf = (name: string) => name.replace('Coach ', '').split(' ').map((x) => x[0]).join('').slice(0, 2);
@@ -35,6 +36,8 @@ export default function Calendar() {
  const [viewMonth, setViewMonth] = useState(now.getMonth());
  const [selKey, setSelKey] = useState(`${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`);
 
+ const [packLeft, setPackLeft] = useState<number | null>(null);
+ useEffect(() => { let c = false; sessionsRemaining().then((n) => { if (!c) setPackLeft(n); }).catch(() => {}); return () => { c = true; }; }, []);
  const mine = sessions.filter((s) => s.clientId === CLIENT_ID && s.status === 'booked');
  const open = sessions.filter((s) => s.status === 'available');
 
@@ -64,6 +67,7 @@ export default function Calendar() {
 
  function book(s: TrainingSession) {
  bookSession(s.id, CLIENT_ID);
+ redeemSession(s.trainerId).then((r) => { if (r.ok && typeof r.remaining === 'number') setPackLeft(r.remaining); }).catch(() => {});
  Alert.alert('Session booked ', `${DOW[new Date(s.startsAt).getDay()]} ${timeLabel(s.startsAt)} with ${coach.name} is confirmed.\n\nA confirmation has been sent to you and your coach.`, [{ text: 'Great' }]);
  }
  function cancel(s: TrainingSession) {
@@ -108,6 +112,12 @@ export default function Calendar() {
  <Text style={{ color: t.ink3, fontSize: 12, fontWeight: '700' }}>Open Slots</Text>
  <Text style={{ color: t.ink, fontSize: 22, fontWeight: '800', marginTop: 4 }}>{open.length}</Text>
  </View>
+ {packLeft != null && packLeft > 0 ? (
+ <View style={{ flex: 1, backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.brand, padding: 14 }}>
+ <Text style={{ color: t.brand, fontSize: 12, fontWeight: '700' }}>Pack credits</Text>
+ <Text style={{ color: t.ink, fontSize: 22, fontWeight: '800', marginTop: 4 }}>{packLeft}</Text>
+ </View>
+ ) : null}
  </View>
 
  {/* Month calendar */}

@@ -82,3 +82,31 @@ export async function fetchMyPurchases(): Promise<Purchase[]> {
     return (data as Purchase[]) ?? [];
   } catch { return []; }
 }
+
+/** Sessions remaining across the client's active packs (optionally for one trainer). */
+export async function sessionsRemaining(trainerId?: string): Promise<number> {
+  try {
+    const { data: auth } = await supabase.auth.getUser();
+    const uid = auth?.user?.id; if (!uid) return 0;
+    let q = supabase.from('client_purchases').select('sessions_total, sessions_used').eq('client_id', uid).eq('status', 'paid').not('sessions_total', 'is', null);
+    if (trainerId) q = q.eq('trainer_id', trainerId);
+    const { data } = await q;
+    return ((data as { sessions_total: number | null; sessions_used: number }[]) ?? []).reduce((a, r) => a + Math.max(0, (r.sessions_total || 0) - r.sessions_used), 0);
+  } catch { return 0; }
+}
+
+/** Draw down one credit from the client's oldest active pack for a trainer.
+ *  Best-effort: no-ops (ok:false) when there is no pack — booking still proceeds. */
+export async function redeemSession(trainerId: string): Promise<{ ok: boolean; remaining?: number; error?: string }> {
+  try {
+    const { data: auth } = await supabase.auth.getUser();
+    const uid = auth?.user?.id; if (!uid) return { ok: false, error: 'Not signed in.' };
+    const { data } = await supabase.from('client_purchases').select('*').eq('client_id', uid).eq('trainer_id', trainerId).eq('status', 'paid').not('sessions_total', 'is', null).order('created_at', { ascending: true });
+    const packs = (data as Purchase[]) ?? [];
+    const pack = packs.find((p) => (p.sessions_total || 0) - p.sessions_used > 0);
+    if (!pack) return { ok: false, error: 'No sessions left in a pack.' };
+    const { error } = await supabase.from('client_purchases').update({ sessions_used: pack.sessions_used + 1 }).eq('id', pack.id);
+    if (error) return { ok: false, error: error.message };
+    return { ok: true, remaining: (pack.sessions_total || 0) - pack.sessions_used - 1 };
+  } catch (e) { return { ok: false, error: (e as Error).message }; }
+}
