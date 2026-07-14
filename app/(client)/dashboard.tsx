@@ -275,14 +275,14 @@ export default function Home() {
 
         {/* body stats */}
         <View style={{ flexDirection: 'row', gap: 9, marginBottom: 11 }}>
-          {stat('Weight', `${c.weightKg}`, wDelta !== 0 ? `${wDelta < 0 ? '▼' : '▲'} ${Math.abs(wDelta)} kg` : '—', wDelta <= 0, '/(client)/measurements')}
-          {stat('Body fat', `${c.bodyFatPct}%`, bfD !== 0 ? `${bfD < 0 ? '▼' : '▲'} ${Math.abs(bfD)}` : '—', bfD <= 0, '/(client)/measurements')}
-          {stat('Muscle', `${c.muscleKg}`, muD !== 0 ? `${muD < 0 ? '▼' : '▲'} ${Math.abs(muD)}` : '—', muD >= 0, '/(client)/measurements')}
+          {stat('Weight', `${c.weightKg}`, wDelta !== 0 ? `${wDelta < 0 ? '▼' : '▲'} ${Math.abs(wDelta)} kg` : '—', wDelta <= 0, '/(client)/scans')}
+          {stat('Body fat', `${c.bodyFatPct}%`, bfD !== 0 ? `${bfD < 0 ? '▼' : '▲'} ${Math.abs(bfD)}` : '—', bfD <= 0, '/(client)/scans')}
+          {stat('Muscle', `${c.muscleKg}`, muD !== 0 ? `${muD < 0 ? '▼' : '▲'} ${Math.abs(muD)}` : '—', muD >= 0, '/(client)/scans')}
         </View>
 
         {/* weight trend */}
         {ws.length > 1 ? (
-          <Pressable onPress={() => router.push('/(client)/measurements')} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 14, marginBottom: 11 }}>
+          <Pressable onPress={() => router.push('/(client)/scans')} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 14, marginBottom: 11 }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
               <Text style={{ color: t.ink3, fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.6 }}>Weight · {ws.length} check-ins</Text>
               <Text style={{ color: t.brand, fontSize: 11, fontWeight: '700' }}>{wDelta > 0 ? '+' : ''}{wDelta} kg</Text>
