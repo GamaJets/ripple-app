@@ -184,6 +184,7 @@ export default function Profile() {
 
   const [showDob, setShowDob] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
   const [heightUnit, setHeightUnit] = useState<'cm' | 'in'>('cm');
   const [heightVal, setHeightVal] = useState(String(cd.heightCm));
@@ -309,9 +310,13 @@ export default function Profile() {
         </Pressable>
 
         {/* hub groups */}
-        {hubGroups.map((g) => (
+        {hubGroups.map((g) => { const gc = collapsed[g.title] ?? false; return (
           <View key={g.title}>
-            <Text style={{ color: t.ink3, fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.7, marginBottom: 8, marginTop: 4 }}>{g.title}</Text>
+            <Pressable onPress={() => setCollapsed((p) => ({ ...p, [g.title]: !gc }))} accessibilityRole="button" accessibilityLabel={(gc ? 'Expand ' : 'Collapse ') + g.title} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, marginTop: 4 }}>
+              <Text style={{ color: t.ink3, fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.7 }}>{g.title}</Text>
+              <View style={{ transform: [{ rotate: gc ? '0deg' : '90deg' }] }}><Icon name="chevron" size={13} color={t.ink3} /></View>
+            </Pressable>
+            {!gc ? (
             <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, overflow: 'hidden', marginBottom: 16 }}>
               {g.items.map((h, i) => (
                 <Pressable key={h.route} onPress={() => router.push(h.route as any)} style={{ flexDirection: 'row', alignItems: 'center', gap: 13, paddingHorizontal: 14, paddingVertical: 13, borderTopWidth: i === 0 ? 0 : 1, borderTopColor: t.ring }}>
@@ -324,8 +329,9 @@ export default function Profile() {
                 </Pressable>
               ))}
             </View>
+            ) : <View style={{ marginBottom: 12 }} />}
           </View>
-        ))}
+        ); })}
       </ScrollView>
 
       {/* edit profile sheet */}

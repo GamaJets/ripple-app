@@ -61,6 +61,7 @@ export default function Nutrition() {
   const [checked, setChecked] = useState<Record<string, boolean>>({});
   useEffect(() => { AsyncStorage.getItem('repple.grocery.checked').then((r) => { if (r) { try { setChecked(JSON.parse(r)); } catch { /* ignore */ } } }); }, []);
   const [view, setView] = useState<'today' | 'week'>('today');
+  const [showAvoid, setShowAvoid] = useState(false);
   const [dayType, setDayType] = useState<'training' | 'rest' | 'off'>('off');
   const [batch, setBatch] = useState(1);
   const [cook, setCook] = useState(false);
@@ -219,17 +220,20 @@ export default function Nutrition() {
           ) : null}
         </View>
 
-        {/* allergen / intolerance filter */}
+        {/* allergen / intolerance filter (collapsible) */}
         <View style={{ marginBottom: 12 }}>
-          <Text style={{ color: t.ink3, fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.9, marginBottom: 7 }}>Avoiding{c.avoid.length ? ' · plan filtered' : ''}</Text>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+          <Pressable onPress={() => setShowAvoid((v) => !v)} accessibilityRole="button" accessibilityLabel="Toggle dietary filters" style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: showAvoid ? 7 : 0 }}>
+            <Text style={{ color: t.ink3, fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.9 }}>Avoiding{c.avoid.length ? ' · ' + c.avoid.length + ' filtered' : ' · tap to set'}</Text>
+            <View style={{ transform: [{ rotate: showAvoid ? '90deg' : '0deg' }] }}><Icon name="chevron" size={13} color={t.ink3} /></View>
+          </Pressable>
+          {showAvoid ? <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
             {ALLERGENS.map((al) => { const on = c.avoid.includes(al.id); return (
               <Pressable key={al.id} onPress={() => c.setAvoid(on ? c.avoid.filter((x) => x !== al.id) : [...c.avoid, al.id])} style={{ paddingHorizontal: 13, paddingVertical: 8, borderRadius: 18, backgroundColor: on ? t.crit : t.surface, borderWidth: 1, borderColor: on ? t.crit : t.ring, flexDirection: 'row', alignItems: 'center', gap: 5 }}>
                 {on ? <Icon name="check" size={12} color="#fff" /> : null}
                 <Text style={{ color: on ? '#fff' : t.ink2, fontWeight: '700', fontSize: 12.5 }}>{al.label}</Text>
               </Pressable>
             ); })}
-          </View>
+          </View> : null}
         </View>
 
         {/* quick links */}
