@@ -86,6 +86,18 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
     AsyncStorage.setItem(KEY, JSON.stringify({ name, dob, heightCm, goal, diet, avoid, injuries, focusAreas, coachingMode, weightKg: manualWeight, bodyFatPct: manualBodyFat, manualAt, photo })).catch(() => {});
   }, [hydrated, name, dob, heightCm, goal, diet, avoid, injuries, focusAreas, coachingMode, manualWeight, manualBodyFat, manualAt, photo]);
 
+  // Publish identity + goal to the shared backend so a LINKED trainer sees the real
+  // client (name/goal) instead of a placeholder. Best-effort & additive: it only
+  // updates existing rows (no-ops when the client isn't linked to a trainer yet),
+  // never clobbers how the client reads their own local data.
+  useEffect(() => {
+    if (!USE_SUPABASE || !sbUid || !hydrated) return;
+    try {
+      supabase.from('profiles').update({ full_name: name }).eq('id', sbUid).then(() => {}, () => {});
+      supabase.from('clients').update({ goal }).eq('id', sbUid).then(() => {}, () => {});
+    } catch { /* ignore */ }
+  }, [name, goal, sbUid, hydrated]);
+
   // Sync body scans with Supabase (per user) — hydrate-or-seed, defensive.
   useEffect(() => {
     if (!USE_SUPABASE) return;
