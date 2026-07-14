@@ -1,0 +1,175 @@
+# Repple — "Unblock the real thing" runbook
+
+Goal: turn the app from demo/local data into a **real backend** where a trainer
+account and a client account are two separate logins that share data — the
+trainer sees the *actual* client on their roster with real name, goal, weight
+change and adherence. This is the trainer↔client data plane going live.
+
+Nothing here touches your app code or requires a new build. It's three things:
+run one SQL file, create two accounts, link them in-app. ~15 minutes.
+
+> The app already ships with `USE_SUPABASE = true`, so as soon as the tables and
+> RLS below exist, the app reads/writes your real Supabase project. No OTA needed
+> for the SQL — but see step 5 for the pending JS OTA that carries the roster +
+> publish code.
+
+---
+
+## Step 1 — Apply the database (one paste)
+
+I've bundled every schema/RLS/function file into a single, idempotent script in
+dependency order so you don't have to run 16 files by hand.
+
+1. Open your Supabase project ▸ **SQL Editor** ▸ **New query**.
+2. Paste the entire contents of **`production/repple-setup.sql`** and click **Run**.
+3. It's safe to re-run any time — every statement is `create ... if not exists`,
+   `create or replace`, or `drop policy if exists`.
+
+What it creates: the base multi-tenant schema (tenants/profiles/trainers/clients/
+scans/sessions/messages/food_logs), the domain tables the app actually uses
+(workouts/measurements/check_ins/habit_logs/coach_nutrition/assigned_programs),
+account auto-provisioning (every new signup gets a tenant + a clients/trainers
+row), the coach-invite link flow, and the trainer-read RLS so a coach can read a
+linked client's real data.
+
+**Verify (run in the SQL editor):**
+```sql
+select tablename from pg_tables where schemaname='public' order by 1;
+-- expect ~30 tables incl. workouts, measurements, check_ins, clients, coach_invites
+
+select proname from pg_proc
+ where proname in ('provision_profile','link_coaching','accept_invite','is_my_client');
+-- expect all four
+```
+
+---
+
+## Step 2 — Create the two accounts
+
+Create both from the app's normal sign-up screen (or two devices / a device +
+the simulator). Use two real, different emails you can receive mail at.
+
+- **Client account** — e.g. `client@yourdomain.com`. Sign up normally. Done —
+  the app signs everyone up as a client, which is what we want here.
+- **Trainer account** — e.g. `coach@yourdomain.com`. Sign up the same way.
+
+> ⚠️ Known gap: the in-app sign-up form **always creates a `client`** (the role
+> picker isn't wired into the signup UI yet — `auth.tsx` passes `'client'`
+> hard-coded). So right after signing up, the "trainer" is still a client in the
+> database. Step 3 promotes it. (If email confirmation is ON in your Supabase
+> Auth settings, confirm both addresses before continuing.)
+
+---
+
+## Step 3 — Promote the trainer account to `role = 'trainer'`
+
+The provisioning trigger only fires on INSERT, so flipping the role also needs a
+`trainers` row created and the stray `clients` row removed. Run this once in the
+SQL editor, with the trainer's email:
+
+```sql
+-- Promote coach@yourdomain.com to a trainer
+with u as (select id, tenant_id from profiles
+           where id = (select id from auth.users where email = 'coach@yourdomain.com'))
+update profiles set role = 'trainer' where id in (select id from u);
+
+-- create the trainers row (trigger already ran at signup, so do it explicitly)
+insert into trainers (id, tenant_id)
+select id, tenant_id from profiles
+ where id = (select id from auth.users where email = 'coach@yourdomain.com')
+on conflict (id) do nothing;
+
+-- remove the clients row it got as a default-client at signup
+delete from clients
+ where id = (select id from auth.users where email = 'coach@yourdomain.com');
+```
+
+**Verify:**
+```sql
+select p.role, (t.id is not null) as has_trainer_row, (c.id is not null) as has_client_row
+from profiles p
+left join trainers t on t.id = p.id
+left join clients  c on c.id = p.id
+where p.id = (select id from auth.users where email = 'coach@yourdomain.com');
+-- expect: trainer | true | false
+```
+
+Sign the trainer out and back in so the app picks up the new role and routes to
+the **Trainer portal**.
+
+---
+
+## Step 4 — Link them (in-app, no SQL)
+
+This uses the real `accept_invite` → `link_coaching` path, which sets
+`clients.trainer_id` and records the coaching relationship.
+
+1. **Trainer** ▸ Dashboard ▸ **Add client** (or **Send invite**). Enter the
+   **client's exact email** (`client@yourdomain.com`) and pick the mode
+   (online or in-person). Send.
+2. **Client** ▸ open the app (signed in as the client). A **"Coaching
+   invitation"** card appears on their Home. Tap **Accept**.
+3. That's the link. Under the hood: `accept_invite(invite_id)` matched the
+   invite to the client's login email, called `link_coaching(coach, client, mode)`,
+   set `clients.trainer_id = coach`, and marked the invite accepted.
+
+**Verify:**
+```sql
+select c.id as client, cl.trainer_id, ci.status
+from clients c
+join profiles cl on cl.id = c.id
+left join coach_invites ci on lower(ci.email) = lower(
+  (select email from auth.users where id = c.id))
+where c.id = (select id from auth.users where email = 'client@yourdomain.com');
+-- expect trainer_id = the coach's id, status = accepted
+```
+
+---
+
+## Step 5 — Publish the pending JS (so the roster shows real stats)
+
+The code that (a) publishes the client's name+goal to the shared tables and
+(b) makes the trainer roster compute real weight-change / last-active /
+adherence is committed but not yet on TestFlight. It's OTA-able JS — no new
+native build:
+
+```bash
+eas update --branch preview -m "backend: trainer sees real linked client"
+```
+
+Then reopen the app on both accounts to pull the update.
+
+> SQL/RLS from steps 1 & 3 is **not** OTA — it only takes effect once run in
+> Supabase (which you did in step 1/3). The OTA only carries the JS.
+
+---
+
+## Step 6 — End-to-end check
+
+As the **client**: set your name and goal in Profile, log a workout, and add a
+body scan / weight in Progress.
+
+As the **trainer**: open your **roster**. You should now see the real client
+(their actual name, not a placeholder), their goal, a weight-change figure
+derived from their scans, "last active" from their latest workout, and a
+self-reported adherence number. Open the client's detail to confirm the numbers
+match what the client entered.
+
+If the client still shows as a placeholder: confirm step 4's `trainer_id` verify
+query returns the coach id, confirm the OTA from step 5 was pulled, and confirm
+the trainer-read RLS ran (it's the `▶ trainer-read-access.sql` section of
+`repple-setup.sql`).
+
+---
+
+## Notes / honest edges
+
+- **Role in signup UI** is the one real gap this runbook works around. A proper
+  fix is to expose a client/trainer choice on the sign-up screen (or an
+  owner-issued trainer invite that pre-sets the role). Until then, step 3 is the
+  manual promotion.
+- **Owner → trainer invites** exist too (`trainer-invites.sql`, in the bundle) if
+  you'd rather the platform owner provision trainers into the owner's tenant.
+- Everything the app writes is **best-effort and RLS-gated** — if a policy is
+  missing the app falls back to demo data rather than crashing, so a partial
+  setup degrades gracefully instead of breaking.
