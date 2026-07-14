@@ -11,7 +11,7 @@ import type { Theme } from '../../src/theme/tokens';
 import { useSessions } from '../../src/ui/sessions';
 import { useCoachProfile } from '../../src/ui/coachProfile';
 import type { TrainingSession } from '../../src/lib/types';
-import { sessionsRemaining, redeemSession } from '../../src/lib/connect';
+import { sessionsRemaining, redeemSession, refundSession } from '../../src/lib/connect';
 
 const CLIENT_ID = 'c1';
 const initialsOf = (name: string) => name.replace('Coach ', '').split(' ').map((x) => x[0]).join('').slice(0, 2);
@@ -67,13 +67,14 @@ export default function Calendar() {
 
  function book(s: TrainingSession) {
  bookSession(s.id, CLIENT_ID);
- redeemSession(s.trainerId).then((r) => { if (r.ok && typeof r.remaining === 'number') setPackLeft(r.remaining); }).catch(() => {});
+ redeemSession(s.trainerId).then((r) => { if (r.ok) sessionsRemaining().then(setPackLeft).catch(() => {}); }).catch(() => {});
  Alert.alert('Session booked ', `${DOW[new Date(s.startsAt).getDay()]} ${timeLabel(s.startsAt)} with ${coach.name} is confirmed.\n\nA confirmation has been sent to you and your coach.`, [{ text: 'Great' }]);
  }
  function cancel(s: TrainingSession) {
  const late = Date.parse(s.startsAt) - Date.now() < 24 * 3600 * 1000;
  const doCancel = () => {
  releaseSession(s.id);
+ refundSession(s.trainerId).then(() => { sessionsRemaining().then(setPackLeft).catch(() => {}); }).catch(() => {});
  Alert.alert('Cancelled', `Your ${timeLabel(s.startsAt)} session was cancelled. The slot has been re-offered to other clients.${late ? `\n\nA $${fee} late-cancellation fee applies.` : ''}`, [{ text: 'OK' }]);
  };
  if (late) Alert.alert('Within 24 hours', `Cancelling now charges the $${fee} late-cancellation fee, and the slot is offered to other clients. Continue?`, [{ text: 'Keep it', style: 'cancel' }, { text: `Cancel · $${fee}`, style: 'destructive', onPress: doCancel }]);

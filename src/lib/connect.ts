@@ -110,3 +110,16 @@ export async function redeemSession(trainerId: string): Promise<{ ok: boolean; r
     return { ok: true, remaining: (pack.sessions_total || 0) - pack.sessions_used - 1 };
   } catch (e) { return { ok: false, error: (e as Error).message }; }
 }
+
+/** Refund one credit (e.g. the client cancelled a booked session). Best-effort. */
+export async function refundSession(trainerId: string): Promise<{ ok: boolean }> {
+  try {
+    const { data: auth } = await supabase.auth.getUser();
+    const uid = auth?.user?.id; if (!uid) return { ok: false };
+    const { data } = await supabase.from('client_purchases').select('*').eq('client_id', uid).eq('trainer_id', trainerId).eq('status', 'paid').not('sessions_total', 'is', null).order('created_at', { ascending: false });
+    const pack = ((data as Purchase[]) ?? []).find((p) => p.sessions_used > 0);
+    if (!pack) return { ok: false };
+    const { error } = await supabase.from('client_purchases').update({ sessions_used: pack.sessions_used - 1 }).eq('id', pack.id);
+    return { ok: !error };
+  } catch { return { ok: false }; }
+}

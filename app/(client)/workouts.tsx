@@ -310,7 +310,7 @@ export default function Train() {
                 <Icon name="plus" size={16} color={t.brand} /><Text style={{ color: t.ink2, fontWeight: '800', fontSize: 14 }}>Add an exercise you did</Text>
               </Pressable>
             ) : null}
-            {Object.values(logged).some((a) => a.length > 0) ? (
+            {Object.keys(logged).some((k) => k.indexOf(dayIdx + ':') === 0 && (logged[k] || []).length > 0) ? (
               <Pressable onPress={saveManual} style={{ backgroundColor: t.brand, borderRadius: 14, paddingVertical: 15, alignItems: 'center', marginTop: 4, flexDirection: 'row', justifyContent: 'center', gap: 8 }}>
                 <Icon name="check" size={16} color={t.brandInk} /><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 15 }}>Save workout to log</Text>
               </Pressable>

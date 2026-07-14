@@ -59,7 +59,7 @@ export function WorkoutLogProvider({ children }: { children: React.ReactNode }) 
   const addWorkout = (entry: WorkoutEntry) => { setLog((p) => [entry, ...p]); persist([entry]); };
   const addWorkouts = (entries: WorkoutEntry[]) => { if (entries.length) { setLog((p) => [...entries, ...p]); persist(entries); } };
   const removeWorkout = (entry: WorkoutEntry) => {
-    setLog((p) => p.filter((e) => !(e.t === entry.t && e.exercise === entry.exercise)));
+    setLog((p) => { const i = p.indexOf(entry); return i >= 0 ? [...p.slice(0, i), ...p.slice(i + 1)] : p.filter((e) => !(e.t === entry.t && e.exercise === entry.exercise)); });
     if (USE_SUPABASE && uid) {
       try { supabase.from('workouts').delete().eq('user_id', uid).eq('performed_at', entry.t).eq('exercise', entry.exercise).then(() => {}, () => {}); } catch { /* ignore */ }
     }

@@ -38,7 +38,7 @@ export default function ThisWeek() {
 
  {WEEK.map((label, i) => {
  const date = new Date(monday); date.setDate(monday.getDate() + i);
- const workout = program.days[i % trainingDays];
+ const workout = (program.days && program.days.length) ? program.days[i % program.days.length] : { day: '', focus: 'Rest day', exercises: [] };
  const isToday = i === jsToMon;
  const done = logged.has(dstr(date));
  return (
