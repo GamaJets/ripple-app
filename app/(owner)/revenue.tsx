@@ -36,7 +36,8 @@ export default function OwnerRevenue() {
   const planTotal = byPlan.reduce((a, p) => a + p.revenue, 0) || 1;
 
   // Trainer LTV: avg revenue per paying trainer × estimated lifespan.
-  const avgMrr = roll.paying > 0 ? roll.mrr / roll.paying : 0;
+  const payingMrr = trainers.filter((x) => x.status === 'active').reduce((a, x) => a + x.mrr, 0);
+  const avgMrr = roll.paying > 0 ? payingMrr / roll.paying : 0;
   const churnRate = roll.trainers > 0 ? roll.suspended / roll.trainers : 0;
   const lifespanMo = churnRate > 0 ? Math.min(48, Math.round(1 / churnRate)) : 24;
   const ltv = Math.round(avgMrr * lifespanMo);

@@ -10,6 +10,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { MOCK_TRAINER } from '../../src/lib/mockData';
+import { useCoachProfile } from '../../src/ui/coachProfile';
 import { cancelSession } from '../../src/lib/booking';
 import { useSessions } from '../../src/ui/sessions';
 import { useAvailability, upcomingDates } from '../../src/ui/availability';
@@ -35,6 +36,7 @@ export default function TrainerSchedule() {
   const now = new Date();
   const { sessions, addSession, releaseSession, removeSession } = useSessions();
   const { roster } = useRoster();
+  const { sessionFee } = useCoachProfile();
   const nameOf = (id: string | null) => roster.find((c) => c.id === id)?.name ?? 'Open slot';
   const [viewYear, setViewYear] = useState(now.getFullYear());
   const [viewMonth, setViewMonth] = useState(now.getMonth());
@@ -108,13 +110,13 @@ export default function TrainerSchedule() {
 
   function doCancel(s: TrainingSession) {
     const others = roster.filter((c) => c.id !== s.clientId).map((c) => c.name);
-    const res = cancelSession(s, MOCK_TRAINER.sessionFee, roster.map((c) => c.id));
+    const res = cancelSession(s, sessionFee, roster.map((c) => c.id));
     releaseSession(s.id);
     Alert.alert(
       'Session cancelled',
       `${timeLabel(s.startsAt)} with ${nameOf(s.clientId)} was cancelled.\n\n` +
       `${nameOf(s.clientId)} has been notified. The freed slot was re-offered to ${others.length} other client${others.length === 1 ? '' : 's'} (${others.slice(0, 3).join(', ')}${others.length > 3 ? '…' : ''}) — first to accept books it.` +
-      (res.charged ? `\n\nInside 24h: a ${MOCK_TRAINER.sessionFee} late-cancel fee applies.` : ''),
+      (res.charged ? `\n\nInside 24h: a ${sessionFee} late-cancel fee applies.` : ''),
       [{ text: 'Done' }]
     );
   }

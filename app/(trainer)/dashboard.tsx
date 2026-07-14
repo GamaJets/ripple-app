@@ -7,6 +7,7 @@ import { Icon } from '../../src/ui/Icon';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { MOCK_TRAINER } from '../../src/lib/mockData';
+import { useCoachProfile } from '../../src/ui/coachProfile';
 import { type RosterClient } from '../../src/lib/trainerMock';
 import { areaLabel } from '../../src/lib/injuries';
 import { supabase } from '../../src/lib/supabase';
@@ -45,6 +46,7 @@ export default function TrainerClients() {
   const t = useTheme();
   const router = useRouter();
   const { roster, addClient, removeClient } = useRoster();
+  const { sessionFee } = useCoachProfile();
   const { getFeedback, addFeedback } = useCoachFeedback();
   const { get: getNutri, setAdjust: setNutri, clear: clearNutri } = useCoachNutrition();
   const { getNotes, addNote, removeNote } = useCoachNotes();
@@ -94,7 +96,7 @@ export default function TrainerClients() {
     return () => { cancelled = true; };
   }, [sel]);
   const active = roster.length;
-  const revenue = active * MOCK_TRAINER.sessionFee * 4;
+  const revenue = active * sessionFee * 4;
   const unread = roster.reduce((a, c) => a + c.unread, 0);
   const atRisk = roster.filter((c) => c.adherence < 80).length;
   const AUTO_SEGS = [

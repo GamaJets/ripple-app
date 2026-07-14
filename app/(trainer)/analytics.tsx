@@ -7,6 +7,7 @@ import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
 import type { Theme } from '../../src/theme/tokens';
 import { MOCK_TRAINER } from '../../src/lib/mockData';
+import { useCoachProfile } from '../../src/ui/coachProfile';
 import { ROSTER } from '../../src/lib/trainerMock';
 import { useRoster } from '../../src/ui/roster';
 import { DistBar, DeltaBadge } from '../../src/ui/charts';
@@ -29,21 +30,22 @@ export default function TrainerAnalytics() {
   const t = useTheme();
   const router = useRouter();
   const { roster } = useRoster();
+  const { sessionFee } = useCoachProfile();
   const staleDays = (str) => { const m = /([0-9]+)d/.exec(str); return m ? parseInt(m[1], 10) : 0; };
   const atRisk = roster.filter((c) => c.adherence < 82 || staleDays(c.lastActive) >= 2);
   const clients = roster.length;
   const sessionsMo = clients * 4;
-  const revenue = sessionsMo * MOCK_TRAINER.sessionFee;
+  const revenue = sessionsMo * sessionFee;
   const platformFee = 99;
   const net = revenue - platformFee;
   const valuePerClient = clients ? Math.round(revenue / clients) : 0;
+  const avgAdh = clients ? Math.round(roster.reduce((a, c) => a + c.adherence, 0) / clients) : 0;
   const estTenureMonths = Math.max(3, Math.min(24, Math.round(6 + (avgAdh - 70) / 10 * 3)));
   const estLtv = valuePerClient * estTenureMonths;
-  const avgAdh = clients ? Math.round(roster.reduce((a, c) => a + c.adherence, 0) / clients) : 0;
   const onTrack = roster.filter((c) => c.adherence >= 85).length;
   const watch = roster.filter((c) => c.adherence >= 70 && c.adherence < 85).length;
   const riskCount = roster.filter((c) => c.adherence < 70).length;
-  const atRiskRevenue = atRisk.length * MOCK_TRAINER.sessionFee * 4;
+  const atRiskRevenue = atRisk.length * sessionFee * 4;
   const { goals, setGoals } = useTrainerGoals();
   const [goalOpen, setGoalOpen] = useState(false);
   const [gRev, setGRev] = useState('');
@@ -68,7 +70,7 @@ export default function TrainerAnalytics() {
         <Pressable onPress={() => router.push('/(trainer)/leaderboard')} style={{ backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 16, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}><Text style={{ color: t.ink, fontWeight: '700', fontSize: 14 }}>Client leaderboard</Text><Text style={{ color: t.ink3, fontSize: 18 }}>›</Text></Pressable>
 
         <View style={{ flexDirection: 'row', gap: 12, marginBottom: 12 }}>
-          <Big t={t} label="Monthly revenue" value={'$' + revenue.toLocaleString()} sub={`${sessionsMo} sessions × $${MOCK_TRAINER.sessionFee}`} tint />
+          <Big t={t} label="Monthly revenue" value={'$' + revenue.toLocaleString()} sub={`${sessionsMo} sessions × $${sessionFee}`} tint />
           <Big t={t} label="Net after fee" value={'$' + net.toLocaleString()} sub={`− $${platformFee} platform`} />
         </View>
         <View style={{ flexDirection: 'row', gap: 12, marginBottom: 16 }}>
@@ -177,7 +179,7 @@ export default function TrainerAnalytics() {
 
         <View style={{ backgroundColor: t.surface2, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 16 }}>
           <Text style={{ color: t.ink2, fontSize: 13, lineHeight: 20 }}>
-            You’re on the <Text style={{ color: t.brand, fontWeight: '800' }}>Pro</Text> plan (${platformFee}/mo to Repple). Add clients or session packages to grow — every new client at ${MOCK_TRAINER.sessionFee}/session adds about ${MOCK_TRAINER.sessionFee * 4}/mo.
+            You’re on the <Text style={{ color: t.brand, fontWeight: '800' }}>Pro</Text> plan (${platformFee}/mo to Repple). Add clients or session packages to grow — every new client at ${sessionFee}/session adds about ${sessionFee * 4}/mo.
           </Text>
         </View>
       </ScrollView>

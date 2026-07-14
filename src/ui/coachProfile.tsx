@@ -1,7 +1,8 @@
 // Coach profile — the trainer's public-facing identity (photo, tagline, bio, what
 // they offer, session fee). Shared state so the coach edits it in their portal and
 // clients see it on the booking screen. Seeded from MOCK_TRAINER.
-import { createContext, useContext, useState, type ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, type ReactNode } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MOCK_TRAINER } from '../lib/mockData';
 
 interface CoachProfileValue {
@@ -26,6 +27,9 @@ export function CoachProfileProvider({ children }: { children: ReactNode }) {
   const [offers, setOffers] = useState<string[]>(['1:1 personal training', 'Custom meal plans', 'Form-check videos', 'Weekly check-ins', 'InBody progress reviews']);
   const [specialties, setSpecialties] = useState<string[]>(['Fat loss', 'Strength', 'Habit coaching']);
   const [sessionFee, setSessionFee] = useState(MOCK_TRAINER.sessionFee);
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => { (async () => { try { const raw = await AsyncStorage.getItem('repple.coachProfile'); if (raw) { const p = JSON.parse(raw); if (typeof p.name === 'string') setName(p.name); if (p.photo === null || typeof p.photo === 'string') setPhoto(p.photo ?? null); if (typeof p.tagline === 'string') setTagline(p.tagline); if (typeof p.bio === 'string') setBio(p.bio); if (Array.isArray(p.offers)) setOffers(p.offers); if (Array.isArray(p.specialties)) setSpecialties(p.specialties); if (typeof p.sessionFee === 'number') setSessionFee(p.sessionFee); } } catch { /* ignore */ } setHydrated(true); })(); }, []);
+  useEffect(() => { if (!hydrated) return; AsyncStorage.setItem('repple.coachProfile', JSON.stringify({ name, photo, tagline, bio, offers, specialties, sessionFee })).catch(() => {}); }, [hydrated, name, photo, tagline, bio, offers, specialties, sessionFee]);
 
   return (
     <Ctx.Provider value={{ name, setName, photo, setPhoto, tagline, setTagline, bio, setBio, offers, setOffers, specialties, setSpecialties, sessionFee, setSessionFee }}>
