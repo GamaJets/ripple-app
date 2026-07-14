@@ -237,6 +237,7 @@ export default function Profile() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
 
+        <Text style={{ color: t.brand, fontSize: 12, fontWeight: '900', textAlign: 'center', marginBottom: 8 }}>✓ UPDATE LIVE · build 0709c</Text>
         {/* header: avatar + serif name + stats + edit pencil */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, marginTop: 4, marginBottom: 16 }}>
           <Pressable onPress={changePhoto}>
