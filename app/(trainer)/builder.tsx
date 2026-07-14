@@ -2,7 +2,7 @@
 // exercises with sets/reps) starting from their auto plan or blank, then assign
 // it. The assigned program flows straight to that client's Train tab, replacing
 // the auto-generated one. Revert puts them back on auto.
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, Modal, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -81,11 +81,12 @@ export default function Builder() {
   }, [clientId]);
 
   // If opened from the template library with a templateId, load it once.
+  const loadedTplRef = useRef<string | null>(null);
   useEffect(() => {
     const tid = params.templateId as string;
-    if (!tid) return;
+    if (!tid || loadedTplRef.current === tid) return;
     const tpl = templates.find((x) => x.id === tid);
-    if (tpl) { loadFrom(tpl.program); setTplName(tpl.name); }
+    if (tpl) { loadedTplRef.current = tid; loadFrom(tpl.program); setTplName(tpl.name); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.templateId, templates.length]);
 

@@ -1,10 +1,10 @@
 // Client · Home — a dense daily briefing: today's plan, body stats, weight trend,
 // nutrition, this week, next session, coach note, quick actions. Rebuilt on the
 // palette theme + SVG icon set. Reads the live providers.
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { View, Text, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import Svg, { Circle, Polyline } from 'react-native-svg';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
@@ -74,7 +74,7 @@ export default function Home() {
   const readiness = readinessScore({ avgSleepHours: _avgSleep, hydrationPct: waterGoal ? water / waterGoal : 0, workoutsLast2Days: _load2d });
   const readinessColor = readiness.tone === 'good' ? t.brand : readiness.tone === 'moderate' ? t.warn : t.crit;
   const [needsOnboard, setNeedsOnboard] = useState(false);
-  useEffect(() => { let c = false; (async () => { try { const v = await AsyncStorage.getItem(ONBOARD_KEY); if (!c) setNeedsOnboard(!v); } catch { /* ignore */ } })(); return () => { c = true; }; }, []);
+  useFocusEffect(useCallback(() => { let c = false; (async () => { try { const v = await AsyncStorage.getItem(ONBOARD_KEY); if (!c) setNeedsOnboard(!v); } catch { /* ignore */ } })(); return () => { c = true; }; }, []));
   const { sessions } = useSessions();
   const { received: myInvites, acceptInvite: acceptCoachInvite, declineInvite: declineCoachInvite } = useInvites();
   const foodToday = useFoodLog().consumed;
