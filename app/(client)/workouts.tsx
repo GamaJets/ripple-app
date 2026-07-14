@@ -21,6 +21,8 @@ import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useExerciseVideos } from '../../src/ui/exerciseVideos';
 import { injuryFlag, areaLabel, type Injury } from '../../src/lib/injuries';
 import { warmupSets, deloadCheck } from '../../src/lib/training';
+import { hrColor, hrZoneLabel } from '../../src/lib/hr';
+import { ageFromDob } from '../../src/lib/age';
 
 const SERIF = 'Georgia';
 const WEEK = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -435,7 +437,7 @@ export default function Train() {
       </Modal>
 
       <Modal visible={session} animationType="slide" onRequestClose={() => setSession(false)}>
-        <SessionRunner t={t} exercises={orderedExercises.filter((e) => !isInjHidden(e))} focus={workout.focus} nameOf={nameOf} liveHr={w && w.today ? w.today.heartRateAvg : null} log={workoutLog} injuries={cd.injuries} onComplete={addWorkouts} onClose={() => setSession(false)} />
+        <SessionRunner t={t} exercises={orderedExercises.filter((e) => !isInjHidden(e))} focus={workout.focus} nameOf={nameOf} age={ageFromDob(cd.dob)} log={workoutLog} injuries={cd.injuries} onComplete={addWorkouts} onClose={() => setSession(false)} />
       </Modal>
       <Confetti show={confetti} onDone={() => setConfetti(false)} />
     </SafeAreaView>
@@ -454,9 +456,24 @@ function LogRow({ t, onLog }: { t: Theme; onLog: (reps: string, kg: string) => v
   );
 }
 
-function SessionRunner({ t, exercises, focus, nameOf, liveHr, log, injuries, onComplete, onClose }: { t: Theme; exercises: ProgramExercise[]; focus: string; nameOf: (e: ProgramExercise) => string; liveHr: number | null; log: WorkoutEntry[]; injuries: Injury[]; onComplete: (entries: WorkoutEntry[]) => void; onClose: () => void }) {
+function SessionRunner({ t, exercises, focus, nameOf, age, log, injuries, onComplete, onClose }: { t: Theme; exercises: ProgramExercise[]; focus: string; nameOf: (e: ProgramExercise) => string; age: number | null; log: WorkoutEntry[]; injuries: Injury[]; onComplete: (entries: WorkoutEntry[]) => void; onClose: () => void }) {
   const insets = useSafeAreaInsets();
   const topPad = Math.max(insets.top, 44);
+  const w = useWearables();
+  const liveHr = w.today.heartRateLatest ?? w.today.heartRateAvg;
+  const startKcalRef = useRef<number | null>(null);
+  const [elapsed, setElapsed] = useState(0);
+  const [hrPeak, setHrPeak] = useState<number | null>(null);
+  if (startKcalRef.current == null && typeof w.today.activeKcal === 'number') startKcalRef.current = w.today.activeKcal;
+  const sessionKcal = (typeof w.today.activeKcal === 'number' && startKcalRef.current != null) ? Math.max(0, Math.round(w.today.activeKcal - startKcalRef.current)) : null;
+  useEffect(() => {
+    const tick = setInterval(() => setElapsed((e) => e + 1), 1000);
+    const q = setInterval(() => w.syncAll(), 10000);
+    w.syncAll();
+    return () => { clearInterval(tick); clearInterval(q); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => { if (typeof liveHr === 'number' && liveHr > 0) setHrPeak((p) => (p == null || liveHr > p ? liveHr : p)); }, [liveHr]);
   const [idx, setIdx] = useState(0);
   const [results, setResults] = useState<{ reps: number; kg: number }[][]>(() => exercises.map(() => []));
   const [reps, setReps] = useState(''); const [kg, setKg] = useState('');
@@ -540,7 +557,11 @@ function SessionRunner({ t, exercises, focus, nameOf, liveHr, log, injuries, onC
               </View>
             ))}
           </View>
-          {liveHr != null ? <View style={{ backgroundColor: t.surface2, borderRadius: 14, borderWidth: 1, borderColor: t.ring, padding: 14, marginBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 8 }}><Icon name="heart" size={15} color={t.brand} /><Text style={{ color: t.ink2, fontSize: 13 }}>Avg heart rate today {liveHr} bpm · from your watch</Text></View> : null}
+          {(sessionKcal != null || hrPeak != null) ? <View style={{ backgroundColor: t.surface2, borderRadius: 14, borderWidth: 1, borderColor: t.ring, padding: 14, marginBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 18, justifyContent: 'center' }}>
+            {sessionKcal != null ? <View style={{ alignItems: 'center' }}><Text style={{ color: t.ink, fontSize: 18, fontWeight: '800' }}>{sessionKcal}</Text><Text style={{ color: t.ink3, fontSize: 11 }}>kcal burned</Text></View> : null}
+            {hrPeak != null ? <View style={{ alignItems: 'center' }}><Text style={{ color: hrColor(hrPeak, age), fontSize: 18, fontWeight: '800' }}>{hrPeak}</Text><Text style={{ color: t.ink3, fontSize: 11 }}>peak bpm</Text></View> : null}
+            {typeof w.today.heartRateAvg === 'number' ? <View style={{ alignItems: 'center' }}><Text style={{ color: t.ink, fontSize: 18, fontWeight: '800' }}>{w.today.heartRateAvg}</Text><Text style={{ color: t.ink3, fontSize: 11 }}>avg bpm</Text></View> : null}
+          </View> : null}
           <Text style={{ color: t.ink3, fontSize: 12, textAlign: 'center', marginBottom: 20 }}>Logged to your history — strength trends and your coach's dashboard update automatically.</Text>
           <Pressable onPress={onClose} style={{ backgroundColor: t.brand, borderRadius: 14, paddingVertical: 16, alignItems: 'center' }}><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 15 }}>Done</Text></Pressable>
         </ScrollView>
@@ -560,11 +581,25 @@ function SessionRunner({ t, exercises, focus, nameOf, liveHr, log, injuries, onC
           {exercises.map((_, i) => <View key={i} style={{ flex: 1, height: 5, borderRadius: 3, backgroundColor: i < idx ? t.good : i === idx ? t.brand : t.surface3 }} />)}
         </View>
 
-        {liveHr != null ? (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: t.surface2, borderRadius: 12, borderWidth: 1, borderColor: t.ring, padding: 12, marginBottom: 16 }}>
-            <Icon name="heart" size={18} color={t.brand} /><Text style={{ color: t.ink, fontSize: 18, fontWeight: '800' }}>{liveHr}</Text><Text style={{ color: t.ink3, fontSize: 13 }}>bpm · from your watch</Text>
+        <View style={{ flexDirection: 'row', gap: 8, marginBottom: liveHr == null ? 4 : 16 }}>
+          <View style={{ flex: 1, backgroundColor: t.surface2, borderRadius: 12, borderWidth: 1, borderColor: t.ring, paddingVertical: 10, alignItems: 'center' }}>
+            <Text style={{ color: t.ink, fontSize: 18, fontWeight: '900' }}>{Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, '0')}</Text>
+            <Text style={{ color: t.ink3, fontSize: 9.5, marginTop: 2, letterSpacing: 0.5 }}>TIME</Text>
           </View>
-        ) : null}
+          <View style={{ flex: 1, backgroundColor: t.surface2, borderRadius: 12, borderWidth: 1, borderColor: liveHr ? hrColor(liveHr, age) : t.ring, paddingVertical: 10, alignItems: 'center' }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}><Icon name="heart" size={14} color={hrColor(liveHr, age)} /><Text style={{ color: hrColor(liveHr, age), fontSize: 18, fontWeight: '900' }}>{liveHr ?? '–'}</Text></View>
+            <Text style={{ color: t.ink3, fontSize: 9.5, marginTop: 2, letterSpacing: 0.5 }}>{liveHr ? hrZoneLabel(liveHr, age).toUpperCase() : 'BPM'}</Text>
+          </View>
+          <View style={{ flex: 1, backgroundColor: t.surface2, borderRadius: 12, borderWidth: 1, borderColor: t.ring, paddingVertical: 10, alignItems: 'center' }}>
+            <Text style={{ color: t.ink, fontSize: 18, fontWeight: '900' }}>{sessionKcal ?? '–'}</Text>
+            <Text style={{ color: t.ink3, fontSize: 9.5, marginTop: 2, letterSpacing: 0.5 }}>KCAL</Text>
+          </View>
+          <View style={{ flex: 1, backgroundColor: t.surface2, borderRadius: 12, borderWidth: 1, borderColor: t.ring, paddingVertical: 10, alignItems: 'center' }}>
+            <Text style={{ color: hrPeak ? hrColor(hrPeak, age) : t.ink, fontSize: 18, fontWeight: '900' }}>{hrPeak ?? '–'}</Text>
+            <Text style={{ color: t.ink3, fontSize: 9.5, marginTop: 2, letterSpacing: 0.5 }}>PEAK</Text>
+          </View>
+        </View>
+        {liveHr == null ? <Text style={{ color: t.ink3, fontSize: 11, textAlign: 'center', marginBottom: 14 }}>Wear your Apple Watch for live heart rate &amp; calories</Text> : null}
 
         {prMsg ? (
           <View style={{ backgroundColor: 'rgba(245,158,11,0.15)', borderRadius: 12, padding: 12, marginBottom: 16, flexDirection: 'row', alignItems: 'center', gap: 8 }}>

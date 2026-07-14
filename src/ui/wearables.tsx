@@ -17,8 +17,10 @@ interface Value {
   connect: (id: ProviderId) => Promise<void>;
   disconnect: (id: ProviderId) => Promise<void>;
   sync: (id: ProviderId) => Promise<void>;
+  /** Re-sync every connected+available provider now (used by the live workout view). */
+  syncAll: () => void;
   /** Combined "today" roll-up across every connected device (for the dashboard). */
-  today: { activeKcal: number | null; steps: number | null; heartRateAvg: number | null };
+  today: { activeKcal: number | null; steps: number | null; heartRateAvg: number | null; heartRateLatest: number | null };
 }
 
 const Ctx = createContext<Value | null>(null);
@@ -95,17 +97,18 @@ export function WearablesProvider({ children }: { children: ReactNode }) {
     })();
   }, [sync]);
 
-  // Auto-refresh connected devices every 60s so Live Today updates on its own.
+  // Auto-refresh connected devices so Live Today updates on its own.
   const statesRef = useRef(states);
   useEffect(() => { statesRef.current = states; }, [states]);
-  useEffect(() => {
-    const timer = setInterval(() => {
-      for (const p of PROVIDERS) {
-        if (statesRef.current[p.meta.id] === 'connected' && p.isAvailable()) sync(p.meta.id as ProviderId);
-      }
-    }, 60000);
-    return () => clearInterval(timer);
+  const syncAll = useCallback(() => {
+    for (const p of PROVIDERS) {
+      if (statesRef.current[p.meta.id] === 'connected' && p.isAvailable()) sync(p.meta.id as ProviderId);
+    }
   }, [sync]);
+  useEffect(() => {
+    const timer = setInterval(() => { syncAll(); }, 60000);
+    return () => clearInterval(timer);
+  }, [syncAll]);
 
   const connectedMetrics = PROVIDERS
     .filter((p) => states[p.meta.id] === 'connected')
@@ -119,13 +122,15 @@ export function WearablesProvider({ children }: { children: ReactNode }) {
   const kcals = pick('activeKcal');
   const steps = pick('steps');
   const hrs = pick('heartRateAvg');
+  const hrl = pick('heartRateLatest');
   const today = {
     activeKcal: kcals ? kcals.reduce((a, b) => a + b, 0) : null,
     steps: steps ? Math.max(...steps) : null,
     heartRateAvg: hrs ? Math.round(hrs.reduce((a, b) => a + b, 0) / hrs.length) : null,
+    heartRateLatest: hrl && hrl.length ? Math.round(hrl[hrl.length - 1]) : null,
   };
 
-  return <Ctx.Provider value={{ states, metrics, busy, lastSync, connect, disconnect, sync, today }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ states, metrics, busy, lastSync, connect, disconnect, sync, syncAll, today }}>{children}</Ctx.Provider>;
 }
 
 export function useWearables(): Value {

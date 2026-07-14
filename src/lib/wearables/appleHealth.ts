@@ -126,6 +126,7 @@ export const appleHealth: WearableProvider = {
     m.activeKcal = sumValues(active);
     m.steps = steps && typeof steps.value === 'number' ? Math.round(steps.value) : sumValues(steps);
     m.heartRateAvg = avgValues(hr);
+    m.heartRateLatest = lastValue(hr);
     m.heartRateResting = lastValue(rhr);
     if (Array.isArray(workouts) && workouts.length) {
       const mins = workouts.reduce((s: number, w: any) => {
