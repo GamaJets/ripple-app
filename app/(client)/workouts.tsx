@@ -59,6 +59,10 @@ export default function Train() {
   const [showCal, setShowCal] = useState(false);
   const [selCalDay, setSelCalDay] = useState('');
   const [confetti, setConfetti] = useState(false);
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [customEx, setCustomEx] = useState<ProgramExercise[]>([]);
+  const [addOpen, setAddOpen] = useState(false);
+  const [cxName, setCxName] = useState(''); const [cxSets, setCxSets] = useState('3'); const [cxReps, setCxReps] = useState('10');
   const today0 = new Date();
   const monday0 = new Date(today0); monday0.setDate(today0.getDate() - jsToMon); monday0.setHours(0, 0, 0, 0);
   const dateFor = (i: number) => { const d = new Date(monday0); d.setDate(monday0.getDate() + i); return d; };
@@ -115,7 +119,7 @@ export default function Train() {
   const saveManual = () => {
     const nowISO = new Date().toISOString();
     let pr = false;
-    const entries: WorkoutEntry[] = exercises.map((e) => {
+    const entries: WorkoutEntry[] = [...exercises, ...customEx].map((e) => {
       const s = logged[uid(e)] || [];
       if (!s.length) return null;
       const setPairs = s.map((x) => [parseInt(x.reps, 10) || 0, parseFloat(x.kg) || 0] as [number, number]);
@@ -125,7 +129,7 @@ export default function Train() {
     }).filter(Boolean) as WorkoutEntry[];
     if (!entries.length) return;
     addWorkouts(entries);
-    setLogged({});
+    setLogged({}); setCustomEx([]);
     if (pr) setConfetti(true);
     Alert.alert('Workout saved', `${entries.length} exercise${entries.length === 1 ? '' : 's'} logged.${pr ? ' New personal record!' : ''} Your streak and records are updated.`, [{ text: 'Nice' }]);
   };
@@ -223,7 +227,7 @@ export default function Train() {
                 <Pressable onPress={() => cd.setFocusAreas([])} hitSlop={8}><Text style={{ color: t.ink3, fontWeight: '700', fontSize: 12 }}>Clear</Text></Pressable>
               </View>
             ) : null}
-            {orderedExercises.map((e) => {
+            {[...orderedExercises, ...customEx].map((e) => {
               const _id = uid(e);
               if (isInjHidden(e)) {
                 const inj = injuryFlag(e.name, e.group, cd.injuries);
@@ -244,44 +248,51 @@ export default function Train() {
               const sug = suggestForExercise(workoutLog, nameOf(e), e.reps);
               const flag = injuryFlag(nameOf(e), e.group, cd.injuries);
               const autoFrom = injAutoMap[_id];
+              const open = expanded[_id] ?? false;
+              const isCustom = e.key.indexOf('custom-') === 0;
               return (
                 <View key={e.key} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: done ? t.brand : flag ? t.s3 : t.ring, padding: 14, marginBottom: 10 }}>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                    <Pressable onPress={() => setVideoFor(nameOf(e))} accessibilityRole="button" accessibilityLabel={'View ' + nameOf(e) + ' demo'} style={{ flex: 1, paddingRight: 10 }}>
+                  <Pressable accessibilityRole="button" accessibilityLabel={(open ? 'Collapse ' : 'Expand ') + nameOf(e)} onPress={() => setExpanded((p) => ({ ...p, [_id]: !open }))} style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                    <View style={{ flex: 1 }}>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                         {done ? <Icon name="check" size={15} color={t.brand} /> : null}
                         <Text style={{ color: t.ink, fontWeight: '700', fontSize: 14.5, textTransform: 'capitalize' }} numberOfLines={1}>{nameOf(e)}</Text>
                         {cd.focusAreas.includes(e.group) ? <View style={{ backgroundColor: 'rgba(22,184,166,0.16)', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 1 }}><Text style={{ color: t.brand, fontSize: 9, fontWeight: '900' }}>FOCUS</Text></View> : null}
+                        {flag ? <Icon name="heart" size={13} color={t.s3} /> : null}
                       </View>
-                      <Text style={{ color: t.ink3, fontSize: 11.5, marginTop: 2 }}>{e.group} · target {e.sets} × {e.reps}</Text>
+                      <Text style={{ color: t.ink3, fontSize: 11.5, marginTop: 2 }}>{e.group} · {sets.length}/{e.sets} sets{!open && sug ? ' · ' + sug.weight + 'kg' : ''}</Text>
+                    </View>
+                    {isCustom ? <Pressable accessibilityLabel="Remove exercise" onPress={() => { setCustomEx((prev) => prev.filter((x) => x.key !== e.key)); setLogged((prev) => { const n = { ...prev }; delete n[_id]; return n; }); }} hitSlop={8} style={{ padding: 4 }}><Icon name="minus" size={16} color={t.ink3} /></Pressable> : null}
+                    <View style={{ transform: [{ rotate: open ? '90deg' : '0deg' }] }}><Icon name="chevron" size={16} color={t.ink3} /></View>
+                  </Pressable>
+                  {sets.length > 0 ? <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10, alignItems: 'center' }}>{sets.map((s, i) => <View key={i} style={{ backgroundColor: t.surface2, borderRadius: 8, paddingHorizontal: 9, paddingVertical: 5 }}><Text style={{ color: t.ink2, fontSize: 12, fontWeight: '600' }}>{s.reps}×{s.kg || '–'}kg</Text></View>)}<Pressable onPress={() => setLogged((prev) => { const n = { ...prev }; delete n[_id]; return n; })} hitSlop={6} style={{ paddingHorizontal: 4 }}><Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700' }}>clear</Text></Pressable></View> : null}
+                  {open ? (
+                    <View>
                       {autoFrom ? (
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 6, backgroundColor: 'rgba(22,184,166,0.12)', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 5, alignSelf: 'flex-start' }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 8, backgroundColor: 'rgba(22,184,166,0.12)', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 5, alignSelf: 'flex-start' }}>
                           <Icon name="swap" size={12} color={t.brand} /><Text style={{ color: t.brand, fontSize: 11, fontWeight: '800' }}>Auto-swapped from {e.name} to protect you</Text>
                         </View>
                       ) : null}
                       {flag ? (
-                        <Pressable onPress={() => setSwapFor(e)} style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 6, backgroundColor: 'rgba(201,133,0,0.14)', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 5, alignSelf: 'flex-start' }}>
+                        <Pressable onPress={() => setSwapFor(e)} style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 8, backgroundColor: 'rgba(201,133,0,0.14)', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 5, alignSelf: 'flex-start' }}>
                           <Icon name="heart" size={12} color={t.s3} /><Text style={{ color: t.s3, fontSize: 11, fontWeight: '800' }}>{flag.reason} · tap to swap</Text>
                         </Pressable>
                       ) : null}
-                    </Pressable>
-                    <View style={{ flexDirection: 'row', gap: 6 }}>
-                      <Pressable accessibilityLabel="Watch exercise demo" accessibilityRole="button" onPress={() => setVideoFor(nameOf(e))} style={{ width: 30, height: 30, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 8, alignItems: 'center', justifyContent: 'center' }}><Icon name="video" size={15} color={t.ink2} /></Pressable>
-                      <Pressable accessibilityLabel="Swap exercise" accessibilityRole="button" onPress={() => setSwapFor(e)} style={{ width: 30, height: 30, backgroundColor: t.surface2, borderColor: flag ? t.s3 : t.ring, borderWidth: 1, borderRadius: 8, alignItems: 'center', justifyContent: 'center' }}><Icon name="swap" size={15} color={flag ? t.s3 : t.ink2} /></Pressable>
-                    </View>
-                  </View>
-                  {sets.length > 0 && <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>{sets.map((s, i) => <View key={i} style={{ backgroundColor: t.surface2, borderRadius: 8, paddingHorizontal: 9, paddingVertical: 5 }}><Text style={{ color: t.ink2, fontSize: 12, fontWeight: '600' }}>{s.reps}×{s.kg || '–'}kg</Text></View>)}</View>}
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10 }}>
-                    {sug ? (
-                      <View style={{ flex: 1, backgroundColor: t.surface2, borderRadius: 10, paddingVertical: 9, paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', gap: 7, borderWidth: 1, borderColor: t.ring }}>
-                        <Icon name="target" size={14} color={t.brand} />
-                        <Text style={{ color: t.brand, fontWeight: '800', fontSize: 13 }}>{sug.weight} kg</Text>
-                        {sug.up ? <Text style={{ color: t.brand, fontWeight: '800', fontSize: 12 }}>↑</Text> : null}
-                        <Text style={{ color: t.ink3, fontSize: 11, flex: 1 }} numberOfLines={1}>{sug.reason}</Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10 }}>
+                        {sug ? (
+                          <View style={{ flex: 1, backgroundColor: t.surface2, borderRadius: 10, paddingVertical: 9, paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', gap: 7, borderWidth: 1, borderColor: t.ring }}>
+                            <Icon name="target" size={14} color={t.brand} />
+                            <Text style={{ color: t.brand, fontWeight: '800', fontSize: 13 }}>{sug.weight} kg</Text>
+                            {sug.up ? <Text style={{ color: t.brand, fontWeight: '800', fontSize: 12 }}>↑</Text> : null}
+                            <Text style={{ color: t.ink3, fontSize: 11, flex: 1 }} numberOfLines={1}>{sug.reason}</Text>
+                          </View>
+                        ) : <View style={{ flex: 1 }} />}
+                        {!isCustom ? <Pressable accessibilityLabel="Watch exercise demo" accessibilityRole="button" onPress={() => setVideoFor(nameOf(e))} style={{ width: 38, height: 38, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 8, alignItems: 'center', justifyContent: 'center' }}><Icon name="video" size={15} color={t.ink2} /></Pressable> : null}
+                        {!isCustom ? <Pressable accessibilityLabel="Swap exercise" accessibilityRole="button" onPress={() => setSwapFor(e)} style={{ width: 38, height: 38, backgroundColor: t.surface2, borderColor: flag ? t.s3 : t.ring, borderWidth: 1, borderRadius: 8, alignItems: 'center', justifyContent: 'center' }}><Icon name="swap" size={15} color={flag ? t.s3 : t.ink2} /></Pressable> : null}
                       </View>
-                    ) : <View style={{ flex: 1 }} />}
-                    <Pressable onPress={() => quickLog(e)} style={{ backgroundColor: t.brand, borderRadius: 10, paddingVertical: 10, paddingHorizontal: 16 }}><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 13 }}>Log set</Text></Pressable>
-                  </View>
+                      <LogRow t={t} onLog={(reps, kg) => logSet(e, reps, kg)} />
+                    </View>
+                  ) : null}
                 </View>
               );
             })}
@@ -291,6 +302,11 @@ export default function Train() {
                 <Text style={{ color: t.ink, fontWeight: '800', fontSize: 16, marginTop: 8 }}>Rest day</Text>
                 <Text style={{ color: t.ink3, fontSize: 13, textAlign: 'center', marginTop: 4, lineHeight: 19 }}>Nothing scheduled today — recovery is where the gains happen. Pick another day above to train, or switch to Cardio to log a session.</Text>
               </View>
+            ) : null}
+            {exercises.length > 0 || customEx.length > 0 ? (
+              <Pressable onPress={() => { setCxName(''); setCxSets('3'); setCxReps('10'); setAddOpen(true); }} style={{ borderWidth: 1, borderColor: t.ring, borderStyle: 'dashed', borderRadius: 14, paddingVertical: 13, alignItems: 'center', marginTop: 2, marginBottom: 10, flexDirection: 'row', justifyContent: 'center', gap: 8 }}>
+                <Icon name="plus" size={16} color={t.brand} /><Text style={{ color: t.ink2, fontWeight: '800', fontSize: 14 }}>Add an exercise you did</Text>
+              </Pressable>
             ) : null}
             {Object.values(logged).some((a) => a.length > 0) ? (
               <Pressable onPress={saveManual} style={{ backgroundColor: t.brand, borderRadius: 14, paddingVertical: 15, alignItems: 'center', marginTop: 4, flexDirection: 'row', justifyContent: 'center', gap: 8 }}>
@@ -438,6 +454,23 @@ export default function Train() {
 
       <Modal visible={session} animationType="slide" onRequestClose={() => setSession(false)}>
         <SessionRunner t={t} exercises={orderedExercises.filter((e) => !isInjHidden(e))} focus={workout.focus} nameOf={nameOf} age={ageFromDob(cd.dob)} log={workoutLog} injuries={cd.injuries} onComplete={addWorkouts} onClose={() => setSession(false)} />
+      </Modal>
+
+      <Modal visible={addOpen} transparent animationType="slide" onRequestClose={() => setAddOpen(false)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setAddOpen(false)} />
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, borderColor: t.ring, padding: 20 }}>
+          <Text style={{ color: t.ink, fontSize: 18, fontWeight: '800', marginBottom: 4 }}>Add an exercise</Text>
+          <Text style={{ color: t.ink3, fontSize: 12.5, marginBottom: 14 }}>Log something you did that isn't in today's plan.</Text>
+          <TextInput value={cxName} onChangeText={setCxName} placeholder="Exercise name (e.g. Cable fly)" placeholderTextColor={t.ink3} style={{ color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, marginBottom: 10 }} />
+          <View style={{ flexDirection: 'row', gap: 10, marginBottom: 16 }}>
+            <View style={{ flex: 1 }}><Text style={{ color: t.ink3, fontSize: 11, marginBottom: 4 }}>Target sets</Text><TextInput value={cxSets} onChangeText={setCxSets} keyboardType="numeric" placeholderTextColor={t.ink3} style={{ color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 11, fontSize: 15 }} /></View>
+            <View style={{ flex: 1 }}><Text style={{ color: t.ink3, fontSize: 11, marginBottom: 4 }}>Target reps</Text><TextInput value={cxReps} onChangeText={setCxReps} keyboardType="numeric" placeholderTextColor={t.ink3} style={{ color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 11, fontSize: 15 }} /></View>
+          </View>
+          <Pressable disabled={!cxName.trim()} onPress={() => { const key = 'custom-' + Date.now(); const ne = { key, name: cxName.trim(), group: 'Added', sets: parseInt(cxSets, 10) || 3, reps: String(parseInt(cxReps, 10) || 10), alternatives: [] } as ProgramExercise; setCustomEx((p) => [...p, ne]); setExpanded((p) => ({ ...p, [dayIdx + ':' + key]: true })); setAddOpen(false); tapLight(); }} style={{ backgroundColor: cxName.trim() ? t.brand : t.surface2, borderWidth: 1, borderColor: cxName.trim() ? t.brand : t.ring, borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginBottom: 8 }}>
+            <Text style={{ color: cxName.trim() ? t.brandInk : t.ink3, fontWeight: '800', fontSize: 15 }}>Add to today</Text>
+          </Pressable>
+          <Pressable onPress={() => setAddOpen(false)} style={{ paddingVertical: 10, alignItems: 'center' }}><Text style={{ color: t.ink3, fontWeight: '700', fontSize: 13 }}>Cancel</Text></Pressable>
+        </View>
       </Modal>
       <Confetti show={confetti} onDone={() => setConfetti(false)} />
     </SafeAreaView>
