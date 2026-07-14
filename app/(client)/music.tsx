@@ -62,9 +62,9 @@ export default function Music() {
  const anyConnected = conn.apple || conn.spotify;
  const openInSpotify = (q: string) => { Linking.openURL('https://open.spotify.com/search/' + encodeURIComponent(q)).catch(() => Alert.alert('Open Spotify', 'Install the Spotify app, then search "' + q + '".')); };
 
- const generate = (nextSalt = salt) => {
+ const generate = (nextSalt = salt, nextIntensity = intensity) => {
  setSalt(nextSalt);
- setPl(generatePlaylist({ mode, intensity, minutes }, nextSalt));
+ setPl(generatePlaylist({ mode, intensity: nextIntensity, minutes }, nextSalt));
  };
 
  const push = async () => {
@@ -142,7 +142,7 @@ export default function Music() {
  <Pressable onPress={push} style={{ flex: 1, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingVertical: 13, alignItems: 'center' }}>
  <Text style={{ color: t.ink, fontWeight: '700', fontSize: 14 }}> Save To Account</Text>
  </Pressable>
- <Pressable onPress={() => { setIntensity((v) => (v < 3 ? ((v + 1) as 1 | 2 | 3) : v)); generate(salt + 1); }} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingVertical: 13, paddingHorizontal: 16, alignItems: 'center' }}>
+ <Pressable onPress={() => { const ni = (intensity < 3 ? intensity + 1 : intensity) as 1 | 2 | 3; setIntensity(ni); generate(salt + 1, ni); }} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingVertical: 13, paddingHorizontal: 16, alignItems: 'center' }}>
  <Text style={{ color: t.ink, fontWeight: '700', fontSize: 14 }}>Harder </Text>
  </Pressable>
  </View>

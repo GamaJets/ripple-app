@@ -14,9 +14,8 @@ export function BrandProvider({ children }: { children: ReactNode }) {
     try { const n = await AsyncStorage.getItem('repple.appName'); if (n) setAppNameState(n); } catch {}
   })(); }, []);
   const setAppName = (n: string) => {
-    const v = n.trim() || 'Repple';
-    setAppNameState(v);
-    AsyncStorage.setItem('repple.appName', v).catch(() => {});
+    setAppNameState(n);
+    AsyncStorage.setItem('repple.appName', n.trim() || 'Repple').catch(() => {});
   };
   return <Ctx.Provider value={{ appName, setAppName }}>{children}</Ctx.Provider>;
 }

@@ -40,8 +40,8 @@ export default function Social() {
  <View style={{ backgroundColor: t.brand, borderRadius: 20, padding: 20, marginBottom: 18 }}>
  <Text style={{ color: t.brandInk, fontSize: 13, fontWeight: '700', opacity: 0.85 }}>MY PROGRESS · REPPLE</Text>
  <View style={{ flexDirection: 'row', gap: 24, marginTop: 14 }}>
- <View><Text style={{ color: t.brandInk, fontSize: 30, fontWeight: '900' }}>-{wtDrop}<Text style={{ fontSize: 15 }}> kg</Text></Text><Text style={{ color: t.brandInk, opacity: 0.8, fontSize: 12, marginTop: 2 }}>Weight</Text></View>
- <View><Text style={{ color: t.brandInk, fontSize: 30, fontWeight: '900' }}>-{bfDrop}<Text style={{ fontSize: 15 }}> %</Text></Text><Text style={{ color: t.brandInk, opacity: 0.8, fontSize: 12, marginTop: 2 }}>Body fat</Text></View>
+ <View><Text style={{ color: t.brandInk, fontSize: 30, fontWeight: '900' }}>{wtDrop >= 0 ? '−' : '+'}{Math.abs(wtDrop)}<Text style={{ fontSize: 15 }}> kg</Text></Text><Text style={{ color: t.brandInk, opacity: 0.8, fontSize: 12, marginTop: 2 }}>Weight</Text></View>
+ <View><Text style={{ color: t.brandInk, fontSize: 30, fontWeight: '900' }}>{bfDrop >= 0 ? '−' : '+'}{Math.abs(bfDrop)}<Text style={{ fontSize: 15 }}> %</Text></Text><Text style={{ color: t.brandInk, opacity: 0.8, fontSize: 12, marginTop: 2 }}>Body fat</Text></View>
  </View>
  <Text style={{ color: t.brandInk, opacity: 0.8, fontSize: 12, marginTop: 14 }}>Every rep ripples out. </Text>
  </View>

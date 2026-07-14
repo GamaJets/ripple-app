@@ -39,7 +39,7 @@ export default function OwnerGrowth() {
 
         <View style={{ flexDirection: 'row', gap: 12, marginBottom: 16 }}>
           <View style={{ flex: 1, backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 14 }}><Text style={{ color: t.ink3, fontSize: 12, fontWeight: '700' }}>New this month</Text><Text style={{ color: t.ink, fontSize: 22, fontWeight: '800', marginTop: 4 }}>+{newThisMonth}</Text></View>
-          <View style={{ flex: 1, backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 14 }}><Text style={{ color: t.ink3, fontSize: 12, fontWeight: '700' }}>Churn</Text><Text style={{ color: churnPct > 0 ? t.crit : t.brand, fontSize: 22, fontWeight: '800', marginTop: 4 }}>{churnPct}%</Text></View>
+          <View style={{ flex: 1, backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 14 }}><Text style={{ color: t.ink3, fontSize: 12, fontWeight: '700' }}>Suspended</Text><Text style={{ color: churnPct > 0 ? t.crit : t.brand, fontSize: 22, fontWeight: '800', marginTop: 4 }}>{churnPct}%</Text></View>
           <View style={{ flex: 1, backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 14 }}><Text style={{ color: t.ink3, fontSize: 12, fontWeight: '700' }}>Trial→paid</Text><Text style={{ color: t.ink, fontSize: 22, fontWeight: '800', marginTop: 4 }}>{roll.trialConversionPct != null ? roll.trialConversionPct + '%' : '—'}</Text></View>
         </View>
 
