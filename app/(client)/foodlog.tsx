@@ -8,13 +8,15 @@ import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
-import { macrosFor } from '../../src/lib/nutrition';
+import { macrosFor, applyCoachAdjust } from '../../src/lib/nutrition';
 import { useClientData } from '../../src/ui/clientData';
 import { Icon } from '../../src/ui/Icon';
 import { analyzeMeal, visionAvailable } from '../../src/lib/vision';
 import { parseFoodText, foodAIAvailable } from '../../src/lib/foodAI';
 import { notifySuccess } from '../../src/ui/haptics';
 import { useFoodLog } from '../../src/ui/foodLog';
+import { useCoachNutrition } from '../../src/ui/coachNutrition';
+import { useWearables } from '../../src/ui/wearables';
 
 type Food = { n: string; k: number; p: number; c: number; f: number };
 type Logged = Food & { via: string };
@@ -36,7 +38,8 @@ export default function FoodLog() {
  const t = useTheme();
  const router = useRouter();
  const cd = useClientData();
- const target = macrosFor({ weightKg: cd.weightKg, bodyFatPct: cd.bodyFatPct, activity: cd.activity, goal: cd.goal, diet: cd.diet });
+ const _adj = useCoachNutrition().get(cd.id);
+ const target = applyCoachAdjust(macrosFor({ weightKg: cd.weightKg, bodyFatPct: cd.bodyFatPct, activity: cd.activity, goal: cd.goal, diet: cd.diet }), cd.coachingMode === 'solo' ? undefined : (_adj || undefined));
 
  const fl = useFoodLog();
  const [q, setQ] = useState('');
@@ -61,7 +64,8 @@ export default function FoodLog() {
  // removal handled via fl.removeFood(id) in the list below
 
  const tot = { k: fl.consumed.kcal, p: fl.consumed.protein, c: fl.consumed.carbs, f: fl.consumed.fat };
- const remK = target.kcal - tot.k;
+ const burned = useWearables().today.activeKcal || 0;
+ const remK = (target.kcal + burned) - tot.k;
 
  const fillEst = (n: string, k: number, p: number, c: number, f: number) => { setEstN(n); setEstK(String(k)); setEstP(String(p)); setEstC(String(c)); setEstF(String(f)); setReading(false); };
  const takeMealPhoto = async (fromCamera: boolean) => {

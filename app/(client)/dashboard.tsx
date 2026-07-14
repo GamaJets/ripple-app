@@ -99,7 +99,7 @@ export default function Home() {
   const prs = personalRecords(log);
   const goalDays = program.days.length || 4;
 
-  const macros = applyCoachAdjust(macrosFor({ weightKg: c.weightKg, bodyFatPct: c.bodyFatPct, activity: c.activity, goal: c.goal, diet: c.diet }), nutriAdjust || undefined);
+  const macros = applyCoachAdjust(macrosFor({ weightKg: c.weightKg, bodyFatPct: c.bodyFatPct, activity: c.activity, goal: c.goal, diet: c.diet }), solo ? undefined : (nutriAdjust || undefined));
   // Real logged intake (shared with the Meals tab + Food Log); reflects what was actually eaten today.
   const consumed = { kcal: foodToday.kcal, p: foodToday.protein, cbs: foodToday.carbs, f: foodToday.fat };
   const _todayKey = new Date().toISOString().slice(0, 10);

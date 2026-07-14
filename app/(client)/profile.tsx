@@ -9,8 +9,9 @@ import * as ImagePicker from 'expo-image-picker';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { ageFromDob } from '../../src/lib/age';
-import { macrosFor } from '../../src/lib/nutrition';
+import { macrosFor, applyCoachAdjust } from '../../src/lib/nutrition';
 import { useClientData, type CoachingMode } from '../../src/ui/clientData';
+import { useCoachNutrition } from '../../src/ui/coachNutrition';
 import { Icon, type IconName } from '../../src/ui/Icon';
 import type { Goal, Diet } from '../../src/lib/types';
 
@@ -221,7 +222,10 @@ export default function Profile() {
   };
 
   const age = ageFromDob(cd.dob);
-  const macros = macrosFor({ weightKg, bodyFatPct: cd.bodyFatPct, activity: cd.activity, goal: cd.goal, diet: cd.diet });
+  const _adj = useCoachNutrition().get(cd.id);
+  const macros = applyCoachAdjust(macrosFor({ weightKg: cd.weightKg, bodyFatPct: cd.bodyFatPct, activity: cd.activity, goal: cd.goal, diet: cd.diet }), cd.coachingMode === 'solo' ? undefined : (_adj || undefined));
+  const _bfPrev = parseFloat(bfVal);
+  const previewMacros = macrosFor({ weightKg, bodyFatPct: isNaN(_bfPrev) ? cd.bodyFatPct : _bfPrev, activity: cd.activity, goal: cd.goal, diet: cd.diet });
 
   const dobLabel = (() => {
     const dd = new Date(cd.dob);
@@ -378,7 +382,7 @@ export default function Profile() {
             </ScrollView>
 
             <View style={{ backgroundColor: t.surface2, borderRadius: 12, borderWidth: 1, borderColor: t.ring, padding: 13, marginBottom: 16 }}>
-              <Text style={{ color: t.ink3, fontSize: 12 }}>New target · <Text style={{ color: t.ink, fontWeight: '700' }}>{macros.kcal.toLocaleString()} kcal</Text> · P{macros.protein} / C{macros.carbs} / F{macros.fat}</Text>
+              <Text style={{ color: t.ink3, fontSize: 12 }}>New target · <Text style={{ color: t.ink, fontWeight: '700' }}>{previewMacros.kcal.toLocaleString()} kcal</Text> · P{previewMacros.protein} / C{previewMacros.carbs} / F{previewMacros.fat}</Text>
             </View>
 
             <Pressable style={{ backgroundColor: saved ? t.surface2 : t.brand, borderWidth: 1, borderColor: saved ? t.ring : t.brand, borderRadius: 12, paddingVertical: 14, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8 }} onPress={save}>

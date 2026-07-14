@@ -107,7 +107,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const sorted = useMemo(() => [...scans].sort((a, b) => Date.parse(a.takenAt) - Date.parse(b.takenAt)), [scans]);
-  const latest = sorted[sorted.length - 1];
+  const latest = sorted[sorted.length - 1] ?? { id: 'none', takenAt: new Date(0).toISOString(), weightKg: manualWeight ?? 70, bodyFatPct: manualBodyFat ?? 20, skeletalMuscleKg: 0, source: '' };
   // Single source of truth: the most RECENT of {manual edit, latest scan} wins.
   const manualIsCurrent = manualAt != null && Date.parse(manualAt) >= Date.parse(latest.takenAt);
   const weightKg = (manualWeight != null && manualIsCurrent) ? manualWeight : latest.weightKg;
