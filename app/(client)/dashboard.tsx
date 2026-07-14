@@ -140,12 +140,12 @@ export default function Home() {
     </View>
   );
 
-  const stat = (label: string, val: string, delta: string, good: boolean) => (
-    <View style={{ flex: 1, backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 13 }}>
+  const stat = (label: string, val: string, delta: string, good: boolean, route?: string) => (
+    <Pressable disabled={!route} onPress={() => route && router.push(route as any)} style={{ flex: 1, backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 13 }}>
       <Text style={{ color: t.ink3, fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.6 }}>{label}</Text>
       <Text style={{ color: t.ink, fontSize: 20, fontWeight: '800', marginTop: 3 }}>{val}</Text>
       {delta ? <Text style={{ color: good ? t.brand : t.ink3, fontSize: 11, fontWeight: '700' }}>{delta}</Text> : null}
-    </View>
+    </Pressable>
   );
 
   const qa = (name: IconName, label: string, route: string) => (
@@ -194,11 +194,11 @@ export default function Home() {
           <Text style={{ color: t.ink, fontSize: 20, fontWeight: '800' }}>{today.headline}</Text>
           <Text style={{ color: t.ink3, fontSize: 13, marginTop: 3, lineHeight: 18 }}>{today.tip}</Text>
           <View style={{ flexDirection: 'row', gap: 8, marginTop: 12, marginBottom: 12 }}>
-            {[['Train', (wk.workouts) + '/' + goalDays], ['Kcal left', kcalLeft.toLocaleString()], ['Readiness', String(readiness.score)]].map(([l, v]) => (
-              <View key={l as string} style={{ flex: 1, backgroundColor: t.surface2, borderRadius: 11, borderWidth: 1, borderColor: t.ring, paddingVertical: 9, alignItems: 'center' }}>
-                <Text style={{ color: t.ink, fontWeight: '800', fontSize: 15 }}>{v as string}</Text>
-                <Text style={{ color: t.ink3, fontSize: 10, marginTop: 1 }}>{l as string}</Text>
-              </View>
+            {([['Train', (wk.workouts) + '/' + goalDays, '/(client)/workouts'], ['Kcal left', kcalLeft.toLocaleString(), '/(client)/nutrition'], ['Readiness', String(readiness.score), '/(client)/recovery']] as const).map(([l, v, r]) => (
+              <Pressable key={l} onPress={() => router.push(r as any)} style={{ flex: 1, backgroundColor: t.surface2, borderRadius: 11, borderWidth: 1, borderColor: t.ring, paddingVertical: 9, alignItems: 'center' }}>
+                <Text style={{ color: t.ink, fontWeight: '800', fontSize: 15 }}>{v}</Text>
+                <Text style={{ color: t.ink3, fontSize: 10, marginTop: 1 }}>{l}</Text>
+              </Pressable>
             ))}
           </View>
           <Pressable onPress={() => router.push(today.route as any)} style={{ backgroundColor: today.tone, borderRadius: 12, paddingVertical: 13, alignItems: 'center' }}>
@@ -274,20 +274,20 @@ export default function Home() {
 
         {/* body stats */}
         <View style={{ flexDirection: 'row', gap: 9, marginBottom: 11 }}>
-          {stat('Weight', `${c.weightKg}`, wDelta !== 0 ? `${wDelta < 0 ? '▼' : '▲'} ${Math.abs(wDelta)} kg` : '—', wDelta <= 0)}
-          {stat('Body fat', `${c.bodyFatPct}%`, bfD !== 0 ? `${bfD < 0 ? '▼' : '▲'} ${Math.abs(bfD)}` : '—', bfD <= 0)}
-          {stat('Muscle', `${c.muscleKg}`, muD !== 0 ? `${muD < 0 ? '▼' : '▲'} ${Math.abs(muD)}` : '—', muD >= 0)}
+          {stat('Weight', `${c.weightKg}`, wDelta !== 0 ? `${wDelta < 0 ? '▼' : '▲'} ${Math.abs(wDelta)} kg` : '—', wDelta <= 0, '/(client)/measurements')}
+          {stat('Body fat', `${c.bodyFatPct}%`, bfD !== 0 ? `${bfD < 0 ? '▼' : '▲'} ${Math.abs(bfD)}` : '—', bfD <= 0, '/(client)/measurements')}
+          {stat('Muscle', `${c.muscleKg}`, muD !== 0 ? `${muD < 0 ? '▼' : '▲'} ${Math.abs(muD)}` : '—', muD >= 0, '/(client)/measurements')}
         </View>
 
         {/* weight trend */}
         {ws.length > 1 ? (
-          <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 14, marginBottom: 11 }}>
+          <Pressable onPress={() => router.push('/(client)/measurements')} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 14, marginBottom: 11 }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
               <Text style={{ color: t.ink3, fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.6 }}>Weight · {ws.length} check-ins</Text>
               <Text style={{ color: t.brand, fontSize: 11, fontWeight: '700' }}>{wDelta > 0 ? '+' : ''}{wDelta} kg</Text>
             </View>
             <Spark t={t} data={ws} />
-          </View>
+          </Pressable>
         ) : null}
 
         {/* nutrition */}
