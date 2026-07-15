@@ -13,6 +13,7 @@ import { useCheckIns } from '../../src/ui/checkins';
 import { currentStreak, weekStats, personalRecords, streakMilestone } from '../../src/lib/streaks';
 import { useState, useEffect } from 'react';
 import { askCoach, coachAvailable } from '../../src/lib/coach';
+import { compositionInsights } from '../../src/lib/inbodyMetrics';
 
 function Metric({ t, label, value, delta, deltaGood }: { t: Theme; label: string; value: string; delta?: string; deltaGood?: boolean }) {
  return (
@@ -48,6 +49,7 @@ export default function WeeklyReport() {
  const weekStart = new Date(today); weekStart.setDate(today.getDate() - 6);
  const range = `${weekStart.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – ${today.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
 
+ const comp = compositionInsights(c.scans);
  const factLines = [
  `Trained ${wk.workouts} time(s) across ${wk.days} active day(s).`,
  `Volume ${(wk.volumeKg / 1000).toFixed(1)} tonnes, ~${wk.kcal} kcal.`,
@@ -55,6 +57,9 @@ export default function WeeklyReport() {
  `Weight ${c.weightKg} kg (${wDelta > 0 ? '+' : ''}${wDelta} kg overall), body fat ${c.bodyFatPct}%, muscle ${c.muscleKg} kg.`,
  waistD != null ? `Waist ${mLatest.waist} cm (${waistD > 0 ? '+' : ''}${waistD} cm).` : '',
  checkIn ? `Check-in energy ${checkIn.energy}/5, sleep ${checkIn.sleep}/5, mood ${checkIn.mood}/5, adherence ${checkIn.adherence}/5.` : '',
+ comp.improving.length ? `Body composition improving: ${comp.improving.join(', ')}.` : '',
+ comp.watch.length ? `Body composition to watch: ${comp.watch.join(', ')}.` : '',
+ comp.balance.length ? comp.balance.join(' ') : '',
  ].filter(Boolean);
  const fallbackNarrative = (() => {
  const bits: string[] = [];
@@ -62,6 +67,8 @@ export default function WeeklyReport() {
  else bits.push('No logged workouts this week — a fresh chance to get one on the board.');
  if (streak > 0) bits.push(`Your streak is at ${streak} day${streak === 1 ? '' : 's'} — keep it alive.`);
  if (wDelta !== 0) bits.push(`Weight is ${wDelta > 0 ? 'up' : 'down'} ${Math.abs(wDelta)} kg overall${wDelta <= 0 ? ', trending your way' : ''}.`);
+ if (comp.improving.length) bits.push(`On composition, ${comp.improving.slice(0, 2).join(' and ')} moved the right way.`);
+ else if (comp.watch.length) bits.push(`Keep an eye on ${comp.watch.slice(0, 2).join(' and ')} from your latest scan.`);
  if (checkIn && checkIn.adherence <= 3) bits.push(`Your last check-in put adherence at ${checkIn.adherence}/5 — worth refocusing next week.`);
  return bits.join(' ');
  })();
