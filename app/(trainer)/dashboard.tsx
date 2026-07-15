@@ -157,8 +157,10 @@ export default function TrainerClients() {
   };
   const genSummary = async (client: RosterClient) => {
     setAiBusy(true); setAiSummary('');
-    const ctx = { name: client.name, goal: client.goal, adherence: client.adherence + '%', recentMeals: clientMeals.map((mm) => mm.name).join(', ') || 'no meals logged yet' };
-    const reply = await askCoach([{ role: 'user', content: 'Write a concise 3-4 sentence weekly coaching summary for this client: what is going well, one concern to watch, and one focus for next week. Use their adherence and recent meals.' }], ctx);
+    const m = client.metrics;
+    const compStr = m ? [m.visceralFat != null ? 'visceral fat ' + m.visceralFat : '', m.inbodyScore != null ? 'InBody score ' + m.inbodyScore : '', m.leanMassKg != null ? 'lean mass ' + m.leanMassKg + 'kg' : '', m.fatMassKg != null ? 'fat mass ' + m.fatMassKg + 'kg' : '', (m.leanArmLKg != null && m.leanArmRKg != null && Math.abs(m.leanArmLKg - m.leanArmRKg) / Math.max(m.leanArmLKg, m.leanArmRKg) >= 0.1) ? 'arm imbalance' : '', (m.leanLegLKg != null && m.leanLegRKg != null && Math.abs(m.leanLegLKg - m.leanLegRKg) / Math.max(m.leanLegLKg, m.leanLegRKg) >= 0.1) ? 'leg imbalance' : ''].filter(Boolean).join(', ') : '';
+    const ctx = { name: client.name, goal: client.goal, adherence: client.adherence + '%', recentMeals: clientMeals.map((mm) => mm.name).join(', ') || 'no meals logged yet', composition: compStr || 'no InBody scan yet' };
+    const reply = await askCoach([{ role: 'user', content: 'Write a concise 3-4 sentence weekly coaching summary for this client: what is going well, one concern to watch, and one focus for next week. Use their adherence, recent meals and InBody composition where available.' }], ctx);
     setAiBusy(false);
     setAiSummary(reply || 'Could not generate a summary right now — the AI backend may be unavailable.');
   };
