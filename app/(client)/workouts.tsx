@@ -71,6 +71,10 @@ export default function Train() {
   const workedDates = new Set(workoutLog.map((l) => dstr(new Date(l.t))));
   Object.keys(logged).forEach((k) => { if ((logged[k] || []).length) workedDates.add(dstr(dateFor(parseInt(k.split(':')[0], 10)))); });
   if (cardioLog.length) workedDates.add(dstr(today0));
+  // Today's cardio, read from the saved log so it persists across navigation (not just this mount).
+  const todayCardio = workoutLog
+    .filter((l) => l.cardio && dstr(new Date(l.t)) === dstr(today0))
+    .map((l) => ({ type: l.exercise, mins: l.cardio!.mins, dist: l.cardio!.dist, unit: l.cardio!.unit, kcal: l.kcal ?? 0 }));
   const calMonth = monday0.getMonth(), calYear = monday0.getFullYear();
   const firstDow = (new Date(calYear, calMonth, 1).getDay() + 6) % 7;
   const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
@@ -330,11 +334,11 @@ export default function Train() {
                 <Pressable onPress={logCardio} style={{ backgroundColor: t.brand, borderRadius: 9, paddingHorizontal: 16, justifyContent: 'center' }}><Text style={{ color: t.brandInk, fontWeight: '800' }}>Log</Text></Pressable>
               </View>
             </View>
-            {cardioLog.length > 0 && (
+            {todayCardio.length > 0 && (
               <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 16 }}>
                 <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, marginBottom: 10 }}>Today's sessions</Text>
-                {cardioLog.map((c, i) => (
-                  <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: i < cardioLog.length - 1 ? 1 : 0, borderBottomColor: t.ring }}>
+                {todayCardio.map((c, i) => (
+                  <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: i < todayCardio.length - 1 ? 1 : 0, borderBottomColor: t.ring }}>
                     <Text style={{ color: t.ink, fontWeight: '600', fontSize: 14 }}>{c.type}</Text>
                     <Text style={{ color: t.ink3, fontSize: 13 }}>{c.mins} min · {c.dist} {c.unit} · {c.kcal} kcal</Text>
                   </View>
