@@ -17,6 +17,7 @@ import { askCoach } from '../../src/lib/coach';
 import { useRoster } from '../../src/ui/roster';
 import { useCoachFeedback } from '../../src/ui/feedback';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
+import { slotsFor, searchMeals, mealAt, type Slot } from '../../src/lib/meals';
 import { useCoachNotes } from '../../src/ui/coachNotes';
 import { useAnnouncements } from '../../src/ui/announcements';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
@@ -51,6 +52,8 @@ export default function TrainerClients() {
   const { sessionFee } = useCoachProfile();
   const { getFeedback, addFeedback } = useCoachFeedback();
   const { get: getNutri, setAdjust: setNutri, clear: clearNutri } = useCoachNutrition();
+  const [mealPick, setMealPick] = useState<{ pos: number; slot: Slot } | null>(null);
+  const [mealQuery, setMealQuery] = useState('');
   const { getNotes, addNote, removeNote } = useCoachNotes();
   const { addAnnouncement } = useAnnouncements();
   const { sent: sentInvites, sendInvite, revokeInvite } = useInvites();
@@ -564,6 +567,24 @@ export default function TrainerClients() {
                       <Text style={{ color: on ? t.brandInk : t.ink2, fontWeight: '800', fontSize: 12 }}>{v > 0 ? '+' + v : v}</Text>
                     </Pressable>); })}
                 </View>
+                <Text style={{ color: t.ink2, fontSize: 12, fontWeight: '700', marginBottom: 6, marginTop: 4 }}>Set specific meals</Text>
+                {slotsFor(sel.mealsPerDay || 3).map((slot, pos) => {
+                  const ovIdx = getNutri(sel.id)?.mealOverride?.[pos];
+                  const dietForPick = (sel.diet || 'meat') as any;
+                  const picked = ovIdx != null ? mealAt(dietForPick, slot, ovIdx) : null;
+                  return (
+                    <View key={pos} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: t.ring }}>
+                      <View style={{ flex: 1, marginRight: 8 }}>
+                        <Text style={{ color: t.ink3, fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.4 }}>{slot}</Text>
+                        <Text style={{ color: picked ? t.ink : t.ink3, fontSize: 13, fontWeight: picked ? '700' : '400' }} numberOfLines={1}>{picked ? picked.n : 'Auto (client picks)'}</Text>
+                      </View>
+                      <View style={{ flexDirection: 'row', gap: 6 }}>
+                        {picked ? <Pressable onPress={() => setNutri(sel.id, { mealOverride: (() => { const mm = { ...(getNutri(sel.id)?.mealOverride ?? {}) }; delete mm[pos]; return mm; })() })} style={{ paddingHorizontal: 10, paddingVertical: 7, borderRadius: 9, backgroundColor: t.surface2, borderWidth: 1, borderColor: t.ring }}><Text style={{ color: t.ink3, fontWeight: '700', fontSize: 12 }}>Clear</Text></Pressable> : null}
+                        <Pressable onPress={() => { setMealQuery(''); setMealPick({ pos, slot }); }} style={{ paddingHorizontal: 12, paddingVertical: 7, borderRadius: 9, backgroundColor: t.brand }}><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 12 }}>{picked ? 'Change' : 'Choose'}</Text></Pressable>
+                      </View>
+                    </View>
+                  );
+                })}
                 <View style={{ flexDirection: 'row', gap: 8 }}>
                   <TextInput value={nnote} onChangeText={setNnote} placeholder="Note on the plan (optional)…" placeholderTextColor={t.ink3} style={{ flex: 1, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14 }} />
                   <Pressable onPress={() => { setNutri(sel.id, { note: nnote.trim() }); }} style={{ backgroundColor: t.brand, borderRadius: 12, paddingHorizontal: 16, justifyContent: 'center' }}><Text style={{ color: t.brandInk, fontWeight: '800' }}>Save</Text></Pressable>
@@ -715,6 +736,31 @@ export default function TrainerClients() {
           </View>
         </View>
               </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Coach meal picker */}
+      <Modal visible={!!mealPick} transparent animationType="slide" onRequestClose={() => setMealPick(null)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setMealPick(null)} />
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, borderColor: t.ring, padding: 20, paddingBottom: 30, maxHeight: '80%' }}>
+          {mealPick && sel ? (
+            <>
+              <Text style={{ color: t.ink, fontSize: 20, fontWeight: '800', textTransform: 'capitalize' }}>Pick a {mealPick.slot.toLowerCase()}</Text>
+              <Text style={{ color: t.ink3, fontSize: 13, marginTop: 2, marginBottom: 12 }}>For {sel.name.split(' ')[0]} · {sel.diet || 'meat'} plan · tap to assign</Text>
+              <TextInput value={mealQuery} onChangeText={setMealQuery} placeholder="Search meals…" placeholderTextColor={t.ink3} style={{ color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, marginBottom: 12 }} />
+              <ScrollView showsVerticalScrollIndicator={false}>
+                {searchMeals((sel.diet || 'meat') as any, mealPick.slot, mealQuery, 40).map((m) => (
+                  <Pressable key={m.idx} onPress={() => { setNutri(sel.id, { mealOverride: { ...(getNutri(sel.id)?.mealOverride ?? {}), [mealPick.pos]: m.idx } }); setMealPick(null); }} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: t.ring }}>
+                    <View style={{ flex: 1, marginRight: 10 }}>
+                      <Text style={{ color: t.ink, fontSize: 14, fontWeight: '600' }} numberOfLines={1}>{m.n}</Text>
+                      <Text style={{ color: t.ink3, fontSize: 12, marginTop: 1 }}>{m.k} kcal · P{m.p} / C{m.c} / F{m.f}</Text>
+                    </View>
+                    <Icon name="chevron" size={16} color={t.ink3} />
+                  </Pressable>
+                ))}
+              </ScrollView>
+            </>
+          ) : null}
+        </View>
       </Modal>
 
       {/* AI check-in draft review */}
