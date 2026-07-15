@@ -12,6 +12,16 @@ try { Device = require('expo-device'); } catch { /* optional */ }
 
 export const pushAvailable = () => !!Notifications;
 
+/** Fire a remote push to specific users via the send-push edge function.
+ *  Best-effort and safe to call today: no tokens / undeployed function → silent
+ *  no-op. Recipients receive it once they're on a push-enabled build. */
+export async function sendPush(userIds: string[], title: string, body: string, data?: Record<string, unknown>): Promise<void> {
+  if (!USE_SUPABASE) return;
+  const ids = (userIds || []).filter(Boolean);
+  if (!ids.length) return;
+  try { supabase.functions.invoke('send-push', { body: { user_ids: ids, title, body, data: data || {} } }).then(() => {}, () => {}); } catch { /* best-effort */ }
+}
+
 if (Notifications?.setNotificationHandler) {
   try {
     Notifications.setNotificationHandler({

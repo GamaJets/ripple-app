@@ -17,6 +17,7 @@ import { useAvailability, upcomingDates } from '../../src/ui/availability';
 import { useRoster } from '../../src/ui/roster';
 import type { TrainingSession } from '../../src/lib/types';
 import { buildIcs, shareIcs } from '../../src/lib/exportShare';
+import { sendPush } from '../../src/ui/pushNotifications';
 
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MON = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -105,6 +106,7 @@ export default function TrainerSchedule() {
     }
     setAddOpen(false);
     if (addClient) {
+      sendPush([addClient], 'Session booked', `Your session on ${DOW[selDate.getDay()]} at ${timeLabel(s.startsAt)} is confirmed.`, { route: '/(client)/calendar' });
       Alert.alert('Session booked', `${timeLabel(s.startsAt)} with ${nameOf(addClient)} confirmed.\n\nA confirmation push has been sent to both your app and ${nameOf(addClient)}'s client app.`, [{ text: 'Great' }]);
     }
   }
@@ -113,6 +115,9 @@ export default function TrainerSchedule() {
     const others = roster.filter((c) => c.id !== s.clientId).map((c) => c.name);
     const res = cancelSession(s, sessionFee, roster.map((c) => c.id));
     releaseSession(s.id);
+    if (s.clientId) sendPush([s.clientId], 'Session cancelled', `Your ${timeLabel(s.startsAt)} session on ${DOW[new Date(s.startsAt).getDay()]} was cancelled.`, { route: '/(client)/calendar' });
+    const _openTo = roster.filter((c) => c.id !== s.clientId).map((c) => c.id);
+    if (_openTo.length) sendPush(_openTo, 'A slot just opened', `${timeLabel(s.startsAt)} on ${DOW[new Date(s.startsAt).getDay()]} is available — first to book it gets it.`, { route: '/(client)/calendar' });
     Alert.alert(
       'Session cancelled',
       `${timeLabel(s.startsAt)} with ${nameOf(s.clientId)} was cancelled.\n\n` +

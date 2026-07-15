@@ -13,6 +13,7 @@ import { useCoachProfile } from '../../src/ui/coachProfile';
 import type { TrainingSession } from '../../src/lib/types';
 import { sessionsRemaining, redeemSession, refundSession } from '../../src/lib/connect';
 import { buildIcs, shareIcs } from '../../src/lib/exportShare';
+import { sendPush } from '../../src/ui/pushNotifications';
 
 const CLIENT_ID = 'c1';
 const initialsOf = (name: string) => name.replace('Coach ', '').split(' ').map((x) => x[0]).join('').slice(0, 2);
@@ -69,6 +70,7 @@ export default function Calendar() {
  function book(s: TrainingSession) {
  bookSession(s.id, CLIENT_ID);
  redeemSession(s.trainerId).then((r) => { if (r.ok) sessionsRemaining().then(setPackLeft).catch(() => {}); }).catch(() => {});
+ sendPush([s.trainerId], 'New booking', `A client booked ${DOW[new Date(s.startsAt).getDay()]} ${timeLabel(s.startsAt)}.`, { route: '/(trainer)/calendar' });
  Alert.alert('Session booked ', `${DOW[new Date(s.startsAt).getDay()]} ${timeLabel(s.startsAt)} with ${coach.name} is confirmed.\n\nA confirmation has been sent to you and your coach.`, [{ text: 'Great' }]);
  }
  function cancel(s: TrainingSession) {
@@ -76,6 +78,7 @@ export default function Calendar() {
  const doCancel = () => {
  releaseSession(s.id);
  refundSession(s.trainerId).then(() => { sessionsRemaining().then(setPackLeft).catch(() => {}); }).catch(() => {});
+ sendPush([s.trainerId], 'Session cancelled', `A client cancelled ${DOW[new Date(s.startsAt).getDay()]} ${timeLabel(s.startsAt)}. The slot re-opened.`, { route: '/(trainer)/calendar' });
  Alert.alert('Cancelled', `Your ${timeLabel(s.startsAt)} session was cancelled. The slot has been re-offered to other clients.${late ? `\n\nA $${fee} late-cancellation fee applies.` : ''}`, [{ text: 'OK' }]);
  };
  if (late) Alert.alert('Within 24 hours', `Cancelling now charges the $${fee} late-cancellation fee, and the slot is offered to other clients. Continue?`, [{ text: 'Keep it', style: 'cancel' }, { text: `Cancel · $${fee}`, style: 'destructive', onPress: doCancel }]);

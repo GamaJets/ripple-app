@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { MOCK_MESSAGES } from '../lib/mockData';
+import { sendPush } from './pushNotifications';
 import type { Message } from '../lib/types';
 
 export type ChatRole = 'client' | 'coach';
@@ -24,6 +25,7 @@ export function useThread(clientId: string | null, role: ChatRole) {
   const [ready, setReady] = useState(false);
   const tid = useRef<string | null>(clientId);
   const seen = useRef<Set<string>>(new Set());
+  const coachId = useRef<string | null>(null);
 
   useEffect(() => {
     if (!USE_SUPABASE) { setReady(true); return; }
@@ -37,6 +39,7 @@ export function useThread(clientId: string | null, role: ChatRole) {
       if (cancelled) return;
       tid.current = cid;
       if (!cid) { setReady(true); return; }
+      if (role === 'client') { try { const { data: cr } = await supabase.from('clients').select('trainer_id').eq('id', cid).single(); coachId.current = (cr as any)?.trainer_id ?? null; } catch { /* ignore */ } }
       try {
         const { data, error } = await supabase.from('messages').select('*').eq('client_id', cid).order('created_at', { ascending: true });
         if (!cancelled && !error && data) {
@@ -70,7 +73,8 @@ export function useThread(clientId: string | null, role: ChatRole) {
         const { data } = await supabase.from('messages').insert({ client_id: tid.current, sender: role, body: b }).select().single();
         if (data) { seen.current.add(String(data.id)); setMessages((p) => p.map((m) => (m.id === optimistic.id ? rowToMsg(data) : m))); }
         // notify the other side (coach -> client push; client side needs the coach id, skipped)
-        if (role === 'coach' && tid.current) { try { supabase.functions.invoke('send-push', { body: { user_ids: [tid.current], title: 'New message from your coach', body: b, data: { route: '/(client)/messages' } } }).then(() => {}, () => {}); } catch { /* ignore */ } }
+        if (role === 'coach' && tid.current) sendPush([tid.current], 'New message from your coach', b, { route: '/(client)/messages' });
+        else if (role === 'client' && coachId.current) sendPush([coachId.current], 'New message from your client', b, { route: '/(trainer)/chat' });
       } catch { /* keep optimistic */ }
     }
   };
