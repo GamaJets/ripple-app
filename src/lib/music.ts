@@ -49,11 +49,12 @@ const AVG_TRACK_MIN = 3.5;
 
 // target energy band per mode + intensity
 function targetEnergy(p: GenParams): [number, number] {
-  if (p.mode === 'mobility') return [1, 2];
-  if (p.mode === 'hiit') return [4, 5];
-  if (p.mode === 'cardio') return p.intensity >= 2 ? [4, 5] : [3, 4];
-  // strength
-  return p.intensity >= 3 ? [4, 5] : p.intensity === 2 ? [3, 5] : [3, 4];
+  if (p.mode === 'mobility') return p.intensity >= 3 ? [2, 3] : [1, 2];
+  const band: Record<number, [number, number]> = { 1: [2, 3], 2: [3, 4], 3: [4, 5] };
+  const bump = p.mode === 'hiit' ? 1 : 0; // HIIT skews a notch harder
+  const lo = Math.min(5, band[p.intensity][0] + bump);
+  const hi = Math.min(5, band[p.intensity][1] + bump);
+  return [lo, hi];
 }
 
 const MODE_LABEL: Record<GenParams['mode'], string> = {
@@ -67,13 +68,15 @@ export function generatePlaylist(p: GenParams, salt = 0): Playlist {
   const pool = inBand.length >= 4 ? inBand : POOL;
   const want = Math.max(4, Math.round(p.minutes / AVG_TRACK_MIN));
   // rotate the pool by salt, then take `want`, wrapping if needed
-  const sorted = [...pool].sort((a, b) => (p.mode === 'mobility' ? a.bpm - b.bpm : b.energy - a.energy || b.bpm - a.bpm));
+  // Easy / mobility → calmest & slowest first; moderate / hard → hardest & fastest first.
+  const calm = p.mode === 'mobility' || p.intensity === 1;
+  const sorted = [...pool].sort((a, b) => (calm ? (a.energy - b.energy || a.bpm - b.bpm) : (b.energy - a.energy || b.bpm - a.bpm)));
   const tracks: Track[] = [];
   for (let i = 0; i < want; i++) tracks.push(sorted[(i + salt) % sorted.length]);
   const minutes = Math.round(tracks.length * AVG_TRACK_MIN);
   const intensityWord = p.intensity >= 3 ? 'high-intensity' : p.intensity === 2 ? 'moderate' : 'steady';
   return {
-    title: `${MODE_LABEL[p.mode]} — ${p.minutes} min`,
+    title: `${MODE_LABEL[p.mode]} · ${intensityWord} — ${p.minutes} min`,
     subtitle: `${tracks.length} tracks · ~${minutes} min · ${intensityWord}, ${lo === hi ? `energy ${lo}` : `energy ${lo}–${hi}`}`,
     minutes,
     tracks,

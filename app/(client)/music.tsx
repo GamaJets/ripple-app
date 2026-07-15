@@ -62,6 +62,8 @@ export default function Music() {
  const anyConnected = conn.apple || conn.spotify;
  const openInSpotify = (q: string) => { Linking.openURL('https://open.spotify.com/search/' + encodeURIComponent(q)).catch(() => Alert.alert('Open Spotify', 'Install the Spotify app, then search "' + q + '".')); };
 
+ // When a playlist is on screen, changing mode/intensity/length re-matches it live.
+ useEffect(() => { setPl((cur) => cur ? generatePlaylist({ mode, intensity, minutes }, salt) : cur); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [mode, intensity, minutes]);
  const generate = (nextSalt = salt, nextIntensity = intensity) => {
  setSalt(nextSalt);
  setPl(generatePlaylist({ mode, intensity: nextIntensity, minutes }, nextSalt));
