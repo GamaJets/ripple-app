@@ -56,7 +56,7 @@ export default function Music() {
    if (conn.spotify) { await spotifyDisconnect(); setConn((p) => ({ ...p, spotify: false })); setSpotifyName(undefined); return; }
    setSpotifyBusy(true);
    try { const r = await connectSpotify(); setConn((p) => ({ ...p, spotify: true })); setSpotifyName(r.name); }
-   catch (e) { Alert.alert('Spotify', (e && e.message) || 'Could not connect.'); }
+   catch (e: any) { Alert.alert('Spotify', (e && e.message) || 'Could not connect.'); }
    finally { setSpotifyBusy(false); }
  };
 
@@ -90,7 +90,7 @@ export default function Music() {
    try {
      const url = await createSpotifyPlaylist(pl.title, pl.tracks.map((tr) => ({ title: tr.title, artist: tr.artist })));
      Alert.alert('Saved to Spotify', pl.title + ' is in your Spotify library.', [{ text: 'Open', onPress: () => Linking.openURL(url).catch(() => {}) }, { text: 'Done' }]);
-   } catch (e) { Alert.alert('Spotify', (e && e.message) || 'Could not save the playlist.'); }
+   } catch (e: any) { Alert.alert('Spotify', (e && e.message) || 'Could not save the playlist.'); }
    finally { setSpotifyBusy(false); }
    return;
  }
