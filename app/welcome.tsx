@@ -26,6 +26,7 @@ export default function Welcome() {
  const { appName } = useBrand();
  const [mode, setMode] = useState<'in' | 'up'>('up');
  const [name, setName] = useState('');
+ const [role, setRole] = useState<'client' | 'trainer'>('client');
  const [email, setEmail] = useState('');
  const [pw, setPw] = useState('');
  const [busy, setBusy] = useState(false);
@@ -37,7 +38,7 @@ export default function Welcome() {
  setBusy(true); setNotice(null);
  try {
  if (mode === 'up') {
- const res = await auth.signUp(name, email.trim(), pw);
+ const res = await auth.signUp(name, email.trim(), pw, role);
  if (res.needsConfirmation) {
  setNotice('Account created. Check your email to confirm, then sign in.');
  setMode('in');
@@ -88,6 +89,19 @@ export default function Welcome() {
 
  {mode === 'up' ? (
  <TextInput value={name} onChangeText={setName} placeholder="Full name" placeholderTextColor={t.ink3} autoCapitalize="words" style={inp} accessibilityLabel="Full name" />
+ ) : null}
+ {mode === 'up' ? (
+ <View style={{ marginBottom: 10 }}>
+ <Text style={{ color: t.ink3, fontSize: 12, fontWeight: '700', marginBottom: 7 }}>I'm signing up as…</Text>
+ <View style={{ flexDirection: 'row', gap: 8 }}>
+ {([['client', 'A client', 'Track my own training'], ['trainer', 'A coach', 'Train & manage clients']] as const).map(([r, label, sub]) => (
+ <Pressable key={r} onPress={() => setRole(r)} accessibilityRole="button" accessibilityLabel={label} style={{ flex: 1, paddingVertical: 11, paddingHorizontal: 12, borderRadius: 12, backgroundColor: role === r ? t.brand : t.surface2, borderWidth: 1, borderColor: role === r ? t.brand : t.ring }}>
+ <Text style={{ color: role === r ? t.brandInk : t.ink, fontWeight: '800', fontSize: 14 }}>{label}</Text>
+ <Text style={{ color: role === r ? t.brandInk : t.ink3, fontSize: 11, marginTop: 1 }}>{sub}</Text>
+ </Pressable>
+ ))}
+ </View>
+ </View>
  ) : null}
  <TextInput value={email} onChangeText={setEmail} placeholder="Email" placeholderTextColor={t.ink3} keyboardType="email-address" autoCapitalize="none" autoCorrect={false} style={inp} accessibilityLabel="Email" />
  <TextInput value={pw} onChangeText={setPw} placeholder="Password (min 6 characters)" placeholderTextColor={t.ink3} secureTextEntry autoCapitalize="none" style={inp} accessibilityLabel="Password" />

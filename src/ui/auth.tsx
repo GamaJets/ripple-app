@@ -23,7 +23,7 @@ interface AuthValue {
   user: AuthUser | null;
   loading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
-  signUp: (name: string, email: string, password: string) => Promise<SignUpResult>;
+  signUp: (name: string, email: string, password: string, role?: Role) => Promise<SignUpResult>;
   signInWithProvider: (provider: 'apple' | 'google') => Promise<void>;
   demo: boolean;
   enterDemo: () => void;
@@ -79,12 +79,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await refreshFromSession();
   };
 
-  const signUp = async (name: string, email: string, password: string): Promise<SignUpResult> => {
+  const signUp = async (name: string, email: string, password: string, role: Role = 'client'): Promise<SignUpResult> => {
     if (!USE_SUPABASE) {
-      setUser({ id: 'local', name: name.trim() || nameFromEmail(email), email, role: 'client' });
+      setUser({ id: 'local', name: name.trim() || nameFromEmail(email), email, role });
       return { needsConfirmation: false };
     }
-    await sbSignUp(email, password, name.trim(), 'client');
+    await sbSignUp(email, password, name.trim(), role);
     // If email confirmation is OFF, a session exists now; otherwise it does not.
     const { data } = await supabase.auth.getSession();
     if (data.session) { await refreshFromSession(); return { needsConfirmation: false }; }
