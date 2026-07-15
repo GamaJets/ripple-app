@@ -33,6 +33,13 @@ const SESSION_TYPES: Record<'cardio' | 'hiit' | 'mobility', string[]> = {
   mobility: ['Stretching', 'Yoga', 'Foam rolling', 'Dynamic warm-up', 'Pilates'],
 };
 const WTYPES = [['strength', 'Program'], ['cardio', 'Cardio'], ['hiit', 'HIIT'], ['mobility', 'Mobility']] as const;
+// Approx METs per activity — kcal = MET x weight(kg) x hours (standard estimate).
+const MET: Record<string, number> = {
+  'Treadmill / Run': 9.8, 'Cycling': 7.5, 'Rowing': 7.0, 'Ski erg': 9.0, 'Elliptical': 5.0, 'Swim': 8.0, 'Walk': 3.8, 'Stairs': 8.0,
+  'Circuit': 8.0, 'Tabata': 10.0, 'EMOM': 8.0, 'AMRAP': 8.0, 'Sprint intervals': 12.0, 'Bike intervals': 10.0, 'Bag work': 7.0,
+  'Stretching': 2.5, 'Yoga': 3.0, 'Foam rolling': 2.5, 'Dynamic warm-up': 4.0, 'Pilates': 3.5,
+};
+const cardioKcal = (type: string, mins: number, weightKg?: number) => Math.round((MET[type] ?? 7) * (weightKg && weightKg > 0 ? weightKg : 70) * (mins / 60));
 
 export default function Train() {
   const t = useTheme();
@@ -117,7 +124,7 @@ export default function Train() {
   const quickLog = (e: ProgramExercise) => { const sg = suggestForExercise(workoutLog, nameOf(e), e.reps); logSet(e, String(parseInt(e.reps, 10) || 8), sg ? String(sg.weight) : ''); };
   const logCardio = () => {
     const m = parseInt(mins, 10) || 0, d = parseFloat(dist) || 0; if (!m) return;
-    const kcal = Math.round(m * 10);
+    const kcal = cardioKcal(ctype, m, cd.weightKg);
     setCardioLog([{ type: ctype, mins: m, dist: d, unit, kcal }, ...cardioLog]);
     addWorkouts([{ t: new Date().toISOString(), exercise: ctype, cardio: { mins: m, dist: d, unit }, kcal }]);
     setMins(''); setDist(''); tapLight();
