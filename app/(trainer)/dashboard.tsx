@@ -571,7 +571,7 @@ export default function TrainerClients() {
                 {slotsFor(sel.mealsPerDay || 3).map((slot, pos) => {
                   const ovIdx = getNutri(sel.id)?.mealOverride?.[pos];
                   const dietForPick = (sel.diet || 'meat') as any;
-                  const picked = ovIdx != null ? mealAt(dietForPick, slot, ovIdx) : null;
+                  const picked = ovIdx != null ? mealAt(dietForPick, slot, ovIdx, (sel.avoid ?? []) as any) : null;
                   return (
                     <View key={pos} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: t.ring }}>
                       <View style={{ flex: 1, marginRight: 8 }}>
@@ -748,7 +748,7 @@ export default function TrainerClients() {
               <Text style={{ color: t.ink3, fontSize: 13, marginTop: 2, marginBottom: 12 }}>For {sel.name.split(' ')[0]} · {sel.diet || 'meat'} plan · tap to assign</Text>
               <TextInput value={mealQuery} onChangeText={setMealQuery} placeholder="Search meals…" placeholderTextColor={t.ink3} style={{ color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, marginBottom: 12 }} />
               <ScrollView showsVerticalScrollIndicator={false}>
-                {searchMeals((sel.diet || 'meat') as any, mealPick.slot, mealQuery, 40).map((m) => (
+                {searchMeals((sel.diet || 'meat') as any, mealPick.slot, mealQuery, 40, (sel.avoid ?? []) as any).map((m) => (
                   <Pressable key={m.idx} onPress={() => { setNutri(sel.id, { mealOverride: { ...(getNutri(sel.id)?.mealOverride ?? {}), [mealPick.pos]: m.idx } }); setMealPick(null); }} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: t.ring }}>
                     <View style={{ flex: 1, marginRight: 10 }}>
                       <Text style={{ color: t.ink, fontSize: 14, fontWeight: '600' }} numberOfLines={1}>{m.n}</Text>

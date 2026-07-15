@@ -30,7 +30,7 @@ export function RosterProvider({ children }: { children: ReactNode }) {
         const uid = auth?.user?.id;
         if (cancelled) return;
         if (!uid) { setRoster(JSON.parse(JSON.stringify(ROSTER))); return; }
-        const { data: cls, error } = await supabase.from('clients').select('id, goal, diet, meals_per_day').eq('trainer_id', uid);
+        const { data: cls, error } = await supabase.from('clients').select('id, goal, diet, meals_per_day, avoid').eq('trainer_id', uid);
         if (error || !cls || !cls.length || cancelled) return;
         const ids = cls.map((c: any) => c.id);
         const names: Record<string, string> = {};
@@ -58,7 +58,7 @@ export function RosterProvider({ children }: { children: ReactNode }) {
           (ci || []).forEach((r: any) => { if (st[r.user_id]) { st[r.user_id].last = Math.max(st[r.user_id].last, Date.parse(r.at)); if (!seen.has(r.user_id) && typeof r.adherence === 'number') { seen.add(r.user_id); st[r.user_id].adh = r.adherence; } } });
         } catch { /* ignore */ }
         const goalMap: Record<string, string> = { fatloss: 'Fat loss', tone: 'Tone', muscle: 'Build muscle' };
-        const real: RosterClient[] = cls.map((c: any) => { const sc = st[c.id]; return { id: c.id, name: names[c.id] || 'Client', goal: goalMap[c.goal] || 'General', weightDelta: sc.wDelta, adherence: sc.adh != null ? sc.adh : 100, lastActive: sc.last ? ago(sc.last) : 'recently', next: '—', unread: 0, mode: 'online' as const, metrics: sc.mx ?? undefined, diet: c.diet ?? undefined, mealsPerDay: c.meals_per_day ?? undefined }; });
+        const real: RosterClient[] = cls.map((c: any) => { const sc = st[c.id]; return { id: c.id, name: names[c.id] || 'Client', goal: goalMap[c.goal] || 'General', weightDelta: sc.wDelta, adherence: sc.adh != null ? sc.adh : 100, lastActive: sc.last ? ago(sc.last) : 'recently', next: '—', unread: 0, mode: 'online' as const, metrics: sc.mx ?? undefined, diet: c.diet ?? undefined, mealsPerDay: c.meals_per_day ?? undefined, avoid: Array.isArray(c.avoid) ? c.avoid : undefined }; });
         if (!cancelled) setRoster(real);
       } catch { /* stay on demo roster */ }
     })();

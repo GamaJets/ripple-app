@@ -451,6 +451,7 @@ alter table coach_nutrition add column if not exists fat_delta int default 0;
 -- catalog) and a per-meal override map on coach_nutrition. Idempotent.
 alter table clients add column if not exists diet text;
 alter table clients add column if not exists meals_per_day int;
+alter table clients add column if not exists avoid text[];
 alter table coach_nutrition add column if not exists meal_override jsonb;
 
 
