@@ -73,6 +73,27 @@ export function suggestProgression(log: WorkoutEntry[], topRange = 12, bottomRan
       nextReps = `${bottomRange}-${topRange}`;
       rationale = `Reps fell off — ease to ~${Math.round(lastWeight * 0.9)}kg and rebuild.`;
     }
+    // RPE / "felt" signal: the hardest feel logged on the top-weight sets (captured
+    // per set in session mode) governs how aggressively to progress.
+    const feels = e.feel || [];
+    const topFeels = (e.sets || [])
+      .map((s, i) => ({ w: s[1], r: s[0], f: feels[i] }))
+      .filter((x) => x.w === lastWeight && x.r > 0 && !!x.f)
+      .map((x) => x.f);
+    const feltHard = topFeels.includes('hard');
+    const feltEasy = topFeels.length > 0 && topFeels.every((f) => f === 'easy');
+    if (feltHard && action === 'increase') {
+      action = 'reps'; nextWeight = lastWeight; nextReps = `${Math.min(topRange, lastReps)}+`;
+      rationale = `Cleared the range but the top sets felt hard — hold ${lastWeight}kg and bank the reps before adding load.`;
+    } else if (feltHard && action === 'reps') {
+      action = 'hold'; nextWeight = lastWeight; nextReps = `${bottomRange}-${topRange}`;
+      rationale = `In range but it felt hard — repeat ${lastWeight}kg to consolidate before progressing.`;
+    } else if (feltEasy && action === 'reps') {
+      action = 'increase'; nextWeight = Math.round((lastWeight + step(exercise)) * 2) / 2; nextReps = `${bottomRange}-${topRange}`;
+      rationale = `In range and every top set felt easy — add ${step(exercise)}kg now.`;
+    } else if (feltEasy && action === 'increase') {
+      rationale = rationale + ' Top sets felt easy — add with confidence.';
+    }
     tips.push({ exercise, lastWeight, lastReps, nextWeight, nextReps, action, rationale, at: e.t });
   }
   // Show the biggest lifts first (proxy: heaviest last weight).

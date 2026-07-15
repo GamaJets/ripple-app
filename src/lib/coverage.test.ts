@@ -1,6 +1,6 @@
 // Extended pure-logic coverage (Phase 8 QA). Compile with tsc then run with node.
 import { currentStreak, longestStreak, personalRecords, weekStats, est1RM, isNewPR, streakMilestone, freezeBudget, currentStreakFrozen } from './streaks';
-import { parseRepRange, suggestNextWeight, suggestForExercise, priorBest1RM } from './progression';
+import { parseRepRange, suggestNextWeight, suggestForExercise, priorBest1RM, suggestProgression } from './progression';
 import { overlaps, isLateCancellation, cancelSession, nextFromWaitlist } from './booking';
 import type { WorkoutEntry } from './mockData';
 import type { TrainingSession } from './types';
@@ -36,6 +36,20 @@ ok(isNewPR([{ t: day(3), exercise: 'B', sets: [[5, 80]] }, prEntry], prEntry) ==
 
 // ── progression ──
 ok(JSON.stringify(parseRepRange('6-8')) === JSON.stringify({ low: 6, high: 8 }), 'range 6-8');
+// ── progression × RPE/felt ──
+const felt = (feel: any): WorkoutEntry[] => [{ t: day(1), exercise: 'Back Squat', sets: [[12,100],[12,100]] as [number,number][], feel }];
+// Cleared the top of the range but it felt hard -> hold load, bank reps (not increase).
+ok(suggestProgression(felt(['hard','hard']))[0].action === 'reps', 'hard top set downgrades increase->reps');
+// Cleared and felt easy -> still increase, with a confidence note.
+ok(suggestProgression(felt(['easy','easy']))[0].action === 'increase', 'easy top set keeps increase');
+// In range (not top) but felt easy -> accelerate to a load increase.
+const midEasy: WorkoutEntry[] = [{ t: day(1), exercise: 'Back Squat', sets: [[9,100],[9,100]] as [number,number][], feel: ['easy','easy'] }];
+ok(suggestProgression(midEasy)[0].action === 'increase', 'in-range + easy accelerates to increase');
+// In range but felt hard -> hold instead of chasing another rep.
+const midHard: WorkoutEntry[] = [{ t: day(1), exercise: 'Back Squat', sets: [[9,100],[9,100]] as [number,number][], feel: ['ok','hard'] }];
+ok(suggestProgression(midHard)[0].action === 'hold', 'in-range + hard holds');
+// No feel data -> unchanged behaviour (cleared top -> increase).
+ok(suggestProgression(felt(undefined))[0].action === 'increase', 'no feel -> default increase');
 ok(parseRepRange('45 sec') === null, 'range non-numeric null');
 const up = suggestNextWeight([[8, 50], [8, 52]], { low: 6, high: 8 });
 ok(!!up && up.up === true && up.weight === 54.5, 'overload up');

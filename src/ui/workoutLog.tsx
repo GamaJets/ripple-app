@@ -17,7 +17,7 @@ const Ctx = createContext<WorkoutLogValue | null>(null);
 
 const rowToEntry = (r: any): WorkoutEntry => ({
   t: r.performed_at, exercise: r.exercise,
-  sets: r.sets ?? undefined, cardio: r.cardio ?? undefined, kcal: r.kcal ?? undefined,
+  sets: r.sets ?? undefined, feel: r.feel ?? undefined, cardio: r.cardio ?? undefined, kcal: r.kcal ?? undefined,
 });
 const entryToRow = (uid: string, e: WorkoutEntry) => ({
   user_id: uid, performed_at: e.t, exercise: e.exercise,
@@ -54,7 +54,16 @@ export function WorkoutLogProvider({ children }: { children: React.ReactNode }) 
 
   const persist = (entries: WorkoutEntry[]) => {
     if (!USE_SUPABASE || !uid || !entries.length) return;
-    try { supabase.from('workouts').insert(entries.map((e) => entryToRow(uid, e))).then(() => {}, () => {}); } catch { /* ignore */ }
+    try {
+      supabase.from('workouts').insert(entries.map((e) => entryToRow(uid, e))).then(() => {
+        // Best-effort: attach per-set feel (column is a newer migration; no-ops if absent).
+        entries.forEach((e) => {
+          if (e.feel && e.feel.length) {
+            supabase.from('workouts').update({ feel: e.feel }).eq('user_id', uid).eq('performed_at', e.t).eq('exercise', e.exercise).then(() => {}, () => {});
+          }
+        });
+      }, () => {});
+    } catch { /* ignore */ }
   };
   const addWorkout = (entry: WorkoutEntry) => { setLog((p) => [entry, ...p]); persist([entry]); };
   const addWorkouts = (entries: WorkoutEntry[]) => { if (entries.length) { setLog((p) => [...entries, ...p]); persist(entries); } };

@@ -321,6 +321,7 @@ create table if not exists workouts (
   created_at timestamptz not null default now()
 );
 create index if not exists idx_workouts_user on workouts(user_id, performed_at desc);
+alter table workouts add column if not exists feel jsonb;
 
 create table if not exists measurements (
   id uuid primary key default gen_random_uuid(),
