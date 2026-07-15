@@ -27,6 +27,11 @@ export default function CoachChat() {
       </View>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView ref={scRef} contentContainerStyle={{ padding: 16 }} onContentSizeChange={() => scRef.current?.scrollToEnd({ animated: true })}>
+          {msgs.length === 0 ? (
+            <View style={{ alignItems: 'center', paddingVertical: 48 }}>
+              <Text style={{ color: t.ink3, fontSize: 13 }}>No messages yet — say hi to {name.split(' ')[0]}.</Text>
+            </View>
+          ) : null}
           {msgs.map((m) => {
             const mine = m.sender === 'coach';
             return (

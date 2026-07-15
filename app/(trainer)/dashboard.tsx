@@ -49,7 +49,7 @@ export default function TrainerClients() {
   const t = useTheme();
   const router = useRouter();
   const { roster, addClient, removeClient } = useRoster();
-  const { sessionFee } = useCoachProfile();
+  const { sessionFee, name: coachName } = useCoachProfile();
   const { getFeedback, addFeedback } = useCoachFeedback();
   const { get: getNutri, setAdjust: setNutri, clear: clearNutri } = useCoachNutrition();
   const [mealPick, setMealPick] = useState<{ pos: number; slot: Slot } | null>(null);
@@ -192,7 +192,7 @@ export default function TrainerClients() {
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
           <View>
             <Text style={{ color: t.ink3, fontSize: 14 }}>Coaching</Text>
-            <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia', textTransform: 'capitalize' }}>{MOCK_TRAINER.name.replace('Coach ', '')}</Text>
+            <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia', textTransform: 'capitalize' }}>{(coachName || MOCK_TRAINER.name).replace('Coach ', '')}</Text>
           </View>
           <View style={{ flexDirection: 'row', gap: 8 }}>
           <Pressable onPress={() => router.push('/(trainer)/explore')} accessibilityLabel="Search" style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 7, alignItems: 'center', justifyContent: 'center' }}><Icon name="search" size={14} color={t.ink2} /></Pressable>
