@@ -11,6 +11,8 @@ import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useMeasurements } from '../../src/ui/measurements';
 import { useCheckIns } from '../../src/ui/checkins';
 import { currentStreak, weekStats, personalRecords, streakMilestone } from '../../src/lib/streaks';
+import { useState, useEffect } from 'react';
+import { askCoach, coachAvailable } from '../../src/lib/coach';
 
 function Metric({ t, label, value, delta, deltaGood }: { t: Theme; label: string; value: string; delta?: string; deltaGood?: boolean }) {
  return (
@@ -46,6 +48,39 @@ export default function WeeklyReport() {
  const weekStart = new Date(today); weekStart.setDate(today.getDate() - 6);
  const range = `${weekStart.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – ${today.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
 
+ const factLines = [
+ `Trained ${wk.workouts} time(s) across ${wk.days} active day(s).`,
+ `Volume ${(wk.volumeKg / 1000).toFixed(1)} tonnes, ~${wk.kcal} kcal.`,
+ `Streak ${streak} day(s).`,
+ `Weight ${c.weightKg} kg (${wDelta > 0 ? '+' : ''}${wDelta} kg overall), body fat ${c.bodyFatPct}%, muscle ${c.muscleKg} kg.`,
+ waistD != null ? `Waist ${mLatest.waist} cm (${waistD > 0 ? '+' : ''}${waistD} cm).` : '',
+ checkIn ? `Check-in energy ${checkIn.energy}/5, sleep ${checkIn.sleep}/5, mood ${checkIn.mood}/5, adherence ${checkIn.adherence}/5.` : '',
+ ].filter(Boolean);
+ const fallbackNarrative = (() => {
+ const bits: string[] = [];
+ if (wk.workouts > 0) bits.push(`You trained ${wk.workouts} time${wk.workouts === 1 ? '' : 's'} over ${wk.days} day${wk.days === 1 ? '' : 's'}, moving ${(wk.volumeKg / 1000).toFixed(1)} tonnes of volume.`);
+ else bits.push('No logged workouts this week — a fresh chance to get one on the board.');
+ if (streak > 0) bits.push(`Your streak is at ${streak} day${streak === 1 ? '' : 's'} — keep it alive.`);
+ if (wDelta !== 0) bits.push(`Weight is ${wDelta > 0 ? 'up' : 'down'} ${Math.abs(wDelta)} kg overall${wDelta <= 0 ? ', trending your way' : ''}.`);
+ if (checkIn && checkIn.adherence <= 3) bits.push(`Your last check-in put adherence at ${checkIn.adherence}/5 — worth refocusing next week.`);
+ return bits.join(' ');
+ })();
+ const [narrative, setNarrative] = useState(fallbackNarrative);
+ useEffect(() => {
+ let alive = true;
+ setNarrative(fallbackNarrative);
+ if (!coachAvailable()) return;
+ (async () => {
+ const reply = await askCoach(
+ [{ role: 'user', content: 'Write a warm, concise 2-3 sentence weekly summary for this client from the facts below. Speak directly to them ("you"), name the biggest win and one focus for next week. No preamble, no lists.\n\n' + factLines.join('\n') }],
+ { week: range, name: c.name }
+ );
+ if (alive && reply && reply.trim()) setNarrative(reply.trim());
+ })();
+ return () => { alive = false; };
+ // eslint-disable-next-line react-hooks/exhaustive-deps
+ }, [wk.workouts, wk.days, streak, wDelta, range]);
+
  return (
  <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
  <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
@@ -58,6 +93,13 @@ export default function WeeklyReport() {
  {milestone ? (
  <View style={{ backgroundColor: t.surface, borderColor: t.brand, borderWidth: 1, borderRadius: 16, padding: 14, marginBottom: 14 }}>
  <Text style={{ color: t.brand, fontWeight: '800', fontSize: 14 }}> {milestone}</Text>
+ </View>
+ ) : null}
+
+ {narrative ? (
+ <View style={{ backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 16, padding: 15, marginBottom: 16 }}>
+ <Text style={{ color: t.brand, fontSize: 11, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 6 }}>Your week in a nutshell</Text>
+ <Text style={{ color: t.ink2, fontSize: 14.5, lineHeight: 21 }}>{narrative}</Text>
  </View>
  ) : null}
 
