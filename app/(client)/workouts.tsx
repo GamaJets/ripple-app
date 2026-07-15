@@ -55,7 +55,7 @@ export default function Train() {
   const [deloadDismiss, setDeloadDismiss] = useState(false);
   const { videos: exVideos } = useExerciseVideos();
   const [session, setSession] = useState(false);
-  const [ctype, setCtype] = useState(CARDIO[0]); const [mins, setMins] = useState('30'); const [dist, setDist] = useState('5'); const [unit, setUnit] = useState<'km' | 'mi'>('km');
+  const [ctype, setCtype] = useState(CARDIO[0]); const [mins, setMins] = useState(''); const [dist, setDist] = useState(''); const [unit, setUnit] = useState<'km' | 'mi'>('km');
   const [showCal, setShowCal] = useState(false);
   const [selCalDay, setSelCalDay] = useState('');
   const [confetti, setConfetti] = useState(false);
@@ -116,7 +116,7 @@ export default function Train() {
     const kcal = Math.round(m * 10);
     setCardioLog([{ type: ctype, mins: m, dist: d, unit, kcal }, ...cardioLog]);
     addWorkouts([{ t: new Date().toISOString(), exercise: ctype, cardio: { mins: m, dist: d, unit }, kcal }]);
-    setMins('30'); setDist('5');
+    setMins(''); setDist(''); tapLight();
   };
   const saveManual = () => {
     const nowISO = new Date().toISOString();
@@ -324,8 +324,8 @@ export default function Train() {
                 {(SESSION_TYPES[(mode === 'strength' ? 'cardio' : mode) as 'cardio' | 'hiit' | 'mobility'] || CARDIO).map((ct) => <Pressable key={ct} onPress={() => setCtype(ct)} style={{ paddingHorizontal: 13, paddingVertical: 8, borderRadius: 18, backgroundColor: ctype === ct ? t.brand : t.surface2, borderWidth: 1, borderColor: ctype === ct ? t.brand : t.ring }}><Text style={{ color: ctype === ct ? t.brandInk : t.ink2, fontWeight: '700', fontSize: 12 }}>{ct}</Text></Pressable>)}
               </ScrollView>
               <View style={{ flexDirection: 'row', gap: 8 }}>
-                <TextInput value={mins} onChangeText={setMins} keyboardType="numeric" placeholder="mins" placeholderTextColor={t.ink3} style={inp} />
-                <TextInput value={dist} onChangeText={setDist} keyboardType="numeric" placeholder="dist" placeholderTextColor={t.ink3} style={inp} />
+                <TextInput value={mins} onChangeText={setMins} keyboardType="numeric" placeholder="Time (min)" placeholderTextColor={t.ink3} style={inp} />
+                <TextInput value={dist} onChangeText={setDist} keyboardType="numeric" placeholder="Distance" placeholderTextColor={t.ink3} style={inp} />
                 <Pressable onPress={() => setUnit(unit === 'km' ? 'mi' : 'km')} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 9, paddingHorizontal: 14, justifyContent: 'center' }}><Text style={{ color: t.ink, fontWeight: '700' }}>{unit}</Text></Pressable>
                 <Pressable onPress={logCardio} style={{ backgroundColor: t.brand, borderRadius: 9, paddingHorizontal: 16, justifyContent: 'center' }}><Text style={{ color: t.brandInk, fontWeight: '800' }}>Log</Text></Pressable>
               </View>
