@@ -8,8 +8,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
-import { generatePlaylist, type Service, type GenParams, type Playlist } from '../../src/lib/music';
-import { connectSpotify, spotifyStatus, spotifyDisconnect, createSpotifyPlaylist } from '../../src/lib/spotify';
+import { generatePlaylist, spotifyQuerySeeds, type Service, type GenParams, type Playlist } from '../../src/lib/music';
+import { connectSpotify, spotifyStatus, spotifyDisconnect, createSpotifyPlaylist, spotifySearchTracks } from '../../src/lib/spotify';
 
 const SERVICES: { id: Service; name: string; ico: string; note: string }[] = [
  { id: 'apple', name: 'Apple Music', ico: '', note: 'Plays natively on your iPhone' },
@@ -48,6 +48,7 @@ export default function Music() {
  const [salt, setSalt] = useState(0);
  const [pl, setPl] = useState<Playlist | null>(null);
  const [spotifyBusy, setSpotifyBusy] = useState(false);
+ const [genBusy, setGenBusy] = useState(false);
  const [spotifyName, setSpotifyName] = useState<string | undefined>(undefined);
  useEffect(() => { (async () => { const st = await spotifyStatus(); if (st.connected) { setConn((p) => ({ ...p, spotify: true })); setSpotifyName(st.name); } })(); }, []);
  const toggleService = async (id: Service) => {
@@ -64,9 +65,22 @@ export default function Music() {
 
  // When a playlist is on screen, changing mode/intensity/length re-matches it live.
  useEffect(() => { setPl((cur) => cur ? generatePlaylist({ mode, intensity, minutes }, salt) : cur); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [mode, intensity, minutes]);
- const generate = (nextSalt = salt, nextIntensity = intensity) => {
+ const generate = async (nextSalt = salt, nextIntensity = intensity) => {
  setSalt(nextSalt);
- setPl(generatePlaylist({ mode, intensity: nextIntensity, minutes }, nextSalt));
+ const base = generatePlaylist({ mode, intensity: nextIntensity, minutes }, nextSalt);
+ if (conn.spotify) {
+ setGenBusy(true);
+ try {
+ const found = await spotifySearchTracks(spotifyQuerySeeds(mode, nextIntensity), base.tracks.length, nextSalt);
+ if (found.length >= 4) {
+ const energy = base.tracks[0]?.energy ?? 3;
+ setPl({ ...base, subtitle: base.subtitle + ' \u00b7 from your Spotify', tracks: found.map((f) => ({ title: f.title, artist: f.artist, bpm: 0, energy, genre: 'Spotify' })) });
+ setGenBusy(false); return;
+ }
+ } catch { /* fall back to curated */ }
+ setGenBusy(false);
+ }
+ setPl(base);
  };
 
  const push = async () => {
@@ -115,8 +129,9 @@ export default function Music() {
  <Text style={{ color: t.ink3, fontSize: 12, fontWeight: '600', marginBottom: 6 }}>Length</Text>
  <Seg>{DURATIONS.map((d) => <Chip key={d} on={minutes === d} label={`${d} min`} onPress={() => setMinutes(d)} t={t} />)}</Seg>
 
- <Pressable onPress={() => generate(salt + 1)} style={{ backgroundColor: t.brand, borderRadius: 14, paddingVertical: 15, alignItems: 'center', marginBottom: 18 }}>
- <Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 15 }}>{pl ? '↻ Regenerate playlist' : ' Generate workout playlist'}</Text>
+ <Pressable onPress={() => generate(salt + 1)} disabled={genBusy} style={{ backgroundColor: t.brand, borderRadius: 14, paddingVertical: 15, alignItems: 'center', marginBottom: 18, opacity: genBusy ? 0.7 : 1, flexDirection: 'row', justifyContent: 'center', gap: 8 }}>
+ {genBusy ? <ActivityIndicator color={t.brandInk} size="small" /> : null}
+ <Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 15 }}>{genBusy ? 'Finding songs…' : pl ? '↻ Regenerate playlist' : ' Generate workout playlist'}</Text>
  </Pressable>
 
  {pl ? (
@@ -131,7 +146,7 @@ export default function Music() {
  <Text style={{ color: t.ink3, fontSize: 12 }}>{tr.artist}</Text>
  </View>
  <View style={{ alignItems: 'flex-end' }}>
- <Text style={{ color: t.ink2, fontSize: 12, fontWeight: '600' }}>{tr.bpm} bpm</Text>
+ <Text style={{ color: t.ink2, fontSize: 12, fontWeight: '600' }}>{tr.bpm > 0 ? tr.bpm + ' bpm' : (tr.genre || '')}</Text>
  <Text style={{ color: t.ink3, fontSize: 11 }}>{''.repeat(tr.energy)}</Text>
  </View>
  <Text style={{ color: t.brand, fontSize: 15 }}>▶</Text>

@@ -150,6 +150,15 @@ function mulberry32(seed: number) {
 }
 
 /** Deterministic-ish pick so the same params give a stable list, varied by `salt`. */
+/** Spotify-search query seeds matched to the workout mode + intensity. */
+export function spotifyQuerySeeds(mode: GenParams['mode'], intensity: 1 | 2 | 3): string[] {
+  const hard = intensity >= 3, easy = intensity === 1;
+  if (mode === 'mobility') return ['chill stretching', 'calm cool down', 'ambient relax', 'yoga flow', 'lofi calm'];
+  if (mode === 'hiit') return ['hiit workout', 'high intensity gym', 'pump up hype', 'hard rap workout', 'beast mode', 'sprint intervals'];
+  if (mode === 'cardio') return easy ? ['steady run', 'jogging pop', 'cardio dance', 'feel good run'] : ['running hype', 'cardio edm', 'workout pop', 'gym cardio', 'run fast'];
+  return hard ? ['gym motivation rap', 'metal workout', 'pump up rock', 'beast mode', 'heavy lifting hype'] : easy ? ['gym groove', 'workout funk', 'steady lifting', 'smooth gym'] : ['gym workout', 'lifting hip hop', 'pump rock', 'workout anthems'];
+}
+
 export function generatePlaylist(p: GenParams, salt = 0): Playlist {
   const [lo, hi] = targetEnergy(p);
   const inBand = POOL.filter((t) => t.energy >= lo && t.energy <= hi);

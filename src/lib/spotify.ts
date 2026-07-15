@@ -74,6 +74,31 @@ async function validToken(): Promise<string | null> {
   return s.access;
 }
 
+/** Search Spotify for real tracks matching workout query seeds — varied, de-duped,
+ * offset-rotated by salt so each generate pulls a fresh set from the live catalog. */
+export async function spotifySearchTracks(queries: string[], want: number, salt: number): Promise<{ title: string; artist: string }[]> {
+  const token = await validToken();
+  if (!token) return [];
+  const h = { Authorization: 'Bearer ' + token };
+  const out: { title: string; artist: string }[] = [];
+  const seen = new Set<string>();
+  for (let qi = 0; qi < queries.length && out.length < want; qi++) {
+    const offset = Math.min(950, ((salt * 3 + qi * 5) % 19) * 50);
+    try {
+      const q = encodeURIComponent(queries[qi]);
+      const r = await (await fetch(`https://api.spotify.com/v1/search?q=${q}&type=track&limit=50&offset=${offset}`, { headers: h })).json();
+      const items = r?.tracks?.items ?? [];
+      for (const it of items) {
+        const id = it?.id; if (!id || seen.has(id) || !it?.name) continue;
+        seen.add(id);
+        out.push({ title: it.name, artist: (it.artists ?? []).map((a: any) => a.name).filter(Boolean).join(', ') });
+        if (out.length >= want) break;
+      }
+    } catch { /* skip this query */ }
+  }
+  return out;
+}
+
 /** Create a playlist in the user's account from {title, artist} tracks. */
 export async function createSpotifyPlaylist(name: string, tracks: { title: string; artist: string }[]): Promise<string> {
   const token = await validToken();
