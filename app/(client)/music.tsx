@@ -147,7 +147,7 @@ export default function Music() {
  </View>
  <View style={{ alignItems: 'flex-end' }}>
  <Text style={{ color: t.ink2, fontSize: 12, fontWeight: '600' }}>{tr.bpm > 0 ? tr.bpm + ' bpm' : (tr.genre || '')}</Text>
- <Text style={{ color: t.ink3, fontSize: 11 }}>{''.repeat(tr.energy)}</Text>
+ <Text style={{ color: t.brand, fontSize: 10, letterSpacing: 1 }}>{tr.bpm > 0 ? '\u25cf'.repeat(tr.energy) : ''}</Text>
  </View>
  <Text style={{ color: t.brand, fontSize: 15 }}>▶</Text>
  </Pressable>
