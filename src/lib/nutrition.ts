@@ -35,14 +35,15 @@ export function macrosFor(s: BodyStats): Macros {
   };
 }
 
-export interface CoachAdjust { kcalDelta?: number; proteinDelta?: number }
+export interface CoachAdjust { kcalDelta?: number; proteinDelta?: number; carbDelta?: number; fatDelta?: number }
 /** Layer a coach macro adjustment on a computed target (kcal + protein deltas; carbs re-derived). */
 export function applyCoachAdjust(m: Macros, a?: CoachAdjust): Macros {
-  if (!a || (!a.kcalDelta && !a.proteinDelta)) return m;
+  if (!a || (!a.kcalDelta && !a.proteinDelta && !a.carbDelta && !a.fatDelta)) return m;
   const kcal = Math.max(1000, m.kcal + (a.kcalDelta || 0));
   const protein = Math.max(0, m.protein + (a.proteinDelta || 0));
-  const carbs = Math.max(20, Math.round((kcal - protein * 4 - m.fat * 9) / 4));
-  return { ...m, kcal, protein, carbs };
+  const fat = Math.max(0, m.fat + (a.fatDelta || 0));
+  const carbs = (a.carbDelta != null && a.carbDelta !== 0) ? Math.max(20, m.carbs + a.carbDelta) : Math.max(20, Math.round((kcal - protein * 4 - fat * 9) / 4));
+  return { ...m, kcal, protein, carbs, fat };
 }
 
 /** Chronologically sort a scan series and return the values used by charts. */

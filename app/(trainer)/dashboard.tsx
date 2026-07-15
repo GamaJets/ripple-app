@@ -533,7 +533,7 @@ export default function TrainerClients() {
 
               <View style={{ marginBottom: 14 }}>
                 <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 7 }}>Meal Plan Targets</Text>
-                <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 10 }}>Nudge {sel.name.split(' ')[0]}'s daily calories & protein — applies to their Meals tab live.</Text>
+                <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 10 }}>Shape {sel.name.split(' ')[0]}'s daily calories, protein, carbs & fat — applies to their Meals tab live.</Text>
                 <Text style={{ color: t.ink2, fontSize: 12, fontWeight: '700', marginBottom: 6 }}>Calories</Text>
                 <View style={{ flexDirection: 'row', gap: 6, marginBottom: 10 }}>
                   {[-300, -150, 0, 150, 300].map((v) => { const on = (getNutri(sel.id)?.kcalDelta ?? 0) === v; return (
@@ -545,6 +545,20 @@ export default function TrainerClients() {
                 <View style={{ flexDirection: 'row', gap: 6, marginBottom: 10 }}>
                   {[0, 10, 20, 30].map((v) => { const on = (getNutri(sel.id)?.proteinDelta ?? 0) === v; return (
                     <Pressable key={v} onPress={() => setNutri(sel.id, { proteinDelta: v })} style={{ flex: 1, paddingVertical: 9, borderRadius: 10, alignItems: 'center', backgroundColor: on ? t.brand : t.surface2, borderWidth: 1, borderColor: on ? t.brand : t.ring }}>
+                      <Text style={{ color: on ? t.brandInk : t.ink2, fontWeight: '800', fontSize: 12 }}>{v > 0 ? '+' + v : v}</Text>
+                    </Pressable>); })}
+                </View>
+                <Text style={{ color: t.ink2, fontSize: 12, fontWeight: '700', marginBottom: 6 }}>Carbs (g)</Text>
+                <View style={{ flexDirection: 'row', gap: 6, marginBottom: 10 }}>
+                  {[-50, -25, 0, 25, 50].map((v) => { const on = (getNutri(sel.id)?.carbDelta ?? 0) === v; return (
+                    <Pressable key={v} onPress={() => setNutri(sel.id, { carbDelta: v })} style={{ flex: 1, paddingVertical: 9, borderRadius: 10, alignItems: 'center', backgroundColor: on ? t.brand : t.surface2, borderWidth: 1, borderColor: on ? t.brand : t.ring }}>
+                      <Text style={{ color: on ? t.brandInk : t.ink2, fontWeight: '800', fontSize: 12 }}>{v > 0 ? '+' + v : v}</Text>
+                    </Pressable>); })}
+                </View>
+                <Text style={{ color: t.ink2, fontSize: 12, fontWeight: '700', marginBottom: 6 }}>Fat (g)</Text>
+                <View style={{ flexDirection: 'row', gap: 6, marginBottom: 10 }}>
+                  {[-20, -10, 0, 10, 20].map((v) => { const on = (getNutri(sel.id)?.fatDelta ?? 0) === v; return (
+                    <Pressable key={v} onPress={() => setNutri(sel.id, { fatDelta: v })} style={{ flex: 1, paddingVertical: 9, borderRadius: 10, alignItems: 'center', backgroundColor: on ? t.brand : t.surface2, borderWidth: 1, borderColor: on ? t.brand : t.ring }}>
                       <Text style={{ color: on ? t.brandInk : t.ink2, fontWeight: '800', fontSize: 12 }}>{v > 0 ? '+' + v : v}</Text>
                     </Pressable>); })}
                 </View>

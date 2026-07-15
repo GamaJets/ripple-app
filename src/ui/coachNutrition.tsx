@@ -30,7 +30,7 @@ export function CoachNutritionProvider({ children }: { children: ReactNode }) {
         const { data } = await supabase.from('coach_nutrition').select('*').or('client_id.eq.' + id + ',coach_id.eq.' + id);
         if (cancelled || !data) return;
         const m: Record<string, NutritionAdjust> = {};
-        for (const r of data as any[]) m[r.client_id] = { kcalDelta: r.kcal_delta ?? 0, proteinDelta: r.protein_delta ?? 0, note: r.note ?? undefined };
+        for (const r of data as any[]) m[r.client_id] = { kcalDelta: r.kcal_delta ?? 0, proteinDelta: r.protein_delta ?? 0, carbDelta: r.carb_delta ?? 0, fatDelta: r.fat_delta ?? 0, note: r.note ?? undefined };
         if (Object.keys(m).length) setMap((prev) => ({ ...prev, ...m }));
       } catch { /* stay in-memory */ }
     })();
@@ -39,10 +39,10 @@ export function CoachNutritionProvider({ children }: { children: ReactNode }) {
 
   const get = (clientId: string) => map[clientId] ?? null;
   const setAdjust = (clientId: string, patch: Partial<NutritionAdjust>) => {
-    const merged: NutritionAdjust = { kcalDelta: 0, proteinDelta: 0, ...(map[clientId] ?? {}), ...patch };
+    const merged: NutritionAdjust = { kcalDelta: 0, proteinDelta: 0, carbDelta: 0, fatDelta: 0, ...(map[clientId] ?? {}), ...patch };
     setMap((m) => ({ ...m, [clientId]: merged }));
     if (USE_SUPABASE && uid) {
-      try { supabase.from('coach_nutrition').upsert({ client_id: clientId, coach_id: uid, kcal_delta: merged.kcalDelta, protein_delta: merged.proteinDelta, note: merged.note ?? null }, { onConflict: 'client_id' }).then(() => {}, () => {}); } catch { /* ignore */ }
+      try { supabase.from('coach_nutrition').upsert({ client_id: clientId, coach_id: uid, kcal_delta: merged.kcalDelta, protein_delta: merged.proteinDelta, note: merged.note ?? null }, { onConflict: 'client_id' }).then(() => { supabase.from('coach_nutrition').update({ carb_delta: merged.carbDelta ?? 0, fat_delta: merged.fatDelta ?? 0 }).eq('client_id', clientId).then(() => {}, () => {}); }, () => {}); } catch { /* ignore */ }
     }
   };
   const clear = (clientId: string) => {
