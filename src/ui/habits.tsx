@@ -3,6 +3,7 @@
 // defensive in-memory fallback so it never blanks/crashes. Water glass count is
 // session-local (no counter column); its 'done' state persists like the rest.
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 
@@ -36,8 +37,11 @@ const Ctx = createContext<HabitsValue | null>(null);
 export function HabitsProvider({ children }: { children: ReactNode }) {
   const [habits, setHabits] = useState<Habit[]>(() => SEED.map((h) => ({ ...h })));
   const [water, setWater] = useState(0);
+  const [wHydrated, setWHydrated] = useState(false);
   const [uid, setUid] = useState<string | null>(null);
   const waterGoal = 8;
+  useEffect(() => { AsyncStorage.getItem('repple.water:' + today()).then((r) => { const n = r ? parseInt(r, 10) : 0; if (Number.isFinite(n) && n > 0) setWater(n); setWHydrated(true); }); }, []);
+  useEffect(() => { if (!wHydrated) return; AsyncStorage.setItem('repple.water:' + today(), String(water)).catch(() => {}); }, [water, wHydrated]);
 
   useEffect(() => {
     if (!USE_SUPABASE) return;
