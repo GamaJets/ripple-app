@@ -107,6 +107,7 @@ export default function Scans() {
   const [cmp, setCmp] = useState<number[]>([]);
   const [reading, setReading] = useState(false);
   const [ocrMsg, setOcrMsg] = useState<string | null>(null);
+  const [mxOpen, setMxOpen] = useState<string | null>(null);
   const [scanMx, setScanMx] = useState<ScanMetrics | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const now = new Date();
@@ -303,16 +304,21 @@ export default function Scans() {
               <View key={grp.group} style={{ marginBottom: 8 }}>
                 <Text style={{ color: t.ink3, fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 5 }}>{grp.group}</Text>
                 {grp.items.map((it) => (
-                  <View key={String(it.def.key)} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 5, borderBottomWidth: 1, borderBottomColor: t.ring }}>
-                    <Text style={{ color: t.ink2, fontSize: 13 }}>{it.def.label}</Text>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                      <Text style={{ color: t.ink, fontSize: 13, fontWeight: '700' }}>{it.latest} {it.def.unit}</Text>
-                      {it.delta != null && it.delta !== 0 ? (
-                        <Text style={{ color: it.good == null ? t.ink3 : it.good ? t.brand : t.warn, fontSize: 12, fontWeight: '700', minWidth: 46, textAlign: 'right' }}>{it.delta > 0 ? '+' : ''}{it.delta}</Text>
-                      ) : (
-                        <Text style={{ color: t.ink3, fontSize: 12, minWidth: 46, textAlign: 'right' }}>—</Text>
-                      )}
-                    </View>
+                  <View key={String(it.def.key)}>
+                    <Pressable onPress={() => { if (it.series.length >= 2) setMxOpen(mxOpen === String(it.def.key) ? null : String(it.def.key)); }} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 5, borderBottomWidth: 1, borderBottomColor: t.ring }}>
+                      <Text style={{ color: t.ink2, fontSize: 13 }}>{it.def.label}{it.series.length >= 2 ? (mxOpen === String(it.def.key) ? '  ▴' : '  ▾') : ''}</Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                        <Text style={{ color: t.ink, fontSize: 13, fontWeight: '700' }}>{it.latest} {it.def.unit}</Text>
+                        {it.delta != null && it.delta !== 0 ? (
+                          <Text style={{ color: it.good == null ? t.ink3 : it.good ? t.brand : t.warn, fontSize: 12, fontWeight: '700', minWidth: 46, textAlign: 'right' }}>{it.delta > 0 ? '+' : ''}{it.delta}</Text>
+                        ) : (
+                          <Text style={{ color: t.ink3, fontSize: 12, minWidth: 46, textAlign: 'right' }}>—</Text>
+                        )}
+                      </View>
+                    </Pressable>
+                    {mxOpen === String(it.def.key) && it.series.length >= 2 ? (
+                      <View style={{ paddingVertical: 8 }}><Spark t={t} data={it.series} h={44} /></View>
+                    ) : null}
                   </View>
                 ))}
               </View>
