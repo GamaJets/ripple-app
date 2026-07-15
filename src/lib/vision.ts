@@ -3,12 +3,13 @@
 // Falls back gracefully (returns null) when the backend isn't configured yet,
 // so the UI keeps its editable-estimate path until you deploy the function.
 import { supabase } from './supabase';
+import type { ScanMetrics } from './inbodyMetrics';
 // Vision runs off its own flag so you can enable AI photo reading without
 // flipping the whole app to live Supabase data. Set EXPO_PUBLIC_ENABLE_VISION=1
 // once the vision-analyze function is deployed.
 
 export interface MealVision { name: string; kcal: number; protein: number; carbs: number; fat: number; confidence: number }
-export interface InBodyVision { weightKg: number | null; bodyFatPct: number | null; skeletalMuscleKg: number | null; takenAt: string | null }
+export interface InBodyVision { weightKg: number | null; bodyFatPct: number | null; skeletalMuscleKg: number | null; takenAt: string | null; metrics?: ScanMetrics }
 
 /** True when the live backend is on — the vision function lives there. */
 export function visionAvailable(): boolean {
@@ -58,5 +59,13 @@ export async function analyzePhysique(imageBase64: string, mediaType?: string): 
 export async function analyzeInBody(imageBase64: string, mediaType?: string): Promise<InBodyVision | null> {
   const r = await call('inbody', imageBase64, mediaType);
   if (!r) return null;
-  return { weightKg: toNum(r.weightKg), bodyFatPct: toNum(r.bodyFatPct), skeletalMuscleKg: toNum(r.skeletalMuscleKg), takenAt: r.takenAt ?? null };
+  const num = (v: any) => toNum(v) ?? undefined;
+  const metrics: ScanMetrics = {
+    visceralFat: num(r.visceralFat), inbodyScore: num(r.inbodyScore), bmr: num(r.bmr),
+    fatMassKg: num(r.fatMassKg), leanMassKg: num(r.leanMassKg),
+    bodyWaterL: num(r.bodyWaterL), proteinKg: num(r.proteinKg), mineralsKg: num(r.mineralsKg),
+    leanArmLKg: num(r.leanArmLKg), leanArmRKg: num(r.leanArmRKg), leanTrunkKg: num(r.leanTrunkKg),
+    leanLegLKg: num(r.leanLegLKg), leanLegRKg: num(r.leanLegRKg),
+  };
+  return { weightKg: toNum(r.weightKg), bodyFatPct: toNum(r.bodyFatPct), skeletalMuscleKg: toNum(r.skeletalMuscleKg), takenAt: r.takenAt ?? null, metrics };
 }

@@ -5,6 +5,7 @@
 // in the data migration.
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import type { ScanMetrics } from '../lib/inbodyMetrics';
 import { MOCK_CLIENT } from '../lib/mockData';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
@@ -13,7 +14,7 @@ import type { Allergen } from '../lib/meals';
 import type { Injury } from '../lib/injuries';
 
 export type CoachingMode = 'online' | 'inperson' | 'solo';
-export interface ScanRec { id: string; takenAt: string; weightKg: number; bodyFatPct: number; skeletalMuscleKg: number; source: string; image?: string }
+export interface ScanRec { id: string; takenAt: string; weightKg: number; bodyFatPct: number; skeletalMuscleKg: number; source: string; image?: string; metrics?: ScanMetrics }
 interface Series { t: string; v: number }
 interface Value {
   id: string; name: string; init: string; setName: (v: string) => void;
@@ -50,6 +51,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
   const [injuries, setInjuries] = useState<Injury[]>([]);
   const [focusAreas, setFocusAreas] = useState<string[]>([]);
   const [scans, setScans] = useState<ScanRec[]>(base.scans.map((s) => ({ id: s.id, takenAt: s.takenAt, weightKg: s.weightKg, bodyFatPct: s.bodyFatPct, skeletalMuscleKg: s.skeletalMuscleKg, source: s.source })));
+  const [scanMetrics, setScanMetrics] = useState<Record<string, ScanMetrics>>({});
   const [manualWeight, setManualWeight] = useState<number | null>(null);
   const [manualBodyFat, setManualBodyFat] = useState<number | null>(null);
   const [manualAt, setManualAt] = useState<string | null>(null);
@@ -98,6 +100,8 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
     } catch { /* ignore */ }
   }, [name, goal, sbUid, hydrated]);
 
+  // Load locally-cached InBody composition metrics (keyed by scan date).
+  useEffect(() => { (async () => { try { const raw = await AsyncStorage.getItem('repple.scanMetrics'); if (raw) setScanMetrics(JSON.parse(raw)); } catch { /* ignore */ } })(); }, []);
   // Sync body scans with Supabase (per user) — hydrate-or-seed, defensive.
   useEffect(() => {
     if (!USE_SUPABASE) return;
@@ -118,7 +122,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
     return () => { cancelled = true; };
   }, []);
 
-  const sorted = useMemo(() => [...scans].sort((a, b) => Date.parse(a.takenAt) - Date.parse(b.takenAt)), [scans]);
+  const sorted = useMemo(() => [...scans].sort((a, b) => Date.parse(a.takenAt) - Date.parse(b.takenAt)).map((s) => (s.metrics ? s : (scanMetrics[s.takenAt.slice(0, 10)] ? { ...s, metrics: scanMetrics[s.takenAt.slice(0, 10)] } : s))), [scans, scanMetrics]);
   const latest = sorted[sorted.length - 1] ?? { id: 'none', takenAt: new Date(0).toISOString(), weightKg: manualWeight ?? 70, bodyFatPct: manualBodyFat ?? 20, skeletalMuscleKg: 0, source: '' };
   // Single source of truth: the most RECENT of {manual edit, latest scan} wins.
   const manualIsCurrent = manualAt != null && Date.parse(manualAt) >= Date.parse(latest.takenAt);
@@ -138,7 +142,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
     activity: base.activity, mealsPerDay: base.mealsPerDay as 3 | 4 | 5,
     weightKg, bodyFatPct, muscleKg: latest.skeletalMuscleKg,
     setWeightKg: (v) => { setManualWeight(v); setManualAt(new Date().toISOString()); }, setBodyFat: (v) => { setManualBodyFat(v); setManualAt(new Date().toISOString()); },
-    scans: sorted, addScan: (s) => { setScans((p) => [...p, s]); setManualWeight(null); setManualBodyFat(null); if (USE_SUPABASE && sbUid) { try { supabase.from('scans').insert({ client_id: sbUid, taken_at: String(s.takenAt).slice(0, 10), weight_kg: s.weightKg, body_fat_pct: s.bodyFatPct, skeletal_muscle_kg: s.skeletalMuscleKg, source: s.source }).then(() => {}, () => {}); } catch { /* ignore */ } } },
+    scans: sorted, addScan: (s) => { setScans((p) => [...p, s]); if (s.metrics && Object.values(s.metrics).some((v) => v != null)) { setScanMetrics((prev) => { const nm = { ...prev, [s.takenAt.slice(0, 10)]: s.metrics! }; AsyncStorage.setItem('repple.scanMetrics', JSON.stringify(nm)).catch(() => {}); return nm; }); } setManualWeight(null); setManualBodyFat(null); if (USE_SUPABASE && sbUid) { try { supabase.from('scans').insert({ client_id: sbUid, taken_at: String(s.takenAt).slice(0, 10), weight_kg: s.weightKg, body_fat_pct: s.bodyFatPct, skeletal_muscle_kg: s.skeletalMuscleKg, source: s.source }).then(() => {}, () => {}); } catch { /* ignore */ } } },
     weightSeries: [...sorted.map((s) => ({ t: s.takenAt, v: s.weightKg })), ...(manualIsCurrent && manualWeight != null ? [{ t: manualAt as string, v: manualWeight }] : [])],
     bodyFatSeries: [...sorted.map((s) => ({ t: s.takenAt, v: s.bodyFatPct })), ...(manualIsCurrent && manualBodyFat != null ? [{ t: manualAt as string, v: manualBodyFat }] : [])],
     muscleSeries: sorted.map((s) => ({ t: s.takenAt, v: s.skeletalMuscleKg })),

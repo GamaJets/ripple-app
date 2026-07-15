@@ -16,6 +16,7 @@ import { useBrand } from '../../src/ui/brand';
 import { TrendChart } from '../../src/ui/Chart';
 import { Icon } from '../../src/ui/Icon';
 import { analyzeInBody, analyzePhysique, visionAvailable, type PhysiqueVision } from '../../src/lib/vision';
+import { metricTrends, compositionInsights, METRIC_GROUPS, type ScanMetrics } from '../../src/lib/inbodyMetrics';
 import { focusToGroups } from '../../src/lib/focus';
 
 const SERIF = 'Georgia';
@@ -106,6 +107,7 @@ export default function Scans() {
   const [cmp, setCmp] = useState<number[]>([]);
   const [reading, setReading] = useState(false);
   const [ocrMsg, setOcrMsg] = useState<string | null>(null);
+  const [scanMx, setScanMx] = useState<ScanMetrics | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const now = new Date();
   const [dD, setDD] = useState(now.getDate() - 1);
@@ -121,11 +123,12 @@ export default function Scans() {
     if (!perm.granted) { Alert.alert('Permission needed', 'Allow access to ' + (fromCamera ? 'the camera' : 'your photos') + ' to add a scan.'); return; }
     const res = fromCamera ? await ImagePicker.launchCameraAsync({ quality: 0.7, base64: true }) : await ImagePicker.launchImageLibraryAsync({ quality: 0.7, base64: true });
     if (!res.canceled && res.assets && res.assets[0]) {
-      const asset = res.assets[0]; const uri = asset.uri; setImg(uri); setReading(true); setOcrMsg(null);
+      const asset = res.assets[0]; const uri = asset.uri; setImg(uri); setReading(true); setOcrMsg(null); setScanMx(null);
       if (visionAvailable() && asset.base64) {
         const v = await analyzeInBody(asset.base64);
         if (v && (v.weightKg != null || v.bodyFatPct != null || v.skeletalMuscleKg != null)) {
           setReading(false);
+          setScanMx(v.metrics ?? null);
           if (v.weightKg != null) setWt(String(v.weightKg));
           if (v.bodyFatPct != null) setBf(String(v.bodyFatPct));
           if (v.skeletalMuscleKg != null) setSm(String(v.skeletalMuscleKg));
@@ -146,8 +149,8 @@ export default function Scans() {
     const before = macrosFor({ weightKg: cd.weightKg, bodyFatPct: cd.bodyFatPct, activity: cd.activity, goal: cd.goal, diet: cd.diet });
     const after = macrosFor({ weightKg: w, bodyFatPct: f, activity: cd.activity, goal: cd.goal, diet: cd.diet });
     const pw = cd.weightKg, pf = cd.bodyFatPct;
-    cd.addScan({ id: 's' + Date.now(), takenAt: scanDateISO(), weightKg: w, bodyFatPct: f, skeletalMuscleKg: m, source: 'InBody (manual)', image: img || undefined });
-    setImg(null); setWt(''); setBf(''); setSm(''); setShowAdd(false);
+    cd.addScan({ id: 's' + Date.now(), takenAt: scanDateISO(), weightKg: w, bodyFatPct: f, skeletalMuscleKg: m, source: scanMx ? 'InBody (OCR)' : 'InBody (manual)', image: img || undefined, metrics: scanMx ?? undefined });
+    setImg(null); setWt(''); setBf(''); setSm(''); setScanMx(null); setShowAdd(false);
     const dK = after.kcal - before.kcal, dP = after.protein - before.protein;
     const sign = (x: number) => (x > 0 ? '+' + x : String(x));
     const changed = Math.abs(dK) >= 5 || Math.abs(dP) >= 2;
@@ -181,6 +184,9 @@ export default function Scans() {
   const latest = chrono[chrono.length - 1];
   const prev = chrono.length > 1 ? chrono[chrono.length - 2] : null;
   const wsv = cd.weightSeries.map((x) => x.v);
+  const mTrends = metricTrends(cd.scans);
+  const mInsights = compositionInsights(cd.scans);
+  const mByGroup = METRIC_GROUPS.map((g) => ({ group: g, items: mTrends.filter((x) => x.def.group === g) })).filter((g) => g.items.length > 0);
   const wDelta = wsv.length > 1 ? +(wsv[wsv.length - 1] - wsv[0]).toFixed(1) : null;
   const fmt = (iso: string) => { const d = new Date(iso); return `${d.getDate()}/${d.getMonth() + 1}/${String(d.getFullYear()).slice(2)}`; };
   const daysAgo = latest ? Math.max(0, Math.round((Date.now() - Date.parse(latest.takenAt)) / 86400000)) : 0;
@@ -281,6 +287,38 @@ export default function Scans() {
             </View>
           )}
         </View>
+
+        {mByGroup.length > 0 && (
+          <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 16, marginBottom: 12 }}>
+            <Text style={{ color: t.ink, fontWeight: '800', fontSize: 14 }}>Body composition</Text>
+            <Text style={{ color: t.ink3, fontSize: 11.5, marginTop: 1, marginBottom: 12 }}>From your InBody scans · latest vs previous</Text>
+            {(mInsights.improving.length > 0 || mInsights.watch.length > 0 || mInsights.balance.length > 0) && (
+              <View style={{ backgroundColor: t.surface2, borderRadius: 12, borderWidth: 1, borderColor: t.ring, padding: 12, marginBottom: 14 }}>
+                {mInsights.improving.length > 0 ? <Text style={{ color: t.ink2, fontSize: 12.5, lineHeight: 19 }}><Text style={{ color: t.brand, fontWeight: '800' }}>Improving  </Text>{mInsights.improving.join('  ·  ')}</Text> : null}
+                {mInsights.watch.length > 0 ? <Text style={{ color: t.ink2, fontSize: 12.5, lineHeight: 19, marginTop: 4 }}><Text style={{ color: t.warn, fontWeight: '800' }}>Watch  </Text>{mInsights.watch.join('  ·  ')}</Text> : null}
+                {mInsights.balance.map((b, i) => <Text key={i} style={{ color: t.ink3, fontSize: 12, lineHeight: 18, marginTop: 4 }}>{b}</Text>)}
+              </View>
+            )}
+            {mByGroup.map((grp) => (
+              <View key={grp.group} style={{ marginBottom: 8 }}>
+                <Text style={{ color: t.ink3, fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 5 }}>{grp.group}</Text>
+                {grp.items.map((it) => (
+                  <View key={String(it.def.key)} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 5, borderBottomWidth: 1, borderBottomColor: t.ring }}>
+                    <Text style={{ color: t.ink2, fontSize: 13 }}>{it.def.label}</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                      <Text style={{ color: t.ink, fontSize: 13, fontWeight: '700' }}>{it.latest} {it.def.unit}</Text>
+                      {it.delta != null && it.delta !== 0 ? (
+                        <Text style={{ color: it.good == null ? t.ink3 : it.good ? t.brand : t.warn, fontSize: 12, fontWeight: '700', minWidth: 46, textAlign: 'right' }}>{it.delta > 0 ? '+' : ''}{it.delta}</Text>
+                      ) : (
+                        <Text style={{ color: t.ink3, fontSize: 12, minWidth: 46, textAlign: 'right' }}>—</Text>
+                      )}
+                    </View>
+                  </View>
+                ))}
+              </View>
+            ))}
+          </View>
+        )}
 
         {/* latest InBody scan card */}
         <Pressable onPress={() => setShowAdd(true)} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12 }}>

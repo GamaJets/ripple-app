@@ -29,10 +29,16 @@ const PROMPTS: Record<string, string> = {
     'Respond with ONLY valid JSON, no prose: {"bodyFatPct": number, "notes": string, "focusAreas": [string]}. ' +
     'bodyFatPct is your best visual estimate (%), notes is one or two encouraging sentences on what stands out, focusAreas lists 2-3 muscle groups or areas to prioritise next. This is a fitness estimate only, not medical or diagnostic advice.',
   inbody:
-    'This is an InBody (or similar) body-composition scan. Extract these fields. ' +
-    'Respond with ONLY valid JSON, no prose: {"weightKg": number, "bodyFatPct": number, "skeletalMuscleKg": number, "takenAt": string|null}. ' +
-    'weightKg is total body weight in kg, bodyFatPct is PBF %, skeletalMuscleKg is SMM in kg. takenAt is the scan date as YYYY-MM-DD if printed, else null. ' +
-    'If a value is not present, use null for it.',
+    'This is an InBody (or similar) body-composition scan. Extract EVERY field below that is printed. ' +
+    'Respond with ONLY valid JSON numbers (not strings), no prose: ' +
+    '{"weightKg": number, "bodyFatPct": number, "skeletalMuscleKg": number, "takenAt": string|null, ' +
+    '"visceralFat": number, "inbodyScore": number, "bmr": number, "fatMassKg": number, "leanMassKg": number, ' +
+    '"bodyWaterL": number, "proteinKg": number, "mineralsKg": number, ' +
+    '"leanArmLKg": number, "leanArmRKg": number, "leanTrunkKg": number, "leanLegLKg": number, "leanLegRKg": number}. ' +
+    'Definitions: weightKg=total body weight kg; bodyFatPct=PBF %; skeletalMuscleKg=SMM kg; visceralFat=visceral fat level (unitless); ' +
+    'inbodyScore=total InBody score points; bmr=basal metabolic rate kcal; fatMassKg=body fat mass kg; leanMassKg=lean/fat-free body mass kg; ' +
+    'bodyWaterL=total body water L; proteinKg and mineralsKg in kg; leanArmLKg/leanArmRKg/leanTrunkKg/leanLegLKg/leanLegRKg are the segmental lean analysis (left/right arm, trunk, left/right leg) in kg. ' +
+    'takenAt is the scan date YYYY-MM-DD if printed, else null. Use null for any field not present on the sheet. Return numbers as numbers.',
 };
 
 function extractJson(text: string): any {
