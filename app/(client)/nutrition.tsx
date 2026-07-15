@@ -56,10 +56,14 @@ export default function Nutrition() {
   const bf = c.bodyFatPct;
   const diet = c.diet;
   const [override, setOverride] = useState<Record<number, number>>({});
+  const [ovHydrated, setOvHydrated] = useState(false);
   const [recipe, setRecipe] = useState<PlannedMeal | null>(null);
   const [showGrocery, setShowGrocery] = useState(false);
   const [checked, setChecked] = useState<Record<string, boolean>>({});
   useEffect(() => { AsyncStorage.getItem('repple.grocery.checked').then((r) => { if (r) { try { setChecked(JSON.parse(r)); } catch { /* ignore */ } } }); }, []);
+  // Persist the client's meal swaps so they survive leaving the tab / relaunch.
+  useEffect(() => { AsyncStorage.getItem('repple.mealOverride').then((r) => { if (r) { try { setOverride(JSON.parse(r)); } catch { /* ignore */ } } setOvHydrated(true); }); }, []);
+  useEffect(() => { if (!ovHydrated) return; AsyncStorage.setItem('repple.mealOverride', JSON.stringify(override)).catch(() => {}); }, [override, ovHydrated]);
   const [view, setView] = useState<'today' | 'week'>('today');
   const [showAvoid, setShowAvoid] = useState(false);
   const [dayType, setDayType] = useState<'training' | 'rest' | 'off'>('off');
