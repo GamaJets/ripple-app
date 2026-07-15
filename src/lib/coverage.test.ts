@@ -1,5 +1,5 @@
 // Extended pure-logic coverage (Phase 8 QA). Compile with tsc then run with node.
-import { currentStreak, longestStreak, personalRecords, weekStats, est1RM, isNewPR, streakMilestone } from './streaks';
+import { currentStreak, longestStreak, personalRecords, weekStats, est1RM, isNewPR, streakMilestone, freezeBudget, currentStreakFrozen } from './streaks';
 import { parseRepRange, suggestNextWeight, suggestForExercise, priorBest1RM } from './progression';
 import { overlaps, isLateCancellation, cancelSession, nextFromWaitlist } from './booking';
 import type { WorkoutEntry } from './mockData';
@@ -18,6 +18,19 @@ ok(est1RM(100, 30) === 200 && est1RM(100, 0) === 100, 'est1RM Epley');
 ok(personalRecords(log)[0].exercise === 'Back Squat', 'PR exercise');
 ok(weekStats(log, Date.now()).workouts === 5, 'weekStats workouts');
 ok(streakMilestone(7)!.includes('week') && streakMilestone(1) === null, 'milestone labels');
+// ── streak freeze ──
+// 5-day chain (days 0..4), miss day 5, then trained days 6,7 -> a freeze bridges day 5.
+const gapLog: WorkoutEntry[] = [0,1,2,3,4,6,7,8,9,10,11,12].map((n) => ({ t: day(n), exercise: 'X', sets: [[8,50]] as [number,number][] }));
+ok(currentStreak(gapLog, Date.now()) === 5, 'raw streak stops at gap = 5');
+ok(freezeBudget(gapLog) === 1, 'freezeBudget: 12 days -> 1');
+ok(currentStreakFrozen(gapLog, 1, Date.now()).streak === 12, 'freeze bridges the gap -> 12');
+ok(currentStreakFrozen(gapLog, 1, Date.now()).freezesUsed === 1, 'one freeze consumed');
+ok(currentStreakFrozen(gapLog, 0, Date.now()).streak === 5, 'no freeze -> raw 5');
+ok(freezeBudget(log) === 0, 'freezeBudget: 5 days -> 0');
+ok(currentStreakFrozen([], 2, Date.now()).streak === 0, 'empty frozen streak 0');
+// a trailing freeze is never wasted when nothing older exists
+const trailLog: WorkoutEntry[] = [0,1,2].map((n) => ({ t: day(n), exercise: 'X', sets: [[8,50]] as [number,number][] }));
+ok(currentStreakFrozen(trailLog, 2, Date.now()).freezesUsed === 0, 'no freeze wasted on trailing edge');
 const prEntry: WorkoutEntry = { t: day(0), exercise: 'B', sets: [[5, 100]] };
 ok(isNewPR([{ t: day(3), exercise: 'B', sets: [[5, 80]] }, prEntry], prEntry) === true, 'isNewPR true');
 

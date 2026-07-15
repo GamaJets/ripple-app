@@ -31,6 +31,43 @@ export function currentStreak(log: WorkoutEntry[], now: number = Date.now()): nu
   return streak;
 }
 
+export interface FrozenStreak { streak: number; freezesUsed: number; frozen: string[] }
+/**
+ * Streak "freeze" budget. The user earns one freeze for every 10 total training
+ * days on record, capped at 2 — a small buffer so an occasional missed day does
+ * not wipe out weeks of consistency (mirrors the Duolingo-style streak freeze).
+ * Pure + derived from the log, so no separate persistence can drift out of sync.
+ */
+export function freezeBudget(log: WorkoutEntry[]): number {
+  return Math.min(2, Math.floor(activeDays(log).length / 10));
+}
+/**
+ * Current streak, allowing up to `freezes` missed days to be bridged inside the
+ * active chain. Returns the (protected) streak length plus which gap days a
+ * freeze covered. A freeze is only spent when there is an older active day still
+ * to chain to — trailing gaps never waste one. Mirrors currentStreak's day math.
+ */
+export function currentStreakFrozen(log: WorkoutEntry[], freezes: number = 0, now: number = Date.now()): FrozenStreak {
+  const daysArr = activeDays(log);
+  if (daysArr.length === 0) return { streak: 0, freezesUsed: 0, frozen: [] };
+  const days = new Set(daysArr);
+  const minActive = Math.min(...daysArr.map((d) => Date.parse(d + 'T00:00:00')));
+  const kOf = (ts: number) => dayKey(new Date(ts).toISOString());
+  const midnight = new Date(now); midnight.setHours(0, 0, 0, 0);
+  let cursor = midnight.getTime();
+  if (!days.has(kOf(cursor))) cursor -= DAY;
+  let streak = 0, used = 0, budget = Math.max(0, freezes);
+  const frozen: string[] = [];
+  while (true) {
+    if (days.has(kOf(cursor))) { streak++; cursor -= DAY; continue; }
+    if (streak === 0) break;          // no active day anchoring the chain yet
+    if (budget <= 0) break;           // out of freezes — chain ends here
+    if (cursor <= minActive) break;   // nothing older to reach — don't waste a freeze
+    budget--; used++; frozen.push(kOf(cursor)); cursor -= DAY;
+  }
+  return { streak, freezesUsed: used, frozen };
+}
+
 export interface StreakRisk { atRisk: boolean; streak: number; trainedToday: boolean }
 /**
  * Retention signal: an active streak (>=2) that will break tonight because the

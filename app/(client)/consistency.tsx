@@ -5,7 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
-import { currentStreak, longestStreak } from '../../src/lib/streaks';
+import { currentStreak, longestStreak, freezeBudget, currentStreakFrozen } from '../../src/lib/streaks';
 
 const WEEKS = 12;
 const DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -34,7 +34,8 @@ export default function Consistency() {
 
   const totalSessions = Object.values(counts).reduce((a, n) => a + n, 0);
   const trainedDays = Object.keys(counts).length;
-  const streak = currentStreak(log);
+  const freezes = freezeBudget(log);
+  const streak = currentStreakFrozen(log, freezes).streak;
   const best = longestStreak(log);
 
   const cell = (d: Date) => {
@@ -55,7 +56,7 @@ export default function Consistency() {
         <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 18 }}>Last {WEEKS} weeks of training</Text>
 
         <View style={{ flexDirection: 'row', gap: 10, marginBottom: 18 }}>
-          {[['Sessions', String(totalSessions)], ['Days trained', String(trainedDays)], ['Streak', String(streak)], ['Best', String(best)]].map(([l, v]) => (
+          {[['Sessions', String(totalSessions)], ['Days trained', String(trainedDays)], ['Streak', String(streak)], ['Best', String(best)], ['\u2744 Freezes', String(freezes)]].map(([l, v]) => (
             <View key={l} style={{ flex: 1, backgroundColor: t.surface, borderRadius: 14, borderWidth: 1, borderColor: t.ring, padding: 12, alignItems: 'center' }}>
               <Text style={{ color: t.ink, fontWeight: '800', fontSize: 18 }}>{v}</Text>
               <Text style={{ color: t.ink3, fontSize: 10, marginTop: 2 }}>{l}</Text>

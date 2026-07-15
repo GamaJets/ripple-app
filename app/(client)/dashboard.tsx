@@ -26,7 +26,7 @@ import { useSessions } from '../../src/ui/sessions';
 import { useInvites } from '../../src/ui/invites';
 import { useFoodLog } from '../../src/ui/foodLog';
 import { useWearables } from '../../src/ui/wearables';
-import { currentStreak, weekStats, personalRecords, streakRisk } from '../../src/lib/streaks';
+import { currentStreak, weekStats, personalRecords, streakRisk, freezeBudget, currentStreakFrozen } from '../../src/lib/streaks';
 import { severeSummary } from '../../src/lib/injuries';
 import { scheduleLocal, pushAvailable } from '../../src/ui/pushNotifications';
 
@@ -87,8 +87,11 @@ export default function Home() {
   const jsToMon = (new Date().getDay() + 6) % 7;
   const workout = program.days[jsToMon % program.days.length] || program.days[0] || { focus: 'Rest day', exercises: [] };
 
-  const streak = currentStreak(log);
+  const freezes = freezeBudget(log);
+  const frz = currentStreakFrozen(log, freezes);
+  const streak = frz.streak;
   const risk = streakRisk(log);
+  const protectedTonight = risk.atRisk && freezes > 0;
   const sevInj = severeSummary(c.injuries);
   const remindTonight = async () => {
     const when = new Date(); when.setHours(19, 0, 0, 0);
@@ -225,16 +228,16 @@ export default function Home() {
         ) : null}
 
         {risk.atRisk ? (
-          <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.s3, padding: 15, marginBottom: 12 }}>
+          <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: protectedTonight ? t.brand : t.s3, padding: 15, marginBottom: 12 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-              <View style={{ width: 42, height: 42, borderRadius: 12, backgroundColor: 'rgba(201,133,0,0.16)', alignItems: 'center', justifyContent: 'center' }}><Icon name="flame" size={22} color={t.s3} /></View>
+              <View style={{ width: 42, height: 42, borderRadius: 12, backgroundColor: protectedTonight ? 'rgba(22,184,166,0.16)' : 'rgba(201,133,0,0.16)', alignItems: 'center', justifyContent: 'center' }}><Icon name={protectedTonight ? 'check' : 'flame'} size={22} color={protectedTonight ? t.brand : t.s3} /></View>
               <View style={{ flex: 1 }}>
-                <Text style={{ color: t.ink, fontWeight: '800', fontSize: 15 }}>Your {risk.streak}-day streak is on the line</Text>
-                <Text style={{ color: t.ink3, fontSize: 12.5, marginTop: 1 }}>Log one session today to keep it alive.</Text>
+                <Text style={{ color: t.ink, fontWeight: '800', fontSize: 15 }}>{protectedTonight ? `A streak freeze has your ${risk.streak}-day streak` : `Your ${risk.streak}-day streak is on the line`}</Text>
+                <Text style={{ color: t.ink3, fontSize: 12.5, marginTop: 1 }}>{protectedTonight ? `${freezes} freeze${freezes > 1 ? 's' : ''} in reserve — tonight's covered, but training keeps it growing.` : 'Log one session today to keep it alive.'}</Text>
               </View>
             </View>
             <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
-              <Pressable onPress={() => router.push('/(client)/workouts')} style={{ flex: 1, backgroundColor: t.s3, borderRadius: 11, paddingVertical: 12, alignItems: 'center' }}><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 13.5 }}>Start now</Text></Pressable>
+              <Pressable onPress={() => router.push('/(client)/workouts')} style={{ flex: 1, backgroundColor: protectedTonight ? t.brand : t.s3, borderRadius: 11, paddingVertical: 12, alignItems: 'center' }}><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 13.5 }}>Start now</Text></Pressable>
               {pushAvailable() ? <Pressable onPress={remindTonight} style={{ flex: 1, backgroundColor: t.surface2, borderWidth: 1, borderColor: t.ring, borderRadius: 11, paddingVertical: 12, alignItems: 'center' }}><Text style={{ color: t.ink, fontWeight: '800', fontSize: 13.5 }}>Remind me tonight</Text></Pressable> : null}
             </View>
           </View>
