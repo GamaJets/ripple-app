@@ -28,7 +28,7 @@ export function RosterProvider({ children }: { children: ReactNode }) {
       try {
         const { data: auth } = await supabase.auth.getUser();
         const uid = auth?.user?.id; if (!uid || cancelled) return;
-        const { data: cls, error } = await supabase.from('clients').select('id, goal').eq('trainer_id', uid);
+        const { data: cls, error } = await supabase.from('clients').select('id, goal, diet, meals_per_day').eq('trainer_id', uid);
         if (error || !cls || !cls.length || cancelled) return;
         const ids = cls.map((c: any) => c.id);
         const names: Record<string, string> = {};
@@ -56,7 +56,7 @@ export function RosterProvider({ children }: { children: ReactNode }) {
           (ci || []).forEach((r: any) => { if (st[r.user_id]) { st[r.user_id].last = Math.max(st[r.user_id].last, Date.parse(r.at)); if (!seen.has(r.user_id) && typeof r.adherence === 'number') { seen.add(r.user_id); st[r.user_id].adh = r.adherence; } } });
         } catch { /* ignore */ }
         const goalMap: Record<string, string> = { fatloss: 'Fat loss', tone: 'Tone', muscle: 'Build muscle' };
-        const real: RosterClient[] = cls.map((c: any) => ({ id: c.id, name: names[c.id] || 'Client', goal: goalMap[c.goal] || 'General', weightDelta: st[c.id].wDelta, adherence: st[c.id].adh != null ? st[c.id].adh : 100, lastActive: st[c.id].last ? ago(st[c.id].last) : 'recently', next: '—', unread: 0, mode: 'online', metrics: st[c.id].mx ?? undefined }));
+        const real: RosterClient[] = cls.map((c: any) => ({ id: c.id, name: names[c.id] || 'Client', goal: goalMap[c.goal] || 'General', weightDelta: st[c.id].wDelta, adherence: st[c.id].adh != null ? st[c.id].adh : 100, lastActive: st[c.id].last ? ago(st[c.id].last) : 'recently', next: '—', unread: 0, mode: 'online', metrics: st[c.id].mx ?? undefined, diet: c.diet ?? undefined, mealsPerDay: c.meals_per_day ?? undefined }));
         if (!cancelled && real.length) setRoster((p) => { const seen = new Set(p.map((x) => x.id)); const add = real.filter((r) => !seen.has(r.id)); return add.length ? [...add, ...p] : p; });
       } catch { /* stay on demo roster */ }
     })();

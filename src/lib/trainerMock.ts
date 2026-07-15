@@ -5,6 +5,8 @@ export interface RosterClient {
   mode: 'online' | 'inperson';
   injuries?: { area: string; severity: string; note?: string; isNew?: boolean }[];
   metrics?: import('./inbodyMetrics').ScanMetrics;
+  diet?: string;
+  mealsPerDay?: number;
 }
 export const ROSTER: RosterClient[] = [
   { id: 'c1', name: 'Timothy', goal: 'Fat loss', weightDelta: -3.8, adherence: 92, lastActive: '2h ago', next: 'Today · 9am', unread: 1, mode: 'online', injuries: [{ area: 'knee', severity: 'moderate', note: 'Sharp on deep squats — cleared for light work', isNew: true }] },

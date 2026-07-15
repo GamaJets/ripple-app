@@ -106,9 +106,9 @@ export default function Nutrition() {
 
   const cycleDelta = dayType === 'training' ? 250 : dayType === 'rest' ? -250 : 0;
   const cyclingAdjust = (coachAdjust || cycleDelta)
-    ? { kcalDelta: (coachAdjust?.kcalDelta || 0) + cycleDelta, proteinDelta: coachAdjust?.proteinDelta }
+    ? { kcalDelta: (coachAdjust?.kcalDelta || 0) + cycleDelta, proteinDelta: coachAdjust?.proteinDelta, carbDelta: coachAdjust?.carbDelta, fatDelta: coachAdjust?.fatDelta }
     : undefined;
-  const input = { id: c.id, weightKg: w, bodyFatPct: bf, activity: c.activity, goal: c.goal, diet, mealsPerDay: c.mealsPerDay, mealOverride: override, coachAdjust: cyclingAdjust, avoid: c.avoid };
+  const input = { id: c.id, weightKg: w, bodyFatPct: bf, activity: c.activity, goal: c.goal, diet, mealsPerDay: c.mealsPerDay, mealOverride: { ...(coachAdjust?.mealOverride ?? {}), ...override }, coachAdjust: cyclingAdjust, avoid: c.avoid };
   const { plan, target, tot } = buildPlan(input);
   const swap = (pos: number, slot: PlannedMeal['slot'], idx: number) => setOverride({ ...override, [pos]: swapIndex(diet, slot, idx) });
   const groc = groceryData(input);

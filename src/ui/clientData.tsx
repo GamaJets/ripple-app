@@ -97,8 +97,9 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
     try {
       supabase.from('profiles').update({ full_name: name }).eq('id', sbUid).then(() => {}, () => {});
       supabase.from('clients').update({ goal }).eq('id', sbUid).then(() => {}, () => {});
+      supabase.from('clients').update({ diet, meals_per_day: base.mealsPerDay }).eq('id', sbUid).then(() => {}, () => {});
     } catch { /* ignore */ }
-  }, [name, goal, sbUid, hydrated]);
+  }, [name, goal, diet, sbUid, hydrated]);
 
   // Load locally-cached InBody composition metrics (keyed by scan date).
   useEffect(() => { (async () => { try { const raw = await AsyncStorage.getItem('repple.scanMetrics'); if (raw) setScanMetrics(JSON.parse(raw)); } catch { /* ignore */ } })(); }, []);
