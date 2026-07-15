@@ -3,6 +3,7 @@ import { currentStreak, longestStreak, personalRecords, weekStats, est1RM, isNew
 import { parseRepRange, suggestNextWeight, suggestForExercise, priorBest1RM, suggestProgression } from './progression';
 import { overlaps, isLateCancellation, cancelSession, nextFromWaitlist } from './booking';
 import type { WorkoutEntry } from './mockData';
+import { buildIcs } from './ics';
 import type { TrainingSession } from './types';
 
 const errors: string[] = [];
@@ -18,6 +19,13 @@ ok(est1RM(100, 30) === 200 && est1RM(100, 0) === 100, 'est1RM Epley');
 ok(personalRecords(log)[0].exercise === 'Back Squat', 'PR exercise');
 ok(weekStats(log, Date.now()).workouts === 5, 'weekStats workouts');
 ok(streakMilestone(7)!.includes('week') && streakMilestone(1) === null, 'milestone labels');
+// ── ics export ──
+const _ics = buildIcs([{ start: '2026-07-20T09:00:00Z', durationMin: 60, title: 'Training, with; coach' }], 'Repple', Date.parse('2026-07-15T00:00:00Z'));
+ok(_ics.startsWith('BEGIN:VCALENDAR') && _ics.trimEnd().endsWith('END:VCALENDAR'), 'ics envelope');
+ok(_ics.includes('DTSTART:20260720T090000Z') && _ics.includes('DTEND:20260720T100000Z'), 'ics start/end utc');
+ok(_ics.includes('SUMMARY:Training\\, with\\; coach'), 'ics escapes comma/semicolon');
+ok((_ics.match(/BEGIN:VEVENT/g) || []).length === 1, 'ics one event');
+ok(buildIcs([], 'X', 0).includes('X-WR-CALNAME:X'), 'ics empty calendar still valid');
 // ── streak freeze ──
 // 5-day chain (days 0..4), miss day 5, then trained days 6,7 -> a freeze bridges day 5.
 const gapLog: WorkoutEntry[] = [0,1,2,3,4,6,7,8,9,10,11,12].map((n) => ({ t: day(n), exercise: 'X', sets: [[8,50]] as [number,number][] }));

@@ -11,6 +11,30 @@ try { Sharing = require('expo-sharing'); } catch { /* optional */ }
 
 export const pdfExportAvailable = () => !!Print;
 
+// ── Calendar (.ics) export ───────────────────────────────────────────────────
+// Standards-compliant iCalendar so a client/coach can drop their sessions into
+// Apple Calendar, Google Calendar, etc. Writes a real .ics file when the native
+// file-system module is present (after a rebuild); otherwise falls back to the
+// Share sheet with the calendar text, so it works over-the-air today.
+let FileSystem: any = null;
+try { FileSystem = require('expo-file-system'); } catch { /* lights up after a rebuild */ }
+
+export { buildIcs, type IcsEvent } from './ics';
+
+export async function shareIcs(ics: string, filename: string, title: string): Promise<'file' | 'text'> {
+  if (FileSystem?.cacheDirectory && Sharing?.shareAsync) {
+    try {
+      const uri = FileSystem.cacheDirectory + filename;
+      await FileSystem.writeAsStringAsync(uri, ics, { encoding: FileSystem.EncodingType?.UTF8 ?? 'utf8' });
+      const ok = Sharing.isAvailableAsync ? await Sharing.isAvailableAsync() : true;
+      if (ok) { await Sharing.shareAsync(uri, { mimeType: 'text/calendar', dialogTitle: title, UTI: 'com.apple.ical.ics' }); return 'file'; }
+    } catch { /* fall through to text */ }
+  }
+  try { await Share.share({ message: ics, title }); } catch { /* ignore */ }
+  return 'text';
+}
+
+
 export async function shareDoc(html: string, text: string, title: string): Promise<'pdf' | 'text'> {
   if (Print?.printToFileAsync) {
     try {

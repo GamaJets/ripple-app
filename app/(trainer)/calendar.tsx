@@ -16,6 +16,7 @@ import { useSessions } from '../../src/ui/sessions';
 import { useAvailability, upcomingDates } from '../../src/ui/availability';
 import { useRoster } from '../../src/ui/roster';
 import type { TrainingSession } from '../../src/lib/types';
+import { buildIcs, shareIcs } from '../../src/lib/exportShare';
 
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MON = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -141,6 +142,13 @@ export default function TrainerSchedule() {
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
         <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia' }}>Schedule</Text>
         <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 16 }}>Tap a day to see sessions · add or cancel any time</Text>
+
+ {booked.length > 0 ? (
+ <Pressable onPress={async () => { const evts = booked.map((s) => ({ start: s.startsAt, durationMin: s.durationMin, title: `Session · ${nameOf(s.clientId)}` })); await shareIcs(buildIcs(evts, 'Repple — Coaching schedule'), 'repple-schedule.ics', 'Export your schedule'); }} accessibilityRole="button" accessibilityLabel="Export your schedule to calendar" style={{ flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', backgroundColor: t.surface, borderWidth: 1, borderColor: t.ring, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 16 }}>
+ <Icon name="calendar" size={15} color={t.brand} />
+ <Text style={{ color: t.ink, fontWeight: '700', fontSize: 13 }}>Export schedule</Text>
+ </Pressable>
+ ) : null}
 
         <View style={{ flexDirection: 'row', gap: 12, marginBottom: 16 }}>
           <View style={{ flex: 1, backgroundColor: t.brand, borderRadius: 16, padding: 14 }}>

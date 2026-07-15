@@ -12,6 +12,7 @@ import { useSessions } from '../../src/ui/sessions';
 import { useCoachProfile } from '../../src/ui/coachProfile';
 import type { TrainingSession } from '../../src/lib/types';
 import { sessionsRemaining, redeemSession, refundSession } from '../../src/lib/connect';
+import { buildIcs, shareIcs } from '../../src/lib/exportShare';
 
 const CLIENT_ID = 'c1';
 const initialsOf = (name: string) => name.replace('Coach ', '').split(' ').map((x) => x[0]).join('').slice(0, 2);
@@ -89,6 +90,13 @@ export default function Calendar() {
  </Pressable>
  <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia' }}>Book Sessions</Text>
  <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 14 }}>Tap a day to book or cancel</Text>
+
+ {mine.length > 0 ? (
+ <Pressable onPress={async () => { const evts = mine.map((s) => ({ start: s.startsAt, durationMin: s.durationMin, title: `Training with ${coach.name}` })); await shareIcs(buildIcs(evts, `Repple — ${coach.name}`), 'repple-sessions.ics', 'Add sessions to your calendar'); }} accessibilityRole="button" accessibilityLabel="Add sessions to your calendar" style={{ flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', backgroundColor: t.surface, borderWidth: 1, borderColor: t.ring, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 14 }}>
+ <Icon name="calendar" size={15} color={t.brand} />
+ <Text style={{ color: t.ink, fontWeight: '700', fontSize: 13 }}>Add to calendar</Text>
+ </Pressable>
+ ) : null}
 
  {/* Coach card */}
  <Pressable onPress={() => setShowCoach(true)} style={{ backgroundColor: t.surface, borderRadius: 18, borderWidth: 1, borderColor: t.ring, padding: 14, marginBottom: 14, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
