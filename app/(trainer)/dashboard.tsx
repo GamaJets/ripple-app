@@ -152,7 +152,7 @@ export default function TrainerClients() {
     if (!list.length) return;
     Alert.alert('Message ' + list.length + ' clients?', 'Send a check-in nudge to everyone in this segment.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Send', onPress: () => { list.forEach((c) => sendNudge(c)); } }]);
   };
-  const bulkAssign = (tpl) => {
+  const bulkAssign = (tpl: any) => {
     const list = shownRoster;
     list.forEach((c) => assignProgram(c.id, tpl.program));
     setBulkTplOpen(false);
@@ -355,7 +355,7 @@ export default function TrainerClients() {
                 <Text style={{ color: t.ink2, fontSize: 11, fontWeight: '700' }}>{c.adherence}%</Text>
               </View>
               <View style={{ height: 6, borderRadius: 3, backgroundColor: t.surface3, overflow: 'hidden' }}>
-                <View style={{ height: 6, borderRadius: 3, backgroundColor: c.adherence >= 85 ? t.brand : t.s3, width: c.adherence + '%' }} />
+                <View style={{ height: 6, borderRadius: 3, backgroundColor: c.adherence >= 85 ? t.brand : t.s3, width: `${c.adherence}%` }} />
               </View>
             </View>
           </Pressable>
@@ -462,7 +462,7 @@ export default function TrainerClients() {
                       <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 }}>Program adherence</Text>
                       <Text style={{ color: adhPct >= 1 ? t.brand : t.ink2, fontSize: 12, fontWeight: '800' }}>{wk?.workouts ?? 0} / {plannedDays} sessions</Text>
                     </View>
-                    <View style={{ height: 8, borderRadius: 4, backgroundColor: t.surface3, overflow: 'hidden' }}><View style={{ height: 8, borderRadius: 4, backgroundColor: adhPct >= 0.85 ? t.brand : t.warn, width: (adhPct * 100) + '%' }} /></View>
+                    <View style={{ height: 8, borderRadius: 4, backgroundColor: t.surface3, overflow: 'hidden' }}><View style={{ height: 8, borderRadius: 4, backgroundColor: adhPct >= 0.85 ? t.brand : t.warn, width: `${(adhPct * 100)}%` }} /></View>
                     <Text style={{ color: t.ink3, fontSize: 11, marginTop: 5 }}>{selProgram ? 'vs assigned program' : 'vs default 3-day week'} · this week</Text>
                   </View>
 

@@ -1,0 +1,11 @@
+                  <View key={String(it.def.key)} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 5, borderBottomWidth: 1, borderBottomColor: t.ring }}>
+                    <Text style={{ color: t.ink2, fontSize: 13 }}>{it.def.label}</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                      <Text style={{ color: t.ink, fontSize: 13, fontWeight: '700' }}>{it.latest} {it.def.unit}</Text>
+                      {it.delta != null && it.delta !== 0 ? (
+                        <Text style={{ color: it.good == null ? t.ink3 : it.good ? t.brand : t.warn, fontSize: 12, fontWeight: '700', minWidth: 46, textAlign: 'right' }}>{it.delta > 0 ? '+' : ''}{it.delta}</Text>
+                      ) : (
+                        <Text style={{ color: t.ink3, fontSize: 12, minWidth: 46, textAlign: 'right' }}>—</Text>
+                      )}
+                    </View>
+                  </View>

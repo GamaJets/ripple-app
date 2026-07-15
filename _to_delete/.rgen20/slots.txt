@@ -1,0 +1,18 @@
+                <Text style={{ color: t.ink2, fontSize: 12, fontWeight: '700', marginBottom: 6, marginTop: 4 }}>Set specific meals</Text>
+                {slotsFor(sel.mealsPerDay || 3).map((slot, pos) => {
+                  const ovIdx = getNutri(sel.id)?.mealOverride?.[pos];
+                  const dietForPick = (sel.diet || 'meat') as any;
+                  const picked = ovIdx != null ? mealAt(dietForPick, slot, ovIdx) : null;
+                  return (
+                    <View key={pos} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: t.ring }}>
+                      <View style={{ flex: 1, marginRight: 8 }}>
+                        <Text style={{ color: t.ink3, fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.4 }}>{slot}</Text>
+                        <Text style={{ color: picked ? t.ink : t.ink3, fontSize: 13, fontWeight: picked ? '700' : '400' }} numberOfLines={1}>{picked ? picked.n : 'Auto (client picks)'}</Text>
+                      </View>
+                      <View style={{ flexDirection: 'row', gap: 6 }}>
+                        {picked ? <Pressable onPress={() => setNutri(sel.id, { mealOverride: (() => { const mm = { ...(getNutri(sel.id)?.mealOverride ?? {}) }; delete mm[pos]; return mm; })() })} style={{ paddingHorizontal: 10, paddingVertical: 7, borderRadius: 9, backgroundColor: t.surface2, borderWidth: 1, borderColor: t.ring }}><Text style={{ color: t.ink3, fontWeight: '700', fontSize: 12 }}>Clear</Text></Pressable> : null}
+                        <Pressable onPress={() => { setMealQuery(''); setMealPick({ pos, slot }); }} style={{ paddingHorizontal: 12, paddingVertical: 7, borderRadius: 9, backgroundColor: t.brand }}><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 12 }}>{picked ? 'Change' : 'Choose'}</Text></Pressable>
+                      </View>
+                    </View>
+                  );
+                })}

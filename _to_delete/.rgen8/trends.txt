@@ -1,0 +1,31 @@
+        {mByGroup.length > 0 && (
+          <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 16, marginBottom: 12 }}>
+            <Text style={{ color: t.ink, fontWeight: '800', fontSize: 14 }}>Body composition</Text>
+            <Text style={{ color: t.ink3, fontSize: 11.5, marginTop: 1, marginBottom: 12 }}>From your InBody scans · latest vs previous</Text>
+            {(mInsights.improving.length > 0 || mInsights.watch.length > 0 || mInsights.balance.length > 0) && (
+              <View style={{ backgroundColor: t.surface2, borderRadius: 12, borderWidth: 1, borderColor: t.ring, padding: 12, marginBottom: 14 }}>
+                {mInsights.improving.length > 0 ? <Text style={{ color: t.ink2, fontSize: 12.5, lineHeight: 19 }}><Text style={{ color: t.brand, fontWeight: '800' }}>Improving  </Text>{mInsights.improving.join('  ·  ')}</Text> : null}
+                {mInsights.watch.length > 0 ? <Text style={{ color: t.ink2, fontSize: 12.5, lineHeight: 19, marginTop: 4 }}><Text style={{ color: t.warn, fontWeight: '800' }}>Watch  </Text>{mInsights.watch.join('  ·  ')}</Text> : null}
+                {mInsights.balance.map((b, i) => <Text key={i} style={{ color: t.ink3, fontSize: 12, lineHeight: 18, marginTop: 4 }}>{b}</Text>)}
+              </View>
+            )}
+            {mByGroup.map((grp) => (
+              <View key={grp.group} style={{ marginBottom: 8 }}>
+                <Text style={{ color: t.ink3, fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 5 }}>{grp.group}</Text>
+                {grp.items.map((it) => (
+                  <View key={String(it.def.key)} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 5, borderBottomWidth: 1, borderBottomColor: t.ring }}>
+                    <Text style={{ color: t.ink2, fontSize: 13 }}>{it.def.label}</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                      <Text style={{ color: t.ink, fontSize: 13, fontWeight: '700' }}>{it.latest} {it.def.unit}</Text>
+                      {it.delta != null && it.delta !== 0 ? (
+                        <Text style={{ color: it.good == null ? t.ink3 : it.good ? t.brand : t.warn, fontSize: 12, fontWeight: '700', minWidth: 46, textAlign: 'right' }}>{it.delta > 0 ? '+' : ''}{it.delta}</Text>
+                      ) : (
+                        <Text style={{ color: t.ink3, fontSize: 12, minWidth: 46, textAlign: 'right' }}>—</Text>
+                      )}
+                    </View>
+                  </View>
+                ))}
+              </View>
+            ))}
+          </View>
+        )}

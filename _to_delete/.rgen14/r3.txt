@@ -1,0 +1,5 @@
+ checkIn ? `Check-in energy ${checkIn.energy}/5, sleep ${checkIn.sleep}/5, mood ${checkIn.mood}/5, adherence ${checkIn.adherence}/5.` : '',
+ comp.improving.length ? `Body composition improving: ${comp.improving.join(', ')}.` : '',
+ comp.watch.length ? `Body composition to watch: ${comp.watch.join(', ')}.` : '',
+ comp.balance.length ? comp.balance.join(' ') : '',
+ ].filter(Boolean);

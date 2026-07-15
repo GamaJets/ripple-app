@@ -3,8 +3,8 @@
 // The client & trainer pick a palette in Appearance; the owner can also set a
 // custom brand colour on top (white-label).
 
-const darkSem = { grid: '#2c2c2a', s1: '#3987e5', s2: '#199e70', s3: '#c98500', s5: '#9085e9', s6: '#e66767', good: '#0ca30c', warn: '#fab219', serious: '#ec835a', crit: '#d03b3b' } as const;
-const lightSem = { grid: '#e1e0d9', s1: '#2a78d6', s2: '#1baf7a', s3: '#eda100', s5: '#4a3aa7', s6: '#e34948', good: '#0ca30c', warn: '#fab219', serious: '#ec835a', crit: '#d03b3b' } as const;
+const darkSem = { grid: '#2c2c2a', s1: '#3987e5', s2: '#199e70', s3: '#c98500', s5: '#9085e9', s6: '#e66767', good: '#0ca30c', warn: '#fab219', serious: '#ec835a', crit: '#d03b3b' };
+const lightSem = { grid: '#e1e0d9', s1: '#2a78d6', s2: '#1baf7a', s3: '#eda100', s5: '#4a3aa7', s6: '#e34948', good: '#0ca30c', warn: '#fab219', serious: '#ec835a', crit: '#d03b3b' };
 
 // ── Elevated Teal (DEFAULT) ────────────────────────────────────────────────
 export const teal = {

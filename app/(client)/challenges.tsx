@@ -36,7 +36,7 @@ export default function Challenges() {
             <View key={c.id} style={{ backgroundColor: t.surface, borderRadius: 18, borderWidth: 1, borderColor: joined ? t.brand : t.ring, padding: 16, marginBottom: 12 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
                 <View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                  <Icon name={c.icon} size={22} color={t.brand} />
+                  <Icon name={c.icon as any} size={22} color={t.brand} />
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={{ color: t.ink, fontWeight: '800', fontSize: 16 }}>{c.title}</Text>
@@ -51,7 +51,7 @@ export default function Challenges() {
                     <Text style={{ color: t.ink3, fontSize: 11 }}>Goal {c.goal}</Text>
                   </View>
                   <View style={{ height: 7, borderRadius: 4, backgroundColor: t.surface3, overflow: 'hidden' }}>
-                    <View style={{ height: 7, borderRadius: 4, backgroundColor: t.brand, width: (pct * 100) + '%' }} />
+                    <View style={{ height: 7, borderRadius: 4, backgroundColor: t.brand, width: `${(pct * 100)}%` }} />
                   </View>
                 </View>
               </View>

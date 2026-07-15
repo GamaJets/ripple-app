@@ -400,7 +400,7 @@ export default function Nutrition() {
             <Text style={{ color: t.ink3, fontSize: 13, marginBottom: 10 }}>This week · {DIET_LABEL[diet]} · sorted by aisle</Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
               <View style={{ flex: 1, height: 7, backgroundColor: t.surface2, borderRadius: 4, marginRight: 12, overflow: 'hidden' }}>
-                <View style={{ width: (grocCount ? Math.round((grocChecked / grocCount) * 100) : 0) + '%', height: 7, backgroundColor: t.brand }} />
+                <View style={{ width: `${(grocCount ? Math.round((grocChecked / grocCount) * 100) : 0)}%`, height: 7, backgroundColor: t.brand }} />
               </View>
               <Text style={{ color: t.ink2, fontSize: 12, fontWeight: '700' }}>{grocChecked}/{grocCount} in cart</Text>
             </View>

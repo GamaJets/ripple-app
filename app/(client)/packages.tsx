@@ -59,7 +59,7 @@ export default function ClientPackages() {
                       <Text style={{ color: t.ink3, fontSize: 12 }}>{Math.max(0, r.sessions_total - r.sessions_used)} of {r.sessions_total} left</Text>
                       <Text style={{ color: t.ink3, fontSize: 11 }}>{new Date(r.created_at).toLocaleDateString()}</Text>
                     </View>
-                    <View style={{ height: 8, borderRadius: 4, backgroundColor: t.surface3, overflow: 'hidden' }}><View style={{ height: 8, borderRadius: 4, backgroundColor: t.brand, width: (r.sessions_total ? Math.round((Math.max(0, r.sessions_total - r.sessions_used) / r.sessions_total) * 100) : 0) + '%' }} /></View>
+                    <View style={{ height: 8, borderRadius: 4, backgroundColor: t.surface3, overflow: 'hidden' }}><View style={{ height: 8, borderRadius: 4, backgroundColor: t.brand, width: `${(r.sessions_total ? Math.round((Math.max(0, r.sessions_total - r.sessions_used) / r.sessions_total) * 100) : 0)}%` }} /></View>
                   </View>
                 ) : <Text style={{ color: t.ink3, fontSize: 12, marginTop: 6 }}>Active since {new Date(r.created_at).toLocaleDateString()}</Text>}
               </View>

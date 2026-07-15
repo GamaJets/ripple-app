@@ -48,7 +48,7 @@ export default function Progression() {
             <View key={tip.exercise} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 15, marginBottom: 11 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                 <View style={{ width: 40, height: 40, borderRadius: 11, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                  <Icon name={m.icon} size={19} color={c} />
+                  <Icon name={m.icon as any} size={19} color={c} />
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={{ color: t.ink, fontWeight: '800', fontSize: 15, textTransform: 'capitalize' }}>{tip.exercise}</Text>

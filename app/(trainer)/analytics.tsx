@@ -94,7 +94,7 @@ export default function TrainerAnalytics() {
                 <Text style={{ color: t.ink2, fontSize: 13, fontWeight: '600' }}>{g.label}</Text>
                 <Text style={{ color: t.ink, fontSize: 13, fontWeight: '700' }}>{g.money ? '$' + g.cur.toLocaleString() : g.cur} / {g.money ? '$' + g.goal.toLocaleString() : g.goal}</Text>
               </View>
-              <View style={{ height: 10, borderRadius: 5, backgroundColor: t.surface3, overflow: 'hidden' }}><View style={{ height: 10, borderRadius: 5, backgroundColor: pc >= 1 ? t.brand : t.s3, width: (pc * 100) + '%' }} /></View>
+              <View style={{ height: 10, borderRadius: 5, backgroundColor: t.surface3, overflow: 'hidden' }}><View style={{ height: 10, borderRadius: 5, backgroundColor: pc >= 1 ? t.brand : t.s3, width: `${(pc * 100)}%` }} /></View>
               <Text style={{ color: pc >= 1 ? t.brand : t.ink3, fontSize: 11, marginTop: 4, fontWeight: pc >= 1 ? '800' : '400' }}>{pc >= 1 ? 'Goal reached!' : Math.round(pc * 100) + '% there'}</Text>
             </View>); })}
         </View>

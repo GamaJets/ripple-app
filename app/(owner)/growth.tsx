@@ -56,8 +56,8 @@ export default function OwnerGrowth() {
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14 }}>
             <View style={{ flex: 1, height: 10, borderRadius: 5, backgroundColor: t.surface3, overflow: 'hidden', flexDirection: 'row' }}>
-              <View style={{ height: 10, backgroundColor: t.brand, width: ca.engagementPct + '%' }} />
-              <View style={{ height: 10, backgroundColor: t.warn, width: (100 - ca.engagementPct) + '%' }} />
+              <View style={{ height: 10, backgroundColor: t.brand, width: `${ca.engagementPct}%` }} />
+              <View style={{ height: 10, backgroundColor: t.warn, width: `${(100 - ca.engagementPct)}%` }} />
             </View>
             <Text style={{ color: t.ink3, fontSize: 11 }}>{ca.engaged} engaged · {ca.atRisk} at-risk</Text>
           </View>
@@ -65,7 +65,7 @@ export default function OwnerGrowth() {
           {ca.byPlan.map((bp) => (
             <View key={bp.plan} style={{ marginBottom: 10 }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}><Text style={{ color: t.ink2, fontSize: 13, fontWeight: '600' }}>{bp.plan}</Text><Text style={{ color: t.ink, fontSize: 13, fontWeight: '700' }}>{bp.clients} · {bp.pct}%</Text></View>
-              <View style={{ height: 8, borderRadius: 4, backgroundColor: t.surface3, overflow: 'hidden' }}><View style={{ height: 8, borderRadius: 4, backgroundColor: t.brand, width: bp.pct + '%' }} /></View>
+              <View style={{ height: 8, borderRadius: 4, backgroundColor: t.surface3, overflow: 'hidden' }}><View style={{ height: 8, borderRadius: 4, backgroundColor: t.brand, width: `${bp.pct}%` }} /></View>
             </View>
           ))}
         </View>
@@ -79,7 +79,7 @@ export default function OwnerGrowth() {
                 <Text style={{ color: t.ink2, fontSize: 13, fontWeight: '600' }}>{c.label}</Text>
                 <Text style={{ color: c.pct === 100 ? t.brand : c.pct >= 60 ? t.ink : t.crit, fontSize: 13, fontWeight: '700' }}>{c.pct}% · {c.active}/{c.total}</Text>
               </View>
-              <View style={{ height: 10, borderRadius: 5, backgroundColor: t.surface3, overflow: 'hidden' }}><View style={{ height: 10, borderRadius: 5, backgroundColor: c.pct >= 60 ? t.brand : t.warn, width: c.pct + '%' }} /></View>
+              <View style={{ height: 10, borderRadius: 5, backgroundColor: t.surface3, overflow: 'hidden' }}><View style={{ height: 10, borderRadius: 5, backgroundColor: c.pct >= 60 ? t.brand : t.warn, width: `${c.pct}%` }} /></View>
             </View>
           ))}
         </View>
@@ -89,7 +89,7 @@ export default function OwnerGrowth() {
           {funnel.map(([label, pct]) => (
             <View key={label} style={{ marginBottom: 12 }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 }}><Text style={{ color: t.ink2, fontSize: 13, fontWeight: '600' }}>{label}</Text><Text style={{ color: t.ink, fontSize: 13, fontWeight: '700' }}>{pct}%</Text></View>
-              <View style={{ height: 10, borderRadius: 5, backgroundColor: t.surface3, overflow: 'hidden' }}><View style={{ height: 10, borderRadius: 5, backgroundColor: t.brand, width: pct + '%' }} /></View>
+              <View style={{ height: 10, borderRadius: 5, backgroundColor: t.surface3, overflow: 'hidden' }}><View style={{ height: 10, borderRadius: 5, backgroundColor: t.brand, width: `${pct}%` }} /></View>
             </View>
           ))}
         </View>

@@ -95,7 +95,7 @@ export default function OwnerRevenue() {
             return (
               <View key={p.name} style={{ marginBottom: 12 }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 }}><Text style={{ color: t.ink2, fontSize: 13, fontWeight: '600' }}>{p.name}</Text><Text style={{ color: t.ink, fontSize: 13, fontWeight: '700' }}>{usd(p.revenue)}/mo · {pct}%</Text></View>
-                <View style={{ height: 10, borderRadius: 5, backgroundColor: t.surface3, overflow: 'hidden' }}><View style={{ height: 10, borderRadius: 5, backgroundColor: t.brand, width: pct + '%' }} /></View>
+                <View style={{ height: 10, borderRadius: 5, backgroundColor: t.surface3, overflow: 'hidden' }}><View style={{ height: 10, borderRadius: 5, backgroundColor: t.brand, width: `${pct}%` }} /></View>
               </View>
             );
           })}

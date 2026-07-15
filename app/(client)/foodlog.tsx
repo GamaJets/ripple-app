@@ -99,7 +99,7 @@ export default function FoodLog() {
  <Text style={{ color: t.ink2, fontSize: 13, fontWeight: '600' }}>{label}</Text>
  <Text style={{ color: t.ink3, fontSize: 12 }}><Text style={{ color: t.ink, fontWeight: '700' }}>{cur}</Text> / {tg}g · {rem >= 0 ? `${rem}g left` : `${-rem}g over`}</Text>
  </View>
- <View style={{ height: 8, borderRadius: 4, backgroundColor: t.surface3, marginTop: 4, overflow: 'hidden' }}><View style={{ height: 8, borderRadius: 4, backgroundColor: rem < 0 ? t.crit : col, width: Math.min(100, Math.round((cur / tg) * 100)) + '%' }} /></View>
+ <View style={{ height: 8, borderRadius: 4, backgroundColor: t.surface3, marginTop: 4, overflow: 'hidden' }}><View style={{ height: 8, borderRadius: 4, backgroundColor: rem < 0 ? t.crit : col, width: `${Math.min(100, Math.round((cur / tg) * 100))}%` }} /></View>
  </View>
  );
  };
@@ -123,7 +123,7 @@ export default function FoodLog() {
  <Text style={{ color: t.ink, fontSize: 18, fontWeight: '700' }}>{tot.k}<Text style={{ color: t.ink3, fontSize: 12 }}> / {target.kcal}</Text></Text>
  </View>
  </View>
- <View style={{ height: 10, borderRadius: 5, backgroundColor: t.surface3, overflow: 'hidden', marginBottom: 14 }}><View style={{ height: 10, borderRadius: 5, backgroundColor: remK < 0 ? t.crit : t.brand, width: Math.min(100, Math.round((tot.k / target.kcal) * 100)) + '%' }} /></View>
+ <View style={{ height: 10, borderRadius: 5, backgroundColor: t.surface3, overflow: 'hidden', marginBottom: 14 }}><View style={{ height: 10, borderRadius: 5, backgroundColor: remK < 0 ? t.crit : t.brand, width: `${Math.min(100, Math.round((tot.k / target.kcal) * 100))}%` }} /></View>
  {macroRow('Protein', tot.p, target.protein, t.brand)}
  {macroRow('Carbs', tot.c, target.carbs, t.s1)}
  {macroRow('Fat', tot.f, target.fat, t.s3)}

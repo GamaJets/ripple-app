@@ -71,7 +71,7 @@ export default function Onboarding() {
       <ScrollView contentContainerStyle={{ padding: 22, paddingTop: 30, paddingBottom: 30, flexGrow: 1 }} keyboardShouldPersistTaps="handled">
         {/* progress */}
         <View style={{ height: 6, borderRadius: 3, backgroundColor: t.surface3, overflow: 'hidden', marginBottom: 28 }}>
-          <View style={{ height: 6, borderRadius: 3, backgroundColor: t.brand, width: pct + '%' }} />
+          <View style={{ height: 6, borderRadius: 3, backgroundColor: t.brand, width: `${pct}%` }} />
         </View>
 
         {step === 0 && (

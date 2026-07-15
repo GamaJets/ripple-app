@@ -29,7 +29,7 @@ export default function Habits() {
  <Text style={{ color: t.brand, fontWeight: '800', fontSize: 20 }}>{pct}%</Text>
  </View>
  <View style={{ height: 10, borderRadius: 5, backgroundColor: t.surface3, overflow: 'hidden' }}>
- <View style={{ height: 10, borderRadius: 5, backgroundColor: t.brand, width: (pct || 0) + '%' }} />
+ <View style={{ height: 10, borderRadius: 5, backgroundColor: t.brand, width: `${(pct || 0)}%` }} />
  </View>
  </View>
 
