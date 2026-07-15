@@ -67,6 +67,11 @@ export default function TrainerAnalytics() {
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
         <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia', textTransform: 'capitalize' }}>Analytics</Text>
         <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 16 }}>Your coaching business at a glance</Text>
+        {clients === 0 ? (
+          <View style={{ backgroundColor: t.surface, borderRadius: 12, borderWidth: 1, borderColor: t.ring, padding: 14, marginBottom: 16 }}>
+            <Text style={{ color: t.ink3, fontSize: 13, lineHeight: 19 }}>No clients yet — revenue, adherence and roster health populate as you add clients and run sessions.</Text>
+          </View>
+        ) : null}
         <Pressable onPress={() => router.push('/(trainer)/leaderboard')} style={{ backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 16, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}><Text style={{ color: t.ink, fontWeight: '700', fontSize: 14 }}>Client leaderboard</Text><Text style={{ color: t.ink3, fontSize: 18 }}>›</Text></Pressable>
 
         <View style={{ flexDirection: 'row', gap: 12, marginBottom: 12 }}>

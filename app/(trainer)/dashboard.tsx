@@ -314,7 +314,7 @@ export default function TrainerClients() {
         ) : null}
         {shownRoster.length === 0 ? (
           <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 22, alignItems: 'center', marginBottom: 10 }}>
-            <Text style={{ color: t.ink3, fontSize: 13 }}>No clients in this segment.</Text>
+            <Text style={{ color: t.ink3, fontSize: 13, textAlign: 'center', lineHeight: 19 }}>{roster.length === 0 ? 'No clients yet. Tap Add Client to invite your first — they connect once they accept in the app.' : 'No clients in this segment.'}</Text>
           </View>
         ) : null}
         {shownRoster.map((c) => (

@@ -17,17 +17,19 @@ interface RosterValue {
 const Ctx = createContext<RosterValue | null>(null);
 
 export function RosterProvider({ children }: { children: ReactNode }) {
-  const [roster, setRoster] = useState<RosterClient[]>(() => JSON.parse(JSON.stringify(ROSTER)));
+  const [roster, setRoster] = useState<RosterClient[]>(() => (USE_SUPABASE ? [] : JSON.parse(JSON.stringify(ROSTER))));
 
-  // Hydrate real, linked clients from Supabase (they appear alongside the demo
-  // roster with their true account id, so messaging/feedback/plans key off it).
+  // A real signed-in coach sees ONLY their linked clients (clean slate if none);
+  // a guest/demo (no session) sees the sample roster so the portal isn't empty to explore.
   useEffect(() => {
     if (!USE_SUPABASE) return;
     let cancelled = false;
     (async () => {
       try {
         const { data: auth } = await supabase.auth.getUser();
-        const uid = auth?.user?.id; if (!uid || cancelled) return;
+        const uid = auth?.user?.id;
+        if (cancelled) return;
+        if (!uid) { setRoster(JSON.parse(JSON.stringify(ROSTER))); return; }
         const { data: cls, error } = await supabase.from('clients').select('id, goal, diet, meals_per_day').eq('trainer_id', uid);
         if (error || !cls || !cls.length || cancelled) return;
         const ids = cls.map((c: any) => c.id);
@@ -57,7 +59,7 @@ export function RosterProvider({ children }: { children: ReactNode }) {
         } catch { /* ignore */ }
         const goalMap: Record<string, string> = { fatloss: 'Fat loss', tone: 'Tone', muscle: 'Build muscle' };
         const real: RosterClient[] = cls.map((c: any) => { const sc = st[c.id]; return { id: c.id, name: names[c.id] || 'Client', goal: goalMap[c.goal] || 'General', weightDelta: sc.wDelta, adherence: sc.adh != null ? sc.adh : 100, lastActive: sc.last ? ago(sc.last) : 'recently', next: '—', unread: 0, mode: 'online' as const, metrics: sc.mx ?? undefined, diet: c.diet ?? undefined, mealsPerDay: c.meals_per_day ?? undefined }; });
-        if (!cancelled && real.length) setRoster((p) => { const seen = new Set(p.map((x) => x.id)); const add = real.filter((r) => !seen.has(r.id)); return add.length ? [...add, ...p] : p; });
+        if (!cancelled) setRoster(real);
       } catch { /* stay on demo roster */ }
     })();
     return () => { cancelled = true; };

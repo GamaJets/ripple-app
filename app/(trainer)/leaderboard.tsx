@@ -33,6 +33,11 @@ export default function Leaderboard() {
         <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia' }}>Leaderboard</Text>
         <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 18 }}>Adherence + progress toward goal</Text>
 
+        {scored.length === 0 ? (
+          <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 22, alignItems: 'center' }}>
+            <Text style={{ color: t.ink3, fontSize: 13, textAlign: 'center', lineHeight: 19 }}>No clients yet — your leaderboard fills in as clients join and log their workouts.</Text>
+          </View>
+        ) : null}
         {scored.map(({ c, score }, i) => (
           <Pressable key={c.id} onPress={() => router.push('/(trainer)/analytics')} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: i === 0 ? t.brand : t.ring, padding: 15, marginBottom: 10 }}>
             <Text style={{ fontSize: 20, width: 30, textAlign: 'center' }}>{i < 3 ? MEDALS[i] : ''}</Text>
