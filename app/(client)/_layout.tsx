@@ -66,6 +66,7 @@ export default function ClientLayout() {
       <Tabs.Screen name="progression" options={{ href: null, title: 'Progression' }} />
       <Tabs.Screen name="scan-machine" options={{ href: null, title: 'Scan machine' }} />
       <Tabs.Screen name="feedback" options={{ href: null, title: 'Send Feedback' }} />
+      <Tabs.Screen name="referral" options={{ href: null, title: 'Invite Friends' }} />
     </Tabs>
   );
 }
