@@ -110,6 +110,7 @@ export default function Nutrition() {
     : undefined;
   const input = { id: c.id, weightKg: w, bodyFatPct: bf, activity: c.activity, goal: c.goal, diet, mealsPerDay: c.mealsPerDay, mealOverride: { ...(coachAdjust?.mealOverride ?? {}), ...override }, coachAdjust: cyclingAdjust, avoid: c.avoid };
   const { plan, target, tot } = buildPlan(input);
+  const coachPick = (pos: number) => !!(coachAdjust?.mealOverride && coachAdjust.mealOverride[pos] != null && override[pos] == null);
   const swap = (pos: number, slot: PlannedMeal['slot'], idx: number) => setOverride({ ...override, [pos]: swapIndex(diet, slot, idx) });
   const groc = groceryData(input);
   const grocCount = DEPTS.reduce((a, d) => a + (groc.byDept[d]?.length ?? 0), 0);
@@ -271,7 +272,7 @@ export default function Nutrition() {
         {plan.map((m) => (
           <Pressable key={m.pos} onPress={() => setRecipe(m)} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 14, marginBottom: 9, flexDirection: 'row', alignItems: 'center' }}>
             <View style={{ flex: 1, paddingRight: 12 }}>
-              <Text style={{ color: t.brand, fontSize: 9, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.8 }}>{m.slot}</Text>
+              <Text style={{ color: t.brand, fontSize: 9, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.8 }}>{m.slot}{coachPick(m.pos) ? "  ·  COACH'S PICK" : ''}</Text>
               <Text style={{ color: t.ink, fontSize: 14, fontWeight: '700', marginTop: 3 }} numberOfLines={2}>{m.n}</Text>
               <Text style={{ color: t.ink3, fontSize: 12, marginTop: 3 }}>P{m.P} · C{m.C} · F{m.F}</Text>
             </View>
