@@ -38,13 +38,13 @@ export function RosterProvider({ children }: { children: ReactNode }) {
         } catch { /* names optional */ }
         // Real per-client stats (best-effort; RLS lets a trainer read linked clients' rows).
         const ago = (t: number) => { const sec = Math.max(0, Math.round((Date.now() - t) / 1000)); if (sec < 3600) return Math.max(1, Math.round(sec / 60)) + 'm ago'; if (sec < 86400) return Math.round(sec / 3600) + 'h ago'; return Math.round(sec / 86400) + 'd ago'; };
-        const st: Record<string, { wDelta: number; adh: number | null; last: number }> = {};
+        const st: Record<string, { wDelta: number; adh: number | null; last: number; mx?: any }> = {};
         ids.forEach((id: string) => { st[id] = { wDelta: 0, adh: null, last: 0 }; });
         try {
-          const { data: sc } = await supabase.from('scans').select('client_id, weight_kg, taken_at').in('client_id', ids).order('taken_at', { ascending: true });
-          const byC: Record<string, { w: number; t: number }[]> = {};
-          (sc || []).forEach((r: any) => { (byC[r.client_id] = byC[r.client_id] || []).push({ w: Number(r.weight_kg), t: Date.parse(r.taken_at) }); });
-          for (const id of ids) { const arr = byC[id]; if (arr && arr.length) { st[id].wDelta = Math.round((arr[arr.length - 1].w - arr[0].w) * 10) / 10; st[id].last = Math.max(st[id].last, arr[arr.length - 1].t); } }
+          const { data: sc } = await supabase.from('scans').select('client_id, weight_kg, taken_at, metrics').in('client_id', ids).order('taken_at', { ascending: true });
+          const byC: Record<string, { w: number; t: number; m: any }[]> = {};
+          (sc || []).forEach((r: any) => { (byC[r.client_id] = byC[r.client_id] || []).push({ w: Number(r.weight_kg), t: Date.parse(r.taken_at), m: r.metrics }); });
+          for (const id of ids) { const arr = byC[id]; if (arr && arr.length) { st[id].wDelta = Math.round((arr[arr.length - 1].w - arr[0].w) * 10) / 10; st[id].last = Math.max(st[id].last, arr[arr.length - 1].t); for (let k = arr.length - 1; k >= 0; k--) { if (arr[k].m) { st[id].mx = arr[k].m; break; } } } }
         } catch { /* ignore */ }
         try {
           const { data: wo } = await supabase.from('workouts').select('user_id, performed_at').in('user_id', ids).order('performed_at', { ascending: false });
@@ -56,7 +56,7 @@ export function RosterProvider({ children }: { children: ReactNode }) {
           (ci || []).forEach((r: any) => { if (st[r.user_id]) { st[r.user_id].last = Math.max(st[r.user_id].last, Date.parse(r.at)); if (!seen.has(r.user_id) && typeof r.adherence === 'number') { seen.add(r.user_id); st[r.user_id].adh = r.adherence; } } });
         } catch { /* ignore */ }
         const goalMap: Record<string, string> = { fatloss: 'Fat loss', tone: 'Tone', muscle: 'Build muscle' };
-        const real: RosterClient[] = cls.map((c: any) => ({ id: c.id, name: names[c.id] || 'Client', goal: goalMap[c.goal] || 'General', weightDelta: st[c.id].wDelta, adherence: st[c.id].adh != null ? st[c.id].adh : 100, lastActive: st[c.id].last ? ago(st[c.id].last) : 'recently', next: '—', unread: 0, mode: 'online' }));
+        const real: RosterClient[] = cls.map((c: any) => ({ id: c.id, name: names[c.id] || 'Client', goal: goalMap[c.goal] || 'General', weightDelta: st[c.id].wDelta, adherence: st[c.id].adh != null ? st[c.id].adh : 100, lastActive: st[c.id].last ? ago(st[c.id].last) : 'recently', next: '—', unread: 0, mode: 'online', metrics: st[c.id].mx ?? undefined }));
         if (!cancelled && real.length) setRoster((p) => { const seen = new Set(p.map((x) => x.id)); const add = real.filter((r) => !seen.has(r.id)); return add.length ? [...add, ...p] : p; });
       } catch { /* stay on demo roster */ }
     })();

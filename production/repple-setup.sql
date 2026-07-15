@@ -1,11 +1,9 @@
 -- ═══════════════════════════════════════════════════════════════════════════
 -- Repple — ONE-SHOT Supabase setup. Paste this whole file into the Supabase
 -- SQL editor (Dashboard ▸ SQL Editor ▸ New query) and Run.
--- Every file below is idempotent (create ... if not exists / create or replace /
--- drop policy if exists) so re-running is safe. Order is dependency-correct.
--- Generated from supabase/*.sql — do not hand-edit; regenerate from sources.
+-- Every file below is idempotent; order is dependency-correct. Regenerate from
+-- supabase/*.sql — do not hand-edit.
 -- ═══════════════════════════════════════════════════════════════════════════
-
 
 -- ─────────────────────────────────────────────────────────────────────────
 -- ▶ schema.sql
@@ -422,6 +420,17 @@ drop policy if exists ann_read on announcements;
 create policy ann_read on announcements for select using (true);
 drop policy if exists ann_write on announcements;
 create policy ann_write on announcements for insert with check (author_id = auth.uid());
+
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- ▶ scan-metrics.sql
+-- ─────────────────────────────────────────────────────────────────────────
+-- Repple — optional richer InBody metrics on scans (visceral fat, InBody score,
+-- BMR, fat/lean mass, body water/protein/minerals, segmental lean). Stored as a
+-- single JSONB blob so new fields never need another migration. The app already
+-- keeps these device-locally; run this + wire the write to make them sync across
+-- devices and show up for the client's trainer. Idempotent; safe to re-run.
+alter table scans add column if not exists metrics jsonb;
 
 
 -- ─────────────────────────────────────────────────────────────────────────

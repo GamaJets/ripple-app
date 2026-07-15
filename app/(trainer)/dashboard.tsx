@@ -9,6 +9,7 @@ import type { Theme } from '../../src/theme/tokens';
 import { MOCK_TRAINER } from '../../src/lib/mockData';
 import { useCoachProfile } from '../../src/ui/coachProfile';
 import { atRiskClient } from '../../src/lib/trainerMock';
+import { METRIC_DEFS, METRIC_GROUPS } from '../../src/lib/inbodyMetrics';
 import { type RosterClient } from '../../src/lib/trainerMock';
 import { areaLabel } from '../../src/lib/injuries';
 import { supabase } from '../../src/lib/supabase';
@@ -363,6 +364,33 @@ export default function TrainerClients() {
             <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 30 }} showsVerticalScrollIndicator={false}>
               <Text style={{ color: t.ink, fontSize: 20, fontWeight: '800', textTransform: 'capitalize' }}>{sel.name}</Text>
               <Text style={{ color: t.ink3, fontSize: 13, marginTop: 2, marginBottom: 16 }}>{sel.goal} · {sel.mode === 'inperson' ? 'In-person' : 'Online'} · {sel.weightDelta > 0 ? '+' : ''}{sel.weightDelta} kg · {sel.adherence}% adherence</Text>
+
+              {sel.metrics && Object.values(sel.metrics).some((v) => v != null) ? (
+                <View style={{ marginBottom: 16 }}>
+                  <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>Body composition · latest scan</Text>
+                  {METRIC_GROUPS.map((g) => {
+                    const items = METRIC_DEFS.filter((d) => d.group === g && sel.metrics && sel.metrics[d.key] != null);
+                    if (!items.length) return null;
+                    return (
+                      <View key={g} style={{ marginBottom: 8 }}>
+                        <Text style={{ color: t.ink3, fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 4 }}>{g}</Text>
+                        {items.map((d) => (
+                          <View key={String(d.key)} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 3 }}>
+                            <Text style={{ color: t.ink2, fontSize: 13 }}>{d.label}</Text>
+                            <Text style={{ color: t.ink, fontSize: 13, fontWeight: '700' }}>{sel.metrics![d.key]} {d.unit}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    );
+                  })}
+                  {(() => {
+                    const m = sel.metrics!; const out: string[] = [];
+                    const pair = (l?: number, r?: number, name?: string) => { if (l == null || r == null || !l || !r) return; const diff = Math.abs(l - r) / Math.max(l, r); if (diff >= 0.1) out.push(name + ': ' + (l < r ? 'left' : 'right') + ' ' + Math.round(diff * 100) + '% behind'); };
+                    pair(m.leanArmLKg, m.leanArmRKg, 'Arms'); pair(m.leanLegLKg, m.leanLegRKg, 'Legs');
+                    return out.length ? <Text style={{ color: t.warn, fontSize: 12, fontWeight: '700', marginTop: 2 }}>{out.join('  ·  ')} — cue the weaker side.</Text> : null;
+                  })()}
+                </View>
+              ) : null}
 
               <View style={{ marginBottom: 16 }}>
                 <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>Tags</Text>
