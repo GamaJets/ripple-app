@@ -39,7 +39,7 @@ export default function Membership() {
     { label: 'Entry barcode', icon: 'grid', route: '/(client)/access', hero: true },
     { label: 'Classes', icon: 'calendar', route: '/(client)/classes' },
     { label: 'Personal training', icon: 'people', route: '/(client)/pt-sessions' },
-    { label: 'My bookings', icon: 'check', route: '/(client)/calendar' },
+    { label: 'My bookings', icon: 'check', route: '/(client)/bookings' },
     { label: 'Offers', icon: 'sparkle', route: '/(client)/explore' },
     { label: 'Refer a friend', icon: 'share', route: '/(client)/referral' },
   ];

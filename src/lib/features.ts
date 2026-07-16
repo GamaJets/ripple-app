@@ -40,6 +40,7 @@ export const CLIENT_FEATURES: Feature[] = [
   { key: 'membership', label: 'Membership', note: 'Card, entry pass & visits', route: '/(client)/membership', icon: 'grid', area: 'me', keywords: 'membership member card gym access barcode entry pass visits plan renew' },
   { key: 'access', label: 'Gym access', note: 'Entry barcode', route: '/(client)/access', icon: 'grid', area: 'me', keywords: 'access barcode entry scan gym door turnstile membership' },
   { key: 'pt-sessions', label: 'Personal training', note: 'Approve delivered PT sessions', route: '/(client)/pt-sessions', icon: 'people', area: 'me', keywords: 'personal training pt sessions approve delivered package trainer' },
+  { key: 'bookings', label: 'My bookings', note: 'Classes & PT in one place', route: '/(client)/bookings', icon: 'check', area: 'me', keywords: 'my bookings booked classes pt sessions upcoming cancel schedule' },
 
   // ── Progress & Insights ───────────────────────────────────
   { key: 'report', label: 'Weekly Report', note: 'Your week at a glance · share it', route: '/(client)/report', icon: 'chart', area: 'progress', keywords: 'summary' },
