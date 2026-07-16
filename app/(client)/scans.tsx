@@ -94,7 +94,7 @@ export default function Scans() {
   const { appName } = useBrand();
   const shareProgress = async () => {
     const rows = [...cd.scans].sort((a, b) => Date.parse(a.takenAt) - Date.parse(b.takenAt)).map((sc) => ({ date: new Date(sc.takenAt).toLocaleDateString(), weightKg: sc.weightKg, bodyFatPct: sc.bodyFatPct, muscleKg: sc.skeletalMuscleKg }));
-    const { html, text } = progressDoc(cd.name, rows, appName);
+    const { html, text } = progressDoc(cd.name, rows, appName, t.brand);
     await shareDoc(html, text, 'Progress');
   };
   const scans = cd.scans;

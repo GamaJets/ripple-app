@@ -49,10 +49,10 @@ export async function shareDoc(html: string, text: string, title: string): Promi
   return 'text';
 }
 
-const page = (title: string, body: string, brand = 'Repple') =>
+const page = (title: string, body: string, brand = 'Repple', accent?: string) =>
   `<html><head><meta name="viewport" content="width=device-width, initial-scale=1"><style>
    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#0f172a;padding:26px;margin:0}
-   .h{background:linear-gradient(135deg,#2dd4bf,#0d9488);color:#fff;padding:18px 22px;border-radius:14px}
+   .h{background:${accent ? accent : 'linear-gradient(135deg,#2dd4bf,#0d9488)'};color:#fff;padding:18px 22px;border-radius:14px}
    .h h1{margin:0;font-size:22px} .h p{margin:4px 0 0;opacity:.9;font-size:13px}
    table{width:100%;border-collapse:collapse;margin-top:18px;font-size:14px}
    th,td{text-align:left;padding:9px 8px;border-bottom:1px solid #e2e8f0}
@@ -63,7 +63,7 @@ const page = (title: string, body: string, brand = 'Repple') =>
 
 export interface PlanMealRow { slot: string; name: string; K: number; P: number; C: number; F: number }
 
-export function mealPlanDoc(name: string, targetKcal: number, meals: PlanMealRow[], avoid: string[] = [], brand = 'Repple'): { html: string; text: string } {
+export function mealPlanDoc(name: string, targetKcal: number, meals: PlanMealRow[], avoid: string[] = [], brand = 'Repple', accent?: string): { html: string; text: string } {
   const first = (name || '').split(' ')[0] || 'Your';
   const rows = meals.map((m) => `<tr><td><b>${m.slot}</b><br><span style="color:#64748b">${m.name}</span></td><td class="r">${m.K}</td><td class="r">${m.P}g</td><td class="r">${m.C}g</td><td class="r">${m.F}g</td></tr>`).join('');
   const totK = meals.reduce((a, m) => a + m.K, 0), totP = meals.reduce((a, m) => a + m.P, 0), totC = meals.reduce((a, m) => a + m.C, 0), totF = meals.reduce((a, m) => a + m.F, 0);
@@ -74,12 +74,12 @@ export function mealPlanDoc(name: string, targetKcal: number, meals: PlanMealRow
   const text = `${first}'s meal plan (${brand}) — target ~${targetKcal} kcal\n` +
     meals.map((m) => `• ${m.slot}: ${m.name} — ${m.K} kcal (P${m.P}/C${m.C}/F${m.F})`).join('\n') +
     `\nTotal: ${totK} kcal · P${totP} C${totC} F${totF}` + (avoid.length ? `\nExcludes: ${avoid.join(', ')}` : '');
-  return { html: page('Meal Plan', body, brand), text };
+  return { html: page('Meal Plan', body, brand, accent), text };
 }
 
 export interface ProgressRow { date: string; weightKg: number; bodyFatPct: number; muscleKg: number }
 
-export function progressDoc(name: string, rows: ProgressRow[], brand = 'Repple'): { html: string; text: string } {
+export function progressDoc(name: string, rows: ProgressRow[], brand = 'Repple', accent?: string): { html: string; text: string } {
   const first = (name || '').split(' ')[0] || 'Your';
   const tr = rows.map((r) => `<tr><td>${r.date}</td><td class="r">${r.weightKg}</td><td class="r">${r.bodyFatPct}%</td><td class="r">${r.muscleKg}</td></tr>`).join('');
   const f = rows[0], l = rows[rows.length - 1];
@@ -87,7 +87,7 @@ export function progressDoc(name: string, rows: ProgressRow[], brand = 'Repple')
   const body = `<h2 style="margin-top:20px">${first}'s progress</h2>${delta}
     <table><tr><th>Date</th><th class="r">Weight</th><th class="r">Body fat</th><th class="r">Muscle</th></tr>${tr}</table>`;
   const text = `${first}'s progress (${brand})\n` + rows.map((r) => `• ${r.date}: ${r.weightKg}kg · ${r.bodyFatPct}% BF · ${r.muscleKg}kg muscle`).join('\n');
-  return { html: page('Progress', body, brand), text };
+  return { html: page('Progress', body, brand, accent), text };
 }
 
 // ── Owner investor/board report ──────────────────────────────────────────────

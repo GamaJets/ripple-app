@@ -132,7 +132,7 @@ export default function Nutrition() {
   const sharePlan = async () => {
     const rows = plan.map((m) => ({ slot: m.slot, name: m.n, K: m.K, P: m.P, C: m.C, F: m.F }));
     const labels = c.avoid.map((a) => (ALLERGENS.find((x) => x.id === a)?.label ?? a));
-    const { html, text } = mealPlanDoc(c.name, target.kcal, rows, labels, appName);
+    const { html, text } = mealPlanDoc(c.name, target.kcal, rows, labels, appName, t.brand);
     await shareDoc(html, text, 'Meal plan');
   };
   const weekPlans = view === 'week' ? WEEKD.map((_, d) => { const ov: Record<number, number> = {}; plan.forEach((m) => { ov[m.pos] = m.idx + d; }); return buildPlan({ ...input, mealOverride: ov }); }) : [];
