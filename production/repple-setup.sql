@@ -323,6 +323,35 @@ create table if not exists workouts (
 create index if not exists idx_workouts_user on workouts(user_id, performed_at desc);
 alter table workouts add column if not exists feel jsonb;
 
+-- ── Referrals (attribution when a new user signs up with a code) ─────────────
+create table if not exists referrals (
+  id uuid primary key default gen_random_uuid(),
+  referred_user_id uuid not null references profiles(id) on delete cascade,
+  code text not null,
+  created_at timestamptz not null default now(),
+  unique (referred_user_id)
+);
+create index if not exists idx_referrals_code on referrals(upper(code));
+alter table referrals enable row level security;
+drop policy if exists referrals_self on referrals;
+create policy referrals_self on referrals for select using (referred_user_id = auth.uid());
+
+create or replace function record_referral(p_code text)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  if p_code is null or length(trim(p_code)) = 0 then return; end if;
+  insert into referrals (referred_user_id, code)
+  values (auth.uid(), upper(trim(p_code)))
+  on conflict (referred_user_id) do nothing;
+end; $$;
+
+create or replace function referral_count(p_code text)
+returns int language sql security definer set search_path = public as $$
+  select count(*)::int from referrals where upper(code) = upper(trim(p_code));
+$$;
+grant execute on function record_referral(text) to authenticated;
+grant execute on function referral_count(text) to authenticated;
+
 create table if not exists measurements (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references profiles(id) on delete cascade,

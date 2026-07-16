@@ -2,6 +2,7 @@
 // the app. Uses the core React Native Share sheet (OTA-safe, no native module).
 // The code is derived deterministically from the user so it's stable and can be
 // credited once reward attribution is wired on the backend.
+import { useEffect, useState } from 'react';
 import { View, Text, Pressable, ScrollView, Share } from 'react-native';
 import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -9,6 +10,7 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { useClientData } from '../../src/ui/clientData';
 import { useBrand } from '../../src/ui/brand';
+import { referralCount } from '../../src/lib/referrals';
 
 function codeFrom(name: string, id: string): string {
   const first = (name.trim().split(' ')[0] || 'REP').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 6) || 'REP';
@@ -25,6 +27,8 @@ export default function Referral() {
   const c = useClientData();
   const { appName } = useBrand();
   const code = codeFrom(c.name, c.id);
+  const [joined, setJoined] = useState(0);
+  useEffect(() => { let on = true; referralCount(code).then((n) => { if (on) setJoined(n); }); return () => { on = false; }; }, [code]);
   const shareMsg = `Join me on ${appName} — the app I use to plan workouts, track progress and dial in my nutrition. Use my code ${code} when you sign up.`;
 
   const steps = [
@@ -49,6 +53,7 @@ export default function Referral() {
         <View style={{ backgroundColor: t.surface, borderColor: t.brand, borderWidth: 1, borderRadius: 18, padding: 20, alignItems: 'center', marginBottom: 22 }}>
           <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.8 }}>Your code</Text>
           <Text style={{ color: t.brand, fontSize: 30, fontWeight: '800', letterSpacing: 2, marginTop: 6, fontFamily: 'Georgia' }}>{code}</Text>
+          {joined > 0 ? <Text style={{ color: t.ink2, fontSize: 12.5, fontWeight: '700', marginTop: 10 }}>{joined} friend{joined === 1 ? '' : 's'} joined with your code 🎉</Text> : null}
         </View>
 
         {steps.map((s) => (

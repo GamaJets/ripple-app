@@ -8,6 +8,7 @@ import { useTheme } from '../src/ui/components';
 import { useAuth } from '../src/ui/auth';
 import { useBrand } from '../src/ui/brand';
 import { USE_SUPABASE } from '../src/lib/config';
+import { recordReferral, stashPendingReferral, flushPendingReferral } from '../src/lib/referrals';
 
 function Ripple({ size, color }: { size: number; color: string }) {
  return (
@@ -30,6 +31,7 @@ export default function Welcome() {
  const [email, setEmail] = useState('');
  const [pw, setPw] = useState('');
  const [busy, setBusy] = useState(false);
+ const [refCode, setRefCode] = useState('');
  const [notice, setNotice] = useState<string | null>(null);
 
  const canGo = email.trim().length > 3 && pw.length >= 6 && (mode === 'in' || name.trim().length > 0);
@@ -40,13 +42,16 @@ export default function Welcome() {
  if (mode === 'up') {
  const res = await auth.signUp(name, email.trim(), pw, role);
  if (res.needsConfirmation) {
+ await stashPendingReferral(refCode);
  setNotice('Account created. Check your email to confirm, then sign in.');
  setMode('in');
  } else {
+ await recordReferral(refCode);
  router.replace('/onboarding');
  }
  } else {
  await auth.signIn(email.trim(), pw);
+ await flushPendingReferral();
  router.replace('/');
  }
  } catch (e: any) {
@@ -105,6 +110,9 @@ export default function Welcome() {
  ) : null}
  <TextInput value={email} onChangeText={setEmail} placeholder="Email" placeholderTextColor={t.ink3} keyboardType="email-address" autoCapitalize="none" autoCorrect={false} style={inp} accessibilityLabel="Email" />
  <TextInput value={pw} onChangeText={setPw} placeholder="Password (min 6 characters)" placeholderTextColor={t.ink3} secureTextEntry autoCapitalize="none" style={inp} accessibilityLabel="Password" />
+ {mode === 'up' ? (
+ <TextInput value={refCode} onChangeText={setRefCode} placeholder="Referral code (optional)" placeholderTextColor={t.ink3} autoCapitalize="characters" autoCorrect={false} style={inp} accessibilityLabel="Referral code (optional)" />
+ ) : null}
 
  <Pressable onPress={go} disabled={!canGo || busy} accessibilityRole="button" style={{ backgroundColor: canGo ? t.brand : t.surface2, borderColor: canGo ? t.brand : t.ring, borderWidth: 1, borderRadius: 14, paddingVertical: 16, alignItems: 'center', marginTop: 6 }}>
  <Text style={{ color: canGo ? t.brandInk : t.ink3, fontWeight: '800', fontSize: 15 }}>{busy ? 'Please wait…' : mode === 'up' ? 'Create Account' : 'Sign In'}</Text>
