@@ -1,12 +1,15 @@
 // Client · Settings & About. Notification prefs, unit preference, legal, and a
 // what's-new changelog. Profile hub.
 import { useState } from 'react';
-import { View, Text, Pressable, ScrollView } from 'react-native';
+import { View, Text, Pressable, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { useSettings } from '../../src/ui/settings';
+import { useAuth } from '../../src/ui/auth';
+import { exportMyData, requestAccountDeletion } from '../../src/lib/gdpr';
+import { shareTextFile } from '../../src/lib/exportShare';
 
 const CHANGELOG = [
   { v: '2.2', notes: ['Coach program builder', 'Coach feedback & meal-plan adjustments', 'Body measurements, weekly report & goal tracker', 'Lifting tools + recovery screen'] },
@@ -38,7 +41,19 @@ export default function Settings() {
   const t = useTheme();
   const router = useRouter();
   const st = useSettings();
+  const auth = useAuth();
   const [legal, setLegal] = useState<'privacy' | 'terms' | null>(null);
+  const [dataBusy, setDataBusy] = useState(false);
+  const exportData = async () => {
+    if (dataBusy) return; setDataBusy(true);
+    try { const json = await exportMyData(); await shareTextFile(json, 'repple-my-data.json', 'application/json', 'Export my data'); } finally { setDataBusy(false); }
+  };
+  const deleteAccount = () => {
+    Alert.alert('Delete your account?', 'This requests permanent deletion of your account and all your data. This cannot be undone.', [
+      { text: 'Keep my account', style: 'cancel' },
+      { text: 'Request deletion', style: 'destructive', onPress: async () => { const ok = await requestAccountDeletion(); Alert.alert(ok ? 'Deletion requested' : 'Request noted', ok ? 'Your account is scheduled for deletion and your data will be erased. You have been signed out.' : "We've recorded your request. If anything remains, contact support.", [{ text: 'OK', onPress: () => { try { auth.signOut(); } catch { /* ignore */ } } }]); } },
+    ]);
+  };
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
@@ -73,6 +88,12 @@ export default function Settings() {
           <Text style={{ color: t.ink, fontSize: 15, fontWeight: '600' }}>Theme & accent colour</Text>
           <Text style={{ color: t.ink3, fontSize: 18 }}>›</Text>
         </Pressable>
+
+        <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>Your data</Text>
+        <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, paddingHorizontal: 14, marginBottom: 18 }}>
+          <Pressable onPress={exportData} accessibilityRole="button" accessibilityLabel="Export my data"><Row t={t} label={dataBusy ? 'Preparing export…' : 'Export my data'} sub="Download everything we store about you (JSON)" right={<Text style={{ color: t.brand, fontSize: 16 }}>{'\u2913'}</Text>} /></Pressable>
+          <Pressable onPress={deleteAccount} accessibilityRole="button" accessibilityLabel="Delete my account"><Row t={t} label="Delete my account" sub="Request permanent erasure of your account and data" right={<Text style={{ color: t.crit, fontSize: 15, fontWeight: '800' }}>{'\u203a'}</Text>} /></Pressable>
+        </View>
 
         <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>Legal</Text>
         <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, paddingHorizontal: 14, marginBottom: 18 }}>

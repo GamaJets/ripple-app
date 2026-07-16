@@ -21,6 +21,19 @@ try { FileSystem = require('expo-file-system'); } catch { /* lights up after a r
 
 export { buildIcs, type IcsEvent } from './ics';
 
+export async function shareTextFile(content: string, filename: string, mime: string, title: string): Promise<'file' | 'text'> {
+  if (FileSystem?.cacheDirectory && Sharing?.shareAsync) {
+    try {
+      const uri = FileSystem.cacheDirectory + filename;
+      await FileSystem.writeAsStringAsync(uri, content, { encoding: FileSystem.EncodingType?.UTF8 ?? 'utf8' });
+      const ok = Sharing.isAvailableAsync ? await Sharing.isAvailableAsync() : true;
+      if (ok) { await Sharing.shareAsync(uri, { mimeType: mime, dialogTitle: title }); return 'file'; }
+    } catch { /* fall through */ }
+  }
+  try { await Share.share({ message: content, title }); } catch { /* ignore */ }
+  return 'text';
+}
+
 export async function shareIcs(ics: string, filename: string, title: string): Promise<'file' | 'text'> {
   if (FileSystem?.cacheDirectory && Sharing?.shareAsync) {
     try {

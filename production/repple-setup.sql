@@ -426,6 +426,15 @@ grant execute on function book_class(uuid)   to authenticated;
 grant execute on function cancel_class(uuid) to authenticated;
 grant execute on function class_counts()     to authenticated;
 
+-- ── GDPR: right to erasure (deletion request flag) ──────────────────────────
+alter table profiles add column if not exists deletion_requested_at timestamptz;
+create or replace function request_account_deletion()
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  update profiles set deletion_requested_at = now() where id = auth.uid();
+end; $$;
+grant execute on function request_account_deletion() to authenticated;
+
 create table if not exists measurements (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references profiles(id) on delete cascade,
