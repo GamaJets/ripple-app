@@ -26,6 +26,7 @@ export default function TrainerClasses() {
   const [hour, setHour] = useState(18);
   const [dur, setDur] = useState(45);
   const [cap, setCap] = useState(16);
+  const [weeks, setWeeks] = useState(1);
   const [busy, setBusy] = useState(false);
 
   const upcoming = useMemo(() => [...classes].sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt)), [classes]);
@@ -36,9 +37,10 @@ export default function TrainerClasses() {
     if (!canAdd || busy) return;
     setBusy(true);
     try {
-      await addClass({ title: title.trim(), kind, instructor: instructor.trim() || 'Coach', branch, room: room.trim(), startsAt: startIso(), durationMin: dur, capacity: cap });
+      const base = new Date(startIso());
+      for (let w = 0; w < weeks; w++) { const d = new Date(base.getTime() + w * 7 * 86400000); await addClass({ title: title.trim(), kind, instructor: instructor.trim() || 'Coach', branch, room: room.trim(), startsAt: d.toISOString(), durationMin: dur, capacity: cap }); }
       setTitle(''); setRoom('');
-      Alert.alert('Class added', `${title.trim()} · ${branch} · ${dayShort(startIso())} ${timeLabel(startIso())}`);
+      Alert.alert(weeks > 1 ? 'Classes added' : 'Class added', weeks > 1 ? `${weeks} weekly ${title.trim()} classes at ${branch}, starting ${dayShort(startIso())} ${timeLabel(startIso())}.` : `${title.trim()} · ${branch} · ${dayShort(startIso())} ${timeLabel(startIso())}`);
     } finally { setBusy(false); }
   };
 
@@ -86,6 +88,8 @@ export default function TrainerClasses() {
             {stepper('Minutes', String(dur), () => setDur((d) => (d > 15 ? d - 15 : d)), () => setDur((d) => (d < 90 ? d + 15 : d)))}
             {stepper('Capacity', String(cap), () => setCap((c) => (c > 4 ? c - 1 : c)), () => setCap((c) => c + 1))}
           </View>
+          <Text style={{ color: t.ink3, fontSize: 11, marginBottom: 6 }}>Repeat</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }} contentContainerStyle={{ gap: 7 }}>{([[1,'Just once'],[4,'Weekly \u00d74'],[8,'Weekly \u00d78'],[12,'Weekly \u00d712']] as [number, string][]).map(([n,label]) => chip(label, weeks === n, () => setWeeks(n)))}</ScrollView>
           <Pressable onPress={submit} disabled={!canAdd || busy} style={{ backgroundColor: canAdd ? t.brand : t.surface2, borderWidth: 1, borderColor: canAdd ? t.brand : t.ring, borderRadius: 12, paddingVertical: 14, alignItems: 'center' }}>
             <Text style={{ color: canAdd ? t.brandInk : t.ink3, fontWeight: '800', fontSize: 14 }}>{busy ? 'Adding…' : 'Add class'}</Text>
           </Pressable>
