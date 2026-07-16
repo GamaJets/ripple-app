@@ -18,6 +18,7 @@ import { suggestForExercise, priorBest1RM } from '../../src/lib/progression';
 import { est1RM } from '../../src/lib/streaks';
 import { Confetti } from '../../src/ui/Confetti';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
+import { parseWorkoutText } from '../../src/lib/workoutParse';
 import { useExerciseVideos } from '../../src/ui/exerciseVideos';
 import { injuryFlag, areaLabel, type Injury } from '../../src/lib/injuries';
 import { warmupSets, deloadCheck } from '../../src/lib/training';
@@ -56,6 +57,15 @@ export default function Train() {
   const [swaps, setSwaps] = useState<Record<string, string>>({});
   const [logged, setLogged] = useState<Record<string, { reps: string; kg: string }[]>>({});
   const [cardioLog, setCardioLog] = useState<{ type: string; mins: number; dist: number; unit: string; kcal: number }[]>([]);
+  const [nlw, setNlw] = useState('');
+  const logWorkoutNL = () => {
+    const lifts = parseWorkoutText(nlw);
+    if (!lifts.length) { Alert.alert('Could not read that', 'Try e.g. "bench 3x8 60kg, squat 100kg 5 5 5".'); return; }
+    const nowISO = new Date().toISOString();
+    addWorkouts(lifts.map((l) => ({ t: nowISO, exercise: l.exercise, sets: l.sets, kcal: Math.round(l.sets.reduce((a, [r, w]) => a + r * (w || 0), 0) / 60) + l.sets.length * 8 })));
+    setNlw('');
+    Alert.alert('Logged', `${lifts.length} exercise${lifts.length === 1 ? '' : 's'} added to today.`);
+  };
   const [swapFor, setSwapFor] = useState<ProgramExercise | null>(null);
   const [videoFor, setVideoFor] = useState<string | null>(null);
   const [injRevealed, setInjRevealed] = useState<string[]>([]);
@@ -178,6 +188,12 @@ export default function Train() {
             </Pressable>
           ))}
         </ScrollView>
+
+        {/* natural-language logger */}
+        <View style={{ flexDirection: 'row', gap: 8, marginBottom: 14 }}>
+          <TextInput value={nlw} onChangeText={setNlw} placeholder='Log by text — "bench 3x8 60kg, squat 5 5 5 100kg"' placeholderTextColor={t.ink3} onSubmitEditing={logWorkoutNL} returnKeyType="done" style={{ flex: 1, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 11, fontSize: 14 }} />
+          <Pressable onPress={logWorkoutNL} disabled={!nlw.trim()} accessibilityRole="button" accessibilityLabel="Log workout from text" style={{ backgroundColor: nlw.trim() ? t.brand : t.surface2, borderRadius: 12, paddingHorizontal: 16, justifyContent: 'center', borderWidth: 1, borderColor: nlw.trim() ? t.brand : t.ring }}><Text style={{ color: nlw.trim() ? t.brandInk : t.ink3, fontWeight: '800', fontSize: 13 }}>Log</Text></Pressable>
+        </View>
 
         {/* day strip */}
         <View style={{ flexDirection: 'row', gap: 6, marginBottom: 14 }}>
