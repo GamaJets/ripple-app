@@ -3,6 +3,8 @@ import { useEffect, useState } from 'react';
 import { View, Text, Pressable, ScrollView, Modal, TextInput, Alert, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { trialInfo } from '../../src/lib/trial';
+import { billingAvailable } from '../../src/lib/billing';
 import { Icon } from '../../src/ui/Icon';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
@@ -48,6 +50,8 @@ function timeAgo(iso: string) {
 export default function TrainerClients() {
   const t = useTheme();
   const router = useRouter();
+  const [trial, setTrial] = useState<{ daysLeft: number; expired: boolean } | null>(null);
+  useEffect(() => { trialInfo().then((ti) => setTrial({ daysLeft: ti.daysLeft, expired: ti.expired })); }, []);
   const { roster, addClient, removeClient } = useRoster();
   const { sessionFee, name: coachName } = useCoachProfile();
   const { getFeedback, addFeedback } = useCoachFeedback();
@@ -204,6 +208,19 @@ export default function TrainerClients() {
           </Pressable>
           </View>
         </View>
+
+        {trial && !billingAvailable() ? (
+          <Pressable onPress={() => router.push('/(trainer)/billing')} style={{ backgroundColor: t.surface, borderColor: trial.expired ? t.s3 : t.brand, borderWidth: 1, borderRadius: 14, padding: 14, marginBottom: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+              <Icon name="sparkle" size={18} color={trial.expired ? t.s3 : t.brand} />
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: t.ink, fontWeight: '800', fontSize: 14 }}>{trial.expired ? 'Your free trial has ended' : `${trial.daysLeft} day${trial.daysLeft === 1 ? '' : 's'} left in your free trial`}</Text>
+                <Text style={{ color: t.ink3, fontSize: 12, marginTop: 1 }}>{trial.expired ? 'Upgrade to keep coaching your clients.' : 'Upgrade any time to unlock everything.'}</Text>
+              </View>
+            </View>
+            <Text style={{ color: trial.expired ? t.s3 : t.brand, fontWeight: '800', fontSize: 13 }}>Upgrade ›</Text>
+          </Pressable>
+        ) : null}
 
                 {trainerInvites.length > 0 ? (
           <View style={{ marginBottom: 14 }}>
