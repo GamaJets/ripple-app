@@ -21,7 +21,7 @@ export default function Membership() {
   const { appName } = useBrand();
   const m = defaultMembership(c.name, c.id);
 
-  const { visits, last } = useMemo(() => {
+  const { visits, last, points } = useMemo(() => {
     const now = new Date();
     const days = new Set<string>();
     let latest = 0;
@@ -31,13 +31,14 @@ export default function Membership() {
       const ts = Date.parse(e.t); if (ts > latest) latest = ts;
     }
     const lastLabel = latest ? new Date(latest).toLocaleDateString() : '—';
-    return { visits: days.size, last: lastLabel };
+    const points = days.size * 10 + log.length * 2;
+    return { visits: days.size, last: lastLabel, points };
   }, [log]);
 
   const actions: { label: string; icon: any; route: string; hero?: boolean }[] = [
     { label: 'Entry barcode', icon: 'grid', route: '/(client)/access', hero: true },
     { label: 'Classes', icon: 'calendar', route: '/(client)/classes' },
-    { label: 'Personal training', icon: 'people', route: '/(client)/calendar' },
+    { label: 'Personal training', icon: 'people', route: '/(client)/pt-sessions' },
     { label: 'My bookings', icon: 'check', route: '/(client)/calendar' },
     { label: 'Offers', icon: 'sparkle', route: '/(client)/explore' },
     { label: 'Refer a friend', icon: 'share', route: '/(client)/referral' },
@@ -75,6 +76,18 @@ export default function Membership() {
             <Text style={{ color: t.ink3, fontSize: 12, fontWeight: '700' }}>Last visit</Text>
             <Text style={{ color: t.ink, fontSize: 16, fontWeight: '800', marginTop: 6 }}>{last}</Text>
           </View>
+        </View>
+
+        {/* Loyalty & balance */}
+        <View style={{ flexDirection: 'row', gap: 12, marginBottom: 18 }}>
+          <View style={{ flex: 1, backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 15 }}>
+            <Text style={{ color: t.ink3, fontSize: 12, fontWeight: '700' }}>Loyalty points</Text>
+            <Text style={{ color: t.brand, fontSize: 24, fontWeight: '800', marginTop: 4 }}>{points.toLocaleString()}</Text>
+          </View>
+          <Pressable onPress={() => router.push('/(client)/packages')} accessibilityRole="button" accessibilityLabel="Top up balance" style={{ flex: 1, backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 15 }}>
+            <Text style={{ color: t.ink3, fontSize: 12, fontWeight: '700' }}>Balance</Text>
+            <Text style={{ color: t.ink, fontSize: 18, fontWeight: '800', marginTop: 5 }}>Add top-up ›</Text>
+          </Pressable>
         </View>
 
         {/* Entry barcode hero */}
