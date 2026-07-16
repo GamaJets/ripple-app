@@ -109,6 +109,14 @@ export default function Calendar() {
  <Text style={{ color: t.brand, fontWeight: '800', fontSize: 18 }}>›</Text>
  </Pressable>
 
+ <Pressable onPress={() => router.push('/(client)/membership')} accessibilityRole="button" accessibilityLabel="Membership and gym access" style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 16, padding: 15, marginBottom: 14 }}>
+ <View style={{ flexDirection: 'row', alignItems: 'center', gap: 11 }}>
+ <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}><Icon name="grid" size={20} color={t.brand} /></View>
+ <View><Text style={{ color: t.ink, fontWeight: '800', fontSize: 15 }}>Membership & entry pass</Text><Text style={{ color: t.ink3, fontSize: 12, marginTop: 1 }}>Card, barcode & visits</Text></View>
+ </View>
+ <Text style={{ color: t.brand, fontWeight: '800', fontSize: 18 }}>›</Text>
+ </Pressable>
+
  {/* Coach card */}
  <Pressable onPress={() => setShowCoach(true)} style={{ backgroundColor: t.surface, borderRadius: 18, borderWidth: 1, borderColor: t.ring, padding: 14, marginBottom: 14, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
  {coach.photo ? (
