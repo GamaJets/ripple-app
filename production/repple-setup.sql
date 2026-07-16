@@ -450,6 +450,14 @@ returns table(client_id uuid) language sql security definer set search_path = pu
 $$;
 grant execute on function reoffer_client_ids(uuid) to authenticated;
 
+-- All member ids for an owner-wide promotion push (owner role only). Ids only.
+create or replace function all_member_ids()
+returns table(user_id uuid) language sql security definer set search_path = public as $$
+  select c.id from clients c
+  where exists (select 1 from profiles p where p.id = auth.uid() and p.role = 'owner');
+$$;
+grant execute on function all_member_ids() to authenticated;
+
 create table if not exists measurements (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references profiles(id) on delete cascade,

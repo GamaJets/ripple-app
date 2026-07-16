@@ -15,6 +15,8 @@ export default function OwnerLayout() {
       <Tabs.Screen name="explore" options={{ href: null, title: 'Explore' }} />
       <Tabs.Screen name="feedback" options={{ href: null, title: 'Feedback' }} />
       <Tabs.Screen name="revenue" options={{ href: null, title: 'Revenue' }} />
+      <Tabs.Screen name="financials" options={{ href: null, title: 'Financial health' }} />
+      <Tabs.Screen name="promotions" options={{ href: null, title: 'Promotions' }} />
     </Tabs>
   );
 }
