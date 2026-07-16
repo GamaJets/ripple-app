@@ -35,6 +35,7 @@ export const CLIENT_FEATURES: Feature[] = [
 
   // ── Nutrition ─────────────────────────────────────────────
   { key: 'foodlog', label: 'Food Log', note: 'Search, barcode or photo', route: '/(client)/foodlog', icon: 'meals', area: 'meals', keywords: 'calories macros barcode photo diary' },
+  { key: 'restaurant', label: 'Eating out', note: 'Estimate restaurant macros', route: '/(client)/restaurant', icon: 'meals', area: 'meals', keywords: 'restaurant eating out dining takeout macros estimate cuisine' },
 
   // ── Progress & Insights ───────────────────────────────────
   { key: 'report', label: 'Weekly Report', note: 'Your week at a glance · share it', route: '/(client)/report', icon: 'chart', area: 'progress', keywords: 'summary' },

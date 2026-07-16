@@ -4,6 +4,7 @@ import { parseRepRange, suggestNextWeight, suggestForExercise, priorBest1RM, sug
 import { overlaps, isLateCancellation, cancelSession, nextFromWaitlist } from './booking';
 import type { WorkoutEntry } from './mockData';
 import { buildIcs } from './ics';
+import { estimateDish, searchDishes, DISHES } from './restaurant';
 import type { TrainingSession } from './types';
 
 const errors: string[] = [];
@@ -26,6 +27,15 @@ ok(_ics.includes('DTSTART:20260720T090000Z') && _ics.includes('DTEND:20260720T10
 ok(_ics.includes('SUMMARY:Training\\, with\\; coach'), 'ics escapes comma/semicolon');
 ok((_ics.match(/BEGIN:VEVENT/g) || []).length === 1, 'ics one event');
 ok(buildIcs([], 'X', 0).includes('X-WR-CALNAME:X'), 'ics empty calendar still valid');
+// ── restaurant estimator ──
+const _burrito = DISHES.find((d) => d.id === 'burrito')!;
+ok(estimateDish(_burrito, 1).kcal === _burrito.kcal, 'full portion = base kcal');
+ok(estimateDish(_burrito, 2).kcal === _burrito.kcal * 2, 'double portion doubles kcal');
+ok(estimateDish(_burrito, 0.5).protein === Math.round(_burrito.protein * 0.5), 'half portion halves protein');
+ok(estimateDish(_burrito, 1).name === _burrito.name && estimateDish(_burrito, 2).name.includes('2'), 'portion label');
+ok(searchDishes('ramen').length === 1 && searchDishes('ramen')[0].id === 'ramen', 'search by name');
+ok(searchDishes('mexican').every((d) => d.cuisine === 'Mexican'), 'search by cuisine');
+ok(searchDishes('').length === DISHES.length || searchDishes('').length === 40, 'empty query returns catalog');
 // ── streak freeze ──
 // 5-day chain (days 0..4), miss day 5, then trained days 6,7 -> a freeze bridges day 5.
 const gapLog: WorkoutEntry[] = [0,1,2,3,4,6,7,8,9,10,11,12].map((n) => ({ t: day(n), exercise: 'X', sets: [[8,50]] as [number,number][] }));
