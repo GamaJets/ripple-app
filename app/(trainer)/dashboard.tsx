@@ -196,7 +196,7 @@ export default function TrainerClients() {
           </View>
           <View style={{ flexDirection: 'row', gap: 8 }}>
           <Pressable onPress={() => router.push('/(trainer)/explore')} accessibilityLabel="Search" style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 7, alignItems: 'center', justifyContent: 'center' }}><Icon name="search" size={14} color={t.ink2} /></Pressable>
-          <Pressable onPress={() => { setBcText(''); setBcOpen(true); }} style={{ backgroundColor: t.brand, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 7 }}>
+          <Pressable onPress={() => router.push('/(trainer)/broadcast')} style={{ backgroundColor: t.brand, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 7 }}>
             <Text style={{ color: t.brandInk, fontWeight: '700', fontSize: 12 }}>Broadcast</Text>
           </Pressable>
           <Pressable onPress={() => router.push('/')} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 7 }}>
