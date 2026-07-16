@@ -141,6 +141,17 @@ export default function TrainerSchedule() {
     ]);
   }
 
+  function reoffer(s: TrainingSession) {
+    const ids = roster.map((c) => c.id);
+    Alert.alert('Re-offer this slot?', `Push all ${ids.length} of your clients that ${timeLabel(s.startsAt)} on ${DOW[new Date(s.startsAt).getDay()]} is open to book.`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: `Notify ${ids.length}`, onPress: () => {
+        if (ids.length) sendPush(ids, 'A slot just opened', `${timeLabel(s.startsAt)} on ${DOW[new Date(s.startsAt).getDay()]} is available — first to book it gets it.`, { route: '/(client)/calendar' });
+        Alert.alert('Re-offered', `Offered to ${ids.length} client${ids.length === 1 ? '' : 's'}.`);
+      } },
+    ]);
+  }
+
   const HOURS = [6, 7, 8, 9, 10, 11, 12, 13, 16, 17, 18, 19, 20];
   const DURS = [30, 45, 60, 90];
 
@@ -251,9 +262,14 @@ export default function TrainerSchedule() {
                 <Text style={{ color: t.s6, fontWeight: '700', fontSize: 12 }}>Cancel</Text>
               </Pressable>
             ) : (
-              <Pressable onPress={() => removeOpen(s)} style={{ borderWidth: 1, borderColor: t.ring, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 }}>
-                <Text style={{ color: t.ink3, fontWeight: '700', fontSize: 12 }}>Remove</Text>
-              </Pressable>
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                <Pressable onPress={() => reoffer(s)} style={{ borderWidth: 1, borderColor: t.brand, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 }}>
+                  <Text style={{ color: t.brand, fontWeight: '700', fontSize: 12 }}>Re-offer</Text>
+                </Pressable>
+                <Pressable onPress={() => removeOpen(s)} style={{ borderWidth: 1, borderColor: t.ring, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 }}>
+                  <Text style={{ color: t.ink3, fontWeight: '700', fontSize: 12 }}>Remove</Text>
+                </Pressable>
+              </View>
             )}
           </View>
         ))}
