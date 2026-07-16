@@ -71,6 +71,7 @@ export default function ClientLayout() {
       <Tabs.Screen name="classes" options={{ href: null, title: 'Classes' }} />
       <Tabs.Screen name="membership" options={{ href: null, title: 'Membership' }} />
       <Tabs.Screen name="access" options={{ href: null, title: 'Access' }} />
+      <Tabs.Screen name="restday" options={{ href: null, title: 'Rest & deload' }} />
     </Tabs>
   );
 }

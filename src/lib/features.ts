@@ -43,6 +43,7 @@ export const CLIENT_FEATURES: Feature[] = [
   // ── Progress & Insights ───────────────────────────────────
   { key: 'report', label: 'Weekly Report', note: 'Your week at a glance · share it', route: '/(client)/report', icon: 'chart', area: 'progress', keywords: 'summary' },
   { key: 'consistency', label: 'Consistency', note: '12-week training heatmap', route: '/(client)/consistency', icon: 'flame', area: 'progress', keywords: 'heatmap streak' },
+  { key: 'restday', label: 'Rest & deload', note: 'Recovery planner from your log', route: '/(client)/restday', icon: 'moon', area: 'train', keywords: 'rest day deload recovery fatigue overtraining planner' },
   { key: 'records', label: 'Personal Records', note: 'Your best lifts, ranked', route: '/(client)/records', icon: 'trophy', area: 'progress', keywords: 'pr prs best lifts' },
   { key: 'progression', label: 'Next-session Targets', note: 'Auto progression from your lifts', route: '/(client)/progression', icon: 'trending', area: 'train', keywords: 'progression overload progressive weight increase targets next' },
   { key: 'standards', label: 'Strength Standards', note: 'How your lifts stack up', route: '/(client)/standards', icon: 'chart', area: 'progress', keywords: 'benchmark bodyweight' },
