@@ -7,6 +7,7 @@ import { useState } from 'react';
 import { View, Text, Pressable, ScrollView, Alert, Modal } from 'react-native';
 import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { MOCK_TRAINER } from '../../src/lib/mockData';
@@ -36,6 +37,7 @@ let SEQ = 5000;
 export default function TrainerSchedule() {
   const t = useTheme();
   const now = new Date();
+  const router = useRouter();
   const { sessions, addSession, releaseSession, removeSession } = useSessions();
   const { roster } = useRoster();
   const { sessionFee } = useCoachProfile();
@@ -154,6 +156,14 @@ export default function TrainerSchedule() {
  <Text style={{ color: t.ink, fontWeight: '700', fontSize: 13 }}>Export schedule</Text>
  </Pressable>
  ) : null}
+
+ <Pressable onPress={() => router.push('/(trainer)/classes')} accessibilityRole="button" accessibilityLabel="Manage gym classes" style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: t.surface, borderColor: t.brand, borderWidth: 1, borderRadius: 14, padding: 14, marginBottom: 16 }}>
+ <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+ <Icon name="calendar" size={19} color={t.brand} />
+ <View><Text style={{ color: t.ink, fontWeight: '800', fontSize: 14.5 }}>Group classes</Text><Text style={{ color: t.ink3, fontSize: 11.5, marginTop: 1 }}>Schedule & fill classes across branches</Text></View>
+ </View>
+ <Text style={{ color: t.brand, fontWeight: '800', fontSize: 18 }}>›</Text>
+ </Pressable>
 
         <View style={{ flexDirection: 'row', gap: 12, marginBottom: 16 }}>
           <View style={{ flex: 1, backgroundColor: t.brand, borderRadius: 16, padding: 14 }}>

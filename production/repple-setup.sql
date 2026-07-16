@@ -352,6 +352,80 @@ $$;
 grant execute on function record_referral(text) to authenticated;
 grant execute on function referral_count(text) to authenticated;
 
+-- ── Gym classes (multi-location group-class booking) ────────────────────────
+create table if not exists gym_classes (
+  id uuid primary key default gen_random_uuid(),
+  trainer_id uuid references trainers(id) on delete set null,
+  title text not null,
+  kind text,
+  instructor text,
+  branch text,
+  room text,
+  starts_at timestamptz not null,
+  duration_min int not null default 45,
+  capacity int not null default 12,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_gym_classes_start on gym_classes(starts_at);
+create index if not exists idx_gym_classes_branch on gym_classes(branch);
+
+create table if not exists class_bookings (
+  id uuid primary key default gen_random_uuid(),
+  class_id uuid not null references gym_classes(id) on delete cascade,
+  user_id uuid not null references profiles(id) on delete cascade,
+  status text not null default 'booked' check (status in ('booked','waitlist')),
+  created_at timestamptz not null default now(),
+  unique (class_id, user_id)
+);
+create index if not exists idx_class_bookings_class on class_bookings(class_id);
+
+alter table gym_classes    enable row level security;
+alter table class_bookings enable row level security;
+drop policy if exists gym_classes_read on gym_classes;
+create policy gym_classes_read on gym_classes for select using (auth.role() = 'authenticated');
+drop policy if exists gym_classes_write on gym_classes;
+create policy gym_classes_write on gym_classes for all using (trainer_id = auth.uid()) with check (trainer_id = auth.uid());
+drop policy if exists class_bookings_self on class_bookings;
+create policy class_bookings_self on class_bookings for all using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+-- Book a class; returns 'booked' or 'waitlist'. Capacity-safe via row lock.
+create or replace function book_class(p_class uuid)
+returns text language plpgsql security definer set search_path = public as $$
+declare v_cap int; v_count int; v_status text;
+begin
+  perform 1 from gym_classes where id = p_class for update;
+  select capacity into v_cap from gym_classes where id = p_class;
+  if v_cap is null then return 'notfound'; end if;
+  select count(*) into v_count from class_bookings where class_id = p_class and status = 'booked';
+  v_status := case when v_count < v_cap then 'booked' else 'waitlist' end;
+  insert into class_bookings (class_id, user_id, status) values (p_class, auth.uid(), v_status)
+    on conflict (class_id, user_id) do update set status = excluded.status;
+  return v_status;
+end; $$;
+
+-- Cancel my booking; promote the earliest waitlister if a seat opens.
+create or replace function cancel_class(p_class uuid)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  delete from class_bookings where class_id = p_class and user_id = auth.uid();
+  update class_bookings set status = 'booked'
+   where id = (
+     select cb.id from class_bookings cb join gym_classes gc on gc.id = cb.class_id
+     where cb.class_id = p_class and cb.status = 'waitlist'
+       and (select count(*) from class_bookings b where b.class_id = p_class and b.status = 'booked') < gc.capacity
+     order by cb.created_at asc limit 1
+   );
+end; $$;
+
+-- Confirmed counts per class (for spots-left display across all members).
+create or replace function class_counts()
+returns table(class_id uuid, booked int) language sql security definer set search_path = public as $$
+  select class_id, count(*)::int from class_bookings where status = 'booked' group by class_id;
+$$;
+grant execute on function book_class(uuid)   to authenticated;
+grant execute on function cancel_class(uuid) to authenticated;
+grant execute on function class_counts()     to authenticated;
+
 create table if not exists measurements (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references profiles(id) on delete cascade,

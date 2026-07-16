@@ -101,6 +101,14 @@ export default function Calendar() {
  </Pressable>
  ) : null}
 
+ <Pressable onPress={() => router.push('/(client)/classes')} accessibilityRole="button" accessibilityLabel="Browse gym classes" style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: t.surface, borderColor: t.brand, borderWidth: 1, borderRadius: 16, padding: 15, marginBottom: 14 }}>
+ <View style={{ flexDirection: 'row', alignItems: 'center', gap: 11 }}>
+ <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: 'rgba(22,184,166,0.14)', alignItems: 'center', justifyContent: 'center' }}><Icon name="calendar" size={20} color={t.brand} /></View>
+ <View><Text style={{ color: t.ink, fontWeight: '800', fontSize: 15 }}>Gym classes</Text><Text style={{ color: t.ink3, fontSize: 12, marginTop: 1 }}>Book HIIT, spin, yoga & more</Text></View>
+ </View>
+ <Text style={{ color: t.brand, fontWeight: '800', fontSize: 18 }}>›</Text>
+ </Pressable>
+
  {/* Coach card */}
  <Pressable onPress={() => setShowCoach(true)} style={{ backgroundColor: t.surface, borderRadius: 18, borderWidth: 1, borderColor: t.ring, padding: 14, marginBottom: 14, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
  {coach.photo ? (

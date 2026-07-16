@@ -68,6 +68,7 @@ export default function ClientLayout() {
       <Tabs.Screen name="feedback" options={{ href: null, title: 'Send Feedback' }} />
       <Tabs.Screen name="referral" options={{ href: null, title: 'Invite Friends' }} />
       <Tabs.Screen name="restaurant" options={{ href: null, title: 'Eating out' }} />
+      <Tabs.Screen name="classes" options={{ href: null, title: 'Classes' }} />
     </Tabs>
   );
 }
