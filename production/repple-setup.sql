@@ -435,6 +435,21 @@ begin
 end; $$;
 grant execute on function request_account_deletion() to authenticated;
 
+-- Re-offer a freed PT slot to the trainer other clients (member cancelled).
+-- Guarded: only a client of that trainer can trigger it. Ids only, no names.
+create or replace function reoffer_client_ids(p_session uuid)
+returns table(client_id uuid) language sql security definer set search_path = public as $$
+  select c.id from clients c
+  where c.trainer_id = (select trainer_id from sessions where id = p_session)
+    and c.id <> auth.uid()
+    and exists (
+      select 1 from clients me
+      where me.id = auth.uid()
+        and me.trainer_id = (select trainer_id from sessions where id = p_session)
+    );
+$$;
+grant execute on function reoffer_client_ids(uuid) to authenticated;
+
 create table if not exists measurements (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references profiles(id) on delete cascade,

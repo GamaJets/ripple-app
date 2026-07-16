@@ -11,7 +11,7 @@ import type { Theme } from '../../src/theme/tokens';
 import { useSessions } from '../../src/ui/sessions';
 import { useCoachProfile } from '../../src/ui/coachProfile';
 import type { TrainingSession } from '../../src/lib/types';
-import { sessionsRemaining, redeemSession, refundSession } from '../../src/lib/connect';
+import { sessionsRemaining, redeemSession, refundSession, reofferSlot } from '../../src/lib/connect';
 import { buildIcs, shareIcs } from '../../src/lib/exportShare';
 import { sendPush } from '../../src/ui/pushNotifications';
 
@@ -76,12 +76,15 @@ export default function Calendar() {
  function cancel(s: TrainingSession) {
  const late = Date.parse(s.startsAt) - Date.now() < 24 * 3600 * 1000;
  const doCancel = () => {
+ // Offer the freed slot to the trainer's other clients (server-side lookup + push).
+ reofferSlot(s.id).then((ids) => { if (ids.length) sendPush(ids, 'A PT slot just opened', `${timeLabel(s.startsAt)} with ${coach.name} just opened up — first to book it gets it.`, { route: '/(client)/calendar' }); }).catch(() => {});
  releaseSession(s.id);
- refundSession(s.trainerId).then(() => { sessionsRemaining().then(setPackLeft).catch(() => {}); }).catch(() => {});
- sendPush([s.trainerId], 'Session cancelled', `A client cancelled ${DOW[new Date(s.startsAt).getDay()]} ${timeLabel(s.startsAt)}. The slot re-opened.`, { route: '/(trainer)/calendar' });
- Alert.alert('Cancelled', `Your ${timeLabel(s.startsAt)} session was cancelled. The slot has been re-offered to other clients.${late ? `\n\nA $${fee} late-cancellation fee applies.` : ''}`, [{ text: 'OK' }]);
+ // Late cancel (within 24h): the session is charged — keep the credit drawn. Otherwise refund it.
+ if (!late) refundSession(s.trainerId).then(() => { sessionsRemaining().then(setPackLeft).catch(() => {}); }).catch(() => {});
+ sendPush([s.trainerId], 'Session cancelled', `A client cancelled ${DOW[new Date(s.startsAt).getDay()]} ${timeLabel(s.startsAt)}. The slot re-opened.${late ? ' (Late cancel — charged.)' : ''}`, { route: '/(trainer)/calendar' });
+ Alert.alert('Cancelled', late ? `Cancelled within 24 hours — this session is charged from your package. The freed slot was offered to your coach's other clients.` : `Your ${timeLabel(s.startsAt)} session was cancelled and returned to your package. The freed slot was offered to your coach's other clients.`, [{ text: 'OK' }]);
  };
- if (late) Alert.alert('Within 24 hours', `Cancelling now charges the $${fee} late-cancellation fee, and the slot is offered to other clients. Continue?`, [{ text: 'Keep it', style: 'cancel' }, { text: `Cancel · $${fee}`, style: 'destructive', onPress: doCancel }]);
+ if (late) Alert.alert('Within 24 hours', `This is inside 24 hours, so the session is charged from your package (and a $${fee} late fee may apply). The slot is offered to your coach's other clients. Continue?`, [{ text: 'Keep it', style: 'cancel' }, { text: 'Cancel anyway', style: 'destructive', onPress: doCancel }]);
  else Alert.alert('Cancel session?', 'This is more than 24h away, so no fee. The slot re-opens for others.', [{ text: 'Keep it', style: 'cancel' }, { text: 'Cancel', style: 'destructive', onPress: doCancel }]);
  }
 

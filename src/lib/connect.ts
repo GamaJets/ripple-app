@@ -111,6 +111,15 @@ export async function redeemSession(trainerId: string): Promise<{ ok: boolean; r
   } catch (e) { return { ok: false, error: (e as Error).message }; }
 }
 
+/** The trainer OTHER clients, to push a freed slot to. Server-side lookup so no
+ *  other-client identity leaks to the caller beyond opaque ids. */
+export async function reofferSlot(sessionId: string): Promise<string[]> {
+  try {
+    const { data } = await supabase.rpc('reoffer_client_ids', { p_session: sessionId });
+    return Array.isArray(data) ? data.map((r: any) => r.client_id).filter(Boolean) : [];
+  } catch { return []; }
+}
+
 /** Refund one credit (e.g. the client cancelled a booked session). Best-effort. */
 export async function refundSession(trainerId: string): Promise<{ ok: boolean }> {
   try {
