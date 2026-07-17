@@ -3,17 +3,18 @@
 // Falls back gracefully (returns null) when the backend isn't configured yet,
 // so the UI keeps its editable-estimate path until you deploy the function.
 import { supabase } from './supabase';
+import { USE_SUPABASE } from './config';
 import type { ScanMetrics } from './inbodyMetrics';
-// Vision runs off its own flag so you can enable AI photo reading without
-// flipping the whole app to live Supabase data. Set EXPO_PUBLIC_ENABLE_VISION=1
-// once the vision-analyze function is deployed.
+// Vision uses the deployed vision-analyze edge function. It's on whenever the
+// backend is on (USE_SUPABASE) OR the explicit EXPO_PUBLIC_ENABLE_VISION flag is
+// set — so an OTA that didn't carry the build flag still gets AI reading.
 
 export interface MealVision { name: string; kcal: number; protein: number; carbs: number; fat: number; confidence: number }
 export interface InBodyVision { weightKg: number | null; bodyFatPct: number | null; skeletalMuscleKg: number | null; takenAt: string | null; metrics?: ScanMetrics }
 
-/** True when the live backend is on — the vision function lives there. */
+/** True when the vision function is reachable — backend on, or the flag is set. */
 export function visionAvailable(): boolean {
-  return process.env.EXPO_PUBLIC_ENABLE_VISION === '1';
+  return USE_SUPABASE || process.env.EXPO_PUBLIC_ENABLE_VISION === '1';
 }
 
 // Coerce a model value to a number: accepts real numbers AND numeric strings
