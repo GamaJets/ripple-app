@@ -25,16 +25,29 @@ function toNum(v: any): number | null {
   return null;
 }
 
+// The last vision failure reason, so the UI can tell the user WHY a scan didn't
+// read (bad model, missing key, etc.) instead of a generic message. '' when fine.
+export let lastVisionError = '';
+
 async function call(mode: string, imageBase64: string, mediaType = 'image/jpeg'): Promise<any | null> {
-  if (!visionAvailable() || !imageBase64) return null;
+  lastVisionError = '';
+  if (!visionAvailable()) { lastVisionError = 'AI reader is off (EXPO_PUBLIC_ENABLE_VISION)'; return null; }
+  if (!imageBase64) { lastVisionError = 'no image'; return null; }
   try {
     const { data, error } = await supabase.functions.invoke('vision-analyze', {
       body: { mode, imageBase64, mediaType },
     });
-    if (error || !data || (data as any).error) return null;
+    if (error) {
+      // supabase-js puts the function's JSON error body on error.context (a Response).
+      let detail = (error as any)?.message || 'reader error';
+      try { const body = await (error as any)?.context?.json?.(); if (body?.error) detail = String(body.error) + (body.detail ? ': ' + String(body.detail).slice(0, 140) : ''); } catch { /* ignore */ }
+      lastVisionError = detail; return null;
+    }
+    if (!data) { lastVisionError = 'no response from reader'; return null; }
+    if ((data as any).error) { lastVisionError = String((data as any).error); return null; }
     return (data as any).result ?? null;
-  } catch {
-    return null;
+  } catch (e) {
+    lastVisionError = String(e); return null;
   }
 }
 

@@ -17,7 +17,9 @@ const CORS = {
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...CORS, 'Content-Type': 'application/json' } });
 
-const MODEL = Deno.env.get('ANTHROPIC_MODEL') ?? 'claude-sonnet-5';
+// Default to a broadly-available vision-capable model. Override with the
+// ANTHROPIC_MODEL secret to use a newer one your account has (e.g. claude-sonnet-4-5).
+const MODEL = Deno.env.get('ANTHROPIC_MODEL') ?? 'claude-3-5-sonnet-latest';
 
 const PROMPTS: Record<string, string> = {
   meal:

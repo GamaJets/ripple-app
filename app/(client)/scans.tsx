@@ -15,7 +15,7 @@ import { useRouter } from 'expo-router';
 import { useBrand } from '../../src/ui/brand';
 import { TrendChart } from '../../src/ui/Chart';
 import { Icon } from '../../src/ui/Icon';
-import { analyzeInBody, analyzePhysique, visionAvailable, type PhysiqueVision } from '../../src/lib/vision';
+import { analyzeInBody, analyzePhysique, visionAvailable, lastVisionError, type PhysiqueVision } from '../../src/lib/vision';
 import { metricTrends, compositionInsights, METRIC_GROUPS, type ScanMetrics } from '../../src/lib/inbodyMetrics';
 import { focusToGroups } from '../../src/lib/focus';
 
@@ -141,7 +141,7 @@ export default function Scans() {
       setReading(false);
       if (r.ok) { if (r.weight) setWt(r.weight); if (r.bf) setBf(r.bf); if (r.muscle) setSm(r.muscle);
         setOcrMsg('Read from your scan: ' + [r.weight ? 'weight ' + r.weight : '', r.bf ? 'body fat ' + r.bf + '%' : '', r.muscle ? 'muscle ' + r.muscle : ''].filter(Boolean).join(' · ') + '. Tap a field to correct.');
-      } else { setOcrMsg('Could not read the numbers automatically — please type them in.'); }
+      } else { setOcrMsg('Could not read automatically' + (lastVisionError ? ' — ' + lastVisionError : '') + '. Please type the numbers in.'); }
     }
   };
   const saveScan = () => {
