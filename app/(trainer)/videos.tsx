@@ -1,11 +1,11 @@
 // Trainer · Videos — exercise library the client app pulls from. Upload your own.
 import { useState } from 'react';
-import { View, Text, Pressable, ScrollView, Alert, Modal, TextInput, ActivityIndicator } from 'react-native';
+import { View, Text, Pressable, ScrollView, Alert, Modal, TextInput, ActivityIndicator, Linking } from 'react-native';
 import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { useTheme } from '../../src/ui/components';
-import { useExerciseVideos, uploadExerciseVideo, videoUploadAvailable } from '../../src/ui/exerciseVideos';
+import { useExerciseVideos, uploadExerciseVideo, videoUploadAvailable, type VideoItem } from '../../src/ui/exerciseVideos';
 
 export default function TrainerVideos() {
   const t = useTheme();
@@ -44,6 +44,27 @@ export default function TrainerVideos() {
     Alert.alert('Clip added', videoUploadAvailable() ? 'Uploaded — your clients can watch it in their program on any device.' : 'Saved to your library on this device.');
   };
 
+  // Tap a clip's play button to watch it; tap a not-yet-recorded exercise to add one.
+  const openVideo = async (v: VideoItem) => {
+    if (v.url) {
+      try {
+        const ok = await Linking.canOpenURL(v.url);
+        if (ok) { await Linking.openURL(v.url); return; }
+      } catch { /* fall through to message */ }
+      Alert.alert('Could not open', 'This video link could not be opened on your device.');
+      return;
+    }
+    if (v.uploaded) {
+      Alert.alert('Saved on this device', 'This clip is stored locally only. Turn on hosting so it plays here and your clients can watch it on any device.');
+      return;
+    }
+    Alert.alert(v.name, 'No video yet for this exercise — add one now:', [
+      { text: 'Record', onPress: () => upload(true) },
+      { text: 'Upload from library', onPress: () => upload(false) },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  };
+
   const done = vids.filter((v) => v.uploaded).length;
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
@@ -65,13 +86,13 @@ export default function TrainerVideos() {
 
         {vids.map((v) => (
           <View key={v.id} style={{ backgroundColor: t.surface, borderRadius: 14, borderWidth: 1, borderColor: t.ring, padding: 14, marginBottom: 9, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-            <View style={{ width: 54, height: 40, borderRadius: 8, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+            <Pressable onPress={() => openVideo(v)} hitSlop={6} style={({ pressed }) => ({ width: 54, height: 40, borderRadius: 8, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center', opacity: pressed ? 0.6 : 1 })}>
               {v.uploaded ? <Icon name="play" size={18} color={t.brand} /> : <Icon name="plus" size={18} color={t.ink3} />}
-            </View>
-            <View style={{ flex: 1 }}>
+            </Pressable>
+            <Pressable onPress={() => openVideo(v)} style={{ flex: 1 }}>
               <Text style={{ color: t.ink, fontWeight: '700', fontSize: 14 }}>{v.name}</Text>
               <Text style={{ color: t.ink3, fontSize: 12 }}>{v.group}{v.uploaded ? ` · ${v.dur}` : ' · not recorded yet'}</Text>
-            </View>
+            </Pressable>
             {(v.id.startsWith('vx') || v.id.startsWith('db')) ? <Pressable onPress={() => removeVideo(v.id)} hitSlop={8}><Text style={{ color: t.ink3, fontWeight: '800', fontSize: 15 }}>×</Text></Pressable> : <Text style={{ color: v.uploaded ? t.brand : t.s3, fontWeight: '700', fontSize: 12 }}>{v.uploaded ? 'Live' : 'To do'}</Text>}
           </View>
         ))}
