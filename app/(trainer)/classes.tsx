@@ -102,9 +102,14 @@ export default function TrainerClasses() {
               <Text style={{ color: t.ink, fontWeight: '800', fontSize: 14.5 }}>{c.title}</Text>
               <Text style={{ color: t.ink3, fontSize: 12, marginTop: 2 }}>{c.branch} · {dayShort(c.startsAt)} {timeLabel(c.startsAt)} · {c.kind}</Text>
             </View>
-            <View style={{ alignItems: 'flex-end' }}>
-              <Text style={{ color: c.booked >= c.capacity ? t.s3 : t.brand, fontWeight: '800', fontSize: 15 }}>{c.booked}/{c.capacity}</Text>
-              <Text style={{ color: t.ink3, fontSize: 10 }}>booked</Text>
+            <View style={{ alignItems: 'flex-end', gap: 6 }}>
+              <View style={{ alignItems: 'flex-end' }}>
+                <Text style={{ color: c.booked >= c.capacity ? t.s3 : t.brand, fontWeight: '800', fontSize: 15 }}>{c.booked}/{c.capacity}</Text>
+                <Text style={{ color: t.ink3, fontSize: 10 }}>booked</Text>
+              </View>
+              <Pressable onPress={() => router.push({ pathname: '/(trainer)/class-checkin', params: { id: c.id, title: c.title, branch: c.branch } })} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 9, paddingHorizontal: 11, paddingVertical: 6 }}>
+                <Text style={{ color: t.brand, fontWeight: '800', fontSize: 12 }}>Check in ›</Text>
+              </Pressable>
             </View>
           </View>
         ))}
