@@ -50,6 +50,7 @@ Deno.serve(async (req: Request) => {
 
   // 3) Aggregate. Each metric guarded so one missing table can't sink the rest.
   const metrics: Record<string, number | null> = {};
+  const series: Record<string, any> = {};
   const live: string[] = [];
   const set = (k: string, v: number | null) => { metrics[k] = v; if (v != null) live.push(k); };
 
@@ -87,16 +88,40 @@ Deno.serve(async (req: Request) => {
   set('workouts7', wk);
   set('ptSessions30', await count('sessions', (q) => q.eq('status', 'booked').gte('starts_at', iso(30 * DAY))));
 
-  // Class fill (attended / booked) over last 30d via the analytics RPC.
+  // Class fill (attended / booked) over last 30d via the analytics RPC — totals + breakdowns.
   try {
     const { data: rows, error } = await admin.rpc('class_attendance_summary', { from_ts: iso(30 * DAY), to_ts: iso(0) });
     if (!error && Array.isArray(rows) && rows.length) {
       let att = 0, bkd = 0;
-      for (const r of rows) { att += Number(r.attended || 0); bkd += Number(r.booked || 0); }
+      const byBranch: Record<string, { a: number; b: number }> = {};
+      const byKind: Record<string, { a: number; b: number }> = {};
+      for (const r of rows) {
+        const a = Number(r.attended || 0), b = Number(r.booked || 0);
+        att += a; bkd += b;
+        const br = (r.branch || '—'); (byBranch[br] ||= { a: 0, b: 0 }); byBranch[br].a += a; byBranch[br].b += b;
+        const kd = (r.kind || r.title || 'Class'); (byKind[kd] ||= { a: 0, b: 0 }); byKind[kd].a += a; byKind[kd].b += b;
+      }
       set('classes30', rows.length);
       set('classFillPct', bkd > 0 ? Math.round((att / bkd) * 100) : null);
+      const toBars = (m: Record<string, { a: number; b: number }>) =>
+        Object.entries(m).map(([k, v]) => [k, v.b > 0 ? Math.round((v.a / v.b) * 100) : 0]).sort((x: any, y: any) => y[1] - x[1]);
+      series.byBranch = toBars(byBranch);
+      series.byKind = toBars(byKind);
     }
   } catch { /* rpc absent → skip */ }
+
+  // New-member trend: client sign-ups per calendar month, last 12 months.
+  try {
+    const { data } = await admin.from('profiles').select('created_at').eq('role', 'client').gte('created_at', iso(365 * DAY)).limit(50000);
+    if (Array.isArray(data) && data.length) {
+      const now = new Date();
+      const months: string[] = [];
+      for (let i = 11; i >= 0; i--) { const d = new Date(now.getFullYear(), now.getMonth() - i, 1); months.push(d.toISOString().slice(0, 7)); }
+      const counts: Record<string, number> = {}; months.forEach((m) => { counts[m] = 0; });
+      data.forEach((r: any) => { const m = String(r.created_at).slice(0, 7); if (m in counts) counts[m]++; });
+      series.signupTrend = { labels: months, counts: months.map((m) => counts[m]) };
+    }
+  } catch { /* no profiles trend */ }
 
   // Revenue (real only if billing rows exist; otherwise omitted → portal shows sample).
   try {
@@ -112,5 +137,5 @@ Deno.serve(async (req: Request) => {
     if (subs != null && subs > 0) set('activeSubscriptions', subs);
   } catch { /* no subscriptions table */ }
 
-  return json({ ok: true, metrics, live, generatedAt: new Date().toISOString() });
+  return json({ ok: true, metrics, series, live, generatedAt: new Date().toISOString() });
 });
