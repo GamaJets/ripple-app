@@ -40,7 +40,7 @@ const PROMPTS: Record<string, string> = {
     'Definitions: weightKg=total body weight kg; bodyFatPct=PBF %; skeletalMuscleKg=SMM kg; visceralFat=visceral fat level (unitless); ' +
     'inbodyScore=total InBody score points; bmr=basal metabolic rate kcal; fatMassKg=body fat mass kg; leanMassKg=lean/fat-free body mass kg; ' +
     'bodyWaterL=total body water L; proteinKg and mineralsKg in kg; leanArmLKg/leanArmRKg/leanTrunkKg/leanLegLKg/leanLegRKg are the segmental lean analysis (left/right arm, trunk, left/right leg) in kg. ' +
-    'takenAt is the scan date YYYY-MM-DD if printed, else null. Use null for any field not present on the sheet. Return numbers as numbers.',
+    'takenAt is the scan/test date. The date printed on the sheet is in DAY/MONTH/YEAR order (international format) — e.g. "05/07/2026" or "05.07.2026" means 5 July 2026, NOT 7 May. Convert it and return takenAt as YYYY-MM-DD (so 5 July 2026 -> "2026-07-05"). Use null for any field not present. Return numbers as numbers.',
 };
 
 function extractJson(text: string): any {
