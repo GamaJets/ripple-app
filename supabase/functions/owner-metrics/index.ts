@@ -217,5 +217,31 @@ Deno.serve(async (req: Request) => {
     }
   } catch { /* ignore */ }
 
+  // Attendance buckets + at-risk members (flight risk) — real from workouts.
+  try {
+    const { data: allc } = await admin.from('profiles').select('id, full_name').eq('role', 'client').limit(1000);
+    if (Array.isArray(allc) && allc.length) {
+      const cid = allc.map((c: any) => c.id);
+      const nameMap: Record<string, string> = {}; allc.forEach((c: any) => { nameMap[c.id] = c.full_name || 'Member'; });
+      const visits: Record<string, number> = {}, last: Record<string, number> = {};
+      try {
+        const { data: w } = await admin.from('workouts').select('user_id, performed_at').in('user_id', cid).limit(50000);
+        (w || []).forEach((x: any) => { const t = Date.parse(x.performed_at); if (isFinite(t)) { if (t >= Date.now() - 30 * DAY) visits[x.user_id] = (visits[x.user_id] || 0) + 1; if (!last[x.user_id] || t > last[x.user_id]) last[x.user_id] = t; } });
+      } catch { /* ignore */ }
+      let b12 = 0, b611 = 0, b25 = 0, b01 = 0;
+      cid.forEach((id: string) => { const v = visits[id] || 0; if (v >= 12) b12++; else if (v >= 6) b611++; else if (v >= 2) b25++; else b01++; });
+      const tot = cid.length || 1;
+      series.attendanceBuckets = [
+        ['12+ visits', Math.round((b12 / tot) * 100), '#3ddc97'],
+        ['6–11 visits', Math.round((b611 / tot) * 100)],
+        ['2–5 visits', Math.round((b25 / tot) * 100), '#f2c85a'],
+        ['0–1 visits', Math.round((b01 / tot) * 100), '#ff6f61'],
+      ];
+      series.atRisk = cid.map((id: string) => ({ name: nameMap[id], last: last[id] || 0 }))
+        .sort((a: any, b: any) => a.last - b.last).slice(0, 5)
+        .map((r: any) => ({ name: r.name, days: r.last ? Math.round((Date.now() - r.last) / DAY) : null }));
+    }
+  } catch { /* ignore */ }
+
   return json({ ok: true, metrics, series, live, generatedAt: new Date().toISOString() });
 });
