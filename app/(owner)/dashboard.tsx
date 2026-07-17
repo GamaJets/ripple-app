@@ -149,6 +149,15 @@ export default function OwnerOverview() {
           <Icon name="chevron" size={18} color={t.ink3} />
         </Pressable>
 
+        <Pressable onPress={() => router.push('/(owner)/class-analytics')} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 16, padding: 15, marginBottom: 16 }}>
+          <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}><Icon name="calendar" size={19} color={t.brand} /></View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: t.ink, fontWeight: '800', fontSize: 14 }}>Classes & payroll</Text>
+            <Text style={{ color: t.ink3, fontSize: 12, marginTop: 1 }}>Attendance, fill rates & trainer pay per check-in</Text>
+          </View>
+          <Icon name="chevron" size={18} color={t.ink3} />
+        </Pressable>
+
         {/* Trainer health board */}
         <View style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18, marginBottom: 16 }}>
           <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16, marginBottom: 4 }}>Trainer health</Text>
