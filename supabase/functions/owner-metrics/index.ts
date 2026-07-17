@@ -137,5 +137,85 @@ Deno.serve(async (req: Request) => {
     if (subs != null && subs > 0) set('activeSubscriptions', subs);
   } catch { /* no subscriptions table */ }
 
+  // ── Names helper (id -> full_name) ────────────────────────────────────────
+  const namesFor = async (ids: string[]): Promise<Record<string, string>> => {
+    const m: Record<string, string> = {};
+    if (!ids.length) return m;
+    try { const { data } = await admin.from('profiles').select('id, full_name').in('id', ids.slice(0, 500)); (data || []).forEach((p: any) => { m[p.id] = p.full_name || 'Member'; }); } catch { /* ignore */ }
+    return m;
+  };
+
+  // Recent members (last 8 client sign-ups) with visit count + active flag.
+  try {
+    const { data: rm } = await admin.from('profiles').select('id, full_name, created_at').eq('role', 'client').order('created_at', { ascending: false }).limit(8);
+    if (Array.isArray(rm) && rm.length) {
+      const ids = rm.map((r: any) => r.id);
+      const visits: Record<string, number> = {}, lastAct: Record<string, number> = {};
+      try {
+        const { data: w } = await admin.from('workouts').select('user_id, performed_at').in('user_id', ids);
+        (w || []).forEach((x: any) => { visits[x.user_id] = (visits[x.user_id] || 0) + 1; const t = Date.parse(x.performed_at); if (!lastAct[x.user_id] || t > lastAct[x.user_id]) lastAct[x.user_id] = t; });
+      } catch { /* ignore */ }
+      series.recentMembers = rm.map((r: any) => ({ name: r.full_name || 'Member', joined: String(r.created_at).slice(0, 10), visits: visits[r.id] || 0, active: lastAct[r.id] ? (Date.now() - lastAct[r.id] < 30 * DAY) : false }));
+    }
+  } catch { /* ignore */ }
+
+  // Trainer roster with client counts.
+  try {
+    const { data: tr } = await admin.from('profiles').select('id, full_name').eq('role', 'trainer').limit(100);
+    if (Array.isArray(tr) && tr.length) {
+      const counts: Record<string, number> = {};
+      try { const { data: cl } = await admin.from('clients').select('trainer_id'); (cl || []).forEach((c: any) => { if (c.trainer_id) counts[c.trainer_id] = (counts[c.trainer_id] || 0) + 1; }); } catch { /* ignore */ }
+      series.trainersList = tr.map((t: any) => ({ name: t.full_name || 'Trainer', clients: counts[t.id] || 0 }));
+    }
+  } catch { /* ignore */ }
+
+  // Live activity feed — newest workouts, scans and sign-ups, merged by time.
+  try {
+    const acts: { who: string; at: number; kind: string }[] = [];
+    try { const { data: w } = await admin.from('workouts').select('user_id, performed_at').order('performed_at', { ascending: false }).limit(6); (w || []).forEach((x: any) => acts.push({ who: x.user_id, at: Date.parse(x.performed_at), kind: 'workout' })); } catch { /* ignore */ }
+    try { const { data: sc } = await admin.from('scans').select('client_id, created_at, taken_at').order('created_at', { ascending: false }).limit(6); (sc || []).forEach((x: any) => acts.push({ who: x.client_id, at: Date.parse(x.created_at || x.taken_at), kind: 'scan' })); } catch { /* ignore */ }
+    try { const { data: nj } = await admin.from('profiles').select('id, created_at').eq('role', 'client').order('created_at', { ascending: false }).limit(6); (nj || []).forEach((x: any) => acts.push({ who: x.id, at: Date.parse(x.created_at), kind: 'join' })); } catch { /* ignore */ }
+    const valid = acts.filter((a) => isFinite(a.at));
+    if (valid.length) {
+      valid.sort((a, b) => b.at - a.at);
+      const top = valid.slice(0, 8);
+      const nm = await namesFor([...new Set(top.map((a) => a.who))]);
+      const label: Record<string, string> = { workout: 'logged a workout', scan: 'new InBody scan', join: 'joined' };
+      series.recentActivity = top.map((a) => ({ text: (nm[a.who] || 'Member') + ' · ' + label[a.kind], at: new Date(a.at).toISOString() }));
+    }
+  } catch { /* ignore */ }
+
+  // Cohort retention heatmap — % of each join-month cohort active in later months.
+  try {
+    const { data: cs } = await admin.from('profiles').select('id, created_at').eq('role', 'client').gte('created_at', iso(190 * DAY)).limit(2000);
+    if (Array.isArray(cs) && cs.length) {
+      const ids = cs.map((c: any) => c.id);
+      const act: Record<string, Set<string>> = {};
+      const addAct = (id: string, ts: string) => { const mo = String(ts).slice(0, 7); (act[id] ||= new Set<string>()).add(mo); };
+      try { const { data: w } = await admin.from('workouts').select('user_id, performed_at').in('user_id', ids).limit(50000); (w || []).forEach((x: any) => addAct(x.user_id, x.performed_at)); } catch { /* ignore */ }
+      try { const { data: ci } = await admin.from('check_ins').select('user_id, at').in('user_id', ids).limit(50000); (ci || []).forEach((x: any) => addAct(x.user_id, x.at)); } catch { /* ignore */ }
+      const now = new Date();
+      const cohMonths: string[] = [];
+      for (let i = 5; i >= 0; i--) { const d = new Date(now.getFullYear(), now.getMonth() - i, 1); cohMonths.push(d.toISOString().slice(0, 7)); }
+      const monthIndex = (m: string) => { const [y, mm] = m.split('-').map(Number); return y * 12 + (mm - 1); };
+      const lastIdx = monthIndex(cohMonths[cohMonths.length - 1]);
+      const labels: string[] = [], sizes: number[] = [], matrix: number[][] = [];
+      for (const cm of cohMonths) {
+        const members = cs.filter((c: any) => String(c.created_at).slice(0, 7) === cm);
+        if (!members.length) continue;
+        const base = monthIndex(cm), maxK = lastIdx - base;
+        const row: number[] = [];
+        for (let k = 0; k <= maxK; k++) {
+          if (k === 0) { row.push(100); continue; }
+          const targetIdx = base + k; let activeN = 0;
+          for (const mem of members) { const set = act[mem.id]; if (set) { let hit = false; set.forEach((am) => { if (monthIndex(am) === targetIdx) hit = true; }); if (hit) activeN++; } }
+          row.push(Math.round((activeN / members.length) * 100));
+        }
+        labels.push(cm); sizes.push(members.length); matrix.push(row);
+      }
+      if (matrix.length) series.cohorts = { labels, sizes, matrix };
+    }
+  } catch { /* ignore */ }
+
   return json({ ok: true, metrics, series, live, generatedAt: new Date().toISOString() });
 });
