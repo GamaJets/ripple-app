@@ -65,6 +65,19 @@ export default function TrainerVideos() {
     ]);
   };
 
+  // Guard removal — a hosted clip disappears for every client, so confirm first.
+  const confirmRemove = (v: VideoItem) => {
+    const hosted = v.id.startsWith('db');
+    Alert.alert(
+      'Remove ' + v.name + '?',
+      hosted ? 'This deletes the clip for you and every client who sees it. This cannot be undone.' : 'This removes it from your library.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Remove', style: 'destructive', onPress: () => removeVideo(v.id) },
+      ],
+    );
+  };
+
   const done = vids.filter((v) => v.uploaded).length;
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
@@ -93,7 +106,7 @@ export default function TrainerVideos() {
               <Text style={{ color: t.ink, fontWeight: '700', fontSize: 14 }}>{v.name}</Text>
               <Text style={{ color: t.ink3, fontSize: 12 }}>{v.group}{v.uploaded ? ` · ${v.dur}` : ' · not recorded yet'}</Text>
             </Pressable>
-            {(v.id.startsWith('vx') || v.id.startsWith('db')) ? <Pressable onPress={() => removeVideo(v.id)} hitSlop={8}><Text style={{ color: t.ink3, fontWeight: '800', fontSize: 15 }}>×</Text></Pressable> : <Text style={{ color: v.uploaded ? t.brand : t.s3, fontWeight: '700', fontSize: 12 }}>{v.uploaded ? 'Live' : 'To do'}</Text>}
+            {(v.id.startsWith('vx') || v.id.startsWith('db')) ? <Pressable onPress={() => confirmRemove(v)} hitSlop={8} accessibilityRole="button" accessibilityLabel={'Remove ' + v.name}><Text style={{ color: t.ink3, fontWeight: '800', fontSize: 15 }}>×</Text></Pressable> : <Text style={{ color: v.uploaded ? t.brand : t.s3, fontWeight: '700', fontSize: 12 }}>{v.uploaded ? 'Live' : 'To do'}</Text>}
           </View>
         ))}
       </ScrollView>
