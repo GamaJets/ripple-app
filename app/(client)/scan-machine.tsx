@@ -14,6 +14,7 @@ import { Icon } from '../../src/ui/Icon';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { tapLight } from '../../src/ui/haptics';
 import { MACHINES, identifyMachine, looksLikeSerial, type MachineDef } from '../../src/lib/machines';
+import { recallMachine, rememberMachine } from '../../src/lib/machineMemory';
 
 // Pull a human label out of whatever the QR encodes (JSON, query param, URL slug).
 function parseMachine(raw: string): string {
@@ -38,6 +39,7 @@ export default function ScanMachine() {
   const [group, setGroup] = useState('');
   const [cardio, setCardio] = useState(false);
   const [needsPick, setNeedsPick] = useState(false);
+  const [recalled, setRecalled] = useState(false);
   const [q, setQ] = useState('');
   // strength
   const [reps, setReps] = useState('');
@@ -52,17 +54,26 @@ export default function ScanMachine() {
 
   const applyDef = (d: MachineDef) => { setExercise(d.name); setGroup(d.group); setCardio(!!d.cardio); setNeedsPick(false); tapLight(); };
 
-  const onScan = (res: { data: string }) => {
+  const onScan = async (res: { data: string }) => {
     if (scanned) return;
-    setScanned(res.data); setRawCode(res.data);
+    setScanned(res.data); setRawCode(res.data); tapLight();
+    // 1) Have we set this exact machine up before? Recall it — no re-entry.
+    const saved = await recallMachine(res.data);
+    if (saved) {
+      setExercise(saved.name); setGroup(saved.group); setCardio(!!saved.cardio);
+      if (saved.unit) setUnit(saved.unit);
+      setNeedsPick(false); setRecalled(true);
+      return;
+    }
+    setRecalled(false);
+    // 2) Otherwise try to identify it from the code…
     const d = identifyMachine(res.data);
     if (d) { applyDef(d); }
     else {
-      // Couldn't name it from the code — let the member pick it.
+      // 3) …or ask the member to pick it (and we'll remember it on save).
       const label = looksLikeSerial(res.data) ? '' : parseMachine(res.data);
       setExercise(label); setGroup(''); setCardio(false); setNeedsPick(true);
     }
-    tapLight();
   };
 
   const list = useMemo(() => {
@@ -93,13 +104,15 @@ export default function ScanMachine() {
       entry = { t: new Date().toISOString(), exercise: exercise.trim(), sets: sets.map((s) => [s.reps, s.kg] as [number, number]), kcal: Math.round(sets.reduce((a, s) => a + s.reps * (s.kg || 0), 0) / 60) + sets.length * 8 };
     }
     addWorkouts([entry]);
+    // Remember this machine's setup so the next scan of the same code auto-fills.
+    if (rawCode) rememberMachine(rawCode, { name: exercise.trim(), group, cardio, unit });
     Alert.alert('Logged', exercise.trim() + ' saved to your workout log.', [
       { text: 'View history', onPress: () => router.replace('/(client)/activity') },
       { text: 'Done', onPress: () => router.back() },
     ]);
   };
 
-  const rescan = () => { setScanned(null); setRawCode(''); setExercise(''); setGroup(''); setCardio(false); setNeedsPick(false); setSets([]); setReps(''); setKg(''); setMins(''); setDist(''); setWatts(''); setKcalIn(''); setManual(false); setQ(''); };
+  const rescan = () => { setScanned(null); setRawCode(''); setExercise(''); setGroup(''); setCardio(false); setNeedsPick(false); setRecalled(false); setSets([]); setReps(''); setKg(''); setMins(''); setDist(''); setWatts(''); setKcalIn(''); setManual(false); setQ(''); };
   const inp = { color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, fontSize: 16, flex: 1 } as const;
 
   const showForm = scanned != null || manual;
@@ -143,9 +156,11 @@ export default function ScanMachine() {
         ) : (
           <View>
             <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.brand, padding: 16, marginBottom: 14 }}>
-              <Text style={{ color: t.brand, fontSize: 10, fontWeight: '900', textTransform: 'uppercase', letterSpacing: 0.7 }}>{needsPick ? "Pick the machine" : 'Machine identified'}</Text>
-              {needsPick && rawCode && looksLikeSerial(rawCode) ? (
-                <Text style={{ color: t.ink3, fontSize: 11.5, marginTop: 4 }}>The machine's code (<Text style={{ color: t.ink2 }}>{rawCode.slice(0, 18)}</Text>) is just its serial — choose the exercise below.</Text>
+              <Text style={{ color: t.brand, fontSize: 10, fontWeight: '900', textTransform: 'uppercase', letterSpacing: 0.7 }}>{recalled ? '✓ Remembered' : needsPick ? 'Pick the machine' : 'Machine identified'}</Text>
+              {recalled ? (
+                <Text style={{ color: t.ink3, fontSize: 11.5, marginTop: 4 }}>You set this machine up before — recalled automatically. Edit if you like.</Text>
+              ) : needsPick && rawCode && looksLikeSerial(rawCode) ? (
+                <Text style={{ color: t.ink3, fontSize: 11.5, marginTop: 4 }}>The machine's code (<Text style={{ color: t.ink2 }}>{rawCode.slice(0, 18)}</Text>) is just its serial — choose the exercise below. We'll remember it next time.</Text>
               ) : (
                 <Text style={{ color: t.ink3, fontSize: 11.5, marginTop: 4, marginBottom: 8 }}>Exercise — edit if it's not quite right.</Text>
               )}
