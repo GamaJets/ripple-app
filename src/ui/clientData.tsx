@@ -123,7 +123,11 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
     return () => { cancelled = true; };
   }, []);
 
-  const sorted = useMemo(() => [...scans].sort((a, b) => Date.parse(a.takenAt) - Date.parse(b.takenAt)).map((s) => (s.metrics ? s : (scanMetrics[s.takenAt.slice(0, 10)] ? { ...s, metrics: scanMetrics[s.takenAt.slice(0, 10)] } : s))), [scans, scanMetrics]);
+  const sorted = useMemo(() => {
+    const byDay: Record<string, ScanRec> = {};
+    for (const s of scans) byDay[s.takenAt.slice(0, 10)] = s; // one InBody scan per day, latest added wins
+    return Object.values(byDay).sort((a, b) => Date.parse(a.takenAt) - Date.parse(b.takenAt)).map((s) => (s.metrics ? s : (scanMetrics[s.takenAt.slice(0, 10)] ? { ...s, metrics: scanMetrics[s.takenAt.slice(0, 10)] } : s)));
+  }, [scans, scanMetrics]);
   const latest = sorted[sorted.length - 1] ?? { id: 'none', takenAt: new Date(0).toISOString(), weightKg: manualWeight ?? 70, bodyFatPct: manualBodyFat ?? 20, skeletalMuscleKg: 0, source: '' };
   // Single source of truth: the most RECENT of {manual edit, latest scan} wins.
   const manualIsCurrent = manualAt != null && Date.parse(manualAt) >= Date.parse(latest.takenAt);
