@@ -52,7 +52,7 @@ export default function TrainerClients() {
   const router = useRouter();
   const [trial, setTrial] = useState<{ daysLeft: number; expired: boolean } | null>(null);
   useEffect(() => { trialInfo().then((ti) => setTrial({ daysLeft: ti.daysLeft, expired: ti.expired })); }, []);
-  const { roster, addClient, removeClient } = useRoster();
+  const { roster, addClient, removeClient, setClientMode } = useRoster();
   const { sessionFee, name: coachName } = useCoachProfile();
   const { getFeedback, addFeedback } = useCoachFeedback();
   const { get: getNutri, setAdjust: setNutri, clear: clearNutri } = useCoachNutrition();
@@ -385,7 +385,21 @@ export default function TrainerClients() {
           {sel && (
             <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 30 }} showsVerticalScrollIndicator={false}>
               <Text style={{ color: t.ink, fontSize: 20, fontWeight: '800', textTransform: 'capitalize' }}>{sel.name}</Text>
-              <Text style={{ color: t.ink3, fontSize: 13, marginTop: 2, marginBottom: 16 }}>{sel.goal} · {sel.mode === 'inperson' ? 'In-person' : 'Online'} · {sel.weightDelta > 0 ? '+' : ''}{sel.weightDelta} kg · {sel.adherence}% adherence</Text>
+              <Text style={{ color: t.ink3, fontSize: 13, marginTop: 2, marginBottom: 12 }}>{sel.goal} · {sel.weightDelta > 0 ? '+' : ''}{sel.weightDelta} kg · {sel.adherence}% adherence</Text>
+
+              <View style={{ marginBottom: 16 }}>
+                <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 6 }}>Delivery</Text>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  {([['inperson', 'In-person'], ['online', 'Online']] as const).map(([m, label]) => {
+                    const on = sel.mode === m;
+                    return (
+                      <Pressable key={m} onPress={() => { setClientMode(sel.id, m); setSel({ ...sel, mode: m }); }} style={{ flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 11, backgroundColor: on ? t.brand : t.surface2, borderWidth: 1, borderColor: on ? t.brand : t.ring }}>
+                        <Text style={{ color: on ? t.brandInk : t.ink2, fontWeight: '800', fontSize: 13 }}>{label}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </View>
 
               {sel.metrics && Object.values(sel.metrics).some((v) => v != null) ? (
                 <View style={{ marginBottom: 16 }}>

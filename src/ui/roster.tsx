@@ -2,22 +2,29 @@
 // remove clients and the change flows to the Clients list and the Schedule's
 // client picker. Seeded from the mock roster; swap for Supabase later.
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ROSTER, type RosterClient } from '../lib/trainerMock';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 
 let SEQ = 900;
+const MODE_KEY = 'repple.clientModes';
 
 interface RosterValue {
   roster: RosterClient[];
   addClient: (name: string, goal: string, mode?: 'online' | 'inperson') => void;
   removeClient: (id: string) => void;
+  setClientMode: (id: string, mode: 'online' | 'inperson') => void;
 }
 
 const Ctx = createContext<RosterValue | null>(null);
 
 export function RosterProvider({ children }: { children: ReactNode }) {
   const [roster, setRoster] = useState<RosterClient[]>(() => (USE_SUPABASE ? [] : JSON.parse(JSON.stringify(ROSTER))));
+  // Trainer-set online/in-person overrides (persisted). Real DB clients default to
+  // 'online'; this lets the coach classify each so the roster filter works for them.
+  const [modeOverrides, setModeOverrides] = useState<Record<string, 'online' | 'inperson'>>({});
+  useEffect(() => { (async () => { try { const raw = await AsyncStorage.getItem(MODE_KEY); if (raw) setModeOverrides(JSON.parse(raw)); } catch { /* ignore */ } })(); }, []);
 
   // A real signed-in coach sees ONLY their linked clients (clean slate if none);
   // a guest/demo (no session) sees the sample roster so the portal isn't empty to explore.
@@ -70,7 +77,12 @@ export function RosterProvider({ children }: { children: ReactNode }) {
     setRoster((p) => [...p, { id: `c${SEQ++}`, name: n, goal, weightDelta: 0, adherence: 100, lastActive: 'just added', next: '—', unread: 0, mode }]);
   };
   const removeClient = (id: string) => setRoster((p) => p.filter((c) => c.id !== id));
-  return <Ctx.Provider value={{ roster, addClient, removeClient }}>{children}</Ctx.Provider>;
+  const setClientMode = (id: string, mode: 'online' | 'inperson') => {
+    setModeOverrides((p) => { const next = { ...p, [id]: mode }; try { AsyncStorage.setItem(MODE_KEY, JSON.stringify(next)); } catch { /* ignore */ } return next; });
+  };
+  // Apply overrides on top of whatever mode the roster came with.
+  const shown = Object.keys(modeOverrides).length ? roster.map((c) => (modeOverrides[c.id] ? { ...c, mode: modeOverrides[c.id] } : c)) : roster;
+  return <Ctx.Provider value={{ roster: shown, addClient, removeClient, setClientMode }}>{children}</Ctx.Provider>;
 }
 
 export function useRoster(): RosterValue {
