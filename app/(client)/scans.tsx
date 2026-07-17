@@ -172,7 +172,9 @@ export default function Scans() {
     setPhotos((p) => [{ uri: asset.uri, at: new Date().toISOString() }, ...p]); setCmp([]);
     if (!visionAvailable() || !asset.base64) { Alert.alert('AI not on yet', 'Physique analysis turns on with the AI backend.'); return; }
     setPhys(null); setPhysOpen(true); setPhysBusy(true);
-    const r = await analyzePhysique(asset.base64);
+    let pb = asset.base64;
+    try { const mm = await ImageManipulator.manipulateAsync(asset.uri, [{ resize: { width: 1512 } }], { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true }); if (mm.base64) pb = mm.base64; } catch {}
+    const r = await analyzePhysique(pb, 'image/jpeg');
     setPhysBusy(false);
     if (r) setPhys(r); else { setPhysOpen(false); Alert.alert('Could not analyze', 'Try a clearer, well-lit full-body photo.'); }
   };

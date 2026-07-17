@@ -6,6 +6,7 @@ import { View, Text, TextInput, Pressable, ScrollView, Alert, Modal, Image, Acti
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { macrosFor, applyCoachAdjust } from '../../src/lib/nutrition';
@@ -78,7 +79,9 @@ export default function FoodLog() {
  setReading(true); setServ(1);
  // Real vision read when the backend is live; otherwise an editable estimate.
  if (visionAvailable() && asset.base64) {
- const r = await analyzeMeal(asset.base64);
+ let mb = asset.base64;
+ try { const mm = await ImageManipulator.manipulateAsync(asset.uri, [{ resize: { width: 1512 } }], { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true }); if (mm.base64) mb = mm.base64; } catch {}
+ const r = await analyzeMeal(mb, 'image/jpeg');
  if (r) { fillEst(r.name, r.kcal, r.protein, r.carbs, r.fat); return; }
  }
  setTimeout(() => fillEst(PHOTO_GUESS.n, PHOTO_GUESS.k, PHOTO_GUESS.p, PHOTO_GUESS.c, PHOTO_GUESS.f), 900);

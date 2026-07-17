@@ -17,6 +17,7 @@ import { Icon } from '../../src/ui/Icon';
 import { useRouter } from 'expo-router';
 import { useBrand } from '../../src/ui/brand';
 import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
 import { analyzeMeal, visionAvailable } from '../../src/lib/vision';
 import { parseFoodText, foodAIAvailable } from '../../src/lib/foodAI';
 import { lookupBarcode, normalizeBarcode } from '../../src/lib/openfoodfacts';
@@ -84,7 +85,8 @@ export default function Nutrition() {
     if (res.canceled || !res.assets || !res.assets[0]) return;
     const asset = res.assets[0];
     setLogBusy(true); let done = false;
-    if (visionAvailable() && asset.base64) { const r = await analyzeMeal(asset.base64); if (r) { fl.addFood({ name: r.name, kcal: r.kcal, protein: r.protein, carbs: r.carbs, fat: r.fat, via: 'photo' }); notifySuccess(); Alert.alert('Logged', r.name + ' · ' + r.kcal + ' kcal added to today.'); done = true; } }
+    let nb = asset.base64; try { const mm = await ImageManipulator.manipulateAsync(asset.uri, [{ resize: { width: 1512 } }], { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true }); if (mm.base64) nb = mm.base64; } catch {}
+    if (visionAvailable() && nb) { const r = await analyzeMeal(nb, 'image/jpeg'); if (r) { fl.addFood({ name: r.name, kcal: r.kcal, protein: r.protein, carbs: r.carbs, fat: r.fat, via: 'photo' }); notifySuccess(); Alert.alert('Logged', r.name + ' · ' + r.kcal + ' kcal added to today.'); done = true; } }
     setLogBusy(false);
     if (!done) { fl.addFood({ name: 'Meal (photo)', kcal: 520, protein: 40, carbs: 50, fat: 16, via: 'photo' }); Alert.alert('Logged an estimate', 'Added ~520 kcal — open Food Log to fine-tune.'); }
   };
