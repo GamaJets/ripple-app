@@ -6,6 +6,7 @@ import { View, Text, Pressable, Image, TextInput, ScrollView, Modal, Alert } fro
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Circle, Polyline } from 'react-native-svg';
 import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { useClientData } from '../../src/ui/clientData';
@@ -125,8 +126,10 @@ export default function Scans() {
     const res = fromCamera ? await ImagePicker.launchCameraAsync({ quality: 0.7, base64: true }) : await ImagePicker.launchImageLibraryAsync({ quality: 0.7, base64: true });
     if (!res.canceled && res.assets && res.assets[0]) {
       const asset = res.assets[0]; const uri = asset.uri; setImg(uri); setReading(true); setOcrMsg(null); setScanMx(null);
-      if (visionAvailable() && asset.base64) {
-        const v = await analyzeInBody(asset.base64);
+      let b64 = asset.base64 || undefined;
+      try { const mm = await ImageManipulator.manipulateAsync(uri, [{ resize: { width: 1512 } }], { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true }); if (mm.base64) b64 = mm.base64; } catch { /* fall back to original */ }
+      if (visionAvailable() && b64) {
+        const v = await analyzeInBody(b64, 'image/jpeg');
         if (v && (v.weightKg != null || v.bodyFatPct != null || v.skeletalMuscleKg != null)) {
           setReading(false);
           setScanMx(v.metrics ?? null);

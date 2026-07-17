@@ -9,8 +9,6 @@
 // Response JSON (meal):   { name, kcal, protein, carbs, fat, confidence }
 //          JSON (inbody): { weightKg, bodyFatPct, skeletalMuscleKg, takenAt? }
 
-import { Image } from 'npm:imagescript@1.2.15';
-
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -51,38 +49,6 @@ function extractJson(text: string): any {
   return JSON.parse(text.slice(a, b + 1));
 }
 
-function b64ToBytes(b64: string): Uint8Array {
-  const bin = atob(b64);
-  const arr = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-  return arr;
-}
-function bytesToB64(bytes: Uint8Array): string {
-  let bin = '';
-  const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) bin += String.fromCharCode(...bytes.subarray(i, i + chunk));
-  return btoa(bin);
-}
-
-// Downscale + re-encode to JPEG so oversized (48MP) or non-JPEG phone photos are
-// accepted by the vision API (max 8000px; JPEG/PNG/WebP only). Falls back to the
-// original bytes if it can't decode (e.g. HEIC) so behaviour never regresses.
-async function normalizeImage(b64: string, media: string): Promise<{ data: string; media: string }> {
-  try {
-    const img: any = await Image.decode(b64ToBytes(b64));
-    const MAXD = 1568;
-    const longEdge = Math.max(img.width, img.height);
-    if (longEdge > MAXD) {
-      const s = MAXD / longEdge;
-      img.resize(Math.max(1, Math.round(img.width * s)), Math.max(1, Math.round(img.height * s)));
-    }
-    const jpeg: Uint8Array = await img.encodeJPEG(82);
-    return { data: bytesToB64(jpeg), media: 'image/jpeg' };
-  } catch (_e) {
-    return { data: b64, media };
-  }
-}
-
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
   if (req.method !== 'POST') return json({ error: 'POST only' }, 405);
@@ -100,7 +66,6 @@ Deno.serve(async (req: Request) => {
   if (!imageBase64) return json({ error: 'imageBase64 required' }, 400);
 
   try {
-    const norm = await normalizeImage(imageBase64, mediaType);
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
@@ -110,7 +75,7 @@ Deno.serve(async (req: Request) => {
         messages: [{
           role: 'user',
           content: [
-            { type: 'image', source: { type: 'base64', media_type: norm.media, data: norm.data } },
+            { type: 'image', source: { type: 'base64', media_type: mediaType, data: imageBase64 } },
             { type: 'text', text: PROMPTS[mode] },
           ],
         }],
