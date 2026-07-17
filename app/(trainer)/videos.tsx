@@ -5,11 +5,13 @@ import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { useTheme } from '../../src/ui/components';
+import { useRouter } from 'expo-router';
 import { useExerciseVideos, uploadExerciseVideo, videoUploadAvailable, type VideoItem } from '../../src/ui/exerciseVideos';
 
 export default function TrainerVideos() {
   const t = useTheme();
   const { videos: vids, addVideo, removeVideo } = useExerciseVideos();
+  const router = useRouter();
   const [linkOpen, setLinkOpen] = useState(false);
   const [lName, setLName] = useState('');
   const [lGroup, setLGroup] = useState('');
@@ -83,7 +85,12 @@ export default function TrainerVideos() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
         <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia', textTransform: 'capitalize' }}>Exercise videos</Text>
-        <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 16 }}>{done} of {vids.length} recorded · clients see these in their program</Text>
+        <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 12 }}>{done} of {vids.length} recorded · clients see these in their program</Text>
+        <Pressable onPress={() => router.push('/(trainer)/broadcast-session')} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, marginBottom: 16 }}>
+          <Icon name="share" size={16} color={t.brand} />
+          <Text style={{ color: t.ink, fontWeight: '800', fontSize: 13.5, flex: 1 }}>Broadcast a session to social</Text>
+          <Text style={{ color: t.ink3, fontSize: 18 }}>›</Text>
+        </Pressable>
 
         <View style={{ flexDirection: 'row', gap: 10, marginBottom: 18 }}>
           <Pressable onPress={() => upload(true)} style={{ flex: 1, backgroundColor: t.brand, borderRadius: 14, paddingVertical: 15, alignItems: 'center', gap: 4 }}>

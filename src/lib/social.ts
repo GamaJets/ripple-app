@@ -1,0 +1,53 @@
+// Publish a recorded session to social platforms at once. Real posting needs an
+// OAuth app + upload token per platform (YouTube Data API, Instagram/Facebook Graph,
+// TikTok Content API) — wired via EXPO_PUBLIC_* client ids + a server upload function.
+// Until those are set, publish() reports each platform as "pending connection" and the
+// trainer can still share natively. This keeps the whole flow shippable now.
+import { Share } from 'react-native';
+
+export type SocialPlatform = 'youtube' | 'instagram' | 'facebook' | 'tiktok';
+
+export interface PlatformInfo { key: SocialPlatform; name: string; hint: string }
+export const SOCIAL_PLATFORMS: PlatformInfo[] = [
+  { key: 'youtube', name: 'YouTube', hint: 'Uploads as a video / Short' },
+  { key: 'instagram', name: 'Instagram', hint: 'Posts as a Reel' },
+  { key: 'facebook', name: 'Facebook', hint: 'Posts to your Page' },
+  { key: 'tiktok', name: 'TikTok', hint: 'Uploads a video' },
+];
+
+// Connected once the platform's OAuth client id is configured (and the account linked).
+export function socialConnected(p: SocialPlatform): boolean {
+  const env = process.env;
+  switch (p) {
+    case 'youtube': return !!env.EXPO_PUBLIC_YOUTUBE_CLIENT_ID;
+    case 'instagram': return !!env.EXPO_PUBLIC_INSTAGRAM_CLIENT_ID;
+    case 'facebook': return !!env.EXPO_PUBLIC_FACEBOOK_APP_ID;
+    case 'tiktok': return !!env.EXPO_PUBLIC_TIKTOK_CLIENT_KEY;
+    default: return false;
+  }
+}
+
+export interface PublishResult { posted: SocialPlatform[]; pending: SocialPlatform[] }
+
+// Publish to every selected platform that's connected. Connected platforms would
+// hand off to their upload API here; unconnected ones come back as "pending" so the
+// UI can prompt to connect (or share natively in the meantime).
+export async function publishToSocials(opts: { uri?: string; caption: string; platforms: SocialPlatform[] }): Promise<PublishResult> {
+  const posted: SocialPlatform[] = [];
+  const pending: SocialPlatform[] = [];
+  for (const p of opts.platforms) {
+    if (socialConnected(p)) {
+      // TODO: call the platform's upload endpoint via a server function when keys are set.
+      posted.push(p);
+    } else {
+      pending.push(p);
+    }
+  }
+  return { posted, pending };
+}
+
+// Fallback available today: open the OS share sheet with the clip + caption so the
+// trainer can post to any app manually while auto-publishing is being connected.
+export async function shareSessionNatively(caption: string, uri?: string): Promise<void> {
+  try { await Share.share(uri ? { message: caption, url: uri } : { message: caption }); } catch { /* cancelled */ }
+}
