@@ -151,11 +151,20 @@ export default function Scans() {
   const saveScan = () => {
     const w = parseFloat(wt) || 0, f = parseFloat(bf) || 0, m = parseFloat(sm) || 0;
     if (!w || !f) { Alert.alert('Add the numbers', 'Enter at least weight and body-fat % from your InBody report.'); return; }
+    const newISO = scanDateISO();
+    // The meal plan follows your MOST RECENT-dated scan only. A back-dated scan is
+    // stored for history/graphs but must not re-tune the plan.
+    const curLatestISO = cd.scans.length ? cd.scans[cd.scans.length - 1].takenAt.slice(0, 10) : '';
+    const isNewest = !curLatestISO || newISO >= curLatestISO;
     const before = macrosFor({ weightKg: cd.weightKg, bodyFatPct: cd.bodyFatPct, activity: cd.activity, goal: cd.goal, diet: cd.diet });
     const after = macrosFor({ weightKg: w, bodyFatPct: f, activity: cd.activity, goal: cd.goal, diet: cd.diet });
     const pw = cd.weightKg, pf = cd.bodyFatPct;
-    cd.addScan({ id: 's' + Date.now(), takenAt: scanDateISO(), weightKg: w, bodyFatPct: f, skeletalMuscleKg: m, source: scanMx ? 'InBody (OCR)' : 'InBody (manual)', image: img || undefined, metrics: scanMx ?? undefined });
+    cd.addScan({ id: 's' + Date.now(), takenAt: newISO, weightKg: w, bodyFatPct: f, skeletalMuscleKg: m, source: scanMx ? 'InBody (OCR)' : 'InBody (manual)', image: img || undefined, metrics: scanMx ?? undefined });
     setImg(null); setWt(''); setBf(''); setSm(''); setScanMx(null); setShowAdd(false);
+    if (!isNewest) {
+      Alert.alert('Scan saved to history', 'This scan is dated ' + fmt(newISO) + ', earlier than your most recent scan (' + fmt(curLatestISO) + '). It\'s added to your progress tracking and graphs — but your meal plan stays on your most recent scan. Only a newer scan re-tunes your plan.');
+      return;
+    }
     const dK = after.kcal - before.kcal, dP = after.protein - before.protein;
     const sign = (x: number) => (x > 0 ? '+' + x : String(x));
     const changed = Math.abs(dK) >= 5 || Math.abs(dP) >= 2;

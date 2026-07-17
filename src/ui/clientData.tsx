@@ -50,7 +50,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
   const [avoid, setAvoid] = useState<Allergen[]>([]);
   const [injuries, setInjuries] = useState<Injury[]>([]);
   const [focusAreas, setFocusAreas] = useState<string[]>([]);
-  const [scans, setScans] = useState<ScanRec[]>(base.scans.map((s) => ({ id: s.id, takenAt: s.takenAt, weightKg: s.weightKg, bodyFatPct: s.bodyFatPct, skeletalMuscleKg: s.skeletalMuscleKg, source: s.source })));
+  const [scans, setScans] = useState<ScanRec[]>(USE_SUPABASE ? [] : base.scans.map((s) => ({ id: s.id, takenAt: s.takenAt, weightKg: s.weightKg, bodyFatPct: s.bodyFatPct, skeletalMuscleKg: s.skeletalMuscleKg, source: s.source })));
   const [scanMetrics, setScanMetrics] = useState<Record<string, ScanMetrics>>({});
   const [manualWeight, setManualWeight] = useState<number | null>(null);
   const [manualBodyFat, setManualBodyFat] = useState<number | null>(null);
@@ -113,11 +113,8 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
         const id = auth?.user?.id; if (!id || cancelled) return; setSbUid(id);
         const { data, error } = await supabase.from('scans').select('*').eq('client_id', id).order('taken_at', { ascending: true });
         if (error || cancelled) return;
-        if (data && data.length) {
-          setScans(data.map((r: any) => ({ id: r.id, takenAt: r.taken_at, weightKg: Number(r.weight_kg), bodyFatPct: Number(r.body_fat_pct), skeletalMuscleKg: r.skeletal_muscle_kg != null ? Number(r.skeletal_muscle_kg) : 0, source: r.source ?? '', metrics: r.metrics ?? undefined })));
-        } else {
-          await supabase.from('scans').insert(base.scans.map((sc) => ({ client_id: id, taken_at: String(sc.takenAt).slice(0, 10), weight_kg: sc.weightKg, body_fat_pct: sc.bodyFatPct, skeletal_muscle_kg: sc.skeletalMuscleKg, source: sc.source })));
-        }
+        // Only ever show the user's own real scans — never seed demo scans into a live account.
+        setScans((data || []).map((r: any) => ({ id: r.id, takenAt: r.taken_at, weightKg: Number(r.weight_kg), bodyFatPct: Number(r.body_fat_pct), skeletalMuscleKg: r.skeletal_muscle_kg != null ? Number(r.skeletal_muscle_kg) : 0, source: r.source ?? '', metrics: r.metrics ?? undefined })));
       } catch { /* stay on mock */ }
     })();
     return () => { cancelled = true; };
