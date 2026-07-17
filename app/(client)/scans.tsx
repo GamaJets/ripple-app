@@ -75,11 +75,17 @@ function StatCard({ t, label, value, unit, delta, good, onPress }: { t: Theme; l
   );
 }
 
-function Spark({ t, data, w = 250, h = 54 }: { t: Theme; data: number[]; w?: number; h?: number }) {
+function Spark({ t, data, times, w = 250, h = 54 }: { t: Theme; data: number[]; times?: number[]; w?: number; h?: number }) {
   if (data.length < 2) return null;
   const min = Math.min(...data), max = Math.max(...data), rng = max - min || 1;
-  const pts = data.map((v, i) => `${(i / (data.length - 1)) * w},${h - ((v - min) / rng) * (h - 8) - 4}`).join(' ');
-  const lx = w, ly = h - ((data[data.length - 1] - min) / rng) * (h - 8) - 4;
+  // Position points by real elapsed time when timestamps are supplied, so unevenly
+  // spaced weigh-ins read truthfully; otherwise fall back to even index spacing.
+  const useT = !!times && times.length === data.length;
+  const t0 = useT ? Math.min(...(times as number[])) : 0;
+  const tspan = useT ? (Math.max(...(times as number[])) - t0) || 1 : 1;
+  const xAt = (i: number) => (useT ? (((times as number[])[i] - t0) / tspan) * w : (i / (data.length - 1)) * w);
+  const pts = data.map((v, i) => `${xAt(i)},${h - ((v - min) / rng) * (h - 8) - 4}`).join(' ');
+  const lx = xAt(data.length - 1), ly = h - ((data[data.length - 1] - min) / rng) * (h - 8) - 4;
   return (
     <Svg width="100%" height={h} viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
       <Polyline points={pts} fill="none" stroke={t.brand} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
@@ -240,7 +246,7 @@ export default function Scans() {
             <Text style={{ color: t.ink3, fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.6 }}>Weight · {wsv.length} check-ins</Text>
             {wDelta !== null ? <Text style={{ color: t.brand, fontSize: 11, fontWeight: '700' }}>{wDelta > 0 ? '+' : ''}{wDelta} kg</Text> : null}
           </View>
-          <Spark t={t} data={wsv} />
+          <Spark t={t} data={wsv} times={cd.weightSeries.map((x) => Date.parse(x.t))} />
         </Pressable>
 
         {/* progress photos */}
