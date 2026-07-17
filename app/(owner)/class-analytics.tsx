@@ -47,7 +47,9 @@ export default function OwnerClassAnalytics() {
   };
   const byBranch = useMemo(() => byGroup((r) => r.branch), [rows]);
   const byTrainer = useMemo(() => byGroup((r) => r.trainerName), [rows]);
+  const byKind = useMemo(() => byGroup((r) => r.kind || r.title), [rows]);
   const maxBranch = Math.max(1, ...byBranch.map(([, v]) => v.attended));
+  const maxKind = Math.max(1, ...byKind.map(([, v]) => v.attended));
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
@@ -101,6 +103,17 @@ export default function OwnerClassAnalytics() {
             <View key={b} style={{ marginBottom: 11 }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}><Text style={{ color: t.ink2, fontSize: 12.5 }}>{b}</Text><Text style={{ color: t.ink, fontWeight: '700', fontSize: 12.5 }}>{v.attended} <Text style={{ color: t.ink3 }}>/ {v.booked}</Text></Text></View>
               <View style={{ height: 9, backgroundColor: t.surface2, borderRadius: 5 }}><View style={{ height: 9, width: `${Math.round((v.attended / maxBranch) * 100)}%`, backgroundColor: t.brand, borderRadius: 5 }} /></View>
+            </View>
+          ))}
+        </View>
+
+        {/* Attendance by class type */}
+        <View style={{ backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 16, padding: 16, marginBottom: 16 }}>
+          <Text style={{ color: t.ink, fontWeight: '800', fontSize: 15, marginBottom: 12 }}>Popularity by class type</Text>
+          {byKind.map(([k, v]) => (
+            <View key={k} style={{ marginBottom: 11 }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}><Text style={{ color: t.ink2, fontSize: 12.5 }}>{k}</Text><Text style={{ color: t.ink, fontWeight: '700', fontSize: 12.5 }}>{v.attended} <Text style={{ color: t.ink3 }}>· {v.classes} run</Text></Text></View>
+              <View style={{ height: 9, backgroundColor: t.surface2, borderRadius: 5 }}><View style={{ height: 9, width: `${Math.round((v.attended / maxKind) * 100)}%`, backgroundColor: t.warn, borderRadius: 5 }} /></View>
             </View>
           ))}
         </View>
