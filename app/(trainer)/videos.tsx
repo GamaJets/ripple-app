@@ -19,15 +19,15 @@ export default function TrainerVideos() {
   const [upGroup, setUpGroup] = useState('');
   const [upBusy, setUpBusy] = useState(false);
 
-  const upload = async (fromCamera: boolean) => {
+  const upload = async (fromCamera: boolean, prefill?: { name?: string; group?: string }) => {
     const perm = fromCamera ? await ImagePicker.requestCameraPermissionsAsync() : await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!perm.granted) { Alert.alert('Permission needed', 'Allow access to ' + (fromCamera ? 'the camera' : 'your library') + ' to add a video.'); return; }
     const res = fromCamera
       ? await ImagePicker.launchCameraAsync({ mediaTypes: ['videos'], videoMaxDuration: 60 })
       : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['videos'] });
     if (!res.canceled && res.assets && res.assets[0]) {
-      // Open the naming sheet; the actual upload happens on Save.
-      setUpName(''); setUpGroup(''); setPendUri(res.assets[0].uri);
+      // Open the naming sheet; pre-fill from the tapped exercise when there is one.
+      setUpName(prefill?.name || ''); setUpGroup(prefill?.group || ''); setPendUri(res.assets[0].uri);
     }
   };
 
@@ -59,8 +59,8 @@ export default function TrainerVideos() {
       return;
     }
     Alert.alert(v.name, 'No video yet for this exercise — add one now:', [
-      { text: 'Record', onPress: () => upload(true) },
-      { text: 'Upload from library', onPress: () => upload(false) },
+      { text: 'Record', onPress: () => upload(true, { name: v.name, group: v.group }) },
+      { text: 'Upload from library', onPress: () => upload(false, { name: v.name, group: v.group }) },
       { text: 'Cancel', style: 'cancel' },
     ]);
   };
