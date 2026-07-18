@@ -125,11 +125,11 @@ Deno.serve(async (req: Request) => {
 
   // Revenue (real only if billing rows exist; otherwise omitted → portal shows sample).
   try {
-    const { data: inv } = await admin.from('invoices').select('amount, status, created_at').gte('created_at', iso(30 * DAY)).limit(10000);
+    const { data: inv } = await admin.from('invoices').select('amount_due, status, created_at').gte('created_at', iso(30 * DAY)).limit(10000);
     if (Array.isArray(inv) && inv.length) {
       const paid = inv.filter((r: any) => (r.status ?? 'paid') === 'paid');
-      const sum = paid.reduce((a: number, r: any) => a + Number(r.amount || 0), 0);
-      if (sum > 0) set('revenue30', Math.round(sum));
+      const cents = paid.reduce((a: number, r: any) => a + Number(r.amount_due || 0), 0); // Stripe stores cents
+      if (cents > 0) set('revenue30', Math.round(cents / 100));
     }
   } catch { /* no invoices table */ }
   try {
