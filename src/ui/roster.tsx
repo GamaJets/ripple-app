@@ -37,7 +37,7 @@ export function RosterProvider({ children }: { children: ReactNode }) {
         const uid = auth?.user?.id;
         if (cancelled) return;
         if (!uid) { setRoster(JSON.parse(JSON.stringify(ROSTER))); return; }
-        const { data: cls, error } = await supabase.from('clients').select('id, goal, diet, meals_per_day, avoid').eq('trainer_id', uid);
+        const { data: cls, error } = await supabase.from('clients').select('id, goal, diet, meals_per_day, avoid, mode').eq('trainer_id', uid);
         if (error || !cls || !cls.length || cancelled) return;
         const ids = cls.map((c: any) => c.id);
         const names: Record<string, string> = {};
@@ -65,7 +65,7 @@ export function RosterProvider({ children }: { children: ReactNode }) {
           (ci || []).forEach((r: any) => { if (st[r.user_id]) { st[r.user_id].last = Math.max(st[r.user_id].last, Date.parse(r.at)); if (!seen.has(r.user_id) && typeof r.adherence === 'number') { seen.add(r.user_id); st[r.user_id].adh = r.adherence; } } });
         } catch { /* ignore */ }
         const goalMap: Record<string, string> = { fatloss: 'Fat loss', tone: 'Tone', muscle: 'Build muscle' };
-        const real: RosterClient[] = cls.map((c: any) => { const sc = st[c.id]; return { id: c.id, name: names[c.id] || 'Client', goal: goalMap[c.goal] || 'General', weightDelta: sc.wDelta, adherence: sc.adh != null ? sc.adh : 100, lastActive: sc.last ? ago(sc.last) : 'recently', next: '—', unread: 0, mode: 'online' as const, metrics: sc.mx ?? undefined, diet: c.diet ?? undefined, mealsPerDay: c.meals_per_day ?? undefined, avoid: Array.isArray(c.avoid) ? c.avoid : undefined }; });
+        const real: RosterClient[] = cls.map((c: any) => { const sc = st[c.id]; return { id: c.id, name: names[c.id] || 'Client', goal: goalMap[c.goal] || 'General', weightDelta: sc.wDelta, adherence: sc.adh != null ? sc.adh : 100, lastActive: sc.last ? ago(sc.last) : 'recently', next: '—', unread: 0, mode: (c.mode === 'inperson' ? 'inperson' : 'online') as 'online' | 'inperson', metrics: sc.mx ?? undefined, diet: c.diet ?? undefined, mealsPerDay: c.meals_per_day ?? undefined, avoid: Array.isArray(c.avoid) ? c.avoid : undefined }; });
         if (!cancelled) setRoster(real);
       } catch { /* stay on demo roster */ }
     })();
@@ -79,6 +79,9 @@ export function RosterProvider({ children }: { children: ReactNode }) {
   const removeClient = (id: string) => setRoster((p) => p.filter((c) => c.id !== id));
   const setClientMode = (id: string, mode: 'online' | 'inperson') => {
     setModeOverrides((p) => { const next = { ...p, [id]: mode }; try { AsyncStorage.setItem(MODE_KEY, JSON.stringify(next)); } catch { /* ignore */ } return next; });
+    // Durably persist to Supabase so the classification follows the client across
+    // devices and feeds owner analytics (RLS: a trainer may update their own clients).
+    if (USE_SUPABASE) { try { supabase.from('clients').update({ mode }).eq('id', id).then(() => {}, () => {}); } catch { /* ignore */ } }
   };
   // Apply overrides on top of whatever mode the roster came with.
   const shown = Object.keys(modeOverrides).length ? roster.map((c) => (modeOverrides[c.id] ? { ...c, mode: modeOverrides[c.id] } : c)) : roster;
