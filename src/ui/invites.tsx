@@ -1,9 +1,11 @@
 // Coach → client invites by email. A trainer invites someone by email; the
 // client with that email sees a pending invitation and accepts, which links the
 // two accounts (accept_invite → link_coaching → coaching_relationships +
-// clients.trainer_id). Supabase-backed with a defensive in-memory fallback so
-// the UI never blanks or crashes if the network/table is unavailable.
+// clients.trainer_id). Supabase-backed. Accepted/declined invites are remembered
+// locally (AsyncStorage) so a handled invitation never re-appears on next login,
+// and a real signed-in account never sees the sample invite.
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 
@@ -29,6 +31,7 @@ interface InvitesValue {
 }
 
 let SEQ = 500;
+const DISMISS_KEY = 'repple.invites.dismissed'; // ids the user has accepted/declined
 
 const rowToInvite = (r: any): Invite => ({
   id: String(r.id),
@@ -40,6 +43,11 @@ const rowToInvite = (r: any): Invite => ({
   createdAt: r.created_at ?? new Date().toISOString(),
 });
 
+const DEMO_INVITE: Invite = {
+  id: 'demo-invite', coachId: 'demo-coach', coachName: 'Coach Sam Rivera',
+  email: 'you', mode: 'online', status: 'pending', createdAt: new Date(0).toISOString(), demo: true,
+};
+
 const Ctx = createContext<InvitesValue | null>(null);
 
 export function InvitesProvider({ children }: { children: ReactNode }) {
@@ -47,28 +55,31 @@ export function InvitesProvider({ children }: { children: ReactNode }) {
   const [received, setReceived] = useState<Invite[]>([]);
   const [uid, setUid] = useState<string | null>(null);
   const [myName, setMyName] = useState<string | null>(null);
+  const [dismissed, setDismissed] = useState<Set<string>>(() => new Set());
 
-  const seedDemo = () => {
-    setReceived((p) => (p.length ? p : [{
-      id: 'demo-invite',
-      coachId: 'demo-coach',
-      coachName: 'Coach Sam Rivera',
-      email: 'you',
-      mode: 'online',
-      status: 'pending',
-      createdAt: new Date().toISOString(),
-      demo: true,
-    }]));
+  const persistDismissed = (next: Set<string>) => {
+    setDismissed(next);
+    AsyncStorage.setItem(DISMISS_KEY, JSON.stringify([...next])).catch(() => {});
   };
+  const markDismissed = (id: string) => { const next = new Set(dismissed); next.add(id); persistDismissed(next); };
 
   useEffect(() => {
-    if (!USE_SUPABASE) { seedDemo(); return; }
     let cancelled = false;
     (async () => {
+      // What the user already handled (accepted/declined) — never show it again.
+      let skip = new Set<string>();
+      try { const raw = await AsyncStorage.getItem(DISMISS_KEY); if (raw) skip = new Set<string>(JSON.parse(raw)); } catch { /* ignore */ }
+      if (!cancelled) setDismissed(skip);
+
+      // Demo mode (no backend): show the sample invite unless already handled.
+      if (!USE_SUPABASE) { if (!cancelled && !skip.has(DEMO_INVITE.id)) setReceived([DEMO_INVITE]); return; }
+
+      // Real backend: only ever show genuine pending invites for this email.
+      // No fake/sample invite for a live account (that was the re-pop bug).
       try {
         const { data: auth } = await supabase.auth.getUser();
         const u = auth?.user;
-        if (!u || cancelled) { seedDemo(); return; }
+        if (!u || cancelled) return;
         setUid(u.id);
         try {
           const prof = await supabase.from('profiles').select('full_name').eq('id', u.id).single();
@@ -81,20 +92,15 @@ export function InvitesProvider({ children }: { children: ReactNode }) {
           if (!cancelled && s.data) setSent(s.data.map(rowToInvite));
         } catch { /* ignore */ }
 
-        // Received (addressed to my email, still pending).
+        // Received (addressed to my email, still pending, not already handled here).
         const email = u.email;
-        if (email) {
+        if (email && !cancelled) {
           try {
             const r = await supabase.from('coach_invites').select('*').ilike('email', email).eq('status', 'pending');
-            if (!cancelled) {
-              if (r.data && r.data.length) setReceived(r.data.map(rowToInvite));
-              else seedDemo();
-            }
-          } catch { if (!cancelled) seedDemo(); }
-        } else if (!cancelled) {
-          seedDemo();
+            if (!cancelled) setReceived((r.data ?? []).map(rowToInvite).filter((i) => !skip.has(i.id)));
+          } catch { if (!cancelled) setReceived([]); }
         }
-      } catch { seedDemo(); }
+      } catch { /* leave received empty — no sample invite on a real account */ }
     })();
     return () => { cancelled = true; };
   }, []);
@@ -130,14 +136,20 @@ export function InvitesProvider({ children }: { children: ReactNode }) {
     const inv = received.find((i) => i.id === id);
     const mode: InviteMode = inv?.mode ?? 'online';
     setReceived((p) => p.filter((i) => i.id !== id));
+    markDismissed(id); // never re-show this invite, even if the RPC lags or fails
     if (USE_SUPABASE && inv && !inv.demo) {
-      try { await supabase.rpc('accept_invite', { p_invite: id }); } catch { /* ignore */ }
+      try { await supabase.rpc('accept_invite', { p_invite: id }); } catch { /* ignore — dismissed locally */ }
     }
     return mode;
   };
 
   const declineInvite: InvitesValue['declineInvite'] = (id) => {
+    const inv = received.find((i) => i.id === id);
     setReceived((p) => p.filter((i) => i.id !== id));
+    markDismissed(id);
+    if (USE_SUPABASE && inv && !inv.demo && !id.startsWith('local-')) {
+      try { supabase.from('coach_invites').update({ status: 'revoked' }).eq('id', id).then(() => {}, () => {}); } catch { /* ignore */ }
+    }
   };
 
   return (

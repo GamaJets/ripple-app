@@ -295,9 +295,9 @@ export default function Home() {
         ) : null}
 
         {/* nutrition */}
-        <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 15, marginBottom: 11 }}>
+        <Pressable onPress={() => router.push('/(client)/nutrition')} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 15, marginBottom: 11 }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Pressable onPress={() => router.push('/(client)/nutrition')} hitSlop={6}><Text style={{ color: t.ink, fontWeight: '800', fontSize: 14 }}>Today's nutrition ›</Text></Pressable>
+            <Text style={{ color: t.ink, fontWeight: '800', fontSize: 14 }}>Today's nutrition ›</Text>
             <Text style={{ color: t.ink3, fontSize: 12 }}><Text style={{ color: t.ink, fontWeight: '700' }}>{consumed.kcal.toLocaleString()}</Text> / {macros.kcal.toLocaleString()} kcal</Text>
           </View>
           {macroBar('Protein', consumed.p, macros.protein, t.brand)}
@@ -305,7 +305,7 @@ export default function Home() {
             <View style={{ flex: 1 }}>{macroBar('Carbs', consumed.cbs, macros.carbs, t.s1)}</View>
             <View style={{ flex: 1 }}>{macroBar('Fat', consumed.f, macros.fat, t.s3)}</View>
           </View>
-        </View>
+        </Pressable>
 
         {/* readiness */}
         <Pressable onPress={() => router.push('/(client)/recovery')} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 15, marginBottom: 11, flexDirection: 'row', alignItems: 'center', gap: 14 }}>
@@ -332,13 +332,13 @@ export default function Home() {
         </View>
 
         {/* this week */}
-        <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 15, marginBottom: 11 }}>
+        <Pressable onPress={() => router.push('/(client)/trends')} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 15, marginBottom: 11 }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
             <Text style={{ color: t.ink, fontWeight: '800', fontSize: 14 }}>This week</Text>
             <Text style={{ color: t.ink3, fontSize: 12 }}>{wk.workouts} of {goalDays} done</Text>
           </View>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-            {[['Workouts', String(wk.workouts)], ['Volume', `${(wk.volumeKg / 1000).toFixed(1)}t`], ['Burned', `${wk.kcal}`], ['PRs', String(prs.length)]].map(([l, v], i) => (
+            {[['Workouts', String(wk.workouts)], ['kg lifted', Math.round(wk.volumeKg).toLocaleString()], ['Burned', `${wk.kcal}`], ['PRs', String(prs.length)]].map(([l, v], i) => (
               <View key={l} style={{ alignItems: 'center' }}>
                 <Text style={{ color: i === 3 ? t.brand : t.ink, fontSize: 18, fontWeight: '800' }}>{v}</Text>
                 <Text style={{ color: t.ink3, fontSize: 9, marginTop: 1 }}>{l}</Text>
@@ -350,7 +350,7 @@ export default function Home() {
               <View key={i} style={{ flex: 1, height: 6, borderRadius: 3, backgroundColor: i < wk.days ? t.brand : t.surface3 }} />
             ))}
           </View>
-        </View>
+        </Pressable>
 
         {/* next session — online (video) or in-person */}
         {(online || inperson) ? <Pressable onPress={() => router.push('/(client)/calendar')} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 14, marginBottom: 11, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
