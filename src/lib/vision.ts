@@ -70,6 +70,14 @@ export async function analyzePhysique(imageBase64: string, mediaType?: string): 
   return { bodyFatPct: toNum(r.bodyFatPct), notes: String(r.notes ?? ''), focusAreas: Array.isArray(r.focusAreas) ? r.focusAreas.map(String).slice(0, 4) : [] };
 }
 
+export interface MachineVision { name: string; muscleGroup: string; isCardio: boolean; confidence: number }
+export async function analyzeMachine(imageBase64: string, mediaType?: string): Promise<MachineVision | null> {
+  const r = await call('machine', imageBase64, mediaType);
+  const name = r?.name ? String(r.name).trim() : '';
+  if (!name) return null;
+  return { name, muscleGroup: String(r.muscleGroup ?? ''), isCardio: !!r.isCardio, confidence: toNum(r.confidence) ?? 0.6 };
+}
+
 export async function analyzeInBody(imageBase64: string, mediaType?: string): Promise<InBodyVision | null> {
   const r = await call('inbody', imageBase64, mediaType);
   if (!r) return null;

@@ -30,6 +30,12 @@ const PROMPTS: Record<string, string> = {
     'This is a physique / body progress photo taken for fitness tracking. Estimate visible body composition to guide training. ' +
     'Respond with ONLY valid JSON, no prose: {"bodyFatPct": number, "notes": string, "focusAreas": [string]}. ' +
     'bodyFatPct is your best visual estimate (%), notes is one or two encouraging sentences on what stands out, focusAreas lists 2-3 muscle groups or areas to prioritise next. This is a fitness estimate only, not medical or diagnostic advice.',
+  machine:
+    'This is a photo of a gym exercise machine or free-weight station. Identify the exercise it is used for. '
+    'Respond with ONLY valid JSON, no prose: {"name": string, "muscleGroup": string, "isCardio": boolean, "confidence": number (0-1)}. '
+    'Use the common gym name for name (e.g. "Bicep Curl", "Lat Pulldown", "Leg Press", "Chest Press", "Seated Row", "Leg Extension", "Shoulder Press", "Rowing Machine", "Treadmill"). '
+    'muscleGroup is the primary muscle worked (e.g. "Biceps", "Back", "Chest", "Legs", "Shoulders"). isCardio is true only for cardio machines (treadmill, bike, rower, elliptical, stair, ski erg). '
+    'An arm-curl / preacher-curl machine is a "Bicep Curl". If unsure, give your best guess and lower the confidence.',
   inbody:
     'This is an InBody (or similar) body-composition scan. Extract EVERY field below that is printed. ' +
     'Respond with ONLY valid JSON numbers (not strings), no prose: ' +
@@ -59,7 +65,7 @@ Deno.serve(async (req: Request) => {
   let mode = 'meal', imageBase64 = '', mediaType = 'image/jpeg';
   try {
     const b = await req.json();
-    mode = (b.mode === 'inbody' || b.mode === 'physique') ? b.mode : 'meal';
+    mode = (b.mode === 'inbody' || b.mode === 'physique' || b.mode === 'machine') ? b.mode : 'meal';
     imageBase64 = String(b.imageBase64 || '').replace(/^data:image\/\w+;base64,/, '');
     if (b.mediaType) mediaType = b.mediaType;
   } catch { return json({ error: 'Invalid JSON body' }, 400); }

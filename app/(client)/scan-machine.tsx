@@ -13,6 +13,9 @@ import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { tapLight } from '../../src/ui/haptics';
+import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
+import { analyzeMachine, visionAvailable } from '../../src/lib/vision';
 import { MACHINES, identifyMachine, looksLikeSerial, type MachineDef } from '../../src/lib/machines';
 import { recallMachine, rememberMachine } from '../../src/lib/machineMemory';
 
@@ -40,6 +43,7 @@ export default function ScanMachine() {
   const [cardio, setCardio] = useState(false);
   const [needsPick, setNeedsPick] = useState(false);
   const [recalled, setRecalled] = useState(false);
+  const [reading, setReading] = useState(false);
   const [q, setQ] = useState('');
   // strength
   const [reps, setReps] = useState('');
@@ -53,6 +57,25 @@ export default function ScanMachine() {
   const [kcalIn, setKcalIn] = useState('');
 
   const applyDef = (d: MachineDef) => { setExercise(d.name); setGroup(d.group); setCardio(!!d.cardio); setNeedsPick(false); tapLight(); };
+
+  // Identify the machine from a photo (AI vision) — no code needed.
+  const identifyByPhoto = async () => {
+    const perm = await ImagePicker.requestCameraPermissionsAsync();
+    if (!perm.granted) { Alert.alert('Camera needed', 'Allow camera access to identify a machine by photo.'); return; }
+    const res = await ImagePicker.launchCameraAsync({ quality: 0.6, base64: true });
+    if (res.canceled || !res.assets || !res.assets[0]) return;
+    const asset = res.assets[0];
+    setReading(true);
+    let b64 = asset.base64 || '';
+    try { const mm = await ImageManipulator.manipulateAsync(asset.uri, [{ resize: { width: 1024 } }], { compress: 0.6, format: ImageManipulator.SaveFormat.JPEG, base64: true }); if (mm.base64) b64 = mm.base64; } catch { /* fall back to original */ }
+    const v = (visionAvailable() && b64) ? await analyzeMachine(b64, 'image/jpeg') : null;
+    setReading(false);
+    setScanned('photo'); setRawCode(''); setRecalled(false); // photo id — no serial to remember
+    if (!v) { setExercise(''); setGroup(''); setCardio(false); setNeedsPick(true); Alert.alert('Could not identify', 'I could not read the machine from that photo — pick it from the list below.'); return; }
+    const d = identifyMachine(v.name);
+    if (d) { applyDef(d); }
+    else { setExercise(v.name); setGroup(v.muscleGroup || ''); setCardio(v.isCardio); setNeedsPick(true); tapLight(); }
+  };
 
   const onScan = async (res: { data: string }) => {
     if (scanned) return;
@@ -149,7 +172,11 @@ export default function ScanMachine() {
                 </CameraView>
               </View>
             )}
-            <Pressable onPress={() => { setManual(true); setNeedsPick(true); setExercise(''); }} style={{ marginTop: 14, paddingVertical: 12, alignItems: 'center' }}>
+            <Pressable onPress={identifyByPhoto} disabled={reading} style={{ marginTop: 12, backgroundColor: t.surface, borderColor: t.brand, borderWidth: 1, borderRadius: 12, paddingVertical: 13, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8, opacity: reading ? 0.6 : 1 }}>
+              <Icon name="camera" size={16} color={t.brand} />
+              <Text style={{ color: t.brand, fontWeight: '800', fontSize: 14 }}>{reading ? 'Identifying…' : '📷 Identify by photo'}</Text>
+            </Pressable>
+            <Pressable onPress={() => { setManual(true); setNeedsPick(true); setExercise(''); }} style={{ marginTop: 8, paddingVertical: 12, alignItems: 'center' }}>
               <Text style={{ color: t.brand, fontWeight: '700', fontSize: 14 }}>No code? Pick the machine yourself</Text>
             </Pressable>
           </View>

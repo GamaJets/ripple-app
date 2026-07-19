@@ -35,7 +35,7 @@ export const MACHINES: MachineDef[] = [
   { name: 'Hip Thrust', group: 'Glutes', keys: ['hip thrust', 'glute'] },
   { name: 'Hip Abduction', group: 'Glutes', keys: ['abduction', 'abductor'] },
   { name: 'Calf Raise', group: 'Calves', keys: ['calf'] },
-  { name: 'Bicep Curl', group: 'Biceps', keys: ['bicep', 'curl machine', 'preacher'] },
+  { name: 'Bicep Curl', group: 'Biceps', keys: ['arm curl', 'preacher', 'biceps', 'bicep', 'curl machine', 'preacher'] },
   { name: 'Tricep Pushdown', group: 'Triceps', keys: ['tricep', 'pushdown', 'push down'] },
   { name: 'Ab Crunch', group: 'Core', keys: ['crunch', 'ab machine', 'abdominal'] },
   { name: 'Back Extension', group: 'Lower back', keys: ['back extension', 'hyperextension'] },
