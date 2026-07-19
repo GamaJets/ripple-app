@@ -31,10 +31,10 @@ const PROMPTS: Record<string, string> = {
     'Respond with ONLY valid JSON, no prose: {"bodyFatPct": number, "notes": string, "focusAreas": [string]}. ' +
     'bodyFatPct is your best visual estimate (%), notes is one or two encouraging sentences on what stands out, focusAreas lists 2-3 muscle groups or areas to prioritise next. This is a fitness estimate only, not medical or diagnostic advice.',
   machine:
-    'This is a photo of a gym exercise machine or free-weight station. Identify the exercise it is used for. '
-    'Respond with ONLY valid JSON, no prose: {"name": string, "muscleGroup": string, "isCardio": boolean, "confidence": number (0-1)}. '
-    'Use the common gym name for name (e.g. "Bicep Curl", "Lat Pulldown", "Leg Press", "Chest Press", "Seated Row", "Leg Extension", "Shoulder Press", "Rowing Machine", "Treadmill"). '
-    'muscleGroup is the primary muscle worked (e.g. "Biceps", "Back", "Chest", "Legs", "Shoulders"). isCardio is true only for cardio machines (treadmill, bike, rower, elliptical, stair, ski erg). '
+    'This is a photo of a gym exercise machine or free-weight station. Identify the exercise it is used for. ' +
+    'Respond with ONLY valid JSON, no prose: {"name": string, "muscleGroup": string, "isCardio": boolean, "confidence": number (0-1)}. ' +
+    'Use the common gym name for name (e.g. "Bicep Curl", "Lat Pulldown", "Leg Press", "Chest Press", "Seated Row", "Leg Extension", "Shoulder Press", "Rowing Machine", "Treadmill"). ' +
+    'muscleGroup is the primary muscle worked (e.g. "Biceps", "Back", "Chest", "Legs", "Shoulders"). isCardio is true only for cardio machines (treadmill, bike, rower, elliptical, stair, ski erg). ' +
     'An arm-curl / preacher-curl machine is a "Bicep Curl". If unsure, give your best guess and lower the confidence.',
   inbody:
     'This is an InBody (or similar) body-composition scan. Extract EVERY field below that is printed. ' +
