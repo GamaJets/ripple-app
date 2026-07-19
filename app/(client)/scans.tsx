@@ -2,7 +2,7 @@
 // trend, progress-photo row, "Latest InBody scan" card. Full add-scan flow (camera/
 // upload + OCR + date wheel + manual entry + history) lives in a bottom sheet.
 import { useState } from 'react';
-import { View, Text, Pressable, Image, TextInput, ScrollView, Modal, Alert } from 'react-native';
+import { View, Text, Pressable, Image, TextInput, ScrollView, Modal, Alert, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Circle, Polyline } from 'react-native-svg';
 import * as ImagePicker from 'expo-image-picker';
@@ -18,7 +18,7 @@ import { TrendChart } from '../../src/ui/Chart';
 import { Icon } from '../../src/ui/Icon';
 import { analyzeInBody, analyzePhysique, visionAvailable, lastVisionError, type PhysiqueVision } from '../../src/lib/vision';
 import { metricTrends, compositionInsights, METRIC_GROUPS, type ScanMetrics } from '../../src/lib/inbodyMetrics';
-import { focusToGroups } from '../../src/lib/focus';
+import { focusToGroups, recommendedExercises } from '../../src/lib/focus';
 
 const SERIF = 'Georgia';
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -449,6 +449,17 @@ export default function Scans() {
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                     {phys.focusAreas.map((a) => (<View key={a} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 16, paddingHorizontal: 13, paddingVertical: 8 }}><Text style={{ color: t.ink2, fontSize: 13, fontWeight: '700' }}>{a}</Text></View>))}
                   </View>
+                  {recommendedExercises(focusToGroups(phys.focusAreas)).length > 0 ? (
+                    <View style={{ marginTop: 16 }}>
+                      <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>Recommended moves · tap to watch form</Text>
+                      {recommendedExercises(focusToGroups(phys.focusAreas)).map((ex) => (
+                        <Pressable key={ex.name} onPress={() => Linking.openURL('https://www.youtube.com/results?search_query=' + encodeURIComponent('how to ' + ex.name + ' proper form'))} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, marginBottom: 8 }}>
+                          <View style={{ flex: 1 }}><Text style={{ color: t.ink, fontWeight: '700', fontSize: 14 }}>{ex.name}</Text><Text style={{ color: t.ink3, fontSize: 11.5 }}>{ex.group}</Text></View>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}><Icon name="play" size={14} color={t.brand} /><Text style={{ color: t.brand, fontWeight: '700', fontSize: 13 }}>Watch demo</Text></View>
+                        </Pressable>
+                      ))}
+                    </View>
+                  ) : null}
                   {focusToGroups(phys.focusAreas).length > 0 ? (
                     <Pressable onPress={() => { cd.setFocusAreas(focusToGroups(phys.focusAreas)); setPhysOpen(false); Alert.alert('Plan updated', 'Your Train tab now emphasises ' + focusToGroups(phys.focusAreas).join(', ') + ' — those exercises are tagged and prioritised until your next photo.'); }} style={{ marginTop: 14, backgroundColor: t.brand, borderRadius: 12, paddingVertical: 14, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8 }}>
                       <Icon name="target" size={16} color={t.brandInk} /><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 15 }}>Emphasise these in my plan</Text>

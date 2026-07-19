@@ -28,4 +28,29 @@ export function focusToGroups(areas: string[] = []): string[] {
   return out;
 }
 
+// Specific moves to recommend for each focus group (from the progress-photo read).
+export const EXERCISES_BY_GROUP: Record<string, string[]> = {
+  Chest: ['Bench Press', 'Incline Dumbbell Press', 'Chest Press', 'Cable Crossover'],
+  Back: ['Lat Pulldown', 'Seated Row', 'Bent-Over Row', 'Pull-up'],
+  Shoulders: ['Shoulder Press', 'Lateral Raise', 'Rear Delt Fly', 'Face Pull'],
+  Arms: ['Bicep Curl', 'Tricep Pushdown', 'Hammer Curl', 'Overhead Tricep Extension'],
+  Legs: ['Leg Press', 'Back Squat', 'Leg Extension', 'Walking Lunge'],
+  Glutes: ['Hip Thrust', 'Glute Bridge', 'Romanian Deadlift', 'Cable Kickback'],
+  Hamstrings: ['Leg Curl', 'Romanian Deadlift', 'Good Morning', 'Nordic Curl'],
+  Core: ['Plank', 'Hanging Leg Raise', 'Cable Crunch', 'Russian Twist'],
+  Calves: ['Standing Calf Raise', 'Seated Calf Raise'],
+};
+
+// Up to `perGroup` specific moves for each focus group (deduped across groups).
+export function recommendedExercises(groups: string[] = [], perGroup = 2): { name: string; group: string }[] {
+  const out: { name: string; group: string }[] = [];
+  const seen = new Set<string>();
+  for (const g of groups) {
+    const list = EXERCISES_BY_GROUP[g] || [];
+    let n = 0;
+    for (const name of list) { if (n >= perGroup) break; if (seen.has(name)) continue; seen.add(name); out.push({ name, group: g }); n++; }
+  }
+  return out;
+}
+
 export const isFocusGroup = (group: string, focusGroups: string[] = []): boolean => focusGroups.includes(group);
