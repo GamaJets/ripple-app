@@ -1,6 +1,7 @@
 // Client · Activity (Phase 3-adjacent, no push dependency). A unified, time-sorted
 // feed built from the reactive stores: workouts, PRs, streak milestones, check-ins,
 // bookings and coach messages. Reachable from the profile hub.
+import { useState } from 'react';
 import { View, Text, Pressable, ScrollView } from 'react-native';
 import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -14,7 +15,7 @@ import { MOCK_MESSAGES } from '../../src/lib/mockData';
 
 const CLIENT_ID = 'c1';
 
-interface Event { at: string; icon: string; title: string; sub: string }
+interface Event { at: string; icon: string; title: string; sub: string; route?: string }
 
 function timeAgo(iso: string) {
  const ms = Date.now() - Date.parse(iso);
@@ -34,6 +35,7 @@ function timeLabel(iso: string) {
 export default function Activity() {
  const t = useTheme();
  const router = useRouter();
+ const [open, setOpen] = useState<number | null>(null);
  const { log } = useWorkoutLog();
  const { checkins } = useCheckIns();
  const { sessions } = useSessions();
@@ -44,23 +46,23 @@ export default function Activity() {
  for (const e of log) {
  const pr = isNewPR(log, e);
  if (e.sets) {
- events.push({ at: e.t, icon: pr ? 'trophy' : 'dumbbell', title: pr ? `New PR — ${e.exercise}` : `Logged ${e.exercise}`, sub: e.sets.map((s) => `${s[0]}×${s[1]}kg`).join(' · ') });
+ events.push({ at: e.t, icon: pr ? 'trophy' : 'dumbbell', title: pr ? `New PR — ${e.exercise}` : `Logged ${e.exercise}`, sub: e.sets.map((s) => `${s[0]}×${s[1]}kg`).join(' · '), route: pr ? '/(client)/records' : '/(client)/trends' });
  } else if (e.cardio) {
- events.push({ at: e.t, icon: 'heart', title: `Logged ${e.exercise}`, sub: [`${e.cardio.mins} min`, e.cardio.dist > 0 ? `${e.cardio.dist} ${e.cardio.unit}` : null, e.cardio.watts && e.cardio.watts > 0 ? `${e.cardio.watts} W` : null].filter(Boolean).join(' · ') });
+ events.push({ at: e.t, icon: 'heart', title: `Logged ${e.exercise}`, sub: [`${e.cardio.mins} min`, e.cardio.dist > 0 ? `${e.cardio.dist} ${e.cardio.unit}` : null, e.cardio.watts && e.cardio.watts > 0 ? `${e.cardio.watts} W` : null].filter(Boolean).join(' · '), route: '/(client)/trends' });
  }
  }
  // Streak milestone (as of now)
  const streak = currentStreak(log);
  const milestone = streakMilestone(streak);
- if (milestone) events.push({ at: new Date().toISOString(), icon: 'flame', title: 'Streak milestone', sub: milestone });
+ if (milestone) events.push({ at: new Date().toISOString(), icon: 'flame', title: 'Streak milestone', sub: milestone, route: '/(client)/achievements' });
  // Check-ins
- for (const c of checkins) events.push({ at: c.at, icon: 'pencil', title: 'Weekly check-in sent', sub: `${c.weightKg} kg · energy ${c.energy}/5 · sleep ${c.sleep}/5` });
+ for (const c of checkins) events.push({ at: c.at, icon: 'pencil', title: 'Weekly check-in sent', sub: `${c.weightKg} kg · energy ${c.energy}/5 · sleep ${c.sleep}/5`, route: '/(client)/checkin' });
  // My sessions
  for (const s of sessions) {
- if (s.status === 'booked' && s.clientId === CLIENT_ID) events.push({ at: s.startsAt, icon: 'calendar', title: 'Session booked', sub: `${timeLabel(s.startsAt)} · ${s.durationMin} min` });
+ if (s.status === 'booked' && s.clientId === CLIENT_ID) events.push({ at: s.startsAt, icon: 'calendar', title: 'Session booked', sub: `${timeLabel(s.startsAt)} · ${s.durationMin} min`, route: '/(client)/bookings' });
  }
  // Coach messages
- for (const m of MOCK_MESSAGES) if (m.sender === 'coach') events.push({ at: m.createdAt, icon: 'message', title: 'Message from your coach', sub: m.body });
+ for (const m of MOCK_MESSAGES) if (m.sender === 'coach') events.push({ at: m.createdAt, icon: 'message', title: 'Message from your coach', sub: m.body, route: '/(client)/messages' });
 
  events.sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
  const feed = events.slice(0, 40);
@@ -79,16 +81,32 @@ export default function Activity() {
  <View style={{ marginBottom: 8 }}><Icon name="bell" size={30} color={t.ink3} /></View>
  <Text style={{ color: t.ink3, fontSize: 14, textAlign: 'center' }}>Nothing yet — log a workout or send a check-in to get started.</Text>
  </View>
- ) : feed.map((e, i) => (
- <View key={i} style={{ flexDirection: 'row', gap: 14, backgroundColor: t.surface, borderRadius: 14, borderWidth: 1, borderColor: t.ring, padding: 14, marginBottom: 9 }}>
+ ) : feed.map((e, i) => {
+ const isOpen = open === i;
+ return (
+ <Pressable key={i} onPress={() => setOpen(isOpen ? null : i)} accessibilityRole="button" accessibilityLabel={`${e.title}. ${e.sub}. ${isOpen ? 'Collapse' : 'Tap to expand'}`} style={{ flexDirection: 'row', gap: 14, backgroundColor: t.surface, borderRadius: 14, borderWidth: 1, borderColor: isOpen ? t.brand : t.ring, padding: 14, marginBottom: 9 }}>
  <View style={{ width: 42, height: 42, borderRadius: 12, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}><Icon name={e.icon as any} size={18} color={t.brand} /></View>
  <View style={{ flex: 1 }}>
  <Text style={{ color: t.ink, fontWeight: '700', fontSize: 14 }}>{e.title}</Text>
- <Text style={{ color: t.ink3, fontSize: 12, marginTop: 2 }} numberOfLines={2}>{e.sub}</Text>
+ <Text style={{ color: t.ink3, fontSize: 12, marginTop: 2 }} numberOfLines={isOpen ? undefined : 2}>{e.sub}</Text>
+ {isOpen ? (
+ <View style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: t.ring, paddingTop: 8 }}>
+ <Text style={{ color: t.ink3, fontSize: 11.5 }}>{timeLabel(e.at)}</Text>
+ {e.route ? (
+ <Pressable onPress={() => router.push(e.route as any)} accessibilityRole="button" accessibilityLabel={'Open details for ' + e.title} style={{ alignSelf: 'flex-start', marginTop: 8, backgroundColor: t.surface2, borderWidth: 1, borderColor: t.ring, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 7 }}>
+ <Text style={{ color: t.brand, fontWeight: '800', fontSize: 12 }}>View details ›</Text>
+ </Pressable>
+ ) : null}
  </View>
+ ) : null}
+ </View>
+ <View style={{ alignItems: 'flex-end', justifyContent: 'space-between' }}>
  <Text style={{ color: t.ink3, fontSize: 11 }}>{timeAgo(e.at)}</Text>
+ <Text style={{ color: isOpen ? t.brand : t.ink3, fontSize: 15, marginTop: 6 }}>{isOpen ? '⌃' : '›'}</Text>
  </View>
- ))}
+ </Pressable>
+ );
+ })}
  </ScrollView>
  </SafeAreaView>
  );
