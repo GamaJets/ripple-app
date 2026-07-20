@@ -46,7 +46,7 @@ export default function Activity() {
  if (e.sets) {
  events.push({ at: e.t, icon: pr ? 'trophy' : 'dumbbell', title: pr ? `New PR — ${e.exercise}` : `Logged ${e.exercise}`, sub: e.sets.map((s) => `${s[0]}×${s[1]}kg`).join(' · ') });
  } else if (e.cardio) {
- events.push({ at: e.t, icon: 'heart', title: `Logged ${e.exercise}`, sub: `${e.cardio.mins} min · ${e.cardio.dist} ${e.cardio.unit}` });
+ events.push({ at: e.t, icon: 'heart', title: `Logged ${e.exercise}`, sub: [`${e.cardio.mins} min`, e.cardio.dist > 0 ? `${e.cardio.dist} ${e.cardio.unit}` : null, e.cardio.watts && e.cardio.watts > 0 ? `${e.cardio.watts} W` : null].filter(Boolean).join(' · ') });
  }
  }
  // Streak milestone (as of now)

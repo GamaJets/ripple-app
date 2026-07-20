@@ -73,6 +73,7 @@ export default function Train() {
   const { videos: exVideos } = useExerciseVideos();
   const [session, setSession] = useState(false);
   const [ctype, setCtype] = useState(CARDIO[0]); const [mins, setMins] = useState(''); const [dist, setDist] = useState(''); const [unit, setUnit] = useState<'km' | 'mi'>('km');
+  const [watts, setWatts] = useState(''); const [kcalIn, setKcalIn] = useState('');
   const [showCal, setShowCal] = useState(false);
   const [selCalDay, setSelCalDay] = useState('');
   const [confetti, setConfetti] = useState(false);
@@ -91,7 +92,7 @@ export default function Train() {
   // Today's cardio, read from the saved log so it persists across navigation (not just this mount).
   const todayCardio = workoutLog
     .filter((l) => l.cardio && dstr(new Date(l.t)) === dstr(today0))
-    .map((l) => ({ type: l.exercise, mins: l.cardio!.mins, dist: l.cardio!.dist, unit: l.cardio!.unit, kcal: l.kcal ?? 0 }));
+    .map((l) => ({ type: l.exercise, mins: l.cardio!.mins, dist: l.cardio!.dist, unit: l.cardio!.unit, watts: l.cardio!.watts ?? 0, kcal: l.kcal ?? 0 }));
   const calMonth = monday0.getMonth(), calYear = monday0.getFullYear();
   const firstDow = (new Date(calYear, calMonth, 1).getDay() + 6) % 7;
   const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
@@ -134,10 +135,12 @@ export default function Train() {
   const quickLog = (e: ProgramExercise) => { const sg = suggestForExercise(workoutLog, nameOf(e), e.reps); logSet(e, String(parseInt(e.reps, 10) || 8), sg ? String(sg.weight) : ''); };
   const logCardio = () => {
     const m = parseInt(mins, 10) || 0, d = parseFloat(dist) || 0; if (!m) return;
-    const kcal = cardioKcal(ctype, m, cd.weightKg);
+    const w = parseInt(watts, 10) || 0;
+    const kIn = parseInt(kcalIn, 10) || 0;
+    const kcal = kIn > 0 ? kIn : cardioKcal(ctype, m, cd.weightKg);
     setCardioLog([{ type: ctype, mins: m, dist: d, unit, kcal }, ...cardioLog]);
-    addWorkouts([{ t: new Date().toISOString(), exercise: ctype, cardio: { mins: m, dist: d, unit }, kcal }]);
-    setMins(''); setDist(''); tapLight();
+    addWorkouts([{ t: new Date().toISOString(), exercise: ctype, cardio: { mins: m, dist: d, unit, ...(w > 0 ? { watts: w } : {}) }, kcal }]);
+    setMins(''); setDist(''); setWatts(''); setKcalIn(''); tapLight();
   };
   const saveManual = () => {
     const nowISO = new Date().toISOString();
@@ -356,6 +359,11 @@ export default function Train() {
                 <Pressable onPress={() => setUnit(unit === 'km' ? 'mi' : 'km')} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 9, paddingHorizontal: 14, justifyContent: 'center' }}><Text style={{ color: t.ink, fontWeight: '700' }}>{unit}</Text></Pressable>
                 <Pressable onPress={logCardio} style={{ backgroundColor: t.brand, borderRadius: 9, paddingHorizontal: 16, justifyContent: 'center' }}><Text style={{ color: t.brandInk, fontWeight: '800' }}>Log</Text></Pressable>
               </View>
+              <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+                <TextInput value={watts} onChangeText={setWatts} keyboardType="numeric" placeholder="Avg watts (optional)" placeholderTextColor={t.ink3} style={inp} />
+                <TextInput value={kcalIn} onChangeText={setKcalIn} keyboardType="numeric" placeholder="Calories (optional)" placeholderTextColor={t.ink3} style={inp} />
+              </View>
+              <Text style={{ color: t.ink3, fontSize: 11.5, lineHeight: 16, marginTop: 8 }}>Bikes, rowers &amp; ski ergs: add your avg watts. Logging an Apple Watch workout by hand? Enter the minutes and the calories it shows — leave distance blank for studio classes like Pilates.</Text>
             </View>
             {todayCardio.length > 0 && (
               <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 16 }}>
@@ -363,7 +371,7 @@ export default function Train() {
                 {todayCardio.map((c, i) => (
                   <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: i < todayCardio.length - 1 ? 1 : 0, borderBottomColor: t.ring }}>
                     <Text style={{ color: t.ink, fontWeight: '600', fontSize: 14 }}>{c.type}</Text>
-                    <Text style={{ color: t.ink3, fontSize: 13 }}>{c.mins} min · {c.dist} {c.unit} · {c.kcal} kcal</Text>
+                    <Text style={{ color: t.ink3, fontSize: 13 }}>{[`${c.mins} min`, c.dist > 0 ? `${c.dist} ${c.unit}` : null, c.watts > 0 ? `${c.watts} W` : null, `${c.kcal} kcal`].filter(Boolean).join(' · ')}</Text>
                   </View>
                 ))}
               </View>
@@ -467,7 +475,7 @@ export default function Train() {
                           {l.sets.map((s: number[], j: number) => { const _f = (l.feel || [])[j]; const _fc = _f === 'easy' ? t.good : _f === 'hard' ? t.crit : null; return <View key={j} style={{ backgroundColor: t.surface, borderRadius: 8, paddingHorizontal: 9, paddingVertical: 5, borderWidth: 1, borderColor: t.ring, flexDirection: 'row', alignItems: 'center', gap: 5 }}>{_fc ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: _fc }} /> : null}<Text style={{ color: t.ink2, fontSize: 12, fontWeight: '600' }}>{s[0]}×{s[1]}kg</Text></View>; })}
                         </View>
                       ) : l.cardio ? (
-                        <Text style={{ color: t.ink3, fontSize: 12, marginTop: 5 }}>{l.cardio.mins} min · {l.cardio.dist} {l.cardio.unit}</Text>
+                        <Text style={{ color: t.ink3, fontSize: 12, marginTop: 5 }}>{[`${l.cardio.mins} min`, l.cardio.dist > 0 ? `${l.cardio.dist} ${l.cardio.unit}` : null, l.cardio.watts && l.cardio.watts > 0 ? `${l.cardio.watts} W` : null].filter(Boolean).join(' · ')}</Text>
                       ) : null}
                       {l.kcal ? <Text style={{ color: t.ink3, fontSize: 11, marginTop: 6 }}>{l.kcal} kcal</Text> : null}
                     </View>

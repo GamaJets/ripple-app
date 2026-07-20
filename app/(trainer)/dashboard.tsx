@@ -524,7 +524,7 @@ export default function TrainerClients() {
                     <View key={i} style={{ backgroundColor: t.surface2, borderRadius: 12, borderWidth: 1, borderColor: t.ring, padding: 12, marginBottom: 8, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                       <View style={{ flex: 1 }}>
                         <Text style={{ color: t.ink, fontWeight: '700', fontSize: 14, textTransform: 'capitalize' }}>{l.exercise}</Text>
-                        <Text style={{ color: t.ink3, fontSize: 12, marginTop: 2 }}>{l.sets ? l.sets.map((s: number[]) => `${s[0]}×${s[1]}kg`).join(' · ') : l.cardio ? `${l.cardio.mins} min · ${l.cardio.dist} ${l.cardio.unit}` : ''}</Text>
+                        <Text style={{ color: t.ink3, fontSize: 12, marginTop: 2 }}>{l.sets ? l.sets.map((s: number[]) => `${s[0]}×${s[1]}kg`).join(' · ') : l.cardio ? [`${l.cardio.mins} min`, l.cardio.dist > 0 ? `${l.cardio.dist} ${l.cardio.unit}` : null, l.cardio.watts && l.cardio.watts > 0 ? `${l.cardio.watts} W` : null].filter(Boolean).join(' · ') : ''}</Text>
                       </View>
                       <Text style={{ color: t.ink3, fontSize: 11 }}>{timeAgo(l.t)}</Text>
                     </View>
