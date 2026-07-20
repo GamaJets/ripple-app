@@ -9,7 +9,7 @@
 // calories, steps and workouts into the iPhone's Health app, and HealthKit
 // reads from there — no separate watchOS target required to READ this data.
 import { Platform, NativeModules } from 'react-native';
-import type { WearableProvider, ProviderMeta, DailyMetrics } from './types';
+import type { WearableProvider, ProviderMeta, DailyMetrics, WorkoutSample } from './types';
 import { emptyMetrics } from './types';
 
 const meta: ProviderMeta = {
@@ -88,6 +88,23 @@ function lastValue(res: any): number | null {
   return Math.round(Number(res[res.length - 1]?.value) || 0);
 }
 
+// Map HealthKit's workout activity names onto Repple's exercise vocabulary so an
+// imported session lines up with the in-app cardio / mobility catalog. Anything we
+// don't recognise keeps its Health label.
+const HK_TO_EXERCISE: Record<string, string> = {
+  Running: 'Treadmill / Run', Walking: 'Walk', Hiking: 'Walk',
+  Cycling: 'Cycling', 'Indoor Cycling': 'Cycling',
+  Rowing: 'Rowing', Elliptical: 'Elliptical',
+  'Stair Climbing': 'Stairs', Stairs: 'Stairs', StairClimbing: 'Stairs',
+  Swimming: 'Swim', Yoga: 'Yoga', Pilates: 'Pilates', 'Mind And Body': 'Pilates',
+  'Core Training': 'Core', 'High Intensity Interval Training': 'Circuit',
+  'Functional Strength Training': 'Circuit', 'Traditional Strength Training': 'Strength',
+  Cooldown: 'Stretching', Flexibility: 'Stretching', 'Mixed Cardio': 'Cardio', Dance: 'Dance',
+};
+function mapActivity(name: string): string {
+  return HK_TO_EXERCISE[name] || name || 'Workout';
+}
+
 export const appleHealth: WearableProvider = {
   meta,
   isAvailable: () => nativePresent(),
@@ -137,5 +154,40 @@ export const appleHealth: WearableProvider = {
       m.workoutMins = Math.round(mins) || null;
     }
     return m;
+  },
+
+  // Individual completed workouts (e.g. an Apple Watch Pilates or cycling session),
+  // for one-tap import into the training log. HealthKit distance is in metres.
+  async fetchWorkouts(sinceDays = 14): Promise<WorkoutSample[]> {
+    if (!nativePresent()) return [];
+    const start = new Date();
+    start.setDate(start.getDate() - Math.max(1, sinceDays));
+    start.setHours(0, 0, 0, 0);
+    const res = await read('getSamples', { startDate: start.toISOString(), endDate: new Date().toISOString(), type: 'Workout', limit: 200 });
+    if (!Array.isArray(res)) return [];
+    const out: WorkoutSample[] = [];
+    for (const w of res) {
+      const a = Date.parse(w?.start ?? w?.startDate);
+      const b = Date.parse(w?.end ?? w?.endDate);
+      if (!isFinite(a)) continue;
+      const mins = isFinite(b) && b > a ? Math.round((b - a) / 60000) : 0;
+      if (mins <= 0) continue;
+      const raw = String(w?.activityName ?? w?.activityId ?? 'Workout');
+      const kcalN = Number(w?.calories);
+      const distN = Number(w?.distance); // metres
+      const startIso = new Date(a).toISOString();
+      out.push({
+        id: `apple-${startIso}-${raw}`,
+        activity: mapActivity(raw),
+        rawActivity: raw,
+        start: startIso,
+        mins,
+        kcal: isFinite(kcalN) && kcalN > 0 ? Math.round(kcalN) : null,
+        distanceKm: isFinite(distN) && distN > 0 ? Math.round(distN / 10) / 100 : null,
+        source: 'apple',
+      });
+    }
+    out.sort((x, y) => Date.parse(y.start) - Date.parse(x.start));
+    return out;
   },
 };

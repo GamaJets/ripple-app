@@ -1,15 +1,18 @@
 // Watch & Devices — real wearable connections through the provider layer.
 // Apple Health reads the paired Apple Watch; live tiles are tappable for detail.
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { View, Text, Pressable, ScrollView, Alert, ActivityIndicator, Modal } from 'react-native';
 import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { PROVIDERS } from '../../src/lib/wearables/registry';
-import type { WearableProvider } from '../../src/lib/wearables/types';
+import type { WearableProvider, WorkoutSample } from '../../src/lib/wearables/types';
 import { useWearables } from '../../src/ui/wearables';
+import { useWorkoutLog } from '../../src/ui/workoutLog';
+import type { WorkoutEntry } from '../../src/lib/mockData';
 import { tapLight } from '../../src/ui/haptics';
 
 type MetricKey = 'kcal' | 'hr' | 'steps' | 'source';
@@ -24,6 +27,10 @@ function ago(ts?: number): string {
 }
 function num(n: number | null | undefined, dashes = '—'): string {
  return typeof n === 'number' ? n.toLocaleString() : dashes;
+}
+function wkDate(iso: string): string {
+ const d = new Date(iso);
+ return `${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()]} ${d.getDate()}/${d.getMonth() + 1}`;
 }
 
 function Metric({ t, ico, label, value, unit, onPress, hint }: { t: Theme; ico: string; label: string; value: string; unit: string; onPress: () => void; hint?: string }) {
@@ -45,6 +52,26 @@ export default function Devices() {
  const router = useRouter();
  const w = useWearables();
  const [detail, setDetail] = useState<MetricKey | null>(null);
+ const { log, addWorkouts } = useWorkoutLog();
+ const apple = PROVIDERS.find((p) => p.meta.id === 'apple');
+ const appleReady = !!apple && apple.isAvailable();
+ const [wk, setWk] = useState<WorkoutSample[] | null>(null);
+ const [wkBusy, setWkBusy] = useState(false);
+ const [importedIds, setImportedIds] = useState<Set<string>>(() => new Set());
+ useEffect(() => { (async () => { try { const raw = await AsyncStorage.getItem('repple.hk.imported'); if (raw) setImportedIds(new Set(JSON.parse(raw))); } catch { /* ignore */ } })(); }, []);
+ const alreadyLogged = (sm: WorkoutSample) => importedIds.has(sm.id) || log.some((l) => l.t === sm.start && l.exercise === sm.activity);
+ const toEntry = (sm: WorkoutSample): WorkoutEntry => ({ t: sm.start, exercise: sm.activity, cardio: { mins: sm.mins, dist: sm.distanceKm ?? 0, unit: 'km' }, kcal: sm.kcal ?? undefined });
+ const markImported = (ids: string[]) => { const next = new Set(importedIds); ids.forEach((i) => next.add(i)); setImportedIds(next); AsyncStorage.setItem('repple.hk.imported', JSON.stringify([...next])).catch(() => {}); };
+ const findWorkouts = async () => {
+ if (!apple?.fetchWorkouts) { Alert.alert('Apple Health', 'Workout import needs the Repple app build with Apple Health.'); return; }
+ if (w.states['apple'] !== 'connected') { Alert.alert('Apple Health', 'Connect Apple Health first (in Available Devices below), then tap Find my workouts.'); return; }
+ setWkBusy(true);
+ try { const list = await apple.fetchWorkouts(14); setWk(list); if (!list.length) Alert.alert('Apple Health', 'No Apple Watch workouts found in the last 14 days. Make sure your watch has synced to the iPhone Health app.'); }
+ catch (e: any) { Alert.alert('Apple Health', e?.message || 'Could not read your workouts.'); }
+ finally { setWkBusy(false); }
+ };
+ const importOne = (sm: WorkoutSample) => { if (alreadyLogged(sm)) return; addWorkouts([toEntry(sm)]); markImported([sm.id]); tapLight(); };
+ const importAll = () => { const fresh = (wk || []).filter((sm) => !alreadyLogged(sm)); if (!fresh.length) return; addWorkouts(fresh.map(toEntry)); markImported(fresh.map((sm) => sm.id)); tapLight(); };
  // Auto-refresh whenever this screen opens (plus the 60s auto-sync in the store).
  useFocusEffect(useCallback(() => { for (const pv of PROVIDERS) { if (pv.isAvailable()) w.sync(pv.meta.id); } }, [w.sync]));
 
@@ -89,6 +116,41 @@ export default function Devices() {
  <Metric t={t} ico="" label="Source" value={String(connected.length)} unit={connected.length === 1 ? 'device' : 'devices'} onPress={() => setDetail('source')} />
  </View>
  <Text style={{ color: t.ink3, fontSize: 11, marginTop: 12, lineHeight: 16 }}>Updates automatically. Steps come from your iPhone; heart rate &amp; calories need an Apple Watch (wear it). Calories feed your daily target.</Text>
+ </View>
+ ) : null}
+
+ {appleReady ? (
+ <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 16, marginBottom: 16 }}>
+ <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, marginBottom: 4 }}>Import Apple Watch workouts</Text>
+ <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 12, lineHeight: 17 }}>Pull sessions you recorded on your Apple Watch — Pilates, runs, cycling — straight into your training log. No manual entry.</Text>
+ {wk == null ? (
+ <Pressable onPress={findWorkouts} disabled={wkBusy} accessibilityRole="button" accessibilityLabel="Find my Apple Watch workouts" style={{ alignSelf: 'flex-start', backgroundColor: t.brand, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, opacity: wkBusy ? 0.6 : 1 }}>
+ {wkBusy ? <ActivityIndicator color={t.brandInk} /> : <Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 13 }}>Find my workouts</Text>}
+ </Pressable>
+ ) : wk.length === 0 ? (
+ <Text style={{ color: t.ink3, fontSize: 13 }}>No workouts found in the last 14 days.</Text>
+ ) : (
+ <View>
+ {wk.map((sm) => {
+ const done = alreadyLogged(sm);
+ return (
+ <View key={sm.id} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: t.ring }}>
+ <View style={{ flex: 1, paddingRight: 10 }}>
+ <Text style={{ color: t.ink, fontWeight: '700', fontSize: 13.5 }}>{sm.activity}</Text>
+ <Text style={{ color: t.ink3, fontSize: 11.5, marginTop: 1 }}>{[wkDate(sm.start), `${sm.mins} min`, sm.distanceKm ? `${sm.distanceKm} km` : null, sm.kcal ? `${sm.kcal} kcal` : null].filter(Boolean).join(' · ')}</Text>
+ </View>
+ <Pressable onPress={() => importOne(sm)} disabled={done} accessibilityRole="button" accessibilityLabel={(done ? 'Already in log: ' : 'Import ') + sm.activity} style={{ backgroundColor: done ? t.surface2 : t.brand, borderColor: t.ring, borderWidth: done ? 1 : 0, borderRadius: 9, paddingHorizontal: 12, paddingVertical: 7 }}>
+ <Text style={{ color: done ? t.ink3 : t.brandInk, fontWeight: '800', fontSize: 12 }}>{done ? 'In log' : 'Import'}</Text>
+ </Pressable>
+ </View>
+ );
+ })}
+ <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
+ <Pressable onPress={importAll} accessibilityRole="button" accessibilityLabel="Import all workouts" style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 9, paddingHorizontal: 12, paddingVertical: 8 }}><Text style={{ color: t.ink, fontWeight: '800', fontSize: 12 }}>Import all</Text></Pressable>
+ <Pressable onPress={findWorkouts} accessibilityRole="button" accessibilityLabel="Refresh workouts" style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 9, paddingHorizontal: 12, paddingVertical: 8 }}><Text style={{ color: t.ink, fontWeight: '800', fontSize: 12 }}>↻ Refresh</Text></Pressable>
+ </View>
+ </View>
+ )}
  </View>
  ) : null}
 
