@@ -8,13 +8,15 @@ import { useTheme } from '../../src/ui/components';
 import { useClasses } from '../../src/ui/classes';
 import { useSessions } from '../../src/ui/sessions';
 import { useCoachProfile } from '../../src/ui/coachProfile';
+import { useBrand } from '../../src/ui/brand';
+import { buildIcs, shareIcs, type IcsEvent } from '../../src/lib/exportShare';
 
 const CLIENT_ID = 'c1';
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const timeLabel = (iso: string) => { const d = new Date(iso); let h = d.getHours(); const m = d.getMinutes(); const ap = h >= 12 ? 'pm' : 'am'; h = h % 12 || 12; return `${h}${m ? ':' + String(m).padStart(2, '0') : ''}${ap}`; };
 const dayLabel = (iso: string) => { const d = new Date(iso); const t = new Date(); const tm = new Date(); tm.setDate(t.getDate() + 1); if (d.toDateString() === t.toDateString()) return 'Today'; if (d.toDateString() === tm.toDateString()) return 'Tomorrow'; return `${DOW[d.getDay()]} ${d.getDate()}/${d.getMonth() + 1}`; };
 
-type Item = { id: string; kind: 'class' | 'pt'; title: string; sub: string; startsAt: string; waitlist?: boolean; onCancel: () => void };
+type Item = { id: string; kind: 'class' | 'pt'; title: string; sub: string; startsAt: string; durationMin: number; location?: string; waitlist?: boolean; onCancel: () => void };
 
 export default function Bookings() {
   const t = useTheme();
@@ -22,18 +24,19 @@ export default function Bookings() {
   const { classes, myStatus, cancel: cancelClass } = useClasses();
   const { sessions, releaseSession } = useSessions();
   const coach = useCoachProfile();
+  const { appName } = useBrand();
 
   const items = useMemo(() => {
     const out: Item[] = [];
     for (const c of classes) {
       const st = myStatus[c.id];
       if (st && Date.parse(c.startsAt) > Date.now() - 3600_000) {
-        out.push({ id: 'c' + c.id, kind: 'class', title: c.title, sub: `${c.kind} · ${c.branch}${c.room ? ' · ' + c.room : ''}`, startsAt: c.startsAt, waitlist: st === 'waitlist', onCancel: () => cancelClass(c.id) });
+        out.push({ id: 'c' + c.id, kind: 'class', title: c.title, sub: `${c.kind} · ${c.branch}${c.room ? ' · ' + c.room : ''}`, startsAt: c.startsAt, durationMin: c.durationMin ?? 45, location: [c.branch, c.room].filter(Boolean).join(' · ') || undefined, waitlist: st === 'waitlist', onCancel: () => cancelClass(c.id) });
       }
     }
     for (const s of sessions) {
       if (s.clientId === CLIENT_ID && s.status === 'booked' && Date.parse(s.startsAt) > Date.now() - 3600_000) {
-        out.push({ id: 'p' + s.id, kind: 'pt', title: `PT with ${coach.name}`, sub: `${s.durationMin} min session`, startsAt: s.startsAt, onCancel: () => releaseSession(s.id) });
+        out.push({ id: 'p' + s.id, kind: 'pt', title: `PT with ${coach.name}`, sub: `${s.durationMin} min session`, startsAt: s.startsAt, durationMin: s.durationMin, location: coach.name ? `with ${coach.name}` : undefined, onCancel: () => releaseSession(s.id) });
       }
     }
     return out.sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt));
@@ -44,6 +47,18 @@ export default function Bookings() {
       { text: 'Keep it', style: 'cancel' },
       { text: 'Cancel', style: 'destructive', onPress: it.onCancel },
     ]);
+  };
+
+  const addToCalendar = async () => {
+    if (items.length === 0) return;
+    const evts: IcsEvent[] = items.map((it) => ({
+      start: it.startsAt,
+      durationMin: it.durationMin || 60,
+      title: `${appName} · ${it.title}`,
+      location: it.location,
+      notes: it.sub,
+    }));
+    await shareIcs(buildIcs(evts, `${appName} — My bookings`), 'my-bookings.ics', 'Add to calendar');
   };
 
   return (
@@ -59,6 +74,12 @@ export default function Bookings() {
           <Pressable onPress={() => router.push('/(client)/classes')} style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, backgroundColor: t.brand, borderRadius: 12, paddingVertical: 12 }}><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 13 }}>+ Book a class</Text></Pressable>
           <Pressable onPress={() => router.push('/(client)/calendar')} style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingVertical: 12 }}><Text style={{ color: t.ink, fontWeight: '800', fontSize: 13 }}>+ Book PT</Text></Pressable>
         </View>
+
+        {items.length > 0 ? (
+          <Pressable onPress={addToCalendar} accessibilityRole="button" accessibilityLabel="Add all bookings to your calendar" style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingVertical: 11, marginBottom: 16 }}>
+            <Text style={{ color: t.ink2, fontWeight: '800', fontSize: 13 }}>📅  Add to calendar</Text>
+          </Pressable>
+        ) : null}
 
         {items.map((it) => (
           <View key={it.id} style={{ backgroundColor: t.surface, borderColor: it.waitlist ? t.s3 : t.ring, borderWidth: 1, borderRadius: 16, padding: 15, marginBottom: 9 }}>
