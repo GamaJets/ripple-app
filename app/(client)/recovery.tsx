@@ -1,11 +1,15 @@
 // Client · Recovery & Wellness. Hydration tracker, sleep log, mobility routines,
 // and rest-day guidance. Profile hub.
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { useWellness } from '../../src/ui/wellness';
+import { useClientData } from '../../src/ui/clientData';
+import { HrZoneChart } from '../../src/ui/HrZoneChart';
+import { ageFromDob, demoHrSeries, type HrSample } from '../../src/lib/hr';
+import { PROVIDERS } from '../../src/lib/wearables/registry';
 
 const MOBILITY = [
  { name: 'Full-body warm-up', dur: '6 min', moves: ['Leg swings ×10/side', 'World’s greatest stretch ×5/side', 'Cat-cow ×10', 'Band pull-aparts ×15', 'Bodyweight squats ×10'] },
@@ -17,6 +21,25 @@ export default function Recovery() {
  const t = useTheme();
  const router = useRouter();
  const { cups, goalCups, addCup, removeCup, sleep, addSleep } = useWellness();
+ const cd = useClientData();
+ const age = ageFromDob(cd.dob);
+ const [hr, setHr] = useState<{ samples: HrSample[]; live: boolean }>({ samples: demoHrSeries(age), live: false });
+ useEffect(() => {
+   let cancelled = false;
+   (async () => {
+     const apple = PROVIDERS.find((pv) => pv.meta.id === 'apple');
+     const fetchHr = apple?.fetchHeartRateSeries;
+     if (fetchHr && apple && apple.isAvailable()) {
+       try {
+         const start = new Date(); start.setHours(0, 0, 0, 0);
+         const s = await fetchHr(start.toISOString(), new Date().toISOString());
+         if (!cancelled && s && s.length >= 2) { setHr({ samples: s, live: true }); return; }
+       } catch { /* fall back to demo */ }
+     }
+     if (!cancelled) setHr({ samples: demoHrSeries(age), live: false });
+   })();
+   return () => { cancelled = true; };
+ }, [age]);
  const [hrs, setHrs] = useState('7.5');
  const [q, setQ] = useState(4);
  const [openRoutine, setOpenRoutine] = useState<number | null>(0);
@@ -31,7 +54,13 @@ export default function Recovery() {
  <Text style={{ color: t.brand, fontWeight: '700', fontSize: 15 }}>‹ Back</Text>
  </Pressable>
  <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia' }}>Recovery</Text>
- <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 18 }}>Hydration, sleep & mobility</Text>
+ <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 18 }}>Heart rate, hydration, sleep &amp; mobility</Text>
+
+ {/* Heart-rate zones */}
+ <View style={{ marginBottom: 14 }}>
+  <HrZoneChart samples={hr.samples} age={age} title="Heart-rate zones"
+   subtitle={hr.live ? "Today, from your Apple Watch" : "Sample session — connect Apple Health in Devices for your live zones"} />
+ </View>
 
  {/* Hydration */}
  <View style={{ backgroundColor: t.surface, borderRadius: 18, borderWidth: 1, borderColor: t.ring, padding: 16, marginBottom: 14 }}>

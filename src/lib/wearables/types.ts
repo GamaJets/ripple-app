@@ -32,6 +32,9 @@ export interface WorkoutSample {
   source: ProviderId;
 }
 
+/** A single heart-rate reading in a series (for the session/day HR chart). */
+export interface HrPoint { t: string; bpm: number }
+
 export interface ProviderMeta {
   id: ProviderId;
   name: string;
@@ -55,6 +58,8 @@ export interface WearableProvider {
   fetchToday(): Promise<DailyMetrics | null>;
   /** Pull recent completed workouts for import into the training log. Optional — not every provider supports it. */
   fetchWorkouts?(sinceDays?: number): Promise<WorkoutSample[]>;
+  /** Heart-rate samples between two ISO timestamps (for the zone chart). Optional. */
+  fetchHeartRateSeries?(startISO: string, endISO: string): Promise<HrPoint[]>;
 }
 
 export function emptyMetrics(source: ProviderId): DailyMetrics {

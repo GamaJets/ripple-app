@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "20608644208",
+    "project_id": "repple-e563f",
+    "storage_bucket": "repple-e563f.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:20608644208:android:b67cd704ecb9df2f5c30b5",
+        "android_client_info": {
+          "package_name": "com.washateria.repple"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBifpXqBO3YZ6nZhf38LQEWeL68CZTz6cs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

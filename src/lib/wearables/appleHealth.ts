@@ -9,7 +9,7 @@
 // calories, steps and workouts into the iPhone's Health app, and HealthKit
 // reads from there — no separate watchOS target required to READ this data.
 import { Platform, NativeModules } from 'react-native';
-import type { WearableProvider, ProviderMeta, DailyMetrics, WorkoutSample } from './types';
+import type { WearableProvider, ProviderMeta, DailyMetrics, WorkoutSample, HrPoint } from './types';
 import { emptyMetrics } from './types';
 
 const meta: ProviderMeta = {
@@ -189,5 +189,24 @@ export const appleHealth: WearableProvider = {
     }
     out.sort((x, y) => Date.parse(y.start) - Date.parse(x.start));
     return out;
+  },
+
+  // Heart-rate samples in a window (a workout session, or a whole day) for the
+  // zone chart. Downsamples to <=180 points so the SVG stays light.
+  async fetchHeartRateSeries(startISO: string, endISO: string): Promise<HrPoint[]> {
+    if (!nativePresent()) return [];
+    const res = await read('getHeartRateSamples', { startDate: startISO, endDate: endISO, limit: 10000, ascending: true });
+    if (!Array.isArray(res)) return [];
+    const raw: HrPoint[] = [];
+    for (const r of res) {
+      const bpm = Number(r?.value);
+      const t = r?.startDate ?? r?.start ?? r?.endDate;
+      if (isFinite(bpm) && bpm > 0 && t) raw.push({ t: new Date(t).toISOString(), bpm: Math.round(bpm) });
+    }
+    raw.sort((a, b) => Date.parse(a.t) - Date.parse(b.t));
+    const MAX = 180;
+    if (raw.length <= MAX) return raw;
+    const step = Math.ceil(raw.length / MAX);
+    return raw.filter((_, i) => i % step === 0);
   },
 };
