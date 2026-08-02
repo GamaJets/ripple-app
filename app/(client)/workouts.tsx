@@ -23,6 +23,7 @@ import { useExerciseVideos } from '../../src/ui/exerciseVideos';
 import { injuryFlag, areaLabel, type Injury } from '../../src/lib/injuries';
 import { warmupSets, deloadCheck } from '../../src/lib/training';
 import { hrColor, hrZoneLabel } from '../../src/lib/hr';
+import { SessionHrSheet } from '../../src/ui/SessionHrSheet';
 import { ageFromDob } from '../../src/lib/age';
 
 const SERIF = 'Georgia';
@@ -74,6 +75,7 @@ export default function Train() {
   const [session, setSession] = useState(false);
   const [ctype, setCtype] = useState(CARDIO[0]); const [mins, setMins] = useState(''); const [dist, setDist] = useState(''); const [unit, setUnit] = useState<'km' | 'mi'>('km');
   const [watts, setWatts] = useState(''); const [kcalIn, setKcalIn] = useState('');
+  const [hrEntry, setHrEntry] = useState<WorkoutEntry | null>(null);
   const [showCal, setShowCal] = useState(false);
   const [selCalDay, setSelCalDay] = useState('');
   const [confetti, setConfetti] = useState(false);
@@ -478,6 +480,10 @@ export default function Train() {
                         <Text style={{ color: t.ink3, fontSize: 12, marginTop: 5 }}>{[`${l.cardio.mins} min`, l.cardio.dist > 0 ? `${l.cardio.dist} ${l.cardio.unit}` : null, l.cardio.watts && l.cardio.watts > 0 ? `${l.cardio.watts} W` : null].filter(Boolean).join(' · ')}</Text>
                       ) : null}
                       {l.kcal ? <Text style={{ color: t.ink3, fontSize: 11, marginTop: 6 }}>{l.kcal} kcal</Text> : null}
+                      <Pressable onPress={() => { tapLight(); setHrEntry(l); }} accessibilityRole="button" accessibilityLabel={'Heart rate for ' + l.exercise} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8, alignSelf: 'flex-start', backgroundColor: t.surface, borderWidth: 1, borderColor: t.ring, borderRadius: 9, paddingHorizontal: 10, paddingVertical: 6 }}>
+                        <Icon name="heart" size={13} color={t.brand} />
+                        <Text style={{ color: t.ink2, fontWeight: '700', fontSize: 12 }}>Heart rate</Text>
+                      </Pressable>
                     </View>
                   ))}
                 </View>
@@ -512,6 +518,14 @@ export default function Train() {
           <Pressable onPress={() => setAddOpen(false)} style={{ paddingVertical: 10, alignItems: 'center' }}><Text style={{ color: t.ink3, fontWeight: '700', fontSize: 13 }}>Cancel</Text></Pressable>
         </View>
       </Modal>
+      <SessionHrSheet
+        visible={!!hrEntry}
+        onClose={() => setHrEntry(null)}
+        title={hrEntry?.exercise || ''}
+        startISO={hrEntry?.t || new Date().toISOString()}
+        durationMin={hrEntry ? (hrEntry.cardio?.mins || Math.max(20, (hrEntry.sets?.length || 0) * 4)) : 45}
+        age={ageFromDob(cd.dob)}
+      />
       <Confetti show={confetti} onDone={() => setConfetti(false)} />
     </SafeAreaView>
   );
