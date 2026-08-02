@@ -12,6 +12,7 @@ import { PROVIDERS } from '../../src/lib/wearables/registry';
 import type { WearableProvider, WorkoutSample } from '../../src/lib/wearables/types';
 import { useWearables } from '../../src/ui/wearables';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
+import { hrStats } from '../../src/lib/hr';
 import type { WorkoutEntry } from '../../src/lib/mockData';
 import { tapLight } from '../../src/ui/haptics';
 
@@ -61,6 +62,19 @@ export default function Devices() {
  useEffect(() => { (async () => { try { const raw = await AsyncStorage.getItem('repple.hk.imported'); if (raw) setImportedIds(new Set(JSON.parse(raw))); } catch { /* ignore */ } })(); }, []);
  const alreadyLogged = (sm: WorkoutSample) => importedIds.has(sm.id) || log.some((l) => l.t === sm.start && l.exercise === sm.activity);
  const toEntry = (sm: WorkoutSample): WorkoutEntry => ({ t: sm.start, exercise: sm.activity, cardio: { mins: sm.mins, dist: sm.distanceKm ?? 0, unit: 'km' }, kcal: sm.kcal ?? undefined });
+ // Best-effort: attach avg/high heart rate from HealthKit for the workout's window.
+ const withHr = async (sm: WorkoutSample): Promise<WorkoutEntry> => {
+  const e = toEntry(sm);
+  const fetchHr = apple?.fetchHeartRateSeries;
+  if (fetchHr && apple && apple.isAvailable()) {
+   try {
+    const endISO = new Date(Date.parse(sm.start) + Math.max(1, sm.mins) * 60000).toISOString();
+    const st = hrStats(await fetchHr(sm.start, endISO));
+    if (st && e.cardio) { e.cardio.hrAvg = st.avg; e.cardio.hrHigh = st.high; }
+   } catch { /* summary is optional */ }
+  }
+  return e;
+ };
  const markImported = (ids: string[]) => { const next = new Set(importedIds); ids.forEach((i) => next.add(i)); setImportedIds(next); AsyncStorage.setItem('repple.hk.imported', JSON.stringify([...next])).catch(() => {}); };
  const findWorkouts = async () => {
  if (!apple?.fetchWorkouts) { Alert.alert('Apple Health', 'Workout import needs the Repple app build with Apple Health.'); return; }
@@ -70,8 +84,8 @@ export default function Devices() {
  catch (e: any) { Alert.alert('Apple Health', e?.message || 'Could not read your workouts.'); }
  finally { setWkBusy(false); }
  };
- const importOne = (sm: WorkoutSample) => { if (alreadyLogged(sm)) return; addWorkouts([toEntry(sm)]); markImported([sm.id]); tapLight(); };
- const importAll = () => { const fresh = (wk || []).filter((sm) => !alreadyLogged(sm)); if (!fresh.length) return; addWorkouts(fresh.map(toEntry)); markImported(fresh.map((sm) => sm.id)); tapLight(); };
+ const importOne = async (sm: WorkoutSample) => { if (alreadyLogged(sm)) return; addWorkouts([await withHr(sm)]); markImported([sm.id]); tapLight(); };
+ const importAll = async () => { const fresh = (wk || []).filter((sm) => !alreadyLogged(sm)); if (!fresh.length) return; addWorkouts(await Promise.all(fresh.map(withHr))); markImported(fresh.map((sm) => sm.id)); tapLight(); };
  // Auto-refresh whenever this screen opens (plus the 60s auto-sync in the store).
  useFocusEffect(useCallback(() => { for (const pv of PROVIDERS) { if (pv.isAvailable()) w.sync(pv.meta.id); } }, [w.sync]));
 

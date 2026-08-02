@@ -23,7 +23,7 @@ export interface WorkoutEntry {
   exercise: string;
   sets?: [number, number][];       // [reps, kg]
   feel?: ('easy' | 'ok' | 'hard')[]; // per-set perceived effort (RPE), aligned to sets
-  cardio?: { mins: number; dist: number; unit: string; watts?: number };
+  cardio?: { mins: number; dist: number; unit: string; watts?: number; hrAvg?: number; hrHigh?: number };
   kcal?: number;
 }
 

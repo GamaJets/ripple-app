@@ -12,10 +12,13 @@ import { useCheckIns } from '../../src/ui/checkins';
 import { useSessions } from '../../src/ui/sessions';
 import { currentStreak, isNewPR, streakMilestone } from '../../src/lib/streaks';
 import { MOCK_MESSAGES } from '../../src/lib/mockData';
+import { useClientData } from '../../src/ui/clientData';
+import { SessionHrSheet } from '../../src/ui/SessionHrSheet';
+import { ageFromDob } from '../../src/lib/hr';
 
 const CLIENT_ID = 'c1';
 
-interface Event { at: string; icon: string; title: string; sub: string; route?: string }
+interface Event { at: string; icon: string; title: string; sub: string; route?: string; hr?: { title: string; startISO: string; durationMin: number } }
 
 function timeAgo(iso: string) {
  const ms = Date.now() - Date.parse(iso);
@@ -36,6 +39,9 @@ export default function Activity() {
  const t = useTheme();
  const router = useRouter();
  const [open, setOpen] = useState<number | null>(null);
+ const [hrFor, setHrFor] = useState<{ title: string; startISO: string; durationMin: number } | null>(null);
+ const cd = useClientData();
+ const age = ageFromDob(cd.dob);
  const { log } = useWorkoutLog();
  const { checkins } = useCheckIns();
  const { sessions } = useSessions();
@@ -46,9 +52,9 @@ export default function Activity() {
  for (const e of log) {
  const pr = isNewPR(log, e);
  if (e.sets) {
- events.push({ at: e.t, icon: pr ? 'trophy' : 'dumbbell', title: pr ? `New PR — ${e.exercise}` : `Logged ${e.exercise}`, sub: e.sets.map((s) => `${s[0]}×${s[1]}kg`).join(' · '), route: pr ? '/(client)/records' : '/(client)/trends' });
+ events.push({ at: e.t, icon: pr ? 'trophy' : 'dumbbell', title: pr ? `New PR — ${e.exercise}` : `Logged ${e.exercise}`, sub: e.sets.map((s) => `${s[0]}×${s[1]}kg`).join(' · '), route: pr ? '/(client)/records' : '/(client)/trends', hr: { title: e.exercise, startISO: e.t, durationMin: Math.max(20, e.sets.length * 4) } });
  } else if (e.cardio) {
- events.push({ at: e.t, icon: 'heart', title: `Logged ${e.exercise}`, sub: [`${e.cardio.mins} min`, e.cardio.dist > 0 ? `${e.cardio.dist} ${e.cardio.unit}` : null, e.cardio.watts && e.cardio.watts > 0 ? `${e.cardio.watts} W` : null].filter(Boolean).join(' · '), route: '/(client)/trends' });
+ events.push({ at: e.t, icon: 'heart', title: `Logged ${e.exercise}`, sub: [`${e.cardio.mins} min`, e.cardio.dist > 0 ? `${e.cardio.dist} ${e.cardio.unit}` : null, e.cardio.watts && e.cardio.watts > 0 ? `${e.cardio.watts} W` : null, e.cardio.hrAvg ? `\u2665 ${e.cardio.hrAvg} avg / ${e.cardio.hrHigh ?? e.cardio.hrAvg} hi` : null].filter(Boolean).join(' · '), route: '/(client)/trends', hr: { title: e.exercise, startISO: e.t, durationMin: e.cardio.mins || 30 } });
  }
  }
  // Streak milestone (as of now)
@@ -92,11 +98,18 @@ export default function Activity() {
  {isOpen ? (
  <View style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: t.ring, paddingTop: 8 }}>
  <Text style={{ color: t.ink3, fontSize: 11.5 }}>{timeLabel(e.at)}</Text>
+ <View style={{ flexDirection: 'row', gap: 8 }}>
  {e.route ? (
  <Pressable onPress={() => router.push(e.route as any)} accessibilityRole="button" accessibilityLabel={'Open details for ' + e.title} style={{ alignSelf: 'flex-start', marginTop: 8, backgroundColor: t.surface2, borderWidth: 1, borderColor: t.ring, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 7 }}>
  <Text style={{ color: t.brand, fontWeight: '800', fontSize: 12 }}>View details ›</Text>
  </Pressable>
  ) : null}
+ {e.hr ? (
+ <Pressable onPress={() => setHrFor(e.hr!)} accessibilityRole="button" accessibilityLabel={'Heart rate for ' + e.title} style={{ alignSelf: 'flex-start', marginTop: 8, backgroundColor: t.surface2, borderWidth: 1, borderColor: t.ring, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 7 }}>
+ <Text style={{ color: t.brand, fontWeight: '800', fontSize: 12 }}>{'\u2665'} Heart rate</Text>
+ </Pressable>
+ ) : null}
+ </View>
  </View>
  ) : null}
  </View>
@@ -108,6 +121,7 @@ export default function Activity() {
  );
  })}
  </ScrollView>
+ <SessionHrSheet visible={!!hrFor} onClose={() => setHrFor(null)} title={hrFor?.title || ''} startISO={hrFor?.startISO || new Date().toISOString()} durationMin={hrFor?.durationMin || 45} age={age} />
  </SafeAreaView>
  );
 }
