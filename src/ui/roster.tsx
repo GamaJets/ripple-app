@@ -24,6 +24,7 @@ export function RosterProvider({ children }: { children: ReactNode }) {
   // Trainer-set online/in-person overrides (persisted). Real DB clients default to
   // 'online'; this lets the coach classify each so the roster filter works for them.
   const [modeOverrides, setModeOverrides] = useState<Record<string, 'online' | 'inperson'>>({});
+  const [uid, setUid] = useState<string | null>(null);
   useEffect(() => { (async () => { try { const raw = await AsyncStorage.getItem(MODE_KEY); if (raw) setModeOverrides(JSON.parse(raw)); } catch { /* ignore */ } })(); }, []);
 
   // A real signed-in coach sees ONLY their linked clients (clean slate if none);
@@ -37,8 +38,16 @@ export function RosterProvider({ children }: { children: ReactNode }) {
         const uid = auth?.user?.id;
         if (cancelled) return;
         if (!uid) { setRoster(JSON.parse(JSON.stringify(ROSTER))); return; }
+        setUid(uid);
+        // Coach-created (manual) clients — durable in coach_clients (session-9 SQL).
+        let manual: RosterClient[] = [];
+        try {
+          const { data: mc } = await supabase.from('coach_clients').select('id, name, goal, mode, created_at').eq('trainer_id', uid).order('created_at', { ascending: true });
+          manual = (mc || []).map((r: any) => ({ id: r.id, name: r.name, goal: r.goal || 'General', weightDelta: 0, adherence: 100, lastActive: 'added by you', next: '—', unread: 0, mode: (r.mode === 'inperson' ? 'inperson' : 'online') as 'online' | 'inperson' }));
+        } catch { /* table may not exist yet */ }
         const { data: cls, error } = await supabase.from('clients').select('id, goal, diet, meals_per_day, avoid, mode').eq('trainer_id', uid);
-        if (error || !cls || !cls.length || cancelled) return;
+        if (cancelled) return;
+        if (error || !cls || !cls.length) { if (manual.length) setRoster(manual); return; }
         const ids = cls.map((c: any) => c.id);
         const names: Record<string, string> = {};
         try {
@@ -66,7 +75,7 @@ export function RosterProvider({ children }: { children: ReactNode }) {
         } catch { /* ignore */ }
         const goalMap: Record<string, string> = { fatloss: 'Fat loss', tone: 'Tone', muscle: 'Build muscle' };
         const real: RosterClient[] = cls.map((c: any) => { const sc = st[c.id]; return { id: c.id, name: names[c.id] || 'Client', goal: goalMap[c.goal] || 'General', weightDelta: sc.wDelta, adherence: sc.adh != null ? sc.adh : 100, lastActive: sc.last ? ago(sc.last) : 'recently', next: '—', unread: 0, mode: (c.mode === 'inperson' ? 'inperson' : 'online') as 'online' | 'inperson', metrics: sc.mx ?? undefined, diet: c.diet ?? undefined, mealsPerDay: c.meals_per_day ?? undefined, avoid: Array.isArray(c.avoid) ? c.avoid : undefined }; });
-        if (!cancelled) setRoster(real);
+        if (!cancelled) setRoster([...real, ...manual]);
       } catch { /* stay on demo roster */ }
     })();
     return () => { cancelled = true; };
@@ -74,14 +83,30 @@ export function RosterProvider({ children }: { children: ReactNode }) {
   const addClient = (name: string, goal: string, mode: 'online' | 'inperson' = 'online') => {
     const n = name.trim();
     if (!n) return;
-    setRoster((p) => [...p, { id: `c${SEQ++}`, name: n, goal, weightDelta: 0, adherence: 100, lastActive: 'just added', next: '—', unread: 0, mode }]);
+    const localId = `c${SEQ++}`;
+    setRoster((p) => [...p, { id: localId, name: n, goal, weightDelta: 0, adherence: 100, lastActive: 'just added', next: '—', unread: 0, mode }]);
+    // Durable: persist to coach_clients so the roster survives restarts/devices.
+    if (USE_SUPABASE && uid) {
+      try {
+        supabase.from('coach_clients').insert({ trainer_id: uid, name: n, goal, mode }).select('id').single().then(
+          (res: any) => { const sid = res?.data?.id; if (sid) setRoster((p) => p.map((c) => (c.id === localId ? { ...c, id: sid } : c))); },
+          () => { /* keep optimistic; will not survive restart until SQL is applied */ },
+        );
+      } catch { /* ignore */ }
+    }
   };
-  const removeClient = (id: string) => setRoster((p) => p.filter((c) => c.id !== id));
+  const removeClient = (id: string) => {
+    setRoster((p) => p.filter((c) => c.id !== id));
+    if (USE_SUPABASE && id.includes('-')) { try { supabase.from('coach_clients').delete().eq('id', id).then(() => {}, () => {}); } catch { /* ignore */ } }
+  };
   const setClientMode = (id: string, mode: 'online' | 'inperson') => {
     setModeOverrides((p) => { const next = { ...p, [id]: mode }; try { AsyncStorage.setItem(MODE_KEY, JSON.stringify(next)); } catch { /* ignore */ } return next; });
     // Durably persist to Supabase so the classification follows the client across
     // devices and feeds owner analytics (RLS: a trainer may update their own clients).
-    if (USE_SUPABASE) { try { supabase.from('clients').update({ mode }).eq('id', id).then(() => {}, () => {}); } catch { /* ignore */ } }
+    if (USE_SUPABASE) {
+      try { supabase.from('clients').update({ mode }).eq('id', id).then(() => {}, () => {}); } catch { /* ignore */ }
+      try { supabase.from('coach_clients').update({ mode }).eq('id', id).then(() => {}, () => {}); } catch { /* ignore */ }
+    }
   };
   // Apply overrides on top of whatever mode the roster came with.
   const shown = Object.keys(modeOverrides).length ? roster.map((c) => (modeOverrides[c.id] ? { ...c, mode: modeOverrides[c.id] } : c)) : roster;

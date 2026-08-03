@@ -6,6 +6,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export interface TrainerInvite {
   id: string;
@@ -46,7 +47,16 @@ export function TrainerInvitesProvider({ children }: { children: ReactNode }) {
   const [myName, setMyName] = useState<string | null>(null);
   const [tenantId, setTenantId] = useState<string | null>(null);
 
-  const seedDemo = () => {
+  const DISMISS_KEY = 'repple.trainerInvites.dismissed';
+  const markDismissed = (id: string) => {
+    AsyncStorage.getItem(DISMISS_KEY).then((raw) => {
+      const set = new Set<string>(raw ? JSON.parse(raw) : []);
+      set.add(id);
+      return AsyncStorage.setItem(DISMISS_KEY, JSON.stringify([...set]));
+    }).catch(() => {});
+  };
+  const seedDemo = async () => {
+    try { const raw = await AsyncStorage.getItem(DISMISS_KEY); if (raw && new Set<string>(JSON.parse(raw)).has('demo-trainer-invite')) return; } catch { /* ignore */ }
     setReceived((p) => (p.length ? p : [{
       id: 'demo-trainer-invite',
       ownerId: 'demo-owner',
@@ -81,11 +91,9 @@ export function TrainerInvitesProvider({ children }: { children: ReactNode }) {
             const r = await supabase.from('trainer_invites').select('*').ilike('email', email).eq('status', 'pending');
             if (!cancelled) {
               if (r.data && r.data.length) setReceived(r.data.map(rowTo));
-              else seedDemo();
+              // no pending invites for a real account -> clean slate, no sample
             }
-          } catch { if (!cancelled) seedDemo(); }
-        } else if (!cancelled) {
-          seedDemo();
+          } catch { /* real account: never fall back to the sample invite */ }
         }
       } catch { seedDemo(); }
     })();
@@ -122,6 +130,7 @@ export function TrainerInvitesProvider({ children }: { children: ReactNode }) {
   const acceptTrainerInvite: TrainerInvitesValue['acceptTrainerInvite'] = async (id) => {
     const inv = received.find((i) => i.id === id);
     setReceived((p) => p.filter((i) => i.id !== id));
+    markDismissed(id);
     if (USE_SUPABASE && inv && !inv.demo) {
       try { await supabase.rpc('accept_trainer_invite', { p_invite: id }); } catch { /* ignore */ }
     }
@@ -129,6 +138,7 @@ export function TrainerInvitesProvider({ children }: { children: ReactNode }) {
 
   const declineTrainerInvite: TrainerInvitesValue['declineTrainerInvite'] = (id) => {
     setReceived((p) => p.filter((i) => i.id !== id));
+    markDismissed(id);
   };
 
   return (
