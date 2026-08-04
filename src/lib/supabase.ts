@@ -40,6 +40,26 @@ export async function signOut() {
   if (error) throw error;
 }
 
+/** Email a password-reset link. Always resolves without leaking whether the
+ * email is registered — Supabase itself stays silent on unknown addresses. */
+export async function sendPasswordReset(email: string, redirectTo: string) {
+  const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
+  if (error) throw error;
+}
+
+/** Establish a session from the recovery-link tokens (deep link back into the
+ * app), so `updatePassword` below has someone to act on. */
+export async function setSessionFromTokens(accessToken: string, refreshToken: string) {
+  const { error } = await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
+  if (error) throw error;
+}
+
+/** Set a new password for the currently-recovered session. */
+export async function updatePassword(newPassword: string) {
+  const { error } = await supabase.auth.updateUser({ password: newPassword });
+  if (error) throw error;
+}
+
 /** Current signed-in user's profile row (role, tenant, name), or null. */
 export async function currentProfile() {
   const { data: auth } = await supabase.auth.getUser();

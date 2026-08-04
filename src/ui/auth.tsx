@@ -12,11 +12,19 @@ import {
   signUp as sbSignUp,
   signOut as sbSignOut,
   currentProfile,
+  sendPasswordReset as sbSendPasswordReset,
+  setSessionFromTokens as sbSetSessionFromTokens,
+  updatePassword as sbUpdatePassword,
 } from '../lib/supabase';
 
 export type Role = 'owner' | 'trainer' | 'client';
 export interface AuthUser { id: string; name: string; email: string; role: Role }
 export interface SignUpResult { needsConfirmation: boolean }
+
+// One shared Supabase identity signs in to all 3 portals (Client / Trainer /
+// Platform Owner) — the portal picker on `/` just routes by role, it isn't a
+// separate credential store. So a single reset-password flow covers everyone.
+const RESET_REDIRECT_URL = 'repple://reset-password';
 
 interface AuthValue {
   authed: boolean;
@@ -28,6 +36,13 @@ interface AuthValue {
   demo: boolean;
   enterDemo: () => void;
   signOut: () => void;
+  /** Email a reset link. In demo mode this is a no-op (there's no real inbox). */
+  sendPasswordReset: (email: string) => Promise<void>;
+  /** Exchange recovery-link tokens (from the `repple://reset-password` deep
+   * link) for a live session, so the user can then set a new password. */
+  beginPasswordRecovery: (accessToken: string, refreshToken: string) => Promise<void>;
+  /** Set the new password on the just-recovered session and refresh `user`. */
+  completePasswordReset: (newPassword: string) => Promise<void>;
 }
 
 const Ctx = createContext<AuthValue | null>(null);
@@ -113,8 +128,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null); setDemo(false);
   };
 
+  const sendPasswordReset = async (email: string) => {
+    if (!USE_SUPABASE) return; // demo mode — no real inbox to email
+    await sbSendPasswordReset(email, RESET_REDIRECT_URL);
+  };
+
+  const beginPasswordRecovery = async (accessToken: string, refreshToken: string) => {
+    await sbSetSessionFromTokens(accessToken, refreshToken);
+  };
+
+  const completePasswordReset = async (newPassword: string) => {
+    await sbUpdatePassword(newPassword);
+    await refreshFromSession();
+  };
+
   return (
-    <Ctx.Provider value={{ authed: !!user, user, loading, demo, enterDemo, signIn, signUp, signInWithProvider, signOut }}>
+    <Ctx.Provider value={{ authed: !!user, user, loading, demo, enterDemo, signIn, signUp, signInWithProvider, signOut, sendPasswordReset, beginPasswordRecovery, completePasswordReset }}>
       {children}
     </Ctx.Provider>
   );

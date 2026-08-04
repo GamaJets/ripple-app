@@ -113,6 +113,11 @@ export default function Welcome() {
  {mode === 'up' ? (
  <TextInput value={refCode} onChangeText={setRefCode} placeholder="Referral code (optional)" placeholderTextColor={t.ink3} autoCapitalize="characters" autoCorrect={false} style={inp} accessibilityLabel="Referral code (optional)" />
  ) : null}
+ {mode === 'in' ? (
+ <Pressable onPress={() => router.push('/forgot-password')} accessibilityRole="button" accessibilityLabel="Forgot password" style={{ alignSelf: 'flex-end', marginTop: -6, marginBottom: 4 }}>
+ <Text style={{ color: t.brand, fontWeight: '700', fontSize: 13 }}>Forgot password?</Text>
+ </Pressable>
+ ) : null}
 
  <Pressable onPress={go} disabled={!canGo || busy} accessibilityRole="button" style={{ backgroundColor: canGo ? t.brand : t.surface2, borderColor: canGo ? t.brand : t.ring, borderWidth: 1, borderRadius: 14, paddingVertical: 16, alignItems: 'center', marginTop: 6 }}>
  <Text style={{ color: canGo ? t.brandInk : t.ink3, fontWeight: '800', fontSize: 15 }}>{busy ? 'Please wait…' : mode === 'up' ? 'Create Account' : 'Sign In'}</Text>
