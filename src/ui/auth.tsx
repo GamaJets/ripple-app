@@ -13,6 +13,7 @@ import {
   signOut as sbSignOut,
   currentProfile,
   sendPasswordReset as sbSendPasswordReset,
+  exchangeRecoveryCode as sbExchangeRecoveryCode,
   setSessionFromTokens as sbSetSessionFromTokens,
   updatePassword as sbUpdatePassword,
 } from '../lib/supabase';
@@ -38,9 +39,11 @@ interface AuthValue {
   signOut: () => void;
   /** Email a reset link. In demo mode this is a no-op (there's no real inbox). */
   sendPasswordReset: (email: string) => Promise<void>;
-  /** Exchange recovery-link tokens (from the `repple://reset-password` deep
-   * link) for a live session, so the user can then set a new password. */
-  beginPasswordRecovery: (accessToken: string, refreshToken: string) => Promise<void>;
+  /** Exchange the recovery-link's PKCE code (from the `repple://reset-password`
+   * deep link) for a live session — the primary, reliable path. */
+  beginPasswordRecoveryWithCode: (code: string) => Promise<void>;
+  /** Fallback for a deep link that arrives with tokens instead of a code. */
+  beginPasswordRecoveryWithTokens: (accessToken: string, refreshToken: string) => Promise<void>;
   /** Set the new password on the just-recovered session and refresh `user`. */
   completePasswordReset: (newPassword: string) => Promise<void>;
 }
@@ -133,7 +136,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await sbSendPasswordReset(email, RESET_REDIRECT_URL);
   };
 
-  const beginPasswordRecovery = async (accessToken: string, refreshToken: string) => {
+  const beginPasswordRecoveryWithCode = async (code: string) => {
+    await sbExchangeRecoveryCode(code);
+  };
+
+  const beginPasswordRecoveryWithTokens = async (accessToken: string, refreshToken: string) => {
     await sbSetSessionFromTokens(accessToken, refreshToken);
   };
 
@@ -143,7 +150,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <Ctx.Provider value={{ authed: !!user, user, loading, demo, enterDemo, signIn, signUp, signInWithProvider, signOut, sendPasswordReset, beginPasswordRecovery, completePasswordReset }}>
+    <Ctx.Provider value={{ authed: !!user, user, loading, demo, enterDemo, signIn, signUp, signInWithProvider, signOut, sendPasswordReset, beginPasswordRecoveryWithCode, beginPasswordRecoveryWithTokens, completePasswordReset }}>
       {children}
     </Ctx.Provider>
   );

@@ -14,6 +14,13 @@ export const supabase = createClient(url, anon, {
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: false,
+    // PKCE, not implicit: recovery/magic-link redirects then carry a `code`
+    // query param instead of an `#access_token=...` fragment. Fragments get
+    // silently dropped when a server-side redirect crosses from https:// to
+    // a custom URL scheme (repple://) on both iOS and Android, which broke
+    // password reset — the app always saw a token-less deep link. Query
+    // params survive that hop intact.
+    flowType: 'pkce',
   },
 });
 
@@ -47,8 +54,15 @@ export async function sendPasswordReset(email: string, redirectTo: string) {
   if (error) throw error;
 }
 
-/** Establish a session from the recovery-link tokens (deep link back into the
- * app), so `updatePassword` below has someone to act on. */
+/** Establish a session from the recovery-link's PKCE `code` (the deep link
+ * back into the app) — the primary, reliable path since the flow is PKCE. */
+export async function exchangeRecoveryCode(code: string) {
+  const { error } = await supabase.auth.exchangeCodeForSession(code);
+  if (error) throw error;
+}
+
+/** Fallback: establish a session directly from access/refresh tokens, for the
+ * rare deep link that still arrives in the older implicit-grant shape. */
 export async function setSessionFromTokens(accessToken: string, refreshToken: string) {
   const { error } = await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
   if (error) throw error;

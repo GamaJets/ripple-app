@@ -1,9 +1,12 @@
 // Reset password (Phase 1) — lands here from the `repple://reset-password`
-// deep link in the recovery email (see forgot-password.tsx). Supabase appends
-// the recovery tokens as a URL fragment/query (#access_token=...&type=recovery
-// or ?error=...&error_description=... if the link is stale/used). We parse
-// those by hand since the Supabase client runs with detectSessionInUrl:false
-// (no browser URL to auto-read on native).
+// deep link in the recovery email (see forgot-password.tsx). The Supabase
+// client uses the PKCE flow, so the link carries a `?code=...` query param
+// (or `?error=...&error_description=...` if stale/used) that we exchange for
+// a session. We parse it by hand since the client runs with
+// detectSessionInUrl:false (no browser URL to auto-read on native). A
+// fragment-based `#access_token=...&refresh_token=...` is kept as a fallback,
+// but query params are the reliable path — fragments can get silently
+// dropped when a server redirect crosses from https:// to a custom scheme.
 import { useEffect, useRef, useState } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView, KeyboardAvoidingView, Platform, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -46,10 +49,20 @@ export default function ResetPassword() {
       setStage('invalid');
       return;
     }
+    if (params.code) {
+      handled.current = true;
+      try {
+        await auth.beginPasswordRecoveryWithCode(params.code);
+        setStage('ready');
+      } catch {
+        setStage('invalid');
+      }
+      return;
+    }
     if (params.access_token && params.refresh_token) {
       handled.current = true;
       try {
-        await auth.beginPasswordRecovery(params.access_token, params.refresh_token);
+        await auth.beginPasswordRecoveryWithTokens(params.access_token, params.refresh_token);
         setStage('ready');
       } catch {
         setStage('invalid');
