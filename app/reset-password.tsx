@@ -1,12 +1,20 @@
 // Reset password (Phase 1) — lands here from the `repple://reset-password`
-// deep link in the recovery email (see forgot-password.tsx). The Supabase
-// client uses the PKCE flow, so the link carries a `?code=...` query param
-// (or `?error=...&error_description=...` if stale/used) that we exchange for
-// a session. We parse it by hand since the client runs with
-// detectSessionInUrl:false (no browser URL to auto-read on native). A
-// fragment-based `#access_token=...&refresh_token=...` is kept as a fallback,
-// but query params are the reliable path — fragments can get silently
-// dropped when a server redirect crosses from https:// to a custom scheme.
+// deep link in the recovery email (see forgot-password.tsx).
+//
+// The link deep-links straight into the app carrying the recovery token as a
+// query param (`?token_hash=...&type=recovery`, or `?error=...&error_description=...`
+// if stale/used) — it does NOT route through Supabase's `/auth/v1/verify`
+// endpoint first. That endpoint auto-redeems the one-time token on a bare GET,
+// which meant an email security scanner prefetching the link (common with
+// Gmail-hosted mail) could silently burn the token before the user ever
+// tapped it — confirmed via Supabase Auth logs: the token was already dead
+// ~5 minutes after being emailed, before the first real tap. A `repple://`
+// URL can't be opened by an https-only bot, so routing the raw token straight
+// into the app (redeemed here, client-side, only when a real device opens it)
+// closes that hole. `code` (PKCE) and `access_token`/`refresh_token`
+// (implicit) are kept as fallbacks for any link that still arrives in an
+// older shape. We parse the URL by hand since the Supabase client runs with
+// detectSessionInUrl:false (no browser URL to auto-read on native).
 import { useEffect, useRef, useState } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView, KeyboardAvoidingView, Platform, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -47,6 +55,16 @@ export default function ResetPassword() {
     if (params.error || params.error_description) {
       handled.current = true;
       setStage('invalid');
+      return;
+    }
+    if (params.token_hash) {
+      handled.current = true;
+      try {
+        await auth.beginPasswordRecoveryWithTokenHash(params.token_hash);
+        setStage('ready');
+      } catch {
+        setStage('invalid');
+      }
       return;
     }
     if (params.code) {

@@ -55,7 +55,8 @@ export async function sendPasswordReset(email: string, redirectTo: string) {
 }
 
 /** Establish a session from the recovery-link's PKCE `code` (the deep link
- * back into the app) — the primary, reliable path since the flow is PKCE. */
+ * back into the app) — kept as a fallback path; the primary path since this
+ * fix is `verifyRecoveryToken` below (see its doc comment for why). */
 export async function exchangeRecoveryCode(code: string) {
   const { error } = await supabase.auth.exchangeCodeForSession(code);
   if (error) throw error;
@@ -65,6 +66,20 @@ export async function exchangeRecoveryCode(code: string) {
  * rare deep link that still arrives in the older implicit-grant shape. */
 export async function setSessionFromTokens(accessToken: string, refreshToken: string) {
   const { error } = await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
+  if (error) throw error;
+}
+
+/** Establish a session straight from the recovery email's raw token hash —
+ * the PRIMARY path as of the 2026-08-10 fix. The email link now deep-links
+ * directly into the app (`repple://reset-password?token_hash=...&type=recovery`)
+ * instead of routing through Supabase's `/auth/v1/verify` endpoint first. That
+ * endpoint auto-redeems the one-time token on a bare GET, which meant an email
+ * security scanner prefetching the link (common with Gmail-hosted mail) could
+ * silently burn the token before the user ever tapped it. A `repple://` URL
+ * can't be opened by an https-only bot, so the token can only be consumed by
+ * this call, which only runs when a real device opens the app. */
+export async function verifyRecoveryToken(tokenHash: string) {
+  const { error } = await supabase.auth.verifyOtp({ type: 'recovery', token_hash: tokenHash });
   if (error) throw error;
 }
 
