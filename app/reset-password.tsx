@@ -19,7 +19,7 @@ import { useEffect, useRef, useState } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView, KeyboardAvoidingView, Platform, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useRouter } from 'expo-router';
-import { useTheme } from '../src/ui/components';
+import { useTheme, PasswordField } from '../src/ui/components';
 import { useAuth } from '../src/ui/auth';
 import { useBrand } from '../src/ui/brand';
 
@@ -57,10 +57,10 @@ export default function ResetPassword() {
       setStage('invalid');
       return;
     }
-    if (params.token_hash) {
+    if (params.token_hash && params.email) {
       handled.current = true;
       try {
-        await auth.beginPasswordRecoveryWithTokenHash(params.token_hash);
+        await auth.beginPasswordRecoveryWithTokenHash(params.token_hash, params.email);
         setStage('ready');
       } catch {
         setStage('invalid');
@@ -148,8 +148,8 @@ export default function ResetPassword() {
                   <Text style={{ color: t.ink2, fontSize: 13, lineHeight: 18 }}>{error}</Text>
                 </View>
               ) : null}
-              <TextInput value={pw} onChangeText={setPw} placeholder="New password (min 6 characters)" placeholderTextColor={t.ink3} secureTextEntry autoCapitalize="none" style={inp} accessibilityLabel="New password" autoFocus />
-              <TextInput value={pw2} onChangeText={setPw2} placeholder="Confirm new password" placeholderTextColor={t.ink3} secureTextEntry autoCapitalize="none" style={inp} accessibilityLabel="Confirm new password" />
+              <PasswordField value={pw} onChangeText={setPw} placeholder="New password (min 6 characters)" style={inp} accessibilityLabel="New password" autoFocus />
+              <PasswordField value={pw2} onChangeText={setPw2} placeholder="Confirm new password" style={inp} accessibilityLabel="Confirm new password" />
               {pw2.length > 0 && pw !== pw2 ? (
                 <Text style={{ color: '#ef4444', fontSize: 12, marginTop: -6, marginBottom: 12 }}>Passwords don't match.</Text>
               ) : null}

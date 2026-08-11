@@ -78,8 +78,8 @@ export async function setSessionFromTokens(accessToken: string, refreshToken: st
  * silently burn the token before the user ever tapped it. A `repple://` URL
  * can't be opened by an https-only bot, so the token can only be consumed by
  * this call, which only runs when a real device opens the app. */
-export async function verifyRecoveryToken(tokenHash: string) {
-  const { error } = await supabase.auth.verifyOtp({ type: 'recovery', token_hash: tokenHash });
+export async function verifyRecoveryToken(tokenHash: string, email: string) {
+  const { error } = await supabase.auth.verifyOtp({ type: 'recovery', token_hash: tokenHash, email });
   if (error) throw error;
 }
 

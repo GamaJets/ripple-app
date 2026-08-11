@@ -42,7 +42,7 @@ interface AuthValue {
   sendPasswordReset: (email: string) => Promise<void>;
   /** Establish a session from the recovery email's raw token hash — the
    * primary path (see verifyRecoveryToken's doc comment in supabase.ts). */
-  beginPasswordRecoveryWithTokenHash: (tokenHash: string) => Promise<void>;
+  beginPasswordRecoveryWithTokenHash: (tokenHash: string, email: string) => Promise<void>;
   /** Fallback: exchange the recovery-link's PKCE code for a live session. */
   beginPasswordRecoveryWithCode: (code: string) => Promise<void>;
   /** Fallback for a deep link that arrives with tokens instead of a code. */
@@ -139,8 +139,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await sbSendPasswordReset(email, RESET_REDIRECT_URL);
   };
 
-  const beginPasswordRecoveryWithTokenHash = async (tokenHash: string) => {
-    await sbVerifyRecoveryToken(tokenHash);
+  const beginPasswordRecoveryWithTokenHash = async (tokenHash: string, email: string) => {
+    await sbVerifyRecoveryToken(tokenHash, email);
   };
 
   const beginPasswordRecoveryWithCode = async (code: string) => {
