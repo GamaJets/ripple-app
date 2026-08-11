@@ -1,5 +1,6 @@
 import { Stack, useRouter } from 'expo-router';
 import { useEffect } from 'react';
+import * as Updates from 'expo-updates';
 import { addNotificationTapListener } from '../src/ui/pushNotifications';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ClientDataProvider } from '../src/ui/clientData';
@@ -42,7 +43,28 @@ function ThemedStack() {
   return <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: t.bg } }} />;
 }
 
+// Auto-apply any already-published OTA update immediately on launch instead
+// of silently downloading it in the background and waiting for the NEXT app
+// open to run it. Without this, every fix we ship needs two full closes +
+// reopens before a tester actually sees it, which reads as "the fix didn't
+// work" when it's really just normal (if confusing) expo-updates behavior.
+function useApplyUpdateOnLaunch() {
+  useEffect(() => {
+    if (!Updates.isEnabled) return; // no-op in dev / Expo Go
+    (async () => {
+      try {
+        const result = await Updates.checkForUpdateAsync();
+        if (result.isAvailable) {
+          await Updates.fetchUpdateAsync();
+          await Updates.reloadAsync();
+        }
+      } catch { /* offline or check failed — just stay on the current bundle */ }
+    })();
+  }, []);
+}
+
 export default function RootLayout() {
+  useApplyUpdateOnLaunch();
   return (
     <SafeAreaProvider>
       <AppThemeProvider>
