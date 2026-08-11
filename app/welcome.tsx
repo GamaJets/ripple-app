@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useRouter } from 'expo-router';
-import { useTheme } from '../src/ui/components';
+import { useTheme, PasswordField } from '../src/ui/components';
 import { useAuth } from '../src/ui/auth';
 import { useBrand } from '../src/ui/brand';
 import { USE_SUPABASE } from '../src/lib/config';
@@ -109,7 +109,7 @@ export default function Welcome() {
  </View>
  ) : null}
  <TextInput value={email} onChangeText={setEmail} placeholder="Email" placeholderTextColor={t.ink3} keyboardType="email-address" autoCapitalize="none" autoCorrect={false} style={inp} accessibilityLabel="Email" />
- <TextInput value={pw} onChangeText={setPw} placeholder="Password (min 6 characters)" placeholderTextColor={t.ink3} secureTextEntry autoCapitalize="none" style={inp} accessibilityLabel="Password" />
+ <PasswordField value={pw} onChangeText={setPw} placeholder="Password (min 6 characters)" style={inp} accessibilityLabel="Password" />
  {mode === 'up' ? (
  <TextInput value={refCode} onChangeText={setRefCode} placeholder="Referral code (optional)" placeholderTextColor={t.ink3} autoCapitalize="characters" autoCorrect={false} style={inp} accessibilityLabel="Referral code (optional)" />
  ) : null}

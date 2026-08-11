@@ -57,6 +57,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
   const [manualAt, setManualAt] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(false);
   const [sbUid, setSbUid] = useState<string | null>(null);
+  const [nameSynced, setNameSynced] = useState(false);
 
   // Load the user's saved profile on first mount.
   useEffect(() => { (async () => {
@@ -92,18 +93,41 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
     AsyncStorage.setItem(KEY, JSON.stringify({ name, dob, heightCm, goal, diet, avoid, injuries, focusAreas, coachingMode, weightKg: manualWeight, bodyFatPct: manualBodyFat, manualAt, photo })).catch(() => {});
   }, [hydrated, name, dob, heightCm, goal, diet, avoid, injuries, focusAreas, coachingMode, manualWeight, manualBodyFat, manualAt, photo]);
 
+  // Pull the real signed-in user's name from the server BEFORE any push below is
+  // allowed to run. This guards against a stale/cross-account name that was
+  // cached locally on a shared/reused device (e.g. from a previous tester's
+  // session) getting pushed up and overwriting a different real user's correct
+  // profile name. Runs once per uid; resets if the signed-in uid changes.
+  useEffect(() => {
+    if (!USE_SUPABASE || !sbUid) return;
+    let cancelled = false;
+    setNameSynced(false);
+    (async () => {
+      try {
+        const { data, error } = await supabase.from('profiles').select('full_name').eq('id', sbUid).single();
+        if (!cancelled && !error && typeof data?.full_name === 'string' && data.full_name.trim()) {
+          setName(data.full_name.trim());
+        }
+      } catch { /* keep whatever we have */ }
+      if (!cancelled) setNameSynced(true);
+    })();
+    return () => { cancelled = true; };
+  }, [sbUid]);
+
   // Publish identity + goal to the shared backend so a LINKED trainer sees the real
   // client (name/goal) instead of a placeholder. Best-effort & additive: it only
   // updates existing rows (no-ops when the client isn't linked to a trainer yet),
-  // never clobbers how the client reads their own local data.
+  // never clobbers how the client reads their own local data. Gated on nameSynced
+  // so this can never fire with a name that hasn't been reconciled against the
+  // signed-in user's real server-side profile first.
   useEffect(() => {
-    if (!USE_SUPABASE || !sbUid || !hydrated) return;
+    if (!USE_SUPABASE || !sbUid || !hydrated || !nameSynced) return;
     try {
       supabase.from('profiles').update({ full_name: name }).eq('id', sbUid).then(() => {}, () => {});
       supabase.from('clients').update({ goal }).eq('id', sbUid).then(() => {}, () => {});
       supabase.from('clients').update({ diet, meals_per_day: 3, avoid }).eq('id', sbUid).then(() => {}, () => {});
     } catch { /* ignore */ }
-  }, [name, goal, diet, avoid, sbUid, hydrated]);
+  }, [name, goal, diet, avoid, sbUid, hydrated, nameSynced]);
 
   // Load locally-cached InBody composition metrics (keyed by scan date).
   useEffect(() => { (async () => { try { const raw = await AsyncStorage.getItem('repple.scanMetrics'); if (raw) setScanMetrics(JSON.parse(raw)); } catch { /* ignore */ } })(); }, []);

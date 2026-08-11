@@ -4,12 +4,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { useTheme } from '../../src/ui/components';
-import { MOCK_TRAINER } from '../../src/lib/mockData';
+import { useCoachProfile } from '../../src/ui/coachProfile';
 import { useThread } from '../../src/ui/messaging';
 
 export default function Messages() {
   const t = useTheme();
   const router = useRouter();
+  const coach = useCoachProfile();
   const { messages: msgs, send } = useThread(null, 'client');
   const [text, setText] = useState('');
   const scRef = useRef<ScrollView>(null);
@@ -19,7 +20,7 @@ export default function Messages() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <View style={{ paddingHorizontal: 18, paddingTop: 8, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: t.ring }}>
         <Pressable onPress={() => router.back()} style={{ marginBottom: 6 }}><Text style={{ color: t.brand, fontWeight: '700', fontSize: 15 }}>‹ Back</Text></Pressable>
-        <Text style={{ color: t.ink, fontSize: 20, fontWeight: '800', textTransform: 'capitalize' }}>{MOCK_TRAINER.name}</Text>
+        <Text style={{ color: t.ink, fontSize: 20, fontWeight: '800', textTransform: 'capitalize' }}>{coach.name || 'Your coach'}</Text>
         <Text style={{ color: t.ink3, fontSize: 12 }}>Your coach · usually replies within a few hours</Text>
       </View>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>

@@ -43,7 +43,10 @@ export function CoachProfileProvider({ children }: { children: ReactNode }) {
         const prof = await supabase.from('profiles').select('full_name').eq('id', u.id).single();
         const real = prof.data?.full_name;
         if (!cancelled && typeof real === 'string' && real.trim()) {
-          setName((prev) => (!prev || prev === MOCK_TRAINER.name ? real.trim() : prev));
+          // Always trust the fetched real profile name over whatever was cached
+          // locally (a stale name from a previous account on a shared/reused
+          // device is not just the mock default — it can be any other real name).
+          setName(real.trim());
         }
       } catch { /* keep whatever we have */ }
     })();
