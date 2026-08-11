@@ -39,18 +39,18 @@ const KEY = 'repple.profile';
 const initials = (n: string) => n.trim().split(/\s+/).map((x) => x[0]).join('').slice(0, 2).toUpperCase() || 'Y';
 
 export function ClientDataProvider({ children }: { children: ReactNode }) {
-  const base = MOCK_CLIENT;
-  const [name, setName] = useState(base.name);
-  const [dob, setDob] = useState(base.dob);
+  // NO mock data — always start empty. Real data loads from Supabase if user is authenticated.
+  const [name, setName] = useState('');
+  const [dob, setDob] = useState('');
   const [photo, setPhoto] = useState<string | null>(null);
-  const [heightCm, setHeightCm] = useState(base.heightCm);
-  const [goal, setGoal] = useState<Goal>(base.goal);
+  const [heightCm, setHeightCm] = useState(170);
+  const [goal, setGoal] = useState<Goal>('muscle');
   const [coachingMode, setCoachingMode] = useState<CoachingMode>('online');
-  const [diet, setDiet] = useState<Diet>(base.diet);
+  const [diet, setDiet] = useState<Diet>('balanced');
   const [avoid, setAvoid] = useState<Allergen[]>([]);
   const [injuries, setInjuries] = useState<Injury[]>([]);
   const [focusAreas, setFocusAreas] = useState<string[]>([]);
-  const [scans, setScans] = useState<ScanRec[]>(USE_SUPABASE ? [] : base.scans.map((s) => ({ id: s.id, takenAt: s.takenAt, weightKg: s.weightKg, bodyFatPct: s.bodyFatPct, skeletalMuscleKg: s.skeletalMuscleKg, source: s.source })));
+  const [scans, setScans] = useState<ScanRec[]>([]);
   const [scanMetrics, setScanMetrics] = useState<Record<string, ScanMetrics>>({});
   const [manualWeight, setManualWeight] = useState<number | null>(null);
   const [manualBodyFat, setManualBodyFat] = useState<number | null>(null);
@@ -61,22 +61,26 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
   // Load the user's saved profile on first mount.
   useEffect(() => { (async () => {
     try {
-      const raw = await AsyncStorage.getItem(KEY);
-      if (raw) {
-        const p = JSON.parse(raw);
-        if (typeof p.name === 'string' && p.name) setName(p.name);
-        if (typeof p.dob === 'string' && p.dob) setDob(p.dob);
-        if (typeof p.heightCm === 'number') setHeightCm(p.heightCm);
-        if (typeof p.goal === 'string') setGoal(p.goal);
-        if (p.coachingMode === 'online' || p.coachingMode === 'inperson' || p.coachingMode === 'solo') setCoachingMode(p.coachingMode);
-        if (typeof p.diet === 'string') setDiet(p.diet);
-        if (Array.isArray(p.avoid)) setAvoid(p.avoid);
-        if (Array.isArray(p.injuries)) setInjuries(p.injuries);
-        if (Array.isArray(p.focusAreas)) setFocusAreas(p.focusAreas);
-        if (typeof p.weightKg === 'number') setManualWeight(p.weightKg);
-        if (typeof p.bodyFatPct === 'number') setManualBodyFat(p.bodyFatPct);
-        if (typeof p.manualAt === 'string') setManualAt(p.manualAt);
-        if (typeof p.photo === 'string') setPhoto(p.photo);
+      if (USE_SUPABASE) {
+        await AsyncStorage.removeItem(KEY);
+      } else {
+        const raw = await AsyncStorage.getItem(KEY);
+        if (raw) {
+          const p = JSON.parse(raw);
+          if (typeof p.name === 'string' && p.name) setName(p.name);
+          if (typeof p.dob === 'string' && p.dob) setDob(p.dob);
+          if (typeof p.heightCm === 'number') setHeightCm(p.heightCm);
+          if (typeof p.goal === 'string') setGoal(p.goal);
+          if (p.coachingMode === 'online' || p.coachingMode === 'inperson' || p.coachingMode === 'solo') setCoachingMode(p.coachingMode);
+          if (typeof p.diet === 'string') setDiet(p.diet);
+          if (Array.isArray(p.avoid)) setAvoid(p.avoid);
+          if (Array.isArray(p.injuries)) setInjuries(p.injuries);
+          if (Array.isArray(p.focusAreas)) setFocusAreas(p.focusAreas);
+          if (typeof p.weightKg === 'number') setManualWeight(p.weightKg);
+          if (typeof p.bodyFatPct === 'number') setManualBodyFat(p.bodyFatPct);
+          if (typeof p.manualAt === 'string') setManualAt(p.manualAt);
+          if (typeof p.photo === 'string') setPhoto(p.photo);
+        }
       }
     } catch {}
     setHydrated(true);
@@ -97,7 +101,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
     try {
       supabase.from('profiles').update({ full_name: name }).eq('id', sbUid).then(() => {}, () => {});
       supabase.from('clients').update({ goal }).eq('id', sbUid).then(() => {}, () => {});
-      supabase.from('clients').update({ diet, meals_per_day: base.mealsPerDay, avoid }).eq('id', sbUid).then(() => {}, () => {});
+      supabase.from('clients').update({ diet, meals_per_day: 3, avoid }).eq('id', sbUid).then(() => {}, () => {});
     } catch { /* ignore */ }
   }, [name, goal, diet, avoid, sbUid, hydrated]);
 
@@ -132,7 +136,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
   const bodyFatPct = (manualBodyFat != null && manualIsCurrent) ? manualBodyFat : latest.bodyFatPct;
 
   const value: Value = {
-    id: sbUid ?? base.id, name, init: initials(name), setName,
+    id: sbUid ?? 'unknown', name, init: initials(name), setName,
     dob, setDob, photo, setPhoto, heightCm, setHeightCm,
     goal, setGoal, diet, setDiet, avoid, setAvoid,
     injuries,
@@ -141,7 +145,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
     updateInjury: (id, patch) => setInjuries((p) => p.map((i) => (i.id === id ? { ...i, ...patch } : i))),
     removeInjury: (id) => setInjuries((p) => p.filter((i) => i.id !== id)),
     coachingMode, setCoachingMode,
-    activity: base.activity, mealsPerDay: base.mealsPerDay as 3 | 4 | 5,
+    activity: 1.5, mealsPerDay: 3 as 3 | 4 | 5,
     weightKg, bodyFatPct, muscleKg: latest.skeletalMuscleKg,
     setWeightKg: (v) => { setManualWeight(v); setManualAt(new Date().toISOString()); }, setBodyFat: (v) => { setManualBodyFat(v); setManualAt(new Date().toISOString()); },
     scans: sorted, addScan: (s) => { setScans((p) => [...p, s]); if (s.metrics && Object.values(s.metrics).some((v) => v != null)) { setScanMetrics((prev) => { const nm = { ...prev, [s.takenAt.slice(0, 10)]: s.metrics! }; AsyncStorage.setItem('repple.scanMetrics', JSON.stringify(nm)).catch(() => {}); return nm; }); } setManualWeight(null); setManualBodyFat(null); if (USE_SUPABASE && sbUid) { try { supabase.from('scans').insert({ client_id: sbUid, taken_at: String(s.takenAt).slice(0, 10), weight_kg: s.weightKg, body_fat_pct: s.bodyFatPct, skeletal_muscle_kg: s.skeletalMuscleKg, source: s.source }).select('id').single().then((res: any) => { const rid = res && res.data && res.data.id; if (rid && s.metrics && Object.values(s.metrics).some((v) => v != null)) { supabase.from('scans').update({ metrics: s.metrics }).eq('id', rid).then(() => {}, () => {}); } }, () => {}); } catch { /* ignore */ } } },

@@ -20,17 +20,16 @@ interface CoachProfileValue {
 const Ctx = createContext<CoachProfileValue | null>(null);
 
 export function CoachProfileProvider({ children }: { children: ReactNode }) {
-  const [name, setName] = useState(MOCK_TRAINER.name);
+  // NO mock data — always start empty. Real data loads from Supabase if user is authenticated.
+  const [name, setName] = useState('');
   const [photo, setPhoto] = useState<string | null>(null);
-  const [tagline, setTagline] = useState('Strength & fat-loss coaching that fits real life');
-  const [bio, setBio] = useState(
-    "NASM-certified coach with 8+ years helping busy people get lean and strong. I build training and nutrition around your body, your schedule and your goals — and I keep you accountable every week."
-  );
-  const [offers, setOffers] = useState<string[]>(['1:1 personal training', 'Custom meal plans', 'Form-check videos', 'Weekly check-ins', 'InBody progress reviews']);
-  const [specialties, setSpecialties] = useState<string[]>(['Fat loss', 'Strength', 'Habit coaching']);
-  const [sessionFee, setSessionFee] = useState(MOCK_TRAINER.sessionFee);
+  const [tagline, setTagline] = useState('');
+  const [bio, setBio] = useState('');
+  const [offers, setOffers] = useState<string[]>([]);
+  const [specialties, setSpecialties] = useState<string[]>([]);
+  const [sessionFee, setSessionFee] = useState(0);
   const [hydrated, setHydrated] = useState(false);
-  useEffect(() => { (async () => { try { const raw = await AsyncStorage.getItem('repple.coachProfile'); if (raw) { const p = JSON.parse(raw); if (typeof p.name === 'string') setName(p.name); if (p.photo === null || typeof p.photo === 'string') setPhoto(p.photo ?? null); if (typeof p.tagline === 'string') setTagline(p.tagline); if (typeof p.bio === 'string') setBio(p.bio); if (Array.isArray(p.offers)) setOffers(p.offers); if (Array.isArray(p.specialties)) setSpecialties(p.specialties); if (typeof p.sessionFee === 'number') setSessionFee(p.sessionFee); } } catch { /* ignore */ } setHydrated(true); })(); }, []);
+  useEffect(() => { (async () => { try { if (USE_SUPABASE) { await AsyncStorage.removeItem('repple.coachProfile'); } else { const raw = await AsyncStorage.getItem('repple.coachProfile'); if (raw) { const p = JSON.parse(raw); if (typeof p.name === 'string') setName(p.name); if (p.photo === null || typeof p.photo === 'string') setPhoto(p.photo ?? null); if (typeof p.tagline === 'string') setTagline(p.tagline); if (typeof p.bio === 'string') setBio(p.bio); if (Array.isArray(p.offers)) setOffers(p.offers); if (Array.isArray(p.specialties)) setSpecialties(p.specialties); if (typeof p.sessionFee === 'number') setSessionFee(p.sessionFee); } } } catch { /* ignore */ } setHydrated(true); })(); }, []);
   // Real account: use the signed-in profile's name unless the coach set a custom
   // one. Fixes real trainers seeing the demo identity ("Coach Daniel Reyes").
   useEffect(() => {
