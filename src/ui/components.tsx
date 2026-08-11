@@ -2,10 +2,11 @@
 // (Elevated Teal default), selectable by client & trainer. An optional accent
 // override sits on top for owner white-labelling. Both persist.
 import { ReactNode, createContext, useContext, useState, useEffect } from 'react';
-import { View, Text, ScrollView, Pressable, StyleSheet } from 'react-native';
+import { View, Text, ScrollView, Pressable, StyleSheet, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { paletteByKey, brandInkFor, DEFAULT_PALETTE, PALETTES, teal, type Theme, type PaletteMeta } from '../theme/tokens';
+import { Icon } from './Icon';
 
 interface ThemeControls {
   palette: string; setPalette: (k: string) => void;
@@ -87,6 +88,53 @@ export function Btn({ label, onPress, primary }: { label: string; onPress?: () =
     <Pressable onPress={onPress} style={[s.btn, { backgroundColor: primary ? t.brand : t.surface2, borderColor: t.ring }]}>
       <Text style={{ color: primary ? t.brandInk : t.ink, fontWeight: '700', fontSize: 13 }}>{label}</Text>
     </Pressable>
+  );
+}
+
+// Password input with a tappable eye toggle so people can check what they
+// typed before submitting. `style` should be the same object used for
+// sibling TextInputs (e.g. the local `inp` style) — its marginBottom (if any)
+// is lifted onto the wrapping View so the eye button stays vertically
+// centered on the input itself, not the input+margin box.
+export function PasswordField({
+  value, onChangeText, placeholder, style, accessibilityLabel, autoFocus,
+}: {
+  value: string;
+  onChangeText: (v: string) => void;
+  placeholder: string;
+  style?: Record<string, any>;
+  accessibilityLabel?: string;
+  autoFocus?: boolean;
+}) {
+  const t = useTheme();
+  const [visible, setVisible] = useState(false);
+  const { marginBottom, ...fieldStyle } = style || {};
+  return (
+    <View style={{ marginBottom: marginBottom ?? 0 }}>
+      <View style={{ position: 'relative', justifyContent: 'center' }}>
+        <TextInput
+          value={value}
+          onChangeText={onChangeText}
+          placeholder={placeholder}
+          placeholderTextColor={t.ink3}
+          secureTextEntry={!visible}
+          autoCapitalize="none"
+          autoCorrect={false}
+          style={[fieldStyle, { paddingRight: 44 }]}
+          accessibilityLabel={accessibilityLabel}
+          autoFocus={autoFocus}
+        />
+        <Pressable
+          onPress={() => setVisible((v) => !v)}
+          accessibilityRole="button"
+          accessibilityLabel={visible ? 'Hide password' : 'Show password'}
+          hitSlop={10}
+          style={{ position: 'absolute', right: 12, top: 0, bottom: 0, justifyContent: 'center', alignItems: 'center' }}
+        >
+          <Icon name={visible ? 'eye-off' : 'eye'} size={20} color={t.ink3} />
+        </Pressable>
+      </View>
+    </View>
   );
 }
 

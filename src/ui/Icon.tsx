@@ -9,7 +9,8 @@ export type IconName =
   | 'play' | 'plus' | 'minus' | 'calendar' | 'video' | 'chart' | 'chevron' | 'back'
   | 'pencil' | 'search' | 'swap' | 'camera' | 'flame' | 'bell' | 'check'
   | 'water' | 'moon' | 'sun' | 'target' | 'trophy' | 'clock' | 'message'
-  | 'ruler' | 'scale' | 'heart' | 'share' | 'settings' | 'sparkle' | 'dumbbell' | 'chat';
+  | 'ruler' | 'scale' | 'heart' | 'share' | 'settings' | 'sparkle' | 'dumbbell' | 'chat'
+  | 'eye' | 'eye-off';
 
 export function Icon({ name, size = 22, color = '#fff', filled = false, strokeWidth = 2 }: {
   name: IconName; size?: number; color?: string; filled?: boolean; strokeWidth?: number;
@@ -82,6 +83,10 @@ export function Icon({ name, size = 22, color = '#fff', filled = false, strokeWi
     case 'message':
     case 'chat':
       return S(<Path d="M4 5h16v11H9l-4 4V5z" {...common} />);
+    case 'eye':
+      return S(<><Circle cx="12" cy="12" r="3" {...common} /><Path d="M2 12c2-4 6-6 10-6s8 2 10 6-4 6-10 6-8-2-10-6z" {...common} /></>);
+    case 'eye-off':
+      return S(<><Path d="M12 3c5.3 0 9.3 3.5 10.5 6-.9 1.8-2.4 3.4-4.2 4.5M2 12c1.2-2.5 5.2-6 10-6m3 9l2 2m-15-2l-2 2M9 9l6 6" {...common} /></>);
     case 'ruler':
       return S(<><Rect x="2.5" y="7" width="19" height="10" rx="1.5" transform="rotate(0 12 12)" {...common} /><Path d="M7 7v3M12 7v4M17 7v3" {...common} /></>);
     case 'scale':
