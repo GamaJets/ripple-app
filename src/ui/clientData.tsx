@@ -132,20 +132,36 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
   // Load locally-cached InBody composition metrics (keyed by scan date).
   useEffect(() => { (async () => { try { const raw = await AsyncStorage.getItem('repple.scanMetrics'); if (raw) setScanMetrics(JSON.parse(raw)); } catch { /* ignore */ } })(); }, []);
   // Sync body scans with Supabase (per user) — hydrate-or-seed, defensive.
+  // Also re-runs on every auth state change (not just once at mount) — if the
+  // Supabase session hasn't finished restoring yet at the exact moment this
+  // effect first ran (common on a cold app launch), sbUid was never set and
+  // never retried, silently leaving the user on empty/mock data. This mirrors
+  // the same fix applied to coachProfile.tsx for the identical race.
   useEffect(() => {
     if (!USE_SUPABASE) return;
     let cancelled = false;
-    (async () => {
+    const loadForUser = async (id: string) => {
+      setSbUid(id);
       try {
-        const { data: auth } = await supabase.auth.getUser();
-        const id = auth?.user?.id; if (!id || cancelled) return; setSbUid(id);
         const { data, error } = await supabase.from('scans').select('*').eq('client_id', id).order('taken_at', { ascending: true });
         if (error || cancelled) return;
         // Only ever show the user's own real scans — never seed demo scans into a live account.
         setScans((data || []).map((r: any) => ({ id: r.id, takenAt: r.taken_at, weightKg: Number(r.weight_kg), bodyFatPct: Number(r.body_fat_pct), skeletalMuscleKg: r.skeletal_muscle_kg != null ? Number(r.skeletal_muscle_kg) : 0, source: r.source ?? '', metrics: r.metrics ?? undefined })));
       } catch { /* stay on mock */ }
+    };
+    (async () => {
+      try {
+        const { data: auth } = await supabase.auth.getUser();
+        const id = auth?.user?.id;
+        if (id && !cancelled) await loadForUser(id);
+      } catch { /* stay on mock */ }
     })();
-    return () => { cancelled = true; };
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
+      if (cancelled) return;
+      const id = session?.user?.id;
+      if (id) loadForUser(id);
+    });
+    return () => { cancelled = true; sub.subscription.unsubscribe(); };
   }, []);
 
   const sorted = useMemo(() => {

@@ -32,10 +32,15 @@ export function CoachProfileProvider({ children }: { children: ReactNode }) {
   useEffect(() => { (async () => { try { if (USE_SUPABASE) { await AsyncStorage.removeItem('repple.coachProfile'); } else { const raw = await AsyncStorage.getItem('repple.coachProfile'); if (raw) { const p = JSON.parse(raw); if (typeof p.name === 'string') setName(p.name); if (p.photo === null || typeof p.photo === 'string') setPhoto(p.photo ?? null); if (typeof p.tagline === 'string') setTagline(p.tagline); if (typeof p.bio === 'string') setBio(p.bio); if (Array.isArray(p.offers)) setOffers(p.offers); if (Array.isArray(p.specialties)) setSpecialties(p.specialties); if (typeof p.sessionFee === 'number') setSessionFee(p.sessionFee); } } } catch { /* ignore */ } setHydrated(true); })(); }, []);
   // Real account: use the signed-in profile's name unless the coach set a custom
   // one. Fixes real trainers seeing the demo identity ("Coach Daniel Reyes").
+  // Also re-fetches on every auth state change (not just once at hydration) —
+  // if the Supabase session hasn't finished restoring yet at the exact moment
+  // this effect first ran (common on a cold app launch), the old code gave up
+  // permanently and the real name never appeared. onAuthStateChange fires again
+  // once the session is actually ready, same pattern used by the main auth flow.
   useEffect(() => {
     if (!hydrated || !USE_SUPABASE) return;
     let cancelled = false;
-    (async () => {
+    const fetchReal = async () => {
       try {
         const { data: auth } = await supabase.auth.getUser();
         const u = auth?.user;
@@ -49,8 +54,13 @@ export function CoachProfileProvider({ children }: { children: ReactNode }) {
           setName(real.trim());
         }
       } catch { /* keep whatever we have */ }
-    })();
-    return () => { cancelled = true; };
+    };
+    fetchReal();
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
+      if (cancelled || !session) return;
+      fetchReal();
+    });
+    return () => { cancelled = true; sub.subscription.unsubscribe(); };
   }, [hydrated]);
 
   useEffect(() => { if (!hydrated) return; AsyncStorage.setItem('repple.coachProfile', JSON.stringify({ name, photo, tagline, bio, offers, specialties, sessionFee })).catch(() => {}); }, [hydrated, name, photo, tagline, bio, offers, specialties, sessionFee]);
