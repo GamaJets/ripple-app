@@ -153,7 +153,7 @@ export default function ResetPassword() {
               {pw2.length > 0 && pw !== pw2 ? (
                 <Text style={{ color: '#ef4444', fontSize: 12, marginTop: -6, marginBottom: 12 }}>Passwords don't match.</Text>
               ) : null}
-              <Pressable onPress={save} disabled={!canSave || stage === 'saving'} accessibilityRole="button" style={{ backgroundColor: canSave ? t.brand : t.surface2, borderColor: canSave ? t.brand : t.ring, borderWidth: 1, borderRadius: 14, paddingVertical: 16, alignItems: 'center', marginTop: 6 }}>
+              <Pressable onPress={save} disabled={!canSave} accessibilityRole="button" style={{ backgroundColor: canSave ? t.brand : t.surface2, borderColor: canSave ? t.brand : t.ring, borderWidth: 1, borderRadius: 14, paddingVertical: 16, alignItems: 'center', marginTop: 6 }}>
                 <Text style={{ color: canSave ? t.brandInk : t.ink3, fontWeight: '800', fontSize: 15 }}>{stage === 'saving' ? 'Saving…' : 'Save new password'}</Text>
               </Pressable>
             </>

@@ -3,7 +3,7 @@
 // client picker. Seeded from the mock roster; swap for Supabase later.
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { ROSTER, type RosterClient } from '../lib/trainerMock';
+import type { RosterClient } from '../lib/trainerMock';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 
@@ -20,7 +20,7 @@ interface RosterValue {
 const Ctx = createContext<RosterValue | null>(null);
 
 export function RosterProvider({ children }: { children: ReactNode }) {
-  const [roster, setRoster] = useState<RosterClient[]>(() => (USE_SUPABASE ? [] : JSON.parse(JSON.stringify(ROSTER))));
+  const [roster, setRoster] = useState<RosterClient[]>([]);
   // Trainer-set online/in-person overrides (persisted). Real DB clients default to
   // 'online'; this lets the coach classify each so the roster filter works for them.
   const [modeOverrides, setModeOverrides] = useState<Record<string, 'online' | 'inperson'>>({});
@@ -37,7 +37,7 @@ export function RosterProvider({ children }: { children: ReactNode }) {
         const { data: auth } = await supabase.auth.getUser();
         const uid = auth?.user?.id;
         if (cancelled) return;
-        if (!uid) { setRoster(JSON.parse(JSON.stringify(ROSTER))); return; }
+        if (!uid) { setRoster([]); return; }
         setUid(uid);
         // Coach-created (manual) clients — durable in coach_clients (session-9 SQL).
         let manual: RosterClient[] = [];

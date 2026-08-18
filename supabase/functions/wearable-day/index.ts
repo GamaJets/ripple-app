@@ -7,7 +7,7 @@ import { createClient } from 'jsr:@supabase/supabase-js@2';
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type' };
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...CORS, 'Content-Type': 'application/json' } });
 const today = () => new Date().toISOString().slice(0, 10);
-const numOr = (v: any): number | null => (Number.isFinite(Number(v)) ? Number(v) : null);
+const numOr = (v: any): number | null => (v == null ? null : Number.isFinite(Number(v)) ? Number(v) : null);
 
 const TOKEN_URL: Record<string, string> = {
   fitbit: 'https://api.fitbit.com/oauth2/token',
@@ -15,18 +15,37 @@ const TOKEN_URL: Record<string, string> = {
   whoop: 'https://api.prod.whoop.com/oauth/oauth2/token',
 };
 
+// Vendors disagree on how client credentials must be sent. WHOOP (Ory Hydra) is
+// registered for client_secret_post and REJECTS a request that also carries an
+// Authorization: Basic header, so try post-body first and fall back to Basic.
+// WHOOP also requires scope=offline on the refresh call to get a NEW refresh
+// token back; omit it and the next refresh has nothing to use.
 async function refresh(provider: string, refreshToken: string) {
   const clientId = Deno.env.get(`${provider.toUpperCase()}_CLIENT_ID`) || '';
   const clientSecret = Deno.env.get(`${provider.toUpperCase()}_CLIENT_SECRET`) || '';
-  const form = new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refreshToken, client_id: clientId });
-  const res = await fetch(TOKEN_URL[provider], {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded', Authorization: 'Basic ' + btoa(`${clientId}:${clientSecret}`) },
-    body: form.toString(),
-  });
-  const t = await res.json();
-  if (!res.ok || !t.access_token) return null;
-  return t;
+  if (!clientId || !clientSecret) return null;
+
+  const base = () => {
+    const f = new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refreshToken, client_id: clientId });
+    if (provider === 'whoop') f.set('scope', 'offline');
+    return f;
+  };
+
+  const postForm = base();
+  postForm.set('client_secret', clientSecret);
+  const attempts = [
+    { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: postForm },
+    { headers: { 'Content-Type': 'application/x-www-form-urlencoded', Authorization: 'Basic ' + btoa(`${clientId}:${clientSecret}`) }, body: base() },
+  ];
+
+  for (const a of attempts) {
+    try {
+      const res = await fetch(TOKEN_URL[provider], { method: 'POST', headers: a.headers, body: a.body.toString() });
+      const t = await res.json();
+      if (res.ok && t?.access_token) return t;
+    } catch { /* try the next auth method */ }
+  }
+  return null;
 }
 
 // ── Per-vendor readers → normalized shape ──────────────────────────────────

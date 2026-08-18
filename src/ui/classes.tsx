@@ -1,11 +1,11 @@
 // Group-classes store. Supabase-backed when signed in (gym_classes + class_bookings
-// with capacity-safe RPCs); falls back to a demo schedule so the screen always
-// renders. Booking rolls onto a waitlist when a class is full; cancelling frees a
+// with capacity-safe RPCs). Starts empty — no classes until the gym creates them.
+// Booking rolls onto a waitlist when a class is full; cancelling frees a
 // seat (the backend promotes the next waitlister).
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
-import { MOCK_CLASSES, type GymClass, type ClassBookingStatus } from '../lib/classesMock';
+import type { GymClass, ClassBookingStatus } from '../lib/classesMock';
 
 interface ClassesValue {
   classes: GymClass[];
@@ -26,7 +26,7 @@ const rowToClass = (r: any): GymClass => ({
 });
 
 export function ClassesProvider({ children }: { children: React.ReactNode }) {
-  const [classes, setClasses] = useState<GymClass[]>(() => JSON.parse(JSON.stringify(MOCK_CLASSES)));
+  const [classes, setClasses] = useState<GymClass[]>([]);
   const [myStatus, setMyStatus] = useState<Record<string, ClassBookingStatus>>({});
   const [uid, setUid] = useState<string | null>(null);
   const [ready, setReady] = useState(false);

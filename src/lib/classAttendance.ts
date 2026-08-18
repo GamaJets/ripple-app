@@ -38,19 +38,8 @@ export interface ClassSummaryRow {
   trainerId: string; trainerName: string; startsAt: string; booked: number; attended: number;
 }
 
-// A representative week of classes across branches/trainers for the demo view.
-const DEMO_SUMMARY: ClassSummaryRow[] = [
-  { classId: 'd1', title: 'HYROX', kind: 'HYROX', branch: 'Al Quoz', trainerId: 't1', trainerName: 'Andres Canty', startsAt: '', booked: 16, attended: 15 },
-  { classId: 'd2', title: 'CrossFit WOD', kind: 'CrossFit', branch: 'DIFC', trainerId: 't2', trainerName: 'Sara Lindqvist', startsAt: '', booked: 14, attended: 12 },
-  { classId: 'd3', title: 'Reformer Pilates', kind: 'Pilates', branch: 'Jumeirah Park', trainerId: 't3', trainerName: 'Aisha Rahman', startsAt: '', booked: 12, attended: 12 },
-  { classId: 'd4', title: 'Spin', kind: 'Cycle', branch: 'Yas Bay', trainerId: 't1', trainerName: 'Andres Canty', startsAt: '', booked: 20, attended: 17 },
-  { classId: 'd5', title: 'Yoga Flow', kind: 'Yoga', branch: 'Al Quoz', trainerId: 't3', trainerName: 'Aisha Rahman', startsAt: '', booked: 18, attended: 14 },
-  { classId: 'd6', title: 'HIIT', kind: 'HIIT', branch: 'Business Bay', trainerId: 't2', trainerName: 'Sara Lindqvist', startsAt: '', booked: 15, attended: 13 },
-  { classId: 'd7', title: 'Strength 101', kind: 'Strength', branch: 'Springs', trainerId: 't4', trainerName: 'Marcus Cole', startsAt: '', booked: 10, attended: 8 },
-  { classId: 'd8', title: 'HYROX', kind: 'HYROX', branch: 'DIFC', trainerId: 't1', trainerName: 'Andres Canty', startsAt: '', booked: 16, attended: 16 },
-];
 
-/** Class attendance over a date range for payroll + analytics (owner-wide). Demo when offline. */
+/** Class attendance over a date range for payroll + analytics (owner-wide). */
 export async function classSummary(fromISO: string, toISO: string): Promise<ClassSummaryRow[]> {
   if (USE_SUPABASE) {
     try {
@@ -62,5 +51,7 @@ export async function classSummary(fromISO: string, toISO: string): Promise<Clas
       }));
     } catch { /* fall back to demo */ }
   }
-  return DEMO_SUMMARY.map((r) => ({ ...r }));
+  // No rows means no classes in range. Return that honestly rather than
+  // falling back to DEMO_SUMMARY, which rendered invented attendance figures.
+  return [];
 }

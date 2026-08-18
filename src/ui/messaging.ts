@@ -1,10 +1,9 @@
 // Coach ↔ client chat thread. The thread is keyed by the client's id
-// (messages.client_id). Live via Supabase Realtime with optimistic send and a
-// defensive fallback to the in-memory mock so the screen never blanks/crashes.
+// (messages.client_id). Live via Supabase Realtime with optimistic send.
+// Starts empty — a thread with no messages shows no messages.
 import { useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
-import { MOCK_MESSAGES } from '../lib/mockData';
 import { sendPush } from './pushNotifications';
 import type { Message } from '../lib/types';
 
@@ -21,7 +20,7 @@ const rowToMsg = (r: any): Message => ({
  * @param role who I am in this thread ('client' | 'coach').
  */
 export function useThread(clientId: string | null, role: ChatRole) {
-  const [messages, setMessages] = useState<Message[]>(() => JSON.parse(JSON.stringify(MOCK_MESSAGES)));
+  const [messages, setMessages] = useState<Message[]>([]);
   const [ready, setReady] = useState(false);
   const tid = useRef<string | null>(clientId);
   const seen = useRef<Set<string>>(new Set());

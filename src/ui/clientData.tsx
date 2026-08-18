@@ -6,7 +6,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { ScanMetrics } from '../lib/inbodyMetrics';
-import { MOCK_CLIENT } from '../lib/mockData';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import type { Goal, Diet } from '../lib/types';
@@ -46,7 +45,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
   const [heightCm, setHeightCm] = useState(170);
   const [goal, setGoal] = useState<Goal>('muscle');
   const [coachingMode, setCoachingMode] = useState<CoachingMode>('online');
-  const [diet, setDiet] = useState<Diet>('balanced');
+  const [diet, setDiet] = useState<Diet>('meat');
   const [avoid, setAvoid] = useState<Allergen[]>([]);
   const [injuries, setInjuries] = useState<Injury[]>([]);
   const [focusAreas, setFocusAreas] = useState<string[]>([]);
@@ -104,30 +103,71 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
     setNameSynced(false);
     (async () => {
       try {
-        const { data, error } = await supabase.from('profiles').select('full_name').eq('id', sbUid).single();
-        if (!cancelled && !error && typeof data?.full_name === 'string' && data.full_name.trim()) {
-          setName(data.full_name.trim());
+        const { data, error } = await supabase.from('profiles').select('full_name, avatar').eq('id', sbUid).single();
+        if (!cancelled && !error) {
+          if (typeof data?.full_name === 'string' && data.full_name.trim()) setName(data.full_name.trim());
+          if (typeof data?.avatar === 'string' && data.avatar) setPhoto(data.avatar);
         }
       } catch { /* keep whatever we have */ }
+
+      // Read the rest of the profile back BEFORE the push effect below is allowed
+      // to run. Without this the local state is still at its defaults (the local
+      // cache is cleared on launch when USE_SUPABASE is on), and the push would
+      // overwrite the user's real goal/diet/allergens on the server with those
+      // defaults on every single app launch.
+      try {
+        const { data: c, error: cErr } = await supabase
+          .from('clients')
+          .select('dob, height_cm, goal, diet, avoid, mode, injuries, focus_areas, manual_weight_kg, manual_body_fat_pct, manual_at')
+          .eq('id', sbUid).single();
+        if (!cancelled && !cErr && c) {
+          const r = c as any;
+          if (typeof r.dob === 'string' && r.dob) setDob(r.dob);
+          if (r.height_cm != null && !Number.isNaN(Number(r.height_cm))) setHeightCm(Number(r.height_cm));
+          if (typeof r.goal === 'string' && r.goal) setGoal(r.goal as Goal);
+          if (typeof r.diet === 'string' && r.diet) setDiet(r.diet as Diet);
+          if (Array.isArray(r.avoid)) setAvoid(r.avoid);
+          if (r.mode === 'online' || r.mode === 'inperson' || r.mode === 'solo') setCoachingMode(r.mode);
+          if (Array.isArray(r.injuries)) setInjuries(r.injuries);
+          if (Array.isArray(r.focus_areas)) setFocusAreas(r.focus_areas);
+          if (r.manual_weight_kg != null && !Number.isNaN(Number(r.manual_weight_kg))) setManualWeight(Number(r.manual_weight_kg));
+          if (r.manual_body_fat_pct != null && !Number.isNaN(Number(r.manual_body_fat_pct))) setManualBodyFat(Number(r.manual_body_fat_pct));
+          if (typeof r.manual_at === 'string' && r.manual_at) setManualAt(r.manual_at);
+        }
+      } catch { /* keep whatever we have */ }
+
       if (!cancelled) setNameSynced(true);
     })();
     return () => { cancelled = true; };
   }, [sbUid]);
 
-  // Publish identity + goal to the shared backend so a LINKED trainer sees the real
-  // client (name/goal) instead of a placeholder. Best-effort & additive: it only
-  // updates existing rows (no-ops when the client isn't linked to a trainer yet),
-  // never clobbers how the client reads their own local data. Gated on nameSynced
-  // so this can never fire with a name that hasn't been reconciled against the
-  // signed-in user's real server-side profile first.
+  // Publish the profile to the shared backend: it is the durable store (the local
+  // cache is cleared on launch when USE_SUPABASE is on) and a LINKED trainer reads
+  // it to see the real client instead of a placeholder. Update-only, so it no-ops
+  // rather than inventing rows. Gated on nameSynced, which is now set only after
+  // BOTH the profiles and clients rows have been read back — otherwise this fires
+  // while state is still at its defaults and overwrites the user's real settings.
+  // Debounced so typing doesn't fire a write per keystroke; one round-trip per table.
   useEffect(() => {
     if (!USE_SUPABASE || !sbUid || !hydrated || !nameSynced) return;
-    try {
-      supabase.from('profiles').update({ full_name: name }).eq('id', sbUid).then(() => {}, () => {});
-      supabase.from('clients').update({ goal }).eq('id', sbUid).then(() => {}, () => {});
-      supabase.from('clients').update({ diet, meals_per_day: 3, avoid }).eq('id', sbUid).then(() => {}, () => {});
-    } catch { /* ignore */ }
-  }, [name, goal, diet, avoid, sbUid, hydrated, nameSynced]);
+    const timer = setTimeout(() => {
+      try {
+        supabase.from('profiles').update({ full_name: name, avatar: photo }).eq('id', sbUid).then(() => {}, () => {});
+        supabase.from('clients').update({
+          dob: dob || null,
+          height_cm: heightCm,
+          goal, diet, avoid,
+          mode: coachingMode,
+          injuries,
+          focus_areas: focusAreas,
+          manual_weight_kg: manualWeight ?? null,
+          manual_body_fat_pct: manualBodyFat ?? null,
+          manual_at: manualAt || null,
+        }).eq('id', sbUid).then(() => {}, () => {});
+      } catch { /* ignore */ }
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [name, photo, dob, heightCm, goal, diet, avoid, coachingMode, injuries, focusAreas, manualWeight, manualBodyFat, manualAt, sbUid, hydrated, nameSynced]);
 
   // Load locally-cached InBody composition metrics (keyed by scan date).
   useEffect(() => { (async () => { try { const raw = await AsyncStorage.getItem('repple.scanMetrics'); if (raw) setScanMetrics(JSON.parse(raw)); } catch { /* ignore */ } })(); }, []);

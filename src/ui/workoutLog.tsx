@@ -1,8 +1,8 @@
-// Shared, reactive workout log. Persists to Supabase per signed-in user when
-// available (hydrate-or-seed on mount + optimistic insert on log), and always
-// falls back to the in-memory mock so the app never blanks or crashes offline.
+// Shared, reactive workout log. Persists to Supabase per signed-in user
+// (hydrate on mount + optimistic insert on log). Starts empty: a new account has
+// no workout history until the user logs one. Never seeds demo data.
 import { createContext, useContext, useEffect, useState } from 'react';
-import { MOCK_CLIENT, type WorkoutEntry } from '../lib/mockData';
+import type { WorkoutEntry } from '../lib/mockData';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 
@@ -25,10 +25,10 @@ const entryToRow = (uid: string, e: WorkoutEntry) => ({
 });
 
 export function WorkoutLogProvider({ children }: { children: React.ReactNode }) {
-  const [log, setLog] = useState<WorkoutEntry[]>(() => JSON.parse(JSON.stringify(MOCK_CLIENT.log)));
+  const [log, setLog] = useState<WorkoutEntry[]>([]);
   const [uid, setUid] = useState<string | null>(null);
 
-  // Hydrate from Supabase (or seed it with the demo history) — never throws.
+  // Hydrate from Supabase — never throws, never seeds.
   useEffect(() => {
     if (!USE_SUPABASE) return;
     let cancelled = false;
@@ -41,13 +41,9 @@ export function WorkoutLogProvider({ children }: { children: React.ReactNode }) 
         const { data, error } = await supabase
           .from('workouts').select('*').eq('user_id', id).order('performed_at', { ascending: false });
         if (error || cancelled) return;
-        if (data && data.length) {
-          setLog(data.map(rowToEntry));
-        } else {
-          // First run for this user: seed the demo history so it persists.
-          await supabase.from('workouts').insert(MOCK_CLIENT.log.map((e) => entryToRow(id, e)));
-        }
-      } catch { /* stay on local mock */ }
+        // No rows means a genuinely empty history. Leave it empty.
+        setLog(data && data.length ? data.map(rowToEntry) : []);
+      } catch { /* leave the log empty */ }
     })();
     return () => { cancelled = true; };
   }, []);

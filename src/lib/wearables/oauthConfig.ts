@@ -4,6 +4,7 @@
 // never live in the app — they stay as Supabase edge-function secrets and are
 // only used server-side during the code→token exchange.
 import type { ProviderId } from './types';
+import Constants from 'expo-constants';
 
 export interface OAuthVendor {
   id: ProviderId;
@@ -17,7 +18,19 @@ export interface OAuthVendor {
 }
 
 const env = (k: string): string => {
-  try { return (process.env as any)?.[k] || ''; } catch { return ''; }
+  // In Expo, EXPO_PUBLIC_* variables are baked into the build
+  // Try accessing from process.env first (web), then Constants (native)
+  try {
+    const val = (process.env as any)?.[k];
+    if (val) return val;
+  } catch { }
+  
+  try {
+    const val = (Constants.expoConfig?.extra as any)?.[k];
+    if (val) return val;
+  } catch { }
+  
+  return '';
 };
 
 // The redirect must exactly match what you register with each vendor.
@@ -47,7 +60,10 @@ export const OAUTH_VENDORS: Partial<Record<ProviderId, OAuthVendor>> = {
     id: 'whoop',
     authorizeUrl: 'https://api.prod.whoop.com/oauth/oauth2/auth',
     tokenUrl: 'https://api.prod.whoop.com/oauth/oauth2/token',
-    scopes: ['read:recovery', 'read:cycles', 'read:workout', 'read:profile'],
+    // 'offline' is required for WHOOP to issue a refresh_token at all. Without
+    // it the connection dies silently ~1h after connecting, with no way to
+    // recover except reconnecting by hand.
+    scopes: ['read:recovery', 'read:cycles', 'read:workout', 'read:profile', 'offline'],
     clientId: env('EXPO_PUBLIC_WHOOP_CLIENT_ID'),
     usePKCE: false,
     note: 'Register at developer.whoop.com → set EXPO_PUBLIC_WHOOP_CLIENT_ID and WHOOP_CLIENT_SECRET.',

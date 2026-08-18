@@ -5,7 +5,7 @@
 // No desktop required — the whole record → upload → assign loop is on the phone.
 import { useEffect, useState, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { EX_VIDEOS, type ExVideo } from '../lib/trainerMock';
+import type { ExVideo } from '../lib/trainerMock';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 
@@ -81,6 +81,6 @@ export function useExerciseVideos() {
     persist(added.filter((x) => x.id !== id));
   };
 
-  const videos: VideoItem[] = [...remote, ...added, ...(EX_VIDEOS as VideoItem[])];
+  const videos: VideoItem[] = [...remote, ...added];
   return { videos, addVideo, removeVideo, reload: load };
 }

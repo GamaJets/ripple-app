@@ -11,7 +11,6 @@ import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useCheckIns } from '../../src/ui/checkins';
 import { useSessions } from '../../src/ui/sessions';
 import { currentStreak, isNewPR, streakMilestone } from '../../src/lib/streaks';
-import { MOCK_MESSAGES } from '../../src/lib/mockData';
 import { useClientData } from '../../src/ui/clientData';
 import { SessionHrSheet } from '../../src/ui/SessionHrSheet';
 import { ageFromDob } from '../../src/lib/hr';
@@ -67,8 +66,6 @@ export default function Activity() {
  for (const s of sessions) {
  if (s.status === 'booked' && s.clientId === CLIENT_ID) events.push({ at: s.startsAt, icon: 'calendar', title: 'Session booked', sub: `${timeLabel(s.startsAt)} · ${s.durationMin} min`, route: '/(client)/bookings' });
  }
- // Coach messages
- for (const m of MOCK_MESSAGES) if (m.sender === 'coach') events.push({ at: m.createdAt, icon: 'message', title: 'Message from your coach', sub: m.body, route: '/(client)/messages' });
 
  events.sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
  const feed = events.slice(0, 40);

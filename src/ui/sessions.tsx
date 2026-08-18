@@ -4,7 +4,6 @@
 // Persists to Supabase `sessions` (RLS: trainer owns; client reads coach's slots;
 // book/cancel via RPC) with a defensive in-memory fallback + booking reminder.
 import { createContext, useContext, useEffect, useState } from 'react';
-import { MOCK_SESSIONS } from '../lib/mockData';
 import { overlaps } from '../lib/booking';
 import type { TrainingSession } from '../lib/types';
 import { scheduleLocal } from './pushNotifications';
@@ -29,7 +28,7 @@ const rowToSession = (r: any): TrainingSession => ({
 const Ctx = createContext<SessionsValue | null>(null);
 
 export function SessionsProvider({ children }: { children: React.ReactNode }) {
-  const [sessions, setSessions] = useState<TrainingSession[]>(() => JSON.parse(JSON.stringify(MOCK_SESSIONS)));
+  const [sessions, setSessions] = useState<TrainingSession[]>([]);
   const [uid, setUid] = useState<string | null>(null);
 
   useEffect(() => {

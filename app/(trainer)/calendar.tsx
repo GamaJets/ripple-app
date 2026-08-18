@@ -10,7 +10,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
-import { MOCK_TRAINER } from '../../src/lib/mockData';
 import { useCoachProfile } from '../../src/ui/coachProfile';
 import { cancelSession } from '../../src/lib/booking';
 import { useSessions } from '../../src/ui/sessions';
@@ -58,7 +57,7 @@ export default function TrainerSchedule() {
     let added = 0;
     for (const sl of availSlots) {
       for (const d of upcomingDates(sl.dow, sl.hour, 4)) {
-        const ses: TrainingSession = { id: 'ms' + (SEQ++), trainerId: MOCK_TRAINER.id, clientId: null, startsAt: d.toISOString(), durationMin: sl.dur, status: 'available', released: false };
+        const ses: TrainingSession = { id: 'ms' + (SEQ++), trainerId: '', clientId: null, startsAt: d.toISOString(), durationMin: sl.dur, status: 'available', released: false };
         if (addSession(ses).ok) added++;
       }
     }
@@ -97,7 +96,7 @@ export default function TrainerSchedule() {
   function handleAdd() {
     const d = new Date(selY, selM, selD); d.setHours(addHour, 0, 0, 0);
     const s: TrainingSession = {
-      id: `ms${SEQ++}`, trainerId: MOCK_TRAINER.id, clientId: addClient,
+      id: `ms${SEQ++}`, trainerId: '', clientId: addClient,
       startsAt: d.toISOString(), durationMin: addDur,
       status: addClient ? 'booked' : 'available', released: false,
     };
