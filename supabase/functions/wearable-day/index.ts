@@ -80,7 +80,7 @@ async function ouraDay(token: string) {
 
 async function whoopDay(token: string) {
   const h = { Authorization: 'Bearer ' + token };
-  const out: any = { activeKcal: null, steps: null, heartRateAvg: null, heartRateResting: null, workoutMins: null };
+  const out: any = { activeKcal: null, steps: null, heartRateAvg: null, heartRateResting: null, workoutMins: null, heartRateMax: null, zoneSeconds: null };
   // WHOOP v2. Cycle = a physiological day: energy (kilojoule) + average HR.
   try {
     const c = await (await fetch('https://api.prod.whoop.com/developer/v2/cycle?limit=1', { headers: h })).json();
@@ -95,14 +95,40 @@ async function whoopDay(token: string) {
     const r = await (await fetch('https://api.prod.whoop.com/developer/v2/recovery?limit=1', { headers: h })).json();
     out.heartRateResting = numOr(r?.records?.[0]?.score?.resting_heart_rate);
   } catch { /* leave nulls */ }
-  // Sum today's workout durations.
+  // Sum today's workout durations, and roll up time-in-zone.
+  //
+  // WHOOP exposes NO intraday heart-rate samples, so a live HR curve is not
+  // possible from this API. What it does give is per-workout zone durations, which
+  // is the Orange-Theory-style number that actually matters: how long you spent in
+  // each effort band. WHOOP uses 6 bands (0-50/50-60/60-70/70-80/80-90/90-100% of
+  // max HR); this app models 5 (rest <50, warmup 50-65, aerobic 65-80, threshold
+  // 80-90, max >=90). zone_two (60-70%) straddles warmup and aerobic and is
+  // assigned to aerobic — the only approximation in the mapping.
   try {
     const start = today() + 'T00:00:00.000Z';
     const w = await (await fetch(`https://api.prod.whoop.com/developer/v2/activity/workout?start=${start}&limit=25`, { headers: h })).json();
     const recs = Array.isArray(w?.records) ? w.records : [];
     let mins = 0;
-    for (const rec of recs) { if (rec?.start && rec?.end) mins += Math.max(0, (Date.parse(rec.end) - Date.parse(rec.start)) / 60000); }
+    const zones = { rest: 0, warmup: 0, aerobic: 0, threshold: 0, max: 0 };
+    let maxHrSeen = 0;
+    for (const rec of recs) {
+      if (rec?.start && rec?.end) mins += Math.max(0, (Date.parse(rec.end) - Date.parse(rec.start)) / 60000);
+      const zd = rec?.score?.zone_durations ?? rec?.score?.zone_duration;
+      if (zd) {
+        const sec = (v: any) => (Number.isFinite(Number(v)) ? Number(v) / 1000 : 0);
+        zones.rest      += sec(zd.zone_zero_milli);
+        zones.warmup    += sec(zd.zone_one_milli);
+        zones.aerobic   += sec(zd.zone_two_milli) + sec(zd.zone_three_milli);
+        zones.threshold += sec(zd.zone_four_milli);
+        zones.max       += sec(zd.zone_five_milli);
+      }
+      const mh = Number(rec?.score?.max_heart_rate);
+      if (Number.isFinite(mh) && mh > maxHrSeen) maxHrSeen = mh;
+    }
     if (mins > 0) out.workoutMins = Math.round(mins);
+    if (maxHrSeen > 0) out.heartRateMax = Math.round(maxHrSeen);
+    const zTotal = Object.values(zones).reduce((a, b) => a + b, 0);
+    if (zTotal > 0) out.zoneSeconds = zones;
   } catch { /* leave nulls */ }
   // WHOOP has no step counter → steps stays null.
   return out;

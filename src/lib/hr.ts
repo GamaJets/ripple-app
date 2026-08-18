@@ -78,23 +78,3 @@ export function timeInZones(samples: HrSample[], age?: number | null): Record<Hr
   }
   return out;
 }
-
-/** A deterministic demo session HR curve (~45 min) so the chart shows on devices
- *  without a connected watch. Warm-up ramp → intervals into orange/red → cooldown. */
-export function demoHrSeries(age?: number | null, nowMs: number = Date.now(), durationMin: number = 45): HrSample[] {
-  const m = maxHr(age);
-  const out: HrSample[] = [];
-  const dur = Math.max(10, Math.round(durationMin));
-  const start = nowMs - dur * 60 * 1000;
-  const ramp = Math.min(8, dur * 0.2);        // warm-up ~20% of session, max 8 min
-  const cool = Math.max(3, Math.round(dur * 0.1)); // cooldown ~10%
-  for (let i = 0; i <= dur; i++) {
-    const x = i / dur;
-    let pct = 0.56 + 0.22 * Math.min(1, i / ramp);        // warm-up ramp to ~aerobic
-    pct += 0.17 * Math.sin(i / 2.1) * (x > 0.18 && x < 0.85 ? 1 : 0); // work intervals into orange/red
-    if (i > dur - cool) pct -= 0.02 * (i - (dur - cool));  // cooldown
-    const bpm = Math.round(Math.max(0.5, Math.min(1.05, pct)) * m);
-    out.push({ t: new Date(start + i * 60 * 1000).toISOString(), bpm });
-  }
-  return out;
-}

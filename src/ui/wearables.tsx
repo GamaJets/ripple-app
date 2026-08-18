@@ -29,6 +29,9 @@ interface Value {
   connect: (id: ProviderId) => Promise<void>;
   disconnect: (id: ProviderId) => Promise<void>;
   sync: (id: ProviderId) => Promise<void>;
+  /** Turn on fast (5s) polling of local sources while a workout is running. */
+  liveMode: boolean;
+  setLiveMode: (on: boolean) => void;
   /** Re-sync every connected+available provider now (used by the live workout view). */
   syncAll: () => void;
   /** Combined "today" roll-up across every connected device (for the dashboard). */
@@ -121,10 +124,33 @@ export function WearablesProvider({ children }: { children: ReactNode }) {
       if (statesRef.current[p.meta.id] === 'connected' && p.isAvailable()) sync(p.meta.id as ProviderId);
     }
   }, [sync]);
+  // Refresh cadence. This used to be a flat 60s for everything, which is both too
+  // slow to watch your heart rate move during a session and pointlessly fast when
+  // the app is just sitting open.
+  //
+  // The right interval depends on the SOURCE, not on us:
+  //   Apple Watch / HealthKit  local reads, no quota — poll fast while training
+  //   WHOOP / Oura / Fitbit    cloud APIs with rate limits, and they only return
+  //                            day-level aggregates anyway, so a fast poll would
+  //                            burn quota to fetch the identical number. WHOOP's
+  //                            limit is 100 req/min; 60s keeps us nowhere near it.
+  const [liveMode, setLiveMode] = useState(false);
   useEffect(() => {
+    const localOnly = () => {
+      for (const p of PROVIDERS) {
+        if (statesRef.current[p.meta.id] !== 'connected' || !p.isAvailable()) continue;
+        if (p.meta.kind === 'healthkit' || p.meta.kind === 'health-connect') sync(p.meta.id as ProviderId);
+      }
+    };
+    if (liveMode) {
+      // During a workout: local sources every 5s, cloud sources still every 60s.
+      const fast = setInterval(localOnly, 5000);
+      const slow = setInterval(() => { syncAll(); }, 60000);
+      return () => { clearInterval(fast); clearInterval(slow); };
+    }
     const timer = setInterval(() => { syncAll(); }, 60000);
     return () => clearInterval(timer);
-  }, [syncAll]);
+  }, [syncAll, sync, liveMode]);
 
   const connectedMetrics = PROVIDERS
     .filter((p) => states[p.meta.id] === 'connected')
@@ -146,7 +172,7 @@ export function WearablesProvider({ children }: { children: ReactNode }) {
     heartRateLatest: hrl && hrl.length ? Math.round(hrl[hrl.length - 1]) : null,
   };
 
-  return <Ctx.Provider value={{ states, metrics, busy, lastSync, connect, disconnect, sync, syncAll, today }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ states, metrics, busy, lastSync, connect, disconnect, sync, syncAll, today, liveMode, setLiveMode }}>{children}</Ctx.Provider>;
 }
 
 export function useWearables(): Value {

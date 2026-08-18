@@ -6,8 +6,9 @@ import { useEffect, useState } from 'react';
 import { View, Text, Pressable, Modal, ActivityIndicator } from 'react-native';
 import { useTheme } from './components';
 import { HrZoneChart } from './HrZoneChart';
-import { demoHrSeries, type HrSample } from '../lib/hr';
+import type { HrSample } from '../lib/hr';
 import { PROVIDERS } from '../lib/wearables/registry';
+import { reportError } from '../lib/reportError';
 
 export function SessionHrSheet({ visible, onClose, title, startISO, durationMin, age }: {
   visible: boolean; onClose: () => void; title: string; startISO: string; durationMin: number; age?: number | null;
@@ -28,9 +29,11 @@ export function SessionHrSheet({ visible, onClose, title, startISO, durationMin,
         try {
           const s = await fetchHr(new Date(startMs).toISOString(), new Date(endMs).toISOString());
           if (!cancelled && s && s.length >= 2) { setState({ samples: s, live: true }); return; }
-        } catch { /* fall through to sample */ }
+        } catch (e) { reportError('sessionHrSheet.appleHrSeries', e); }
       }
-      if (!cancelled) setState({ samples: demoHrSeries(age, isFinite(endMs) ? endMs : Date.now(), mins), live: false });
+      // No demo curve. If HealthKit has nothing for this window the chart says so,
+      // rather than showing a fabricated session as if it were the user's own.
+      if (!cancelled) setState({ samples: [], live: false });
     })();
     return () => { cancelled = true; };
   }, [visible, startISO, durationMin, age]);

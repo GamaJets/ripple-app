@@ -47,6 +47,8 @@ export function makeCloudProvider(meta: ProviderMeta): WearableProvider {
       m.steps = typeof raw.steps === 'number' ? raw.steps : null;
       m.heartRateAvg = typeof raw.heartRateAvg === 'number' ? raw.heartRateAvg : null;
       m.heartRateResting = typeof raw.heartRateResting === 'number' ? raw.heartRateResting : null;
+      m.heartRateMax = typeof raw.heartRateMax === 'number' ? raw.heartRateMax : null;
+      m.zoneSeconds = raw.zoneSeconds && typeof raw.zoneSeconds === 'object' ? raw.zoneSeconds : null;
       m.workoutMins = typeof raw.workoutMins === 'number' ? raw.workoutMins : null;
       return m;
     },

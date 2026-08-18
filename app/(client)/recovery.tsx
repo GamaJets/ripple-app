@@ -8,7 +8,9 @@ import { useTheme } from '../../src/ui/components';
 import { useWellness } from '../../src/ui/wellness';
 import { useClientData } from '../../src/ui/clientData';
 import { HrZoneChart } from '../../src/ui/HrZoneChart';
-import { ageFromDob, demoHrSeries, type HrSample } from '../../src/lib/hr';
+import { ageFromDob, type HrSample } from '../../src/lib/hr';
+import { useWearables } from '../../src/ui/wearables';
+import { reportError } from '../../src/lib/reportError';
 import { PROVIDERS } from '../../src/lib/wearables/registry';
 
 const MOBILITY = [
@@ -22,8 +24,14 @@ export default function Recovery() {
  const router = useRouter();
  const { cups, goalCups, addCup, removeCup, sleep, addSleep } = useWellness();
  const cd = useClientData();
+ const wear = useWearables();
  const age = ageFromDob(cd.dob);
- const [hr, setHr] = useState<{ samples: HrSample[]; live: boolean }>({ samples: demoHrSeries(age), live: false });
+ // Source order, most to least detailed. No demo fallback: an empty chart that
+ // says so beats a fabricated curve that looks like the user's own training.
+ //   1. Apple Watch / HealthKit — real HR samples, so a full coloured line
+ //   2. WHOOP — no intraday samples exist in its API, but per-workout zone
+ //      durations do, which still answers "how long was I in each zone"
+ const [hr, setHr] = useState<{ samples: HrSample[]; source: 'apple' | null }>({ samples: [], source: null });
  useEffect(() => {
    let cancelled = false;
    (async () => {
@@ -33,13 +41,18 @@ export default function Recovery() {
        try {
          const start = new Date(); start.setHours(0, 0, 0, 0);
          const s = await fetchHr(start.toISOString(), new Date().toISOString());
-         if (!cancelled && s && s.length >= 2) { setHr({ samples: s, live: true }); return; }
-       } catch { /* fall back to demo */ }
+         if (!cancelled && s && s.length >= 2) { setHr({ samples: s, source: 'apple' }); return; }
+       } catch (e) { reportError('recovery.appleHrSeries', e); }
      }
-     if (!cancelled) setHr({ samples: demoHrSeries(age), live: false });
+     if (!cancelled) setHr({ samples: [], source: null });
    })();
    return () => { cancelled = true; };
  }, [age]);
+
+ // WHOOP zone totals, straight off the wearables context (no extra round trip).
+ const whoopMetrics = wear.metrics?.whoop ?? null;
+ const zoneSeconds = hr.source === 'apple' ? null : (whoopMetrics?.zoneSeconds ?? null);
+ const hrSource: 'apple' | 'whoop' | null = hr.source === 'apple' ? 'apple' : (zoneSeconds ? 'whoop' : null);
  const [hrs, setHrs] = useState('7.5');
  const [q, setQ] = useState(4);
  const [openRoutine, setOpenRoutine] = useState<number | null>(0);
@@ -58,8 +71,18 @@ export default function Recovery() {
 
  {/* Heart-rate zones */}
  <View style={{ marginBottom: 14 }}>
-  <HrZoneChart samples={hr.samples} age={age} title="Heart-rate zones"
-   subtitle={hr.live ? "Today, from your Apple Watch" : "Sample session — connect Apple Health in Devices for your live zones"} />
+  <HrZoneChart
+   samples={hr.samples}
+   zoneSeconds={zoneSeconds}
+   avgBpm={hrSource === 'whoop' ? whoopMetrics?.heartRateAvg ?? null : null}
+   maxBpm={hrSource === 'whoop' ? whoopMetrics?.heartRateMax ?? null : null}
+   age={age}
+   title="Heart-rate zones"
+   subtitle={
+     hrSource === 'apple' ? 'Today, from your Apple Watch'
+     : hrSource === 'whoop' ? "Today's workouts, from WHOOP"
+     : 'Connect a device in Watch & Devices to see your zones'
+   } />
  </View>
 
  {/* Hydration */}

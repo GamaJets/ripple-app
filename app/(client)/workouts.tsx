@@ -73,6 +73,17 @@ export default function Train() {
   const [deloadDismiss, setDeloadDismiss] = useState(false);
   const { videos: exVideos } = useExerciseVideos();
   const [session, setSession] = useState(false);
+
+  // While the guided session modal is open, poll local HR sources every 5s instead
+  // of every 60s so the live heart rate actually tracks what you're doing. Cloud
+  // vendors stay on the slow cadence — they only return day aggregates and have
+  // rate limits. Always turned back off on unmount so a backgrounded app doesn't
+  // keep fast-polling.
+  const setLiveMode = w.setLiveMode;
+  useEffect(() => {
+    setLiveMode(session);
+    return () => setLiveMode(false);
+  }, [session, setLiveMode]);
   const [ctype, setCtype] = useState(CARDIO[0]); const [mins, setMins] = useState(''); const [dist, setDist] = useState(''); const [unit, setUnit] = useState<'km' | 'mi'>('km');
   const [watts, setWatts] = useState(''); const [kcalIn, setKcalIn] = useState('');
   const [hrEntry, setHrEntry] = useState<WorkoutEntry | null>(null);

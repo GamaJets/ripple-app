@@ -15,6 +15,10 @@ export interface DailyMetrics {
   heartRateAvg: number | null;  // bpm, mean of today's samples
   heartRateLatest: number | null; // bpm, most recent sample (live-ish during a workout)
   heartRateResting: number | null;
+  heartRateMax: number | null;    // bpm, peak of today's workouts
+  /** Seconds per training zone. WHOOP reports these per workout; HealthKit gives
+   *  raw samples instead, from which the client derives the same shape. */
+  zoneSeconds: { rest: number; warmup: number; aerobic: number; threshold: number; max: number } | null;
   workoutMins: number | null;
   updatedAt: string;            // ISO timestamp of the sync
   source: ProviderId;
@@ -65,5 +69,5 @@ export interface WearableProvider {
 export function emptyMetrics(source: ProviderId): DailyMetrics {
   const d = new Date();
   const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  return { date, activeKcal: null, steps: null, heartRateAvg: null, heartRateLatest: null, heartRateResting: null, workoutMins: null, updatedAt: d.toISOString(), source };
+  return { date, activeKcal: null, steps: null, heartRateAvg: null, heartRateLatest: null, heartRateResting: null, heartRateMax: null, zoneSeconds: null, workoutMins: null, updatedAt: d.toISOString(), source };
 }
