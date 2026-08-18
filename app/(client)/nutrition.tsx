@@ -271,6 +271,31 @@ export default function Nutrition() {
         {view === 'today' ? (
           <>
         <Text style={{ color: t.ink3, fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.9, marginBottom: 9 }}>Today's plan · {plan.length} meals</Text>
+        {/* Meals per day. This drives slotsFor() — 3 gives breakfast/lunch/dinner,
+            4 adds a snack, 5 splits into two snacks — so changing it rebuilds the
+            plan and the macro split immediately. */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12 }}>
+          <Text style={{ color: t.ink3, fontSize: 12, marginRight: 2 }}>Meals per day</Text>
+          {([3, 4, 5] as const).map((n) => {
+            const on = c.mealsPerDay === n;
+            return (
+              <Pressable
+                key={n}
+                onPress={() => c.setMealsPerDay(n)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: on }}
+                accessibilityLabel={`${n} meals per day`}
+                style={{
+                  minWidth: 34, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999,
+                  borderWidth: 1, alignItems: 'center',
+                  backgroundColor: on ? t.brand : 'transparent',
+                  borderColor: on ? t.brand : t.ring,
+                }}>
+                <Text style={{ color: on ? t.brandInk : t.ink2, fontSize: 12.5, fontWeight: on ? '800' : '600' }}>{n}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
         {plan.map((m) => (
           <Pressable key={m.pos} onPress={() => setRecipe(m)} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 14, marginBottom: 9, flexDirection: 'row', alignItems: 'center' }}>
             <View style={{ flex: 1, paddingRight: 12 }}>

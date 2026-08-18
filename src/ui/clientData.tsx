@@ -27,7 +27,8 @@ interface Value {
   avoid: Allergen[]; setAvoid: (v: Allergen[]) => void;
   injuries: Injury[]; addInjury: (v: Injury) => void; updateInjury: (id: string, patch: Partial<Injury>) => void; removeInjury: (id: string) => void;
   focusAreas: string[]; setFocusAreas: (v: string[]) => void;
-  activity: number; mealsPerDay: 3 | 4 | 5;
+  activity: number;
+  mealsPerDay: 3 | 4 | 5; setMealsPerDay: (v: 3 | 4 | 5) => void;
   weightKg: number; bodyFatPct: number; muscleKg: number;
   setWeightKg: (v: number) => void; setBodyFat: (v: number) => void;
   scans: ScanRec[]; addScan: (s: ScanRec) => void;
@@ -50,6 +51,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
   const [avoid, setAvoid] = useState<Allergen[]>([]);
   const [injuries, setInjuries] = useState<Injury[]>([]);
   const [focusAreas, setFocusAreas] = useState<string[]>([]);
+  const [mealsPerDay, setMealsPerDay] = useState<3 | 4 | 5>(3);
   const [scans, setScans] = useState<ScanRec[]>([]);
   const [scanMetrics, setScanMetrics] = useState<Record<string, ScanMetrics>>({});
   const [manualWeight, setManualWeight] = useState<number | null>(null);
@@ -81,6 +83,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
           if (typeof p.bodyFatPct === 'number') setManualBodyFat(p.bodyFatPct);
           if (typeof p.manualAt === 'string') setManualAt(p.manualAt);
           if (typeof p.photo === 'string') setPhoto(p.photo);
+          if (p.mealsPerDay === 3 || p.mealsPerDay === 4 || p.mealsPerDay === 5) setMealsPerDay(p.mealsPerDay);
         }
       }
     } catch {}
@@ -90,8 +93,8 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
   // Persist edits once hydrated (avoids clobbering saved data with defaults on boot).
   useEffect(() => {
     if (!hydrated) return;
-    AsyncStorage.setItem(KEY, JSON.stringify({ name, dob, heightCm, goal, diet, avoid, injuries, focusAreas, coachingMode, weightKg: manualWeight, bodyFatPct: manualBodyFat, manualAt, photo })).catch(() => {});
-  }, [hydrated, name, dob, heightCm, goal, diet, avoid, injuries, focusAreas, coachingMode, manualWeight, manualBodyFat, manualAt, photo]);
+    AsyncStorage.setItem(KEY, JSON.stringify({ name, dob, heightCm, goal, diet, avoid, injuries, focusAreas, coachingMode, mealsPerDay, weightKg: manualWeight, bodyFatPct: manualBodyFat, manualAt, photo })).catch(() => {});
+  }, [hydrated, name, dob, heightCm, goal, diet, avoid, injuries, focusAreas, coachingMode, mealsPerDay, manualWeight, manualBodyFat, manualAt, photo]);
 
   // Pull the real signed-in user's name from the server BEFORE any push below is
   // allowed to run. This guards against a stale/cross-account name that was
@@ -119,7 +122,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
       try {
         const { data: c, error: cErr } = await supabase
           .from('clients')
-          .select('dob, height_cm, goal, diet, avoid, mode, injuries, focus_areas, manual_weight_kg, manual_body_fat_pct, manual_at')
+          .select('dob, height_cm, goal, diet, avoid, mode, injuries, focus_areas, manual_weight_kg, manual_body_fat_pct, manual_at, meals_per_day')
           .eq('id', sbUid).single();
         if (!cancelled && !cErr && c) {
           const r = c as any;
@@ -134,6 +137,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
           if (r.manual_weight_kg != null && !Number.isNaN(Number(r.manual_weight_kg))) setManualWeight(Number(r.manual_weight_kg));
           if (r.manual_body_fat_pct != null && !Number.isNaN(Number(r.manual_body_fat_pct))) setManualBodyFat(Number(r.manual_body_fat_pct));
           if (typeof r.manual_at === 'string' && r.manual_at) setManualAt(r.manual_at);
+          if (r.meals_per_day === 3 || r.meals_per_day === 4 || r.meals_per_day === 5) setMealsPerDay(r.meals_per_day);
         }
       } catch (e) { reportError('clientData.hydrate.clients', e); }
 
@@ -158,6 +162,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
           dob: dob || null,
           height_cm: heightCm,
           goal, diet, avoid,
+          meals_per_day: mealsPerDay,
           mode: coachingMode,
           injuries,
           focus_areas: focusAreas,
@@ -168,7 +173,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
       } catch { /* ignore */ }
     }, 600);
     return () => clearTimeout(timer);
-  }, [name, photo, dob, heightCm, goal, diet, avoid, coachingMode, injuries, focusAreas, manualWeight, manualBodyFat, manualAt, sbUid, hydrated, nameSynced]);
+  }, [name, photo, dob, heightCm, goal, diet, avoid, mealsPerDay, coachingMode, injuries, focusAreas, manualWeight, manualBodyFat, manualAt, sbUid, hydrated, nameSynced]);
 
   // Load locally-cached InBody composition metrics (keyed by scan date).
   useEffect(() => { (async () => { try { const raw = await AsyncStorage.getItem('repple.scanMetrics'); if (raw) setScanMetrics(JSON.parse(raw)); } catch { /* ignore */ } })(); }, []);
@@ -226,7 +231,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
     updateInjury: (id, patch) => setInjuries((p) => p.map((i) => (i.id === id ? { ...i, ...patch } : i))),
     removeInjury: (id) => setInjuries((p) => p.filter((i) => i.id !== id)),
     coachingMode, setCoachingMode,
-    activity: 1.5, mealsPerDay: 3 as 3 | 4 | 5,
+    activity: 1.5, mealsPerDay, setMealsPerDay,
     weightKg, bodyFatPct, muscleKg: latest.skeletalMuscleKg,
     setWeightKg: (v) => { setManualWeight(v); setManualAt(new Date().toISOString()); }, setBodyFat: (v) => { setManualBodyFat(v); setManualAt(new Date().toISOString()); },
     scans: sorted, addScan: (s) => { setScans((p) => [...p, s]); if (s.metrics && Object.values(s.metrics).some((v) => v != null)) { setScanMetrics((prev) => { const nm = { ...prev, [s.takenAt.slice(0, 10)]: s.metrics! }; AsyncStorage.setItem('repple.scanMetrics', JSON.stringify(nm)).catch(() => {}); return nm; }); } setManualWeight(null); setManualBodyFat(null); if (USE_SUPABASE && sbUid) { try { supabase.from('scans').insert({ client_id: sbUid, taken_at: String(s.takenAt).slice(0, 10), weight_kg: s.weightKg, body_fat_pct: s.bodyFatPct, skeletal_muscle_kg: s.skeletalMuscleKg, source: s.source }).select('id').single().then((res: any) => { const rid = res && res.data && res.data.id; if (rid && s.metrics && Object.values(s.metrics).some((v) => v != null)) { supabase.from('scans').update({ metrics: s.metrics }).eq('id', rid).then(() => {}, () => {}); } }, () => {}); } catch { /* ignore */ } } },
