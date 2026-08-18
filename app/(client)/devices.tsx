@@ -123,7 +123,15 @@ export default function Devices() {
  const importOne = async (sm: WorkoutSample) => { if (alreadyLogged(sm)) return; addWorkouts([await withHr(sm)]); markImported([sm.id]); tapLight(); };
  const importAll = async () => { const fresh = (wk || []).filter((sm) => !alreadyLogged(sm)); if (!fresh.length) return; addWorkouts(await Promise.all(fresh.map(withHr))); markImported(fresh.map((sm) => sm.id)); tapLight(); };
  // Auto-refresh whenever this screen opens (plus the 60s auto-sync in the store).
- useFocusEffect(useCallback(() => { for (const pv of PROVIDERS) { if (pv.isAvailable()) w.sync(pv.meta.id); } }, [w.sync]));
+ // Only re-sync providers that are actually CONNECTED. This used to hit every
+ // available provider, so opening this screen fired wearable-day for WHOOP, Oura,
+ // Fitbit and Garmin alike — three pointless edge-function round trips per visit
+ // for vendors with no stored token, each logging a notConnected report.
+ useFocusEffect(useCallback(() => {
+  for (const pv of PROVIDERS) {
+   if (pv.isAvailable() && w.states[pv.meta.id] === 'connected') w.sync(pv.meta.id);
+  }
+ }, [w.sync, w.states]));
 
  const onConnect = async (p: WearableProvider) => {
  const reason = p.unavailableReason();
