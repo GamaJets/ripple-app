@@ -1,6 +1,6 @@
 // Body measurements (cm) the client logs over time, complementing InBody scans.
 // Persists to Supabase `measurements` (one row per body-part per date) with a
-// hydrate-or-seed pattern + defensive in-memory fallback.
+// hydrate-only: an empty result is an empty history, never a cue to seed.
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
@@ -19,10 +19,6 @@ export const METRICS: { key: keyof Omit<MeasureEntry, 'id' | 'at'>; label: strin
 ];
 
 let SEQ = 1;
-const seed: MeasureEntry[] = [
-  { id: 'm-seed1', at: new Date(Date.now() - 35 * 86400000).toISOString(), waist: 82, chest: 98, arm: 31, thigh: 58, hips: 96 },
-  { id: 'm-seed2', at: new Date(Date.now() - 5 * 86400000).toISOString(), waist: 79, chest: 99, arm: 32, thigh: 57, hips: 94 },
-];
 
 const dateOf = (iso: string) => iso.slice(0, 10);
 // group flat rows [{taken_at, kind, value}] into MeasureEntry per date
@@ -49,7 +45,7 @@ interface MeasureValue {
 const Ctx = createContext<MeasureValue | null>(null);
 
 export function MeasurementsProvider({ children }: { children: ReactNode }) {
-  const [entries, setEntries] = useState<MeasureEntry[]>(() => JSON.parse(JSON.stringify(seed)));
+  const [entries, setEntries] = useState<MeasureEntry[]>([]);
   const [uid, setUid] = useState<string | null>(null);
 
   useEffect(() => {
@@ -61,8 +57,9 @@ export function MeasurementsProvider({ children }: { children: ReactNode }) {
         const id = auth?.user?.id; if (!id || cancelled) return; setUid(id);
         const { data, error } = await supabase.from('measurements').select('*').eq('user_id', id).order('taken_at', { ascending: false });
         if (error || cancelled) return;
-        if (data && data.length) setEntries(rowsToEntries(data));
-        else { const rows = seed.flatMap((e) => entryToRows(id, e)); if (rows.length) await supabase.from('measurements').insert(rows); }
+        // Same rule as check-ins and the workout log: an empty result is an empty
+        // history, not a cue to write fabricated measurements into Supabase.
+        setEntries(data && data.length ? rowsToEntries(data) : []);
       } catch { /* stay on mock */ }
     })();
     return () => { cancelled = true; };

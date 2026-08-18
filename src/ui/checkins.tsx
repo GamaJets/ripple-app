@@ -18,9 +18,6 @@ interface CheckInsValue {
 
 let SEQ = 700;
 const daysAgo = (n: number) => { const d = new Date(); d.setDate(d.getDate() - n); return d.toISOString(); };
-const SEED: CheckIn[] = [
-  { id: 'ci0', at: daysAgo(7), weightKg: 68.0, energy: 4, sleep: 3, mood: 4, adherence: 4, note: 'Good week — sleep slipped mid-week but training felt strong.' },
-];
 
 const rowToCI = (r: any): CheckIn => ({ id: r.id, at: r.at, weightKg: Number(r.weight_kg), energy: r.energy, sleep: r.sleep, mood: r.mood, adherence: r.adherence, note: r.note ?? '' });
 const ciToRow = (uid: string, c: CheckIn) => ({ user_id: uid, at: c.at, weight_kg: c.weightKg, energy: c.energy, sleep: c.sleep, mood: c.mood, adherence: c.adherence, note: c.note });
@@ -28,7 +25,7 @@ const ciToRow = (uid: string, c: CheckIn) => ({ user_id: uid, at: c.at, weight_k
 const Ctx = createContext<CheckInsValue | null>(null);
 
 export function CheckInsProvider({ children }: { children: ReactNode }) {
-  const [checkins, setCheckins] = useState<CheckIn[]>(() => JSON.parse(JSON.stringify(SEED)));
+  const [checkins, setCheckins] = useState<CheckIn[]>([]);
   const [uid, setUid] = useState<string | null>(null);
 
   useEffect(() => {
@@ -40,8 +37,10 @@ export function CheckInsProvider({ children }: { children: ReactNode }) {
         const id = auth?.user?.id; if (!id || cancelled) return; setUid(id);
         const { data, error } = await supabase.from('check_ins').select('*').eq('user_id', id).order('at', { ascending: false });
         if (error || cancelled) return;
-        if (data && data.length) setCheckins(data.map(rowToCI));
-        else await supabase.from('check_ins').insert(SEED.map((c) => ciToRow(id, c)));
+        // No rows means no check-ins. Show that, do NOT invent one — this used to
+        // INSERT a fabricated 68.0 kg check-in into Supabase for every new account,
+        // which then persisted forever and drove the trainer's adherence figures.
+        setCheckins(data && data.length ? data.map(rowToCI) : []);
       } catch { /* stay on mock */ }
     })();
     return () => { cancelled = true; };

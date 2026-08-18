@@ -71,7 +71,8 @@ export function RosterProvider({ children }: { children: ReactNode }) {
         try {
           const { data: ci } = await supabase.from('check_ins').select('user_id, at, adherence').in('user_id', ids).order('at', { ascending: false });
           const seen = new Set<string>();
-          (ci || []).forEach((r: any) => { if (st[r.user_id]) { st[r.user_id].last = Math.max(st[r.user_id].last, Date.parse(r.at)); if (!seen.has(r.user_id) && typeof r.adherence === 'number') { seen.add(r.user_id); st[r.user_id].adh = r.adherence; } } });
+          (ci || []).forEach((r: any) => { if (st[r.user_id]) { st[r.user_id].last = Math.max(st[r.user_id].last, Date.parse(r.at)); if (!seen.has(r.user_id) && typeof r.adherence === 'number') { seen.add(r.user_id); // check_ins.adherence is a 1-5 self-rating (see the Rating control on the client check-in screen), but every trainer surface renders this field as a PERCENTAGE and atRiskClient() flags anything under 80. Passing it through raw meant a client who rated themselves 4/5 showed as '4% adherence' and was flagged at risk. Convert.
+            st[r.user_id].adh = Math.round((Math.max(1, Math.min(5, r.adherence)) / 5) * 100); } } });
         } catch { /* ignore */ }
         const goalMap: Record<string, string> = { fatloss: 'Fat loss', tone: 'Tone', muscle: 'Build muscle' };
         const real: RosterClient[] = cls.map((c: any) => { const sc = st[c.id]; return { id: c.id, name: names[c.id] || 'Client', goal: goalMap[c.goal] || 'General', weightDelta: sc.wDelta, adherence: sc.adh != null ? sc.adh : 100, lastActive: sc.last ? ago(sc.last) : 'recently', next: '—', unread: 0, mode: (c.mode === 'inperson' ? 'inperson' : 'online') as 'online' | 'inperson', metrics: sc.mx ?? undefined, diet: c.diet ?? undefined, mealsPerDay: c.meals_per_day ?? undefined, avoid: Array.isArray(c.avoid) ? c.avoid : undefined }; });
