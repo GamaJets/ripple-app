@@ -1,1 +1,0 @@
- if (wDelta !== 0) bits.push(`Weight is ${wDelta > 0 ? 'up' : 'down'} ${Math.abs(wDelta)} kg overall${wDelta <= 0 ? ', trending your way' : ''}.`);

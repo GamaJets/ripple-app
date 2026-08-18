@@ -7,6 +7,7 @@
 import { supabase } from '../supabase';
 import { vendorFor, isConfigured, OAUTH_REDIRECT } from './oauthConfig';
 import type { ProviderId } from './types';
+import { reportError } from '../reportError';
 
 function authSession(): any {
   try { return require('expo-auth-session'); } catch { return null; }
@@ -57,6 +58,8 @@ export async function connectVendor(id: ProviderId): Promise<void> {
     },
   });
   if (error || (data as any)?.error) {
+    const detail = (data as any)?.error || (error as any)?.message || 'unknown';
+    reportError('wearables.connect.tokenExchange', detail, { provider: id });
     throw new Error((data as any)?.error || 'The server could not finish connecting. Check the vendor secret is set.');
   }
 }
@@ -67,7 +70,8 @@ export async function fetchVendorDay(id: ProviderId): Promise<any | null> {
     const { data, error } = await supabase.functions.invoke('wearable-day', { body: { provider: id } });
     if (error || !data || (data as any).error) return null;
     return (data as any).metrics ?? null;
-  } catch {
+  } catch (e) {
+    reportError('wearables.fetchDay', e, { provider: id });
     return null;
   }
 }

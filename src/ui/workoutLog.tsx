@@ -5,6 +5,7 @@ import { createContext, useContext, useEffect, useState } from 'react';
 import type { WorkoutEntry } from '../lib/mockData';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
+import { reportError } from '../lib/reportError';
 
 interface WorkoutLogValue {
   log: WorkoutEntry[];
@@ -43,7 +44,7 @@ export function WorkoutLogProvider({ children }: { children: React.ReactNode }) 
         if (error || cancelled) return;
         // No rows means a genuinely empty history. Leave it empty.
         setLog(data && data.length ? data.map(rowToEntry) : []);
-      } catch { /* leave the log empty */ }
+      } catch (e) { reportError('workoutLog.hydrate', e); }
     })();
     return () => { cancelled = true; };
   }, []);

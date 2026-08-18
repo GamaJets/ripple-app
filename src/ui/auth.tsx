@@ -18,6 +18,7 @@ import {
   verifyRecoveryToken as sbVerifyRecoveryToken,
   updatePassword as sbUpdatePassword,
 } from '../lib/supabase';
+import { reportError } from '../lib/reportError';
 
 export type Role = 'owner' | 'trainer' | 'client';
 export interface AuthUser { id: string; name: string; email: string; role: Role }
@@ -83,13 +84,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!USE_SUPABASE) return;
     let active = true;
     (async () => {
-      try { await refreshFromSession(); } catch { if (active) setUser(null); }
+      try { await refreshFromSession(); } catch (e) { reportError('auth.restoreSession', e); if (active) setUser(null); }
       finally { if (active) setLoading(false); }
     })();
     const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
       if (!active) return;
       if (!session) setUser(null);
-      else refreshFromSession().catch(() => {});
+      else refreshFromSession().catch((e) => reportError('auth.onAuthStateChange', e));
     });
     return () => { active = false; sub.subscription.unsubscribe(); };
   }, []);

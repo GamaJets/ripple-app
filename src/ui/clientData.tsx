@@ -11,6 +11,7 @@ import { USE_SUPABASE } from '../lib/config';
 import type { Goal, Diet } from '../lib/types';
 import type { Allergen } from '../lib/meals';
 import type { Injury } from '../lib/injuries';
+import { reportError } from '../lib/reportError';
 
 export type CoachingMode = 'online' | 'inperson' | 'solo';
 export interface ScanRec { id: string; takenAt: string; weightKg: number; bodyFatPct: number; skeletalMuscleKg: number; source: string; image?: string; metrics?: ScanMetrics }
@@ -108,7 +109,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
           if (typeof data?.full_name === 'string' && data.full_name.trim()) setName(data.full_name.trim());
           if (typeof data?.avatar === 'string' && data.avatar) setPhoto(data.avatar);
         }
-      } catch { /* keep whatever we have */ }
+      } catch (e) { reportError('clientData.hydrate.profiles', e); }
 
       // Read the rest of the profile back BEFORE the push effect below is allowed
       // to run. Without this the local state is still at its defaults (the local
@@ -134,7 +135,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
           if (r.manual_body_fat_pct != null && !Number.isNaN(Number(r.manual_body_fat_pct))) setManualBodyFat(Number(r.manual_body_fat_pct));
           if (typeof r.manual_at === 'string' && r.manual_at) setManualAt(r.manual_at);
         }
-      } catch { /* keep whatever we have */ }
+      } catch (e) { reportError('clientData.hydrate.clients', e); }
 
       if (!cancelled) setNameSynced(true);
     })();

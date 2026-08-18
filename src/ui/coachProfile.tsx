@@ -12,6 +12,7 @@ import { createContext, useContext, useState, useEffect, type ReactNode } from '
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
+import { reportError } from '../lib/reportError';
 
 interface CoachProfileValue {
   name: string; setName: (v: string) => void;
@@ -76,7 +77,7 @@ export function CoachProfileProvider({ children }: { children: ReactNode }) {
           if (Array.isArray(t.specialties)) setSpecialties(t.specialties);
           if (t.session_fee != null && !Number.isNaN(Number(t.session_fee))) setSessionFee(Number(t.session_fee));
         }
-      } catch { /* keep whatever we have */ }
+      } catch (e) { reportError('coachProfile.hydrate', e); }
       if (!cancelled) setSynced(true);
     };
     fetchReal();
@@ -99,7 +100,7 @@ export function CoachProfileProvider({ children }: { children: ReactNode }) {
         supabase.from('trainers').update({
           bio, tagline, offers, specialties, session_fee: sessionFee,
         }).eq('id', uid).then(() => {}, () => {});
-      } catch { /* ignore */ }
+      } catch (e) { reportError('coachProfile.persist', e); }
     }, 600);
     return () => clearTimeout(timer);
   }, [name, photo, tagline, bio, offers, specialties, sessionFee, uid, hydrated, synced]);
