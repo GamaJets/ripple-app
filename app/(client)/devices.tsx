@@ -15,6 +15,7 @@ import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { hrStats } from '../../src/lib/hr';
 import type { WorkoutEntry } from '../../src/lib/mockData';
 import { tapLight } from '../../src/ui/haptics';
+import { reportError } from '../../src/lib/reportError';
 
 type MetricKey = 'kcal' | 'hr' | 'steps' | 'source';
 
@@ -56,6 +57,13 @@ export default function Devices() {
  const { log, addWorkouts } = useWorkoutLog();
  const apple = PROVIDERS.find((p) => p.meta.id === 'apple');
  const appleReady = !!apple && apple.isAvailable();
+ // Import is no longer Apple-only: any connected provider that implements
+ // fetchWorkouts can feed the log. WHOOP does now, via the wearable-day function.
+ const importSources = PROVIDERS.filter(
+   (pv) => typeof pv.fetchWorkouts === 'function' && pv.isAvailable() && w.states[pv.meta.id] === 'connected',
+ );
+ const canImport = importSources.length > 0;
+ const importLabel = importSources.length === 1 ? importSources[0].meta.name : 'your devices';
  const [wk, setWk] = useState<WorkoutSample[] | null>(null);
  const [wkBusy, setWkBusy] = useState(false);
  const [importedIds, setImportedIds] = useState<Set<string>>(() => new Set());
@@ -65,24 +73,47 @@ export default function Devices() {
  // Best-effort: attach avg/high heart rate from HealthKit for the workout's window.
  const withHr = async (sm: WorkoutSample): Promise<WorkoutEntry> => {
   const e = toEntry(sm);
+  // WHOOP reports avg/max HR on the workout itself. Prefer that over deriving it,
+  // and never ask HealthKit about a session it did not record.
+  if (sm.source !== 'apple') {
+   if (e.cardio) {
+    if (typeof sm.avgHr === 'number') e.cardio.hrAvg = sm.avgHr;
+    if (typeof sm.maxHr === 'number') e.cardio.hrHigh = sm.maxHr;
+   }
+   return e;
+  }
   const fetchHr = apple?.fetchHeartRateSeries;
   if (fetchHr && apple && apple.isAvailable()) {
    try {
     const endISO = new Date(Date.parse(sm.start) + Math.max(1, sm.mins) * 60000).toISOString();
     const st = hrStats(await fetchHr(sm.start, endISO));
     if (st && e.cardio) { e.cardio.hrAvg = st.avg; e.cardio.hrHigh = st.high; }
-   } catch { /* summary is optional */ }
+   } catch (err) { reportError('devices.withHr', err); }
   }
   return e;
  };
  const markImported = (ids: string[]) => { const next = new Set(importedIds); ids.forEach((i) => next.add(i)); setImportedIds(next); AsyncStorage.setItem('repple.hk.imported', JSON.stringify([...next])).catch(() => {}); };
  const findWorkouts = async () => {
- if (!apple?.fetchWorkouts) { Alert.alert('Apple Health', 'Workout import needs the Repple app build with Apple Health.'); return; }
- if (w.states['apple'] !== 'connected') { Alert.alert('Apple Health', 'Connect Apple Health first (in Available Devices below), then tap Find my workouts.'); return; }
- setWkBusy(true);
- try { const list = await apple.fetchWorkouts(14); setWk(list); if (!list.length) Alert.alert('Apple Health', 'No Apple Watch workouts found in the last 14 days. Make sure your watch has synced to the iPhone Health app.'); }
- catch (e: any) { Alert.alert('Apple Health', e?.message || 'Could not read your workouts.'); }
- finally { setWkBusy(false); }
+   if (!canImport) {
+     Alert.alert('Import workouts', 'Connect Apple Health or WHOOP first (in Available Devices below), then tap Find my workouts.');
+     return;
+   }
+   setWkBusy(true);
+   try {
+     const lists = await Promise.all(importSources.map(async (pv) => {
+       try { return (await pv.fetchWorkouts!(14)) || []; }
+       catch (e) { reportError('devices.fetchWorkouts', e, { provider: pv.meta.id }); return []; }
+     }));
+     // Merge across sources, newest first. Ids are source-prefixed so the same
+     // session recorded by two devices stays two rows rather than silently merging.
+     const merged = lists.flat().sort((a, b) => Date.parse(b.start) - Date.parse(a.start));
+     setWk(merged);
+     if (!merged.length) Alert.alert('Import workouts', `No workouts found in the last 14 days from ${importLabel}.`);
+   } catch (e: any) {
+     Alert.alert('Import workouts', e?.message || 'Could not read your workouts.');
+   } finally {
+     setWkBusy(false);
+   }
  };
  const importOne = async (sm: WorkoutSample) => { if (alreadyLogged(sm)) return; addWorkouts([await withHr(sm)]); markImported([sm.id]); tapLight(); };
  const importAll = async () => { const fresh = (wk || []).filter((sm) => !alreadyLogged(sm)); if (!fresh.length) return; addWorkouts(await Promise.all(fresh.map(withHr))); markImported(fresh.map((sm) => sm.id)); tapLight(); };
@@ -133,12 +164,12 @@ export default function Devices() {
  </View>
  ) : null}
 
- {appleReady ? (
+ {canImport ? (
  <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 16, marginBottom: 16 }}>
- <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, marginBottom: 4 }}>Import Apple Watch workouts</Text>
- <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 12, lineHeight: 17 }}>Pull sessions you recorded on your Apple Watch — Pilates, runs, cycling — straight into your training log. No manual entry.</Text>
+ <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, marginBottom: 4 }}>Import workouts</Text>
+ <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 12, lineHeight: 17 }}>Pull sessions from your connected devices — runs, cycling, lifting, Pilates — straight into your training log. No manual entry.</Text>
  {wk == null ? (
- <Pressable onPress={findWorkouts} disabled={wkBusy} accessibilityRole="button" accessibilityLabel="Find my Apple Watch workouts" style={{ alignSelf: 'flex-start', backgroundColor: t.brand, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, opacity: wkBusy ? 0.6 : 1 }}>
+ <Pressable onPress={findWorkouts} disabled={wkBusy} accessibilityRole="button" accessibilityLabel="Find my workouts" style={{ alignSelf: 'flex-start', backgroundColor: t.brand, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, opacity: wkBusy ? 0.6 : 1 }}>
  {wkBusy ? <ActivityIndicator color={t.brandInk} /> : <Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 13 }}>Find my workouts</Text>}
  </Pressable>
  ) : wk.length === 0 ? (

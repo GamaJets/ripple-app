@@ -33,6 +33,10 @@ export interface WorkoutSample {
   mins: number;               // duration in minutes
   kcal: number | null;        // active energy burned, if recorded
   distanceKm: number | null;  // distance in km if the activity records it (else null)
+  /** Vendor-reported heart rate for the session. WHOOP gives these directly;
+   *  HealthKit does not, so the client derives them from the sample series. */
+  avgHr?: number | null;
+  maxHr?: number | null;
   source: ProviderId;
 }
 

@@ -6,10 +6,10 @@
 // only "available" to connect once its client ID is configured (env var) — until
 // then the UI shows exactly what the owner needs to register.
 import { Platform } from 'react-native';
-import type { WearableProvider, ProviderMeta, DailyMetrics } from './types';
+import type { WearableProvider, ProviderMeta, DailyMetrics, WorkoutSample } from './types';
 import { emptyMetrics } from './types';
 import { vendorFor, isConfigured } from './oauthConfig';
-import { connectVendor, fetchVendorDay, disconnectVendor } from './oauth';
+import { connectVendor, fetchVendorDay, disconnectVendor, fetchVendorWorkouts } from './oauth';
 
 export function makeCloudProvider(meta: ProviderMeta): WearableProvider {
   const isHealthConnect = meta.kind === 'health-connect';
@@ -37,6 +37,22 @@ export function makeCloudProvider(meta: ProviderMeta): WearableProvider {
     async disconnect() {
       if (isHealthConnect) return;
       await disconnectVendor(meta.id);
+    },
+    async fetchWorkouts(sinceDays = 14): Promise<WorkoutSample[]> {
+      if (isHealthConnect) return [];
+      const raw = await fetchVendorWorkouts(meta.id, sinceDays);
+      return raw.map((r: any) => ({
+        id: String(r.id),
+        activity: String(r.activity || 'Workout'),
+        rawActivity: String(r.rawActivity || r.activity || 'Workout'),
+        start: String(r.start),
+        mins: Number(r.mins) || 0,
+        kcal: typeof r.kcal === 'number' ? r.kcal : null,
+        distanceKm: typeof r.distanceKm === 'number' ? r.distanceKm : null,
+        avgHr: typeof r.avgHr === 'number' ? r.avgHr : null,
+        maxHr: typeof r.maxHr === 'number' ? r.maxHr : null,
+        source: meta.id,
+      })).filter((x: WorkoutSample) => x.mins > 0 && !!x.start);
     },
     async fetchToday(): Promise<DailyMetrics | null> {
       if (isHealthConnect) return null;

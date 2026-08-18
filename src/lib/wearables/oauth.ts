@@ -94,6 +94,22 @@ export async function fetchVendorDay(id: ProviderId): Promise<any | null> {
   return payload?.metrics ?? null;
 }
 
+/** Recent workouts from a cloud vendor, for importing into the training log. */
+export async function fetchVendorWorkouts(id: ProviderId, sinceDays = 14): Promise<any[]> {
+  try {
+    const { data, error } = await supabase.functions.invoke('wearable-day', {
+      body: { provider: id, action: 'workouts', sinceDays },
+    });
+    if (error || !data) return [];
+    if ((data as any).connected === false) throw new WearableNotConnectedError(id, (data as any).reason);
+    return Array.isArray((data as any).workouts) ? (data as any).workouts : [];
+  } catch (e) {
+    if (e instanceof WearableNotConnectedError) throw e;
+    reportError('wearables.fetchWorkouts', e, { provider: id });
+    return [];
+  }
+}
+
 /**
  * Actually drop the stored token. This used to be a no-op with a comment claiming
  * revocation happened server-side; nothing deleted the row, so "disconnect" only
