@@ -1,4 +1,9 @@
-// Demo roster + exercise videos for the trainer portal (UI-only mock).
+// Trainer-portal shapes, the shared at-risk rule, and the built-in exercise
+// library.
+//
+// ROSTER is empty. It previously held five invented clients ("Jordan P.",
+// "Sam R.", "Alex M.", "Priya N.") with invented adherence, weight deltas and
+// injuries, which shipped in the production bundle.
 export interface RosterClient {
   id: string; name: string; goal: string; weightDelta: number;
   adherence: number; lastActive: string; next: string; unread: number;
@@ -9,13 +14,7 @@ export interface RosterClient {
   mealsPerDay?: number;
   avoid?: import('./meals').Allergen[];
 }
-export const ROSTER: RosterClient[] = [
-  { id: 'c1', name: 'Timothy', goal: 'Fat loss', weightDelta: -3.8, adherence: 92, lastActive: '2h ago', next: 'Today · 9am', unread: 1, mode: 'online', injuries: [{ area: 'knee', severity: 'moderate', note: 'Sharp on deep squats — cleared for light work', isNew: true }] },
-  { id: 'c2', name: 'Jordan P.', goal: 'Build muscle', weightDelta: 2.1, adherence: 74, lastActive: '1d ago', next: 'Wed · 5pm', unread: 0, mode: 'inperson', injuries: [{ area: 'lower_back', severity: 'mild', note: 'Tweak after long drives' }] },
-  { id: 'c3', name: 'Sam R.', goal: 'Tone', weightDelta: -1.2, adherence: 88, lastActive: '4h ago', next: '—', unread: 2, mode: 'online' },
-  { id: 'c4', name: 'Alex M.', goal: 'Fat loss', weightDelta: -5.4, adherence: 96, lastActive: '30m ago', next: 'Thu · 7am', unread: 0, mode: 'inperson' },
-  { id: 'c5', name: 'Priya N.', goal: 'Build muscle', weightDelta: 3.6, adherence: 81, lastActive: '2d ago', next: 'Fri · 6pm', unread: 0, mode: 'online' },
-];
+export const ROSTER: RosterClient[] = [];
 export interface ExVideo { id: string; name: string; group: string; dur: string; uploaded: boolean; url?: string; }
 
 // Shared "at-risk" definition so every trainer screen agrees (adherence low OR inactive 2+ days).
@@ -26,10 +25,10 @@ export function atRiskClient(c: { adherence: number; lastActive: string }): bool
 // these with their own recorded clip from the Videos screen.
 const demo = (q: string) => 'https://www.youtube.com/results?search_query=' + encodeURIComponent(q + ' proper form technique');
 export const EX_VIDEOS: ExVideo[] = [
-  { id: 'v1', name: 'Back Squat', group: 'Legs', dur: '1:12', uploaded: true, url: demo('barbell back squat') },
-  { id: 'v2', name: 'Barbell Bench Press', group: 'Chest', dur: '0:58', uploaded: true, url: demo('barbell bench press') },
-  { id: 'v3', name: 'Romanian Deadlift', group: 'Hamstrings', dur: '1:04', uploaded: true, url: demo('romanian deadlift') },
-  { id: 'v4', name: 'Pull-up', group: 'Back', dur: '0:47', uploaded: true, url: demo('pull up') },
-  { id: 'v5', name: 'Overhead Press', group: 'Shoulders', dur: '0:51', uploaded: true, url: demo('overhead barbell press') },
-  { id: 'v6', name: 'Walking Lunge', group: 'Legs', dur: '1:20', uploaded: true, url: demo('walking lunge') },
+  { id: 'v1', name: 'Back Squat', group: 'Legs', dur: '', uploaded: true, url: demo('barbell back squat') },
+  { id: 'v2', name: 'Barbell Bench Press', group: 'Chest', dur: '', uploaded: true, url: demo('barbell bench press') },
+  { id: 'v3', name: 'Romanian Deadlift', group: 'Hamstrings', dur: '', uploaded: true, url: demo('romanian deadlift') },
+  { id: 'v4', name: 'Pull-up', group: 'Back', dur: '', uploaded: true, url: demo('pull up') },
+  { id: 'v5', name: 'Overhead Press', group: 'Shoulders', dur: '', uploaded: true, url: demo('overhead barbell press') },
+  { id: 'v6', name: 'Walking Lunge', group: 'Legs', dur: '', uploaded: true, url: demo('walking lunge') },
 ];

@@ -9,3 +9,5 @@ android/
 
 # transient edit scripts (device fs cannot rm)
 .scratch*
+.DS_Store
+_to_delete/

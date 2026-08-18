@@ -1,8 +1,15 @@
 // Owner financial-health review. Deterministic analysis of the gym's numbers
 // (margin, retention, growth, concentration) that reads like an advisor and
-// always works offline; upgrades to an LLM narrative when the AI backend is on.
-// Real figures flow in once accounting is connected — until then these are the
-// owner's entered/illustrative numbers.
+// always works offline.
+//
+// It analyses ONLY figures the owner has entered (or that a connected
+// accounting integration supplied). There is no sample/illustrative snapshot:
+// this module previously exported `sampleFinances()` returning an invented
+// AED 214,000/mo, 1,940-member gym, which the Financial health screen rendered
+// as if it were the owner's real business — complete with a grade and an AI
+// verdict saying the gym was in strong financial health. Nothing here
+// fabricates numbers; `emptyFinances()` is all zeros and `hasFigures()` gates
+// the review so an un-filled screen shows an empty state instead of fiction.
 
 export interface FinInputs {
   revenue: number;      // total monthly revenue (AED)
@@ -27,9 +34,14 @@ export interface FinReview {
 const money = (n: number) => 'AED ' + Math.round(n).toLocaleString();
 const pct = (n: number) => (n >= 0 ? '' : '') + n.toFixed(1) + '%';
 
-/** A sensible mid-size gym snapshot to start from (until accounting is connected). */
-export function sampleFinances(): FinInputs {
-  return { revenue: 214000, expenses: 172000, mrr: 168000, members: 1940, newMembers: 96, churnedMembers: 58, ptRevenue: 31000, classRevenue: 15000 };
+/** All-zero starting point. The owner fills these in (or accounting supplies them). */
+export function emptyFinances(): FinInputs {
+  return { revenue: 0, expenses: 0, mrr: 0, members: 0, newMembers: 0, churnedMembers: 0, ptRevenue: 0, classRevenue: 0 };
+}
+
+/** True once there is enough entered for a review to mean anything. */
+export function hasFigures(f: FinInputs): boolean {
+  return f.revenue > 0 || f.expenses > 0 || f.members > 0;
 }
 
 export function reviewFinances(f: FinInputs): FinReview {

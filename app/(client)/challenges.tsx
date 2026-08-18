@@ -59,7 +59,7 @@ export default function Challenges() {
               <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 14 }}>
                 <Pressable onPress={() => setOpen(c)} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                   <Icon name="trophy" size={14} color={t.ink3} />
-                  <Text style={{ color: t.ink2, fontWeight: '700', fontSize: 13 }}>{joined ? `You're #${rank} of ${total}` : 'View leaderboard'}</Text>
+                  <Text style={{ color: t.ink2, fontWeight: '700', fontSize: 13 }}>{!joined ? 'View progress' : total > 1 ? `You're #${rank} of ${total}` : `${my} of ${c.goal} ${c.unit}`}</Text>
                 </Pressable>
                 <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
                   <Text style={{ color: t.ink3, fontSize: 11 }}>{c.endsInDays}d left</Text>
@@ -72,7 +72,7 @@ export default function Challenges() {
           );
         })}
 
-        <Text style={{ color: t.ink3, fontSize: 11, marginTop: 6, lineHeight: 16 }}>Your score is computed live from your logged workouts. Cohort shown is a demo field — real multi-athlete challenges arrive with the group-coaching update.</Text>
+        <Text style={{ color: t.ink3, fontSize: 11, marginTop: 6, lineHeight: 16 }}>Your score is computed live from your logged workouts. Challenges are solo against the goal for now — competing against other athletes arrives with the group-coaching update.</Text>
       </ScrollView>
 
       <Modal visible={!!open} transparent animationType="slide" onRequestClose={() => setOpen(null)}>
@@ -81,7 +81,10 @@ export default function Challenges() {
           {open && (
             <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 30 }}>
               <Text style={{ color: t.ink, fontSize: 21, fontWeight: '700', fontFamily: 'Georgia', marginBottom: 2 }}>{open.title}</Text>
-              <Text style={{ color: t.ink3, fontSize: 13, marginBottom: 16 }}>Leaderboard · {open.endsInDays} days left</Text>
+              <Text style={{ color: t.ink3, fontSize: 13, marginBottom: 16 }}>{open.field.length > 0 ? 'Leaderboard' : 'Your progress'} · {open.endsInDays} days left</Text>
+              {open.field.length === 0 ? (
+                <Text style={{ color: t.ink3, fontSize: 12.5, lineHeight: 18, marginBottom: 14 }}>You're the only athlete on this board right now. Other athletes appear once group challenges are live — nothing here is simulated.</Text>
+              ) : null}
               {ch.board(open).map((r, i) => (
                 <View key={r.name + i} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: t.ring, backgroundColor: r.you ? 'rgba(45,212,191,0.08)' : 'transparent', borderRadius: r.you ? 10 : 0, paddingHorizontal: r.you ? 8 : 0 }}>
                   <Text style={{ color: i < 3 ? t.brand : t.ink3, fontWeight: '800', fontSize: 15, width: 26 }}>{i + 1}</Text>

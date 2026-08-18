@@ -144,6 +144,24 @@ export default function CoachProfile() {
 
         <Field t={t} label="Session Rate ($)" value={String(p.sessionFee)} onChangeText={(v) => p.setSessionFee(parseInt(v.replace(/[^0-9]/g, ''), 10) || 0)} placeholder="75" keyboardType="numeric" />
 
+        {/* Public directory opt-in. Off by default and never set on the
+            trainer's behalf — clients only see coaches who switched this on. */}
+        <Pressable
+          onPress={() => p.setListed(!p.listed)}
+          accessibilityRole="switch"
+          accessibilityState={{ checked: p.listed }}
+          style={{ flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: t.surface, borderColor: p.listed ? t.brand : t.ring, borderWidth: 1, borderRadius: 14, padding: 15, marginTop: 6, marginBottom: 12 }}
+        >
+          <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}><Icon name="search" size={19} color={p.listed ? t.brand : t.ink3} /></View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: t.ink, fontWeight: '800', fontSize: 14 }}>List me in Find a Trainer</Text>
+            <Text style={{ color: t.ink3, fontSize: 12, marginTop: 1, lineHeight: 17 }}>{p.listed ? 'Clients browsing Repple can see your name, tagline, bio, specialties and rate, and can request coaching.' : 'Off — you are not visible to clients browsing for a coach.'}</Text>
+          </View>
+          <View style={{ width: 46, height: 27, borderRadius: 14, backgroundColor: p.listed ? t.brand : t.surface3, borderWidth: 1, borderColor: p.listed ? t.brand : t.ring, justifyContent: 'center', paddingHorizontal: 3 }}>
+            <View style={{ width: 21, height: 21, borderRadius: 11, backgroundColor: p.listed ? t.brandInk : t.ink3, alignSelf: p.listed ? 'flex-end' : 'flex-start' }} />
+          </View>
+        </Pressable>
+
         <Pressable onPress={() => router.push('/(trainer)/payments')} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 14, padding: 15, marginTop: 6, marginBottom: 12 }}>
           <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}><Icon name="people" size={19} color={t.brand} /></View>
           <View style={{ flex: 1 }}>

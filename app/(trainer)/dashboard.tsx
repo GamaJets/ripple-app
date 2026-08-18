@@ -9,6 +9,7 @@ import { Icon } from '../../src/ui/Icon';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { useCoachProfile } from '../../src/ui/coachProfile';
+import { CoachRequests } from '../../src/ui/CoachRequests';
 import { atRiskClient } from '../../src/lib/trainerMock';
 import { METRIC_DEFS, METRIC_GROUPS } from '../../src/lib/inbodyMetrics';
 import { type RosterClient } from '../../src/lib/trainerMock';
@@ -207,6 +208,10 @@ export default function TrainerClients() {
           </Pressable>
           </View>
         </View>
+
+        {/* Clients who found this coach in the public directory and asked to
+            be coached. Renders nothing when there are none. */}
+        <CoachRequests />
 
         {trial && !billingAvailable() ? (
           <Pressable onPress={() => router.push('/(trainer)/billing')} style={{ backgroundColor: t.surface, borderColor: trial.expired ? t.s3 : t.brand, borderWidth: 1, borderRadius: 14, padding: 14, marginBottom: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>

@@ -22,6 +22,8 @@ interface CoachProfileValue {
   offers: string[]; setOffers: (v: string[]) => void;
   specialties: string[]; setSpecialties: (v: string[]) => void;
   sessionFee: number; setSessionFee: (v: number) => void;
+  /** Opt-in: appear in the client-facing Find a Trainer directory. Default off. */
+  listed: boolean; setListed: (v: boolean) => void;
 }
 
 const Ctx = createContext<CoachProfileValue | null>(null);
@@ -35,6 +37,7 @@ export function CoachProfileProvider({ children }: { children: ReactNode }) {
   const [offers, setOffers] = useState<string[]>([]);
   const [specialties, setSpecialties] = useState<string[]>([]);
   const [sessionFee, setSessionFee] = useState(0);
+  const [listed, setListed] = useState(false);
   const [hydrated, setHydrated] = useState(false);
   // Set only once the server copy has been read for this uid. Nothing is written
   // back before then, so a stale local value can never clobber the real profile
@@ -42,7 +45,7 @@ export function CoachProfileProvider({ children }: { children: ReactNode }) {
   const [uid, setUid] = useState<string | null>(null);
   const [synced, setSynced] = useState(false);
 
-  useEffect(() => { (async () => { try { if (USE_SUPABASE) { await AsyncStorage.removeItem('repple.coachProfile'); } else { const raw = await AsyncStorage.getItem('repple.coachProfile'); if (raw) { const p = JSON.parse(raw); if (typeof p.name === 'string') setName(p.name); if (p.photo === null || typeof p.photo === 'string') setPhoto(p.photo ?? null); if (typeof p.tagline === 'string') setTagline(p.tagline); if (typeof p.bio === 'string') setBio(p.bio); if (Array.isArray(p.offers)) setOffers(p.offers); if (Array.isArray(p.specialties)) setSpecialties(p.specialties); if (typeof p.sessionFee === 'number') setSessionFee(p.sessionFee); } } } catch { /* ignore */ } setHydrated(true); })(); }, []);
+  useEffect(() => { (async () => { try { if (USE_SUPABASE) { await AsyncStorage.removeItem('repple.coachProfile'); } else { const raw = await AsyncStorage.getItem('repple.coachProfile'); if (raw) { const p = JSON.parse(raw); if (typeof p.name === 'string') setName(p.name); if (p.photo === null || typeof p.photo === 'string') setPhoto(p.photo ?? null); if (typeof p.tagline === 'string') setTagline(p.tagline); if (typeof p.bio === 'string') setBio(p.bio); if (Array.isArray(p.offers)) setOffers(p.offers); if (Array.isArray(p.specialties)) setSpecialties(p.specialties); if (typeof p.sessionFee === 'number') setSessionFee(p.sessionFee); if (typeof p.listed === 'boolean') setListed(p.listed); } } } catch { /* ignore */ } setHydrated(true); })(); }, []);
 
   // Load the real server-side profile. Re-fetches on every auth state change (not
   // just once at hydration) — if the Supabase session hasn't finished restoring at
@@ -67,7 +70,7 @@ export function CoachProfileProvider({ children }: { children: ReactNode }) {
         if (typeof real === 'string' && real.trim()) setName(real.trim());
         if (typeof prof.data?.avatar === 'string' && prof.data.avatar) setPhoto(prof.data.avatar);
 
-        const tr = await supabase.from('trainers').select('bio, tagline, offers, specialties, session_fee').eq('id', u.id).single();
+        const tr = await supabase.from('trainers').select('bio, tagline, offers, specialties, session_fee, listed').eq('id', u.id).single();
         if (cancelled) return;
         const t = tr.data as any;
         if (t) {
@@ -76,6 +79,7 @@ export function CoachProfileProvider({ children }: { children: ReactNode }) {
           if (Array.isArray(t.offers)) setOffers(t.offers);
           if (Array.isArray(t.specialties)) setSpecialties(t.specialties);
           if (t.session_fee != null && !Number.isNaN(Number(t.session_fee))) setSessionFee(Number(t.session_fee));
+          if (typeof t.listed === 'boolean') setListed(t.listed);
         }
       } catch (e) { reportError('coachProfile.hydrate', e); }
       if (!cancelled) setSynced(true);
@@ -98,17 +102,17 @@ export function CoachProfileProvider({ children }: { children: ReactNode }) {
       try {
         supabase.from('profiles').update({ full_name: name, avatar: photo }).eq('id', uid).then(() => {}, () => {});
         supabase.from('trainers').update({
-          bio, tagline, offers, specialties, session_fee: sessionFee,
+          bio, tagline, offers, specialties, session_fee: sessionFee, listed,
         }).eq('id', uid).then(() => {}, () => {});
       } catch (e) { reportError('coachProfile.persist', e); }
     }, 600);
     return () => clearTimeout(timer);
-  }, [name, photo, tagline, bio, offers, specialties, sessionFee, uid, hydrated, synced]);
+  }, [name, photo, tagline, bio, offers, specialties, sessionFee, listed, uid, hydrated, synced]);
 
-  useEffect(() => { if (!hydrated) return; AsyncStorage.setItem('repple.coachProfile', JSON.stringify({ name, photo, tagline, bio, offers, specialties, sessionFee })).catch(() => {}); }, [hydrated, name, photo, tagline, bio, offers, specialties, sessionFee]);
+  useEffect(() => { if (!hydrated) return; AsyncStorage.setItem('repple.coachProfile', JSON.stringify({ name, photo, tagline, bio, offers, specialties, sessionFee, listed })).catch(() => {}); }, [hydrated, name, photo, tagline, bio, offers, specialties, sessionFee, listed]);
 
   return (
-    <Ctx.Provider value={{ name, setName, photo, setPhoto, tagline, setTagline, bio, setBio, offers, setOffers, specialties, setSpecialties, sessionFee, setSessionFee }}>
+    <Ctx.Provider value={{ name, setName, photo, setPhoto, tagline, setTagline, bio, setBio, offers, setOffers, specialties, setSpecialties, sessionFee, setSessionFee, listed, setListed }}>
       {children}
     </Ctx.Provider>
   );

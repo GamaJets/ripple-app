@@ -1,8 +1,13 @@
 // Challenges + leaderboards — join a 30-day consistency, streak, or volume
-// challenge and see where you stand against a cohort. The client's own score is
-// computed live from their real workout log; the cohort is a seeded demo field
-// (until real multi-user challenges ship on the backend). Joined state persists
-// to AsyncStorage so it survives restarts. Pure JS — ships over-the-air.
+// challenge and track progress toward the goal. Scores are computed live from
+// the client's real workout log.
+//
+// The cohort (`field`) is empty. It previously held six invented athletes
+// ("Maya R.", "Devin K.", "Marcus T." …) with invented scores, which shipped in
+// the production bundle and presented a real client with a leaderboard of
+// people who do not exist — and a rank measured against them. It fills in when
+// real multi-athlete challenges ship on the backend. Joined state persists to
+// AsyncStorage so it survives restarts. Pure JS — ships over-the-air.
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useWorkoutLog } from './workoutLog';
@@ -46,26 +51,17 @@ export const CHALLENGES: Challenge[] = [
   {
     id: 'consistency30', title: '30-Day Consistency', blurb: 'Train the most days in 30. Show up, climb the board.',
     metric: 'workouts30', unit: 'days', goal: 20, endsInDays: 30, icon: 'flame',
-    field: [
-      { name: 'Maya R.', score: 22 }, { name: 'Devin K.', score: 19 }, { name: 'Priya S.', score: 18 },
-      { name: 'Marcus T.', score: 16 }, { name: 'Lena W.', score: 14 }, { name: 'Sam O.', score: 12 },
-    ],
+    field: [],
   },
   {
     id: 'streak', title: 'Streak Club', blurb: 'Longest active training streak wins. Do not break the chain.',
     metric: 'streak', unit: 'day streak', goal: 14, endsInDays: 21, icon: 'trophy',
-    field: [
-      { name: 'Devin K.', score: 17 }, { name: 'Maya R.', score: 12 }, { name: 'Priya S.', score: 9 },
-      { name: 'Marcus T.', score: 7 }, { name: 'Lena W.', score: 5 },
-    ],
+    field: [],
   },
   {
     id: 'volume30', title: 'Volume Club', blurb: 'Move the most total weight this month. Every rep counts.',
     metric: 'volume30', unit: 't', goal: 40, endsInDays: 30, icon: 'chart',
-    field: [
-      { name: 'Marcus T.', score: 52 }, { name: 'Maya R.', score: 44 }, { name: 'Sam O.', score: 38 },
-      { name: 'Devin K.', score: 31 }, { name: 'Priya S.', score: 27 },
-    ],
+    field: [],
   },
 ];
 

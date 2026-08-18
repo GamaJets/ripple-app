@@ -55,18 +55,11 @@ export function TrainerInvitesProvider({ children }: { children: ReactNode }) {
       return AsyncStorage.setItem(DISMISS_KEY, JSON.stringify([...set]));
     }).catch(() => {});
   };
-  const seedDemo = async () => {
-    try { const raw = await AsyncStorage.getItem(DISMISS_KEY); if (raw && new Set<string>(JSON.parse(raw)).has('demo-trainer-invite')) return; } catch { /* ignore */ }
-    setReceived((p) => (p.length ? p : [{
-      id: 'demo-trainer-invite',
-      ownerId: 'demo-owner',
-      ownerName: 'Repple HQ',
-      email: 'you',
-      status: 'pending',
-      createdAt: new Date().toISOString(),
-      demo: true,
-    }]));
-  };
+  // No demo invitation. This used to inject a fabricated pending invite from
+  // "Repple HQ" — and it fired whenever there was no authenticated user, not
+  // only in no-backend mode, so a signed-out trainer saw an invitation that
+  // had never been sent.
+  const seedDemo = () => { setReceived([]); };
 
   useEffect(() => {
     if (!USE_SUPABASE) { seedDemo(); return; }

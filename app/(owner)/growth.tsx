@@ -22,7 +22,16 @@ export default function OwnerGrowth() {
   const churnPct = trainers.length ? Math.round((roll.suspended / trainers.length) * 100) : 0;
   const [code, setCode] = useState('');
   const [disc, setDisc] = useState(20);
-  const funnel = [['Visited site', 100], ['Started trial', 38], ['Activated', 24], ['Paying', 18]] as const;
+  // Trainer funnel, derived from the real roster. There is no analytics on
+  // site visits, so the funnel starts at signup — a "Visited site 100% →
+  // Paying 18%" curve was previously hardcoded here and was entirely invented.
+  const activated = trainers.filter((x) => x.clients > 0).length;
+  const funnelPct = (n: number) => (roll.trainers ? Math.round((n / roll.trainers) * 100) : 0);
+  const funnel: [string, number, number][] = [
+    ['Signed up', roll.trainers, 100],
+    ['Activated (has clients)', activated, funnelPct(activated)],
+    ['Paying', roll.paying, funnelPct(roll.paying)],
+  ];
 
   const create = () => {
     const r = addPromo(code, disc);
@@ -62,6 +71,7 @@ export default function OwnerGrowth() {
             <Text style={{ color: t.ink3, fontSize: 11 }}>{ca.engaged} engaged · {ca.atRisk} at-risk</Text>
           </View>
           <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>Clients by plan</Text>
+          {ca.byPlan.length === 0 ? <Text style={{ color: t.ink3, fontSize: 13 }}>No clients on any plan yet.</Text> : null}
           {ca.byPlan.map((bp) => (
             <View key={bp.plan} style={{ marginBottom: 10 }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}><Text style={{ color: t.ink2, fontSize: 13, fontWeight: '600' }}>{bp.plan}</Text><Text style={{ color: t.ink, fontSize: 13, fontWeight: '700' }}>{bp.clients} · {bp.pct}%</Text></View>
@@ -73,6 +83,7 @@ export default function OwnerGrowth() {
         <View style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18, marginBottom: 16 }}>
           <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16, marginBottom: 4 }}>Cohort retention</Text>
           <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 14 }}>Trainers by signup month · % still active</Text>
+          {coh.length === 0 ? <Text style={{ color: t.ink3, fontSize: 13 }}>No signups to group yet.</Text> : null}
           {coh.map((c) => (
             <View key={c.label} style={{ marginBottom: 12 }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 }}>
@@ -86,9 +97,11 @@ export default function OwnerGrowth() {
 
         <View style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18, marginBottom: 16 }}>
           <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16, textTransform: 'capitalize', marginBottom: 14 }}>Trainer acquisition funnel</Text>
-          {funnel.map(([label, pct]) => (
+          {roll.trainers === 0 ? (
+            <Text style={{ color: t.ink3, fontSize: 13 }}>No trainers on the platform yet — the funnel fills in as they sign up.</Text>
+          ) : funnel.map(([label, count, pct]) => (
             <View key={label} style={{ marginBottom: 12 }}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 }}><Text style={{ color: t.ink2, fontSize: 13, fontWeight: '600' }}>{label}</Text><Text style={{ color: t.ink, fontSize: 13, fontWeight: '700' }}>{pct}%</Text></View>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 }}><Text style={{ color: t.ink2, fontSize: 13, fontWeight: '600' }}>{label}</Text><Text style={{ color: t.ink, fontSize: 13, fontWeight: '700' }}>{count} · {pct}%</Text></View>
               <View style={{ height: 10, borderRadius: 5, backgroundColor: t.surface3, overflow: 'hidden' }}><View style={{ height: 10, borderRadius: 5, backgroundColor: t.brand, width: `${pct}%` }} /></View>
             </View>
           ))}
@@ -110,6 +123,7 @@ export default function OwnerGrowth() {
               </Pressable>); })}
           </View>
 
+          {promos.length === 0 ? <Text style={{ color: t.ink3, fontSize: 13 }}>No codes yet — create one above.</Text> : null}
           {promos.map((p) => (
             <View key={p.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: t.surface2, borderRadius: 12, borderWidth: 1, borderColor: t.ring, padding: 12, marginBottom: 8 }}>
               <View style={{ flex: 1 }}>

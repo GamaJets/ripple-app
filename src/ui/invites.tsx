@@ -43,10 +43,9 @@ const rowToInvite = (r: any): Invite => ({
   createdAt: r.created_at ?? new Date().toISOString(),
 });
 
-const DEMO_INVITE: Invite = {
-  id: 'demo-invite', coachId: 'demo-coach', coachName: 'Coach Sam Rivera',
-  email: 'you', mode: 'online', status: 'pending', createdAt: new Date(0).toISOString(), demo: true,
-};
+// No demo invitation. A fabricated pending invite from "Coach Sam Rivera" used
+// to be injected here in no-backend mode; a client had a coaching invitation
+// from someone who does not exist sitting in their app.
 
 const Ctx = createContext<InvitesValue | null>(null);
 
@@ -72,7 +71,7 @@ export function InvitesProvider({ children }: { children: ReactNode }) {
       if (!cancelled) setDismissed(skip);
 
       // Demo mode (no backend): show the sample invite unless already handled.
-      if (!USE_SUPABASE) { if (!cancelled && !skip.has(DEMO_INVITE.id)) setReceived([DEMO_INVITE]); return; }
+      if (!USE_SUPABASE) { if (!cancelled) setReceived([]); return; }
 
       // Real backend: only ever show genuine pending invites for this email.
       // No fake/sample invite for a live account (that was the re-pop bug).

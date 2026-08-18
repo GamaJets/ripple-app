@@ -6,7 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { useClasses } from '../../src/ui/classes';
-import { CLASS_KINDS, BRANCHES, type GymClass } from '../../src/lib/classesMock';
+import { CLASS_KINDS, branchesFrom, type GymClass } from '../../src/lib/classesMock';
 
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const timeLabel = (iso: string) => { const d = new Date(iso); let h = d.getHours(); const m = d.getMinutes(); const ap = h >= 12 ? 'pm' : 'am'; h = h % 12 || 12; return `${h}${m ? ':' + String(m).padStart(2, '0') : ''}${ap}`; };
@@ -19,7 +19,9 @@ export default function TrainerClasses() {
 
   const [title, setTitle] = useState('');
   const [kind, setKind] = useState<string>(CLASS_KINDS[0]);
-  const [branch, setBranch] = useState<string>(BRANCHES[0]);
+  // Branch is typed in. It used to be a picker over six hardcoded Dubai
+  // locations; chips below now offer only branches this gym has already used.
+  const [branch, setBranch] = useState<string>('');
   const [room, setRoom] = useState('');
   const [instructor, setInstructor] = useState('');
   const [dayOff, setDayOff] = useState(0);
@@ -28,19 +30,20 @@ export default function TrainerClasses() {
   const [cap, setCap] = useState(16);
   const [weeks, setWeeks] = useState(1);
   const [busy, setBusy] = useState(false);
+  const knownBranches = branchesFrom(classes);
 
   const upcoming = useMemo(() => [...classes].sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt)), [classes]);
 
   const startIso = () => { const d = new Date(); d.setDate(d.getDate() + dayOff); d.setHours(hour, 0, 0, 0); return d.toISOString(); };
-  const canAdd = title.trim().length > 0;
+  const canAdd = title.trim().length > 0 && branch.trim().length > 0;
   const submit = async () => {
     if (!canAdd || busy) return;
     setBusy(true);
     try {
       const base = new Date(startIso());
-      for (let w = 0; w < weeks; w++) { const d = new Date(base.getTime() + w * 7 * 86400000); await addClass({ title: title.trim(), kind, instructor: instructor.trim() || 'Coach', branch, room: room.trim(), startsAt: d.toISOString(), durationMin: dur, capacity: cap }); }
+      for (let w = 0; w < weeks; w++) { const d = new Date(base.getTime() + w * 7 * 86400000); await addClass({ title: title.trim(), kind, instructor: instructor.trim() || 'Coach', branch: branch.trim(), room: room.trim(), startsAt: d.toISOString(), durationMin: dur, capacity: cap }); }
       setTitle(''); setRoom('');
-      Alert.alert(weeks > 1 ? 'Classes added' : 'Class added', weeks > 1 ? `${weeks} weekly ${title.trim()} classes at ${branch}, starting ${dayShort(startIso())} ${timeLabel(startIso())}.` : `${title.trim()} · ${branch} · ${dayShort(startIso())} ${timeLabel(startIso())}`);
+      Alert.alert(weeks > 1 ? 'Classes added' : 'Class added', weeks > 1 ? `${weeks} weekly ${title.trim()} classes at ${branch.trim()}, starting ${dayShort(startIso())} ${timeLabel(startIso())}.` : `${title.trim()} · ${branch.trim()} · ${dayShort(startIso())} ${timeLabel(startIso())}`);
     } finally { setBusy(false); }
   };
 
@@ -76,7 +79,10 @@ export default function TrainerClasses() {
           <Text style={{ color: t.ink3, fontSize: 11, marginBottom: 6 }}>Type</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }} contentContainerStyle={{ gap: 7 }}>{CLASS_KINDS.map((k) => chip(k, kind === k, () => setKind(k)))}</ScrollView>
           <Text style={{ color: t.ink3, fontSize: 11, marginBottom: 6 }}>Branch</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }} contentContainerStyle={{ gap: 7 }}>{BRANCHES.map((b) => chip(b, branch === b, () => setBranch(b)))}</ScrollView>
+          <TextInput value={branch} onChangeText={setBranch} placeholder="Branch or location — e.g. your main studio" placeholderTextColor={t.ink3} style={[inp, { marginBottom: knownBranches.length ? 8 : 10 }]} />
+          {knownBranches.length > 0 ? (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }} contentContainerStyle={{ gap: 7 }}>{knownBranches.map((b) => chip(b, branch === b, () => setBranch(b)))}</ScrollView>
+          ) : null}
           <View style={{ flexDirection: 'row', gap: 10, marginBottom: 10 }}>
             <TextInput value={instructor} onChangeText={setInstructor} placeholder="Instructor" placeholderTextColor={t.ink3} style={[inp, { flex: 1 }]} />
             <TextInput value={room} onChangeText={setRoom} placeholder="Room (optional)" placeholderTextColor={t.ink3} style={[inp, { flex: 1 }]} />

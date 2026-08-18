@@ -1,16 +1,18 @@
 // Promo / referral codes the owner offers trainers. Reactive so creating,
-// toggling or deleting a code updates the Growth screen live. Seeded for the
-// demo. Swap for a Supabase `promo_codes` table in the migration.
+// toggling or deleting a code updates the Growth screen live.
+//
+// Starts empty. This list was previously seeded with two invented codes
+// ("LAUNCH20 · 7 redeemed", "COACH50 · 3 redeemed") which shipped in the
+// production bundle and read to a real owner as live codes with real
+// redemptions. Redemption counts stay at 0 until a real redemption is
+// recorded. Swap for a Supabase `promo_codes` table in the migration.
 import { createContext, useContext, useState, type ReactNode } from 'react';
 
 export interface Promo { id: string; code: string; discountPct: number; redeemed: number; active: boolean }
 
 let SEQ = 10;
 
-const seed: Promo[] = [
-  { id: 'p1', code: 'LAUNCH20', discountPct: 20, redeemed: 7, active: true },
-  { id: 'p2', code: 'COACH50', discountPct: 50, redeemed: 3, active: false },
-];
+const seed: Promo[] = [];
 
 interface PromosValue {
   promos: Promo[];
