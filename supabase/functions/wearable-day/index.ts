@@ -9,6 +9,14 @@ const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: 
 const today = () => new Date().toISOString().slice(0, 10);
 const numOr = (v: any): number | null => (v == null ? null : Number.isFinite(Number(v)) ? Number(v) : null);
 
+// WHOOP caps `limit` at 25 per page on its collection endpoints and paginates with
+// next_token. There is no documented floor on how far `start` can reach, so how
+// much history you get is purely a function of how many pages we walk. MAX_PAGES
+// bounds that: 12 pages = up to 300 sessions, and 12 requests sits far under the
+// 100 req/min rate limit.
+const WHOOP_PAGE_LIMIT = 25;
+const MAX_PAGES = 12;
+
 const TOKEN_URL: Record<string, string> = {
   fitbit: 'https://api.fitbit.com/oauth2/token',
   oura: 'https://api.ouraring.com/oauth/token',
@@ -106,7 +114,7 @@ async function whoopDay(token: string) {
   // assigned to aerobic — the only approximation in the mapping.
   try {
     const start = today() + 'T00:00:00.000Z';
-    const w = await (await fetch(`https://api.prod.whoop.com/developer/v2/activity/workout?start=${start}&limit=25`, { headers: h })).json();
+    const w = await (await fetch(`https://api.prod.whoop.com/developer/v2/activity/workout?start=${start}&limit=${WHOOP_PAGE_LIMIT}`, { headers: h })).json();
     const recs = Array.isArray(w?.records) ? w.records : [];
     let mins = 0;
     const zones = { rest: 0, warmup: 0, aerobic: 0, threshold: 0, max: 0 };
@@ -167,10 +175,21 @@ const WHOOP_SPORT: Record<string, string> = {
 async function whoopWorkouts(token: string, sinceDays: number) {
   const h = { Authorization: 'Bearer ' + token };
   const start = new Date(Date.now() - Math.max(1, sinceDays) * 86400000).toISOString();
-  const res = await fetch(`https://api.prod.whoop.com/developer/v2/activity/workout?start=${start}&limit=50`, { headers: h });
-  if (!res.ok) return [];
-  const data = await res.json();
-  const recs = Array.isArray(data?.records) ? data.records : [];
+  const recs: any[] = [];
+  let nextToken = '';
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const url = new URL('https://api.prod.whoop.com/developer/v2/activity/workout');
+    url.searchParams.set('start', start);
+    url.searchParams.set('limit', String(WHOOP_PAGE_LIMIT));
+    if (nextToken) url.searchParams.set('nextToken', nextToken);
+    const res = await fetch(url.toString(), { headers: h });
+    if (!res.ok) break;
+    const data = await res.json();
+    const batch = Array.isArray(data?.records) ? data.records : [];
+    recs.push(...batch);
+    nextToken = String(data?.next_token || '');
+    if (!nextToken || batch.length < WHOOP_PAGE_LIMIT) break;
+  }
   const out: any[] = [];
   for (const r of recs) {
     const a = Date.parse(r?.start);
@@ -251,7 +270,8 @@ Deno.serve(async (req) => {
   if (String(body.action || '') === 'workouts') {
     if (provider !== 'whoop') return json({ workouts: [], connected: true });
     try {
-      const workouts = await whoopWorkouts(access, Number(body.sinceDays) || 14);
+      const days = Math.min(365, Math.max(1, Number(body.sinceDays) || 14));
+      const workouts = await whoopWorkouts(access, days);
       return json({ workouts, connected: true });
     } catch (_e) {
       return json({ workouts: [], connected: true, error: 'could not read workouts' });

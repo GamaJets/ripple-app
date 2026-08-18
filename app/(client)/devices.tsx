@@ -63,6 +63,11 @@ export default function Devices() {
    (pv) => typeof pv.fetchWorkouts === 'function' && pv.isAvailable() && w.states[pv.meta.id] === 'connected',
  );
  const canImport = importSources.length > 0;
+ // How far back to pull. WHOOP documents no floor on `start` and HealthKit holds
+ // everything on device, so this is a product choice, not an API limit.
+ const LOOKBACKS = [14, 30, 90, 365] as const;
+ const [lookback, setLookback] = useState<number>(14);
+ const lookbackLabel = (d: number) => (d >= 365 ? '1 year' : d >= 90 ? '90 days' : `${d} days`);
  const importLabel = importSources.length === 1 ? importSources[0].meta.name : 'your devices';
  const [wk, setWk] = useState<WorkoutSample[] | null>(null);
  const [wkBusy, setWkBusy] = useState(false);
@@ -101,14 +106,14 @@ export default function Devices() {
    setWkBusy(true);
    try {
      const lists = await Promise.all(importSources.map(async (pv) => {
-       try { return (await pv.fetchWorkouts!(14)) || []; }
+       try { return (await pv.fetchWorkouts!(lookback)) || []; }
        catch (e) { reportError('devices.fetchWorkouts', e, { provider: pv.meta.id }); return []; }
      }));
      // Merge across sources, newest first. Ids are source-prefixed so the same
      // session recorded by two devices stays two rows rather than silently merging.
      const merged = lists.flat().sort((a, b) => Date.parse(b.start) - Date.parse(a.start));
      setWk(merged);
-     if (!merged.length) Alert.alert('Import workouts', `No workouts found in the last 14 days from ${importLabel}.`);
+     if (!merged.length) Alert.alert('Import workouts', `No workouts found in the last ${lookbackLabel(lookback)} from ${importLabel}.`);
    } catch (e: any) {
      Alert.alert('Import workouts', e?.message || 'Could not read your workouts.');
    } finally {
@@ -168,12 +173,36 @@ export default function Devices() {
  <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 16, marginBottom: 16 }}>
  <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, marginBottom: 4 }}>Import workouts</Text>
  <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 12, lineHeight: 17 }}>Pull sessions from your connected devices — runs, cycling, lifting, Pilates — straight into your training log. No manual entry.</Text>
+ {/* How far back to look. Changing it clears the current list so the shown
+     results always match the selected window. */}
+ <View style={{ flexDirection: 'row', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
+  {LOOKBACKS.map((d) => {
+   const on = lookback === d;
+   return (
+    <Pressable
+     key={d}
+     onPress={() => { setLookback(d); setWk(null); }}
+     accessibilityRole="button"
+     accessibilityState={{ selected: on }}
+     accessibilityLabel={`Look back ${lookbackLabel(d)}`}
+     style={{
+      paddingHorizontal: 11, paddingVertical: 6, borderRadius: 999, borderWidth: 1,
+      backgroundColor: on ? t.brand : 'transparent',
+      borderColor: on ? t.brand : t.ring,
+     }}>
+     <Text style={{ color: on ? t.brandInk : t.ink2, fontSize: 12, fontWeight: on ? '800' : '600' }}>
+      {lookbackLabel(d)}
+     </Text>
+    </Pressable>
+   );
+  })}
+ </View>
  {wk == null ? (
  <Pressable onPress={findWorkouts} disabled={wkBusy} accessibilityRole="button" accessibilityLabel="Find my workouts" style={{ alignSelf: 'flex-start', backgroundColor: t.brand, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, opacity: wkBusy ? 0.6 : 1 }}>
  {wkBusy ? <ActivityIndicator color={t.brandInk} /> : <Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 13 }}>Find my workouts</Text>}
  </Pressable>
  ) : wk.length === 0 ? (
- <Text style={{ color: t.ink3, fontSize: 13 }}>No workouts found in the last 14 days.</Text>
+ <Text style={{ color: t.ink3, fontSize: 13 }}>No workouts found in the last {lookbackLabel(lookback)}.</Text>
  ) : (
  <View>
  {wk.map((sm) => {
