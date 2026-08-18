@@ -132,22 +132,29 @@ Deno.serve(async (req) => {
   if (!userId) return json({ error: 'no user' }, 401);
 
   const { data: row } = await service.from('wearable_tokens').select('*').eq('user_id', userId).eq('provider', provider).maybeSingle();
-  if (!row) return json({ metrics: null });
+  // connected:false is a real signal, not just 'no data' — the client uses it to
+  // stop claiming a dead connection is live.
+  if (!row) return json({ metrics: null, connected: false });
 
   let access = row.access_token as string;
-  if (row.expires_at && Date.parse(row.expires_at) < Date.now() + 60000 && row.refresh_token) {
+  const expired = !!row.expires_at && Date.parse(row.expires_at) < Date.now() + 60000;
+  if (expired && !row.refresh_token) {
+    // No refresh token was ever issued (WHOOP does this when 'offline' scope was
+    // not requested). Nothing can revive this — the user must reconnect.
+    return json({ metrics: null, connected: false, reason: 'expired_no_refresh_token' });
+  }
+  if (expired && row.refresh_token) {
     const t = await refresh(provider, row.refresh_token);
-    if (t?.access_token) {
-      access = t.access_token;
-      await service.from('wearable_tokens').update({
-        access_token: t.access_token,
-        refresh_token: t.refresh_token ?? row.refresh_token,
-        expires_at: new Date(Date.now() + (Number(t.expires_in) || 3600) * 1000).toISOString(),
-        updated_at: new Date().toISOString(),
-      }).eq('user_id', userId).eq('provider', provider);
-    }
+    if (!t?.access_token) return json({ metrics: null, connected: false, reason: 'refresh_failed' });
+    access = t.access_token;
+    await service.from('wearable_tokens').update({
+      access_token: t.access_token,
+      refresh_token: t.refresh_token ?? row.refresh_token,
+      expires_at: new Date(Date.now() + (Number(t.expires_in) || 3600) * 1000).toISOString(),
+      updated_at: new Date().toISOString(),
+    }).eq('user_id', userId).eq('provider', provider);
   }
 
   const metrics = await readVendor(provider, access);
-  return json({ metrics });
+  return json({ metrics, connected: true });
 });

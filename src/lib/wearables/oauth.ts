@@ -64,14 +64,45 @@ export async function connectVendor(id: ProviderId): Promise<void> {
   }
 }
 
+/**
+ * Thrown when the server reports there is no usable token for this vendor — the
+ * connection is dead and the user must reconnect. Distinct from "no data today",
+ * which is a perfectly normal null.
+ */
+export class WearableNotConnectedError extends Error {
+  constructor(public provider: string, public reason?: string) {
+    super(`${provider} is not connected`);
+    this.name = 'WearableNotConnectedError';
+  }
+}
+
 /** Ask the server for today's metrics for a connected cloud vendor. */
 export async function fetchVendorDay(id: ProviderId): Promise<any | null> {
+  let payload: any;
   try {
     const { data, error } = await supabase.functions.invoke('wearable-day', { body: { provider: id } });
     if (error || !data || (data as any).error) return null;
-    return (data as any).metrics ?? null;
+    payload = data;
   } catch (e) {
     reportError('wearables.fetchDay', e, { provider: id });
     return null;
+  }
+  if (payload?.connected === false) {
+    reportError('wearables.notConnected', payload?.reason || 'no usable token', { provider: id });
+    throw new WearableNotConnectedError(id, payload?.reason);
+  }
+  return payload?.metrics ?? null;
+}
+
+/**
+ * Actually drop the stored token. This used to be a no-op with a comment claiming
+ * revocation happened server-side; nothing deleted the row, so "disconnect" only
+ * cleared a local flag and the dead token lingered forever.
+ */
+export async function disconnectVendor(id: ProviderId): Promise<void> {
+  try {
+    await supabase.from('wearable_tokens').delete().eq('provider', id);
+  } catch (e) {
+    reportError('wearables.disconnect', e, { provider: id });
   }
 }

@@ -6,8 +6,20 @@ import { createContext, useContext, useEffect, useState, useCallback, useRef, ty
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { PROVIDERS, providerById } from '../lib/wearables/registry';
 import type { ConnectionState, DailyMetrics, ProviderId } from '../lib/wearables/types';
+import { WearableNotConnectedError } from '../lib/wearables/oauth';
+import { reportError } from '../lib/reportError';
 
 const STORE_KEY = 'repple.wearables.connected';
+
+/** Drop a provider from the remembered-connections list in AsyncStorage. */
+async function forgetRemembered(id: string): Promise<void> {
+  try {
+    const remembered = await AsyncStorage.getItem(STORE_KEY);
+    const set = new Set<string>(remembered ? JSON.parse(remembered) : []);
+    set.delete(id);
+    await AsyncStorage.setItem(STORE_KEY, JSON.stringify([...set]));
+  } catch { /* best effort */ }
+}
 
 interface Value {
   states: Record<string, ConnectionState>;
@@ -42,8 +54,15 @@ export function WearablesProvider({ children }: { children: ReactNode }) {
       const m = await p.fetchToday();
       setMetrics((prev) => ({ ...prev, [id]: m }));
       setLastSync((prev) => ({ ...prev, [id]: Date.now() }));
-    } catch {
-      /* leave last metrics in place */
+    } catch (e) {
+      if (e instanceof WearableNotConnectedError) {
+        // The server has no usable token. Stop showing this as connected —
+        // otherwise the UI reads "connected" forever while nothing works.
+        setState(id, 'disconnected');
+        setMetrics((prev) => ({ ...prev, [id]: null }));
+        forgetRemembered(id).catch(() => {});
+      }
+      /* otherwise leave last metrics in place */
     } finally {
       setBusyFor(id, false);
     }
@@ -72,13 +91,10 @@ export function WearablesProvider({ children }: { children: ReactNode }) {
 
   const disconnect = useCallback(async (id: ProviderId) => {
     const p = providerById(id);
-    if (p) { try { await p.disconnect(); } catch {} }
+    if (p) { try { await p.disconnect(); } catch (e) { reportError('wearables.disconnect', e, { provider: id }); } }
     setState(id, 'disconnected');
     setMetrics((prev) => ({ ...prev, [id]: null }));
-    const remembered = await AsyncStorage.getItem(STORE_KEY);
-    const set = new Set<string>(remembered ? JSON.parse(remembered) : []);
-    set.delete(id);
-    await AsyncStorage.setItem(STORE_KEY, JSON.stringify([...set]));
+    await forgetRemembered(id);
   }, []);
 
   // On launch: restore remembered connections and sync the ones that can run here.

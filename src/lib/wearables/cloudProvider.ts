@@ -9,7 +9,7 @@ import { Platform } from 'react-native';
 import type { WearableProvider, ProviderMeta, DailyMetrics } from './types';
 import { emptyMetrics } from './types';
 import { vendorFor, isConfigured } from './oauthConfig';
-import { connectVendor, fetchVendorDay } from './oauth';
+import { connectVendor, fetchVendorDay, disconnectVendor } from './oauth';
 
 export function makeCloudProvider(meta: ProviderMeta): WearableProvider {
   const isHealthConnect = meta.kind === 'health-connect';
@@ -35,7 +35,8 @@ export function makeCloudProvider(meta: ProviderMeta): WearableProvider {
       await connectVendor(meta.id);
     },
     async disconnect() {
-      // Token revocation handled server-side; the context drops the local flag.
+      if (isHealthConnect) return;
+      await disconnectVendor(meta.id);
     },
     async fetchToday(): Promise<DailyMetrics | null> {
       if (isHealthConnect) return null;
