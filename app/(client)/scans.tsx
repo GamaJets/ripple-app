@@ -18,6 +18,8 @@ import { View, Text, Pressable, Image, TextInput, ScrollView, Modal, Alert, Link
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
+import { supabase } from '../../src/lib/supabase';
+import { reportError } from '../../src/lib/reportError';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { useClientData } from '../../src/ui/clientData';
@@ -39,31 +41,43 @@ const ITEM_H = 42, VISIBLE = 5;
 const YEARS = Array.from({ length: 8 }, (_, i) => 2019 + i);
 const daysIn = (m: number, y: number) => new Date(y, m + 1, 0).getDate();
 
-const OCR_KEY = process.env.EXPO_PUBLIC_OCR_API_KEY || 'helloworld';
-async function ocrInBody(uri: string): Promise<{ weight?: string; bf?: string; muscle?: string; ok: boolean }> {
+// The OCR key is NOT in the app. It used to be
+//   const OCR_KEY = process.env.EXPO_PUBLIC_OCR_API_KEY || 'helloworld';
+// which had two faults: the EXPO_PUBLIC_ prefix inlines a value into the JS
+// bundle at build time, so the key shipped readable to anyone who unpacked the
+// app; and it was never actually set, so every scan ever made used the literal
+// fallback 'helloworld' — OCR.space's shared public demo key, globally rate
+// limited to a handful of requests. That is why scanning failed at random.
+//
+// The read now goes through the `ocr-scan` edge function, which holds the key as
+// a Supabase secret. Parsing stays here, where the InBody-specific rules live.
+function parseInBody(text: string): { weight?: string; bf?: string; muscle?: string; ok: boolean } {
+  const lines = text.split(/\r?\n/);
+  const numsIn = (str: string) => (str.match(/\d{1,3}(?:\.\d)?/g) || []).map(Number);
+  let weight: string | undefined, bf: string | undefined, muscle: string | undefined;
+  for (const ln of lines) {
+    const low = ln.toLowerCase();
+    if (bf === undefined && (low.includes('pbf') || low.includes('percent body fat'))) { const n = numsIn(ln).find((x) => x >= 3 && x <= 70); if (n !== undefined) bf = String(n); }
+    if (muscle === undefined && (low.includes('smm') || low.includes('skeletal muscle'))) { const n = numsIn(ln).find((x) => x >= 10 && x <= 80); if (n !== undefined) muscle = String(n); }
+    if (weight === undefined && low.includes('weight') && !low.includes('target') && !low.includes('control') && !low.includes('ideal') && !low.includes('over') && !low.includes('under')) { const cand = numsIn(ln).filter((x) => x >= 35 && x <= 250); if (cand.length) weight = String(cand[cand.length - 1]); }
+  }
+  if (bf === undefined) { const m = text.match(/PBF[^0-9]{0,12}(\d{1,2}(?:\.\d)?)/i); if (m) bf = m[1]; }
+  if (muscle === undefined) { const m = text.match(/SMM[^0-9]{0,12}(\d{1,2}(?:\.\d)?)/i); if (m) muscle = m[1]; }
+  return { weight, bf, muscle, ok: !!(weight || bf || muscle) };
+}
+
+/** Send the image to the edge function and parse whatever text comes back. */
+async function ocrInBody(b64?: string): Promise<{ weight?: string; bf?: string; muscle?: string; ok: boolean; error?: string }> {
+  if (!b64) return { ok: false, error: 'No image to read.' };
   try {
-    const form: any = new FormData();
-    form.append('apikey', OCR_KEY);
-    form.append('OCREngine', '2');
-    form.append('scale', 'true');
-    form.append('file', { uri, name: 'scan.jpg', type: 'image/jpeg' } as any);
-    const res = await fetch('https://api.ocr.space/parse/image', { method: 'POST', body: form });
-    const json: any = await res.json();
-    const text: string = (json && json.ParsedResults && json.ParsedResults[0] && json.ParsedResults[0].ParsedText) || '';
-    if (!text) return { ok: false };
-    const lines = text.split(/\r?\n/);
-    const numsIn = (str: string) => (str.match(/\d{1,3}(?:\.\d)?/g) || []).map(Number);
-    let weight: string | undefined, bf: string | undefined, muscle: string | undefined;
-    for (const ln of lines) {
-      const low = ln.toLowerCase();
-      if (bf === undefined && (low.includes('pbf') || low.includes('percent body fat'))) { const n = numsIn(ln).find((x) => x >= 3 && x <= 70); if (n !== undefined) bf = String(n); }
-      if (muscle === undefined && (low.includes('smm') || low.includes('skeletal muscle'))) { const n = numsIn(ln).find((x) => x >= 10 && x <= 80); if (n !== undefined) muscle = String(n); }
-      if (weight === undefined && low.includes('weight') && !low.includes('target') && !low.includes('control') && !low.includes('ideal') && !low.includes('over') && !low.includes('under')) { const cand = numsIn(ln).filter((x) => x >= 35 && x <= 250); if (cand.length) weight = String(cand[cand.length - 1]); }
-    }
-    if (bf === undefined) { const m = text.match(/PBF[^0-9]{0,12}(\d{1,2}(?:\.\d)?)/i); if (m) bf = m[1]; }
-    if (muscle === undefined) { const m = text.match(/SMM[^0-9]{0,12}(\d{1,2}(?:\.\d)?)/i); if (m) muscle = m[1]; }
-    return { weight, bf, muscle, ok: !!(weight || bf || muscle) };
-  } catch (e) { return { ok: false }; }
+    const { data, error } = await supabase.functions.invoke('ocr-scan', { body: { imageBase64: b64 } });
+    if (error) { reportError('scans.ocr', error); return { ok: false, error: 'Could not reach the scanning service.' }; }
+    if (!data?.ok) return { ok: false, error: typeof data?.error === 'string' ? data.error : undefined };
+    return parseInBody(String(data.text || ''));
+  } catch (e) {
+    reportError('scans.ocr', e);
+    return { ok: false, error: 'Could not reach the scanning service.' };
+  }
 }
 
 function Wheel({ items, index, onChange, t }: { items: string[]; index: number; onChange: (i: number) => void; t: Theme }) {
@@ -131,11 +145,11 @@ export default function Scans() {
           return;
         }
       }
-      const r = await ocrInBody(uri);
+      const r = await ocrInBody(b64);
       setReading(false);
       if (r.ok) { if (r.weight) setWt(r.weight); if (r.bf) setBf(r.bf); if (r.muscle) setSm(r.muscle);
         setOcrMsg('Read from your scan: ' + [r.weight ? 'weight ' + r.weight : '', r.bf ? 'body fat ' + r.bf + '%' : '', r.muscle ? 'muscle ' + r.muscle : ''].filter(Boolean).join(' · ') + '. Tap a field to correct.');
-      } else { setOcrMsg('Could not read automatically' + (lastVisionError ? ' — ' + lastVisionError : '') + '. Please type the numbers in.'); }
+      } else { setOcrMsg((r.error || 'Could not read automatically' + (lastVisionError ? ' — ' + lastVisionError : '')) + ' Please type the numbers in.'); }
     }
   };
   const saveScan = () => {
