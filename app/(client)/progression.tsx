@@ -1,13 +1,23 @@
 // Client · Progression. Auto-generated next-session targets from your logged
 // lifts using double-progression (add load when you clear the top of the range,
 // otherwise chase reps). Read-only guidance — you still log what you actually do.
-import { View, Text, Pressable, ScrollView } from 'react-native';
+//
+// Rebuilt on the instrument-panel kit (`src/ui/kit`) and the scale
+// (`src/theme/scale`). Every provider, conditional and route from the previous
+// version is preserved — only the presentation changed: one bordered card per
+// exercise (each with a second bordered box nested inside it) became hairline
+// rows carrying a <KpiRow>, and the action tag no longer prints itself in a
+// reserved status colour — the status is a coloured mark beside ink text.
+// A list of equal-weight targets is a list, so this screen leads with no hero.
+import { View, Text, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { suggestProgression, type ProgressAction } from '../../src/lib/progression';
+import { Rule, Section, SectionHead, KpiRow, Cta, Ghost } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 
 const META: Record<ProgressAction, { label: string; icon: string; color: (t: any) => string }> = {
   increase: { label: 'Add load', icon: 'trending', color: (t) => t.brand },
@@ -21,62 +31,76 @@ export default function Progression() {
   const router = useRouter();
   const { log } = useWorkoutLog();
   const tips = suggestProgression(log);
+  const G = layout.gutter;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
-        <Pressable onPress={() => router.back()} accessibilityLabel="Go back" style={{ marginBottom: 8 }}>
-          <Text style={{ color: t.brand, fontWeight: '700', fontSize: 15 }}>‹ Back</Text>
-        </Pressable>
-        <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia' }}>Next-session targets</Text>
-        <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 18 }}>Smart progression from your logged lifts. Aim for these next time.</Text>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+
+        {/* ── header ─────────────────────────────────────────────────────── */}
+        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
+          <View style={{ flex: 1 }}>
+            <Text style={{ ...ty.micro, color: t.ink3 }}>From your logged lifts</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Next-session targets</Text>
+          </View>
+          <Ghost icon="back" onPress={() => router.back()} />
+        </View>
+
+        <Rule />
 
         {tips.length === 0 ? (
-          <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 22, alignItems: 'center' }}>
-            <Icon name="trending" size={26} color={t.ink3} />
-            <Text style={{ color: t.ink2, fontWeight: '700', fontSize: 15, marginTop: 10 }}>No targets yet</Text>
-            <Text style={{ color: t.ink3, fontSize: 13, textAlign: 'center', marginTop: 4 }}>Log a few weighted sets and your progression targets will appear here.</Text>
-            <Pressable onPress={() => router.push('/(client)/workouts')} style={{ backgroundColor: t.brand, borderRadius: 11, paddingHorizontal: 18, paddingVertical: 11, marginTop: 14 }}>
-              <Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 13 }}>Log a workout</Text>
-            </Pressable>
-          </View>
-        ) : tips.map((tip) => {
-          const m = META[tip.action];
-          const c = m.color(t);
-          const bump = tip.nextWeight - tip.lastWeight;
-          return (
-            <View key={tip.exercise} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 15, marginBottom: 11 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                <View style={{ width: 40, height: 40, borderRadius: 11, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                  <Icon name={m.icon as any} size={19} color={c} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ color: t.ink, fontWeight: '800', fontSize: 15, textTransform: 'capitalize' }}>{tip.exercise}</Text>
-                  <Text style={{ color: t.ink3, fontSize: 12, marginTop: 1 }}>Last: {tip.lastWeight}kg × {tip.lastReps}</Text>
-                </View>
-                <View style={{ backgroundColor: c + '22', borderRadius: 9, paddingHorizontal: 9, paddingVertical: 4 }}>
-                  <Text style={{ color: c, fontWeight: '800', fontSize: 11 }}>{m.label}</Text>
-                </View>
-              </View>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12, backgroundColor: t.surface2, borderRadius: 12, borderWidth: 1, borderColor: t.ring, padding: 12 }}>
-                <View style={{ alignItems: 'center', flex: 1 }}>
-                  <Text style={{ color: t.ink, fontWeight: '800', fontSize: 20 }}>{tip.nextWeight}<Text style={{ fontSize: 12, color: t.ink3 }}>kg</Text></Text>
-                  {bump !== 0 ? <Text style={{ color: bump > 0 ? t.brand : t.crit, fontSize: 11, fontWeight: '700' }}>{bump > 0 ? '+' + bump : bump}kg</Text> : <Text style={{ color: t.ink3, fontSize: 11 }}>same</Text>}
-                </View>
-                <View style={{ width: 1, height: 32, backgroundColor: t.ring }} />
-                <View style={{ alignItems: 'center', flex: 1 }}>
-                  <Text style={{ color: t.ink, fontWeight: '800', fontSize: 20 }}>{tip.nextReps}</Text>
-                  <Text style={{ color: t.ink3, fontSize: 11 }}>reps</Text>
-                </View>
-              </View>
-              <Text style={{ color: t.ink3, fontSize: 12, marginTop: 10, lineHeight: 17 }}>{tip.rationale}</Text>
+          <Section>
+            <SectionHead title="No targets yet" />
+            <Text style={{ ...ty.body, color: t.ink2 }}>Log a few weighted sets and your progression targets will appear here.</Text>
+            <View style={{ height: sp.lg }} />
+            <View style={{ alignSelf: 'flex-start' }}>
+              <Cta label="Log a workout" onPress={() => router.push('/(client)/workouts')} />
             </View>
-          );
-        })}
+          </Section>
+        ) : (
+          <Section>
+            <SectionHead title="Aim for these next time" note={`${tips.length} lift${tips.length === 1 ? '' : 's'}`} />
+            {tips.map((tip, i) => {
+              const m = META[tip.action];
+              const c = m.color(t);
+              const bump = tip.nextWeight - tip.lastWeight;
+              return (
+                <View key={tip.exercise} style={{ paddingVertical: sp.lg, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+                    <View style={{ width: 34, height: 34, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+                      <Icon name={m.icon as any} size={17} color={c} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{tip.exercise}</Text>
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>Last: {tip.lastWeight}kg × {tip.lastReps}</Text>
+                    </View>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: c }} />
+                      <Text style={{ ...ty.caption, fontWeight: '500', color: t.ink2 }}>{m.label}</Text>
+                    </View>
+                  </View>
+                  <View style={{ height: sp.md }} />
+                  <KpiRow items={[
+                    {
+                      label: 'Target load', value: String(tip.nextWeight), unit: 'kg',
+                      good: bump >= 0,
+                      delta: bump !== 0 ? `${bump > 0 ? '+' : '−'}${Math.abs(bump)} kg` : 'same weight',
+                    },
+                    { label: 'Target reps', value: String(tip.nextReps) },
+                  ]} />
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{tip.rationale}</Text>
+                </View>
+              );
+            })}
+          </Section>
+        )}
 
-        {tips.length > 0 ? (
-          <Text style={{ color: t.ink3, fontSize: 11, marginTop: 6, lineHeight: 16 }}>Double-progression: clear the top of the rep range on every working set, then the weight goes up and reps reset. These are guidance — log what you actually lift.</Text>
-        ) : null}
+        {tips.length > 0 ? (<>
+          <Rule />
+          <Section>
+            <Text style={{ ...ty.caption, color: t.ink3 }}>Double-progression: clear the top of the rep range on every working set, then the weight goes up and reps reset. These are guidance — log what you actually lift.</Text>
+          </Section>
+        </>) : null}
       </ScrollView>
     </SafeAreaView>
   );

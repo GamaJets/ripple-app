@@ -1,12 +1,22 @@
 // Client · Body composition trends. Graphs every InBody metric over your scan
 // history — weight, body fat %, skeletal muscle, and InBody score — so you can see
 // the direction of travel, not just the latest numbers. Reads the scan store.
+//
+// Rebuilt on the instrument-panel kit (`src/ui/kit`) and the scale
+// (`src/theme/scale`). Every provider, conditional and route from the previous
+// version is preserved — only the presentation changed: four bordered cards with
+// hand-rolled View-bar charts became hairline-separated sections carrying a
+// <Spark> each, the 8px tick labels are gone, and the movement figure no longer
+// paints itself in a reserved status colour — it carries a mark beside ink text.
+// Four metrics of equal weight is a list, so this screen leads with no hero.
 import { useMemo } from 'react';
-import { View, Text, Pressable, ScrollView } from 'react-native';
+import { View, Text, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { useClientData } from '../../src/ui/clientData';
+import { Rule, Section, SectionHead, Ghost, Spark } from '../../src/ui/kit';
+import { sp, layout, type as ty, numeric, value } from '../../src/theme/scale';
 
 interface MetricDef { key: string; label: string; unit: string; better: 'up' | 'down' }
 const METRICS: MetricDef[] = [
@@ -22,55 +32,79 @@ function valOf(scan: any, key: string): number | undefined {
   return typeof v === 'number' ? v : undefined;
 }
 
+const dm = (iso: string) => `${new Date(iso).getDate()}/${new Date(iso).getMonth() + 1}`;
+
 export default function BodyTrends() {
   const t = useTheme();
   const router = useRouter();
   const cd = useClientData();
   const scans = useMemo(() => [...(cd.scans || [])].sort((a, b) => Date.parse(a.takenAt) - Date.parse(b.takenAt)), [cd.scans]);
+  const G = layout.gutter;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
-        <Pressable onPress={() => router.back()} hitSlop={8} style={{ marginBottom: 8 }}><Text style={{ color: t.brand, fontWeight: '700', fontSize: 15 }}>‹ Back</Text></Pressable>
-        <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia' }}>Composition trends</Text>
-        <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 18, fontSize: 14 }}>Every InBody metric across {scans.length} scan{scans.length === 1 ? '' : 's'}.</Text>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+
+        {/* ── header ─────────────────────────────────────────────────────── */}
+        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
+          <View style={{ flex: 1 }}>
+            <Text style={{ ...ty.micro, color: t.ink3 }}>Every InBody metric across {scans.length} scan{scans.length === 1 ? '' : 's'}</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Composition trends</Text>
+          </View>
+          <Ghost icon="back" onPress={() => router.back()} />
+        </View>
+
+        <Rule />
 
         {scans.length < 2 ? (
-          <View style={{ backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 16, padding: 18 }}>
-            <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, marginBottom: 4 }}>Add another scan to see trends</Text>
-            <Text style={{ color: t.ink3, fontSize: 13, lineHeight: 19 }}>Once you've logged two or more InBody scans, each metric graphs here so you can watch it move over time.</Text>
-          </View>
+          <Section>
+            <SectionHead title="Not enough scans yet" />
+            <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>Add another scan to see trends</Text>
+            <Text style={{ ...ty.label, color: t.ink3, marginTop: 4 }}>Once you've logged two or more InBody scans, each metric graphs here so you can watch it move over time.</Text>
+          </Section>
         ) : (
-          METRICS.map((m) => {
+          METRICS.map((m, mi) => {
             const series = scans.map((s) => ({ t: s.takenAt, v: valOf(s, m.key) })).filter((p) => typeof p.v === 'number') as { t: string; v: number }[];
             if (series.length < 2) return (
-              <View key={m.key} style={{ backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 16, padding: 16, marginBottom: 14 }}>
-                <Text style={{ color: t.ink, fontWeight: '800', fontSize: 15 }}>{m.label}</Text>
-                <Text style={{ color: t.ink3, fontSize: 12.5, marginTop: 6 }}>{m.key === 'inbodyScore' ? 'InBody score reads from your scan once the AI reader is connected.' : 'Not enough data yet.'}</Text>
+              <View key={m.key}>
+                {mi > 0 ? <Rule /> : null}
+                <Section>
+                  <SectionHead title={m.label} />
+                  <Text style={{ ...ty.label, color: t.ink3 }}>{m.key === 'inbodyScore' ? 'InBody score reads from your scan once the AI reader is connected.' : 'Not enough data yet.'}</Text>
+                </Section>
               </View>
             );
             const vals = series.map((p) => p.v);
-            const min = Math.min(...vals), max = Math.max(...vals), span = max - min || 1;
+            const min = Math.min(...vals), max = Math.max(...vals);
             const first = vals[0], last = vals[vals.length - 1], delta = Math.round((last - first) * 10) / 10;
             const improving = m.better === 'up' ? delta >= 0 : delta <= 0;
             return (
-              <View key={m.key} style={{ backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 16, padding: 16, marginBottom: 14 }}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 12 }}>
-                  <Text style={{ color: t.ink, fontWeight: '800', fontSize: 15 }}>{m.label}</Text>
-                  <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8 }}>
-                    <Text style={{ color: t.ink, fontSize: 18, fontWeight: '800' }}>{last}<Text style={{ fontSize: 12, color: t.ink3 }}> {m.unit}</Text></Text>
-                    <Text style={{ color: improving ? (t.good ?? t.brand) : t.crit, fontWeight: '800', fontSize: 12.5 }}>{delta > 0 ? '▲ +' : delta < 0 ? '▼ ' : ''}{delta !== 0 ? Math.abs(delta) : '—'}</Text>
-                  </View>
-                </View>
-                <View style={{ flexDirection: 'row', alignItems: 'flex-end', height: 100, gap: 6 }}>
-                  {series.map((p, i) => (
-                    <View key={i} style={{ flex: 1, alignItems: 'center' }}>
-                      <Text style={{ color: t.ink3, fontSize: 8.5, marginBottom: 3 }}>{p.v}</Text>
-                      <View style={{ width: '66%', height: Math.max(4, ((p.v - min) / span) * 74 + 6), backgroundColor: t.brand, borderRadius: 4 }} />
-                      <Text style={{ color: t.ink3, fontSize: 8, marginTop: 4 }}>{new Date(p.t).getDate()}/{new Date(p.t).getMonth() + 1}</Text>
+              <View key={m.key}>
+                {mi > 0 ? <Rule /> : null}
+                <Section>
+                  <SectionHead title={m.label} note={`${series.length} scans`} />
+                  <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.md }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+                      <Text style={{ ...value(26), color: t.ink }}>{last}</Text>
+                      <Text style={{ ...ty.caption, color: t.ink3, marginLeft: 3 }}>{m.unit}</Text>
                     </View>
-                  ))}
-                </View>
+                    {delta !== 0 ? (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: improving ? t.brand : t.ink3 }} />
+                        <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{delta > 0 ? '+' : '−'}{Math.abs(delta)} {m.unit} since your first scan</Text>
+                      </View>
+                    ) : (
+                      <Text style={{ ...ty.caption, color: t.ink3 }}>No change since your first scan</Text>
+                    )}
+                  </View>
+                  <View style={{ height: sp.md }} />
+                  <Spark data={vals} />
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: sp.sm }}>
+                    <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{dm(series[0].t)} · {first} {m.unit}</Text>
+                    <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>range {min}–{max} {m.unit}</Text>
+                    <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{dm(series[series.length - 1].t)}</Text>
+                  </View>
+                </Section>
               </View>
             );
           })

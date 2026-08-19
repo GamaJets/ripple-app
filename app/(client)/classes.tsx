@@ -1,10 +1,18 @@
 // Client · Classes. Pick a branch and browse the gym's group-class schedule, then
 // book or cancel. Full classes offer a waitlist; cancelling frees your seat.
+//
+// Re-skinned onto the instrument-panel kit (`src/ui/kit`) and the scale
+// (`src/theme/scale`): no hero (a schedule has no single number), days as
+// hairline-separated sections instead of a stack of bordered cards, and a
+// coloured dot beside ink text where "Class full" used to be status-coloured
+// type. The schedule itself is the gym's own — nothing is scheduled here.
 import { useMemo, useState } from 'react';
 import { View, Text, Pressable, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
+import { Rule, Section, SectionHead, Cta, Ghost } from '../../src/ui/kit';
+import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
 import { useClasses } from '../../src/ui/classes';
 import { scheduleLocal } from '../../src/ui/pushNotifications';
 import type { GymClass } from '../../src/lib/classesMock';
@@ -50,56 +58,76 @@ export default function Classes() {
   };
 
   const chip = (label: string, active: boolean, onPress: () => void) => (
-    <Pressable onPress={onPress} style={{ paddingHorizontal: 13, paddingVertical: 8, borderRadius: 18, backgroundColor: active ? t.brand : t.surface2, borderWidth: 1, borderColor: active ? t.brand : t.ring }}>
-      <Text style={{ color: active ? t.brandInk : t.ink2, fontWeight: '700', fontSize: 12 }}>{label}</Text>
+    <Pressable key={label} onPress={onPress} accessibilityRole="button" accessibilityLabel={label}
+      style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.sm, backgroundColor: active ? t.brand : t.surface2 }}>
+      <Text style={{ ...ty.label, fontWeight: active ? '600' : '500', color: active ? t.brandInk : t.ink2 }}>{label}</Text>
     </Pressable>
   );
 
+  const G = layout.gutter;
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
-        <Pressable onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Go back" style={{ marginBottom: 8 }}>
-          <Text style={{ color: t.brand, fontWeight: '700', fontSize: 15 }}>‹ Back</Text>
-        </Pressable>
-        <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia' }}>Classes</Text>
-        <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 14, fontSize: 14 }}>Pick your location and book a spot. Full classes have a waitlist.</Text>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+
+        {/* ── header ─────────────────────────────────────────────────────── */}
+        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
+          <View style={{ flex: 1 }}>
+            <Text style={{ ...ty.micro, color: t.ink3 }}>At the gym</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Classes</Text>
+            <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>Pick your location and book a spot. Full classes have a waitlist.</Text>
+          </View>
+          <Ghost icon="back" onPress={() => router.back()} />
+        </View>
 
         {branches.length > 1 ? (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }} contentContainerStyle={{ gap: 8 }}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: sp.lg }} contentContainerStyle={{ gap: sp.sm }}>
             {chip('All branches', branch === null, () => setBranch(null))}
             {branches.map((b) => chip(b, branch === b, () => setBranch(b === branch ? null : b)))}
           </ScrollView>
         ) : null}
 
         {byDay.map((g) => (
-          <View key={g.key} style={{ marginBottom: 18 }}>
-            <Text style={{ color: t.ink2, fontSize: 12, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 9 }}>{g.label}</Text>
-            {g.items.map((c) => {
-              const mine = myStatus[c.id];
-              const spotsLeft = Math.max(0, c.capacity - c.booked);
-              const full = spotsLeft === 0;
-              return (
-                <View key={c.id} style={{ backgroundColor: t.surface, borderColor: mine ? t.brand : t.ring, borderWidth: 1, borderRadius: 16, padding: 15, marginBottom: 9 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 3 }}>
-                    <View style={{ backgroundColor: t.surface2, borderRadius: 7, paddingHorizontal: 8, paddingVertical: 3 }}><Text style={{ color: t.brand, fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.4 }}>{c.kind}</Text></View>
-                    <Text style={{ color: t.ink3, fontSize: 12, fontWeight: '700' }}>{timeLabel(c.startsAt)} · {c.durationMin}m</Text>
+          <View key={g.key}>
+            <Rule />
+            <Section>
+              <SectionHead title={g.label} note={`${g.items.length} class${g.items.length === 1 ? '' : 'es'}`} />
+              {g.items.map((c, i) => {
+                const mine = myStatus[c.id];
+                const spotsLeft = Math.max(0, c.capacity - c.booked);
+                const full = spotsLeft === 0;
+                return (
+                  <View key={c.id}>
+                    {i > 0 ? <Rule /> : null}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ ...ty.micro, color: t.ink3 }}>{c.kind}</Text>
+                        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, marginTop: 3 }}>{c.title}</Text>
+                        <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{timeLabel(c.startsAt)} · {c.durationMin}m · {c.instructor} · {c.branch}{c.room ? ' · ' + c.room : ''}</Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 }}>
+                          <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: mine ? t.brand : full ? t.s3 : t.ink3 }} />
+                          <Text style={{ ...ty.caption, color: t.ink2 }}>{mine === 'waitlist' ? 'On the waitlist' : mine ? 'Booked' : full ? 'Class full' : `${spotsLeft} spot${spotsLeft === 1 ? '' : 's'} left`}</Text>
+                        </View>
+                      </View>
+                      {mine ? (
+                        <Ghost label={mine === 'waitlist' ? 'Leave waitlist' : 'Cancel'} onPress={() => onCancel(c)} />
+                      ) : (
+                        <Cta label={full ? 'Join waitlist' : 'Book'} onPress={() => onBook(c)} />
+                      )}
+                    </View>
                   </View>
-                  <Text style={{ color: t.ink, fontSize: 16, fontWeight: '800' }}>{c.title}</Text>
-                  <Text style={{ color: t.ink3, fontSize: 12.5, marginTop: 2 }}>{c.instructor} · {c.branch}{c.room ? ' · ' + c.room : ''}</Text>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 }}>
-                    <Text style={{ color: full ? t.s3 : t.ink3, fontSize: 12, fontWeight: '700' }}>{mine === 'waitlist' ? 'On the waitlist' : full ? 'Class full' : `${spotsLeft} spot${spotsLeft === 1 ? '' : 's'} left`}</Text>
-                    {mine ? (
-                      <Pressable onPress={() => onCancel(c)} accessibilityRole="button" accessibilityLabel={'Cancel ' + c.title} style={{ backgroundColor: t.surface2, borderWidth: 1, borderColor: t.ring, borderRadius: 11, paddingHorizontal: 18, paddingVertical: 9 }}><Text style={{ color: t.ink2, fontWeight: '800', fontSize: 13 }}>{mine === 'waitlist' ? 'Leave waitlist' : 'Cancel'}</Text></Pressable>
-                    ) : (
-                      <Pressable onPress={() => onBook(c)} accessibilityRole="button" accessibilityLabel={'Book ' + c.title} style={{ backgroundColor: t.brand, borderRadius: 11, paddingHorizontal: 20, paddingVertical: 9 }}><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 13 }}>{full ? 'Join waitlist' : 'Book'}</Text></Pressable>
-                    )}
-                  </View>
-                </View>
-              );
-            })}
+                );
+              })}
+            </Section>
           </View>
         ))}
-        {filtered.length === 0 ? <Text style={{ color: t.ink3, fontSize: 13, textAlign: 'center', marginTop: 30 }}>No classes scheduled{branch ? ' at ' + branch : ''} yet. Check back soon.</Text> : null}
+
+        {filtered.length === 0 ? (
+          <View style={{ paddingTop: sp.huge, alignItems: 'center' }}>
+            <Text style={{ ...ty.head, color: t.ink, textAlign: 'center' }}>No classes scheduled{branch ? ' at ' + branch : ''} yet</Text>
+            <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: 6, maxWidth: 300 }}>Classes appear here as soon as your gym adds them to the schedule.</Text>
+          </View>
+        ) : null}
       </ScrollView>
     </SafeAreaView>
   );

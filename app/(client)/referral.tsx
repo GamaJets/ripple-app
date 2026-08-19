@@ -1,16 +1,26 @@
-// Client · Invite Friends. Share a personal referral code to bring friends onto
+// Client · Invite friends. Share a personal referral code to bring friends onto
 // the app. Uses the core React Native Share sheet (OTA-safe, no native module).
 // The code is derived deterministically from the user so it's stable and can be
 // credited once reward attribution is wired on the backend.
+//
+// Rebuilt on the instrument-panel kit (`src/ui/kit`) and the scale
+// (`src/theme/scale`). Same code derivation, same share sheet, same hooks in the
+// same order. No hero: an invite code is not a metric, so the one card on the
+// screen is spent on the thing you act on.
+//
+// Nothing here is invented: the joined count comes from the `referral_count`
+// RPC and is simply absent until someone has actually signed up with the code —
+// no "0 friends joined" tile, no sample referrals, no fake reward balance.
 import { useEffect, useState } from 'react';
-import { View, Text, Pressable, ScrollView, Share } from 'react-native';
-import { Icon } from '../../src/ui/Icon';
+import { View, Text, ScrollView, Share } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { useClientData } from '../../src/ui/clientData';
 import { useBrand } from '../../src/ui/brand';
 import { referralCount } from '../../src/lib/referrals';
+import { Rule, Section, SectionHead, Card, Cta, Ghost } from '../../src/ui/kit';
+import { sp, layout, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 
 function codeFrom(name: string, id: string): string {
   const first = (name.trim().split(' ')[0] || 'REP').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 6) || 'REP';
@@ -41,37 +51,54 @@ export default function Referral() {
     try { await Share.share({ message: shareMsg }); } catch { /* user cancelled */ }
   };
 
+  const G = layout.gutter;
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
-        <Pressable onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Go back" style={{ marginBottom: 8 }}>
-          <Text style={{ color: t.brand, fontWeight: '700', fontSize: 15 }}>‹ Back</Text>
-        </Pressable>
-        <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia' }}>Invite friends</Text>
-        <Text style={{ color: t.ink3, marginTop: 4, marginBottom: 20, fontSize: 14, lineHeight: 20 }}>Training is easier with company. Share {appName} with a friend using your personal code.</Text>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
 
-        <View style={{ backgroundColor: t.surface, borderColor: t.brand, borderWidth: 1, borderRadius: 18, padding: 20, alignItems: 'center', marginBottom: 22 }}>
-          <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.8 }}>Your code</Text>
-          <Text style={{ color: t.brand, fontSize: 30, fontWeight: '800', letterSpacing: 2, marginTop: 6, fontFamily: 'Georgia' }}>{code}</Text>
-          {joined > 0 ? <Text style={{ color: t.ink2, fontSize: 12.5, fontWeight: '700', marginTop: 10 }}>{joined} friend{joined === 1 ? '' : 's'} joined with your code 🎉</Text> : null}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
+          <Ghost icon="back" onPress={() => router.back()} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ ...ty.micro, color: t.ink3 }}>Training is easier with company</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Invite friends</Text>
+          </View>
         </View>
 
-        {steps.map((s) => (
-          <View key={s.n} style={{ flexDirection: 'row', alignItems: 'center', gap: 13, marginBottom: 14 }}>
-            <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: t.surface2, borderWidth: 1, borderColor: t.ring, alignItems: 'center', justifyContent: 'center' }}>
-              <Text style={{ color: t.brand, fontWeight: '800', fontSize: 15 }}>{s.n}</Text>
+        {/* ── the one card: the thing you act on ─────────────────────────── */}
+        <Section>
+          <Card>
+            <Text style={{ ...ty.micro, color: t.ink3 }}>Your code</Text>
+            <Text style={{ ...value(30), color: t.ink, letterSpacing: 1.5, marginTop: 6 }}>{code}</Text>
+            {joined > 0 ? (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.md }}>
+                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.brand }} />
+                <Text style={{ ...ty.label, ...numeric, color: t.ink2 }}>{joined} friend{joined === 1 ? '' : 's'} joined with your code</Text>
+              </View>
+            ) : null}
+            <View style={{ marginTop: sp.lg }}>
+              <Cta label="Share my invite" wide onPress={invite} />
             </View>
-            <View style={{ flex: 1 }}>
-              <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15 }}>{s.label}</Text>
-              <Text style={{ color: t.ink3, fontSize: 13, marginTop: 1 }}>{s.note}</Text>
-            </View>
-          </View>
-        ))}
+          </Card>
+        </Section>
 
-        <Pressable onPress={invite} accessibilityRole="button" accessibilityLabel="Share my invite" style={{ backgroundColor: t.brand, borderRadius: 14, paddingVertical: 16, alignItems: 'center', marginTop: 10, flexDirection: 'row', justifyContent: 'center', gap: 8 }}>
-          <Icon name="share" size={17} color={t.brandInk} />
-          <Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 15 }}>Share my invite</Text>
-        </Pressable>
+        <Rule />
+
+        <Section>
+          <SectionHead title="How it works" />
+          {steps.map((s, i) => (
+            <View key={s.n} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+              <View style={{ width: 30, height: 30, borderRadius: 15, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+                <Text style={{ ...ty.label, ...numeric, fontWeight: '600', color: t.ink2 }}>{s.n}</Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{s.label}</Text>
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{s.note}</Text>
+              </View>
+            </View>
+          ))}
+        </Section>
+
       </ScrollView>
     </SafeAreaView>
   );

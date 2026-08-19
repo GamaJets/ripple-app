@@ -1,12 +1,23 @@
 // Watch & Devices — real wearable connections through the provider layer.
-// Apple Health reads the paired Apple Watch; live tiles are tappable for detail.
+// Apple Health reads the paired Apple Watch; live metrics are tappable for detail.
+//
+// Rebuilt on the instrument-panel kit (`src/ui/kit`) and the scale
+// (`src/theme/scale`). Every provider, handler, conditional and route from the
+// previous version is preserved — only the presentation changed: today's active
+// energy is the screen's one hero figure, the four bordered metric tiles became
+// hairline-separated list rows that still open the same detail sheet, and the
+// three stacked bordered card stacks became sections separated by a rule.
+//
+// Also removed: the footnote claiming cloud devices "arrive with the backend
+// rollout". They connect today — `makeCloudProvider` runs the vendor OAuth and
+// reads the day through the edge function, and WHOOP already feeds the workout
+// importer above it. The line described behaviour the code no longer has.
 import { useState, useCallback, useEffect } from 'react';
 import { View, Text, Pressable, ScrollView, Alert, ActivityIndicator, Modal } from 'react-native';
 import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import type { Theme } from '../../src/theme/tokens';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { PROVIDERS } from '../../src/lib/wearables/registry';
 import type { WearableProvider, WorkoutSample } from '../../src/lib/wearables/types';
@@ -16,6 +27,8 @@ import { hrStats } from '../../src/lib/hr';
 import type { WorkoutEntry } from '../../src/lib/mockData';
 import { tapLight } from '../../src/ui/haptics';
 import { reportError } from '../../src/lib/reportError';
+import { Rule, Section, SectionHead, Hero, ListRow, Cta, Ghost } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 
 type MetricKey = 'kcal' | 'hr' | 'steps' | 'source';
 
@@ -33,20 +46,6 @@ function num(n: number | null | undefined, dashes = '—'): string {
 function wkDate(iso: string): string {
  const d = new Date(iso);
  return `${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()]} ${d.getDate()}/${d.getMonth() + 1}`;
-}
-
-function Metric({ t, ico, label, value, unit, onPress, hint }: { t: Theme; ico: string; label: string; value: string; unit: string; onPress: () => void; hint?: string }) {
- return (
- <Pressable onPress={onPress} style={{ flex: 1, backgroundColor: t.surface2, borderRadius: 14, padding: 14, borderWidth: 1, borderColor: t.ring }}>
- <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
- <Icon name={(ico || 'chart') as any} size={18} color={t.brand} />
- <Text style={{ color: t.ink3, fontSize: 16 }}>›</Text>
- </View>
- <Text style={{ color: t.ink, fontSize: 20, fontWeight: '800', textTransform: 'capitalize', marginTop: 6 }}>{value}<Text style={{ color: t.ink3, fontSize: 11, fontWeight: '600' }}> {unit}</Text></Text>
- <Text style={{ color: t.ink3, fontSize: 11, marginTop: 1, textTransform: 'capitalize' }}>{label}</Text>
- {hint ? <Text style={{ color: t.s3, fontSize: 10, marginTop: 3, fontWeight: '700' }}>{hint}</Text> : null}
- </Pressable>
- );
 }
 
 export default function Devices() {
@@ -153,160 +152,205 @@ export default function Devices() {
  source: { ico: 'clock', title: 'Connected Sources', value: `${connected.length} ${connected.length === 1 ? 'device' : 'devices'}`, blurb: connected.map((p) => `• ${p.meta.name}`).join('\n') || 'No devices connected yet.' },
  };
 
+ const devicesWord = connected.length === 1 ? 'device' : 'devices';
+ const G = layout.gutter;
+
  return (
  <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
- <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
- <Pressable onPress={() => router.back()} style={{ marginBottom: 8 }}><Text style={{ color: t.brand, fontWeight: '700', fontSize: 15, textTransform: 'capitalize' }}>‹ Back</Text></Pressable>
- <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia', textTransform: 'capitalize' }}>Watch &amp; Devices</Text>
- <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 16 }}>Connect a wearable to auto-track heart rate and calories burned.</Text>
+ <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
 
- {showLive ? (
- <View style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18, marginBottom: 16 }}>
- <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12 }}>
- <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: t.good }} /><Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, textTransform: 'capitalize' }}>Live Today</Text>
- </View>
- <View style={{ flexDirection: 'row', gap: 10, marginBottom: 10 }}>
- <Metric t={t} ico="" label="Calories Burned" value={num(w.today.activeKcal)} unit="kcal" hint={w.today.activeKcal == null ? 'Wear your Apple Watch' : undefined} onPress={() => setDetail('kcal')} />
- <Metric t={t} ico="" label="Avg Heart Rate" value={num(w.today.heartRateAvg)} unit="bpm" hint={w.today.heartRateAvg == null ? 'Wear your Apple Watch' : undefined} onPress={() => setDetail('hr')} />
- </View>
- <View style={{ flexDirection: 'row', gap: 10 }}>
- <Metric t={t} ico="" label="Steps" value={num(w.today.steps)} unit="" onPress={() => setDetail('steps')} />
- <Metric t={t} ico="" label="Source" value={String(connected.length)} unit={connected.length === 1 ? 'device' : 'devices'} onPress={() => setDetail('source')} />
- </View>
- <Text style={{ color: t.ink3, fontSize: 11, marginTop: 12, lineHeight: 16 }}>Updates automatically. Steps come from your iPhone; heart rate &amp; calories need an Apple Watch (wear it). Calories feed your daily target.</Text>
- </View>
- ) : null}
+  {/* ── header ──────────────────────────────────────────────────────── */}
+  <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
+   <View style={{ flex: 1 }}>
+    <Text style={{ ...ty.micro, color: t.ink3 }}>Wearables</Text>
+    <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Watch &amp; devices</Text>
+   </View>
+   <Ghost icon="back" onPress={() => router.back()} />
+  </View>
 
- {canImport ? (
- <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 16, marginBottom: 16 }}>
- <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, marginBottom: 4 }}>Import workouts</Text>
- <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 12, lineHeight: 17 }}>Pull sessions from your connected devices — runs, cycling, lifting, Pilates — straight into your training log. No manual entry.</Text>
- {/* How far back to look. Changing it clears the current list so the shown
-     results always match the selected window. */}
- <View style={{ flexDirection: 'row', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
-  {LOOKBACKS.map((d) => {
-   const on = lookback === d;
-   return (
-    <Pressable
-     key={d}
-     onPress={() => { setLookback(d); setWk(null); }}
-     accessibilityRole="button"
-     accessibilityState={{ selected: on }}
-     accessibilityLabel={`Look back ${lookbackLabel(d)}`}
-     style={{
-      paddingHorizontal: 11, paddingVertical: 6, borderRadius: 999, borderWidth: 1,
-      backgroundColor: on ? t.brand : 'transparent',
-      borderColor: on ? t.brand : t.ring,
+  {/* ── the hero: today's live burn, when a device is feeding it ─────── */}
+  {showLive ? (<>
+   <Hero
+    label="Burned today"
+    figure={num(w.today.activeKcal)}
+    unit="kcal"
+    note={w.today.activeKcal == null
+     ? `Wear your watch — active energy syncs on its own from your ${connected.length} connected ${devicesWord}.`
+     : `Active energy from your watch · feeds your daily calorie target.`}
+    onPress={() => setDetail('kcal')}
+   />
+
+   <Rule />
+
+   <Section>
+    <SectionHead title="Live today" note={`${connected.length} ${devicesWord}`} onPress={() => setDetail('source')} />
+    <ListRow icon="heart" title="Average heart rate"
+     note={w.today.heartRateAvg == null ? 'Wear your Apple Watch' : `${num(w.today.heartRateAvg)} bpm across today's samples`}
+     onPress={() => setDetail('hr')} />
+    <ListRow icon="trending" title="Steps"
+     note={w.today.steps == null ? 'Comes from your iPhone' : `${num(w.today.steps)} today`}
+     onPress={() => setDetail('steps')} />
+    <ListRow icon="clock" title="Connected sources"
+     note={connected.map((p) => p.meta.name).join(' · ')}
+     onPress={() => setDetail('source')} />
+    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+     Updates automatically. Steps come from your iPhone; heart rate &amp; calories need an Apple Watch (wear it).
+    </Text>
+   </Section>
+  </>) : null}
+
+  {/* ── import workouts ─────────────────────────────────────────────── */}
+  {canImport ? (<>
+   <Rule />
+   <Section>
+    <SectionHead title="Import workouts" note={importLabel} />
+    <Text style={{ ...ty.label, color: t.ink2 }}>
+     Pull sessions from your connected devices — runs, cycling, lifting, Pilates — straight into your training log. No manual entry.
+    </Text>
+    {/* How far back to look. Changing it clears the current list so the shown
+        results always match the selected window. */}
+    <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.lg, marginBottom: sp.lg, flexWrap: 'wrap' }}>
+     {LOOKBACKS.map((d) => {
+      const on = lookback === d;
+      return (
+       <Pressable
+        key={d}
+        onPress={() => { setLookback(d); setWk(null); }}
+        accessibilityRole="button"
+        accessibilityState={{ selected: on }}
+        accessibilityLabel={`Look back ${lookbackLabel(d)}`}
+        style={{
+         paddingHorizontal: sp.md, paddingVertical: 7, borderRadius: radius.pill,
+         backgroundColor: on ? t.brand : t.surface2,
+        }}>
+        <Text style={{ ...ty.caption, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>
+         {lookbackLabel(d)}
+        </Text>
+       </Pressable>
+      );
+     })}
+    </View>
+    {wk == null ? (
+     wkBusy
+      ? <View style={{ alignSelf: 'flex-start', paddingVertical: sp.md }}><ActivityIndicator color={t.brand} /></View>
+      : <View style={{ alignSelf: 'flex-start' }}><Cta label="Find my workouts" onPress={findWorkouts} /></View>
+    ) : wk.length === 0 ? (
+     <Text style={{ ...ty.label, color: t.ink3 }}>No workouts found in the last {lookbackLabel(lookback)}.</Text>
+    ) : (
+     <View>
+      {wk.map((sm, i) => {
+       const done = alreadyLogged(sm);
+       return (
+        <View key={sm.id} style={{
+         flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md,
+         borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
+        }}>
+         <View style={{ flex: 1 }}>
+          <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{sm.activity}</Text>
+          <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{[wkDate(sm.start), `${sm.mins} min`, sm.distanceKm ? `${sm.distanceKm} km` : null, sm.kcal ? `${sm.kcal} kcal` : null].filter(Boolean).join(' · ')}</Text>
+         </View>
+         {done ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }} accessibilityLabel={'Already in log: ' + sm.activity}>
+           <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: t.brand }} />
+           <Text style={{ ...ty.caption, color: t.ink3 }}>In log</Text>
+          </View>
+         ) : (
+          <Ghost label="Import" onPress={() => importOne(sm)} />
+         )}
+        </View>
+       );
+      })}
+      <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.lg }}>
+       <View style={{ flex: 1 }}><Cta label="Import all" wide onPress={importAll} /></View>
+       <View style={{ flex: 1 }}><Ghost label="Refresh" onPress={findWorkouts} /></View>
+      </View>
+     </View>
+    )}
+   </Section>
+  </>) : null}
+
+  {/* ── available devices ───────────────────────────────────────────── */}
+  <Rule />
+  <Section>
+   <SectionHead title="Available devices" note={connected.length ? `${connected.length} connected` : undefined} />
+   {PROVIDERS.map((p, i) => {
+    const st = w.states[p.meta.id] || 'disconnected';
+    const on = st === 'connected';
+    const busy = !!w.busy[p.meta.id];
+    const reason = p.unavailableReason();
+    const blocked = !p.isAvailable() && !on;
+    return (
+     <View key={p.meta.id} style={{
+      paddingVertical: sp.md,
+      borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
      }}>
-     <Text style={{ color: on ? t.brandInk : t.ink2, fontSize: 12, fontWeight: on ? '800' : '600' }}>
-      {lookbackLabel(d)}
-     </Text>
-    </Pressable>
-   );
-  })}
- </View>
- {wk == null ? (
- <Pressable onPress={findWorkouts} disabled={wkBusy} accessibilityRole="button" accessibilityLabel="Find my workouts" style={{ alignSelf: 'flex-start', backgroundColor: t.brand, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, opacity: wkBusy ? 0.6 : 1 }}>
- {wkBusy ? <ActivityIndicator color={t.brandInk} /> : <Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 13 }}>Find my workouts</Text>}
- </Pressable>
- ) : wk.length === 0 ? (
- <Text style={{ color: t.ink3, fontSize: 13 }}>No workouts found in the last {lookbackLabel(lookback)}.</Text>
- ) : (
- <View>
- {wk.map((sm) => {
- const done = alreadyLogged(sm);
- return (
- <View key={sm.id} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: t.ring }}>
- <View style={{ flex: 1, paddingRight: 10 }}>
- <Text style={{ color: t.ink, fontWeight: '700', fontSize: 13.5 }}>{sm.activity}</Text>
- <Text style={{ color: t.ink3, fontSize: 11.5, marginTop: 1 }}>{[wkDate(sm.start), `${sm.mins} min`, sm.distanceKm ? `${sm.distanceKm} km` : null, sm.kcal ? `${sm.kcal} kcal` : null].filter(Boolean).join(' · ')}</Text>
- </View>
- <Pressable onPress={() => importOne(sm)} disabled={done} accessibilityRole="button" accessibilityLabel={(done ? 'Already in log: ' : 'Import ') + sm.activity} style={{ backgroundColor: done ? t.surface2 : t.brand, borderColor: t.ring, borderWidth: done ? 1 : 0, borderRadius: 9, paddingHorizontal: 12, paddingVertical: 7 }}>
- <Text style={{ color: done ? t.ink3 : t.brandInk, fontWeight: '800', fontSize: 12 }}>{done ? 'In log' : 'Import'}</Text>
- </Pressable>
- </View>
- );
- })}
- <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
- <Pressable onPress={importAll} accessibilityRole="button" accessibilityLabel="Import all workouts" style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 9, paddingHorizontal: 12, paddingVertical: 8 }}><Text style={{ color: t.ink, fontWeight: '800', fontSize: 12 }}>Import all</Text></Pressable>
- <Pressable onPress={findWorkouts} accessibilityRole="button" accessibilityLabel="Refresh workouts" style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 9, paddingHorizontal: 12, paddingVertical: 8 }}><Text style={{ color: t.ink, fontWeight: '800', fontSize: 12 }}>↻ Refresh</Text></Pressable>
- </View>
- </View>
- )}
- </View>
- ) : null}
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+       <View style={{ width: 34, height: 34, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+        <Icon name="clock" size={17} color={on ? t.brand : t.ink3} />
+       </View>
+       <View style={{ flex: 1 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
+         {on ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.brand }} /> : null}
+         <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{p.meta.name}</Text>
+        </View>
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{p.meta.blurb}</Text>
+       </View>
+       {busy ? (
+        <ActivityIndicator color={t.brand} />
+       ) : on || blocked ? (
+        <Ghost label={on ? 'Connected' : 'Unavailable'} onPress={() => (on ? w.disconnect(p.meta.id) : onConnect(p))} />
+       ) : (
+        <Cta label="Connect" onPress={() => onConnect(p)} />
+       )}
+      </View>
 
- <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16, textTransform: 'capitalize', marginBottom: 10 }}>Available Devices</Text>
- {PROVIDERS.map((p) => {
- const st = w.states[p.meta.id] || 'disconnected';
- const on = st === 'connected';
- const busy = !!w.busy[p.meta.id];
- const reason = p.unavailableReason();
- const blocked = !p.isAvailable() && !on;
- return (
- <View key={p.meta.id} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: on ? t.brand : t.ring, padding: 15, marginBottom: 10 }}>
- <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
- <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}><Icon name="clock" size={20} color={t.brand} /></View>
- <View style={{ flex: 1 }}>
- <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, textTransform: 'capitalize' }}>{p.meta.name}</Text>
- <Text style={{ color: t.ink3, fontSize: 12, marginTop: 1 }}>{p.meta.blurb}</Text>
- </View>
- {busy ? (
- <ActivityIndicator color={t.brand} />
- ) : (
- <Pressable onPress={() => (on ? w.disconnect(p.meta.id) : onConnect(p))}
- style={{ backgroundColor: on ? t.surface2 : blocked ? t.surface2 : t.brand, borderColor: t.ring, borderWidth: on || blocked ? 1 : 0, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 9 }}>
- <Text style={{ color: on ? t.ink2 : blocked ? t.ink3 : t.brandInk, fontWeight: '800', fontSize: 13 }}>{on ? 'Connected' : blocked ? 'Unavailable' : 'Connect'}</Text>
- </Pressable>
- )}
- </View>
+      {blocked && reason ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{reason}</Text> : null}
 
- {blocked && reason ? <Text style={{ color: t.ink3, fontSize: 11, marginTop: 10 }}>ⓘ {reason}</Text> : null}
-
- {on ? (
- <View style={{ marginTop: 12, borderTopWidth: 1, borderTopColor: t.ring, paddingTop: 12 }}>
- {(() => {
- const m = w.metrics[p.meta.id];
- if (!m) return <Text style={{ color: t.ink3, fontSize: 12 }}>Connected. Tap Sync — no data for today yet.</Text>;
- return (
- <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 16 }}>
- {m.activeKcal != null ? <Text style={{ color: t.ink2, fontSize: 12 }}> {m.activeKcal} kcal</Text> : null}
- {m.heartRateAvg != null ? <Text style={{ color: t.ink2, fontSize: 12 }}> {m.heartRateAvg} bpm avg</Text> : null}
- {m.heartRateResting != null ? <Text style={{ color: t.ink2, fontSize: 12 }}> {m.heartRateResting} resting</Text> : null}
- {m.steps != null ? <Text style={{ color: t.ink2, fontSize: 12 }}> {m.steps.toLocaleString()} steps</Text> : null}
- {m.workoutMins != null ? <Text style={{ color: t.ink2, fontSize: 12 }}> {m.workoutMins} min</Text> : null}
- </View>
- );
- })()}
- <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 12 }}>
- <Pressable accessibilityLabel={'Sync ' + p.meta.name} accessibilityRole="button" onPress={() => { tapLight(); w.sync(p.meta.id); }} style={{ alignSelf: 'flex-start', backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 9, paddingHorizontal: 12, paddingVertical: 7 }}>
- <Text style={{ color: t.ink, fontWeight: '700', fontSize: 12 }}>↻ Sync Now</Text>
- </Pressable>
- {w.lastSync[p.meta.id] ? <Text style={{ color: t.ink3, fontSize: 11 }}>Synced {ago(w.lastSync[p.meta.id])}</Text> : null}
- </View>
- </View>
- ) : null}
- </View>
- );
- })}
- <Text style={{ color: t.ink3, fontSize: 12, marginTop: 8 }}>Apple Health reads your paired Apple Watch through HealthKit. Cloud devices (WHOOP, Oura, Garmin, Fitbit) connect via their APIs and arrive with the backend rollout.</Text>
+      {on ? (
+       <View style={{ marginTop: sp.md }}>
+        {(() => {
+         const m = w.metrics[p.meta.id];
+         if (!m) return <Text style={{ ...ty.caption, color: t.ink3 }}>Connected. Tap Sync — no data for today yet.</Text>;
+         return (
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.lg }}>
+           {m.activeKcal != null ? <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{m.activeKcal} kcal</Text> : null}
+           {m.heartRateAvg != null ? <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{m.heartRateAvg} bpm avg</Text> : null}
+           {m.heartRateResting != null ? <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{m.heartRateResting} resting</Text> : null}
+           {m.steps != null ? <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{m.steps.toLocaleString()} steps</Text> : null}
+           {m.workoutMins != null ? <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{m.workoutMins} min</Text> : null}
+          </View>
+         );
+        })()}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginTop: sp.md }}>
+         <Ghost label="Sync now" onPress={() => { tapLight(); w.sync(p.meta.id); }} />
+         {w.lastSync[p.meta.id] ? <Text style={{ ...ty.caption, color: t.ink3 }}>Synced {ago(w.lastSync[p.meta.id])}</Text> : null}
+        </View>
+       </View>
+      ) : null}
+     </View>
+    );
+   })}
+   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
+    Apple Health reads your paired Apple Watch through HealthKit. WHOOP, Oura, Garmin and Fitbit connect through their own APIs — sign in once and the day syncs on its own.
+   </Text>
+  </Section>
  </ScrollView>
 
  <Modal visible={detail != null} transparent animationType="slide" onRequestClose={() => setDetail(null)}>
- <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)' }} onPress={() => setDetail(null)} />
- <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, borderColor: t.ring, padding: 20, paddingBottom: 32 }}>
- {detail ? (
- <>
- <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
- <Text style={{ color: t.ink, fontSize: 18, fontWeight: '800' }}>{DETAILS[detail].title}</Text>
- <Pressable onPress={() => setDetail(null)}><Text style={{ color: t.brand, fontSize: 16, fontWeight: '800' }}>Close</Text></Pressable>
- </View>
- <Text style={{ color: t.ink, fontSize: 34, fontWeight: '800', marginBottom: 12 }}>{DETAILS[detail].value}</Text>
- <Text style={{ color: t.ink2, fontSize: 14, lineHeight: 21 }}>{DETAILS[detail].blurb}</Text>
- <Text style={{ color: t.ink3, fontSize: 12, marginTop: 16 }}>Trends and history charts arrive with the backend rollout. Manage what Repple can read in Apple Health ▸ Sharing ▸ Repple.</Text>
- </>
- ) : null}
- </View>
+  <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)' }} onPress={() => setDetail(null)} />
+  <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 32 }}>
+   {detail ? (
+    <>
+     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sp.lg }}>
+      <Text style={{ ...ty.title, color: t.ink }}>{DETAILS[detail].title}</Text>
+      <Ghost label="Close" onPress={() => setDetail(null)} />
+     </View>
+     <Text style={{ ...value(34), color: t.ink, marginBottom: sp.md }}>{DETAILS[detail].value}</Text>
+     <Text style={{ ...ty.body, color: t.ink2 }}>{DETAILS[detail].blurb}</Text>
+     <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>Manage what Repple can read in Apple Health ▸ Sharing ▸ Repple.</Text>
+    </>
+   ) : null}
+  </View>
  </Modal>
  </SafeAreaView>
  );

@@ -1,12 +1,19 @@
 // Client · Rest & deload planner. Reads the training log to gauge fatigue and
 // recommend rest days / a deload week, with simple recovery actions. Pure logic
 // (deloadCheck + weekStats), OTA-safe.
+//
+// On the instrument-panel kit (`src/ui/kit`) and the scale (`src/theme/scale`).
+// Every provider, computation, conditional and route is preserved — the tone
+// that used to colour a bordered headline card is now a Notice's mark, so the
+// status colour never lands on the text itself.
 import { useMemo } from 'react';
-import { View, Text, Pressable, ScrollView } from 'react-native';
+import { View, Text, ScrollView } from 'react-native';
 import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
+import { Rule, Section, SectionHead, Hero, KpiRow, Notice, Cta, Ghost } from '../../src/ui/kit';
+import { sp, layout, type as ty } from '../../src/theme/scale';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { deloadCheck } from '../../src/lib/training';
 import { weekStats } from '../../src/lib/streaks';
@@ -43,48 +50,73 @@ export default function RestDay() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
-        <Pressable onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Go back" style={{ marginBottom: 8 }}>
-          <Text style={{ color: t.brand, fontWeight: '700', fontSize: 15 }}>‹ Back</Text>
-        </Pressable>
-        <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia' }}>Rest & deload</Text>
-        <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 16, fontSize: 14 }}>Recovery is where training pays off. Here's what your log suggests.</Text>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
 
-        <View style={{ backgroundColor: t.surface, borderColor: tone, borderWidth: 1, borderRadius: 18, padding: 18, marginBottom: 16 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-            <View style={{ width: 42, height: 42, borderRadius: 12, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}><Icon name={dl.due ? 'moon' : restToday ? 'water' : 'flame'} size={22} color={tone} /></View>
-            <Text style={{ color: t.ink, fontSize: 18, fontWeight: '800', flex: 1 }}>{headline}</Text>
+        {/* ── header ─────────────────────────────────────────────────────── */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
+          <Ghost icon="back" onPress={() => router.back()} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ ...ty.micro, color: t.ink3 }}>What your log suggests</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Rest & deload</Text>
           </View>
-          <Text style={{ color: t.ink2, fontSize: 13.5, lineHeight: 20 }}>{body}</Text>
         </View>
 
-        <View style={{ flexDirection: 'row', gap: 12, marginBottom: 18 }}>
-          {[['This week', `${wk.days} days`], ['Hard weeks', `${dl.hardWeeks}`], ['Volume', `${(wk.volumeKg / 1000).toFixed(1)}t`]].map(([l, v]) => (
-            <View key={l} style={{ flex: 1, backgroundColor: t.surface, borderRadius: 14, borderWidth: 1, borderColor: t.ring, padding: 13 }}>
-              <Text style={{ color: t.ink, fontSize: 18, fontWeight: '800' }}>{v}</Text>
-              <Text style={{ color: t.ink3, fontSize: 11, marginTop: 2 }}>{l}</Text>
+        {/* ── the call, above the hero ────────────────────────────────────── */}
+        <View style={{ marginTop: sp.lg }}>
+          <Notice tone={tone} kicker="Recovery" title={headline} note={body} />
+        </View>
+
+        {/* ── the hero: how loaded this week already is ───────────────────── */}
+        <Hero
+          label="Trained this week"
+          figure={String(wk.days)}
+          unit={wk.days === 1 ? 'day' : 'days'}
+          arc={wk.days / 7}
+          tone={tone}
+          note={`${dl.hardWeeks} consecutive hard week${dl.hardWeeks === 1 ? '' : 's'} behind you`}
+        />
+
+        <Rule />
+
+        <Section>
+          <SectionHead title="Load" />
+          <KpiRow items={[
+            { label: 'Hard weeks', value: String(dl.hardWeeks) },
+            { label: 'Volume this week', value: (wk.volumeKg / 1000).toFixed(1), unit: 't' },
+          ]} />
+        </Section>
+
+        {dl.due ? (<>
+          <Rule />
+          <Section>
+            <SectionHead title="How to deload" />
+            <Text style={{ ...ty.body, color: t.ink2 }}>Keep training, but cut volume to ~60%: fewer sets, or ~10% lighter weights, staying well shy of failure. One easier week lets fatigue clear so you come back stronger.</Text>
+          </Section>
+        </>) : null}
+
+        <Rule />
+
+        <Section>
+          <SectionHead title="On a rest day" />
+          {restActions.map((a, ai) => (
+            <View key={a.label}>
+              {ai > 0 ? <Rule /> : null}
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
+                <Icon name={a.icon} size={18} color={t.ink2} />
+                <View style={{ flex: 1 }}>
+                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{a.label}</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{a.note}</Text>
+                </View>
+              </View>
             </View>
           ))}
-        </View>
+        </Section>
 
-        {dl.due ? (
-          <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 15, marginBottom: 16 }}>
-            <Text style={{ color: t.ink, fontWeight: '800', fontSize: 15, marginBottom: 6 }}>How to deload</Text>
-            <Text style={{ color: t.ink2, fontSize: 13.5, lineHeight: 20 }}>Keep training, but cut volume to ~60%: fewer sets, or ~10% lighter weights, staying well shy of failure. One easier week lets fatigue clear so you come back stronger.</Text>
-          </View>
-        ) : null}
+        <Rule />
 
-        <Text style={{ color: t.ink2, fontSize: 12, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 10 }}>On a rest day</Text>
-        {restActions.map((a) => (
-          <View key={a.label} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: t.surface, borderRadius: 14, borderWidth: 1, borderColor: t.ring, padding: 14, marginBottom: 8 }}>
-            <Icon name={a.icon} size={20} color={t.brand} />
-            <View style={{ flex: 1 }}><Text style={{ color: t.ink, fontWeight: '700', fontSize: 14 }}>{a.label}</Text><Text style={{ color: t.ink3, fontSize: 12, marginTop: 1 }}>{a.note}</Text></View>
-          </View>
-        ))}
-
-        <Pressable onPress={() => router.push('/(client)/recovery')} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 14, paddingVertical: 14, alignItems: 'center', marginTop: 8 }}>
-          <Text style={{ color: t.ink, fontWeight: '800', fontSize: 14 }}>Open recovery tools</Text>
-        </Pressable>
+        <Section>
+          <Cta label="Open recovery tools" wide onPress={() => router.push('/(client)/recovery')} />
+        </Section>
       </ScrollView>
     </SafeAreaView>
   );

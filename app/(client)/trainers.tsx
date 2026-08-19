@@ -8,12 +8,20 @@
 // Supabase: `trainers.listed = true` (opt-in, set by the trainer themselves)
 // and a real row in `coach_requests` that the trainer sees on their dashboard.
 // Ratings and review counts are gone — there is no review system to feed them.
+//
+// Re-skinned onto the instrument-panel kit (`src/ui/kit`) and the scale
+// (`src/theme/scale`): no hero (a directory has no single live number), a
+// hairline-separated directory instead of a stack of bordered cards, and a
+// <Notice> for the one thing that needs a decision — an invitation. Every
+// query, conditional and route above is untouched.
 import { useCallback, useEffect, useState } from 'react';
 import { View, Text, Pressable, ScrollView, Modal, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
+import { Rule, Section, SectionHead, Cta, Ghost, Notice } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, elevation, type as ty, value } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
 import { useInvites } from '../../src/ui/invites';
 import { notifySuccess } from '../../src/ui/haptics';
@@ -21,7 +29,6 @@ import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
 
-const SERIF = 'Georgia';
 type Mode = 'online' | 'inperson';
 interface Coach {
   id: string;
@@ -128,125 +135,152 @@ export default function FindTrainer() {
     }
   }, []);
 
+  const G = layout.gutter;
+  const initials = (n: string) => n.split(' ').map((x) => x[0]).join('');
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
-        <Pressable onPress={() => router.back()} style={{ marginBottom: 8 }}><Text style={{ color: t.brand, fontWeight: '700', fontSize: 15 }}>‹ Back</Text></Pressable>
-        <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: SERIF }}>Find a trainer</Text>
-        <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 14 }}>Browse coaches on Repple and start online or in-person.</Text>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
 
+        {/* ── header ─────────────────────────────────────────────────────── */}
+        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
+          <View style={{ flex: 1 }}>
+            <Text style={{ ...ty.micro, color: t.ink3 }}>Connect</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Find a trainer</Text>
+            <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>Browse coaches on Repple and start online or in-person.</Text>
+          </View>
+          <Ghost icon="back" onPress={() => router.back()} />
+        </View>
+
+        {/* ── invitations: the one thing that needs a decision ────────────── */}
         {received.length > 0 ? (
-          <View style={{ marginBottom: 16 }}>
+          <View style={{ marginTop: sp.lg }}>
             {received.map((iv) => (
-              <View key={iv.id} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.brand, padding: 15, marginBottom: 10 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                  <Icon name="sparkle" size={15} color={t.brand} />
-                  <Text style={{ color: t.brand, fontSize: 11, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6 }}>Coaching invitation{iv.demo ? ' · sample' : ''}</Text>
+              <Notice key={iv.id} tone={t.brand}
+                kicker={`Coaching invitation${iv.demo ? ' · sample' : ''}`}
+                title={`${iv.coachName || 'A coach'} invited you`}
+                note={`${iv.mode === 'inperson' ? 'In-person' : 'Online'} coaching. Accept to connect — their program, feedback and messaging turn on for you.`}>
+                <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.lg }}>
+                  <View style={{ flex: 1 }}><Ghost label="Decline" onPress={() => declineInvite(iv.id)} /></View>
+                  <View style={{ flex: 2 }}><Cta label="Accept invitation" wide onPress={() => acceptCoach(iv.id, iv.coachName, iv.mode)} /></View>
                 </View>
-                <Text style={{ color: t.ink, fontSize: 16, fontWeight: '800' }}>{iv.coachName || 'A coach'} invited you</Text>
-                <Text style={{ color: t.ink3, fontSize: 13, marginTop: 2, marginBottom: 12 }}>{iv.mode === 'inperson' ? 'In-person' : 'Online'} coaching. Accept to connect — their program, feedback and messaging turn on for you.</Text>
-                <View style={{ flexDirection: 'row', gap: 10 }}>
-                  <Pressable onPress={() => declineInvite(iv.id)} style={{ flex: 1, paddingVertical: 12, borderRadius: 12, alignItems: 'center', backgroundColor: t.surface2, borderWidth: 1, borderColor: t.ring }}><Text style={{ color: t.ink2, fontWeight: '800' }}>Decline</Text></Pressable>
-                  <Pressable onPress={() => acceptCoach(iv.id, iv.coachName, iv.mode)} style={{ flex: 2, paddingVertical: 12, borderRadius: 12, alignItems: 'center', backgroundColor: t.brand }}><Text style={{ color: t.brandInk, fontWeight: '800' }}>Accept invitation</Text></Pressable>
-                </View>
-              </View>
+              </Notice>
             ))}
           </View>
         ) : null}
 
-        {loading ? (
-          <View style={{ paddingVertical: 40, alignItems: 'center' }}><ActivityIndicator color={t.brand} /></View>
-        ) : coaches.length === 0 ? (
-          <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 22, alignItems: 'center' }}>
-            <View style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}><Icon name="people" size={24} color={t.ink3} /></View>
-            <Text style={{ color: t.ink, fontWeight: '800', fontSize: 16, textAlign: 'center' }}>No coaches listed yet</Text>
-            <Text style={{ color: t.ink3, fontSize: 13, textAlign: 'center', marginTop: 6, lineHeight: 19 }}>Trainers appear here once they publish their profile to the directory. If a coach has invited you directly, their invitation shows above.</Text>
-          </View>
-        ) : coaches.map((c) => (
-          <Pressable key={c.id} onPress={() => setSel(c)} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 15, marginBottom: 11 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-              <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                <Text style={{ color: t.brand, fontWeight: '800', fontSize: 16 }}>{c.name.split(' ').map((x) => x[0]).join('')}</Text>
+        <Rule />
+
+        {/* ── the directory ──────────────────────────────────────────────── */}
+        <Section>
+          <SectionHead title="Coaches on Repple" note={!loading && coaches.length > 0 ? String(coaches.length) : undefined} />
+
+          {loading ? (
+            <View style={{ paddingVertical: sp.huge, alignItems: 'center' }}><ActivityIndicator color={t.brand} /></View>
+          ) : coaches.length === 0 ? (
+            <View style={{ alignItems: 'center', paddingVertical: sp.xl }}>
+              <View style={{ width: 52, height: 52, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center', marginBottom: sp.md }}>
+                <Icon name="people" size={24} color={t.ink3} />
               </View>
-              <View style={{ flex: 1 }}>
-                <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15 }}>{c.name}</Text>
-                {c.tagline ? <Text style={{ color: t.ink3, fontSize: 12.5, marginTop: 1 }}>{c.tagline}</Text> : null}
-              </View>
-              {c.sessionFee > 0 ? (
-                <View style={{ alignItems: 'flex-end' }}>
-                  <Text style={{ color: t.ink, fontWeight: '800', fontSize: 15 }}>${c.sessionFee}</Text>
-                  <Text style={{ color: t.ink3, fontSize: 10 }}>/ session</Text>
-                </View>
-              ) : null}
+              <Text style={{ ...ty.head, color: t.ink, textAlign: 'center' }}>No coaches listed yet</Text>
+              <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: 6, maxWidth: 300 }}>Trainers appear here once they publish their profile to the directory. If a coach has invited you directly, their invitation shows above.</Text>
             </View>
-            {c.specialties.length > 0 || sent[c.id] ? (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
-                {sent[c.id] ? <Text style={{ color: t.brand, fontSize: 12, fontWeight: '800' }}>Request pending</Text> : null}
-                <View style={{ flex: 1 }} />
-                {c.specialties.slice(0, 3).map((sp) => (
-                  <View key={sp} style={{ borderWidth: 1, borderColor: t.ring, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 }}>
-                    <Text style={{ color: t.ink3, fontSize: 10, fontWeight: '700' }}>{sp}</Text>
+          ) : coaches.map((c, i) => (
+            <View key={c.id}>
+              {i > 0 ? <Rule inset={46} /> : null}
+              <Pressable onPress={() => setSel(c)} accessibilityRole="button" accessibilityLabel={c.name}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
+                <View style={{ width: 34, height: 34, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+                  <Text style={{ ...value(13), color: t.brand }}>{initials(c.name)}</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{c.name}</Text>
+                  {c.tagline ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }} numberOfLines={1}>{c.tagline}</Text> : null}
+                  {c.specialties.length > 0 || sent[c.id] ? (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: 7, flexWrap: 'wrap' }}>
+                      {sent[c.id] ? (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                          <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.brand }} />
+                          <Text style={{ ...ty.caption, color: t.ink2 }}>Request pending</Text>
+                        </View>
+                      ) : null}
+                      {c.specialties.slice(0, 3).map((sx) => (
+                        <View key={sx} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.sm, paddingVertical: 3 }}>
+                          <Text style={{ ...ty.caption, color: t.ink3 }}>{sx}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  ) : null}
+                </View>
+                {c.sessionFee > 0 ? (
+                  <View style={{ alignItems: 'flex-end' }}>
+                    <Text style={{ ...value(17), color: t.ink }}>${c.sessionFee}</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3 }}>/ session</Text>
                   </View>
-                ))}
-              </View>
-            ) : null}
-          </Pressable>
-        ))}
+                ) : null}
+                <Icon name="chevron" size={16} color={t.ink3} />
+              </Pressable>
+            </View>
+          ))}
+        </Section>
       </ScrollView>
 
       <Modal visible={!!sel} transparent animationType="slide" onRequestClose={() => setSel(null)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setSel(null)} />
-        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, borderColor: t.ring, maxHeight: '86%' }}>
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, borderTopWidth: hairline, borderColor: t.ring, maxHeight: '86%', ...elevation.e2 }}>
           {sel && (
-            <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 30 }} showsVerticalScrollIndicator={false}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 14 }}>
-                <View style={{ width: 58, height: 58, borderRadius: 29, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                  <Text style={{ color: t.brand, fontWeight: '800', fontSize: 20 }}>{sel.name.split(' ').map((x) => x[0]).join('')}</Text>
+            <ScrollView contentContainerStyle={{ padding: G, paddingBottom: sp.xxl }} showsVerticalScrollIndicator={false}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginBottom: sp.lg }}>
+                <View style={{ width: 58, height: 58, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+                  <Text style={{ ...value(20), color: t.brand }}>{initials(sel.name)}</Text>
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={{ color: t.ink, fontSize: 21, fontWeight: '700', fontFamily: SERIF }}>{sel.name}</Text>
-                  {sel.tagline ? <Text style={{ color: t.ink3, fontSize: 13, marginTop: 1 }}>{sel.tagline}</Text> : null}
+                  <Text style={{ ...ty.title, color: t.ink }}>{sel.name}</Text>
+                  {sel.tagline ? <Text style={{ ...ty.label, color: t.ink3, marginTop: 2 }}>{sel.tagline}</Text> : null}
                 </View>
               </View>
 
               {sel.sessionFee > 0 ? (
-                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
-                  <View style={{ flex: 1 }} />
-                  <Text style={{ color: t.ink, fontWeight: '800', fontSize: 16 }}>${sel.sessionFee}<Text style={{ color: t.ink3, fontSize: 11, fontWeight: '600' }}> / session</Text></Text>
+                <View style={{ flexDirection: 'row', alignItems: 'baseline', marginBottom: sp.lg }}>
+                  <Text style={{ ...ty.micro, color: t.ink3, flex: 1 }}>Session fee</Text>
+                  <Text style={{ ...value(20), color: t.ink }}>${sel.sessionFee}</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginLeft: 4 }}>/ session</Text>
                 </View>
               ) : null}
 
-              {sel.bio ? <Text style={{ color: t.ink2, fontSize: 14, lineHeight: 21, marginBottom: 16 }}>{sel.bio}</Text> : null}
+              {sel.bio ? <Text style={{ ...ty.body, color: t.ink2, marginBottom: sp.lg }}>{sel.bio}</Text> : null}
 
               {sel.specialties.length > 0 ? (<>
-                <Text style={{ color: t.ink3, fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 8 }}>Specialties</Text>
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginBottom: 18 }}>
-                  {sel.specialties.map((sp) => (
-                    <View key={sp} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 16, paddingHorizontal: 12, paddingVertical: 7 }}>
-                      <Text style={{ color: t.ink2, fontSize: 12, fontWeight: '700' }}>{sp}</Text>
+                <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Specialties</Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginBottom: sp.xl }}>
+                  {sel.specialties.map((sx) => (
+                    <View key={sx} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 7 }}>
+                      <Text style={{ ...ty.caption, color: t.ink2 }}>{sx}</Text>
                     </View>
                   ))}
                 </View>
               </>) : null}
 
               {sent[sel.id] ? (
-                <View style={{ backgroundColor: t.surface2, borderColor: t.brand, borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 10 }}>
-                  <Text style={{ color: t.ink, fontWeight: '800', fontSize: 14 }}>Request pending</Text>
-                  <Text style={{ color: t.ink3, fontSize: 12.5, marginTop: 3, lineHeight: 18 }}>{sel.name} has your request. You'll be connected when they accept.</Text>
+                <View style={{ backgroundColor: t.surface2, borderRadius: radius.sm, padding: sp.lg, marginBottom: sp.md }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
+                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.brand }} />
+                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>Request pending</Text>
+                  </View>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>{sel.name} has your request. You'll be connected when they accept.</Text>
                 </View>
               ) : (<>
-                <Text style={{ color: t.ink3, fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 8 }}>Start coaching</Text>
+                <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Start coaching</Text>
                 {(['online', 'inperson'] as Mode[]).map((m) => (
-                  <Pressable key={m} onPress={() => request(sel, m)} style={{ backgroundColor: t.brand, borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginBottom: 9, flexDirection: 'row', justifyContent: 'center', gap: 8 }}>
-                    <Icon name={m === 'inperson' ? 'people' : 'video'} size={16} color={t.brandInk} />
-                    <Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 15 }}>Request {m === 'inperson' ? 'in-person' : 'online'} coaching</Text>
-                  </Pressable>
+                  <View key={m} style={{ marginBottom: 9 }}>
+                    <Cta label={`Request ${m === 'inperson' ? 'in-person' : 'online'} coaching`} wide onPress={() => request(sel, m)} />
+                  </View>
                 ))}
               </>)}
 
-              <Pressable onPress={() => setSel(null)} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingVertical: 13, alignItems: 'center', marginTop: 8 }}>
-                <Text style={{ color: t.ink, fontWeight: '700' }}>Close</Text>
-              </Pressable>
+              <View style={{ marginTop: sp.sm }}>
+                <Ghost label="Close" onPress={() => setSel(null)} />
+              </View>
             </ScrollView>
           )}
         </View>

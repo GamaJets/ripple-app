@@ -1,9 +1,17 @@
 // Client · This Week. The week's training plan at a glance — each day's planned
 // focus (coach or auto program) and whether it's been logged. Profile hub.
+//
+// On the instrument-panel kit (`src/ui/kit`) and the scale (`src/theme/scale`).
+// Seven days is a list, so the screen leads with no hero: hairline-separated
+// rows instead of seven bordered cards. Every provider, computation and route is
+// preserved.
 import { View, Text, Pressable, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
+import { Icon } from '../../src/ui/Icon';
+import { Rule, Section, SectionHead, Ghost } from '../../src/ui/kit';
+import { sp, layout, type as ty, value } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
@@ -12,54 +20,78 @@ import { buildProgram } from '../../src/lib/programs';
 const WEEK = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 export default function ThisWeek() {
- const t = useTheme();
- const router = useRouter();
- const c = useClientData();
- const coachProgram = useAssignedPrograms().getProgram(c.id);
- const { log } = useWorkoutLog();
- const program = coachProgram ?? buildProgram(c.goal, c.bodyFatPct);
+  const t = useTheme();
+  const router = useRouter();
+  const c = useClientData();
+  const coachProgram = useAssignedPrograms().getProgram(c.id);
+  const { log } = useWorkoutLog();
+  const program = coachProgram ?? buildProgram(c.goal, c.bodyFatPct);
 
- const jsToMon = (new Date().getDay() + 6) % 7;
- const monday = new Date(); monday.setDate(monday.getDate() - jsToMon); monday.setHours(0, 0, 0, 0);
- const pad = (n: number) => String(n).padStart(2, '0');
- const dstr = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
- const logged = new Set(log.map((l) => dstr(new Date(l.t))));
+  const jsToMon = (new Date().getDay() + 6) % 7;
+  const monday = new Date(); monday.setDate(monday.getDate() - jsToMon); monday.setHours(0, 0, 0, 0);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const dstr = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const logged = new Set(log.map((l) => dstr(new Date(l.t))));
 
- const trainingDays = program.days.length;
+  const trainingDays = program.days.length;
 
- return (
- <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
- <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
- <Pressable onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Go back" style={{ marginBottom: 8 }}>
- <Text style={{ color: t.brand, fontWeight: '700', fontSize: 15 }}>‹ Back</Text>
- </Pressable>
- <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia' }}>This Week</Text>
- <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 18 }}>{program.title}{coachProgram ? ' · coach plan' : ''}</Text>
+  return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
 
- {WEEK.map((label, i) => {
- const date = new Date(monday); date.setDate(monday.getDate() + i);
- const workout = (program.days && program.days.length) ? program.days[i % program.days.length] : { day: '', focus: 'Rest day', exercises: [] };
- const isToday = i === jsToMon;
- const done = logged.has(dstr(date));
- return (
- <Pressable key={label} onPress={() => router.push('/(client)/workouts')} style={{ flexDirection: 'row', alignItems: 'center', gap: 14, backgroundColor: t.surface, borderRadius: 14, borderWidth: 1, borderColor: isToday ? t.brand : t.ring, padding: 14, marginBottom: 9 }}>
- <View style={{ width: 46, alignItems: 'center' }}>
- <Text style={{ color: isToday ? t.brand : t.ink3, fontSize: 12, fontWeight: '700' }}>{label}</Text>
- <Text style={{ color: t.ink, fontSize: 18, fontWeight: '800' }}>{date.getDate()}</Text>
- </View>
- <View style={{ flex: 1 }}>
- <Text style={{ color: t.ink, fontWeight: '700', fontSize: 14, textTransform: 'capitalize' }}>{workout.focus}</Text>
- <Text style={{ color: t.ink3, fontSize: 12, marginTop: 1 }}>{workout.exercises.length} exercises{workout.cardio ? ` · ${workout.cardio}` : ''}</Text>
- </View>
- {done ? <Text style={{ color: t.brand, fontWeight: '800', fontSize: 13 }}> done</Text> : isToday ? <Text style={{ color: t.brand, fontWeight: '800', fontSize: 13 }}>today</Text> : <Text style={{ color: t.ink3, fontSize: 18 }}>›</Text>}
- </Pressable>
- );
- })}
+        {/* ── header ─────────────────────────────────────────────────────── */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
+          <Ghost icon="back" onPress={() => router.back()} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ ...ty.micro, color: t.ink3 }} numberOfLines={1}>{program.title}{coachProgram ? ' · coach plan' : ''}</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>This week</Text>
+          </View>
+        </View>
 
- <View style={{ backgroundColor: t.surface2, borderRadius: 12, borderWidth: 1, borderColor: t.ring, padding: 14, marginTop: 8 }}>
- <Text style={{ color: t.ink3, fontSize: 13 }}>This program runs {trainingDays} training day{trainingDays === 1 ? '' : 's'} a week. Tap any day to open Train and log it.</Text>
- </View>
- </ScrollView>
- </SafeAreaView>
- );
+        <Section>
+          <SectionHead title="The plan" note={`${trainingDays} training day${trainingDays === 1 ? '' : 's'} a week`} />
+
+          {WEEK.map((label, i) => {
+            const date = new Date(monday); date.setDate(monday.getDate() + i);
+            const workout = (program.days && program.days.length) ? program.days[i % program.days.length] : { day: '', focus: 'Rest day', exercises: [] };
+            const isToday = i === jsToMon;
+            const done = logged.has(dstr(date));
+            return (
+              <View key={label}>
+                {i > 0 ? <Rule /> : null}
+                <Pressable onPress={() => router.push('/(client)/workouts')} accessibilityRole="button"
+                  accessibilityLabel={`${label} ${date.getDate()}. ${workout.focus}. ${done ? 'Logged' : isToday ? 'Today' : 'Open Train'}`}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
+                  <View style={{ width: 38 }}>
+                    <Text style={{ ...ty.micro, color: isToday ? t.ink2 : t.ink3 }}>{label}</Text>
+                    <Text style={{ ...value(17), color: isToday ? t.ink : t.ink2, marginTop: 2 }}>{date.getDate()}</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{workout.focus}</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{workout.exercises.length} exercises{workout.cardio ? ` · ${workout.cardio}` : ''}</Text>
+                  </View>
+                  {done ? (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.brand }} />
+                      <Text style={{ ...ty.label, color: t.ink2 }}>Logged</Text>
+                    </View>
+                  ) : isToday ? (
+                    <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>Today</Text>
+                  ) : (
+                    <Icon name="chevron" size={16} color={t.ink3} />
+                  )}
+                </Pressable>
+              </View>
+            );
+          })}
+        </Section>
+
+        <Rule />
+
+        <Section>
+          <Text style={{ ...ty.caption, color: t.ink3 }}>This program runs {trainingDays} training day{trainingDays === 1 ? '' : 's'} a week. Tap any day to open Train and log it.</Text>
+        </Section>
+      </ScrollView>
+    </SafeAreaView>
+  );
 }

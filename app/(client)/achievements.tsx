@@ -1,65 +1,94 @@
 // Client · Achievements (Phase 7). Badges derived from the reactive workout log:
-// streaks, total sessions, PRs, cardio, volume. Earned badges glow; locked show
-// what to do next. Reachable from the profile hub and the dashboard streak card.
-import { View, Text, Pressable, ScrollView } from 'react-native';
+// streaks, total sessions, PRs, cardio, volume. Earned badges are marked; locked
+// ones show what to do next. Reachable from the profile hub and the dashboard
+// streak card.
+//
+// On the instrument-panel kit (`src/ui/kit`) and the scale (`src/theme/scale`).
+// Every threshold, computation and route is preserved — twelve bordered tiles
+// became one hero figure and a hairline-separated list. The badges' `icon` field
+// held an empty string for every badge (its emoji had been stripped), so each
+// tile rendered a blank 28px circle; that dead field is gone.
+import { View, Text, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
+import { Icon } from '../../src/ui/Icon';
+import { Rule, Section, SectionHead, Hero, Ghost } from '../../src/ui/kit';
+import { sp, layout, radius, type as ty } from '../../src/theme/scale';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { longestStreak, personalRecords } from '../../src/lib/streaks';
 
 export default function Achievements() {
- const t = useTheme();
- const router = useRouter();
- const { log } = useWorkoutLog();
+  const t = useTheme();
+  const router = useRouter();
+  const { log } = useWorkoutLog();
 
- const totalWorkouts = log.length;
- const best = longestStreak(log);
- const prs = personalRecords(log).length;
- const hasCardio = log.some((e) => e.cardio);
- const totalVolume = log.reduce((a, e) => a + (e.sets ? e.sets.reduce((x, [r, w]) => x + (r || 0) * (w || 0), 0) : 0), 0);
+  const totalWorkouts = log.length;
+  const best = longestStreak(log);
+  const prs = personalRecords(log).length;
+  const hasCardio = log.some((e) => e.cardio);
+  const totalVolume = log.reduce((a, e) => a + (e.sets ? e.sets.reduce((x, [r, w]) => x + (r || 0) * (w || 0), 0) : 0), 0);
 
- const badges: { icon: string; title: string; desc: string; earned: boolean }[] = [
- { icon: '', title: 'First Rep', desc: 'Log your first workout', earned: totalWorkouts >= 1 },
- { icon: '', title: 'On a Roll', desc: '3-day streak', earned: best >= 3 },
- { icon: '', title: 'Week Warrior', desc: '7-day streak', earned: best >= 7 },
- { icon: '', title: 'Two Weeks Strong', desc: '14-day streak', earned: best >= 14 },
- { icon: '', title: 'Unstoppable', desc: '30-day streak', earned: best >= 30 },
- { icon: '', title: 'Ten Sessions', desc: 'Log 10 workouts', earned: totalWorkouts >= 10 },
- { icon: '', title: 'Fifty Club', desc: 'Log 50 workouts', earned: totalWorkouts >= 50 },
- { icon: '', title: 'Record Breaker', desc: 'Set a personal record', earned: prs >= 1 },
- { icon: '', title: 'PR Machine', desc: '5 personal records', earned: prs >= 5 },
- { icon: '', title: 'Cardio Kick', desc: 'Log a cardio session', earned: hasCardio },
- { icon: '', title: 'One Tonne', desc: 'Lift 1,000 kg total volume', earned: totalVolume >= 1000 },
- { icon: '', title: 'Ten Tonnes', desc: 'Lift 10,000 kg total volume', earned: totalVolume >= 10000 },
- ];
- const earnedCount = badges.filter((b) => b.earned).length;
+  const badges: { title: string; desc: string; earned: boolean }[] = [
+    { title: 'First Rep', desc: 'Log your first workout', earned: totalWorkouts >= 1 },
+    { title: 'On a Roll', desc: '3-day streak', earned: best >= 3 },
+    { title: 'Week Warrior', desc: '7-day streak', earned: best >= 7 },
+    { title: 'Two Weeks Strong', desc: '14-day streak', earned: best >= 14 },
+    { title: 'Unstoppable', desc: '30-day streak', earned: best >= 30 },
+    { title: 'Ten Sessions', desc: 'Log 10 workouts', earned: totalWorkouts >= 10 },
+    { title: 'Fifty Club', desc: 'Log 50 workouts', earned: totalWorkouts >= 50 },
+    { title: 'Record Breaker', desc: 'Set a personal record', earned: prs >= 1 },
+    { title: 'PR Machine', desc: '5 personal records', earned: prs >= 5 },
+    { title: 'Cardio Kick', desc: 'Log a cardio session', earned: hasCardio },
+    { title: 'One Tonne', desc: 'Lift 1,000 kg total volume', earned: totalVolume >= 1000 },
+    { title: 'Ten Tonnes', desc: 'Lift 10,000 kg total volume', earned: totalVolume >= 10000 },
+  ];
+  const earnedCount = badges.filter((b) => b.earned).length;
 
- return (
- <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
- <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
- <Pressable onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Go back" style={{ marginBottom: 8 }}>
- <Text style={{ color: t.brand, fontWeight: '700', fontSize: 15 }}>‹ Back</Text>
- </Pressable>
- <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia' }}>Achievements</Text>
- <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 18 }}>{earnedCount} of {badges.length} unlocked</Text>
+  return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
 
- <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
- {badges.map((b) => (
- <View
- key={b.title}
- accessibilityLabel={`${b.title}, ${b.earned ? 'unlocked' : 'locked'}. ${b.desc}`}
- style={{ width: '47%', backgroundColor: t.surface, borderRadius: 18, borderWidth: 1, borderColor: b.earned ? t.brand : t.ring, padding: 16, alignItems: 'center', opacity: b.earned ? 1 : 0.5 }}
- >
- <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: b.earned ? 'rgba(45,212,191,0.15)' : t.surface2, alignItems: 'center', justifyContent: 'center', marginBottom: 10 }}>
- <Text style={{ fontSize: 28 }}>{b.earned ? b.icon : ''}</Text>
- </View>
- <Text style={{ color: t.ink, fontWeight: '800', fontSize: 14, textAlign: 'center' }}>{b.title}</Text>
- <Text style={{ color: t.ink3, fontSize: 11, textAlign: 'center', marginTop: 3 }}>{b.desc}</Text>
- </View>
- ))}
- </View>
- </ScrollView>
- </SafeAreaView>
- );
+        {/* ── header ─────────────────────────────────────────────────────── */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
+          <Ghost icon="back" onPress={() => router.back()} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ ...ty.micro, color: t.ink3 }}>Earned from your log</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Achievements</Text>
+          </View>
+        </View>
+
+        {/* ── the hero: how much of the set is unlocked ───────────────────── */}
+        <Hero
+          label="Unlocked"
+          figure={String(earnedCount)}
+          unit={`of ${badges.length}`}
+          arc={earnedCount / badges.length}
+          note={earnedCount === 0 ? 'Log a workout to unlock your first badge' : `${badges.length - earnedCount} left to earn`}
+        />
+
+        <Rule />
+
+        <Section>
+          <SectionHead title="Badges" />
+          {badges.map((b, bi) => (
+            <View key={b.title}>
+              {bi > 0 ? <Rule /> : null}
+              <View accessibilityLabel={`${b.title}, ${b.earned ? 'unlocked' : 'locked'}. ${b.desc}`}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
+                <View style={{ width: 34, height: 34, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+                  <Icon name={b.earned ? 'check' : 'trophy'} size={16} color={b.earned ? t.brand : t.ink3} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ ...ty.body, fontWeight: '500', color: b.earned ? t.ink : t.ink2 }}>{b.title}</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{b.desc}</Text>
+                </View>
+                <Text style={{ ...ty.micro, color: t.ink3 }}>{b.earned ? 'Earned' : 'Locked'}</Text>
+              </View>
+            </View>
+          ))}
+        </Section>
+      </ScrollView>
+    </SafeAreaView>
+  );
 }

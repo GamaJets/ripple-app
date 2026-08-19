@@ -13,8 +13,12 @@ interface GoalValue {
 
 const Ctx = createContext<GoalValue | null>(null);
 
+// No default target weight. The provider used to hand every account a 64 kg
+// goal nobody had set, which the Goal screen then rendered as "Target 64 kg"
+// complete with a progress bar and a projected finish date. 0 means "not set
+// yet" and the screen shows an honest empty state until the client sets one.
 function defaultTarget(): GoalTarget {
-  return { targetWeightKg: 64, targetDateISO: new Date(Date.now() + 90 * 86400000).toISOString() };
+  return { targetWeightKg: 0, targetDateISO: new Date(Date.now() + 90 * 86400000).toISOString() };
 }
 
 export function GoalTrackerProvider({ children }: { children: ReactNode }) {

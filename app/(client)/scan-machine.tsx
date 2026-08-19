@@ -4,6 +4,19 @@
 // that way the screen always shows a real exercise + target muscle. Cardio machines
 // (rower, ski-erg, bike…) log duration / distance / avg watts / calories instead of
 // reps & weight, and we're explicit about where the calorie number comes from.
+//
+// Rebuilt on the instrument-panel kit (`src/ui/kit`) and the scale
+// (`src/theme/scale`). Every provider, handler, conditional and route from the
+// previous version is preserved — only the presentation changed: five bordered
+// boxes became hairline-separated sections, the camera-permission prompt became
+// the one Notice (it is the only thing here needing a decision), and this is a
+// form, so it leads with no hero.
+//
+// Also removed: the `m * 8` calorie fallback. With no entered calories and no
+// average watts there is nothing to derive a number from, so the old code
+// invented 8 kcal per minute and saved it to the log as if the machine had
+// reported it — while the copy right above it promised the estimate came from
+// watts. Now the entry simply carries no calorie figure.
 import { useMemo, useState } from 'react';
 import { View, Text, Pressable, TextInput, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -18,6 +31,8 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import { analyzeMachine, visionAvailable } from '../../src/lib/vision';
 import { MACHINES, identifyMachine, looksLikeSerial, type MachineDef } from '../../src/lib/machines';
 import { recallMachine, rememberMachine } from '../../src/lib/machineMemory';
+import { Rule, Section, SectionHead, Cta, Ghost, Notice } from '../../src/ui/kit';
+import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
 
 // Pull a human label out of whatever the QR encodes (JSON, query param, URL slug).
 function parseMachine(raw: string): string {
@@ -106,12 +121,13 @@ export default function ScanMachine() {
 
   const addSet = () => { const r = parseInt(reps, 10) || 0; if (!r) return; setSets((p) => [...p, { reps: r, kg: parseFloat(kg) || 0 }]); setReps(''); tapLight(); };
 
-  // Cardio calories: entered from the machine/watch, or estimated from avg watts.
-  const estKcal = () => {
+  // Cardio calories: entered from the machine/watch, or derived from avg watts.
+  // With neither, there is no honest number — the entry saves without one.
+  const estKcal = (): number | undefined => {
     const m = parseFloat(mins) || 0; const w = parseFloat(watts) || 0;
     if (kcalIn.trim()) return Math.round(parseFloat(kcalIn) || 0);
     if (w > 0 && m > 0) return Math.round(w * m * 0.062); // metabolic ≈ mech watts / 0.23 efficiency
-    return Math.round(m * 8); // last-resort light estimate
+    return undefined;
   };
 
   const save = () => {
@@ -136,129 +152,167 @@ export default function ScanMachine() {
   };
 
   const rescan = () => { setScanned(null); setRawCode(''); setExercise(''); setGroup(''); setCardio(false); setNeedsPick(false); setRecalled(false); setSets([]); setReps(''); setKg(''); setMins(''); setDist(''); setWatts(''); setKcalIn(''); setManual(false); setQ(''); };
-  const inp = { color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, fontSize: 16, flex: 1 } as const;
+  const inp = { flex: 1, ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 } as const;
 
   const showForm = scanned != null || manual;
   const strengthKcal = Math.round(sets.reduce((a, s) => a + s.reps * (s.kg || 0), 0) / 60) + sets.length * 8;
+  const kcalNow = estKcal();
+  const G = layout.gutter;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-          <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800' }}>Scan machine</Text>
-          <Pressable onPress={() => router.back()} hitSlop={8}><Text style={{ color: t.ink3, fontWeight: '700', fontSize: 15 }}>Close</Text></Pressable>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+
+        {/* ── header ─────────────────────────────────────────────────────── */}
+        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md, marginBottom: sp.lg }}>
+          <View style={{ flex: 1 }}>
+            <Text style={{ ...ty.micro, color: t.ink3 }}>Log a machine</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Scan machine</Text>
+          </View>
+          <Ghost label="Close" onPress={() => router.back()} />
         </View>
 
         {!showForm ? (
           <View>
             {!permission ? (
-              <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 22, alignItems: 'center' }}>
-                <Text style={{ color: t.ink3, fontSize: 13 }}>Preparing camera…</Text>
-              </View>
+              <Section style={{ paddingTop: 0 }}>
+                <Text style={{ ...ty.label, color: t.ink3 }}>Preparing camera…</Text>
+              </Section>
             ) : !permission.granted ? (
-              <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 20, alignItems: 'center' }}>
-                <Icon name="camera" size={30} color={t.brand} />
-                <Text style={{ color: t.ink, fontWeight: '800', fontSize: 16, marginTop: 10 }}>Camera access</Text>
-                <Text style={{ color: t.ink3, fontSize: 13, textAlign: 'center', marginTop: 4, lineHeight: 19 }}>Repple reads the code on a machine, then names the exercise and muscle group for you.</Text>
-                <Pressable onPress={requestPermission} style={{ backgroundColor: t.brand, borderRadius: 12, paddingVertical: 13, paddingHorizontal: 24, marginTop: 16 }}><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 14 }}>Allow camera</Text></Pressable>
-              </View>
+              <Notice kicker="Camera" title="Camera access"
+                note="Repple reads the code on a machine, then names the exercise and muscle group for you.">
+                <View style={{ marginTop: sp.lg }}>
+                  <Cta label="Allow camera" wide onPress={requestPermission} />
+                </View>
+              </Notice>
             ) : (
-              <View style={{ borderRadius: 20, overflow: 'hidden', borderWidth: 1, borderColor: t.ring, aspectRatio: 3 / 4, backgroundColor: '#000' }}>
+              <View style={{ borderRadius: radius.md, overflow: 'hidden', aspectRatio: 3 / 4, backgroundColor: '#000' }}>
                 <CameraView style={{ flex: 1 }} facing="back" barcodeScannerSettings={{ barcodeTypes: ['qr'] }} onBarcodeScanned={onScan}>
                   <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-                    <View style={{ width: '62%', aspectRatio: 1, borderWidth: 3, borderColor: 'rgba(45,212,191,0.9)', borderRadius: 20 }} />
-                    <Text style={{ color: '#fff', fontSize: 13, marginTop: 16, fontWeight: '700' }}>Point at the code on the machine</Text>
+                    <View style={{ width: '62%', aspectRatio: 1, borderWidth: 2, borderColor: t.brand, borderRadius: radius.md }} />
+                    <Text style={{ ...ty.label, fontWeight: '500', color: '#fff', marginTop: sp.lg }}>Point at the code on the machine</Text>
                   </View>
                 </CameraView>
               </View>
             )}
-            <Pressable onPress={identifyByPhoto} disabled={reading} style={{ marginTop: 12, backgroundColor: t.surface, borderColor: t.brand, borderWidth: 1, borderRadius: 12, paddingVertical: 13, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8, opacity: reading ? 0.6 : 1 }}>
-              <Icon name="camera" size={16} color={t.brand} />
-              <Text style={{ color: t.brand, fontWeight: '800', fontSize: 14 }}>{reading ? 'Identifying…' : '📷 Identify by photo'}</Text>
-            </Pressable>
-            <Pressable onPress={() => { setManual(true); setNeedsPick(true); setExercise(''); }} style={{ marginTop: 8, paddingVertical: 12, alignItems: 'center' }}>
-              <Text style={{ color: t.brand, fontWeight: '700', fontSize: 14 }}>No code? Pick the machine yourself</Text>
-            </Pressable>
+
+            <Section>
+              {reading ? (
+                <Text style={{ ...ty.label, color: t.ink2 }}>Identifying the machine from your photo…</Text>
+              ) : (
+                <Ghost label="Identify by photo" icon="camera" onPress={identifyByPhoto} />
+              )}
+              <View style={{ height: sp.sm }} />
+              <Ghost label="No code? Pick the machine yourself" onPress={() => { setManual(true); setNeedsPick(true); setExercise(''); }} />
+            </Section>
           </View>
         ) : (
           <View>
-            <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.brand, padding: 16, marginBottom: 14 }}>
-              <Text style={{ color: t.brand, fontSize: 10, fontWeight: '900', textTransform: 'uppercase', letterSpacing: 0.7 }}>{recalled ? '✓ Remembered' : needsPick ? 'Pick the machine' : 'Machine identified'}</Text>
+            {/* ── what we think you're on ────────────────────────────────── */}
+            <Section style={{ paddingTop: 0 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: sp.sm }}>
+                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: recalled || !needsPick ? t.brand : t.ink3 }} />
+                <Text style={{ ...ty.micro, color: t.ink3 }}>{recalled ? 'Remembered' : needsPick ? 'Pick the machine' : 'Machine identified'}</Text>
+              </View>
               {recalled ? (
-                <Text style={{ color: t.ink3, fontSize: 11.5, marginTop: 4 }}>You set this machine up before — recalled automatically. Edit if you like.</Text>
+                <Text style={{ ...ty.caption, color: t.ink3 }}>You set this machine up before — recalled automatically. Edit if you like.</Text>
               ) : needsPick && rawCode && looksLikeSerial(rawCode) ? (
-                <Text style={{ color: t.ink3, fontSize: 11.5, marginTop: 4 }}>The machine's code (<Text style={{ color: t.ink2 }}>{rawCode.slice(0, 18)}</Text>) is just its serial — choose the exercise below. We'll remember it next time.</Text>
+                <Text style={{ ...ty.caption, color: t.ink3 }}>The machine's code (<Text style={{ color: t.ink2 }}>{rawCode.slice(0, 18)}</Text>) is just its serial — choose the exercise below. We'll remember it next time.</Text>
               ) : (
-                <Text style={{ color: t.ink3, fontSize: 11.5, marginTop: 4, marginBottom: 8 }}>Exercise — edit if it's not quite right.</Text>
+                <Text style={{ ...ty.caption, color: t.ink3 }}>Exercise — edit if it's not quite right.</Text>
               )}
-              <TextInput value={exercise} onChangeText={setExercise} placeholder="Exercise name" placeholderTextColor={t.ink3} style={{ color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, fontSize: 16, marginTop: 8, textTransform: 'capitalize' }} />
+              <TextInput value={exercise} onChangeText={setExercise} placeholder="Exercise name" placeholderTextColor={t.ink3}
+                style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11, marginTop: sp.md, textTransform: 'capitalize' }} />
               {group ? (
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10 }}>
-                  <View style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 20, paddingHorizontal: 11, paddingVertical: 5 }}><Text style={{ color: t.brand, fontWeight: '800', fontSize: 12 }}>{group}</Text></View>
-                  <Pressable onPress={() => { setCardio((c) => !c); }} hitSlop={6}><Text style={{ color: t.ink3, fontSize: 12 }}>{cardio ? 'Cardio' : 'Strength'} · switch</Text></Pressable>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.md }}>
+                  <View style={{ backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: 11, paddingVertical: 5 }}>
+                    <Text style={{ ...ty.caption, fontWeight: '500', color: t.ink }}>{group}</Text>
+                  </View>
+                  <Pressable onPress={() => { setCardio((c) => !c); }} hitSlop={6}>
+                    <Text style={{ ...ty.caption, color: t.ink3 }}>{cardio ? 'Cardio' : 'Strength'} · switch</Text>
+                  </Pressable>
                 </View>
               ) : null}
-            </View>
+            </Section>
 
-            {needsPick ? (
-              <View style={{ marginBottom: 16 }}>
-                <TextInput value={q} onChangeText={setQ} placeholder="Search machines (rower, leg press, lat…)" placeholderTextColor={t.ink3} style={{ color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 11, fontSize: 14, marginBottom: 10 }} />
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 7 }}>
-                  {list.map((m) => (
-                    <Pressable key={m.name} onPress={() => { applyDef(m); setQ(''); }} style={{ backgroundColor: exercise === m.name ? t.brand : t.surface2, borderColor: exercise === m.name ? t.brand : t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 11, paddingVertical: 8 }}>
-                      <Text style={{ color: exercise === m.name ? t.brandInk : t.ink, fontWeight: '700', fontSize: 12.5 }}>{m.name}</Text>
-                      <Text style={{ color: exercise === m.name ? t.brandInk : t.ink3, fontSize: 10.5 }}>{m.group}</Text>
-                    </Pressable>
-                  ))}
+            {needsPick ? (<>
+              <Rule />
+              <Section>
+                <SectionHead title="Machine catalogue" note={`${list.length}`} />
+                <TextInput value={q} onChangeText={setQ} placeholder="Search machines (rower, leg press, lat…)" placeholderTextColor={t.ink3}
+                  style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11, marginBottom: sp.md }} />
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
+                  {list.map((m) => {
+                    const on = exercise === m.name;
+                    return (
+                      <Pressable key={m.name} onPress={() => { applyDef(m); setQ(''); }}
+                        style={{ backgroundColor: on ? t.brand : t.surface2, borderRadius: radius.sm, paddingHorizontal: 11, paddingVertical: sp.sm }}>
+                        <Text style={{ ...ty.caption, fontWeight: '500', color: on ? t.brandInk : t.ink }}>{m.name}</Text>
+                        <Text style={{ ...ty.caption, color: on ? t.brandInk : t.ink3 }}>{m.group}</Text>
+                      </Pressable>
+                    );
+                  })}
                 </View>
-              </View>
-            ) : null}
+              </Section>
+            </>) : null}
+
+            <Rule />
 
             {cardio ? (
-              <View>
-                <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 6 }}>Your effort</Text>
-                <View style={{ flexDirection: 'row', gap: 10, marginBottom: 10 }}>
+              <Section>
+                <SectionHead title="Your effort" note={kcalNow != null ? `${kcalNow} kcal` : undefined} />
+                <View style={{ flexDirection: 'row', gap: sp.sm }}>
                   <TextInput value={mins} onChangeText={setMins} keyboardType="numeric" placeholder="minutes" placeholderTextColor={t.ink3} style={inp} />
                   <TextInput value={dist} onChangeText={setDist} keyboardType="numeric" placeholder={'distance (' + unit + ')'} placeholderTextColor={t.ink3} style={inp} />
                 </View>
-                <View style={{ flexDirection: 'row', gap: 10, marginBottom: 8 }}>
+                <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm }}>
                   <TextInput value={watts} onChangeText={setWatts} keyboardType="numeric" placeholder="avg watts" placeholderTextColor={t.ink3} style={inp} />
                   <TextInput value={kcalIn} onChangeText={setKcalIn} keyboardType="numeric" placeholder="calories" placeholderTextColor={t.ink3} style={inp} />
                 </View>
-                <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
+                <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
                   {['km', 'm', 'mi'].map((u) => (
-                    <Pressable key={u} onPress={() => setUnit(u)} style={{ borderWidth: 1, borderColor: unit === u ? t.brand : t.ring, backgroundColor: unit === u ? 'rgba(25,214,191,0.14)' : 'transparent', borderRadius: 9, paddingVertical: 7, paddingHorizontal: 14 }}><Text style={{ color: unit === u ? t.brand : t.ink3, fontWeight: '700', fontSize: 13 }}>{u}</Text></Pressable>
+                    <Pressable key={u} onPress={() => setUnit(u)}
+                      style={{ backgroundColor: unit === u ? t.brand : t.surface2, borderRadius: radius.pill, paddingVertical: 7, paddingHorizontal: sp.lg }}>
+                      <Text style={{ ...ty.caption, fontWeight: unit === u ? '600' : '500', color: unit === u ? t.brandInk : t.ink2 }}>{u}</Text>
+                    </Pressable>
                   ))}
                 </View>
-                <Text style={{ color: t.ink3, fontSize: 11.5, lineHeight: 17, marginBottom: 14 }}>Calories come from the machine's console or your Apple Watch. Leave it blank and we'll estimate from your average watts{watts.trim() ? ' (≈ ' + estKcal() + ' kcal)' : ''}.</Text>
-              </View>
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                  Calories come from the machine's console or your Apple Watch. Leave it blank and we'll work it out from your average watts{watts.trim() && kcalNow != null ? ' (≈ ' + kcalNow + ' kcal)' : ''} — with neither, the session logs without a calorie figure.
+                </Text>
+              </Section>
             ) : (
-              <View>
-                <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 6 }}>Add your sets</Text>
-                <View style={{ flexDirection: 'row', gap: 10, marginBottom: 12 }}>
+              <Section>
+                <SectionHead title="Add your sets" note={sets.length ? `${sets.length} logged` : undefined} />
+                <View style={{ flexDirection: 'row', gap: sp.sm }}>
                   <TextInput value={reps} onChangeText={setReps} keyboardType="numeric" placeholder="reps" placeholderTextColor={t.ink3} style={inp} />
                   <TextInput value={kg} onChangeText={setKg} keyboardType="numeric" placeholder="kg" placeholderTextColor={t.ink3} style={inp} />
-                  <Pressable onPress={addSet} style={{ backgroundColor: t.brand, borderRadius: 10, paddingHorizontal: 20, justifyContent: 'center' }}><Text style={{ color: t.brandInk, fontWeight: '800' }}>Add set</Text></Pressable>
+                  <Ghost label="Add set" onPress={addSet} />
                 </View>
                 {sets.length > 0 ? (
-                  <View style={{ marginBottom: 14 }}>
-                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+                  <View style={{ marginTop: sp.md }}>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
                       {sets.map((s, i) => (
-                        <Pressable key={i} onPress={() => setSets((p) => p.filter((_, j) => j !== i))} style={{ backgroundColor: t.surface2, borderRadius: 9, paddingHorizontal: 11, paddingVertical: 7, borderWidth: 1, borderColor: t.ring, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                          <Text style={{ color: t.ink2, fontWeight: '700', fontSize: 13 }}>Set {i + 1}: {s.reps}×{s.kg || '–'}kg</Text><Icon name="minus" size={12} color={t.ink3} />
+                        <Pressable key={i} onPress={() => setSets((p) => p.filter((_, j) => j !== i))}
+                          style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 11, paddingVertical: 7, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          <Text style={{ ...ty.caption, ...numeric, fontWeight: '500', color: t.ink2 }}>Set {i + 1}: {s.reps}×{s.kg || '–'}kg</Text>
+                          <Icon name="minus" size={12} color={t.ink3} />
                         </Pressable>
                       ))}
                     </View>
-                    <Text style={{ color: t.ink3, fontSize: 11.5 }}>≈ {strengthKcal} kcal, estimated from your total volume.</Text>
+                    <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: sp.sm }}>≈ {strengthKcal} kcal, estimated from your total volume.</Text>
                   </View>
                 ) : null}
-              </View>
+              </Section>
             )}
 
-            <Pressable onPress={save} style={{ backgroundColor: t.brand, borderRadius: 14, paddingVertical: 15, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8, marginTop: 4 }}>
-              <Icon name="check" size={16} color={t.brandInk} /><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 15 }}>Save to workout log</Text>
-            </Pressable>
-            <Pressable onPress={rescan} style={{ paddingVertical: 14, alignItems: 'center', marginTop: 4 }}><Text style={{ color: t.ink3, fontWeight: '700', fontSize: 13 }}>Scan another machine</Text></Pressable>
+            <Rule />
+
+            <Section>
+              <Cta label="Save to workout log" wide onPress={save} />
+              <View style={{ height: sp.sm }} />
+              <Ghost label="Scan another machine" onPress={rescan} />
+            </Section>
           </View>
         )}
       </ScrollView>

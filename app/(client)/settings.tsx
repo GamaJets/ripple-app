@@ -1,5 +1,17 @@
-// Client · Settings & About. Notification prefs, unit preference, legal, and a
-// what's-new changelog. Profile hub.
+// Client · Settings & About. Notification prefs, unit preference, legal, your
+// data (GDPR export / erasure), and the build this phone is actually running.
+// Profile hub.
+//
+// Re-skinned onto the instrument-panel kit (`src/ui/kit`) and the scale
+// (`src/theme/scale`): hairline-separated sections instead of six stacked
+// bordered boxes, three weights, no raw type sizes. Every route, hook,
+// conditional and handler is unchanged.
+//
+// Removed in the migration: a hardcoded "What's new" changelog claiming
+// v2.2 / v2.1 / v2.0 and a footer reading "v2.2". The app's real version is
+// 1.0.0 (app.json) — those numbers came from nowhere and sat directly above
+// <BuildInfo/>, which prints the true version. A false version defeats the
+// whole point of the Build section.
 import { useState } from 'react';
 import { View, Text, Pressable, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -7,31 +19,28 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { BuildInfo } from '../../src/ui/BuildInfo';
 import type { Theme } from '../../src/theme/tokens';
+import { Rule, Section, SectionHead, ListRow, Ghost } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
+import { Icon } from '../../src/ui/Icon';
 import { useSettings } from '../../src/ui/settings';
 import { useAuth } from '../../src/ui/auth';
 import { exportMyData, requestAccountDeletion } from '../../src/lib/gdpr';
 import { shareTextFile } from '../../src/lib/exportShare';
 
-const CHANGELOG = [
-  { v: '2.2', notes: ['Coach program builder', 'Coach feedback & meal-plan adjustments', 'Body measurements, weekly report & goal tracker', 'Lifting tools + recovery screen'] },
-  { v: '2.1', notes: ['Live white-label branding', 'Owner trainer management & promo codes'] },
-  { v: '2.0', notes: ['Real accounts & sign-in', 'Three portals: client, trainer, owner'] },
-];
-
 function Toggle({ t, on, onPress }: { t: Theme; on: boolean; onPress: () => void }) {
   return (
-    <Pressable onPress={onPress} style={{ width: 48, height: 28, borderRadius: 14, backgroundColor: on ? t.brand : t.surface3, justifyContent: 'center', padding: 3 }}>
-      <View style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: '#fff', alignSelf: on ? 'flex-end' : 'flex-start' }} />
+    <Pressable onPress={onPress} style={{ width: 48, height: 28, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface3, justifyContent: 'center', padding: 3 }}>
+      <View style={{ width: 22, height: 22, borderRadius: radius.pill, backgroundColor: '#fff', alignSelf: on ? 'flex-end' : 'flex-start' }} />
     </Pressable>
   );
 }
 
-function Row({ t, label, sub, right }: { t: Theme; label: string; sub?: string; right: React.ReactNode }) {
+function Row({ t, label, sub, right, first }: { t: Theme; label: string; sub?: string; right: React.ReactNode; first?: boolean }) {
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: t.ring }}>
-      <View style={{ flex: 1, paddingRight: 12 }}>
-        <Text style={{ color: t.ink, fontSize: 15, fontWeight: '600' }}>{label}</Text>
-        {sub ? <Text style={{ color: t.ink3, fontSize: 12, marginTop: 2 }}>{sub}</Text> : null}
+    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: sp.md, borderTopWidth: first ? 0 : hairline, borderTopColor: t.ring }}>
+      <View style={{ flex: 1, paddingRight: sp.md }}>
+        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{label}</Text>
+        {sub ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{sub}</Text> : null}
       </View>
       {right}
     </View>
@@ -58,71 +67,94 @@ export default function Settings() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
-        <Pressable onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Go back" style={{ marginBottom: 8 }}>
-          <Text style={{ color: t.brand, fontWeight: '700', fontSize: 15 }}>‹ Back</Text>
-        </Pressable>
-        <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia' }}>Settings</Text>
-        <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 18 }}>Preferences, legal & version</Text>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
 
-        <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>Notifications</Text>
-        <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, paddingHorizontal: 14, marginBottom: 18 }}>
-          <Row t={t} label="Push notifications" sub="Session reminders, PRs, coach messages" right={<Toggle t={t} on={st.notifPush} onPress={() => st.set({ notifPush: !st.notifPush })} />} />
-          <Row t={t} label="Email updates" sub="Weekly summary & tips" right={<Toggle t={t} on={st.notifEmail} onPress={() => st.set({ notifEmail: !st.notifEmail })} />} />
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
+          <Ghost icon="back" onPress={() => router.back()} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ ...ty.micro, color: t.ink3 }}>Account</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Settings</Text>
+          </View>
         </View>
+        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>Preferences, legal & version</Text>
 
-        <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>Units</Text>
-        <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, paddingHorizontal: 14, marginBottom: 18 }}>
-          <Row t={t} label="Body weight" right={
+        <Rule />
+
+        <Section>
+          <SectionHead title="Notifications" />
+          <Row t={t} first label="Push notifications" sub="Session reminders, PRs, coach messages" right={<Toggle t={t} on={st.notifPush} onPress={() => st.set({ notifPush: !st.notifPush })} />} />
+          <Row t={t} label="Email updates" sub="Weekly summary & tips" right={<Toggle t={t} on={st.notifEmail} onPress={() => st.set({ notifEmail: !st.notifEmail })} />} />
+        </Section>
+
+        <Rule />
+
+        <Section>
+          <SectionHead title="Units" />
+          <Row t={t} first label="Body weight" right={
             <View style={{ flexDirection: 'row', gap: 6 }}>
               {(['kg', 'lb'] as const).map((u) => (
-                <Pressable key={u} onPress={() => st.set({ weightUnit: u })} style={{ paddingHorizontal: 14, paddingVertical: 7, borderRadius: 9, backgroundColor: st.weightUnit === u ? t.brand : t.surface2, borderWidth: 1, borderColor: st.weightUnit === u ? t.brand : t.ring }}>
-                  <Text style={{ color: st.weightUnit === u ? t.brandInk : t.ink2, fontWeight: '800', fontSize: 13 }}>{u}</Text>
+                <Pressable key={u} onPress={() => st.set({ weightUnit: u })} style={{ paddingHorizontal: sp.lg, paddingVertical: 7, borderRadius: radius.sm, backgroundColor: st.weightUnit === u ? t.brand : t.surface2 }}>
+                  <Text style={{ ...ty.label, fontWeight: st.weightUnit === u ? '600' : '500', color: st.weightUnit === u ? t.brandInk : t.ink2 }}>{u}</Text>
                 </Pressable>
               ))}
             </View>
           } />
-        </View>
+        </Section>
 
-        <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>Appearance</Text>
-        <Pressable onPress={() => router.push('/(client)/appearance')} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 14, marginBottom: 18, flexDirection: 'row', justifyContent: 'space-between' }}>
-          <Text style={{ color: t.ink, fontSize: 15, fontWeight: '600' }}>Theme & accent colour</Text>
-          <Text style={{ color: t.ink3, fontSize: 18 }}>›</Text>
-        </Pressable>
+        <Rule />
 
-        <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>Your data</Text>
-        <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, paddingHorizontal: 14, marginBottom: 18 }}>
-          <Pressable onPress={exportData} accessibilityRole="button" accessibilityLabel="Export my data"><Row t={t} label={dataBusy ? 'Preparing export…' : 'Export my data'} sub="Download everything we store about you (JSON)" right={<Text style={{ color: t.brand, fontSize: 16 }}>{'\u2913'}</Text>} /></Pressable>
-          <Pressable onPress={deleteAccount} accessibilityRole="button" accessibilityLabel="Delete my account"><Row t={t} label="Delete my account" sub="Request permanent erasure of your account and data" right={<Text style={{ color: t.crit, fontSize: 15, fontWeight: '800' }}>{'\u203a'}</Text>} /></Pressable>
-        </View>
+        <Section>
+          <SectionHead title="Appearance" />
+          <ListRow icon="palette" title="Theme & accent colour" note="10 palettes, applied live"
+            onPress={() => router.push('/(client)/appearance')} />
+        </Section>
 
-        <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>Legal</Text>
-        <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, paddingHorizontal: 14, marginBottom: 18 }}>
-          <Pressable onPress={() => setLegal(legal === 'privacy' ? null : 'privacy')}><Row t={t} label="Privacy Policy" right={<Text style={{ color: t.ink3, fontSize: 16 }}>{legal === 'privacy' ? '▾' : '›'}</Text>} /></Pressable>
-          {legal === 'privacy' ? <Text style={{ color: t.ink3, fontSize: 13, lineHeight: 19, paddingVertical: 10 }}>We store your training, nutrition and body data to power your plan. Health data is never sold or shared with advertisers. You can export or delete your data at any time from your account. Photos and scans are stored securely and visible only to you and your coach.</Text> : null}
-          <Pressable onPress={() => setLegal(legal === 'terms' ? null : 'terms')}><Row t={t} label="Terms of Service" right={<Text style={{ color: t.ink3, fontSize: 16 }}>{legal === 'terms' ? '▾' : '›'}</Text>} /></Pressable>
-          {legal === 'terms' ? <Text style={{ color: t.ink3, fontSize: 13, lineHeight: 19, paddingVertical: 10 }}>Repple provides fitness and nutrition guidance for general wellness and is not a substitute for medical advice. Consult a physician before starting any program. Coaching is delivered by independent trainers on the platform; billing terms are shown at checkout.</Text> : null}
-        </View>
+        <Rule />
 
-        <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>What's new</Text>
-        <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 14, marginBottom: 18 }}>
-          {CHANGELOG.map((c) => (
-            <View key={c.v} style={{ marginBottom: 12 }}>
-              <Text style={{ color: t.brand, fontWeight: '800', fontSize: 14, marginBottom: 4 }}>v{c.v}</Text>
-              {c.notes.map((n) => <Text key={n} style={{ color: t.ink3, fontSize: 13, marginTop: 2 }}>· {n}</Text>)}
-            </View>
-          ))}
-        </View>
+        <Section>
+          <SectionHead title="Your data" />
+          <Pressable onPress={exportData} accessibilityRole="button" accessibilityLabel="Export my data">
+            <Row t={t} first label={dataBusy ? 'Preparing export…' : 'Export my data'} sub="Download everything we store about you (JSON)"
+              right={<Text style={{ ...ty.head, color: t.brand }}>{'⤓'}</Text>} />
+          </Pressable>
+          <Pressable onPress={deleteAccount} accessibilityRole="button" accessibilityLabel="Delete my account">
+            <Row t={t} label="Delete my account" sub="Request permanent erasure of your account and data" right={
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
+                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
+                <Icon name="chevron" size={15} color={t.ink3} />
+              </View>
+            } />
+          </Pressable>
+        </Section>
 
-        <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>Build</Text>
-        <View style={{ marginBottom: 18 }}>
+        <Rule />
+
+        <Section>
+          <SectionHead title="Legal" />
+          <Pressable onPress={() => setLegal(legal === 'privacy' ? null : 'privacy')}>
+            <Row t={t} first label="Privacy Policy" right={<Text style={{ ...ty.body, color: t.ink3 }}>{legal === 'privacy' ? '▾' : '›'}</Text>} />
+          </Pressable>
+          {legal === 'privacy' ? <Text style={{ ...ty.label, color: t.ink3, paddingVertical: sp.sm }}>We store your training, nutrition and body data to power your plan. Health data is never sold or shared with advertisers. You can export or delete your data at any time from your account. Photos and scans are stored securely and visible only to you and your coach.</Text> : null}
+          <Pressable onPress={() => setLegal(legal === 'terms' ? null : 'terms')}>
+            <Row t={t} label="Terms of Service" right={<Text style={{ ...ty.body, color: t.ink3 }}>{legal === 'terms' ? '▾' : '›'}</Text>} />
+          </Pressable>
+          {legal === 'terms' ? <Text style={{ ...ty.label, color: t.ink3, paddingVertical: sp.sm }}>Repple provides fitness and nutrition guidance for general wellness and is not a substitute for medical advice. Consult a physician before starting any program. Coaching is delivered by independent trainers on the platform; billing terms are shown at checkout.</Text> : null}
+        </Section>
+
+        <Rule />
+
+        {/* Build — the diagnostic for whether an OTA actually landed on this phone. */}
+        <Section>
+          <SectionHead title="Build" />
           <BuildInfo />
-          <Text style={{ color: t.ink3, fontSize: 12, lineHeight: 17, marginTop: 8 }}>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
             Which bundle this phone is running. If a fix was published but isn't here, compare Channel and Update against the EAS dashboard before assuming it's a code bug.
           </Text>
-        </View>
+        </Section>
 
-        <Text style={{ color: t.ink3, fontSize: 12, textAlign: 'center' }}>Repple · v2.2 · made for coaches & their clients</Text>
+        <Rule />
+
+        <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.xl }}>Repple · made for coaches & their clients</Text>
       </ScrollView>
     </SafeAreaView>
   );

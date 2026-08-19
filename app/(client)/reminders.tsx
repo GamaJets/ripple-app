@@ -2,14 +2,20 @@
 // reminders, backed by daily repeating local notifications. Persisted; re-scheduled
 // on save. Uses the notifications layer already built — it lights up on the
 // notifications-enabled build and no-ops safely before then.
+//
+// Re-skinned onto the kit (`src/ui/kit`) + scale (`src/theme/scale`): two
+// bordered boxes became hairline-separated sections, the "not on this build
+// yet" banner became the screen's one <Notice>. Hooks, state, scheduling and
+// persistence are unchanged.
 import { useState, useEffect } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../../src/ui/components';
-import type { Theme } from '../../src/theme/tokens';
 import { Icon } from '../../src/ui/Icon';
+import { Rule, Section, SectionHead, Notice, Cta, Ghost } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { pushAvailable, scheduleDailyReminder, cancelReminders } from '../../src/ui/pushNotifications';
 
 const KEY = 'repple.reminders';
@@ -69,73 +75,86 @@ export default function Reminders() {
   };
 
   const seg = (val: number, cur: number, set: (n: number) => void, label: string) => (
-    <Pressable onPress={() => set(val)} style={{ flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: 'center', backgroundColor: cur === val ? t.brand : t.surface2, borderWidth: 1, borderColor: cur === val ? t.brand : t.ring }}>
-      <Text style={{ color: cur === val ? t.brandInk : t.ink2, fontWeight: '800', fontSize: 13 }}>{label}</Text>
+    <Pressable onPress={() => set(val)} style={{ flex: 1, paddingVertical: sp.md, borderRadius: radius.sm, alignItems: 'center', backgroundColor: cur === val ? t.brand : t.surface2 }}>
+      <Text style={{ ...ty.label, fontWeight: cur === val ? '600' : '500', color: cur === val ? t.brandInk : t.ink2 }}>{label}</Text>
     </Pressable>
   );
-  const num = { color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 11, fontSize: 15, width: 54, textAlign: 'center' } as const;
+  const num = { ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11, width: 54, textAlign: 'center' } as const;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top', 'bottom']}>
-      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
-        <Pressable onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Go back" style={{ marginBottom: 8 }}><Icon name="back" size={22} color={t.ink2} /></Pressable>
-        <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia' }}>Reminders</Text>
-        <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 18 }}>Gentle daily nudges for hydration and supplements.</Text>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
+          <Ghost icon="back" onPress={() => router.back()} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ ...ty.micro, color: t.ink3 }}>Daily</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Reminders</Text>
+          </View>
+        </View>
+        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, marginBottom: sp.lg }}>Gentle daily nudges for hydration and supplements.</Text>
 
         {!pushAvailable() ? (
-          <View style={{ backgroundColor: t.surface2, borderRadius: 12, borderWidth: 1, borderColor: t.ring, padding: 12, marginBottom: 18, flexDirection: 'row', gap: 8 }}>
-            <Icon name="bell" size={15} color={t.ink3} />
-            <Text style={{ color: t.ink3, fontSize: 12.5, flex: 1, lineHeight: 18 }}>Save your reminders now — they'll start sending once the notifications build installs from TestFlight.</Text>
-          </View>
+          <Notice kicker="Not sending yet" title="Save them now, they'll start later"
+            note="Your reminders start sending once the notifications build installs from TestFlight." />
         ) : null}
 
+        <Rule />
+
         {/* Hydration */}
-        <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 16, marginBottom: 14 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: hydration ? 14 : 0 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}><Icon name="water" size={17} color={t.brand} /><Text style={{ color: t.ink, fontWeight: '800', fontSize: 15 }}>Hydration nudges</Text></View>
-            <Pressable onPress={() => setHydration((v) => !v)} style={{ width: 48, height: 28, borderRadius: 14, backgroundColor: hydration ? t.brand : t.surface3, justifyContent: 'center', paddingHorizontal: 3 }}>
-              <View style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: '#fff', alignSelf: hydration ? 'flex-end' : 'flex-start' }} />
+        <Section>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: hydration ? sp.lg : 0 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
+              <Icon name="water" size={17} color={t.brand} />
+              <Text style={{ ...ty.head, color: t.ink }}>Hydration nudges</Text>
+            </View>
+            <Pressable onPress={() => setHydration((v) => !v)} style={{ width: 48, height: 28, borderRadius: radius.pill, backgroundColor: hydration ? t.brand : t.surface3, justifyContent: 'center', paddingHorizontal: 3 }}>
+              <View style={{ width: 22, height: 22, borderRadius: radius.pill, backgroundColor: '#fff', alignSelf: hydration ? 'flex-end' : 'flex-start' }} />
             </Pressable>
           </View>
           {hydration ? (
             <View>
-              <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 6 }}>Every</Text>
-              <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>{seg(2, every, setEvery, '2 hours')}{seg(3, every, setEvery, '3 hours')}{seg(4, every, setEvery, '4 hours')}</View>
-              <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 6 }}>Between</Text>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 6 }}>Every</Text>
+              <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.md }}>{seg(2, every, setEvery, '2 hours')}{seg(3, every, setEvery, '3 hours')}{seg(4, every, setEvery, '4 hours')}</View>
+              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 6 }}>Between</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
                 <TextInput value={String(startH)} onChangeText={(x) => setStartH(Math.min(23, Math.max(0, parseInt(x, 10) || 0)))} keyboardType="number-pad" style={num} />
-                <Text style={{ color: t.ink3 }}>to</Text>
+                <Text style={{ ...ty.label, color: t.ink3 }}>to</Text>
                 <TextInput value={String(endH)} onChangeText={(x) => setEndH(Math.min(23, Math.max(0, parseInt(x, 10) || 0)))} keyboardType="number-pad" style={num} />
-                <Text style={{ color: t.ink3, fontSize: 12, flex: 1 }}>{fmt(startH, 0)} – {fmt(endH, 0)}</Text>
+                <Text style={{ ...ty.caption, ...numeric, color: t.ink3, flex: 1 }}>{fmt(startH, 0)} – {fmt(endH, 0)}</Text>
               </View>
             </View>
           ) : null}
-        </View>
+        </Section>
+
+        <Rule />
 
         {/* Supplements */}
-        <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 16, marginBottom: 14 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}><Icon name="check" size={16} color={t.brand} /><Text style={{ color: t.ink, fontWeight: '800', fontSize: 15 }}>Supplement reminders</Text></View>
-          {supps.map((s) => (
-            <View key={s.id} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: t.ring }}>
-              <Text style={{ color: t.ink2, fontSize: 14, flex: 1 }}>{s.name}</Text>
-              <Text style={{ color: t.ink, fontSize: 13, fontWeight: '700', marginRight: 12 }}>{fmt(s.hour, s.minute)}</Text>
+        <Section>
+          <SectionHead title="Supplement reminders" note={supps.length ? String(supps.length) : undefined} />
+          {supps.map((s, i) => (
+            <View key={s.id} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+              <Text style={{ ...ty.body, color: t.ink2, flex: 1 }}>{s.name}</Text>
+              <Text style={{ ...ty.label, ...numeric, fontWeight: '600', color: t.ink, marginRight: sp.md }}>{fmt(s.hour, s.minute)}</Text>
               <Pressable accessibilityLabel="Remove reminder" accessibilityRole="button" onPress={() => removeSupp(s.id)} hitSlop={6}><Icon name="minus" size={16} color={t.ink3} /></Pressable>
             </View>
           ))}
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12 }}>
-            <TextInput value={name} onChangeText={setName} placeholder="e.g. Creatine" placeholderTextColor={t.ink3} style={{ flex: 1, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 11, fontSize: 14 }} />
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.md }}>
+            <TextInput value={name} onChangeText={setName} placeholder="e.g. Creatine" placeholderTextColor={t.ink3}
+              style={{ flex: 1, ...ty.body, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 }} />
             <TextInput value={sh} onChangeText={setSh} keyboardType="number-pad" style={num} />
-            <Text style={{ color: t.ink3, fontWeight: '800' }}>:</Text>
+            <Text style={{ ...ty.body, fontWeight: '500', color: t.ink3 }}>:</Text>
             <TextInput value={sm} onChangeText={setSm} keyboardType="number-pad" style={num} />
           </View>
-          <Pressable onPress={addSupp} style={{ marginTop: 10, backgroundColor: t.surface2, borderWidth: 1, borderColor: t.ring, borderRadius: 10, paddingVertical: 11, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6 }}>
-            <Icon name="plus" size={15} color={t.ink2} /><Text style={{ color: t.ink2, fontWeight: '700', fontSize: 13 }}>Add reminder</Text>
-          </Pressable>
-        </View>
+          <View style={{ marginTop: sp.md, alignItems: 'flex-start' }}>
+            <Ghost label="Add reminder" icon="plus" onPress={addSupp} />
+          </View>
+        </Section>
 
-        <Pressable onPress={saveAndSchedule} style={{ backgroundColor: t.brand, borderRadius: 14, paddingVertical: 16, alignItems: 'center' }}>
-          <Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 15 }}>Save &amp; schedule</Text>
-        </Pressable>
+        <Rule />
+
+        <View style={{ marginTop: layout.section }}>
+          <Cta label="Save & schedule" onPress={saveAndSchedule} wide />
+        </View>
       </ScrollView>
     </SafeAreaView>
   );

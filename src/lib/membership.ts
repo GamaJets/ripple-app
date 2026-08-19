@@ -1,8 +1,11 @@
-// Membership helpers — a member's card number, plan and validity. In a real gym
-// deployment these come from the gym's system; here they're derived/defaulted so
-// the card + access barcode render for any signed-in member.
-
-export interface Membership { memberNo: string; plan: string; validUntil: string }
+// Membership helpers — the member number the app shows on the membership card
+// and encodes into the entry barcode. Derived from the signed-in user so it is
+// stable for that user; no gym billing system issues it.
+//
+// `defaultMembership()` used to sit here too, returning a plan of "Member" and a
+// validity of exactly one year from today. Both were printed on the membership
+// card as though a gym had issued them. Nothing ever set them, so they are gone
+// rather than replaced.
 
 /** Stable member number derived from the user (e.g. RPL-4821). */
 export function memberNoFrom(name: string, id: string): string {
@@ -10,11 +13,4 @@ export function memberNoFrom(name: string, id: string): string {
   let h = 0;
   for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
   return 'RPL-' + (1000 + (h % 9000));
-}
-
-/** Default plan/validity a year out (until wired to the gym's billing). */
-export function defaultMembership(name: string, id: string): Membership {
-  const d = new Date(); d.setFullYear(d.getFullYear() + 1);
-  const until = `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()}`;
-  return { memberNo: memberNoFrom(name, id), plan: 'Member', validUntil: until };
 }

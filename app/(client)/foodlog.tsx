@@ -1,6 +1,18 @@
-// Food Log — search / barcode / photo. Photo capture is real (camera or library);
-// the AI reading of the plate into macros lands with the vision backend, so for
-// now the estimate is editable before it logs. Tracks consumed vs remaining live.
+// Client · Food Log — search the food database, describe a meal in words, or
+// photograph a plate; everything lands against today's targets.
+//
+// Rebuilt on the instrument-panel kit (`src/ui/kit`) and the scale
+// (`src/theme/scale`). Every hook (same order), conditional branch, alert and
+// route from the previous version is preserved — the four bordered boxes became
+// hairline-separated sections and "calories remaining" became the screen's one
+// hero figure instead of a 40px number fighting a 10px bar.
+//
+// Removed as fabricated data: a `BARCODE` constant —
+//   const BARCODE = { n: 'Protein Bar (barcode)', k: 210, p: 20, c: 21, f: 7 };
+// — which the "Barcode" button logged straight into the client's diary while
+// alerting "Barcode Scanned". No barcode was ever read and no product was ever
+// looked up: every scan produced the same invented protein bar. The button now
+// says nothing was logged and points at the real Open Food Facts lookup.
 import { useState } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView, Alert, Modal, Image, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -8,7 +20,6 @@ import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { useTheme } from '../../src/ui/components';
-import type { Theme } from '../../src/theme/tokens';
 import { macrosFor, applyCoachAdjust } from '../../src/lib/nutrition';
 import { useClientData } from '../../src/ui/clientData';
 import { Icon } from '../../src/ui/Icon';
@@ -18,9 +29,13 @@ import { notifySuccess } from '../../src/ui/haptics';
 import { useFoodLog } from '../../src/ui/foodLog';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
 import { useWearables } from '../../src/ui/wearables';
+import { Rule, Section, SectionHead, Hero, Ghost, ListRow } from '../../src/ui/kit';
+import { sp, layout, radius, elevation, type as ty, numeric } from '../../src/theme/scale';
 
 type Food = { n: string; k: number; p: number; c: number; f: number };
 type Logged = Food & { via: string };
+// A reference food table — a lookup vocabulary the client searches, not a record
+// of anything they ate. Nothing here is logged until they tap it.
 const FOOD_DB: Food[] = [
  { n: 'Chicken Breast (150g)', k: 250, p: 47, c: 0, f: 5 }, { n: 'Greek Yogurt (200g)', k: 130, p: 20, c: 9, f: 4 },
  { n: 'Banana', k: 105, p: 1, c: 27, f: 0 }, { n: 'Oats (60g)', k: 230, p: 8, c: 40, f: 5 },
@@ -29,9 +44,6 @@ const FOOD_DB: Food[] = [
  { n: 'Eggs (2)', k: 140, p: 12, c: 1, f: 10 }, { n: 'Almonds (30g)', k: 175, p: 6, c: 6, f: 15 },
  { n: 'Sweet Potato (200g)', k: 180, p: 4, c: 41, f: 0 }, { n: 'Broccoli (150g)', k: 51, p: 4, c: 10, f: 0 },
 ];
-const BARCODE = { n: 'Protein Bar (barcode)', k: 210, p: 20, c: 21, f: 7 };
-// Interim baseline estimate shown after a photo; the vision backend replaces this
-// with a real read of the actual plate. User can edit before logging.
 // No baseline estimate. This used to be
 //   const PHOTO_GUESS: Food = { n: 'Meal (photo estimate)', k: 520, p: 40, c: 50, f: 16 };
 // filled in after a simulated 900ms "Reading Your Meal…" delay whenever the vision
@@ -104,108 +116,193 @@ export default function FoodLog() {
  setPhotoUri(null);
  };
 
- const macroRow = (label: string, cur: number, tg: number, col: string) => {
+ // Nothing is scanned and nothing is logged — say so instead of inventing a hit.
+ const barcodeNote = () => Alert.alert('No barcode was scanned', 'Nothing was logged. A real barcode lookup lives on the Meals screen, under "Log what you ate" → Barcode — it reads the product from Open Food Facts.');
+
+ const macroRow = (label: string, cur: number, tg: number, dim?: boolean) => {
  const rem = tg - cur;
+ const pct = Math.max(0, Math.min(100, Math.round((cur / (tg || 1)) * 100)));
  return (
- <View key={label} style={{ marginBottom: 10 }}>
+ <View key={label} style={{ marginTop: sp.md }}>
  <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
- <Text style={{ color: t.ink2, fontSize: 13, fontWeight: '600' }}>{label}</Text>
- <Text style={{ color: t.ink3, fontSize: 12 }}><Text style={{ color: t.ink, fontWeight: '700' }}>{cur}</Text> / {tg}g · {rem >= 0 ? `${rem}g left` : `${-rem}g over`}</Text>
+ <Text style={{ ...ty.caption, color: t.ink2 }}>{label}</Text>
+ <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{cur} / {tg}g · {rem >= 0 ? `${rem}g left` : `${-rem}g over`}</Text>
  </View>
- <View style={{ height: 8, borderRadius: 4, backgroundColor: t.surface3, marginTop: 4, overflow: 'hidden' }}><View style={{ height: 8, borderRadius: 4, backgroundColor: rem < 0 ? t.crit : col, width: `${Math.min(100, Math.round((cur / tg) * 100))}%` }} /></View>
+ <View style={{ height: 3, borderRadius: 2, backgroundColor: t.surface3, marginTop: 7, overflow: 'hidden' }}>
+ <View style={{ height: 3, borderRadius: 2, width: `${pct}%`, backgroundColor: rem < 0 ? t.crit : t.brand, opacity: dim && rem >= 0 ? 0.45 : 1 }} />
+ </View>
  </View>
  );
  };
 
+ const G = layout.gutter;
+ const field = { ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 } as const;
+
  return (
  <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
- <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
- <Pressable onPress={() => router.back()} style={{ marginBottom: 8 }}><Text style={{ color: t.brand, fontWeight: '700', fontSize: 15 }}>‹ Back</Text></Pressable>
- <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia', textTransform: 'capitalize' }}>Food Log</Text>
- <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 16 }}>Log by search, barcode, or a photo of your plate — macros update live.</Text>
+ <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
 
- {/* Consumed vs remaining hero */}
- <View style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18, marginBottom: 14 }}>
- <View style={{ flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 14 }}>
- <View>
- <Text style={{ color: t.ink3, fontSize: 12, fontWeight: '600', textTransform: 'capitalize' }}>{remK >= 0 ? 'Calories Remaining' : 'Calories Over'}</Text>
- <Text style={{ color: remK < 0 ? t.crit : t.ink, fontSize: 40, fontWeight: '900' }}>{Math.abs(remK)}<Text style={{ color: t.ink3, fontSize: 14, fontWeight: '600' }}> kcal</Text></Text>
- </View>
- <View style={{ alignItems: 'flex-end' }}>
- <Text style={{ color: t.ink3, fontSize: 12 }}>Consumed</Text>
- <Text style={{ color: t.ink, fontSize: 18, fontWeight: '700' }}>{tot.k}<Text style={{ color: t.ink3, fontSize: 12 }}> / {target.kcal}</Text></Text>
- </View>
- </View>
- <View style={{ height: 10, borderRadius: 5, backgroundColor: t.surface3, overflow: 'hidden', marginBottom: 14 }}><View style={{ height: 10, borderRadius: 5, backgroundColor: remK < 0 ? t.crit : t.brand, width: `${Math.min(100, Math.round((tot.k / target.kcal) * 100))}%` }} /></View>
- {macroRow('Protein', tot.p, target.protein, t.brand)}
- {macroRow('Carbs', tot.c, target.carbs, t.s1)}
- {macroRow('Fat', tot.f, target.fat, t.s3)}
- </View>
-
- <View style={{ flexDirection: 'row', gap: 10, marginBottom: 12 }}>
- <Pressable accessibilityLabel="Scan barcode" accessibilityRole="button" onPress={() => { add(BARCODE, 'barcode'); Alert.alert('Barcode Scanned', BARCODE.n + ' added.'); }} style={{ flex: 1, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingVertical: 14, alignItems: 'center', gap: 4 }}><Icon name="search" size={20} color={t.ink} /><Text style={{ color: t.ink, fontWeight: '700', fontSize: 12 }}>Barcode</Text></Pressable>
- <Pressable accessibilityLabel="Take a meal photo" accessibilityRole="button" onPress={() => takeMealPhoto(true)} style={{ flex: 1, backgroundColor: t.brand, borderRadius: 12, paddingVertical: 14, alignItems: 'center', gap: 4 }}><Icon name="camera" size={20} color={t.brandInk} /><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 12 }}>Photo a meal</Text></Pressable>
- <Pressable accessibilityLabel="Add meal photo from library" accessibilityRole="button" onPress={() => takeMealPhoto(false)} style={{ flex: 1, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingVertical: 14, alignItems: 'center', gap: 4 }}><Icon name="plus" size={20} color={t.ink} /><Text style={{ color: t.ink, fontWeight: '700', fontSize: 12 }}>Upload</Text></Pressable>
- </View>
-
- <Pressable accessibilityLabel="Estimate eating-out macros" accessibilityRole="button" onPress={() => router.push('/(client)/restaurant')} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingVertical: 13, marginBottom: 12 }}><Icon name="meals" size={17} color={t.brand} /><Text style={{ color: t.ink, fontWeight: '700', fontSize: 13 }}>Eating out? Estimate a restaurant meal</Text></Pressable>
-
- <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
- <TextInput value={nl} onChangeText={setNl} placeholder='Describe your meal — "chicken burrito & a coke"' placeholderTextColor={t.ink3} onSubmitEditing={logNL} returnKeyType="done" style={{ flex: 1, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15 }} />
- <Pressable onPress={logNL} disabled={nlBusy || !nl.trim()} style={{ backgroundColor: nl.trim() ? t.brand : t.surface2, borderRadius: 12, paddingHorizontal: 16, justifyContent: 'center', borderWidth: 1, borderColor: nl.trim() ? t.brand : t.ring }}>{nlBusy ? <ActivityIndicator color={t.brandInk} /> : <Text style={{ color: nl.trim() ? t.brandInk : t.ink3, fontWeight: '800', fontSize: 13 }}>Log AI</Text>}</Pressable>
- </View>
- <TextInput value={q} onChangeText={setQ} placeholder="Search foods…" placeholderTextColor={t.ink3} style={{ color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, marginBottom: 8 }} />
- {results.map((f) => (
- <Pressable key={f.n} onPress={() => { add(f, 'search'); setQ(''); }} style={{ backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 12, padding: 13, marginBottom: 6, flexDirection: 'row', justifyContent: 'space-between' }}>
- <Text style={{ color: t.ink, fontSize: 14 }}>{f.n}</Text><Text style={{ color: t.ink3, fontSize: 13 }}>{f.k} kcal · +</Text>
- </Pressable>
- ))}
-
- <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16, textTransform: 'capitalize', marginTop: 10, marginBottom: 8 }}>Logged Today</Text>
- {fl.entries.length === 0 ? <Text style={{ color: t.ink3, fontSize: 13 }}>Nothing logged yet today.</Text> : fl.entries.map((fe) => (
- <View key={fe.id} style={{ backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 12, padding: 13, marginBottom: 6, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+ <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
+ <Ghost icon="back" onPress={() => router.back()} />
  <View style={{ flex: 1 }}>
- <Text style={{ color: t.ink, fontSize: 14, fontWeight: '600' }}>{fe.name}</Text>
- <Text style={{ color: t.ink3, fontSize: 12 }}>{fe.kcal} kcal · P{fe.protein} C{fe.carbs} F{fe.fat}</Text>
+ <Text style={{ ...ty.micro, color: t.ink3 }}>Nutrition</Text>
+ <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Food log</Text>
  </View>
- <Pressable onPress={() => fl.removeFood(fe.id)} style={{ padding: 6 }}><Text style={{ color: t.ink3, fontSize: 16 }}>×</Text></Pressable>
+ </View>
+
+ {/* ── the hero: what is left in the day ──────────────────────────── */}
+ <Hero
+ label={remK >= 0 ? 'Calories remaining' : 'Calories over'}
+ figure={String(Math.abs(remK))}
+ unit="kcal"
+ note={`${tot.k} of ${target.kcal} kcal eaten${burned ? ` · ${burned} kcal burned` : ''}`}
+ arc={target.kcal ? tot.k / target.kcal : 0}
+ tone={remK < 0 ? t.crit : undefined}
+ />
+
+ <Rule />
+
+ {/* ── macros against target ──────────────────────────────────────── */}
+ <Section>
+ <SectionHead title="Macros" />
+ {macroRow('Protein', tot.p, target.protein)}
+ {macroRow('Carbs', tot.c, target.carbs, true)}
+ {macroRow('Fat', tot.f, target.fat, true)}
+ </Section>
+
+ <Rule />
+
+ {/* ── log a meal ─────────────────────────────────────────────────── */}
+ <Section>
+ <SectionHead title="Log a meal" />
+ <View style={{ flexDirection: 'row', gap: sp.sm }}>
+ <Pressable accessibilityLabel="Take a meal photo" accessibilityRole="button" onPress={() => takeMealPhoto(true)}
+ style={{ flex: 1, backgroundColor: t.brand, borderRadius: radius.sm, paddingVertical: sp.md, alignItems: 'center', gap: 5 }}>
+ <Icon name="camera" size={18} color={t.brandInk} />
+ <Text style={{ ...ty.caption, fontWeight: '600', color: t.brandInk }}>Photo</Text>
+ </Pressable>
+ <Pressable accessibilityLabel="Add meal photo from library" accessibilityRole="button" onPress={() => takeMealPhoto(false)}
+ style={{ flex: 1, backgroundColor: t.surface2, borderRadius: radius.sm, paddingVertical: sp.md, alignItems: 'center', gap: 5 }}>
+ <Icon name="plus" size={18} color={t.ink2} />
+ <Text style={{ ...ty.caption, fontWeight: '500', color: t.ink }}>Upload</Text>
+ </Pressable>
+ <Pressable accessibilityLabel="Scan barcode" accessibilityRole="button" onPress={barcodeNote}
+ style={{ flex: 1, backgroundColor: t.surface2, borderRadius: radius.sm, paddingVertical: sp.md, alignItems: 'center', gap: 5 }}>
+ <Icon name="search" size={18} color={t.ink2} />
+ <Text style={{ ...ty.caption, fontWeight: '500', color: t.ink }}>Barcode</Text>
+ </Pressable>
+ </View>
+ <ListRow icon="meals" title="Eating out?" note="Estimate a restaurant meal" onPress={() => router.push('/(client)/restaurant')} />
+ </Section>
+
+ <Rule />
+
+ {/* ── describe it in words ───────────────────────────────────────── */}
+ <Section>
+ <SectionHead title="Describe it" />
+ <Text style={{ ...ty.caption, color: t.ink3, marginBottom: 6 }}>In your own words — the AI reads it into macros</Text>
+ <View style={{ flexDirection: 'row', gap: sp.sm }}>
+ <TextInput value={nl} onChangeText={setNl} placeholder='"chicken burrito & a coke"' placeholderTextColor={t.ink3} onSubmitEditing={logNL} returnKeyType="done"
+ style={{ ...field, flex: 1 }} />
+ <Pressable onPress={logNL} disabled={nlBusy || !nl.trim()}
+ style={{ backgroundColor: nl.trim() ? t.brand : t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, justifyContent: 'center' }}>
+ {nlBusy ? <ActivityIndicator color={t.brandInk} /> : <Text style={{ ...ty.label, fontWeight: '600', color: nl.trim() ? t.brandInk : t.ink3 }}>Log</Text>}
+ </Pressable>
+ </View>
+ </Section>
+
+ <Rule />
+
+ {/* ── search the food table ──────────────────────────────────────── */}
+ <Section>
+ <SectionHead title="Search foods" note={q ? `${results.length} match${results.length === 1 ? '' : 'es'}` : undefined} />
+ <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md }}>
+ <Icon name="search" size={16} color={t.ink3} />
+ <TextInput value={q} onChangeText={setQ} placeholder="Chicken, oats, banana…" placeholderTextColor={t.ink3}
+ style={{ flex: 1, ...ty.body, color: t.ink, paddingVertical: 11 }} />
+ </View>
+ {results.map((f, i) => (
+ <View key={f.n}>
+ {i > 0 ? <Rule /> : null}
+ <Pressable onPress={() => { add(f, 'search'); setQ(''); }} accessibilityRole="button" accessibilityLabel={'Log ' + f.n}
+ style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
+ <Text style={{ ...ty.body, color: t.ink, flex: 1 }}>{f.n}</Text>
+ <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{f.k} kcal</Text>
+ <Icon name="plus" size={16} color={t.brand} />
+ </Pressable>
  </View>
  ))}
+ </Section>
+
+ <Rule />
+
+ {/* ── today's entries, or an honest empty state ──────────────────── */}
+ <Section>
+ <SectionHead title="Logged today" note={`${tot.k} kcal`} />
+ {fl.entries.length === 0 ? (
+ <Text style={{ ...ty.label, color: t.ink3 }}>Nothing logged yet today.</Text>
+ ) : fl.entries.map((fe, i) => (
+ <View key={fe.id}>
+ {i > 0 ? <Rule /> : null}
+ <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
+ <View style={{ flex: 1 }}>
+ <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }} numberOfLines={1}>{fe.name}</Text>
+ <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{fe.kcal} kcal · P{fe.protein} C{fe.carbs} F{fe.fat}</Text>
+ </View>
+ <Pressable onPress={() => fl.removeFood(fe.id)} hitSlop={8} accessibilityRole="button" accessibilityLabel={'Remove ' + fe.name}>
+ <Text style={{ ...ty.body, color: t.ink3 }}>×</Text>
+ </Pressable>
+ </View>
+ </View>
+ ))}
+ </Section>
+
  </ScrollView>
 
- {/* Photo → estimate modal */}
+ {/* ── photo → estimate sheet ───────────────────────────────────────── */}
  <Modal visible={photoUri != null} transparent animationType="slide" onRequestClose={() => setPhotoUri(null)}>
- <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)' }} onPress={() => setPhotoUri(null)} />
- <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, borderColor: t.ring, padding: 18, paddingBottom: 30 }}>
- <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
- <Text style={{ color: t.ink, fontSize: 18, fontWeight: '800' }}>{reading ? 'Reading Your Meal…' : readFailed ? 'Enter This Meal' : 'Confirm & Log'}</Text>
- <Pressable onPress={() => setPhotoUri(null)}><Text style={{ color: t.brand, fontSize: 16, fontWeight: '800' }}>Cancel</Text></Pressable>
+ <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setPhotoUri(null)} />
+ <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30, ...elevation.e2 }}>
+ <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sp.md }}>
+ <Text style={{ ...ty.title, color: t.ink }}>{reading ? 'Reading Your Meal…' : readFailed ? 'Enter This Meal' : 'Confirm & Log'}</Text>
+ <Pressable onPress={() => setPhotoUri(null)} hitSlop={8} accessibilityRole="button" accessibilityLabel="Cancel">
+ <Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>Cancel</Text>
+ </Pressable>
  </View>
- {photoUri ? <Image source={{ uri: photoUri }} style={{ width: '100%', height: 150, borderRadius: 12, backgroundColor: t.surface2, marginBottom: 12 }} resizeMode="cover" /> : null}
+ {photoUri ? <Image source={{ uri: photoUri }} style={{ width: '100%', height: 150, borderRadius: radius.md, backgroundColor: t.surface2, marginBottom: sp.md }} resizeMode="cover" /> : null}
  {reading ? (
- <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8 }}><ActivityIndicator color={t.brand} /><Text style={{ color: t.ink3, fontSize: 13 }}>Estimating calories and macros…</Text></View>
+ <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.sm }}>
+ <ActivityIndicator color={t.brand} />
+ <Text style={{ ...ty.label, color: t.ink3 }}>Estimating calories and macros…</Text>
+ </View>
  ) : (
  <>
- <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 10 }}>{readFailed ? "Photo reading isn't available yet, so nothing was estimated from your picture — enter the calories and macros and they'll be logged against this photo." : 'AI estimate from your photo — adjust anything before logging.'}</Text>
- <TextInput value={estN} onChangeText={setEstN} placeholder="Meal name" placeholderTextColor={t.ink3} style={{ color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 11, fontSize: 14, marginBottom: 8 }} />
- <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
+ <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>{readFailed ? "Photo reading isn't available yet, so nothing was estimated from your picture — enter the calories and macros and they'll be logged against this photo." : 'AI estimate from your photo — adjust anything before logging.'}</Text>
+ <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Meal name</Text>
+ <TextInput value={estN} onChangeText={setEstN} placeholder="What was it?" placeholderTextColor={t.ink3} style={{ ...field, marginBottom: sp.md }} />
+ <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.lg }}>
  {[['kcal', estK, setEstK], ['P', estP, setEstP], ['C', estC, setEstC], ['F', estF, setEstF]].map(([lbl, val, set]: any) => (
  <View key={lbl} style={{ flex: 1 }}>
- <Text style={{ color: t.ink3, fontSize: 11, marginBottom: 3 }}>{lbl}</Text>
- <TextInput value={val} onChangeText={set} keyboardType="numeric" style={{ color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 10, fontSize: 14 }} />
+ <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>{lbl}</Text>
+ <TextInput value={val} onChangeText={set} keyboardType="numeric" style={{ ...field, ...numeric, paddingHorizontal: 10 }} />
  </View>
  ))}
  </View>
- <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 6 }}>Portion</Text>
- <View style={{ flexDirection: 'row', gap: 8, marginBottom: 14 }}>
- {[0.5, 1, 1.5, 2].map((s) => (
- <Pressable key={s} onPress={() => setServ(s)} style={{ flex: 1, paddingVertical: 9, borderRadius: 10, alignItems: 'center', backgroundColor: serv === s ? t.brand : t.surface2, borderWidth: 1, borderColor: serv === s ? t.brand : t.ring }}>
- <Text style={{ color: serv === s ? t.brandInk : t.ink2, fontWeight: '700', fontSize: 13 }}>{s === 1 ? '1×' : s + '×'}</Text>
+ <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Portion</Text>
+ <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.lg }}>
+ {[0.5, 1, 1.5, 2].map((s) => {
+ const on = serv === s;
+ return (
+ <Pressable key={s} onPress={() => setServ(s)} accessibilityRole="button" accessibilityState={{ selected: on }}
+ style={{ flex: 1, paddingVertical: 10, borderRadius: radius.sm, alignItems: 'center', backgroundColor: on ? t.brand : t.surface2 }}>
+ <Text style={{ ...ty.label, ...numeric, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{s === 1 ? '1×' : s + '×'}</Text>
  </Pressable>
- ))}
+ );
+ })}
  </View>
- <Pressable onPress={logPhoto} style={{ backgroundColor: t.brand, borderRadius: 12, paddingVertical: 14, alignItems: 'center' }}>
- <Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 15 }}>Log {round((parseFloat(estK) || 0) * serv)} kcal</Text>
+ <Pressable onPress={logPhoto} accessibilityRole="button"
+ style={{ backgroundColor: t.brand, borderRadius: radius.sm, paddingVertical: 13, alignItems: 'center' }}>
+ <Text style={{ ...ty.body, fontWeight: '600', color: t.brandInk }}>Log {round((parseFloat(estK) || 0) * serv)} kcal</Text>
  </Pressable>
  </>
  )}

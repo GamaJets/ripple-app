@@ -1,9 +1,16 @@
 // Client · Consistency. A 12-week heatmap of training days from the workout log,
 // plus totals. Read-only. Profile hub.
-import { View, Text, Pressable, ScrollView } from 'react-native';
+//
+// On the instrument-panel kit (`src/ui/kit`) and the scale (`src/theme/scale`).
+// Every provider, computation and route is preserved — the five bordered stat
+// tiles became one hero figure plus a hairline-divided KPI row, and the heatmap
+// lost its box.
+import { View, Text, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
+import { Rule, Section, SectionHead, Hero, KpiRow, Ghost } from '../../src/ui/kit';
+import { sp, layout, hairline, type as ty } from '../../src/theme/scale';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { currentStreak, longestStreak, freezeBudget, currentStreakFrozen } from '../../src/lib/streaks';
 
@@ -43,31 +50,50 @@ export default function Consistency() {
     const future = d > today;
     const bg = future ? 'transparent' : c === 0 ? t.surface2 : c === 1 ? t.brand : t.brand;
     const op = future ? 0 : c === 0 ? 1 : c === 1 ? 0.6 : 1;
-    return { backgroundColor: bg, opacity: op, borderWidth: future ? 0 : 1, borderColor: t.ring };
+    return { backgroundColor: bg, opacity: op, borderWidth: future ? 0 : hairline, borderColor: t.ring };
   };
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
-        <Pressable onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Go back" style={{ marginBottom: 8 }}>
-          <Text style={{ color: t.brand, fontWeight: '700', fontSize: 15 }}>‹ Back</Text>
-        </Pressable>
-        <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia' }}>Consistency</Text>
-        <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 18 }}>Last {WEEKS} weeks of training</Text>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
 
-        <View style={{ flexDirection: 'row', gap: 10, marginBottom: 18 }}>
-          {[['Sessions', String(totalSessions)], ['Days trained', String(trainedDays)], ['Streak', String(streak)], ['Best', String(best)], ['\u2744 Freezes', String(freezes)]].map(([l, v]) => (
-            <View key={l} style={{ flex: 1, backgroundColor: t.surface, borderRadius: 14, borderWidth: 1, borderColor: t.ring, padding: 12, alignItems: 'center' }}>
-              <Text style={{ color: t.ink, fontWeight: '800', fontSize: 18 }}>{v}</Text>
-              <Text style={{ color: t.ink3, fontSize: 10, marginTop: 2 }}>{l}</Text>
-            </View>
-          ))}
+        {/* ── header ─────────────────────────────────────────────────────── */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
+          <Ghost icon="back" onPress={() => router.back()} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ ...ty.micro, color: t.ink3 }}>Last {WEEKS} weeks</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Consistency</Text>
+          </View>
         </View>
 
-        <View style={{ backgroundColor: t.surface, borderRadius: 18, borderWidth: 1, borderColor: t.ring, padding: 16 }}>
+        {/* ── the hero: the streak the heatmap is about ───────────────────── */}
+        <Hero
+          label="Current streak"
+          figure={String(streak)}
+          unit={streak === 1 ? 'day' : 'days'}
+          note={freezes > 0
+            ? `Best ${best} · ${freezes} freeze${freezes === 1 ? '' : 's'} in reserve`
+            : `Best ${best} day${best === 1 ? '' : 's'} · no freezes yet`}
+        />
+
+        <Rule />
+
+        <Section>
+          <SectionHead title="Totals" />
+          <KpiRow items={[
+            { label: 'Sessions', value: String(totalSessions) },
+            { label: 'Days trained', value: String(trainedDays) },
+            { label: 'Best streak', value: String(best) },
+          ]} />
+        </Section>
+
+        <Rule />
+
+        <Section>
+          <SectionHead title="Training days" note={`${WEEKS} weeks`} />
           <View style={{ flexDirection: 'row' }}>
             <View style={{ justifyContent: 'space-between', marginRight: 6, paddingVertical: 2 }}>
-              {DOW.map((d) => <Text key={d} style={{ color: t.ink3, fontSize: 9, height: 16 }}>{d[0]}</Text>)}
+              {DOW.map((d) => <Text key={d} style={{ ...ty.micro, color: t.ink3, height: 16 }}>{d[0]}</Text>)}
             </View>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
               <View style={{ flexDirection: 'row', gap: 4 }}>
@@ -79,14 +105,14 @@ export default function Consistency() {
               </View>
             </ScrollView>
           </View>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 12 }}>
-            <Text style={{ color: t.ink3, fontSize: 11 }}>Less</Text>
-            <View style={{ width: 12, height: 12, borderRadius: 3, backgroundColor: t.surface2, borderWidth: 1, borderColor: t.ring }} />
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: sp.md }}>
+            <Text style={{ ...ty.caption, color: t.ink3 }}>Less</Text>
+            <View style={{ width: 12, height: 12, borderRadius: 3, backgroundColor: t.surface2, borderWidth: hairline, borderColor: t.ring }} />
             <View style={{ width: 12, height: 12, borderRadius: 3, backgroundColor: t.brand, opacity: 0.6 }} />
             <View style={{ width: 12, height: 12, borderRadius: 3, backgroundColor: t.brand }} />
-            <Text style={{ color: t.ink3, fontSize: 11 }}>More</Text>
+            <Text style={{ ...ty.caption, color: t.ink3 }}>More</Text>
           </View>
-        </View>
+        </Section>
       </ScrollView>
     </SafeAreaView>
   );

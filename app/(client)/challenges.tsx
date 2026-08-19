@@ -1,13 +1,20 @@
-// Client · Challenges + leaderboards. Join a 30-day consistency, streak, or
-// volume challenge; your live score (from your real workout log) is ranked
-// against a cohort. Tap a challenge to see the full board. Reachable from the
-// dashboard and Explore.
+// Client · Challenges. Join a 30-day consistency, streak, or volume challenge;
+// your live score is computed from your real workout log and measured against
+// the goal. Tap a challenge to see the full board. Reachable from the dashboard
+// and Explore.
+//
+// On the instrument-panel kit (`src/ui/kit`) and the scale (`src/theme/scale`).
+// Every provider, conditional branch and route from the previous version is
+// preserved — only the presentation changed: hairline-separated rows and a 3px
+// meter instead of three bordered cards with their own progress bars.
 import { useState } from 'react';
 import { View, Text, Pressable, ScrollView, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
+import { Rule, Section, SectionHead, Meter, Cta, Ghost } from '../../src/ui/kit';
+import { sp, layout, radius, elevation, type as ty, numeric, value } from '../../src/theme/scale';
 import { useChallenges, CHALLENGES, type Challenge } from '../../src/ui/challenges';
 import { notifySuccess } from '../../src/ui/haptics';
 
@@ -19,87 +26,103 @@ export default function Challenges() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
-        <Pressable onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Go back" style={{ marginBottom: 8 }}>
-          <Text style={{ color: t.brand, fontWeight: '700', fontSize: 15 }}>‹ Back</Text>
-        </Pressable>
-        <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia' }}>Challenges</Text>
-        <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 18 }}>Join a challenge and climb the leaderboard.</Text>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
 
-        {CHALLENGES.map((c) => {
-          const joined = ch.isJoined(c.id);
-          const my = ch.myScore(c.metric);
-          const rank = ch.myRank(c);
-          const total = c.field.length + 1;
-          const pct = Math.max(0, Math.min(1, c.goal ? my / c.goal : 0));
-          return (
-            <View key={c.id} style={{ backgroundColor: t.surface, borderRadius: 18, borderWidth: 1, borderColor: joined ? t.brand : t.ring, padding: 16, marginBottom: 12 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                <View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                  <Icon name={c.icon as any} size={22} color={t.brand} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ color: t.ink, fontWeight: '800', fontSize: 16 }}>{c.title}</Text>
-                  <Text style={{ color: t.ink3, fontSize: 12, marginTop: 1 }}>{c.blurb}</Text>
-                </View>
-              </View>
+        {/* ── header ─────────────────────────────────────────────────────── */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
+          <Ghost icon="back" onPress={() => router.back()} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ ...ty.micro, color: t.ink3 }}>You against the goal</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Challenges</Text>
+          </View>
+        </View>
 
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 12 }}>
-                <View style={{ flex: 1 }}>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
-                    <Text style={{ color: t.ink3, fontSize: 11 }}>Your score: <Text style={{ color: t.ink, fontWeight: '800' }}>{my} {c.unit}</Text></Text>
-                    <Text style={{ color: t.ink3, fontSize: 11 }}>Goal {c.goal}</Text>
+        <Section>
+          <SectionHead title="Open challenges" />
+
+          {CHALLENGES.map((c, ci) => {
+            const joined = ch.isJoined(c.id);
+            const my = ch.myScore(c.metric);
+            const rank = ch.myRank(c);
+            const total = c.field.length + 1;
+            return (
+              <View key={c.id}>
+                {ci > 0 ? <Rule /> : null}
+                <View style={{ paddingVertical: sp.lg }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+                    <View style={{ width: 34, height: 34, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+                      <Icon name={c.icon as any} size={17} color={joined ? t.brand : t.ink2} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{c.title}</Text>
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{c.blurb}</Text>
+                    </View>
                   </View>
-                  <View style={{ height: 7, borderRadius: 4, backgroundColor: t.surface3, overflow: 'hidden' }}>
-                    <View style={{ height: 7, borderRadius: 4, backgroundColor: t.brand, width: `${(pct * 100)}%` }} />
+
+                  <Meter label="Your score" val={my} target={c.goal} unit={' ' + c.unit} dim={!joined} />
+
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: sp.lg }}>
+                    <Pressable onPress={() => setOpen(c)} hitSlop={8} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
+                      <Icon name="trophy" size={14} color={t.ink3} />
+                      <Text style={{ ...ty.label, color: t.ink2 }} numberOfLines={1}>{!joined ? 'View progress' : total > 1 ? `You're #${rank} of ${total}` : `${my} of ${c.goal} ${c.unit}`}</Text>
+                    </Pressable>
+                    <View style={{ flexDirection: 'row', gap: sp.md, alignItems: 'center' }}>
+                      <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{c.endsInDays}-day</Text>
+                      {joined ? (
+                        <Ghost label="Joined" onPress={() => { ch.toggle(c.id); if (!joined) notifySuccess(); }} />
+                      ) : (
+                        <Cta label="Join" onPress={() => { ch.toggle(c.id); if (!joined) notifySuccess(); }} />
+                      )}
+                    </View>
                   </View>
                 </View>
               </View>
+            );
+          })}
+        </Section>
 
-              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 14 }}>
-                <Pressable onPress={() => setOpen(c)} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                  <Icon name="trophy" size={14} color={t.ink3} />
-                  <Text style={{ color: t.ink2, fontWeight: '700', fontSize: 13 }}>{!joined ? 'View progress' : total > 1 ? `You're #${rank} of ${total}` : `${my} of ${c.goal} ${c.unit}`}</Text>
-                </Pressable>
-                <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
-                  <Text style={{ color: t.ink3, fontSize: 11 }}>{c.endsInDays}d left</Text>
-                  <Pressable onPress={() => { ch.toggle(c.id); if (!joined) notifySuccess(); }} style={{ backgroundColor: joined ? t.surface2 : t.brand, borderColor: joined ? t.ring : t.brand, borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8 }}>
-                    <Text style={{ color: joined ? t.ink2 : t.brandInk, fontWeight: '800', fontSize: 13 }}>{joined ? 'Joined' : 'Join'}</Text>
-                  </Pressable>
-                </View>
-              </View>
-            </View>
-          );
-        })}
+        <Rule />
 
-        <Text style={{ color: t.ink3, fontSize: 11, marginTop: 6, lineHeight: 16 }}>Your score is computed live from your logged workouts. Challenges are solo against the goal for now — competing against other athletes arrives with the group-coaching update.</Text>
+        <Section>
+          <Text style={{ ...ty.caption, color: t.ink3 }}>Your score is computed live from your logged workouts. Challenges are solo against the goal for now — competing against other athletes arrives with the group-coaching update.</Text>
+        </Section>
       </ScrollView>
 
       <Modal visible={!!open} transparent animationType="slide" onRequestClose={() => setOpen(null)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setOpen(null)} />
-        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, borderColor: t.ring, maxHeight: '80%' }}>
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, maxHeight: '80%', ...elevation.e2 }}>
           {open && (
-            <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 30 }}>
-              <Text style={{ color: t.ink, fontSize: 21, fontWeight: '700', fontFamily: 'Georgia', marginBottom: 2 }}>{open.title}</Text>
-              <Text style={{ color: t.ink3, fontSize: 13, marginBottom: 16 }}>{open.field.length > 0 ? 'Leaderboard' : 'Your progress'} · {open.endsInDays} days left</Text>
+            <ScrollView contentContainerStyle={{ padding: layout.gutter, paddingBottom: 30 }}>
+              <Text style={{ ...ty.micro, color: t.ink3 }}>{open.field.length > 0 ? 'Leaderboard' : 'Your progress'} · {open.endsInDays}-day challenge</Text>
+              <Text style={{ ...ty.title, color: t.ink, marginTop: 3, marginBottom: sp.lg }}>{open.title}</Text>
               {open.field.length === 0 ? (
-                <Text style={{ color: t.ink3, fontSize: 12.5, lineHeight: 18, marginBottom: 14 }}>You're the only athlete on this board right now. Other athletes appear once group challenges are live — nothing here is simulated.</Text>
+                <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>You're the only athlete on this board right now. Other athletes appear once group challenges are live — nothing here is simulated.</Text>
               ) : null}
               {ch.board(open).map((r, i) => (
-                <View key={r.name + i} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: t.ring, backgroundColor: r.you ? 'rgba(45,212,191,0.08)' : 'transparent', borderRadius: r.you ? 10 : 0, paddingHorizontal: r.you ? 8 : 0 }}>
-                  <Text style={{ color: i < 3 ? t.brand : t.ink3, fontWeight: '800', fontSize: 15, width: 26 }}>{i + 1}</Text>
-                  <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                    <Text style={{ color: r.you ? t.brand : t.ink2, fontWeight: '800', fontSize: 13 }}>{r.name.split(' ').map((x) => x[0]).join('')}</Text>
+                <View key={r.name + i}>
+                  {i > 0 ? <Rule /> : null}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
+                    <Text style={{ ...value(15), color: t.ink3, width: 22 }}>{i + 1}</Text>
+                    <View style={{ width: 32, height: 32, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+                      <Text style={{ ...ty.caption, fontWeight: '500', color: r.you ? t.brand : t.ink2 }}>{r.name.split(' ').map((x) => x[0]).join('')}</Text>
+                    </View>
+                    <Text style={{ flex: 1, ...ty.body, fontWeight: r.you ? '500' : '400', color: r.you ? t.ink : t.ink2 }}>{r.name}</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+                      <Text style={{ ...value(15), color: t.ink }}>{r.score}</Text>
+                      <Text style={{ ...ty.caption, color: t.ink3, marginLeft: 3 }}>{open.unit}</Text>
+                    </View>
                   </View>
-                  <Text style={{ flex: 1, color: r.you ? t.ink : t.ink2, fontWeight: r.you ? '800' : '600', fontSize: 14 }}>{r.name}</Text>
-                  <Text style={{ color: t.ink, fontWeight: '800', fontSize: 14 }}>{r.score} <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '600' }}>{open.unit}</Text></Text>
                 </View>
               ))}
-              <Pressable onPress={() => { const c = open; ch.toggle(c.id); }} style={{ backgroundColor: ch.isJoined(open.id) ? t.surface2 : t.brand, borderColor: ch.isJoined(open.id) ? t.ring : t.brand, borderWidth: 1, borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginTop: 16 }}>
-                <Text style={{ color: ch.isJoined(open.id) ? t.ink2 : t.brandInk, fontWeight: '800' }}>{ch.isJoined(open.id) ? 'Leave challenge' : 'Join challenge'}</Text>
-              </Pressable>
-              <Pressable onPress={() => setOpen(null)} style={{ paddingVertical: 12, alignItems: 'center' }}>
-                <Text style={{ color: t.ink3, fontWeight: '700', fontSize: 13 }}>Close</Text>
+              <View style={{ marginTop: sp.xl }}>
+                {ch.isJoined(open.id) ? (
+                  <Ghost label="Leave challenge" onPress={() => { const c = open; ch.toggle(c.id); }} />
+                ) : (
+                  <Cta label="Join challenge" wide onPress={() => { const c = open; ch.toggle(c.id); }} />
+                )}
+              </View>
+              <Pressable onPress={() => setOpen(null)} style={{ paddingVertical: sp.md, alignItems: 'center', marginTop: sp.sm }}>
+                <Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>Close</Text>
               </Pressable>
             </ScrollView>
           )}

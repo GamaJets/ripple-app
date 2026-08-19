@@ -1,13 +1,15 @@
 // Client tab navigator — Home · Train · Meals · Progress · Me
+//
+// Configuration, not layout: every Tabs.Screen, name, href, title and the order
+// they appear in is untouched. The only change is that the tab label and the
+// bar's padding come off the scale (`src/theme/scale`) instead of being raw
+// numbers, and a dead emoji-based TabIcon (nothing rendered it since the Icon
+// set landed) is gone.
 import { Tabs } from 'expo-router';
-import { Text } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-
-function TabIcon({ emoji, focused }: { emoji: string; focused: boolean }) {
-  return <Text style={{ fontSize: 22, opacity: focused ? 1 : 0.45 }}>{emoji}</Text>;
-}
+import { sp, type as ty } from '../../src/theme/scale';
 
 export default function ClientLayout() {
   const t = useTheme();
@@ -20,10 +22,11 @@ export default function ClientLayout() {
         headerStyle: { backgroundColor: t.surface },
         headerTintColor: t.ink,
         headerShadowVisible: false,
-        tabBarStyle: { backgroundColor: t.surface, borderTopColor: t.ring, height: 56 + bottomPad, paddingTop: 8, paddingBottom: bottomPad },
+        tabBarStyle: { backgroundColor: t.surface, borderTopColor: t.ring, height: 56 + bottomPad, paddingTop: sp.sm, paddingBottom: bottomPad },
         tabBarActiveTintColor: t.brand,
         tabBarInactiveTintColor: t.ink3,
-        tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
+        // The scale's smallest step, in sentence case and at the emphasis weight.
+        tabBarLabelStyle: { ...ty.micro, textTransform: 'none', letterSpacing: 0.2, fontWeight: '500' },
         sceneStyle: { backgroundColor: t.bg },
       }}
     >

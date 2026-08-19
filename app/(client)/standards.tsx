@@ -1,13 +1,21 @@
 // Client · Strength Standards. Grades the client's best estimated 1RM on the big
 // lifts against bodyweight multiples (approximate, unisex). Reads PRs + weight.
-import { View, Text, Pressable, ScrollView } from 'react-native';
+//
+// Rebuilt on the instrument-panel kit (`src/ui/kit`) and the scale
+// (`src/theme/scale`). Every provider, conditional and route from the previous
+// version is preserved — only the presentation changed: five bordered cards
+// became hairline rows, the level bar is on the kit's 3px mark spec, and the
+// level name and "Elite" tag no longer print in accent/status colour — the
+// status is a mark beside ink text. Five equal lifts is a list, so no hero.
+import { View, Text, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import type { Theme } from '../../src/theme/tokens';
 import { useClientData } from '../../src/ui/clientData';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { personalRecords } from '../../src/lib/streaks';
+import { Rule, Section, SectionHead, Ghost } from '../../src/ui/kit';
+import { sp, layout, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 
 const LEVELS = ['Beginner', 'Novice', 'Intermediate', 'Advanced', 'Elite'];
 const LIFTS: { name: string; match: string[]; mult: number[] }[] = [
@@ -41,40 +49,69 @@ export default function Standards() {
  const nextTarget = lvl >= 0 && lvl < LEVELS.length - 1 ? Math.round(lift.mult[lvl + 1] * bw) : null;
  return { lift, best, ratio, lvl, nextTarget };
  });
+ const G = layout.gutter;
 
  return (
  <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
- <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
- <Pressable onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Go back" style={{ marginBottom: 8 }}>
- <Text style={{ color: t.brand, fontWeight: '700', fontSize: 15 }}>‹ Back</Text>
- </Pressable>
- <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia' }}>Strength Standards</Text>
- <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 18 }}>Your best lifts vs bodyweight ({bw} kg) · approximate</Text>
+ <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
 
- {rows.map(({ lift, best, ratio, lvl, nextTarget }) => (
- <View key={lift.name} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 16, marginBottom: 12 }}>
- <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
- <Text style={{ color: t.ink, fontWeight: '800', fontSize: 16 }}>{lift.name}</Text>
- {best ? <Text style={{ color: t.brand, fontWeight: '800', fontSize: 15 }}>{best} kg <Text style={{ color: t.ink3, fontSize: 12 }}>({ratio.toFixed(2)}×)</Text></Text> : <Text style={{ color: t.ink3, fontSize: 13 }}>No data</Text>}
- </View>
- {lvl >= -1 ? (
- <View>
- <View style={{ flexDirection: 'row', gap: 4, marginBottom: 6 }}>
- {LEVELS.map((L, i) => (
- <View key={L} style={{ flex: 1, height: 8, borderRadius: 4, backgroundColor: i <= lvl ? t.brand : t.surface3 }} />
- ))}
- </View>
- <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
- <Text style={{ color: lvl >= 0 ? t.brand : t.ink3, fontSize: 13, fontWeight: '800' }}>{lvl >= 0 ? LEVELS[lvl] : 'Getting started'}</Text>
- {nextTarget ? <Text style={{ color: t.ink3, fontSize: 12 }}>Next: {LEVELS[lvl + 1]} @ {nextTarget} kg</Text> : lvl === LEVELS.length - 1 ? <Text style={{ color: t.s3, fontSize: 12, fontWeight: '700' }}>Elite </Text> : null}
- </View>
- </View>
- ) : (
- <Text style={{ color: t.ink3, fontSize: 13 }}>Log this lift to see your level.</Text>
- )}
- </View>
- ))}
- <Text style={{ color: t.ink3, fontSize: 11, textAlign: 'center', marginTop: 6 }}>Standards are general guidelines and vary by age, sex & training history.</Text>
+  {/* ── header ──────────────────────────────────────────────────────── */}
+  <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
+   <View style={{ flex: 1 }}>
+    <Text style={{ ...ty.micro, color: t.ink3 }}>Best lifts vs bodyweight · approximate</Text>
+    <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Strength standards</Text>
+   </View>
+   <Ghost icon="back" onPress={() => router.back()} />
+  </View>
+
+  <Rule />
+
+  <Section>
+   <SectionHead title="The big lifts" note={`bodyweight ${bw} kg`} />
+   {rows.map(({ lift, best, ratio, lvl, nextTarget }, i) => (
+    <View key={lift.name} style={{ paddingVertical: sp.lg, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' }}>
+      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{lift.name}</Text>
+      {best ? (
+       <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+        <Text style={{ ...value(18), color: t.ink }}>{best}</Text>
+        <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginLeft: 4 }}>kg · {ratio.toFixed(2)}×</Text>
+       </View>
+      ) : (
+       <Text style={{ ...ty.caption, color: t.ink3 }}>No data</Text>
+      )}
+     </View>
+     {lvl >= -1 ? (
+      <View>
+       <View style={{ flexDirection: 'row', gap: 5, marginTop: sp.md }}>
+        {LEVELS.map((L, li) => (
+         <View key={L} style={{ flex: 1, height: 3, borderRadius: 2, backgroundColor: li <= lvl ? t.brand : t.surface3 }} />
+        ))}
+       </View>
+       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: sp.sm }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+         <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: lvl >= 0 ? t.brand : t.surface3 }} />
+         <Text style={{ ...ty.caption, fontWeight: '500', color: lvl >= 0 ? t.ink : t.ink3 }}>{lvl >= 0 ? LEVELS[lvl] : 'Getting started'}</Text>
+        </View>
+        {nextTarget ? (
+         <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>Next: {LEVELS[lvl + 1]} @ {nextTarget} kg</Text>
+        ) : lvl === LEVELS.length - 1 ? (
+         <Text style={{ ...ty.caption, fontWeight: '500', color: t.ink2 }}>Top of the scale</Text>
+        ) : null}
+       </View>
+      </View>
+     ) : (
+      <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>Log this lift to see your level.</Text>
+     )}
+    </View>
+   ))}
+  </Section>
+
+  <Rule />
+
+  <Section>
+   <Text style={{ ...ty.caption, color: t.ink3 }}>Standards are general guidelines and vary by age, sex &amp; training history.</Text>
+  </Section>
  </ScrollView>
  </SafeAreaView>
  );

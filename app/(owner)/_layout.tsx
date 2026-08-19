@@ -1,12 +1,16 @@
+// Owner portal tabs — Overview · Trainers · Brand · Growth · Ops
+//
+// Configuration, not layout: every Tabs.Screen, name, href, title and their
+// order are untouched. Only the tab label and the bar's padding moved onto the
+// scale (`src/theme/scale`); the dead emoji TabIcon is gone.
 import { Tabs } from 'expo-router';
-import { Text } from 'react-native';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-function TabIcon({ emoji, focused }: { emoji: string; focused: boolean }) { return <Text style={{ fontSize: 22, opacity: focused ? 1 : 0.45 }}>{emoji}</Text>; }
+import { sp, type as ty } from '../../src/theme/scale';
 export default function OwnerLayout() {
   const t = useTheme();
   return (
-    <Tabs backBehavior="history" screenOptions={{ headerShown: false, tabBarStyle: { backgroundColor: t.surface, borderTopColor: t.ring, height: 62, paddingTop: 6, paddingBottom: 8 }, tabBarActiveTintColor: t.brand, tabBarInactiveTintColor: t.ink3, tabBarLabelStyle: { fontSize: 11, fontWeight: '600' }, sceneStyle: { backgroundColor: t.bg } }}>
+    <Tabs backBehavior="history" screenOptions={{ headerShown: false, tabBarStyle: { backgroundColor: t.surface, borderTopColor: t.ring, height: 62, paddingTop: sp.sm, paddingBottom: sp.sm }, tabBarActiveTintColor: t.brand, tabBarInactiveTintColor: t.ink3, tabBarLabelStyle: { ...ty.micro, textTransform: 'none', letterSpacing: 0.2, fontWeight: '500' }, sceneStyle: { backgroundColor: t.bg } }}>
       <Tabs.Screen name="dashboard" options={{ title: 'Overview', tabBarIcon: ({ color }) => <Icon name="grid" size={23} color={color} /> }} />
       <Tabs.Screen name="trainers" options={{ title: 'Trainers', tabBarIcon: ({ color }) => <Icon name="people" size={23} color={color} /> }} />
       <Tabs.Screen name="brand" options={{ title: 'Brand', tabBarIcon: ({ color }) => <Icon name="palette" size={23} color={color} /> }} />
