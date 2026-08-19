@@ -1,4 +1,14 @@
 // Trainer · Videos — exercise library the client app pulls from. Upload your own.
+//
+// Rebuilt on the instrument-panel kit (`src/ui/kit`) and the scale
+// (`src/theme/scale`). Every provider, conditional, modal and route from the
+// previous version is preserved — only the presentation changed: the library
+// count became the screen's one hero figure, the bordered clip boxes became a
+// hairline-divided list, and the Georgia serif header is gone.
+//
+// Also removed: the row subtitle printed `v.dur`, a duration field that was
+// invented and has since been blanked — a clip now says what it is and whether
+// it is recorded, and nothing it cannot know.
 import { useState } from 'react';
 import { View, Text, Pressable, ScrollView, Alert, Modal, TextInput, ActivityIndicator, Linking } from 'react-native';
 import { Icon } from '../../src/ui/Icon';
@@ -6,6 +16,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { useTheme } from '../../src/ui/components';
 import { useRouter } from 'expo-router';
+import { Rule, Section, SectionHead, Hero, ListRow, Cta, Ghost } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/theme/scale';
 import { useExerciseVideos, uploadExerciseVideo, videoUploadAvailable, type VideoItem } from '../../src/ui/exerciseVideos';
 
 export default function TrainerVideos() {
@@ -81,68 +93,113 @@ export default function TrainerVideos() {
   };
 
   const done = vids.filter((v) => v.uploaded).length;
+  const G = layout.gutter;
+  const sheet = { backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, borderTopWidth: hairline, borderColor: t.ring, padding: G, paddingBottom: 30, ...elevation.e2 };
+  const input = { ...ty.body, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: sp.md, marginBottom: sp.md };
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
-        <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia', textTransform: 'capitalize' }}>Exercise videos</Text>
-        <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 12 }}>{done} of {vids.length} recorded · clients see these in their program</Text>
-        <Pressable onPress={() => router.push('/(trainer)/broadcast-session')} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, marginBottom: 16 }}>
-          <Icon name="share" size={16} color={t.brand} />
-          <Text style={{ color: t.ink, fontWeight: '800', fontSize: 13.5, flex: 1 }}>Broadcast a session to social</Text>
-          <Text style={{ color: t.ink3, fontSize: 18 }}>›</Text>
-        </Pressable>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
 
-        <View style={{ flexDirection: 'row', gap: 10, marginBottom: 18 }}>
-          <Pressable onPress={() => upload(true)} style={{ flex: 1, backgroundColor: t.brand, borderRadius: 14, paddingVertical: 15, alignItems: 'center', gap: 4 }}>
-            <Icon name="video" size={20} color={t.brandInk} /><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 13 }}>Record</Text>
-          </Pressable>
-          <Pressable onPress={() => upload(false)} style={{ flex: 1, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 14, paddingVertical: 15, alignItems: 'center', gap: 4 }}>
-            <Icon name="plus" size={20} color={t.ink} /><Text style={{ color: t.ink, fontWeight: '800', fontSize: 13 }}>Upload</Text>
-          </Pressable>
-          <Pressable onPress={() => { setLName(''); setLGroup(''); setLUrl(''); setLinkOpen(true); }} style={{ flex: 1, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 14, paddingVertical: 15, alignItems: 'center', gap: 4 }}>
-            <Icon name="share" size={20} color={t.ink} /><Text style={{ color: t.ink, fontWeight: '800', fontSize: 13 }}>Add link</Text>
-          </Pressable>
+        <View style={{ paddingTop: sp.md }}>
+          <Text style={{ ...ty.micro, color: t.ink3 }}>Your clients see these</Text>
+          <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Exercise videos</Text>
         </View>
 
-        {vids.map((v) => (
-          <View key={v.id} style={{ backgroundColor: t.surface, borderRadius: 14, borderWidth: 1, borderColor: t.ring, padding: 14, marginBottom: 9, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-            <Pressable onPress={() => openVideo(v)} hitSlop={6} style={({ pressed }) => ({ width: 54, height: 40, borderRadius: 8, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center', opacity: pressed ? 0.6 : 1 })}>
-              {v.uploaded ? <Icon name="play" size={18} color={t.brand} /> : <Icon name="plus" size={18} color={t.ink3} />}
-            </Pressable>
-            <Pressable onPress={() => openVideo(v)} style={{ flex: 1 }}>
-              <Text style={{ color: t.ink, fontWeight: '700', fontSize: 14 }}>{v.name}</Text>
-              <Text style={{ color: t.ink3, fontSize: 12 }}>{v.group}{v.uploaded ? ` · ${v.dur}` : ' · not recorded yet'}</Text>
-            </Pressable>
-            {(v.id.startsWith('vx') || v.id.startsWith('db')) ? <Pressable onPress={() => confirmRemove(v)} hitSlop={8} accessibilityRole="button" accessibilityLabel={'Remove ' + v.name}><Text style={{ color: t.ink3, fontWeight: '800', fontSize: 15 }}>×</Text></Pressable> : <Text style={{ color: v.uploaded ? t.brand : t.s3, fontWeight: '700', fontSize: 12 }}>{v.uploaded ? 'Live' : 'To do'}</Text>}
+        {/* ── the hero ───────────────────────────────────────────────────── */}
+        <Hero
+          label="In your library"
+          figure={String(vids.length)}
+          unit={vids.length === 1 ? 'clip' : 'clips'}
+          note={vids.length ? `${done} of ${vids.length} recorded · clients see these in their program` : 'Record a clip or paste a link and it appears in every client’s program.'}
+        />
+
+        <Rule />
+
+        {/* ── add a clip: the primary action ─────────────────────────────── */}
+        <Section>
+          <SectionHead title="Add a clip" />
+          <Cta label="Record" wide onPress={() => upload(true)} />
+          <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm }}>
+            <View style={{ flex: 1 }}><Ghost label="Upload" icon="plus" onPress={() => upload(false)} /></View>
+            <View style={{ flex: 1 }}><Ghost label="Add link" icon="share" onPress={() => { setLName(''); setLGroup(''); setLUrl(''); setLinkOpen(true); }} /></View>
           </View>
-        ))}
+        </Section>
+
+        <Rule />
+
+        <Section>
+          <ListRow icon="share" title="Broadcast a session to social" note="Share a session from your library"
+            onPress={() => router.push('/(trainer)/broadcast-session')} />
+        </Section>
+
+        <Rule />
+
+        {/* ── the library ────────────────────────────────────────────────── */}
+        <Section>
+          <SectionHead title="Library" note={vids.length ? `${vids.length} clip${vids.length === 1 ? '' : 's'}` : undefined} />
+          {vids.length === 0 ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>
+              No clips yet. Record one, upload one from your library, or paste a hosted link — whatever you add here is what your clients watch in their program.
+            </Text>
+          ) : vids.map((v, i) => (
+            <View key={v.id} style={{
+              flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md,
+              borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
+            }}>
+              <Pressable onPress={() => openVideo(v)} hitSlop={6} accessibilityRole="button" accessibilityLabel={'Play ' + v.name}
+                style={({ pressed }) => ({ width: 46, height: 36, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center', opacity: pressed ? 0.6 : 1 })}>
+                {v.uploaded ? <Icon name="play" size={17} color={t.brand} /> : <Icon name="plus" size={17} color={t.ink3} />}
+              </Pressable>
+              <Pressable onPress={() => openVideo(v)} style={{ flex: 1 }}>
+                <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{v.name}</Text>
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{v.group}{v.uploaded ? '' : ' · not recorded yet'}</Text>
+              </Pressable>
+              {(v.id.startsWith('vx') || v.id.startsWith('db')) ? (
+                <Pressable onPress={() => confirmRemove(v)} hitSlop={8} accessibilityRole="button" accessibilityLabel={'Remove ' + v.name}>
+                  <Icon name="minus" size={16} color={t.ink3} />
+                </Pressable>
+              ) : (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                  <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: v.uploaded ? t.brand : t.s3 }} />
+                  <Text style={{ ...ty.caption, color: t.ink2 }}>{v.uploaded ? 'Live' : 'To do'}</Text>
+                </View>
+              )}
+            </View>
+          ))}
+        </Section>
       </ScrollView>
 
+      {/* ── add by link ──────────────────────────────────────────────────── */}
       <Modal visible={linkOpen} transparent animationType="slide" onRequestClose={() => setLinkOpen(false)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setLinkOpen(false)} />
-        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, borderColor: t.ring, padding: 20, paddingBottom: 30 }}>
-          <Text style={{ color: t.ink, fontSize: 20, fontWeight: '800', marginBottom: 4 }}>Add a video by link</Text>
-          <Text style={{ color: t.ink3, fontSize: 13, marginBottom: 14 }}>Paste a hosted link (YouTube, Vimeo…). Clients watch it in their library.</Text>
-          <TextInput value={lName} onChangeText={setLName} placeholder="Exercise name (e.g. Front Squat)" placeholderTextColor={t.ink3} style={{ color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 11, fontSize: 15, marginBottom: 10 }} />
-          <TextInput value={lGroup} onChangeText={setLGroup} placeholder="Muscle group (e.g. Legs)" placeholderTextColor={t.ink3} style={{ color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 11, fontSize: 15, marginBottom: 10 }} />
-          <TextInput value={lUrl} onChangeText={setLUrl} placeholder="https://…" placeholderTextColor={t.ink3} autoCapitalize="none" keyboardType="url" style={{ color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 11, fontSize: 15, marginBottom: 16 }} />
-          <Pressable onPress={() => { if (!lName.trim()) { Alert.alert('Name needed', 'Give the exercise a name.'); return; } addVideo({ name: lName, group: lGroup, url: lUrl }); setLinkOpen(false); Alert.alert('Added', lName + ' is in the exercise library.'); }} style={{ backgroundColor: t.brand, borderRadius: 12, paddingVertical: 14, alignItems: 'center' }}><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 14 }}>Add to library</Text></Pressable>
-          <Pressable onPress={() => setLinkOpen(false)} style={{ paddingVertical: 12, alignItems: 'center' }}><Text style={{ color: t.ink3, fontWeight: '700', fontSize: 13 }}>Cancel</Text></Pressable>
+        <View style={sheet}>
+          <Text style={{ ...ty.title, color: t.ink }}>Add a video by link</Text>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>Paste a hosted link (YouTube, Vimeo…). Clients watch it in their library.</Text>
+          <TextInput value={lName} onChangeText={setLName} placeholder="Exercise name (e.g. Front Squat)" placeholderTextColor={t.ink3} style={input} />
+          <TextInput value={lGroup} onChangeText={setLGroup} placeholder="Muscle group (e.g. Legs)" placeholderTextColor={t.ink3} style={input} />
+          <TextInput value={lUrl} onChangeText={setLUrl} placeholder="https://…" placeholderTextColor={t.ink3} autoCapitalize="none" keyboardType="url" style={[input, { marginBottom: sp.lg }]} />
+          <Cta label="Add to library" wide onPress={() => { if (!lName.trim()) { Alert.alert('Name needed', 'Give the exercise a name.'); return; } addVideo({ name: lName, group: lGroup, url: lUrl }); setLinkOpen(false); Alert.alert('Added', lName + ' is in the exercise library.'); }} />
+          <View style={{ height: sp.sm }} />
+          <Ghost label="Cancel" onPress={() => setLinkOpen(false)} />
         </View>
       </Modal>
 
+      {/* ── name a recorded / picked clip ────────────────────────────────── */}
       <Modal visible={!!pendUri} transparent animationType="slide" onRequestClose={() => { if (!upBusy) setPendUri(null); }}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => { if (!upBusy) setPendUri(null); }} />
-        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, borderColor: t.ring, padding: 20, paddingBottom: 30 }}>
-          <Text style={{ color: t.ink, fontSize: 20, fontWeight: '800', marginBottom: 4 }}>Name this clip</Text>
-          <Text style={{ color: t.ink3, fontSize: 13, marginBottom: 14 }}>{videoUploadAvailable() ? 'It uploads to your library so clients watch it in their program on any device.' : 'Saved to this device — turn on the backend to share it with clients.'}</Text>
-          <TextInput value={upName} onChangeText={setUpName} editable={!upBusy} placeholder="Exercise name (e.g. Front Squat)" placeholderTextColor={t.ink3} style={{ color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 11, fontSize: 15, marginBottom: 10 }} />
-          <TextInput value={upGroup} onChangeText={setUpGroup} editable={!upBusy} placeholder="Muscle group (e.g. Legs)" placeholderTextColor={t.ink3} style={{ color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 11, fontSize: 15, marginBottom: 16 }} />
-          <Pressable onPress={saveUpload} disabled={upBusy} style={{ backgroundColor: t.brand, borderRadius: 12, paddingVertical: 14, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8, opacity: upBusy ? 0.7 : 1 }}>
+        <View style={sheet}>
+          <Text style={{ ...ty.title, color: t.ink }}>Name this clip</Text>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>{videoUploadAvailable() ? 'It uploads to your library so clients watch it in their program on any device.' : 'Saved to this device — turn on the backend to share it with clients.'}</Text>
+          <TextInput value={upName} onChangeText={setUpName} editable={!upBusy} placeholder="Exercise name (e.g. Front Squat)" placeholderTextColor={t.ink3} style={input} />
+          <TextInput value={upGroup} onChangeText={setUpGroup} editable={!upBusy} placeholder="Muscle group (e.g. Legs)" placeholderTextColor={t.ink3} style={[input, { marginBottom: sp.lg }]} />
+          <Pressable onPress={saveUpload} disabled={upBusy}
+            style={{ backgroundColor: t.brand, borderRadius: radius.sm, paddingVertical: 11, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: sp.sm, opacity: upBusy ? 0.7 : 1 }}>
             {upBusy ? <ActivityIndicator color={t.brandInk} /> : null}
-            <Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 14 }}>{upBusy ? 'Uploading…' : (videoUploadAvailable() ? 'Upload to library' : 'Save clip')}</Text>
+            <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>{upBusy ? 'Uploading…' : (videoUploadAvailable() ? 'Upload to library' : 'Save clip')}</Text>
           </Pressable>
-          <Pressable onPress={() => { if (!upBusy) setPendUri(null); }} disabled={upBusy} style={{ paddingVertical: 12, alignItems: 'center' }}><Text style={{ color: t.ink3, fontWeight: '700', fontSize: 13 }}>Cancel</Text></Pressable>
+          <View style={{ height: sp.sm }} />
+          <Ghost label="Cancel" onPress={() => { if (!upBusy) setPendUri(null); }} />
         </View>
       </Modal>
     </SafeAreaView>

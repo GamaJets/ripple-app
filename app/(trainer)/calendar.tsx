@@ -3,6 +3,13 @@
 // stay in sync with the client app. Adding a slot that overlaps an existing one
 // is rejected (no double-booking). Cancelling a booked session frees the slot
 // and re-offers it to the coach's other clients.
+//
+// Rebuilt on the instrument-panel kit (`src/ui/kit`) and the scale
+// (`src/theme/scale`). Same store, same routes, same alerts, same modals — only
+// the presentation changed: the two stat tiles and the Georgia serif header
+// became one hero figure, the six bordered cards became hairline-separated
+// sections, and the day grid now reads through weight and the accent rather
+// than through boxes and 800-weight text.
 import { useState } from 'react';
 import { View, Text, Pressable, ScrollView, Alert, Modal } from 'react-native';
 import { Icon } from '../../src/ui/Icon';
@@ -10,6 +17,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
+import { Rule, Section, SectionHead, Hero, ListRow, Cta, Ghost } from '../../src/ui/kit';
+import { sp, layout, radius, elevation, type as ty, numeric } from '../../src/theme/scale';
 import { useCoachProfile } from '../../src/ui/coachProfile';
 import { cancelSession } from '../../src/lib/booking';
 import { useSessions } from '../../src/ui/sessions';
@@ -29,6 +38,19 @@ function dayKey(iso: string) {
 function timeLabel(iso: string) {
   const d = new Date(iso); let h = d.getHours(); const ap = h >= 12 ? 'pm' : 'am'; h = h % 12 || 12;
   const m = d.getMinutes(); return `${h}${m ? ':' + String(m).padStart(2, '0') : ''}${ap}`;
+}
+
+/**
+ * A selectable pill. Takes the theme as a prop rather than calling useTheme —
+ * the screen's hook order is part of its contract.
+ */
+function Chip({ t, label, on, onPress }: { t: Theme; label: string; on: boolean; onPress: () => void }) {
+  return (
+    <Pressable onPress={onPress} accessibilityRole="button" accessibilityState={{ selected: on }}
+      style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface2 }}>
+      <Text style={{ ...ty.label, fontWeight: on ? '500' : '400', color: on ? t.brandInk : t.ink2 }}>{label}</Text>
+    </Pressable>
+  );
 }
 
 let SEQ = 5000;
@@ -154,58 +176,70 @@ export default function TrainerSchedule() {
   const HOURS = [6, 7, 8, 9, 10, 11, 12, 13, 16, 17, 18, 19, 20];
   const DURS = [30, 45, 60, 90];
 
+  const G = layout.gutter;
+  const totalSlots = booked.length + open.length;
+  const exportSchedule = async () => {
+    const evts = booked.map((s) => ({ start: s.startsAt, durationMin: s.durationMin, title: `Session · ${nameOf(s.clientId)}` }));
+    await shareIcs(buildIcs(evts, 'Repple — Coaching schedule'), 'repple-schedule.ics', 'Export your schedule');
+  };
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
-        <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia' }}>Schedule</Text>
-        <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 16 }}>Tap a day to see sessions · add or cancel any time</Text>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
 
- {booked.length > 0 ? (
- <Pressable onPress={async () => { const evts = booked.map((s) => ({ start: s.startsAt, durationMin: s.durationMin, title: `Session · ${nameOf(s.clientId)}` })); await shareIcs(buildIcs(evts, 'Repple — Coaching schedule'), 'repple-schedule.ics', 'Export your schedule'); }} accessibilityRole="button" accessibilityLabel="Export your schedule to calendar" style={{ flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', backgroundColor: t.surface, borderWidth: 1, borderColor: t.ring, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 16 }}>
- <Icon name="calendar" size={15} color={t.brand} />
- <Text style={{ color: t.ink, fontWeight: '700', fontSize: 13 }}>Export schedule</Text>
- </Pressable>
- ) : null}
-
- <Pressable onPress={() => router.push('/(trainer)/classes')} accessibilityRole="button" accessibilityLabel="Manage gym classes" style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: t.surface, borderColor: t.brand, borderWidth: 1, borderRadius: 14, padding: 14, marginBottom: 16 }}>
- <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
- <Icon name="calendar" size={19} color={t.brand} />
- <View><Text style={{ color: t.ink, fontWeight: '800', fontSize: 14.5 }}>Group classes</Text><Text style={{ color: t.ink3, fontSize: 11.5, marginTop: 1 }}>Schedule & fill classes across branches</Text></View>
- </View>
- <Text style={{ color: t.brand, fontWeight: '800', fontSize: 18 }}>›</Text>
- </Pressable>
-
-        <View style={{ flexDirection: 'row', gap: 12, marginBottom: 16 }}>
-          <View style={{ flex: 1, backgroundColor: t.brand, borderRadius: 16, padding: 14 }}>
-            <Text style={{ color: t.brandInk, fontSize: 12, fontWeight: '700', opacity: 0.85 }}>Booked</Text>
-            <Text style={{ color: t.brandInk, fontSize: 22, fontWeight: '800', marginTop: 4 }}>{booked.length}</Text>
-          </View>
-          <View style={{ flex: 1, backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 14 }}>
-            <Text style={{ color: t.ink3, fontSize: 12, fontWeight: '700' }}>Open Slots</Text>
-            <Text style={{ color: t.ink, fontSize: 22, fontWeight: '800', marginTop: 4 }}>{open.length}</Text>
-          </View>
-          <Pressable onPress={() => { setAddClient(null); setAddOpen(true); }} style={{ flex: 1, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 16, padding: 14, justifyContent: 'center', alignItems: 'center' }}>
-            <Icon name="plus" size={20} color={t.brand} />
-            <Text style={{ color: t.ink2, fontSize: 12, fontWeight: '700', marginTop: 4 }}>Add Session</Text>
-          </Pressable>
+        {/* ── header ─────────────────────────────────────────────────────── */}
+        <View style={{ paddingTop: sp.md }}>
+          <Text style={{ ...ty.micro, color: t.ink3 }}>Your coaching week</Text>
+          <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Schedule</Text>
+          <Text style={{ ...ty.label, color: t.ink3, marginTop: 4 }}>Tap a day to see sessions · add or cancel any time</Text>
         </View>
 
-        <Pressable onPress={() => setAvailOpen(true)} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingVertical: 11, paddingHorizontal: 14, marginBottom: 16 }}>
-          <Icon name="calendar" size={16} color={t.brand} />
-          <Text style={{ color: t.ink2, fontWeight: '700', fontSize: 13, flex: 1 }}>Weekly availability{availSlots.length ? ' · ' + availSlots.length + ' slot' + (availSlots.length === 1 ? '' : 's') : ''}</Text>
-          <Text style={{ color: t.brand, fontWeight: '800', fontSize: 12 }}>Set up ›</Text>
-        </Pressable>
+        {/* ── the hero: how much of the schedule is spoken for ────────────── */}
+        <Hero
+          label="Booked"
+          figure={String(booked.length)}
+          unit={booked.length === 1 ? 'session' : 'sessions'}
+          note={totalSlots === 0
+            ? 'Nothing scheduled yet — add a session or set your weekly availability.'
+            : `${open.length} open slot${open.length === 1 ? '' : 's'} · ${Math.round((booked.length / totalSlots) * 100)}% of your slots are filled`}
+          arc={totalSlots ? booked.length / totalSlots : undefined}
+        />
 
-        {/* Month calendar */}
-        <View style={{ backgroundColor: t.surface, borderRadius: 18, borderWidth: 1, borderColor: t.ring, padding: 14, marginBottom: 16 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-            <Pressable onPress={() => shiftMonth(-1)} hitSlop={12} style={{ padding: 4 }}><Text style={{ color: t.ink2, fontSize: 20, fontWeight: '800' }}>‹</Text></Pressable>
-            <Text style={{ color: t.ink, fontSize: 16, fontWeight: '800' }}>{MON[viewMonth]} {viewYear}</Text>
-            <Pressable onPress={() => shiftMonth(1)} hitSlop={12} style={{ padding: 4 }}><Text style={{ color: t.ink2, fontSize: 20, fontWeight: '800' }}>›</Text></Pressable>
+        <Rule />
+
+        {/* ── the things you do from here ─────────────────────────────────── */}
+        <Section>
+          <SectionHead title="Manage" />
+          <ListRow icon="plus" title="Add a session"
+            note={`Book a client or open a slot on ${DOW[selDate.getDay()]} ${selD} ${MON[selM].slice(0, 3)}`}
+            onPress={() => { setAddClient(null); setAddOpen(true); }} />
+          <ListRow icon="clock" title="Weekly availability"
+            note={availSlots.length
+              ? `${availSlots.length} weekly slot${availSlots.length === 1 ? '' : 's'} · generate the next 4 weeks`
+              : 'Set the times you offer every week'}
+            onPress={() => setAvailOpen(true)} />
+          <ListRow icon="people" title="Group classes" note="Schedule & fill classes across branches"
+            onPress={() => router.push('/(trainer)/classes')} />
+          {booked.length > 0 ? (
+            <ListRow icon="share" title="Export schedule" note="Send your booked sessions to your calendar app"
+              onPress={exportSchedule} />
+          ) : null}
+        </Section>
+
+        <Rule />
+
+        {/* ── month grid ─────────────────────────────────────────────────── */}
+        <Section>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: sp.lg }}>
+            <Ghost icon="back" onPress={() => shiftMonth(-1)} />
+            <Text style={{ ...ty.head, color: t.ink }}>{MON[viewMonth]} {viewYear}</Text>
+            <Ghost icon="chevron" onPress={() => shiftMonth(1)} />
           </View>
-          <View style={{ flexDirection: 'row', marginBottom: 6 }}>
-            {DOW.map((d) => <Text key={d} style={{ flex: 1, textAlign: 'center', color: t.ink3, fontSize: 11, fontWeight: '700' }}>{d[0]}</Text>)}
+
+          <View style={{ flexDirection: 'row', marginBottom: sp.sm }}>
+            {DOW.map((d) => <Text key={d} style={{ ...ty.micro, flex: 1, textAlign: 'center', color: t.ink3 }}>{d[0]}</Text>)}
           </View>
+
           {Array.from({ length: cells.length / 7 }).map((_, row) => (
             <View key={row} style={{ flexDirection: 'row' }}>
               {cells.slice(row * 7, row * 7 + 7).map((d, i) => {
@@ -217,9 +251,16 @@ export default function TrainerSchedule() {
                 const hasBooked = daySess.some((s) => s.status === 'booked');
                 const hasOpen = daySess.some((s) => s.status === 'available');
                 return (
-                  <Pressable key={i} onPress={() => setSelKey(k)} style={{ flex: 1, aspectRatio: 1, alignItems: 'center', justifyContent: 'center' }}>
-                    <View style={{ width: 34, height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: isSel ? t.brand : 'transparent', borderWidth: isToday && !isSel ? 1 : 0, borderColor: t.brand }}>
-                      <Text style={{ color: isSel ? t.brandInk : t.ink, fontSize: 14, fontWeight: isToday || isSel ? '800' : '600' }}>{d}</Text>
+                  <Pressable key={i} onPress={() => setSelKey(k)} accessibilityRole="button" accessibilityState={{ selected: isSel }}
+                    style={{ flex: 1, aspectRatio: 1, alignItems: 'center', justifyContent: 'center' }}>
+                    {/* Selected reads as the accent; today reads as weight and
+                        accent ink — no border pretending to be a state. */}
+                    <View style={{ width: 34, height: 34, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: isSel ? t.brand : 'transparent' }}>
+                      <Text style={{
+                        ...ty.body, ...numeric,
+                        fontWeight: isSel || isToday ? '600' : '400',
+                        color: isSel ? t.brandInk : isToday ? t.brand : t.ink2,
+                      }}>{d}</Text>
                     </View>
                     <View style={{ flexDirection: 'row', gap: 3, height: 6, marginTop: 2 }}>
                       {hasBooked && <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: t.brand }} />}
@@ -230,133 +271,134 @@ export default function TrainerSchedule() {
               })}
             </View>
           ))}
-          <View style={{ flexDirection: 'row', gap: 16, marginTop: 10, justifyContent: 'center' }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}><View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.brand }} /><Text style={{ color: t.ink3, fontSize: 11 }}>Booked</Text></View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}><View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.ink3 }} /><Text style={{ color: t.ink3, fontSize: 11 }}>Open</Text></View>
-          </View>
-        </View>
 
-        {/* Selected day */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-          <Text style={{ color: t.ink, fontWeight: '800', fontSize: 16 }}>{DOW[selDate.getDay()]}, {MON[selM].slice(0, 3)} {selD}</Text>
-          <Pressable onPress={() => { setAddClient(null); setAddOpen(true); }} style={{ backgroundColor: t.brand, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 7 }}>
-            <Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 12 }}>＋ Add</Text>
-          </Pressable>
-        </View>
-
-        {selDaySessions.length === 0 ? (
-          <View style={{ backgroundColor: t.surface, borderRadius: 14, borderWidth: 1, borderColor: t.ring, padding: 22, alignItems: 'center' }}>
-            <View style={{ marginBottom: 6 }}><Icon name="calendar" size={26} color={t.ink3} /></View>
-            <Text style={{ color: t.ink3, fontSize: 13 }}>No sessions this day. Tap Add to book one.</Text>
-          </View>
-        ) : selDaySessions.map((s) => (
-          <View key={s.id} style={{ backgroundColor: t.surface, borderRadius: 14, borderWidth: 1, borderColor: t.ring, padding: 14, marginBottom: 9, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-            <View style={{ width: 8, height: 44, borderRadius: 4, backgroundColor: s.status === 'booked' ? t.brand : t.surface3 }} />
-            <View style={{ flex: 1 }}>
-              <Text style={{ color: t.ink, fontWeight: '800', fontSize: 15 }}>{timeLabel(s.startsAt)} · {s.durationMin} min</Text>
-              <Text style={{ color: t.ink3, fontSize: 12, marginTop: 2 }}>{s.status === 'booked' ? nameOf(s.clientId) : (s.released ? 'Open · re-offered' : 'Open slot')}</Text>
+          <View style={{ flexDirection: 'row', gap: sp.lg, marginTop: sp.md, justifyContent: 'center' }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+              <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.brand }} />
+              <Text style={{ ...ty.caption, color: t.ink3 }}>Booked</Text>
             </View>
-            {s.status === 'booked' ? (
-              <Pressable onPress={() => confirmCancel(s)} style={{ borderWidth: 1, borderColor: t.s6, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 }}>
-                <Text style={{ color: t.s6, fontWeight: '700', fontSize: 12 }}>Cancel</Text>
-              </Pressable>
-            ) : (
-              <View style={{ flexDirection: 'row', gap: 8 }}>
-                <Pressable onPress={() => reoffer(s)} style={{ borderWidth: 1, borderColor: t.brand, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 }}>
-                  <Text style={{ color: t.brand, fontWeight: '700', fontSize: 12 }}>Re-offer</Text>
-                </Pressable>
-                <Pressable onPress={() => removeOpen(s)} style={{ borderWidth: 1, borderColor: t.ring, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 }}>
-                  <Text style={{ color: t.ink3, fontWeight: '700', fontSize: 12 }}>Remove</Text>
-                </Pressable>
-              </View>
-            )}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+              <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.ink3 }} />
+              <Text style={{ ...ty.caption, color: t.ink3 }}>Open</Text>
+            </View>
           </View>
-        ))}
+        </Section>
+
+        <Rule />
+
+        {/* ── the selected day ───────────────────────────────────────────── */}
+        <Section>
+          <SectionHead title={`${DOW[selDate.getDay()]} ${selD} ${MON[selM].slice(0, 3)}`} note="Add"
+            onPress={() => { setAddClient(null); setAddOpen(true); }} />
+
+          {selDaySessions.length === 0 ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>No sessions this day. Tap Add to book one.</Text>
+          ) : selDaySessions.map((s, i) => (
+            <View key={s.id}>
+              {i > 0 ? <Rule /> : null}
+              <View style={{ paddingVertical: sp.md }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: s.status === 'booked' ? t.brand : t.surface3 }} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: t.ink }}>{timeLabel(s.startsAt)} · {s.durationMin} min</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{s.status === 'booked' ? nameOf(s.clientId) : (s.released ? 'Open · re-offered' : 'Open slot')}</Text>
+                  </View>
+                </View>
+                <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md, marginLeft: sp.md + 6 }}>
+                  {s.status === 'booked' ? (
+                    <Ghost label="Cancel" onPress={() => confirmCancel(s)} />
+                  ) : (<>
+                    <View style={{ flex: 1 }}><Ghost label="Re-offer" onPress={() => reoffer(s)} /></View>
+                    <View style={{ flex: 1 }}><Ghost label="Remove" onPress={() => removeOpen(s)} /></View>
+                  </>)}
+                </View>
+              </View>
+            </View>
+          ))}
+        </Section>
+
       </ScrollView>
 
-      {/* Add-session modal */}
+      {/* ── weekly availability sheet ─────────────────────────────────────── */}
       <Modal visible={availOpen} animationType="slide" transparent onRequestClose={() => setAvailOpen(false)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setAvailOpen(false)} />
-        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, borderColor: t.ring, padding: 20, paddingBottom: 30, maxHeight: '82%' }}>
-          <Text style={{ color: t.ink, fontSize: 20, fontWeight: '800' }}>Weekly availability</Text>
-          <Text style={{ color: t.ink3, fontSize: 13, marginTop: 2, marginBottom: 14 }}>Set the times you offer every week, then generate open slots.</Text>
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, maxHeight: '82%', ...elevation.e2 }}>
+          <Text style={{ ...ty.head, color: t.ink }}>Weekly availability</Text>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.md }}>Set the times you offer every week, then generate open slots.</Text>
           <ScrollView showsVerticalScrollIndicator={false}>
-            {availSlots.length === 0 ? <Text style={{ color: t.ink3, fontSize: 13, marginBottom: 10 }}>No weekly slots yet.</Text> : availSlots.map((sl) => (
-              <View key={sl.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: t.surface2, borderRadius: 12, borderWidth: 1, borderColor: t.ring, padding: 12, marginBottom: 8 }}>
-                <Icon name="calendar" size={16} color={t.brand} />
-                <Text style={{ color: t.ink, fontWeight: '700', fontSize: 14, flex: 1 }}>{DOW[sl.dow]} · {sl.hour % 12 || 12}{sl.hour >= 12 ? 'pm' : 'am'} · {sl.dur}min</Text>
-                <Pressable onPress={() => removeAvail(sl.id)} hitSlop={8}><Text style={{ color: t.ink3, fontWeight: '800', fontSize: 16 }}>×</Text></Pressable>
+            {availSlots.length === 0 ? (
+              <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.sm }}>No weekly slots yet.</Text>
+            ) : availSlots.map((sl, i) => (
+              <View key={sl.id}>
+                {i > 0 ? <Rule /> : null}
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
+                  <Icon name="clock" size={16} color={t.brand} />
+                  <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: t.ink, flex: 1 }}>{DOW[sl.dow]} · {sl.hour % 12 || 12}{sl.hour >= 12 ? 'pm' : 'am'} · {sl.dur}min</Text>
+                  <Pressable onPress={() => removeAvail(sl.id)} hitSlop={8} accessibilityRole="button" accessibilityLabel={`Remove ${DOW[sl.dow]} slot`}>
+                    <Icon name="minus" size={16} color={t.ink3} />
+                  </Pressable>
+                </View>
               </View>
             ))}
-            <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 8, marginBottom: 8 }}>Add a weekly slot</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, marginBottom: 8 }}>
-              {DOW.map((d, i) => (<Pressable key={d} onPress={() => setAvDow(i)} style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, backgroundColor: avDow === i ? t.brand : t.surface2, borderWidth: 1, borderColor: avDow === i ? t.brand : t.ring }}><Text style={{ color: avDow === i ? t.brandInk : t.ink2, fontWeight: '700', fontSize: 12 }}>{d}</Text></Pressable>))}
+
+            <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.md }}>Add a weekly slot</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.md }}>
+              {DOW.map((d, i) => <Chip key={d} t={t} label={d} on={avDow === i} onPress={() => setAvDow(i)} />)}
             </ScrollView>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, marginBottom: 12 }}>
-              {[6,7,8,9,10,11,12,13,14,15,16,17,18,19,20].map((h) => (<Pressable key={h} onPress={() => setAvHour(h)} style={{ paddingHorizontal: 11, paddingVertical: 8, borderRadius: 10, backgroundColor: avHour === h ? t.brand : t.surface2, borderWidth: 1, borderColor: avHour === h ? t.brand : t.ring }}><Text style={{ color: avHour === h ? t.brandInk : t.ink2, fontWeight: '700', fontSize: 12 }}>{h % 12 || 12}{h >= 12 ? 'pm' : 'am'}</Text></Pressable>))}
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.md }}>
+              {[6,7,8,9,10,11,12,13,14,15,16,17,18,19,20].map((h) => (
+                <Chip key={h} t={t} label={`${h % 12 || 12}${h >= 12 ? 'pm' : 'am'}`} on={avHour === h} onPress={() => setAvHour(h)} />
+              ))}
             </ScrollView>
-            <Pressable onPress={() => addAvail(avDow, avHour, 60)} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingVertical: 12, alignItems: 'center', marginBottom: 8 }}><Text style={{ color: t.ink, fontWeight: '800', fontSize: 13 }}>+ Add {DOW[avDow]} {avHour % 12 || 12}{avHour >= 12 ? 'pm' : 'am'}</Text></Pressable>
+            <Ghost label={`Add ${DOW[avDow]} ${avHour % 12 || 12}${avHour >= 12 ? 'pm' : 'am'}`} icon="plus" onPress={() => addAvail(avDow, avHour, 60)} />
           </ScrollView>
-          <Pressable onPress={generateSlots} style={{ backgroundColor: t.brand, borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginTop: 6 }}><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 14 }}>Generate open slots · next 4 weeks</Text></Pressable>
-          <Pressable onPress={() => setAvailOpen(false)} style={{ paddingVertical: 12, alignItems: 'center' }}><Text style={{ color: t.ink3, fontWeight: '700', fontSize: 13 }}>Done</Text></Pressable>
+          <View style={{ height: sp.lg }} />
+          <Cta label="Generate open slots · next 4 weeks" wide onPress={generateSlots} />
+          <View style={{ height: sp.sm }} />
+          <Ghost label="Done" onPress={() => setAvailOpen(false)} />
         </View>
       </Modal>
 
+      {/* ── add-session sheet ─────────────────────────────────────────────── */}
       <Modal visible={addOpen} animationType="slide" transparent onRequestClose={() => setAddOpen(false)}>
         <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' }}>
-          <View style={{ backgroundColor: t.bg, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, paddingBottom: 34, borderTopWidth: 1, borderColor: t.ring }}>
-            <View style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: t.surface3, alignSelf: 'center', marginBottom: 16 }} />
-            <Text style={{ color: t.ink, fontSize: 20, fontWeight: '800' }}>Add Session</Text>
-            <Text style={{ color: t.ink3, fontSize: 13, marginTop: 3, marginBottom: 16 }}>{DOW[selDate.getDay()]}, {MON[selM]} {selD}</Text>
+          <View style={{ backgroundColor: t.bg, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 34, ...elevation.e2 }}>
+            <View style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: t.surface3, alignSelf: 'center', marginBottom: sp.lg }} />
+            <Text style={{ ...ty.head, color: t.ink }}>Add Session</Text>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>{DOW[selDate.getDay()]}, {MON[selM]} {selD}</Text>
 
-            <Text style={{ color: t.ink2, fontWeight: '700', fontSize: 13, marginBottom: 8 }}>Time</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
-              <View style={{ flexDirection: 'row', gap: 8 }}>
-                {HOURS.map((h) => {
-                  const sel = h === addHour; const ap = h >= 12 ? 'pm' : 'am'; const hh = h % 12 || 12;
-                  return (
-                    <Pressable key={h} onPress={() => setAddHour(h)} style={{ paddingHorizontal: 14, paddingVertical: 10, borderRadius: 12, backgroundColor: sel ? t.brand : t.surface2, borderWidth: 1, borderColor: sel ? t.brand : t.ring }}>
-                      <Text style={{ color: sel ? t.brandInk : t.ink2, fontWeight: '700', fontSize: 13 }}>{hh}{ap}</Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
+            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.md }}>Time</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.lg }}>
+              {HOURS.map((h) => {
+                const sel = h === addHour; const ap = h >= 12 ? 'pm' : 'am'; const hh = h % 12 || 12;
+                return <Chip key={h} t={t} label={`${hh}${ap}`} on={sel} onPress={() => setAddHour(h)} />;
+              })}
             </ScrollView>
 
-            <Text style={{ color: t.ink2, fontWeight: '700', fontSize: 13, marginBottom: 8 }}>Duration</Text>
-            <View style={{ flexDirection: 'row', gap: 8, marginBottom: 16 }}>
+            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.md }}>Duration</Text>
+            <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.lg }}>
               {DURS.map((d) => {
                 const sel = d === addDur;
                 return (
-                  <Pressable key={d} onPress={() => setAddDur(d)} style={{ flex: 1, paddingVertical: 10, borderRadius: 12, alignItems: 'center', backgroundColor: sel ? t.brand : t.surface2, borderWidth: 1, borderColor: sel ? t.brand : t.ring }}>
-                    <Text style={{ color: sel ? t.brandInk : t.ink2, fontWeight: '700', fontSize: 13 }}>{d}m</Text>
-                  </Pressable>
+                  <View key={d} style={{ flex: 1 }}>
+                    <Pressable onPress={() => setAddDur(d)} accessibilityRole="button" accessibilityState={{ selected: sel }}
+                      style={{ paddingVertical: sp.sm, borderRadius: radius.pill, alignItems: 'center', backgroundColor: sel ? t.brand : t.surface2 }}>
+                      <Text style={{ ...ty.label, ...numeric, fontWeight: sel ? '500' : '400', color: sel ? t.brandInk : t.ink2 }}>{d}m</Text>
+                    </Pressable>
+                  </View>
                 );
               })}
             </View>
 
-            <Text style={{ color: t.ink2, fontWeight: '700', fontSize: 13, marginBottom: 8 }}>Client</Text>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 20 }}>
-              <Pressable onPress={() => setAddClient(null)} style={{ paddingHorizontal: 14, paddingVertical: 10, borderRadius: 12, backgroundColor: addClient === null ? t.brand : t.surface2, borderWidth: 1, borderColor: addClient === null ? t.brand : t.ring }}>
-                <Text style={{ color: addClient === null ? t.brandInk : t.ink2, fontWeight: '700', fontSize: 13 }}>Open slot</Text>
-              </Pressable>
-              {roster.map((c) => {
-                const sel = c.id === addClient;
-                return (
-                  <Pressable key={c.id} onPress={() => setAddClient(c.id)} style={{ paddingHorizontal: 14, paddingVertical: 10, borderRadius: 12, backgroundColor: sel ? t.brand : t.surface2, borderWidth: 1, borderColor: sel ? t.brand : t.ring }}>
-                    <Text style={{ color: sel ? t.brandInk : t.ink2, fontWeight: '700', fontSize: 13 }}>{c.name}</Text>
-                  </Pressable>
-                );
-              })}
+            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.md }}>Client</Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginBottom: sp.xl }}>
+              <Chip t={t} label="Open slot" on={addClient === null} onPress={() => setAddClient(null)} />
+              {roster.map((c) => <Chip key={c.id} t={t} label={c.name} on={c.id === addClient} onPress={() => setAddClient(c.id)} />)}
             </View>
 
-            <View style={{ flexDirection: 'row', gap: 10 }}>
-              <Pressable onPress={() => setAddOpen(false)} style={{ flex: 1, paddingVertical: 15, borderRadius: 14, alignItems: 'center', backgroundColor: t.surface2, borderWidth: 1, borderColor: t.ring }}>
-                <Text style={{ color: t.ink2, fontWeight: '800' }}>Cancel</Text>
-              </Pressable>
-              <Pressable onPress={handleAdd} style={{ flex: 2, paddingVertical: 15, borderRadius: 14, alignItems: 'center', backgroundColor: t.brand }}>
-                <Text style={{ color: t.brandInk, fontWeight: '800' }}>{addClient ? 'Book Session' : 'Add Open Slot'}</Text>
-              </Pressable>
+            <View style={{ flexDirection: 'row', gap: sp.md }}>
+              <View style={{ flex: 1 }}><Ghost label="Cancel" onPress={() => setAddOpen(false)} /></View>
+              <View style={{ flex: 2 }}><Cta label={addClient ? 'Book Session' : 'Add Open Slot'} wide onPress={handleAdd} /></View>
             </View>
           </View>
         </View>

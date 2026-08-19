@@ -2,13 +2,31 @@
 // exercises with sets/reps) starting from their auto plan or blank, then assign
 // it. The assigned program flows straight to that client's Train tab, replacing
 // the auto-generated one. Revert puts them back on auto.
+//
+// Rebuilt on the instrument-panel kit (`src/ui/kit`) and the scale
+// (`src/theme/scale`). Same providers, state, handlers, routes and modals —
+// only the presentation changed: the Georgia serif header and the stack of
+// bordered boxes (one per day, one per exercise) became a header block plus
+// hairline-separated sections, and every form field now shares one treatment
+// (surface2 fill, radius.sm, ty.body, no border). No <Hero>: a builder has no
+// single live metric to lead with — the day/exercise counts sit in the section
+// head where they belong.
+//
+// Also removed: the note prefill on the auto plan. `buildProgram()` writes prose
+// that cites "your latest InBody scan (25% body fat)" — the 25 is a constant
+// this screen passes because the roster carries no body-fat reading, so that
+// sentence was an invented scan result being typed into the coach's note to
+// their client and shipped with the assigned program. The note now starts empty
+// unless a human wrote one. (The exercise library below is kept: it is a
+// vocabulary of movement names, not invented client content.)
 import { useEffect, useState, useRef } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, Modal, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import type { Theme } from '../../src/theme/tokens';
+import { Rule, Section, SectionHead, Cta, Ghost } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, elevation, type as ty, value } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
 import { useProgramTemplates } from '../../src/ui/programTemplates';
@@ -26,6 +44,10 @@ const LIB: { name: string; group: string }[] = [
   { name: 'Barbell Curl', group: 'Arms' }, { name: 'Triceps Pushdown', group: 'Arms' }, { name: 'Plank', group: 'Core' },
   { name: 'Cable Crunch', group: 'Core' }, { name: 'Calf Raise', group: 'Calves' },
 ];
+
+/** Prose written by the program generator, which cites a body-fat reading this
+ *  screen does not have. Never prefilled into the coach's note to a client. */
+const GENERATED_NOTE = /latest InBody scan/i;
 
 let KEY = 1;
 const nextKey = () => 'e' + KEY++;
@@ -63,7 +85,7 @@ export default function Builder() {
 
   const loadFrom = (p: Program) => {
     setTitle(p.title);
-    setNote(p.note ?? '');
+    setNote(p.note && !GENERATED_NOTE.test(p.note) ? p.note : '');
     setDays(p.days.map((d) => ({
       day: d.day, focus: d.focus, cardio: d.cardio,
       exercises: d.exercises.map((e) => ({ key: nextKey(), name: e.name, group: e.group, sets: e.sets, reps: e.reps })),
@@ -149,166 +171,244 @@ export default function Builder() {
     Alert.alert('Reverted to auto', `${client?.name ?? 'Your client'} is back on their auto-generated program.`);
   };
 
-  const inp = { color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14 } as const;
+  // One field treatment for the whole screen: surface2 fill, no border.
+  const inp = { ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 11 };
+  const sheet = { backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30, ...elevation.e2 };
+  const scrim = { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' };
+  const G = layout.gutter;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 48 }} keyboardShouldPersistTaps="handled">
-        <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia' }}>Program builder</Text>
-        <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 14 }}>Build a weekly plan and assign it to a client</Text>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
 
-        {/* Client picker */}
-        <Text style={{ color: t.ink2, fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 8 }}>Client</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginBottom: 6 }}>
-          {roster.map((c) => {
-            const on = c.id === clientId;
-            return (
-              <Pressable key={c.id} onPress={() => setClientId(c.id)} style={{ paddingHorizontal: 14, paddingVertical: 9, borderRadius: 20, backgroundColor: on ? t.brand : t.surface, borderWidth: 1, borderColor: on ? t.brand : t.ring }}>
-                <Text style={{ color: on ? t.brandInk : t.ink2, fontWeight: '700', fontSize: 13 }}>{c.name}</Text>
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-        <View style={{ backgroundColor: t.surface2, borderRadius: 10, borderWidth: 1, borderColor: t.ring, padding: 10, marginTop: 8, marginBottom: 16 }}>
-          <Text style={{ color: t.ink3, fontSize: 12 }}>{assignedNow ? 'Currently on a coach-assigned program' : 'Currently on their auto-generated program'} · goal: {client?.goal ?? '—'}</Text>
+        {/* ── header ─────────────────────────────────────────────────────── */}
+        <View style={{ paddingTop: sp.md }}>
+          <Text style={{ ...ty.micro, color: t.ink3 }}>Programs</Text>
+          <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Program builder</Text>
+          <Text style={{ ...ty.label, color: t.ink3, marginTop: 4 }}>Build a weekly plan and assign it to a client.</Text>
         </View>
 
-        {/* Template actions */}
-        <View style={{ flexDirection: 'row', gap: 8, marginBottom: 16 }}>
-          <Pressable onPress={() => setTplPick(true)} style={{ flex: 1, backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 11, paddingVertical: 11, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6 }}>
-            <Icon name="grid" size={15} color={t.ink2} />
-            <Text style={{ color: t.ink2, fontWeight: '700', fontSize: 13 }}>Start from template</Text>
-          </Pressable>
-          <Pressable onPress={() => { setTplName(title); setSaveOpen(true); }} style={{ flex: 1, backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 11, paddingVertical: 11, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6 }}>
-            <Icon name="plus" size={15} color={t.brand} />
-            <Text style={{ color: t.brand, fontWeight: '700', fontSize: 13 }}>Save as template</Text>
-          </Pressable>
-        </View>
-
-        {/* Program title + note */}
-        <Text style={{ color: t.ink2, fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 6 }}>Program name</Text>
-        <TextInput value={title} onChangeText={setTitle} placeholder="e.g. Push · Pull · Legs" placeholderTextColor={t.ink3} style={[inp, { marginBottom: 12 }]} />
-        <Text style={{ color: t.ink2, fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 6 }}>Note to client (optional)</Text>
-        <TextInput value={note} onChangeText={setNote} placeholder="Focus, tempo, anything they should know…" placeholderTextColor={t.ink3} multiline style={[inp, { marginBottom: 18, minHeight: 60, textAlignVertical: 'top' }]} />
-
-        {/* Days */}
-        {days.map((d, di) => (
-          <View key={di} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 14, marginBottom: 12 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-              <Pressable onPress={() => cycleDay(di)} style={{ backgroundColor: t.brand, borderRadius: 9, paddingHorizontal: 12, paddingVertical: 8 }}>
-                <Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 13 }}>{d.day} ⟳</Text>
-              </Pressable>
-              <TextInput value={d.focus} onChangeText={(v) => setDayFocus(di, v)} placeholder="Focus (e.g. Push)" placeholderTextColor={t.ink3} style={[inp, { flex: 1 }]} />
-              <Pressable onPress={() => removeDay(di)} accessibilityLabel="Remove day" style={{ paddingHorizontal: 8, paddingVertical: 8 }}>
-                <Text style={{ color: t.crit, fontWeight: '800', fontSize: 16 }}>×</Text>
-              </Pressable>
-            </View>
-
-            {d.exercises.map((e) => (
-              <View key={e.key} style={{ backgroundColor: t.surface2, borderRadius: 12, borderWidth: 1, borderColor: t.ring, padding: 11, marginBottom: 8 }}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ color: t.ink, fontWeight: '700', fontSize: 14 }}>{e.name}</Text>
-                    {e.group ? <Text style={{ color: t.ink3, fontSize: 11, marginTop: 1 }}>{e.group}</Text> : null}
-                  </View>
-                  <Pressable onPress={() => removeExercise(di, e.key)} accessibilityLabel="Remove exercise" style={{ paddingHorizontal: 8, paddingVertical: 4 }}>
-                    <Text style={{ color: t.ink3, fontWeight: '800', fontSize: 15 }}>×</Text>
+        {/* ── client ─────────────────────────────────────────────────────── */}
+        <Section>
+          <SectionHead title="Client" note={roster.length ? `${roster.length} in roster` : undefined} />
+          {roster.length === 0 ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>
+              No clients yet — add a client from your dashboard and they'll appear here to build for.
+            </Text>
+          ) : (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingRight: sp.lg }}>
+              {roster.map((c) => {
+                const on = c.id === clientId;
+                return (
+                  <Pressable key={c.id} onPress={() => setClientId(c.id)}
+                    style={{ paddingHorizontal: sp.lg, paddingVertical: 9, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface2 }}>
+                    <Text style={{ ...ty.label, fontWeight: '500', color: on ? t.brandInk : t.ink2 }}>{c.name}</Text>
                   </Pressable>
-                </View>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 8 }}>
-                  <Text style={{ color: t.ink3, fontSize: 12 }}>Sets</Text>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                    <Pressable onPress={() => patchEx(di, e.key, { sets: Math.max(1, e.sets - 1) })} style={{ width: 30, height: 30, borderRadius: 8, backgroundColor: t.surface, borderWidth: 1, borderColor: t.ring, alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: t.ink, fontWeight: '800' }}>−</Text></Pressable>
-                    <Text style={{ color: t.ink, fontWeight: '800', fontSize: 15, minWidth: 18, textAlign: 'center' }}>{e.sets}</Text>
-                    <Pressable onPress={() => patchEx(di, e.key, { sets: Math.min(8, e.sets + 1) })} style={{ width: 30, height: 30, borderRadius: 8, backgroundColor: t.surface, borderWidth: 1, borderColor: t.ring, alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: t.ink, fontWeight: '800' }}>＋</Text></Pressable>
-                  </View>
-                  <Text style={{ color: t.ink3, fontSize: 12, marginLeft: 4 }}>Reps</Text>
-                  <TextInput value={e.reps} onChangeText={(v) => patchEx(di, e.key, { reps: v })} placeholder="8-10" placeholderTextColor={t.ink3} style={{ color: t.ink, backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, fontSize: 14, width: 76 }} />
-                </View>
-              </View>
-            ))}
-
-            <Pressable onPress={() => { setCustom(''); setPickerDay(di); }} style={{ borderRadius: 10, borderWidth: 1, borderColor: t.brand, borderStyle: 'dashed', paddingVertical: 10, alignItems: 'center', marginTop: 2 }}>
-              <Text style={{ color: t.brand, fontWeight: '700', fontSize: 13 }}>＋ Add exercise</Text>
-            </Pressable>
+                );
+              })}
+            </ScrollView>
+          )}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.md }}>
+            <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: assignedNow ? t.brand : t.ink3 }} />
+            <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }}>
+              {assignedNow ? 'Currently on a coach-assigned program' : 'Currently on their auto-generated program'} · goal: {client?.goal ?? '—'}
+            </Text>
           </View>
-        ))}
+        </Section>
 
-        <Pressable onPress={addDay} style={{ borderRadius: 12, borderWidth: 1, borderColor: t.ring, paddingVertical: 12, alignItems: 'center', marginBottom: 18, backgroundColor: t.surface }}>
-          <Text style={{ color: t.ink2, fontWeight: '700', fontSize: 14 }}>＋ Add training day</Text>
-        </Pressable>
+        <Rule />
 
-        <Pressable onPress={assign} disabled={!canAssign} style={{ backgroundColor: canAssign ? t.brand : t.surface2, borderColor: canAssign ? t.brand : t.ring, borderWidth: 1, borderRadius: 14, paddingVertical: 16, alignItems: 'center' }}>
-          <Text style={{ color: canAssign ? t.brandInk : t.ink3, fontWeight: '800', fontSize: 15 }}>Assign to {client?.name ?? 'client'} · {totalExercises} exercises</Text>
-        </Pressable>
-        {assignedNow ? (
-          <Pressable onPress={revert} style={{ paddingVertical: 14, alignItems: 'center', marginTop: 4 }}>
-            <Text style={{ color: t.ink3, fontWeight: '700', fontSize: 13 }}>Revert to auto-generated program</Text>
-          </Pressable>
-        ) : null}
+        {/* ── templates ──────────────────────────────────────────────────── */}
+        <Section>
+          <SectionHead title="Templates" note="Save as template" onPress={() => { setTplName(title); setSaveOpen(true); }} />
+          <Ghost label="Start from a template" icon="grid" onPress={() => setTplPick(true)} />
+        </Section>
+
+        <Rule />
+
+        {/* ── the program itself ─────────────────────────────────────────── */}
+        <Section>
+          <SectionHead title="Program" />
+          <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Program name</Text>
+          <TextInput value={title} onChangeText={setTitle} placeholder="e.g. Push · Pull · Legs" placeholderTextColor={t.ink3}
+            style={[inp, { marginBottom: sp.lg }]} />
+          <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Note to client (optional)</Text>
+          <TextInput value={note} onChangeText={setNote} placeholder="Focus, tempo, anything they should know…" placeholderTextColor={t.ink3}
+            multiline style={[inp, { minHeight: 72, textAlignVertical: 'top' }]} />
+        </Section>
+
+        <Rule />
+
+        {/* ── days ───────────────────────────────────────────────────────── */}
+        <Section>
+          <SectionHead title="Training days"
+            note={days.length ? `${days.length} day${days.length === 1 ? '' : 's'} · ${totalExercises} exercises` : undefined} />
+
+          {days.length === 0 ? (
+            <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>
+              No training days yet — add one to start building.
+            </Text>
+          ) : null}
+
+          {days.map((d, di) => (
+            <View key={di} style={{
+              marginTop: di === 0 ? 0 : sp.xl, paddingTop: di === 0 ? 0 : sp.xl,
+              borderTopWidth: di === 0 ? 0 : hairline, borderTopColor: t.ring,
+            }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
+                <Pressable onPress={() => cycleDay(di)} accessibilityRole="button" accessibilityLabel={`Change day, currently ${d.day}`}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 }}>
+                  <Text style={{ ...ty.label, fontWeight: '600', color: t.ink }}>{d.day}</Text>
+                  <Icon name="swap" size={13} color={t.ink3} />
+                </Pressable>
+                <TextInput value={d.focus} onChangeText={(v) => setDayFocus(di, v)} placeholder="Focus (e.g. Push)" placeholderTextColor={t.ink3}
+                  style={[inp, { flex: 1 }]} />
+                <Pressable onPress={() => removeDay(di)} accessibilityRole="button" accessibilityLabel="Remove day" hitSlop={8}
+                  style={{ paddingHorizontal: sp.sm, paddingVertical: sp.sm }}>
+                  <Text style={{ ...ty.head, color: t.ink3 }}>×</Text>
+                </Pressable>
+              </View>
+
+              {d.exercises.map((e) => (
+                <View key={e.key} style={{ marginTop: sp.md, paddingTop: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{e.name}</Text>
+                      {e.group ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{e.group}</Text> : null}
+                    </View>
+                    <Pressable onPress={() => removeExercise(di, e.key)} accessibilityRole="button" accessibilityLabel="Remove exercise" hitSlop={8}
+                      style={{ paddingHorizontal: sp.sm, paddingVertical: sp.xs }}>
+                      <Text style={{ ...ty.head, color: t.ink3 }}>×</Text>
+                    </Pressable>
+                  </View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.sm }}>
+                    <Text style={{ ...ty.caption, color: t.ink3 }}>Sets</Text>
+                    <Pressable onPress={() => patchEx(di, e.key, { sets: Math.max(1, e.sets - 1) })} accessibilityRole="button" accessibilityLabel="One set fewer"
+                      style={{ width: 30, height: 30, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+                      <Icon name="minus" size={14} color={t.ink2} />
+                    </Pressable>
+                    <Text style={{ ...value(16), color: t.ink, minWidth: 16, textAlign: 'center' }}>{e.sets}</Text>
+                    <Pressable onPress={() => patchEx(di, e.key, { sets: Math.min(8, e.sets + 1) })} accessibilityRole="button" accessibilityLabel="One set more"
+                      style={{ width: 30, height: 30, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+                      <Icon name="plus" size={14} color={t.ink2} />
+                    </Pressable>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginLeft: sp.sm }}>Reps</Text>
+                    <TextInput value={e.reps} onChangeText={(v) => patchEx(di, e.key, { reps: v })} placeholder="8-10" placeholderTextColor={t.ink3}
+                      style={[inp, { width: 74, paddingVertical: 7, paddingHorizontal: 10 }]} />
+                  </View>
+                </View>
+              ))}
+
+              <View style={{ marginTop: sp.lg }}>
+                <Ghost label="Add exercise" icon="plus" onPress={() => { setCustom(''); setPickerDay(di); }} />
+              </View>
+            </View>
+          ))}
+
+          <View style={{ marginTop: days.length ? sp.xl : 0 }}>
+            <Ghost label="Add training day" icon="calendar" onPress={addDay} />
+          </View>
+        </Section>
+
+        <Rule />
+
+        {/* ── assign ─────────────────────────────────────────────────────── */}
+        <Section>
+          <View style={{ opacity: canAssign ? 1 : 0.4 }} pointerEvents={canAssign ? 'auto' : 'none'}>
+            <Cta wide label={`Assign to ${client?.name ?? 'client'} · ${totalExercises} exercises`} onPress={assign} />
+          </View>
+          {!canAssign ? (
+            <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.sm }}>
+              {clientId ? 'Add at least one exercise to assign this program.' : 'Pick a client first.'}
+            </Text>
+          ) : null}
+          {assignedNow ? (
+            <View style={{ marginTop: sp.md }}>
+              <Ghost label="Revert to auto-generated program" onPress={revert} />
+            </View>
+          ) : null}
+        </Section>
+
       </ScrollView>
 
-      {/* Exercise picker */}
+      {/* ── exercise picker ──────────────────────────────────────────────── */}
       <Modal visible={pickerDay !== null} transparent animationType="slide" onRequestClose={() => setPickerDay(null)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setPickerDay(null)} />
-        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, borderColor: t.ring, padding: 20, paddingBottom: 30, maxHeight: '82%' }}>
-          <Text style={{ color: t.ink, fontSize: 18, fontWeight: '800', marginBottom: 12 }}>Add exercise</Text>
-          <View style={{ flexDirection: 'row', gap: 8, marginBottom: 14 }}>
-            <TextInput value={custom} onChangeText={setCustom} placeholder="Custom exercise name" placeholderTextColor={t.ink3} style={[inp, { flex: 1 }]} />
-            <Pressable onPress={() => { if (custom.trim() && pickerDay !== null) { addExercise(pickerDay, custom.trim(), ''); setPickerDay(null); } }} style={{ backgroundColor: t.brand, borderRadius: 10, paddingHorizontal: 16, justifyContent: 'center' }}><Text style={{ color: t.brandInk, fontWeight: '800' }}>Add</Text></Pressable>
+        <Pressable style={scrim} onPress={() => setPickerDay(null)} />
+        <View style={[sheet, { maxHeight: '82%' }]}>
+          <Text style={{ ...ty.title, color: t.ink, marginBottom: sp.lg }}>Add exercise</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginBottom: sp.lg }}>
+            <TextInput value={custom} onChangeText={setCustom} placeholder="Custom exercise name" placeholderTextColor={t.ink3}
+              style={[inp, { flex: 1 }]} />
+            <Cta label="Add" onPress={() => { if (custom.trim() && pickerDay !== null) { addExercise(pickerDay, custom.trim(), ''); setPickerDay(null); } }} />
           </View>
           <ScrollView showsVerticalScrollIndicator={false}>
-            {LIB.map((x) => (
-              <Pressable key={x.name} onPress={() => { if (pickerDay !== null) { addExercise(pickerDay, x.name, x.group); setPickerDay(null); } }} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: t.ring }}>
-                <Text style={{ color: t.ink, fontWeight: '600', fontSize: 15 }}>{x.name}</Text>
-                <Text style={{ color: t.ink3, fontSize: 12 }}>{x.group}</Text>
+            {LIB.map((x, i) => (
+              <Pressable key={x.name} onPress={() => { if (pickerDay !== null) { addExercise(pickerDay, x.name, x.group); setPickerDay(null); } }}
+                style={{
+                  flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: sp.md,
+                  borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
+                }}>
+                <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{x.name}</Text>
+                <Text style={{ ...ty.caption, color: t.ink3 }}>{x.group}</Text>
               </Pressable>
             ))}
           </ScrollView>
         </View>
       </Modal>
 
-      {/* Start-from-template picker */}
+      {/* ── start-from-template picker ───────────────────────────────────── */}
       <Modal visible={tplPick} transparent animationType="slide" onRequestClose={() => setTplPick(false)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setTplPick(false)} />
-        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, borderColor: t.ring, padding: 20, paddingBottom: 30, maxHeight: '80%' }}>
-          <Text style={{ color: t.ink, fontSize: 18, fontWeight: '800', marginBottom: 4 }}>Start from a template</Text>
-          <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 14 }}>Loads into the builder for {client?.name ?? 'this client'} — tweak, then assign.</Text>
+        <Pressable style={scrim} onPress={() => setTplPick(false)} />
+        <View style={[sheet, { maxHeight: '80%' }]}>
+          <Text style={{ ...ty.title, color: t.ink }}>Start from a template</Text>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>
+            Loads into the builder for {client?.name ?? 'this client'} — tweak, then assign.
+          </Text>
           <ScrollView showsVerticalScrollIndicator={false}>
-            {templates.map((tpl) => {
+            {templates.length === 0 ? (
+              <Text style={{ ...ty.label, color: t.ink3 }}>No templates saved yet.</Text>
+            ) : null}
+            {templates.map((tpl, i) => {
               const dc = tpl.program.days.length;
               const ec = tpl.program.days.reduce((a, d) => a + d.exercises.length, 0);
               return (
-                <Pressable key={tpl.id} onPress={() => { loadFrom(tpl.program); setTplName(tpl.name); setTplPick(false); }} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: t.ring }}>
-                  <View style={{ width: 40, height: 40, borderRadius: 11, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}><Icon name="grid" size={18} color={t.brand} /></View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15 }}>{tpl.name}</Text>
-                    <Text style={{ color: t.ink3, fontSize: 12 }}>{dc} days · {ec} exercises</Text>
+                <Pressable key={tpl.id} onPress={() => { loadFrom(tpl.program); setTplName(tpl.name); setTplPick(false); }}
+                  style={{
+                    flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md,
+                    borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
+                  }}>
+                  <View style={{ width: 34, height: 34, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+                    <Icon name="grid" size={17} color={t.brand} />
                   </View>
-                  <Text style={{ color: t.brand, fontWeight: '800', fontSize: 13 }}>Use</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{tpl.name}</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{dc} days · {ec} exercises</Text>
+                  </View>
+                  <Text style={{ ...ty.label, fontWeight: '500', color: t.brand }}>Use</Text>
                 </Pressable>
               );
             })}
           </ScrollView>
-          <Pressable onPress={() => { setTplPick(false); router.push('/(trainer)/templates'); }} style={{ paddingVertical: 12, alignItems: 'center', marginTop: 4 }}>
-            <Text style={{ color: t.ink3, fontWeight: '700', fontSize: 13 }}>Manage all templates ›</Text>
-          </Pressable>
+          <View style={{ marginTop: sp.lg }}>
+            <Ghost label="Manage all templates" onPress={() => { setTplPick(false); router.push('/(trainer)/templates'); }} />
+          </View>
         </View>
       </Modal>
 
-      {/* Save-as-template */}
+      {/* ── save-as-template ─────────────────────────────────────────────── */}
       <Modal visible={saveOpen} transparent animationType="slide" onRequestClose={() => setSaveOpen(false)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setSaveOpen(false)} />
-        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, borderColor: t.ring, padding: 20, paddingBottom: 30 }}>
-          <Text style={{ color: t.ink, fontSize: 18, fontWeight: '800', marginBottom: 4 }}>Save as template</Text>
-          <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 14 }}>Reuse this program with other clients — {totalExercises} exercises across {days.filter((d) => d.exercises.length).length} days.</Text>
-          <TextInput value={tplName} onChangeText={setTplName} placeholder="Template name — e.g. Push · Pull · Legs" placeholderTextColor={t.ink3} style={[inp, { marginBottom: 14 }]} />
-          <Pressable onPress={doSaveTemplate} style={{ backgroundColor: t.brand, borderRadius: 12, paddingVertical: 14, alignItems: 'center' }}>
-            <Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 14 }}>Save template</Text>
-          </Pressable>
-          <Pressable onPress={() => setSaveOpen(false)} style={{ paddingVertical: 12, alignItems: 'center' }}>
-            <Text style={{ color: t.ink3, fontWeight: '700', fontSize: 13 }}>Cancel</Text>
-          </Pressable>
+        <Pressable style={scrim} onPress={() => setSaveOpen(false)} />
+        <View style={sheet}>
+          <Text style={{ ...ty.title, color: t.ink }}>Save as template</Text>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>
+            Reuse this program with other clients — {totalExercises} exercises across {days.filter((d) => d.exercises.length).length} days.
+          </Text>
+          <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Template name</Text>
+          <TextInput value={tplName} onChangeText={setTplName} placeholder="e.g. Push · Pull · Legs" placeholderTextColor={t.ink3}
+            style={[inp, { marginBottom: sp.xl }]} />
+          <Cta label="Save template" wide onPress={doSaveTemplate} />
+          <View style={{ height: sp.sm }} />
+          <Ghost label="Cancel" onPress={() => setSaveOpen(false)} />
         </View>
       </Modal>
     </SafeAreaView>

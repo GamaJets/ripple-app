@@ -3,8 +3,8 @@
 //
 // Rebuilt on the instrument-panel kit (`src/ui/kit`) and the scale
 // (`src/theme/scale`). Every provider, conditional, modal and route from the
-// previous version is preserved — only the presentation changed: the serif studio
-// name is gone, the three bordered stat boxes and the per-client
+// previous version is preserved — only the presentation changed: the Georgia
+// serif studio name is gone, the three bordered stat boxes and the per-client
 // bordered cards became hairline-separated rows, and a card is now spent only on
 // the things that need a decision (trial, platform invite, suggested check-ins).
 //
@@ -14,7 +14,7 @@
 //     program adherence, personal records, recent sessions, and a "Latest
 //     Check-in" line (weight · energy · sleep · mood · adherence) that was also
 //     spliced into the client's timeline. None of it belonged to the client —
-//     `useWorkoutLog` and `useCheckIns` read the *signed-in user's* rows,
+//     `useWorkoutLog()` and `useCheckIns()` read the *signed-in user's* rows,
 //     i.e. the coach's own training, rendered under the client's name. `c1` was
 //     the id of one of the five invented clients already deleted from
 //     `trainerMock`, so the branch was unreachable as well as wrong. Its
@@ -857,7 +857,7 @@ export default function TrainerClients() {
               <View style={{ flexDirection: 'row', gap: sp.sm }}>
                 <Ghost icon="sparkle" label="Redraft" onPress={() => draftNudge(draftClient)} />
                 <View style={{ flex: 1 }}>
-                  <Cta label="Send check-in" wide onPress={sendDraft} />
+                  <Cta label="Send check-in" wide onPress={sendDraft} tone={(!draftBusy && draftText.trim()) ? undefined : t.surface3} />
                 </View>
               </View>
               <Pressable onPress={() => setDraftClient(null)} style={{ paddingVertical: sp.md, alignItems: 'center' }}>

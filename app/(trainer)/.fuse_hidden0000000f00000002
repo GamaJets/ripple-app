@@ -14,7 +14,7 @@
 //     program adherence, personal records, recent sessions, and a "Latest
 //     Check-in" line (weight · energy · sleep · mood · adherence) that was also
 //     spliced into the client's timeline. None of it belonged to the client —
-//     `useWorkoutLog` and `useCheckIns` read the *signed-in user's* rows,
+//     `useWorkoutLog()` and `useCheckIns()` read the *signed-in user's* rows,
 //     i.e. the coach's own training, rendered under the client's name. `c1` was
 //     the id of one of the five invented clients already deleted from
 //     `trainerMock`, so the branch was unreachable as well as wrong. Its
@@ -857,7 +857,7 @@ export default function TrainerClients() {
               <View style={{ flexDirection: 'row', gap: sp.sm }}>
                 <Ghost icon="sparkle" label="Redraft" onPress={() => draftNudge(draftClient)} />
                 <View style={{ flex: 1 }}>
-                  <Cta label="Send check-in" wide onPress={sendDraft} />
+                  <Cta label="Send check-in" wide onPress={sendDraft} tone={(!draftBusy && draftText.trim()) ? undefined : t.surface3} />
                 </View>
               </View>
               <Pressable onPress={() => setDraftClient(null)} style={{ paddingVertical: sp.md, alignItems: 'center' }}>
