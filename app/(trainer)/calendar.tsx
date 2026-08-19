@@ -302,6 +302,15 @@ export default function TrainerSchedule() {
                   <View style={{ flex: 1 }}>
                     <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: t.ink }}>{timeLabel(s.startsAt)} · {s.durationMin} min</Text>
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{s.status === 'booked' ? nameOf(s.clientId) : (s.released ? 'Open · re-offered' : 'Open slot')}</Text>
+                    {s.approvedAt ? (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
+                        <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: t.good }} />
+                        <Text style={{ ...ty.caption, color: t.ink3 }}>Confirmed by client</Text>
+                      </View>
+                    ) : null}
+                    {s.approvalNote ? (
+                      <Text style={{ ...ty.label, color: t.ink2, marginTop: 4 }}>“{s.approvalNote}”</Text>
+                    ) : null}
                   </View>
                 </View>
                 <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md, marginLeft: sp.md + 6 }}>

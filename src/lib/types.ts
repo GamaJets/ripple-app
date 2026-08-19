@@ -42,6 +42,12 @@ export interface TrainingSession {
   durationMin: number;
   status: SessionStatus;
   released: boolean;      // re-offered after a cancellation
+  /** When the client confirmed the session was delivered. From `session_approvals`,
+   *  not from `sessions` — the note beside it is private to the client and their
+   *  trainer, and RLS cannot hide a single column. */
+  approvedAt?: string | null;
+  /** The comment the client left when approving. */
+  approvalNote?: string | null;
 }
 
 export interface CancellationResult {

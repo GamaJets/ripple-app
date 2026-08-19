@@ -2,21 +2,22 @@
 // the ones you have confirmed. Mirrors the "sessions delivered → approve" flow
 // gyms use.
 //
-// Honesty note: approving writes one flag to AsyncStorage on this device and
-// nothing else. The old header comment claimed approvals went "best-effort to
-// the backend" (no such write exists), and the screen told the client an
-// approved session was "drawn from your package" — nothing here touches
-// `client_purchases`; a pack credit is redeemed when the session is BOOKED, in
-// calendar.tsx. Both claims are gone rather than replaced, and the copy now
-// says what actually happens.
+// Approving used to write one flag to AsyncStorage on this device and nothing
+// else, and the comment box beside it was never read by anything at all — the
+// text went into React state and died there. Both now go to Supabase through
+// the `approve_session` RPC, and the trainer sees the confirmation and the
+// comment on their calendar.
+//
+// Still true, and still worth saying on screen: approving does not spend a
+// package credit. A credit is redeemed when the session is BOOKED, in
+// calendar.tsx.
 //
 // Re-skinned onto the instrument-panel kit (`src/ui/kit`) and the scale
 // (`src/theme/scale`): no hero, cards spent only on the sessions you can act
 // on, and a coloured dot beside ink text where "Approved ✓" used to be painted
 // in the reserved `good` colour.
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { View, Text, ScrollView, TextInput, Alert } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -25,28 +26,30 @@ import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
 import { useSessions } from '../../src/ui/sessions';
 import { useClientData } from '../../src/ui/clientData';
 
-const KEY = 'repple.ptApproved';
 const fmt = (iso: string) => { const d = new Date(iso); return d.toLocaleDateString() + ' · ' + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); };
 
 export default function PtSessions() {
   const t = useTheme();
   const router = useRouter();
-  const { sessions } = useSessions();
+  const { sessions, approveSession } = useSessions();
   const c = useClientData();
-  const [approved, setApproved] = useState<Record<string, boolean>>({});
-  const [hydrated, setHydrated] = useState(false);
   const [note, setNote] = useState<Record<string, string>>({});
-
-  useEffect(() => { AsyncStorage.getItem(KEY).then((v) => { if (v) { try { setApproved(JSON.parse(v)); } catch { /* ignore */ } } setHydrated(true); }).catch(() => setHydrated(true)); }, []);
-  useEffect(() => { if (hydrated) AsyncStorage.setItem(KEY, JSON.stringify(approved)).catch(() => {}); }, [approved, hydrated]);
+  const [busy, setBusy] = useState<string | null>(null);
 
   const mine = useMemo(() => sessions
     .filter((s) => s.clientId === c.id && s.status === 'booked' && Date.parse(s.startsAt) <= Date.now())
     .sort((a, b) => Date.parse(b.startsAt) - Date.parse(a.startsAt)), [sessions, c.id]);
-  const pending = mine.filter((s) => !approved[s.id]);
-  const done = mine.filter((s) => approved[s.id]);
+  const pending = mine.filter((s) => !s.approvedAt);
+  const done = mine.filter((s) => s.approvedAt);
 
-  const approve = (id: string) => { setApproved((p) => ({ ...p, [id]: true })); Alert.alert('Approved', 'Confirmed on this device. Package credits are drawn when a session is booked, not here.'); };
+  const approve = async (id: string) => {
+    setBusy(id);
+    const r = await approveSession(id, note[id]);
+    setBusy(null);
+    if (!r.ok) { Alert.alert('Not approved', r.error || 'Could not save that. Try again in a moment.'); return; }
+    setNote((p) => ({ ...p, [id]: '' }));
+    Alert.alert('Approved', 'Your trainer can see this. Package credits are drawn when a session is booked, not here.');
+  };
 
   const G = layout.gutter;
 
@@ -59,7 +62,7 @@ export default function PtSessions() {
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>At the gym</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Personal training</Text>
-            <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>Sessions your trainer has delivered. Approving records your confirmation on this device.</Text>
+            <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>Sessions your trainer has delivered. Approving confirms it with them, and any comment you add goes with it.</Text>
           </View>
           <Ghost icon="back" onPress={() => router.back()} />
         </View>
@@ -74,9 +77,10 @@ export default function PtSessions() {
               <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: t.ink }}>{fmt(s.startsAt)}</Text>
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{s.durationMin} min personal training session</Text>
               <TextInput value={note[s.id] || ''} onChangeText={(v) => setNote((p) => ({ ...p, [s.id]: v }))}
-                placeholder="Add a comment (optional)…" placeholderTextColor={t.ink3}
+                placeholder="Add a comment for your trainer (optional)…" placeholderTextColor={t.ink3}
+                editable={busy !== s.id} multiline
                 style={{ ...ty.label, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: sp.md, marginTop: sp.md, marginBottom: sp.md }} />
-              <Cta label="Approve session" wide onPress={() => approve(s.id)} />
+              <Cta label={busy === s.id ? 'Approving…' : 'Approve session'} wide disabled={busy === s.id} onPress={() => approve(s.id)} />
             </Card>
           ))}
           {pending.length === 0 ? <Text style={{ ...ty.label, color: t.ink3 }}>Nothing to approve right now.</Text> : null}
@@ -91,10 +95,15 @@ export default function PtSessions() {
               {done.map((s, i) => (
                 <View key={s.id}>
                   {i > 0 ? <Rule /> : null}
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
-                    <Text style={{ ...ty.body, ...numeric, color: t.ink2, flex: 1 }}>{fmt(s.startsAt)}</Text>
-                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.good }} />
-                    <Text style={{ ...ty.caption, color: t.ink2 }}>Approved</Text>
+                  <View style={{ paddingVertical: sp.md }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+                      <Text style={{ ...ty.body, ...numeric, color: t.ink2, flex: 1 }}>{fmt(s.startsAt)}</Text>
+                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.good }} />
+                      <Text style={{ ...ty.caption, color: t.ink2 }}>Approved</Text>
+                    </View>
+                    {s.approvalNote ? (
+                      <Text style={{ ...ty.label, color: t.ink3, marginTop: 4 }}>“{s.approvalNote}”</Text>
+                    ) : null}
                   </View>
                 </View>
               ))}

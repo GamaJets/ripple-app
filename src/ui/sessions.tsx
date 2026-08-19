@@ -1,8 +1,9 @@
 // Shared training-session store — a single source of truth for the coach and
 // client portals so a slot the coach opens shows up as bookable for the client,
 // a booking shows on the coach's calendar, and a cancellation re-offers the slot.
-// Persists to Supabase `sessions` (RLS: trainer owns; client reads coach's slots;
-// book/cancel via RPC) with a defensive in-memory fallback + booking reminder.
+// Persists to Supabase `sessions` (RLS: trainer owns; client reads open slots and
+// their own; book/cancel/approve via RPC) with a defensive in-memory fallback and
+// a booking reminder. Client approvals are merged in from `session_approvals`.
 import { createContext, useContext, useEffect, useState } from 'react';
 import { overlaps } from '../lib/booking';
 import type { TrainingSession } from '../lib/types';
@@ -18,6 +19,10 @@ interface SessionsValue {
   /** Cancel → slot returns to available and is flagged re-offered. */
   releaseSession: (id: string) => void;
   removeSession: (id: string) => void;
+  /** Client confirms a delivered session, with an optional comment for the trainer.
+   *  Goes through the `approve_session` RPC — a client has no write access to
+   *  `sessions` or `session_approvals` directly. */
+  approveSession: (id: string, note?: string) => Promise<{ ok: boolean; error?: string }>;
 }
 
 const rowToSession = (r: any): TrainingSession => ({
@@ -40,7 +45,23 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
         const id = auth?.user?.id; if (!id || cancelled) return; setUid(id);
         const { data, error } = await supabase.from('sessions').select('*').order('starts_at', { ascending: true });
         if (error || cancelled || !data) return;
-        if (data.length) setSessions(data.map(rowToSession));
+        if (!data.length) return;
+        let rows = data.map(rowToSession);
+        // Approvals live in their own table (see supabase/session-approvals.sql).
+        // A failure here must not cost us the sessions themselves — the screen is
+        // still usable without knowing what has been approved.
+        try {
+          const { data: appr } = await supabase.from('session_approvals').select('session_id, approved_at, note');
+          if (appr?.length) {
+            const byId = new Map(appr.map((a: any) => [String(a.session_id), a]));
+            rows = rows.map((r) => {
+              const a = byId.get(r.id);
+              return a ? { ...r, approvedAt: a.approved_at, approvalNote: a.note ?? null } : r;
+            });
+          }
+        } catch { /* sessions still load */ }
+        if (cancelled) return;
+        setSessions(rows);
       } catch { /* stay on mock */ }
     })();
     return () => { cancelled = true; };
@@ -85,7 +106,22 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
     if (USE_SUPABASE) { try { supabase.from('sessions').delete().eq('id', id).then(() => {}, () => {}); } catch { /* ignore */ } }
   };
 
-  return <Ctx.Provider value={{ sessions, addSession, bookSession, releaseSession, removeSession }}>{children}</Ctx.Provider>;
+  const approveSession: SessionsValue['approveSession'] = async (id, note) => {
+    const trimmed = (note || '').trim();
+    if (!USE_SUPABASE) return { ok: false, error: 'Not signed in to the server.' };
+    try {
+      const { error } = await supabase.rpc('approve_session', { p_session: id, p_note: trimmed || null });
+      if (error) return { ok: false, error: error.message };
+    } catch (e: any) {
+      return { ok: false, error: e?.message || 'Could not reach the server.' };
+    }
+    // Only after the server accepted it — an approval that exists on this phone
+    // and nowhere else is exactly the bug this replaced.
+    setSessions((p) => p.map((x) => (x.id === id ? { ...x, approvedAt: new Date().toISOString(), approvalNote: trimmed || null } : x)));
+    return { ok: true };
+  };
+
+  return <Ctx.Provider value={{ sessions, addSession, bookSession, releaseSession, removeSession, approveSession }}>{children}</Ctx.Provider>;
 }
 
 export function useSessions(): SessionsValue {
