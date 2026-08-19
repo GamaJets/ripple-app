@@ -24,7 +24,14 @@ export function focusAreas(bodyFatPct: number, goal: Goal): string[] {
 
 export function buildProgram(goal: Goal, bodyFatPct: number): Program {
   const focus = focusAreas(bodyFatPct, goal);
-  const note = `Built from your latest InBody scan (${bodyFatPct}% body fat) and goal. Your coach flagged ${(focus[focus.length - 1] || "strength").toLowerCase()} as a priority — extra volume added there. Progress the weight when you hit the top of the rep range.`;
+  // Says only what is true. This used to read "Built from your latest InBody scan
+  // (N% body fat) and goal. Your coach flagged X as a priority…" — but the caller
+  // supplies bodyFatPct, and three of the six call sites pass a hardcoded constant
+  // (25 from the trainer builder, 26/28/30 from the starter templates) for clients
+  // who may have no scan at all and no coach. It claimed a measurement that had
+  // not been taken and a coach decision nobody had made. The note is not currently
+  // rendered to clients; this keeps it safe for whenever it is.
+  const note = `A ${goal === 'fatloss' ? 'fat-loss' : goal === 'muscle' ? 'muscle-building' : 'toning'} plan with extra volume on ${(focus[focus.length - 1] || 'strength').toLowerCase()}. Progress the weight when you hit the top of the rep range.`;
 
   if (goal === 'muscle') {
     return {

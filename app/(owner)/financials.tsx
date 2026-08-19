@@ -7,13 +7,22 @@
 // grade and an AI verdict, that their business was in strong financial health.
 // Until figures are entered (or accounting is connected) it now shows an entry
 // form and no analysis at all.
+//
+// Rebuilt on the instrument-panel kit (`src/ui/kit`) and the scale
+// (`src/theme/scale`). Every provider, conditional, handler, route and the
+// AsyncStorage persistence are preserved — only the presentation changed: the
+// health score became the screen's one hero figure (in the "has figures" state
+// only — the empty state shows no hero of zeros), the bordered KPI grid became
+// hairline-divided KPI rows, the flag boxes became a hairline-divided list with
+// a tone dot beside ink-coloured text, and the Georgia serif header is gone.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, Pressable, ScrollView, Alert, TextInput } from 'react-native';
+import { View, Text, ScrollView, Alert, TextInput } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
+import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Cta, Ghost } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { emptyFinances, hasFigures, reviewFinances, type FinInputs, type FinFlag } from '../../src/lib/financialAI';
 
 const KEY = 'repple.owner.financials';
@@ -87,113 +96,146 @@ export default function Financials() {
     ['PT + classes', money(fin.ptRevenue + fin.classRevenue)],
   ] : [];
 
-  const connectCard = (
-    <Pressable onPress={() => Alert.alert('Connect accounting', 'Link Xero or QuickBooks to pull real revenue, expenses and P&L automatically. Setup uses your accounting login — ask us to enable it for your account.')} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: t.surface, borderColor: connected ? t.good : t.brand, borderWidth: 1, borderRadius: 14, padding: 14, marginBottom: 16 }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 11 }}>
-        <View style={{ width: 38, height: 38, borderRadius: 11, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}><Icon name="chart" size={19} color={t.brand} /></View>
-        <View><Text style={{ color: t.ink, fontWeight: '800', fontSize: 14 }}>{connected ? 'Accounting connected' : 'Connect accounting'}</Text><Text style={{ color: t.ink3, fontSize: 12, marginTop: 1 }}>{connected ? 'Syncing from Xero' : 'Xero · QuickBooks — pull real P&L'}</Text></View>
+  const G = layout.gutter;
+  const input = { ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 11 };
+
+  const flagList = (flags: FinFlag[]) => flags.map((f, i) => (
+    <View key={i} style={{
+      flexDirection: 'row', gap: sp.md, paddingVertical: sp.md,
+      borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
+    }}>
+      <View style={{ width: 6, height: 6, borderRadius: 3, marginTop: 8, backgroundColor: toneColor(f.tone) }} />
+      <View style={{ flex: 1 }}>
+        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{f.title}</Text>
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{f.detail}</Text>
       </View>
-      <Text style={{ color: t.brand, fontWeight: '800', fontSize: 13 }}>{connected ? 'Manage' : 'Connect'}</Text>
-    </Pressable>
+    </View>
+  ));
+
+  const connectRow = (
+    <ListRow
+      icon="chart"
+      title={connected ? 'Accounting connected' : 'Connect accounting'}
+      note={connected ? 'Syncing from Xero' : 'Xero · QuickBooks — pull real P&L'}
+      tone={connected ? t.good : undefined}
+      onPress={() => Alert.alert('Connect accounting', 'Link Xero or QuickBooks to pull real revenue, expenses and P&L automatically. Setup uses your accounting login — ask us to enable it for your account.')}
+    />
   );
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
-        <Pressable onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Go back" style={{ marginBottom: 8 }}>
-          <Text style={{ color: t.brand, fontWeight: '700', fontSize: 15 }}>‹ Back</Text>
-        </Pressable>
-        <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia' }}>Financial health</Text>
-        <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 16, fontSize: 14 }}>How the gym is doing — with an AI review of where to improve.</Text>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
 
-        {connectCard}
+        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
+          <View style={{ flex: 1 }}>
+            <Text style={{ ...ty.micro, color: t.ink3 }}>Your gym</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Financial health</Text>
+          </View>
+          <Ghost icon="back" onPress={() => router.back()} />
+        </View>
+        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
+          How the gym is doing — with an AI review of where to improve.
+        </Text>
 
         {!hydrated ? null : editing ? (
-          <View style={{ backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 18, padding: 18, marginBottom: 16 }}>
-            <Text style={{ color: t.ink, fontWeight: '800', fontSize: 16, marginBottom: 2 }}>Your monthly figures</Text>
-            <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 14 }}>Leave a field blank if you don't track it. Stored on this device only.</Text>
+          /* ── entry form ───────────────────────────────────────────────── */
+          <Section>
+            <SectionHead title="Your monthly figures" note="This device only" />
+            <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>
+              Leave a field blank if you don't track it. Stored on this device only.
+            </Text>
             {FIELDS.map((f) => (
-              <View key={f.key} style={{ marginBottom: 10 }}>
-                <Text style={{ color: t.ink2, fontSize: 12, fontWeight: '700', marginBottom: 4 }}>{f.label} <Text style={{ color: t.ink3, fontWeight: '500' }}>({f.hint})</Text></Text>
+              <View key={f.key} style={{ marginBottom: sp.md }}>
+                <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>
+                  {f.label} <Text style={{ ...ty.caption, color: t.ink3 }}>({f.hint})</Text>
+                </Text>
                 <TextInput
                   value={draft[f.key] ?? ''}
                   onChangeText={(v) => setDraft((d) => ({ ...d, [f.key]: v }))}
                   keyboardType="numeric"
                   placeholder="0"
                   placeholderTextColor={t.ink3}
-                  style={{ color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15, fontWeight: '700' }}
+                  style={input}
                 />
               </View>
             ))}
-            <Pressable onPress={save} style={{ backgroundColor: t.brand, borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginTop: 6 }}>
-              <Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 14 }}>Save &amp; review</Text>
-            </Pressable>
-            <Pressable onPress={() => setEditing(false)} style={{ paddingVertical: 10, alignItems: 'center' }}>
-              <Text style={{ color: t.ink3, fontWeight: '700', fontSize: 13 }}>Cancel</Text>
-            </Pressable>
-          </View>
+            <View style={{ height: sp.sm }} />
+            <Cta label="Save & review" wide onPress={save} />
+            <View style={{ height: sp.sm }} />
+            <Ghost label="Cancel" onPress={() => setEditing(false)} />
+          </Section>
         ) : !ready ? (
-          <View style={{ backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 18, padding: 20, marginBottom: 16, alignItems: 'center' }}>
-            <View style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}><Icon name="chart" size={24} color={t.ink3} /></View>
-            <Text style={{ color: t.ink, fontWeight: '800', fontSize: 16, textAlign: 'center' }}>No figures yet</Text>
-            <Text style={{ color: t.ink3, fontSize: 13, textAlign: 'center', marginTop: 6, lineHeight: 19 }}>Connect your accounting, or enter this month's revenue, expenses and membership numbers. Nothing is shown until it comes from you.</Text>
-            <Pressable onPress={openEditor} style={{ backgroundColor: t.brand, borderRadius: 12, paddingVertical: 13, paddingHorizontal: 22, marginTop: 16 }}>
-              <Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 14 }}>Enter my figures</Text>
-            </Pressable>
-          </View>
+          /* ── honest empty state: no hero of zeros ─────────────────────── */
+          <Section>
+            <SectionHead title="No figures yet" />
+            <Text style={{ ...ty.body, color: t.ink2 }}>
+              Connect your accounting, or enter this month's revenue, expenses and membership
+              numbers. Nothing is shown until it comes from you.
+            </Text>
+            <View style={{ height: sp.lg }} />
+            <Cta label="Enter my figures" wide onPress={openEditor} />
+          </Section>
         ) : r ? (
           <>
-            {/* AI review card */}
-            <View style={{ backgroundColor: t.surface, borderColor: t.brand, borderWidth: 1, borderRadius: 18, padding: 18, marginBottom: 16 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
-                <View style={{ width: 66, height: 66, borderRadius: 33, borderWidth: 4, borderColor: t.brand, alignItems: 'center', justifyContent: 'center' }}>
-                  <Text style={{ color: t.ink, fontSize: 26, fontWeight: '900' }}>{r.grade}</Text>
-                </View>
-                <View style={{ flex: 1 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 3 }}>
-                    <Icon name="sparkle" size={14} color={t.brand} /><Text style={{ color: t.brand, fontSize: 10.5, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6 }}>AI financial review</Text>
-                  </View>
-                  <Text style={{ color: t.ink, fontWeight: '800', fontSize: 16 }}>Health score {r.score}/100</Text>
-                </View>
-              </View>
-              <Text style={{ color: t.ink2, fontSize: 13.5, lineHeight: 20, marginTop: 12 }}>{r.summary}</Text>
-            </View>
+            {/* ── the hero ─────────────────────────────────────────────── */}
+            <Hero
+              label="Health score"
+              figure={String(r.score)}
+              unit="/100"
+              note={`Grade ${r.grade} · ${money(r.netProfit)} net profit on a ${r.marginPct.toFixed(0)}% margin`}
+              arc={r.score / 100}
+            />
 
-            {/* KPI grid */}
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 18 }}>
-              {kpis.map(([l, v]) => (
-                <View key={l} style={{ width: '47.5%', backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 14, padding: 14 }}>
-                  <Text style={{ color: t.ink, fontSize: 18, fontWeight: '800' }}>{v}</Text>
-                  <Text style={{ color: t.ink3, fontSize: 11, marginTop: 2 }}>{l}</Text>
+            <Rule />
+
+            <Section>
+              <SectionHead title="AI financial review" note={`Grade ${r.grade}`} />
+              <Text style={{ ...ty.body, color: t.ink2 }}>{r.summary}</Text>
+            </Section>
+
+            <Rule />
+
+            <Section>
+              <SectionHead title="This month" note="From your figures" />
+              {[0, 2, 4, 6].map((i) => (
+                <View key={i} style={{ marginTop: i === 0 ? 0 : sp.lg }}>
+                  <KpiRow items={kpis.slice(i, i + 2).map(([l, v]) => ({ label: l, value: v }))} />
                 </View>
               ))}
-            </View>
+            </Section>
 
             {r.strengths.length > 0 ? (<>
-              <Text style={{ color: t.ink2, fontSize: 12, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 10 }}>What's working</Text>
-              {r.strengths.map((f, i) => (
-                <View key={i} style={{ flexDirection: 'row', gap: 11, backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderLeftWidth: 3, borderLeftColor: toneColor(f.tone), borderRadius: 12, padding: 13, marginBottom: 8 }}>
-                  <View style={{ flex: 1 }}><Text style={{ color: t.ink, fontWeight: '800', fontSize: 13.5 }}>{f.title}</Text><Text style={{ color: t.ink3, fontSize: 12.5, marginTop: 3, lineHeight: 18 }}>{f.detail}</Text></View>
-                </View>
-              ))}
+              <Rule />
+              <Section>
+                <SectionHead title="What's working" />
+                {flagList(r.strengths)}
+              </Section>
             </>) : null}
 
-            <Text style={{ color: t.ink2, fontSize: 12, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6, marginTop: 8, marginBottom: 10 }}>Where to improve</Text>
-            {r.improvements.map((f, i) => (
-              <View key={i} style={{ flexDirection: 'row', gap: 11, backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderLeftWidth: 3, borderLeftColor: toneColor(f.tone), borderRadius: 12, padding: 13, marginBottom: 8 }}>
-                <View style={{ flex: 1 }}><Text style={{ color: t.ink, fontWeight: '800', fontSize: 13.5 }}>{f.title}</Text><Text style={{ color: t.ink3, fontSize: 12.5, marginTop: 3, lineHeight: 18 }}>{f.detail}</Text></View>
-              </View>
-            ))}
+            <Rule />
 
-            <Pressable onPress={openEditor} style={{ backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 14, paddingVertical: 13, alignItems: 'center', marginTop: 10 }}>
-              <Text style={{ color: t.ink2, fontWeight: '800', fontSize: 13 }}>Update my figures</Text>
-            </Pressable>
-            <Pressable onPress={() => router.push('/(owner)/promotions')} style={{ backgroundColor: t.brand, borderRadius: 14, paddingVertical: 15, alignItems: 'center', marginTop: 10 }}>
-              <Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 14 }}>Create a promotion →</Text>
-            </Pressable>
-            <Text style={{ color: t.ink3, fontSize: 11, textAlign: 'center', marginTop: 12, lineHeight: 16 }}>Review is generated from the figures you entered — not financial advice.</Text>
+            <Section>
+              <SectionHead title="Where to improve" />
+              {flagList(r.improvements)}
+            </Section>
+
+            <Rule />
+
+            <Section>
+              <Cta label="Create a promotion" wide onPress={() => router.push('/(owner)/promotions')} />
+              <View style={{ height: sp.sm }} />
+              <Ghost label="Update my figures" onPress={openEditor} />
+              <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.md }}>
+                Review is generated from the figures you entered — not financial advice.
+              </Text>
+            </Section>
           </>
         ) : null}
+
+        <Rule />
+
+        <Section>{connectRow}</Section>
+
       </ScrollView>
     </SafeAreaView>
   );

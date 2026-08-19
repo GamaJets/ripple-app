@@ -1,8 +1,19 @@
 // Owner · White-label Studio. Set the app name and pick the primary palette
 // (one of 10). Applies live app-wide and persists. Optional custom accent too.
+//
+// Rebuilt on the instrument-panel kit (`src/ui/kit`) and the scale
+// (`src/theme/scale`). No hero: this is a settings screen — there is no live
+// metric to lead with, so it leads with the thing you change. The colour
+// swatches stay: on a white-label screen the colours *are* the content.
+//
+// Removed: the live preview used to show a "Daily target · 1,980 kcal" tile.
+// That number belonged to nobody — no provider, no prop, no computation — and
+// the preview demonstrates the palette just as well without inventing a figure.
 import { View, Text, TextInput, Pressable, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme, useThemeControls } from '../../src/ui/components';
+import { Rule, Section, SectionHead, Ghost } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/theme/scale';
 import { useBrand } from '../../src/ui/brand';
 import { Icon } from '../../src/ui/Icon';
 
@@ -10,51 +21,74 @@ export default function OwnerBrand() {
   const t = useTheme();
   const { palette, setPalette, palettes, setAccent } = useThemeControls();
   const { appName, setAppName } = useBrand();
-  const inp = { color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15 } as const;
+  const inp = { ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md } as const;
+  const G = layout.gutter;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
-        <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800' }}>White-label Studio</Text>
-        <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 16 }}>Rebrand the whole app — applies live and persists</Text>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
 
-        <View style={{ backgroundColor: t.surface, borderRadius: 18, borderWidth: 1, borderColor: t.ring, padding: 16, marginBottom: 14 }}>
-          <Text style={{ color: t.ink2, fontSize: 13, fontWeight: '700', marginBottom: 8 }}>App name</Text>
+        <View style={{ paddingTop: sp.md }}>
+          <Text style={{ ...ty.micro, color: t.ink3 }}>Owner</Text>
+          <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>White-label Studio</Text>
+          <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>Rebrand the whole app — applies live and persists</Text>
+        </View>
+
+        <Section>
+          <SectionHead title="App name" />
           <TextInput value={appName} onChangeText={setAppName} placeholder="Your brand" placeholderTextColor={t.ink3} style={inp} />
-        </View>
+        </Section>
 
-        <Text style={{ color: t.ink2, fontSize: 13, fontWeight: '700', marginBottom: 4 }}>Primary palette</Text>
-        <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 12 }}>Tap a colour — the whole app rethemes instantly.</Text>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 8 }}>
-          {palettes.map((p) => {
-            const on = p.key === palette;
-            return (
-              <Pressable key={p.key} onPress={() => { setAccent(null); setPalette(p.key); }} accessibilityLabel={p.name} style={{ width: 52, height: 52, borderRadius: 14, backgroundColor: p.theme.bg, borderWidth: on ? 3 : 1, borderColor: on ? t.brand : t.ring, alignItems: 'center', justifyContent: 'center' }}>
-                <View style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: p.theme.brand }} />
-                {on ? <View style={{ position: 'absolute', bottom: 3, right: 3 }}><Icon name="check" size={13} color={t.brand} /></View> : null}
-              </Pressable>
-            );
-          })}
-        </View>
-        <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 18 }}>Current: {palettes.find((p) => p.key === palette)?.name}</Text>
+        <Rule />
 
-        <Text style={{ color: t.ink2, fontSize: 13, fontWeight: '700', marginBottom: 8 }}>Live preview</Text>
-        <View style={{ backgroundColor: t.surface, borderRadius: 18, borderWidth: 1, borderColor: t.ring, overflow: 'hidden' }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, padding: 14, backgroundColor: t.surface2, borderBottomWidth: 1, borderBottomColor: t.ring }}>
-            <View style={{ width: 32, height: 32, borderRadius: 9, backgroundColor: t.brand }} />
-            <Text style={{ color: t.ink, fontWeight: '800', fontSize: 16 }}>{appName}</Text>
+        {/* ── the colours are the content, not decoration ────────────────── */}
+        <Section>
+          <SectionHead title="Primary palette" note={palettes.find((p) => p.key === palette)?.name} />
+          <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>Tap a colour — the whole app rethemes instantly.</Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.md }}>
+            {palettes.map((p) => {
+              const on = p.key === palette;
+              return (
+                <Pressable key={p.key} onPress={() => { setAccent(null); setPalette(p.key); }} accessibilityRole="button" accessibilityLabel={p.name}
+                  style={{ width: 52, height: 52, borderRadius: radius.md, backgroundColor: p.theme.bg, borderWidth: on ? 2 : hairline, borderColor: on ? t.brand : t.ring, alignItems: 'center', justifyContent: 'center' }}>
+                  <View style={{ width: 22, height: 22, borderRadius: radius.pill, backgroundColor: p.theme.brand }} />
+                  {on ? <View style={{ position: 'absolute', bottom: 3, right: 3 }}><Icon name="check" size={13} color={t.brand} /></View> : null}
+                </Pressable>
+              );
+            })}
           </View>
-          <View style={{ padding: 16 }}>
-            <View style={{ backgroundColor: t.surface2, borderRadius: 12, padding: 14, marginBottom: 12 }}><Text style={{ color: t.ink3, fontSize: 12 }}>Daily target</Text><Text style={{ color: t.ink, fontSize: 22, fontWeight: '800' }}>1,980<Text style={{ fontSize: 12, color: t.ink3 }}> kcal</Text></Text></View>
-            <View style={{ backgroundColor: t.brand, borderRadius: 12, paddingVertical: 13, alignItems: 'center' }}><Text style={{ color: t.brandInk, fontWeight: '800' }}>Start today's workout</Text></View>
+        </Section>
+
+        <Rule />
+
+        {/* ── live preview: chrome and the primary action, no invented data ─ */}
+        <Section>
+          <SectionHead title="Live preview" />
+          <View style={{ backgroundColor: t.surface, borderRadius: radius.md, overflow: 'hidden', ...elevation.e1 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, padding: sp.lg, backgroundColor: t.surface2 }}>
+              <View style={{ width: 32, height: 32, borderRadius: radius.sm, backgroundColor: t.brand }} />
+              <Text style={{ ...ty.head, color: t.ink }}>{appName}</Text>
+            </View>
+            <View style={{ padding: sp.lg }}>
+              <Text style={{ ...ty.body, color: t.ink2, marginBottom: sp.lg }}>Body copy, headings and the primary action, in your colours.</Text>
+              <View style={{ backgroundColor: t.brand, borderRadius: radius.sm, paddingVertical: 13, alignItems: 'center' }}>
+                <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>Start today's workout</Text>
+              </View>
+            </View>
           </View>
-        </View>
+        </Section>
 
-        <Pressable onPress={() => { setAccent(null); setPalette('teal'); setAppName('Repple'); Alert.alert('Reset', 'Branding restored to Repple defaults.'); }} style={{ marginTop: 14, alignSelf: 'flex-start', paddingVertical: 8 }}>
-          <Text style={{ color: t.ink3, fontWeight: '700', fontSize: 13 }}>Reset to default branding</Text>
-        </Pressable>
+        <Rule />
 
-        <Text style={{ color: t.ink3, fontSize: 12, marginTop: 10 }}>On Studio plans each trainer gets this panel for their own client app — their logo, colours, and domain. You keep the platform fee.</Text>
+        <Section>
+          <View style={{ alignSelf: 'flex-start' }}>
+            <Ghost label="Reset to default branding"
+              onPress={() => { setAccent(null); setPalette('teal'); setAppName('Repple'); Alert.alert('Reset', 'Branding restored to Repple defaults.'); }} />
+          </View>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
+            On Studio plans each trainer gets this panel for their own client app — their logo, colours, and domain. You keep the platform fee.
+          </Text>
+        </Section>
       </ScrollView>
     </SafeAreaView>
   );

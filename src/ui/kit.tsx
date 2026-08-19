@@ -190,7 +190,7 @@ export function ListRow({ icon, title, note, onPress, tone }: {
 }) {
   const t = useTheme();
   return (
-    <Pressable onPress={onPress}
+    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={note ? `${title}. ${note}` : title}
       style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
       <View style={{ width: 34, height: 34, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
         <Icon name={icon} size={17} color={tone || t.brand} />
@@ -206,15 +206,19 @@ export function ListRow({ icon, title, note, onPress, tone }: {
 
 /* ── controls ─────────────────────────────────────────────────────────────── */
 
-export function Cta({ label, onPress, tone, wide }: { label: string; onPress: () => void; tone?: string; wide?: boolean }) {
+export function Cta({ label, onPress, tone, wide, disabled }: {
+  label: string; onPress: () => void; tone?: string; wide?: boolean; disabled?: boolean;
+}) {
   const t = useTheme();
   return (
-    <Pressable onPress={onPress} style={{
-      backgroundColor: tone || t.brand, borderRadius: radius.sm,
-      paddingVertical: 11, paddingHorizontal: wide ? 0 : sp.lg,
-      alignItems: 'center', ...(wide ? { alignSelf: 'stretch' } : null),
-    }}>
-      <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>{label}</Text>
+    <Pressable onPress={onPress} disabled={disabled}
+      accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ disabled: !!disabled }}
+      style={{
+        backgroundColor: disabled ? t.surface2 : (tone || t.brand), borderRadius: radius.sm,
+        paddingVertical: 11, paddingHorizontal: wide ? 0 : sp.lg,
+        alignItems: 'center', ...(wide ? { alignSelf: 'stretch' } : null),
+      }}>
+      <Text style={{ ...ty.label, fontWeight: '600', color: disabled ? t.ink3 : t.brandInk }}>{label}</Text>
     </Pressable>
   );
 }

@@ -2,6 +2,17 @@
 // starting stats, writing into the shared client data so the app is tailored
 // from the first screen. Reached via replace from the Welcome screen after
 // creating an account.
+//
+// Rebuilt on the instrument-panel kit (`src/ui/kit`) and the scale
+// (`src/theme/scale`). Every step, route and write is unchanged — only the
+// presentation moved: no hero (nothing is measured yet), option rows lost
+// their 1px borders for a fill, and the footer buttons are <Cta>/<Ghost>.
+//
+// Also removed: the Starting-stats step opened with the weight and height
+// fields pre-filled from the client-data DEFAULTS (70 kg / 170 cm) — numbers
+// nobody had entered, presented as the user's own, and written to their
+// profile verbatim if they just tapped Finish. Both fields now start empty and
+// are only saved when the user actually types a value.
 import { useState } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView, Image, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -11,11 +22,13 @@ import { useTheme } from '../src/ui/components';
 import { useClientData } from '../src/ui/clientData';
 import type { Goal, Diet } from '../src/lib/types';
 import { Icon } from '../src/ui/Icon';
+import { Cta, Ghost } from '../src/ui/kit';
+import { sp, layout, radius, type as ty } from '../src/theme/scale';
 
-const GOALS: { id: Goal; label: string; icon: string }[] = [
-  { id: 'fatloss', label: 'Fat Loss', icon: '' },
-  { id: 'tone', label: 'Tone', icon: '' },
-  { id: 'muscle', label: 'Build Muscle', icon: '' },
+const GOALS: { id: Goal; label: string }[] = [
+  { id: 'fatloss', label: 'Fat Loss' },
+  { id: 'tone', label: 'Tone' },
+  { id: 'muscle', label: 'Build Muscle' },
 ];
 const DIETS: { id: Diet; label: string }[] = [
   { id: 'meat', label: 'Meat' }, { id: 'vegetarian', label: 'Vegetarian' }, { id: 'vegan', label: 'Vegan' }, { id: 'paleo', label: 'Paleo' }, { id: 'keto', label: 'Keto' },
@@ -27,8 +40,9 @@ export default function Onboarding() {
   const cd = useClientData();
   const [step, setStep] = useState(0);
   const [role, setRole] = useState<'client' | 'trainer' | 'owner'>('client');
-  const [weight, setWeight] = useState(String(Math.round(cd.weightKg)));
-  const [height, setHeight] = useState(String(cd.heightCm));
+  // Empty, not pre-filled: these are the user's own numbers or they're nothing.
+  const [weight, setWeight] = useState('');
+  const [height, setHeight] = useState('');
   const [cmode, setCmode] = useState<'online' | 'inperson' | 'solo'>('online');
 
   // Steps: 0 role. For client: 1 photo, 2 goal, 3 diet, 4 stats. Others finish at role.
@@ -59,79 +73,86 @@ export default function Onboarding() {
   };
   const back = () => { if (step > 0) setStep(step - 1); };
 
-  const Btn = ({ label, onPress, primary }: { label: string; onPress: () => void; primary?: boolean }) => (
-    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={label} style={{ flex: primary ? 2 : 1, paddingVertical: 15, borderRadius: 14, alignItems: 'center', backgroundColor: primary ? t.brand : t.surface2, borderWidth: 1, borderColor: primary ? t.brand : t.ring }}>
-      <Text style={{ color: primary ? t.brandInk : t.ink2, fontWeight: '800', fontSize: 15 }}>{label}</Text>
+  const lab = { ...ty.caption, color: t.ink2, marginBottom: 6 } as const;
+  const inp = { ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 } as const;
+
+  /** One selectable option row: quiet fill when off, brand when on. */
+  const Option = ({ on, onPress, label, note, icon, mark }: {
+    on: boolean; onPress: () => void; label: string; note?: string;
+    icon?: 'me' | 'people' | 'grid'; mark?: 'check' | 'radio';
+  }) => (
+    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={note ? `${label}. ${note}` : label}
+      style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, borderRadius: radius.sm, padding: sp.lg, marginBottom: sp.sm, backgroundColor: on ? t.brand : t.surface2 }}>
+      {mark === 'radio' ? (
+        <View style={{ width: 20, height: 20, borderRadius: radius.pill, borderWidth: 2, borderColor: on ? t.brandInk : t.ink3, alignItems: 'center', justifyContent: 'center' }}>
+          {on ? <View style={{ width: 10, height: 10, borderRadius: radius.pill, backgroundColor: t.brandInk }} /> : null}
+        </View>
+      ) : null}
+      {icon ? <Icon name={icon} size={22} color={on ? t.brandInk : t.brand} /> : null}
+      <View style={{ flex: 1 }}>
+        <Text style={{ ...ty.body, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink }}>{label}</Text>
+        {note ? <Text style={{ ...ty.caption, color: on ? t.brandInk : t.ink3, marginTop: 2, opacity: on ? 0.85 : 1 }}>{note}</Text> : null}
+      </View>
+      {mark === 'check' && on ? <Icon name="check" size={16} color={t.brandInk} /> : null}
     </Pressable>
   );
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
       <Stack.Screen options={{ headerShown: false }} />
-      <ScrollView contentContainerStyle={{ padding: 22, paddingTop: 30, paddingBottom: 30, flexGrow: 1 }} keyboardShouldPersistTaps="handled">
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingTop: sp.xxl, paddingBottom: sp.xxl, flexGrow: 1 }} keyboardShouldPersistTaps="handled">
         {/* progress */}
-        <View style={{ height: 6, borderRadius: 3, backgroundColor: t.surface3, overflow: 'hidden', marginBottom: 28 }}>
-          <View style={{ height: 6, borderRadius: 3, backgroundColor: t.brand, width: `${pct}%` }} />
+        <View accessibilityRole="progressbar" accessibilityLabel={`Step ${step + 1} of ${totalSteps}`}
+          style={{ height: 3, borderRadius: 2, backgroundColor: t.surface3, overflow: 'hidden', marginBottom: sp.xl }}>
+          <View style={{ height: 3, borderRadius: 2, backgroundColor: t.brand, width: `${pct}%` }} />
         </View>
 
         {step === 0 && (
           <View>
-            <Text style={{ color: t.ink, fontSize: 26, fontWeight: '800', marginBottom: 6 }}>Welcome to Repple</Text>
-            <Text style={{ color: t.ink3, fontSize: 15, marginBottom: 24 }}>How will you use the app?</Text>
-            {([['client', 'me', 'I\'m training', 'Follow a program, meals & progress'], ['trainer', 'people', 'I\'m a coach', 'Manage clients & schedule'], ['owner', 'grid', 'I run the platform', 'Trainers, billing & white-label']] as const).map(([id, icon, title, sub]) => {
-              const on = role === id;
-              return (
-                <Pressable key={id} onPress={() => setRole(id as any)} accessibilityRole="button" style={{ flexDirection: 'row', alignItems: 'center', gap: 14, borderRadius: 16, padding: 16, marginBottom: 12, backgroundColor: on ? t.brand : t.surface, borderWidth: 1, borderColor: on ? t.brand : t.ring }}>
-                  <Icon name={icon as any} size={24} color={on ? t.brandInk : t.brand} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ color: on ? t.brandInk : t.ink, fontWeight: '800', fontSize: 16 }}>{title}</Text>
-                    <Text style={{ color: on ? t.brandInk : t.ink3, fontSize: 12, opacity: on ? 0.85 : 1 }}>{sub}</Text>
-                  </View>
-                  {on ? <Icon name="check" size={16} color={t.brandInk} /> : null}
-                </Pressable>
-              );
-            })}
+            <Text style={{ ...ty.micro, color: t.ink3 }}>Step {step + 1} of {totalSteps}</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Welcome to Repple</Text>
+            <Text style={{ ...ty.body, color: t.ink3, marginTop: sp.sm, marginBottom: sp.xl }}>How will you use the app?</Text>
+            {([['client', 'me', 'I\'m training', 'Follow a program, meals & progress'], ['trainer', 'people', 'I\'m a coach', 'Manage clients & schedule'], ['owner', 'grid', 'I run the platform', 'Trainers, billing & white-label']] as const).map(([id, icon, title, sub]) => (
+              <Option key={id} on={role === id} onPress={() => setRole(id as any)} label={title} note={sub} icon={icon} mark="check" />
+            ))}
           </View>
         )}
 
         {role === 'client' && step === 1 && (
           <View style={{ alignItems: 'center' }}>
-            <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800', marginBottom: 6, alignSelf: 'flex-start' }}>Add a photo</Text>
-            <Text style={{ color: t.ink3, fontSize: 15, marginBottom: 24, alignSelf: 'flex-start' }}>Optional — helps your coach recognise you.</Text>
-            {cd.photo ? <Image source={{ uri: cd.photo }} style={{ width: 120, height: 120, borderRadius: 60, marginBottom: 20 }} /> : <View style={{ width: 120, height: 120, borderRadius: 60, backgroundColor: t.surface2, borderWidth: 1, borderColor: t.ring, alignItems: 'center', justifyContent: 'center', marginBottom: 20 }}><Icon name="camera" size={40} color={t.ink3} /></View>}
-            <View style={{ flexDirection: 'row', gap: 10, alignSelf: 'stretch' }}>
-              <Btn label="Upload" onPress={() => pickPhoto(false)} />
-              <Btn label="Take Photo" onPress={() => pickPhoto(true)} />
+            <Text style={{ ...ty.micro, color: t.ink3, alignSelf: 'flex-start' }}>Step {step + 1} of {totalSteps}</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 5, alignSelf: 'flex-start' }}>Add a photo</Text>
+            <Text style={{ ...ty.body, color: t.ink3, marginTop: sp.sm, marginBottom: sp.xl, alignSelf: 'flex-start' }}>Optional — helps your coach recognise you.</Text>
+            {cd.photo ? <Image source={{ uri: cd.photo }} style={{ width: 120, height: 120, borderRadius: radius.pill, marginBottom: sp.xl }} /> : <View style={{ width: 120, height: 120, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center', marginBottom: sp.xl }}><Icon name="camera" size={40} color={t.ink3} /></View>}
+            <View style={{ flexDirection: 'row', gap: sp.sm, alignSelf: 'stretch' }}>
+              <View style={{ flex: 1 }}><Ghost label="Upload" onPress={() => pickPhoto(false)} /></View>
+              <View style={{ flex: 1 }}><Ghost label="Take Photo" onPress={() => pickPhoto(true)} /></View>
             </View>
           </View>
         )}
 
         {role === 'client' && step === 2 && (
           <View>
-            <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800', marginBottom: 6 }}>What's your goal?</Text>
-            <Text style={{ color: t.ink3, fontSize: 15, marginBottom: 24 }}>We tailor workouts & meals to this.</Text>
-            {GOALS.map((g) => {
-              const on = cd.goal === g.id;
-              return (
-                <Pressable key={g.id} onPress={() => cd.setGoal(g.id)} accessibilityRole="button" style={{ flexDirection: 'row', alignItems: 'center', gap: 14, borderRadius: 16, padding: 16, marginBottom: 12, backgroundColor: on ? t.brand : t.surface, borderWidth: 1, borderColor: on ? t.brand : t.ring }}>
-                  <Text style={{ flex: 1, color: on ? t.brandInk : t.ink, fontWeight: '800', fontSize: 16 }}>{g.label}</Text>
-                  {on ? <Icon name="check" size={16} color={t.brandInk} /> : null}
-                </Pressable>
-              );
-            })}
+            <Text style={{ ...ty.micro, color: t.ink3 }}>Step {step + 1} of {totalSteps}</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>What's your goal?</Text>
+            <Text style={{ ...ty.body, color: t.ink3, marginTop: sp.sm, marginBottom: sp.xl }}>We tailor workouts & meals to this.</Text>
+            {GOALS.map((g) => (
+              <Option key={g.id} on={cd.goal === g.id} onPress={() => cd.setGoal(g.id)} label={g.label} mark="check" />
+            ))}
           </View>
         )}
 
         {role === 'client' && step === 3 && (
           <View>
-            <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800', marginBottom: 6 }}>Diet preference</Text>
-            <Text style={{ color: t.ink3, fontSize: 15, marginBottom: 24 }}>Your meal plan is built around this.</Text>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+            <Text style={{ ...ty.micro, color: t.ink3 }}>Step {step + 1} of {totalSteps}</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Diet preference</Text>
+            <Text style={{ ...ty.body, color: t.ink3, marginTop: sp.sm, marginBottom: sp.xl }}>Your meal plan is built around this.</Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
               {DIETS.map((d) => {
                 const on = cd.diet === d.id;
                 return (
-                  <Pressable key={d.id} onPress={() => cd.setDiet(d.id)} accessibilityRole="button" style={{ paddingHorizontal: 18, paddingVertical: 12, borderRadius: 20, backgroundColor: on ? t.brand : t.surface, borderWidth: 1, borderColor: on ? t.brand : t.ring }}>
-                    <Text style={{ color: on ? t.brandInk : t.ink2, fontWeight: '700', fontSize: 14 }}>{d.label}</Text>
+                  <Pressable key={d.id} onPress={() => cd.setDiet(d.id)} accessibilityRole="button" accessibilityLabel={d.label} style={{ paddingHorizontal: sp.lg, paddingVertical: sp.md, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface2 }}>
+                    <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{d.label}</Text>
                   </Pressable>
                 );
               })}
@@ -141,26 +162,27 @@ export default function Onboarding() {
 
         {role === 'client' && step === 4 && (
           <View>
-            <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800', marginBottom: 6 }}>Starting stats</Text>
-            <Text style={{ color: t.ink3, fontSize: 15, marginBottom: 24 }}>So we can set your calorie & macro targets.</Text>
-            <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>Weight (kg)</Text>
-            <TextInput value={weight} onChangeText={setWeight} keyboardType="numeric" placeholderTextColor={t.ink3} accessibilityLabel="Weight in kilograms" style={{ color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 13, fontSize: 15, marginBottom: 16 }} />
-            <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>Height (cm)</Text>
-            <TextInput value={height} onChangeText={setHeight} keyboardType="numeric" placeholderTextColor={t.ink3} accessibilityLabel="Height in centimetres" style={{ color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 13, fontSize: 15 }} />
-            <Text style={{ color: t.ink3, fontSize: 12, marginTop: 14 }}>You can refine these any time in your profile, and an InBody scan updates them automatically.</Text>
-            <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 18, marginBottom: 8 }}>How are you coaching?</Text>
-            {([['online', 'Online coach', 'Remote coaching & messaging'], ['inperson', 'In-person coach', 'Coach trains you in person'], ['solo', 'On my own', 'Self-managed with AI & tools']] as const).map(([id, label, note]) => { const on = cmode === id; return (
-              <Pressable key={id} onPress={() => setCmode(id)} style={{ flexDirection: 'row', alignItems: 'center', gap: 11, borderRadius: 12, padding: 13, marginBottom: 8, backgroundColor: on ? t.brand : t.surface, borderWidth: 1, borderColor: on ? t.brand : t.ring }}>
-                <View style={{ width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: on ? t.brandInk : t.ring, alignItems: 'center', justifyContent: 'center' }}>{on ? <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: t.brandInk }} /> : null}</View>
-                <View style={{ flex: 1 }}><Text style={{ color: on ? t.brandInk : t.ink, fontWeight: '700', fontSize: 14 }}>{label}</Text><Text style={{ color: on ? t.brandInk : t.ink3, fontSize: 11.5, opacity: on ? 0.85 : 1 }}>{note}</Text></View>
-              </Pressable>); })}
+            <Text style={{ ...ty.micro, color: t.ink3 }}>Step {step + 1} of {totalSteps}</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Starting stats</Text>
+            <Text style={{ ...ty.body, color: t.ink3, marginTop: sp.sm, marginBottom: sp.xl }}>So we can set your calorie & macro targets.</Text>
+            <Text style={lab}>Weight (kg)</Text>
+            <TextInput value={weight} onChangeText={setWeight} keyboardType="numeric" placeholder="kg" placeholderTextColor={t.ink3} accessibilityLabel="Weight in kilograms" style={{ ...inp, marginBottom: sp.lg }} />
+            <Text style={lab}>Height (cm)</Text>
+            <TextInput value={height} onChangeText={setHeight} keyboardType="numeric" placeholder="cm" placeholderTextColor={t.ink3} accessibilityLabel="Height in centimetres" style={inp} />
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>You can add or refine these any time in your profile, and an InBody scan updates them automatically.</Text>
+            <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.xl, marginBottom: sp.sm }}>How are you coaching?</Text>
+            {([['online', 'Online coach', 'Remote coaching & messaging'], ['inperson', 'In-person coach', 'Coach trains you in person'], ['solo', 'On my own', 'Self-managed with AI & tools']] as const).map(([id, label, note]) => (
+              <Option key={id} on={cmode === id} onPress={() => setCmode(id)} label={label} note={note} mark="radio" />
+            ))}
           </View>
         )}
 
         <View style={{ flex: 1 }} />
-        <View style={{ flexDirection: 'row', gap: 10, marginTop: 28 }}>
-          {step > 0 ? <Btn label="Back" onPress={back} /> : null}
-          <Btn label={role !== 'client' ? 'Enter Portal' : step >= clientSteps - 1 ? 'Finish' : step === 1 ? 'Continue' : 'Continue'} onPress={next} primary />
+        <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.xl }}>
+          {step > 0 ? <View style={{ flex: 1 }}><Ghost label="Back" onPress={back} /></View> : null}
+          <View style={{ flex: 2 }}>
+            <Cta wide onPress={next} label={role !== 'client' ? 'Enter Portal' : step >= clientSteps - 1 ? 'Finish' : step === 1 ? 'Continue' : 'Continue'} />
+          </View>
         </View>
       </ScrollView>
     </SafeAreaView>

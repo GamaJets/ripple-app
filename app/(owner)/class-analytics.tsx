@@ -1,11 +1,24 @@
 // Owner · Class analytics & payroll. Reads class attendance (per class × branch ×
 // trainer × time) to show fill rates, and computes trainer pay from check-ins at a
-// per-attendee rate — the payroll basis. Live via class_attendance_summary; demo otherwise.
+// per-attendee rate — the payroll basis.
+//
+// Every figure on this screen comes from `class_attendance_summary`; there is no
+// demo fallback, so an empty range says "no classes" rather than inventing
+// attendance for people who were never checked in. Pay-per-attendee is the one
+// number you type in — payroll is check-ins × that rate, nothing else.
+//
+// Rebuilt on the instrument-panel kit (`src/ui/kit`) and the scale
+// (`src/theme/scale`): eleven bordered boxes became hairline-separated sections,
+// payroll became the screen's one hero figure, and the Georgia serif header and
+// the 12.5/11.5px font sizes are gone.
 import { useEffect, useMemo, useState } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
+import type { Theme } from '../../src/theme/tokens';
+import { Rule, Section, SectionHead, Hero, KpiRow, Ghost } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { classSummary, type ClassSummaryRow } from '../../src/lib/classAttendance';
 
 type Range = 'week' | 'month' | 'season';
@@ -15,6 +28,24 @@ function rangeFrom(days: number): { from: string; to: string } {
   // Fixed "now" isn't available deterministically here; use Date at call time.
   const now = new Date(); const to = new Date(now); const from = new Date(now); from.setDate(from.getDate() - days);
   return { from: from.toISOString(), to: to.toISOString() };
+}
+
+/**
+ * One bar of a ranked list. 3px on a dim track, same mark as <Meter/> — `dim`
+ * separates the two ranked lists without reaching for a status colour.
+ */
+function Bar({ t, label, note, pct, dim }: { t: Theme; label: string; note: string; pct: number; dim?: boolean }) {
+  return (
+    <View style={{ marginTop: sp.md }}>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: sp.md }}>
+        <Text style={{ ...ty.caption, color: t.ink2, flex: 1 }} numberOfLines={1}>{label}</Text>
+        <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{note}</Text>
+      </View>
+      <View style={{ height: 3, borderRadius: 2, backgroundColor: t.surface3, marginTop: 7, overflow: 'hidden' }}>
+        <View style={{ height: 3, borderRadius: 2, width: `${pct}%`, backgroundColor: t.brand, opacity: dim ? 0.45 : 1 }} />
+      </View>
+    </View>
+  );
 }
 
 export default function OwnerClassAnalytics() {
@@ -50,84 +81,124 @@ export default function OwnerClassAnalytics() {
   const byKind = useMemo(() => byGroup((r) => r.kind || r.title), [rows]);
   const maxBranch = Math.max(1, ...byBranch.map(([, v]) => v.attended));
   const maxKind = Math.max(1, ...byKind.map(([, v]) => v.attended));
+  const G = layout.gutter;
+
+  const rateField = (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginBottom: sp.md }}>
+      <Text style={{ ...ty.label, color: t.ink3, flex: 1 }}>Pay per attendee</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md }}>
+        <Text style={{ ...ty.label, color: t.ink3 }}>AED</Text>
+        <TextInput value={rate} onChangeText={setRate} keyboardType="numeric" accessibilityLabel="Pay per attendee in dirhams"
+          style={{ ...ty.body, ...numeric, color: t.ink, paddingVertical: 9, minWidth: 44 }} />
+      </View>
+    </View>
+  );
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
-        <Pressable onPress={() => router.back()} hitSlop={8} style={{ marginBottom: 8 }}><Text style={{ color: t.brand, fontWeight: '700', fontSize: 15 }}>‹ Back</Text></Pressable>
-        <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia' }}>Classes & payroll</Text>
-        <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 16, fontSize: 14 }}>Attendance drives trainer pay and class performance.</Text>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
 
-        <View style={{ flexDirection: 'row', gap: 8, marginBottom: 16 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
+          <Ghost icon="back" onPress={() => router.back()} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ ...ty.micro, color: t.ink3 }}>Attendance drives pay</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Classes & payroll</Text>
+          </View>
+        </View>
+
+        {/* ── range ──────────────────────────────────────────────────────── */}
+        <View style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: radius.sm, padding: 3, marginTop: sp.lg }}>
           {RANGES.map(([k, label]) => (
-            <Pressable key={k} onPress={() => setRange(k)} style={{ flex: 1, alignItems: 'center', paddingVertical: 9, borderRadius: 10, backgroundColor: range === k ? t.brand : t.surface2, borderWidth: 1, borderColor: range === k ? t.brand : t.ring }}>
-              <Text style={{ color: range === k ? t.brandInk : t.ink2, fontWeight: '800', fontSize: 12.5 }}>{label}</Text>
+            <Pressable key={k} onPress={() => setRange(k)} style={{ flex: 1, alignItems: 'center', paddingVertical: 9, borderRadius: radius.sm, backgroundColor: range === k ? t.brand : 'transparent' }}>
+              <Text style={{ ...ty.label, fontWeight: '600', color: range === k ? t.brandInk : t.ink3 }}>{label}</Text>
             </Pressable>
           ))}
         </View>
 
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 16 }}>
-          {[['Classes', String(totals.classes)], ['Check-ins', String(totals.attended)], ['Avg fill', totals.fill + '%'], ['Trainer payroll', 'AED ' + totals.payroll.toLocaleString()]].map(([l, v]) => (
-            <View key={l} style={{ flexBasis: '47%', flexGrow: 1, backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 14, padding: 14 }}>
-              <Text style={{ color: t.ink3, fontSize: 11.5 }}>{l}</Text>
-              <Text style={{ color: l === 'Trainer payroll' ? t.brand : t.ink, fontSize: 22, fontWeight: '800', marginTop: 4 }}>{v}</Text>
-            </View>
-          ))}
-        </View>
+        {rows.length === 0 ? (
+          <Section>
+            <Text style={{ ...ty.head, color: t.ink }}>No classes in this range.</Text>
+            <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
+              Attendance, fill rates and trainer payroll appear here once classes run and trainers check members in.
+              Nothing is estimated — payroll is check-ins × your per-attendee rate.
+            </Text>
+          </Section>
+        ) : (<>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-          <Text style={{ color: t.ink3, fontSize: 13 }}>Pay per attendee</Text>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12 }}>
-            <Text style={{ color: t.ink3, fontSize: 14 }}>AED</Text>
-            <TextInput value={rate} onChangeText={setRate} keyboardType="numeric" style={{ color: t.ink, paddingVertical: 9, fontSize: 15, minWidth: 44 }} />
-          </View>
-        </View>
+          {/* ── the hero: what this screen is for ────────────────────────── */}
+          <Hero
+            label="Trainer payroll (AED)"
+            figure={totals.payroll.toLocaleString()}
+            note={`${totals.attended} check-ins × AED ${rate$} · ${totals.classes} classes · ${totals.fill}% avg fill`}
+          />
 
-        {/* Payroll by trainer */}
-        <View style={{ backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 16, padding: 16, marginBottom: 16 }}>
-          <Text style={{ color: t.ink, fontWeight: '800', fontSize: 15, marginBottom: 4 }}>Payroll by trainer</Text>
-          <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 12 }}>Check-ins × AED {rate$} per attendee</Text>
-          {byTrainer.map(([name, v]) => (
-            <View key={name} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: t.ring }}>
-              <View><Text style={{ color: t.ink, fontWeight: '700', fontSize: 14 }}>{name}</Text><Text style={{ color: t.ink3, fontSize: 12 }}>{v.classes} classes · {v.attended} check-ins</Text></View>
-              <Text style={{ color: t.brand, fontWeight: '800', fontSize: 15 }}>AED {(v.attended * rate$).toLocaleString()}</Text>
-            </View>
-          ))}
-          <Text style={{ color: t.ink3, fontSize: 11.5, marginTop: 10 }}>Export feeds accounting/payroll once Stripe & accounting are connected.</Text>
-        </View>
+          <Rule />
 
-        {/* Attendance by branch */}
-        <View style={{ backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 16, padding: 16, marginBottom: 16 }}>
-          <Text style={{ color: t.ink, fontWeight: '800', fontSize: 15, marginBottom: 12 }}>Attendance by branch</Text>
-          {byBranch.map(([b, v]) => (
-            <View key={b} style={{ marginBottom: 11 }}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}><Text style={{ color: t.ink2, fontSize: 12.5 }}>{b}</Text><Text style={{ color: t.ink, fontWeight: '700', fontSize: 12.5 }}>{v.attended} <Text style={{ color: t.ink3 }}>/ {v.booked}</Text></Text></View>
-              <View style={{ height: 9, backgroundColor: t.surface2, borderRadius: 5 }}><View style={{ height: 9, width: `${Math.round((v.attended / maxBranch) * 100)}%`, backgroundColor: t.brand, borderRadius: 5 }} /></View>
-            </View>
-          ))}
-        </View>
+          <Section>
+            <SectionHead title="This range" />
+            <KpiRow items={[
+              { label: 'Classes', value: String(totals.classes) },
+              { label: 'Check-ins', value: String(totals.attended) },
+              { label: 'Avg fill', value: String(totals.fill), unit: '%' },
+            ]} />
+          </Section>
 
-        {/* Attendance by class type */}
-        <View style={{ backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 16, padding: 16, marginBottom: 16 }}>
-          <Text style={{ color: t.ink, fontWeight: '800', fontSize: 15, marginBottom: 12 }}>Popularity by class type</Text>
-          {byKind.map(([k, v]) => (
-            <View key={k} style={{ marginBottom: 11 }}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}><Text style={{ color: t.ink2, fontSize: 12.5 }}>{k}</Text><Text style={{ color: t.ink, fontWeight: '700', fontSize: 12.5 }}>{v.attended} <Text style={{ color: t.ink3 }}>· {v.classes} run</Text></Text></View>
-              <View style={{ height: 9, backgroundColor: t.surface2, borderRadius: 5 }}><View style={{ height: 9, width: `${Math.round((v.attended / maxKind) * 100)}%`, backgroundColor: t.warn, borderRadius: 5 }} /></View>
-            </View>
-          ))}
-        </View>
+          <Rule />
 
-        {/* Class log */}
-        <View style={{ backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 16, padding: 16 }}>
-          <Text style={{ color: t.ink, fontWeight: '800', fontSize: 15, marginBottom: 12 }}>Classes</Text>
-          {rows.map((r) => (
-            <View key={r.classId} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: t.ring }}>
-              <View style={{ flex: 1 }}><Text style={{ color: t.ink, fontWeight: '700', fontSize: 13.5 }}>{r.title}</Text><Text style={{ color: t.ink3, fontSize: 11.5 }}>{r.branch} · {r.trainerName}</Text></View>
-              <Text style={{ color: r.attended >= r.booked ? t.good ?? t.brand : t.ink2, fontWeight: '800', fontSize: 13 }}>{r.attended}/{r.booked}</Text>
-            </View>
-          ))}
-        </View>
+          {/* ── payroll by trainer ───────────────────────────────────────── */}
+          <Section>
+            <SectionHead title="Payroll by trainer" note={`AED ${totals.payroll.toLocaleString()}`} />
+            {rateField}
+            {byTrainer.map(([name, v], i) => (
+              <View key={name} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{name}</Text>
+                  <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{v.classes} classes · {v.attended} check-ins</Text>
+                </View>
+                <Text style={{ ...ty.body, fontWeight: '600', ...numeric, color: t.ink }}>AED {(v.attended * rate$).toLocaleString()}</Text>
+              </View>
+            ))}
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+              Export feeds accounting/payroll once Stripe & accounting are connected.
+            </Text>
+          </Section>
+
+          <Rule />
+
+          {/* ── where the check-ins are ──────────────────────────────────── */}
+          <Section>
+            <SectionHead title="Attendance by branch" note={`${totals.attended} of ${totals.booked} booked`} />
+            {byBranch.map(([b, v]) => (
+              <Bar key={b} t={t} label={b} note={`${v.attended} / ${v.booked}`} pct={Math.round((v.attended / maxBranch) * 100)} />
+            ))}
+          </Section>
+
+          <Rule />
+
+          <Section>
+            <SectionHead title="Popularity by class type" />
+            {byKind.map(([k, v]) => (
+              <Bar key={k} t={t} label={k} note={`${v.attended} · ${v.classes} run`} pct={Math.round((v.attended / maxKind) * 100)} dim />
+            ))}
+          </Section>
+
+          <Rule />
+
+          {/* ── the log the numbers came from ────────────────────────────── */}
+          <Section>
+            <SectionHead title="Classes" note={`${rows.length} in range`} />
+            {rows.map((r, i) => (
+              <View key={r.classId} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{r.title}</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{r.branch} · {r.trainerName}</Text>
+                </View>
+                {r.attended >= r.booked ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.good }} /> : null}
+                <Text style={{ ...ty.body, fontWeight: '600', ...numeric, color: t.ink }}>{r.attended}/{r.booked}</Text>
+              </View>
+            ))}
+          </Section>
+        </>)}
       </ScrollView>
     </SafeAreaView>
   );

@@ -1,9 +1,25 @@
 // Owner · Growth. Acquisition/retention snapshot + an interactive promo-code
+//
+// Promo rows show the discount only. They used to append "· N redeemed", but
+// nothing in the codebase ever increments `redeemed` — the sole write is the
+// literal `redeemed: 0` at creation — so it was a permanently-zero counter
+// presented as a tracked redemption metric. Same defect was fixed on the
+// Promotions screen; this was the second render site.
 // tool: create referral/discount codes, toggle them on/off, track redemptions.
+//
+// Rebuilt on the instrument-panel kit (`src/ui/kit`) and the scale
+// (`src/theme/scale`): three bordered stat boxes and four stacked cards became
+// one hero figure plus hairline-separated sections, and the Georgia serif
+// header is gone.
 import { useState } from 'react';
 import { View, Text, ScrollView, Pressable, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
+import {
+  Rule, Section, SectionHead, Hero, KpiRow, Cta,
+} from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
+import { DistBar } from '../../src/ui/charts';
 import { usePromos } from '../../src/ui/promos';
 import { usePlatformTrainers } from '../../src/ui/trainers';
 import { platformRollup, cohorts, clientAnalytics, type TrainerLike } from '../../src/lib/ownerAnalytics';
@@ -40,103 +56,147 @@ export default function OwnerGrowth() {
     Alert.alert('Code created', `${code.trim().toUpperCase()} · ${disc}% off is now live.`);
   };
 
+  /** One labelled bar — the section's unit of comparison. */
+  const Bar = ({ label, right, pct, dim }: { label: string; right: string; pct: number; dim?: boolean }) => (
+    <View style={{ marginBottom: sp.lg }}>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+        <Text style={{ ...ty.caption, color: t.ink2 }}>{label}</Text>
+        <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{right}</Text>
+      </View>
+      <View style={{ height: 3, borderRadius: 2, backgroundColor: t.surface3, marginTop: 7, overflow: 'hidden' }}>
+        <View style={{ height: 3, borderRadius: 2, width: `${Math.max(0, Math.min(100, pct))}%`, backgroundColor: t.brand, opacity: dim ? 0.55 : 1 }} />
+      </View>
+    </View>
+  );
+
+  const G = layout.gutter;
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
-        <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia', textTransform: 'capitalize' }}>Growth</Text>
-        <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 16 }}>Acquisition &amp; retention</Text>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
 
-        <View style={{ flexDirection: 'row', gap: 12, marginBottom: 16 }}>
-          <View style={{ flex: 1, backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 14 }}><Text style={{ color: t.ink3, fontSize: 12, fontWeight: '700' }}>New this month</Text><Text style={{ color: t.ink, fontSize: 22, fontWeight: '800', marginTop: 4 }}>+{newThisMonth}</Text></View>
-          <View style={{ flex: 1, backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 14 }}><Text style={{ color: t.ink3, fontSize: 12, fontWeight: '700' }}>Suspended</Text><Text style={{ color: churnPct > 0 ? t.crit : t.brand, fontSize: 22, fontWeight: '800', marginTop: 4 }}>{churnPct}%</Text></View>
-          <View style={{ flex: 1, backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 14 }}><Text style={{ color: t.ink3, fontSize: 12, fontWeight: '700' }}>Trial→paid</Text><Text style={{ color: t.ink, fontSize: 22, fontWeight: '800', marginTop: 4 }}>{roll.trialConversionPct != null ? roll.trialConversionPct + '%' : '—'}</Text></View>
+        {/* ── header ─────────────────────────────────────────────────────── */}
+        <View style={{ paddingTop: sp.md }}>
+          <Text style={{ ...ty.micro, color: t.ink3 }}>Acquisition &amp; retention</Text>
+          <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Growth</Text>
         </View>
 
-        <View style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18, marginBottom: 16 }}>
-          <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16, marginBottom: 4 }}>Platform client analytics</Text>
-          <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 14 }}>End-clients across every trainer</Text>
-          <View style={{ flexDirection: 'row', gap: 10, marginBottom: 16 }}>
-            {[['Active clients', String(ca.total)], ['Engaged', ca.engagementPct + '%'], ['Avg / trainer', String(ca.avgPerTrainer)]].map(([l, v]) => (
-              <View key={l} style={{ flex: 1, backgroundColor: t.surface2, borderRadius: 12, borderWidth: 1, borderColor: t.ring, paddingVertical: 12, alignItems: 'center' }}>
-                <Text style={{ color: t.ink, fontWeight: '800', fontSize: 18 }}>{v}</Text>
-                <Text style={{ color: t.ink3, fontSize: 10.5, marginTop: 2 }}>{l}</Text>
-              </View>
+        {/* ── the hero ───────────────────────────────────────────────────── */}
+        <Hero
+          label={`New trainers · ${thisMonth}`}
+          figure={'+' + newThisMonth}
+          note={roll.trainers > 0
+            ? `${roll.trainers} on the platform · ${roll.paying} paying · ${roll.trial} on trial`
+            : 'No trainers on the platform yet — this fills in as they sign up.'}
+        />
+
+        <Rule />
+
+        {/* ── retention ──────────────────────────────────────────────────── */}
+        <Section>
+          <SectionHead title="Retention" />
+          <KpiRow items={[
+            { label: 'Suspended', value: String(churnPct), unit: '%', delta: `${roll.suspended} of ${roll.trainers}` },
+            { label: 'Trial→paid', value: roll.trialConversionPct != null ? String(roll.trialConversionPct) : '—', unit: roll.trialConversionPct != null ? '%' : undefined, delta: `${roll.paying} paying · ${roll.trial} trial` },
+            { label: 'End clients', value: String(ca.total), delta: `${ca.avgPerTrainer} avg / trainer` },
+          ]} />
+        </Section>
+
+        <Rule />
+
+        {/* ── platform client analytics ──────────────────────────────────── */}
+        <Section>
+          <SectionHead title="Platform clients" note="Across every trainer" />
+          <KpiRow items={[
+            { label: 'Active clients', value: String(ca.total) },
+            { label: 'Engaged', value: String(ca.engagementPct), unit: '%' },
+            { label: 'Avg / trainer', value: String(ca.avgPerTrainer) },
+          ]} />
+          <View style={{ marginTop: sp.xl }}>
+            <DistBar segments={[
+              { label: 'Engaged', value: ca.engaged, color: t.brand },
+              { label: 'At risk', value: ca.atRisk, color: t.warn },
+            ]} />
+            <View style={{ flexDirection: 'row', gap: sp.lg, marginTop: sp.md }}>
+              {([['Engaged', ca.engaged, t.brand], ['At risk', ca.atRisk, t.warn]] as const).map(([l, v, col]) => (
+                <View key={l} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: col }} />
+                  <Text style={{ ...ty.caption, color: t.ink2 }}>{l} {v}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+          <View style={{ marginTop: sp.xl }}>
+            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.md }}>Clients by plan</Text>
+            {ca.byPlan.length === 0 ? <Text style={{ ...ty.label, color: t.ink3 }}>No clients on any plan yet.</Text> : null}
+            {ca.byPlan.map((bp) => (
+              <Bar key={bp.plan} label={bp.plan} right={`${bp.clients} · ${bp.pct}%`} pct={bp.pct} />
             ))}
           </View>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14 }}>
-            <View style={{ flex: 1, height: 10, borderRadius: 5, backgroundColor: t.surface3, overflow: 'hidden', flexDirection: 'row' }}>
-              <View style={{ height: 10, backgroundColor: t.brand, width: `${ca.engagementPct}%` }} />
-              <View style={{ height: 10, backgroundColor: t.warn, width: `${(100 - ca.engagementPct)}%` }} />
-            </View>
-            <Text style={{ color: t.ink3, fontSize: 11 }}>{ca.engaged} engaged · {ca.atRisk} at-risk</Text>
-          </View>
-          <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>Clients by plan</Text>
-          {ca.byPlan.length === 0 ? <Text style={{ color: t.ink3, fontSize: 13 }}>No clients on any plan yet.</Text> : null}
-          {ca.byPlan.map((bp) => (
-            <View key={bp.plan} style={{ marginBottom: 10 }}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}><Text style={{ color: t.ink2, fontSize: 13, fontWeight: '600' }}>{bp.plan}</Text><Text style={{ color: t.ink, fontSize: 13, fontWeight: '700' }}>{bp.clients} · {bp.pct}%</Text></View>
-              <View style={{ height: 8, borderRadius: 4, backgroundColor: t.surface3, overflow: 'hidden' }}><View style={{ height: 8, borderRadius: 4, backgroundColor: t.brand, width: `${bp.pct}%` }} /></View>
-            </View>
-          ))}
-        </View>
+        </Section>
 
-        <View style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18, marginBottom: 16 }}>
-          <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16, marginBottom: 4 }}>Cohort retention</Text>
-          <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 14 }}>Trainers by signup month · % still active</Text>
-          {coh.length === 0 ? <Text style={{ color: t.ink3, fontSize: 13 }}>No signups to group yet.</Text> : null}
+        <Rule />
+
+        {/* ── cohort retention ───────────────────────────────────────────── */}
+        <Section>
+          <SectionHead title="Cohort retention" note="By signup month" />
+          {coh.length === 0 ? <Text style={{ ...ty.label, color: t.ink3 }}>No signups to group yet.</Text> : null}
           {coh.map((c) => (
-            <View key={c.label} style={{ marginBottom: 12 }}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 }}>
-                <Text style={{ color: t.ink2, fontSize: 13, fontWeight: '600' }}>{c.label}</Text>
-                <Text style={{ color: c.pct === 100 ? t.brand : c.pct >= 60 ? t.ink : t.crit, fontSize: 13, fontWeight: '700' }}>{c.pct}% · {c.active}/{c.total}</Text>
-              </View>
-              <View style={{ height: 10, borderRadius: 5, backgroundColor: t.surface3, overflow: 'hidden' }}><View style={{ height: 10, borderRadius: 5, backgroundColor: c.pct >= 60 ? t.brand : t.warn, width: `${c.pct}%` }} /></View>
-            </View>
+            <Bar key={c.label} label={c.label} right={`${c.pct}% · ${c.active}/${c.total}`} pct={c.pct} dim={c.pct < 60} />
           ))}
-        </View>
+        </Section>
 
-        <View style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18, marginBottom: 16 }}>
-          <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16, textTransform: 'capitalize', marginBottom: 14 }}>Trainer acquisition funnel</Text>
+        <Rule />
+
+        {/* ── trainer acquisition funnel ─────────────────────────────────── */}
+        <Section>
+          <SectionHead title="Trainer acquisition funnel" note="From signup" />
           {roll.trainers === 0 ? (
-            <Text style={{ color: t.ink3, fontSize: 13 }}>No trainers on the platform yet — the funnel fills in as they sign up.</Text>
+            <Text style={{ ...ty.label, color: t.ink3 }}>No trainers on the platform yet — the funnel fills in as they sign up.</Text>
           ) : funnel.map(([label, count, pct]) => (
-            <View key={label} style={{ marginBottom: 12 }}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 }}><Text style={{ color: t.ink2, fontSize: 13, fontWeight: '600' }}>{label}</Text><Text style={{ color: t.ink, fontSize: 13, fontWeight: '700' }}>{count} · {pct}%</Text></View>
-              <View style={{ height: 10, borderRadius: 5, backgroundColor: t.surface3, overflow: 'hidden' }}><View style={{ height: 10, borderRadius: 5, backgroundColor: t.brand, width: `${pct}%` }} /></View>
-            </View>
+            <Bar key={label} label={label} right={`${count} · ${pct}%`} pct={pct} />
           ))}
-        </View>
+        </Section>
 
-        {/* Promo / referral codes */}
-        <View style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18 }}>
-          <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16, textTransform: 'capitalize', marginBottom: 4 }}>Promo &amp; referral codes</Text>
-          <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 14 }}>Discounts on trainer subscriptions to drive signups</Text>
+        <Rule />
 
-          <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
-            <TextInput value={code} onChangeText={setCode} placeholder="CODE" placeholderTextColor={t.ink3} autoCapitalize="characters" autoCorrect={false} style={{ flex: 1, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15, fontWeight: '700', letterSpacing: 1 }} />
-            <Pressable onPress={create} style={{ backgroundColor: t.brand, borderRadius: 10, paddingHorizontal: 16, justifyContent: 'center' }}><Text style={{ color: t.brandInk, fontWeight: '800' }}>Create</Text></Pressable>
+        {/* ── promo / referral codes ─────────────────────────────────────── */}
+        <Section>
+          <SectionHead title="Promo & referral codes" note="Trainer subscriptions" />
+          <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.md }}>
+            <TextInput value={code} onChangeText={setCode} placeholder="CODE" placeholderTextColor={t.ink3}
+              autoCapitalize="characters" autoCorrect={false}
+              style={{ ...ty.body, fontWeight: '500', letterSpacing: 1, flex: 1, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 11 }} />
+            <Cta label="Create" onPress={create} />
           </View>
-          <View style={{ flexDirection: 'row', gap: 8, marginBottom: 16 }}>
+          <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.xl }}>
             {DISCOUNTS.map((d) => { const on = disc === d; return (
-              <Pressable key={d} onPress={() => setDisc(d)} style={{ flex: 1, paddingVertical: 8, borderRadius: 10, alignItems: 'center', backgroundColor: on ? t.brand : t.surface2, borderWidth: 1, borderColor: on ? t.brand : t.ring }}>
-                <Text style={{ color: on ? t.brandInk : t.ink2, fontWeight: '800', fontSize: 12 }}>{d}%</Text>
+              <Pressable key={d} onPress={() => setDisc(d)}
+                style={{ flex: 1, paddingVertical: 9, borderRadius: radius.sm, alignItems: 'center', backgroundColor: on ? t.brand : t.surface2 }}>
+                <Text style={{ ...ty.label, fontWeight: '500', color: on ? t.brandInk : t.ink2 }}>{d}%</Text>
               </Pressable>); })}
           </View>
 
-          {promos.length === 0 ? <Text style={{ color: t.ink3, fontSize: 13 }}>No codes yet — create one above.</Text> : null}
-          {promos.map((p) => (
-            <View key={p.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: t.surface2, borderRadius: 12, borderWidth: 1, borderColor: t.ring, padding: 12, marginBottom: 8 }}>
+          {promos.length === 0 ? <Text style={{ ...ty.label, color: t.ink3 }}>No codes yet — create one above.</Text> : null}
+          {promos.map((p, i) => (
+            <View key={p.id} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md,
+                                      borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
               <View style={{ flex: 1 }}>
-                <Text style={{ color: t.ink, fontWeight: '800', fontSize: 15, letterSpacing: 1 }}>{p.code}</Text>
-                <Text style={{ color: t.ink3, fontSize: 12, marginTop: 2 }}>{p.discountPct}% off · {p.redeemed} redeemed</Text>
+                <Text style={{ ...value(15), letterSpacing: 1, color: t.ink }}>{p.code}</Text>
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{p.discountPct}% off</Text>
               </View>
-              <Pressable onPress={() => toggleActive(p.id)} style={{ backgroundColor: p.active ? 'rgba(45,212,191,0.15)' : t.surface3, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 6 }}>
-                <Text style={{ color: p.active ? t.brand : t.ink3, fontWeight: '800', fontSize: 11 }}>{p.active ? 'ACTIVE' : 'OFF'}</Text>
+              <Pressable onPress={() => toggleActive(p.id)} accessibilityRole="button"
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: 11, paddingVertical: 6 }}>
+                <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: p.active ? t.brand : t.ink3 }} />
+                <Text style={{ ...ty.caption, color: t.ink2 }}>{p.active ? 'Active' : 'Off'}</Text>
               </Pressable>
-              <Pressable onPress={() => removePromo(p.id)} accessibilityLabel="Delete code" style={{ paddingHorizontal: 4, paddingVertical: 4 }}><Text style={{ color: t.ink3, fontWeight: '800', fontSize: 15 }}>×</Text></Pressable>
+              <Pressable onPress={() => removePromo(p.id)} accessibilityLabel="Delete code" accessibilityRole="button" hitSlop={8}
+                style={{ paddingHorizontal: sp.xs, paddingVertical: sp.xs }}>
+                <Text style={{ ...ty.body, color: t.ink3 }}>×</Text>
+              </Pressable>
             </View>
           ))}
-        </View>
+        </Section>
       </ScrollView>
     </SafeAreaView>
   );

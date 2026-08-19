@@ -15,13 +15,23 @@
 // (implicit) are kept as fallbacks for any link that still arrives in an
 // older shape. We parse the URL by hand since the Supabase client runs with
 // detectSessionInUrl:false (no browser URL to auto-read on native).
+//
+// Rebuilt on the instrument-panel kit (`src/ui/kit`) and the scale
+// (`src/theme/scale`). The link parsing, all four token shapes, the 2.5s
+// give-up timer, every stage and every route are unchanged — only the
+// presentation moved: no hero, the white-label app name is the kicker above a
+// `ty.title`, fields lost their 1px borders for a `surface2` fill, and the
+// "Passwords don't match" line is ink text beside a red dot instead of red
+// text.
 import { useEffect, useRef, useState } from 'react';
-import { View, Text, TextInput, Pressable, ScrollView, KeyboardAvoidingView, Platform, Linking } from 'react-native';
+import { View, Text, Pressable, ScrollView, KeyboardAvoidingView, Platform, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useRouter } from 'expo-router';
 import { useTheme, PasswordField } from '../src/ui/components';
 import { useAuth } from '../src/ui/auth';
 import { useBrand } from '../src/ui/brand';
+import { Card, Cta } from '../src/ui/kit';
+import { sp, layout, radius, type as ty } from '../src/theme/scale';
 
 function parseAuthParams(url: string): Record<string, string> {
   const params: Record<string, string> = {};
@@ -112,61 +122,68 @@ export default function ResetPassword() {
     }
   };
 
-  const inp = { color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 14, fontSize: 15, marginBottom: 12 } as const;
+  // One field style, shared with <PasswordField> (which lifts the marginBottom
+  // onto its wrapper so the eye toggle stays centred on the input itself).
+  const inp = { ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11, marginBottom: sp.md } as const;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
       <Stack.Screen options={{ headerShown: false }} />
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={{ padding: 24, paddingTop: 50, paddingBottom: 40, flexGrow: 1 }} keyboardShouldPersistTaps="handled">
-          <Text style={{ color: t.ink, fontSize: 26, fontWeight: '800', letterSpacing: -0.4, marginBottom: 8 }}>
+        <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingTop: sp.huge, paddingBottom: 40, flexGrow: 1 }} keyboardShouldPersistTaps="handled">
+          <Text style={{ ...ty.micro, color: t.ink3 }}>{appName}</Text>
+          <Text style={{ ...ty.title, color: t.ink, marginTop: 5, marginBottom: sp.md }}>
             {stage === 'done' ? 'Password updated' : 'Set a new password'}
           </Text>
 
           {stage === 'checking' ? (
-            <Text style={{ color: t.ink3, fontSize: 14, lineHeight: 20 }}>Checking your reset link…</Text>
+            <Text style={{ ...ty.body, color: t.ink3 }}>Checking your reset link…</Text>
           ) : null}
 
           {stage === 'invalid' ? (
             <>
-              <Text style={{ color: t.ink3, fontSize: 14, marginBottom: 22, lineHeight: 20 }}>
+              <Text style={{ ...ty.body, color: t.ink3, marginBottom: sp.xl }}>
                 This link is invalid or has expired. Request a new one and use it within an hour.
               </Text>
-              <Pressable onPress={() => router.replace('/forgot-password')} accessibilityRole="button" style={{ backgroundColor: t.brand, borderRadius: 14, paddingVertical: 16, alignItems: 'center' }}>
-                <Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 15 }}>Request a new link</Text>
-              </Pressable>
+              <Cta wide label="Request a new link" onPress={() => router.replace('/forgot-password')} />
             </>
           ) : null}
 
           {stage === 'ready' || stage === 'saving' ? (
             <>
-              <Text style={{ color: t.ink3, fontSize: 14, marginBottom: 22, lineHeight: 20 }}>
+              <Text style={{ ...ty.body, color: t.ink3, marginBottom: sp.xl }}>
                 Choose a new password for your {appName} account. It applies to Client, Trainer, and Owner access alike.
               </Text>
               {error ? (
-                <View style={{ backgroundColor: t.surface, borderColor: t.brand, borderWidth: 1, borderRadius: 12, padding: 12, marginBottom: 14 }}>
-                  <Text style={{ color: t.ink2, fontSize: 13, lineHeight: 18 }}>{error}</Text>
-                </View>
+                <Card tone={t.crit} style={{ marginBottom: sp.md }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 7 }}>
+                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit, marginTop: 6 }} />
+                    <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}>{error}</Text>
+                  </View>
+                </Card>
               ) : null}
+              <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>New password</Text>
               <PasswordField value={pw} onChangeText={setPw} placeholder="New password (min 6 characters)" style={inp} accessibilityLabel="New password" autoFocus />
+              <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Confirm new password</Text>
               <PasswordField value={pw2} onChangeText={setPw2} placeholder="Confirm new password" style={inp} accessibilityLabel="Confirm new password" />
               {pw2.length > 0 && pw !== pw2 ? (
-                <Text style={{ color: '#ef4444', fontSize: 12, marginTop: -6, marginBottom: 12 }}>Passwords don't match.</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: -6, marginBottom: sp.md }}>
+                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
+                  <Text style={{ ...ty.caption, color: t.ink2 }}>Passwords don't match.</Text>
+                </View>
               ) : null}
-              <Pressable onPress={save} disabled={!canSave} accessibilityRole="button" style={{ backgroundColor: canSave ? t.brand : t.surface2, borderColor: canSave ? t.brand : t.ring, borderWidth: 1, borderRadius: 14, paddingVertical: 16, alignItems: 'center', marginTop: 6 }}>
-                <Text style={{ color: canSave ? t.brandInk : t.ink3, fontWeight: '800', fontSize: 15 }}>{stage === 'saving' ? 'Saving…' : 'Save new password'}</Text>
-              </Pressable>
+              <View style={{ marginTop: sp.sm }}>
+                <Cta wide disabled={!canSave} onPress={save} label={stage === 'saving' ? 'Saving…' : 'Save new password'} />
+              </View>
             </>
           ) : null}
 
           {stage === 'done' ? (
             <>
-              <Text style={{ color: t.ink3, fontSize: 14, marginBottom: 22, lineHeight: 20 }}>
+              <Text style={{ ...ty.body, color: t.ink3, marginBottom: sp.xl }}>
                 You're signed in with your new password. Pick a portal to continue.
               </Text>
-              <Pressable onPress={() => router.replace('/')} accessibilityRole="button" style={{ backgroundColor: t.brand, borderRadius: 14, paddingVertical: 16, alignItems: 'center' }}>
-                <Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 15 }}>Continue</Text>
-              </Pressable>
+              <Cta wide label="Continue" onPress={() => router.replace('/')} />
             </>
           ) : null}
         </ScrollView>

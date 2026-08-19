@@ -1,8 +1,23 @@
 // Owner · Operations. Announcements to trainers, support inbox, activity log.
+//
+// Rebuilt on the instrument-panel kit (`src/ui/kit`) and the scale
+// (`src/theme/scale`). Same three tabs, same providers, same actions — the
+// bordered box drawn around every announcement, ticket and event became
+// hairline-separated rows, and the Georgia serif header is gone.
+//
+// No hero: this is a three-task console (write · triage · read), not a screen
+// with one live number to lead with.
+//
+// Every list starts empty and fills from real activity — announcements the
+// owner sends, tickets from `useOwnerOps` plus real in-app feedback rows, and
+// events recorded by `usePlatformTrainers`. Nothing is seeded, so each tab now
+// says so honestly instead of rendering a blank stretch of screen.
 import { useState, useEffect } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
+import { Rule, Section, SectionHead, Cta } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { useOwnerOps } from '../../src/ui/ownerOps';
 import { fetchAllFeedback, type FeedbackRow } from '../../src/ui/appFeedback';
 import { usePlatformTrainers } from '../../src/ui/trainers';
@@ -11,6 +26,11 @@ function ago(iso: string) {
   const h = Math.round((Date.now() - Date.parse(iso)) / 3600000);
   if (h < 1) return 'just now'; if (h < 24) return `${h}h ago`;
   const d = Math.round(h / 24); return d === 1 ? 'yesterday' : `${d}d ago`;
+}
+
+/** An honest "nothing here yet" line — these lists genuinely start empty. */
+function Empty({ tone, children }: { tone: string; children: string }) {
+  return <Text style={{ ...ty.label, color: tone }}>{children}</Text>;
 }
 
 export default function OwnerOps() {
@@ -28,66 +48,98 @@ export default function OwnerOps() {
   const [tab, setTab] = useState<'announce' | 'support' | 'activity'>('announce');
   const [text, setText] = useState('');
   const [openT, setOpenT] = useState<string | null>(null);
+  const G = layout.gutter;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
-        <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia', textTransform: 'capitalize' }}>Operations</Text>
-        <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 16 }}>Talk to trainers · support · platform activity</Text>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
 
-        <View style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: 10, padding: 3, marginBottom: 16, borderWidth: 1, borderColor: t.ring }}>
+        <View style={{ paddingTop: sp.md }}>
+          <Text style={{ ...ty.micro, color: t.ink3 }}>Platform</Text>
+          <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Operations</Text>
+          <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>Talk to trainers · support · platform activity</Text>
+        </View>
+
+        {/* ── the three jobs this screen does ────────────────────────────── */}
+        <View style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: radius.sm, padding: 3, marginTop: sp.lg }}>
           {([['announce', 'Announce'], ['support', `Support${openCount ? ' (' + openCount + ')' : ''}`], ['activity', 'Activity']] as const).map(([k, label]) => (
-            <Pressable key={k} onPress={() => setTab(k)} style={{ flex: 1, paddingVertical: 9, borderRadius: 8, alignItems: 'center', backgroundColor: tab === k ? t.brand : 'transparent' }}>
-              <Text style={{ color: tab === k ? t.brandInk : t.ink3, fontWeight: '700', fontSize: 12 }}>{label}</Text>
+            <Pressable key={k} onPress={() => setTab(k)} style={{ flex: 1, paddingVertical: 9, borderRadius: radius.sm, alignItems: 'center', backgroundColor: tab === k ? t.brand : 'transparent' }}>
+              <Text style={{ ...ty.label, fontWeight: '600', color: tab === k ? t.brandInk : t.ink3 }}>{label}</Text>
             </Pressable>
           ))}
         </View>
 
         {tab === 'announce' ? (
           <View>
-            <TextInput value={text} onChangeText={setText} placeholder="Announcement to all trainers…" placeholderTextColor={t.ink3} multiline style={{ color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, minHeight: 80, textAlignVertical: 'top', marginBottom: 12 }} />
-            <Pressable onPress={() => { if (!text.trim()) { Alert.alert('Write something', 'Enter an announcement.'); return; } addAnn(text); setText(''); Alert.alert('Sent', 'All trainers will see this.'); }} style={{ backgroundColor: t.brand, borderRadius: 14, paddingVertical: 15, alignItems: 'center', marginBottom: 18 }}><Text style={{ color: t.brandInk, fontWeight: '800' }}>Send to all trainers</Text></Pressable>
-            {anns.map((a) => (
-              <View key={a.id} style={{ backgroundColor: t.surface, borderRadius: 14, borderWidth: 1, borderColor: t.ring, padding: 14, marginBottom: 9 }}>
-                <Text style={{ color: t.ink2, fontSize: 14, lineHeight: 20 }}>{a.body}</Text>
-                <Text style={{ color: t.ink3, fontSize: 11, marginTop: 6 }}>{ago(a.at)}</Text>
-              </View>
-            ))}
+            <Section>
+              <SectionHead title="New announcement" />
+              <TextInput value={text} onChangeText={setText} placeholder="Announcement to all trainers…" placeholderTextColor={t.ink3} multiline
+                style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: sp.md, minHeight: 80, textAlignVertical: 'top', marginBottom: sp.md }} />
+              <Cta wide label="Send to all trainers"
+                onPress={() => { if (!text.trim()) { Alert.alert('Write something', 'Enter an announcement.'); return; } addAnn(text); setText(''); Alert.alert('Sent', 'All trainers will see this.'); }} />
+            </Section>
+
+            <Rule />
+
+            <Section>
+              <SectionHead title="Sent" note={anns.length ? `${anns.length} sent` : undefined} />
+              {anns.length === 0 ? (
+                <Empty tone={t.ink3}>Nothing sent yet — announcements you post appear here.</Empty>
+              ) : anns.map((a, i) => (
+                <View key={a.id} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+                  <Text style={{ ...ty.body, color: t.ink2 }}>{a.body}</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>{ago(a.at)}</Text>
+                </View>
+              ))}
+            </Section>
           </View>
         ) : tab === 'support' ? (
           <View>
-            {allTickets.map((tk) => {
-              const open = openT === tk.id;
-              return (
-                <View key={tk.id} style={{ backgroundColor: t.surface, borderRadius: 14, borderWidth: 1, borderColor: tk.resolved ? t.ring : t.brand, padding: 14, marginBottom: 9, opacity: tk.resolved ? 0.6 : 1 }}>
-                  <Pressable onPress={() => setOpenT(open ? null : tk.id)}>
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <Text style={{ color: t.ink, fontWeight: '700', fontSize: 14, flex: 1 }}>{tk.subject}</Text>
-                      {tk.resolved ? <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '800' }}>RESOLVED</Text> : <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: t.brand }} />}
-                    </View>
-                    <Text style={{ color: t.ink3, fontSize: 12, marginTop: 2 }}>{tk.from}</Text>
-                  </Pressable>
-                  {open ? (
-                    <View style={{ marginTop: 10 }}>
-                      <Text style={{ color: t.ink2, fontSize: 13, lineHeight: 19 }}>{tk.body}</Text>
-                      {!tk.resolved ? (
-                        <Pressable onPress={() => resolveAny(tk.id)} style={{ backgroundColor: t.brand, borderRadius: 10, paddingVertical: 10, alignItems: 'center', marginTop: 10 }}><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 13 }}>Mark resolved</Text></Pressable>
-                      ) : null}
-                    </View>
-                  ) : null}
-                </View>
-              );
-            })}
+            <Section>
+              <SectionHead title="Support inbox" note={allTickets.length ? (openCount ? `${openCount} open` : 'All resolved') : undefined} />
+              {allTickets.length === 0 ? (
+                <Empty tone={t.ink3}>No tickets. Feedback sent from inside the app lands here.</Empty>
+              ) : allTickets.map((tk, i) => {
+                const open = openT === tk.id;
+                return (
+                  <View key={tk.id} style={{ borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring, opacity: tk.resolved ? 0.6 : 1 }}>
+                    <Pressable onPress={() => setOpenT(open ? null : tk.id)} style={{ paddingVertical: sp.md }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
+                        {tk.resolved ? null : <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.brand }} />}
+                        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, flex: 1 }}>{tk.subject}</Text>
+                        {tk.resolved ? <Text style={{ ...ty.micro, color: t.ink3 }}>Resolved</Text> : null}
+                      </View>
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{tk.from}</Text>
+                    </Pressable>
+                    {open ? (
+                      <View style={{ paddingBottom: sp.md }}>
+                        <Text style={{ ...ty.label, color: t.ink2 }}>{tk.body}</Text>
+                        {!tk.resolved ? (
+                          <View style={{ flexDirection: 'row', marginTop: sp.md }}>
+                            <Cta label="Mark resolved" onPress={() => resolveAny(tk.id)} />
+                          </View>
+                        ) : null}
+                      </View>
+                    ) : null}
+                  </View>
+                );
+              })}
+            </Section>
           </View>
         ) : (
           <View>
-            {feed.map((e) => (
-              <View key={e.id} style={{ flexDirection: 'row', gap: 12, backgroundColor: t.surface, borderRadius: 14, borderWidth: 1, borderColor: t.ring, padding: 13, marginBottom: 8 }}>
-                <Text style={{ fontSize: 20 }}>{e.icon}</Text>
-                <Text style={{ color: t.ink2, fontSize: 14, flex: 1 }}>{e.text}</Text>
-                <Text style={{ color: t.ink3, fontSize: 11 }}>{ago(e.at)}</Text>
-              </View>
-            ))}
+            <Section>
+              <SectionHead title="Platform activity" note={feed.length ? `${feed.length} events` : undefined} />
+              {feed.length === 0 ? (
+                <Empty tone={t.ink3}>Nothing yet — trials, plan changes and suspensions land here as they happen.</Empty>
+              ) : feed.map((e, i) => (
+                <View key={e.id} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+                  <Text style={ty.head}>{e.icon}</Text>
+                  <Text style={{ ...ty.body, color: t.ink2, flex: 1 }}>{e.text}</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3 }}>{ago(e.at)}</Text>
+                </View>
+              ))}
+            </Section>
           </View>
         )}
       </ScrollView>
