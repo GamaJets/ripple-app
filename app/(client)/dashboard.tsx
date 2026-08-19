@@ -117,6 +117,7 @@ export default function Home() {
   const d = new Date();
   const hi = d.getHours() < 12 ? 'Good morning' : d.getHours() < 18 ? 'Good afternoon' : 'Good evening';
 
+  const firstName = (c.name || '').trim().split(' ')[0] || '';
   const kcalNote = `${consumed.kcal.toLocaleString()} of ${macros.kcal.toLocaleString()} kcal`;
   const G = layout.gutter;
 
@@ -128,8 +129,10 @@ export default function Home() {
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingTop: sp.md }}>
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>{DAYS[d.getDay()]} {d.getDate()} {MONTHS[d.getMonth()]}</Text>
+            {/* A client who has not finished onboarding has no name yet — don't
+                render "Good morning," with a dangling comma and nothing after it. */}
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }} numberOfLines={1}>
-              {hi}, {c.name.split(' ')[0]}
+              {firstName ? `${hi}, ${firstName}` : hi}
             </Text>
           </View>
           <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: 2 }}>

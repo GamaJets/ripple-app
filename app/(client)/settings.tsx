@@ -5,6 +5,7 @@ import { View, Text, Pressable, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
+import { BuildInfo } from '../../src/ui/BuildInfo';
 import type { Theme } from '../../src/theme/tokens';
 import { useSettings } from '../../src/ui/settings';
 import { useAuth } from '../../src/ui/auth';
@@ -111,6 +112,14 @@ export default function Settings() {
               {c.notes.map((n) => <Text key={n} style={{ color: t.ink3, fontSize: 13, marginTop: 2 }}>· {n}</Text>)}
             </View>
           ))}
+        </View>
+
+        <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>Build</Text>
+        <View style={{ marginBottom: 18 }}>
+          <BuildInfo />
+          <Text style={{ color: t.ink3, fontSize: 12, lineHeight: 17, marginTop: 8 }}>
+            Which bundle this phone is running. If a fix was published but isn't here, compare Channel and Update against the EAS dashboard before assuming it's a code bug.
+          </Text>
         </View>
 
         <Text style={{ color: t.ink3, fontSize: 12, textAlign: 'center' }}>Repple · v2.2 · made for coaches & their clients</Text>
