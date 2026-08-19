@@ -39,7 +39,6 @@
     },
     "production": {
       "autoIncrement": true,
-      "_comment_channel": "Was 'preview', which is the preview profile's channel — so a production build listened on the same channel as internal test builds, and `eas update --branch production` reached nothing. Store builds now listen on 'production'.",
       "channel": "production",
       "env": {
         "EXPO_PUBLIC_ENABLE_VISION": "1",
