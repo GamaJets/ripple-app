@@ -26,7 +26,7 @@ export interface GymClass {
 }
 
 // Common studio-class formats (chain-agnostic; a gym can add its own).
-export const CLASS_KINDS = ['CrossFit', 'Strength & Conditioning', 'HYROX', 'GRIT', 'MetCon', 'Cycle', 'Zumba', 'Yoga Flow', 'Yoga Stretch', 'Reformer Pilates', 'TRX', 'Olympic Lifting', 'Abs & Glutes', 'Boxing'] as const;
+export const CLASS_KINDS = ['Abs & Glutes', 'Boxing', 'CrossFit', 'Cycle', 'GRIT', 'HYROX', 'MetCon', 'Olympic Lifting', 'Reformer Pilates', 'Strength & Conditioning', 'TRX', 'Yoga Flow', 'Yoga Stretch', 'Zumba'] as const;
 
 // A gym's branches are derived from the classes it has actually created — see
 // `branchesFrom` — so nothing is suggested that the gym did not enter itself.

@@ -116,7 +116,12 @@ export default function ScanMachine() {
 
   const list = useMemo(() => {
     const s = q.trim().toLowerCase();
-    return MACHINES.filter((m) => !s || m.name.toLowerCase().includes(s) || m.group.toLowerCase().includes(s) || (m.keys || []).some((k) => k.includes(s)));
+    // Sorted for display only. MACHINES itself stays in catalogue order because
+    // identifyMachine() resolves a scan by first match — reordering the source
+    // array would change which machine a given QR code maps to.
+    return MACHINES
+      .filter((m) => !s || m.name.toLowerCase().includes(s) || m.group.toLowerCase().includes(s) || (m.keys || []).some((k) => k.includes(s)))
+      .sort((a, b) => a.name.localeCompare(b.name));
   }, [q]);
 
   const addSet = () => { const r = parseInt(reps, 10) || 0; if (!r) return; setSets((p) => [...p, { reps: r, kg: parseFloat(kg) || 0 }]); setReps(''); tapLight(); };

@@ -34,19 +34,62 @@ import { SessionHrSheet } from '../../src/ui/SessionHrSheet';
 import { ageFromDob } from '../../src/lib/age';
 
 const WEEK = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-const CARDIO = ['Treadmill / Run', 'Cycling', 'Rowing', 'Ski erg', 'Elliptical', 'Swim', 'Walk', 'Stairs'];
+// Session catalog. Each activity carries its own MET value, because the two used
+// to live in separate structures keyed by the display string: renaming a label
+// silently detached it from its MET, and `cardioKcal` falls back to 7 for an
+// unknown key — so a typo would have quietly changed a client's calorie estimate
+// with nothing to show for it. One entry, one place.
+//
+// Titles are Title Case throughout and each list is alphabetical. Acronyms
+// (EMOM, AMRAP) stay upper-case; they are not words.
+interface Activity { name: string; met: number }
+
+const CARDIO_ACTS: Activity[] = [
+  { name: 'Cycling',          met: 7.5 },
+  { name: 'Elliptical',       met: 5.0 },
+  { name: 'Rowing',           met: 7.0 },
+  { name: 'Ski Erg',          met: 9.0 },
+  { name: 'Stairs',           met: 8.0 },
+  { name: 'Swim',             met: 8.0 },
+  { name: 'Treadmill / Run',  met: 9.8 },
+  { name: 'Walk',             met: 3.8 },
+];
+
+const HIIT_ACTS: Activity[] = [
+  { name: 'AMRAP',            met: 8.0 },
+  { name: 'Bag Work',         met: 7.0 },
+  { name: 'Bike Intervals',   met: 10.0 },
+  { name: 'Circuit',          met: 8.0 },
+  { name: 'EMOM',             met: 8.0 },
+  { name: 'Sprint Intervals', met: 12.0 },
+  { name: 'Tabata',           met: 10.0 },
+];
+
+const MOBILITY_ACTS: Activity[] = [
+  { name: 'Dynamic Warm-Up',  met: 4.0 },
+  { name: 'Foam Rolling',     met: 2.5 },
+  { name: 'Pilates',          met: 3.5 },
+  { name: 'Stretching',       met: 2.5 },
+  { name: 'Yoga',             met: 3.0 },
+];
+
+// Sorted here as well as written in order, so a later addition dropped in the
+// wrong place still renders alphabetically.
+const byName = (a: Activity, b: Activity) => a.name.localeCompare(b.name);
+const names = (acts: Activity[]) => [...acts].sort(byName).map((a) => a.name);
+
+const CARDIO = names(CARDIO_ACTS);
 const SESSION_TYPES: Record<'cardio' | 'hiit' | 'mobility', string[]> = {
   cardio: CARDIO,
-  hiit: ['Circuit', 'Tabata', 'EMOM', 'AMRAP', 'Sprint intervals', 'Bike intervals', 'Bag work'],
-  mobility: ['Stretching', 'Yoga', 'Foam rolling', 'Dynamic warm-up', 'Pilates'],
+  hiit: names(HIIT_ACTS),
+  mobility: names(MOBILITY_ACTS),
 };
 const WTYPES = [['strength', 'Program'], ['cardio', 'Cardio'], ['hiit', 'HIIT'], ['mobility', 'Mobility']] as const;
+
 // Approx METs per activity — kcal = MET x weight(kg) x hours (standard estimate).
-const MET: Record<string, number> = {
-  'Treadmill / Run': 9.8, 'Cycling': 7.5, 'Rowing': 7.0, 'Ski erg': 9.0, 'Elliptical': 5.0, 'Swim': 8.0, 'Walk': 3.8, 'Stairs': 8.0,
-  'Circuit': 8.0, 'Tabata': 10.0, 'EMOM': 8.0, 'AMRAP': 8.0, 'Sprint intervals': 12.0, 'Bike intervals': 10.0, 'Bag work': 7.0,
-  'Stretching': 2.5, 'Yoga': 3.0, 'Foam rolling': 2.5, 'Dynamic warm-up': 4.0, 'Pilates': 3.5,
-};
+const MET: Record<string, number> = Object.fromEntries(
+  [...CARDIO_ACTS, ...HIIT_ACTS, ...MOBILITY_ACTS].map((a) => [a.name, a.met]),
+);
 const cardioKcal = (type: string, mins: number, weightKg?: number) => Math.round((MET[type] ?? 7) * (weightKg && weightKg > 0 ? weightKg : 70) * (mins / 60));
 
 /** Metric columns divided by a hairline — the KpiRow idiom, where a status dot is needed. */
