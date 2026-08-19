@@ -642,7 +642,18 @@ function SessionRunner({ t, exercises, focus, nameOf, age, log, injuries, onComp
   const insets = useSafeAreaInsets();
   const topPad = Math.max(insets.top, 44);
   const w = useWearables();
-  const liveHr = w.today.heartRateLatest ?? w.today.heartRateAvg;
+  // `heartRateLatest` is the most recent SAMPLE and is only ever set by
+  // HealthKit (see appleHealth.ts). Cloud providers leave it null: WHOOP, Oura
+  // and Fitbit expose no intraday samples at all, and WHOOP's `heartRateAvg` is
+  // the average across the whole physiological day.
+  //
+  // So the daily average is kept as a display fallback for the bpm column, but
+  // it must NEVER drive the zone: accumulating time-in-zone against a static
+  // day-average would invent a zone breakdown for a session it never measured —
+  // a WHOOP user would finish and see "42 min in Zone 2" derived from one
+  // number that had nothing to do with the workout.
+  const liveSample = w.today.heartRateLatest;          // a real, current reading
+  const liveHr = liveSample ?? w.today.heartRateAvg;   // display only
   const startKcalRef = useRef<number | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const [hrPeak, setHrPeak] = useState<number | null>(null);
@@ -656,13 +667,13 @@ function SessionRunner({ t, exercises, focus, nameOf, age, log, injuries, onComp
     return () => { clearInterval(tick); clearInterval(q); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  useEffect(() => { if (typeof liveHr === 'number' && liveHr > 0) setHrPeak((p) => (p == null || liveHr > p ? liveHr : p)); }, [liveHr]);
+  useEffect(() => { if (typeof liveSample === 'number' && liveSample > 0) setHrPeak((p) => (p == null || liveSample > p ? liveSample : p)); }, [liveSample]);
 
   // Time in zone, accumulated a second at a time against the latest reading.
   // `hrRef` keeps the tick reading the current bpm without re-arming the interval.
   const [zoneSecs, setZoneSecs] = useState<ZoneSeconds>(emptyZoneSeconds);
   const hrRef = useRef<number | null>(null);
-  hrRef.current = typeof liveHr === 'number' && liveHr > 0 ? liveHr : null;
+  hrRef.current = typeof liveSample === 'number' && liveSample > 0 ? liveSample : null;
   useEffect(() => {
     const z = setInterval(() => {
       const bpm = hrRef.current;
@@ -672,7 +683,7 @@ function SessionRunner({ t, exercises, focus, nameOf, age, log, injuries, onComp
     return () => clearInterval(z);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [age]);
-  const liveZone = hrZoneNo(liveHr, age);
+  const liveZone = hrZoneNo(liveSample, age);
   const hasZones = zoneSecondsTotal(zoneSecs) > 0;
   const [idx, setIdx] = useState(0);
   const [results, setResults] = useState<{ reps: number; kg: number }[][]>(() => exercises.map(() => []));
@@ -804,12 +815,19 @@ function SessionRunner({ t, exercises, focus, nameOf, age, log, injuries, onComp
         </View>
 
         <MetricCols t={t} items={liveCols} />
-        {liveHr == null ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>Wear your Apple Watch for live heart rate &amp; calories</Text> : null}
+        {liveHr == null ? (
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>Wear your Apple Watch for live heart rate &amp; calories</Text>
+        ) : liveSample == null ? (
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+            That bpm is today&apos;s average from your connected device, not a live reading — it can&apos;t be used for zones.
+            Live zones need an Apple Watch.
+          </Text>
+        ) : null}
 
         {/* Live effort. The zone numeral leads; colour only confirms it. */}
         {liveZone || hasZones ? (
           <View style={{ marginTop: sp.xl }}>
-            <ZoneNow zone={liveZone} bpm={liveHr ?? null} compact />
+            <ZoneNow zone={liveZone} bpm={liveSample ?? null} compact />
             {hasZones ? (
               <View style={{ marginTop: sp.lg }}>
                 <ZoneBoard seconds={zoneSecs} current={liveZone} />
