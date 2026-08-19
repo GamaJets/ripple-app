@@ -1,29 +1,29 @@
 // Trainer · Analytics — revenue, clients, retention, platform fee.
-import { View, Text, ScrollView, Pressable, ActivityIndicator, Alert, Modal, TextInput } from 'react-native';
+//
+// Rebuilt on the instrument-panel kit (`src/ui/kit`) and the scale
+// (`src/theme/scale`). Same numbers, same routes, same AI digest — the ten
+// stacked bordered cards became hairline-separated sections, revenue became the
+// screen's one hero figure, and the Georgia serif header is gone.
+//
+// Also removed: a `months` array of hardcoded growth fractions (Feb 0.55 …
+// Jul 1) that was dead but still shipping in the bundle.
+import { View, Text, ScrollView, Pressable, ActivityIndicator, Modal, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useState } from 'react';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import type { Theme } from '../../src/theme/tokens';
+import {
+  Rule, Section, SectionHead, Hero, KpiRow, ListRow, Card, Cta, Ghost, Spark,
+} from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 import { useCoachProfile } from '../../src/ui/coachProfile';
 import { atRiskClient } from '../../src/lib/trainerMock';
 import { useRoster } from '../../src/ui/roster';
-import { DistBar, DeltaBadge } from '../../src/ui/charts';
-import { Sparkline } from '../../src/ui/charts';
+import { DistBar } from '../../src/ui/charts';
 import { askCoach } from '../../src/lib/coach';
 import { useTrainerGoals, goalPct } from '../../src/ui/trainerGoals';
 import { useMonthlyHistory } from '../../src/ui/useMrrHistory';
-
-function Big({ t, label, value, sub, tint }: { t: Theme; label: string; value: string; sub: string; tint?: boolean }) {
-  return (
-    <View style={{ flex: 1, backgroundColor: tint ? t.brand : t.surface, borderRadius: 18, borderWidth: 1, borderColor: t.ring, padding: 16 }}>
-      <Text style={{ color: tint ? t.brandInk : t.ink3, fontSize: 12, fontWeight: '700', opacity: tint ? 0.85 : 1 }}>{label}</Text>
-      <Text style={{ color: tint ? t.brandInk : t.ink, fontSize: 26, fontWeight: '800', textTransform: 'capitalize', marginTop: 6 }}>{value}</Text>
-      <Text style={{ color: tint ? t.brandInk : t.ink3, fontSize: 11, marginTop: 2, opacity: tint ? 0.85 : 1 }}>{sub}</Text>
-    </View>
-  );
-}
 
 export default function TrainerAnalytics() {
   const t = useTheme();
@@ -58,145 +58,220 @@ export default function TrainerAnalytics() {
     setDigest(reply || 'Could not generate the digest right now — the AI backend may be unavailable.');
   };
   const revHist = useMonthlyHistory('repple.trainer.revHistory', revenue);
-  const months = [['Feb', 0.55], ['Mar', 0.62], ['Apr', 0.7], ['May', 0.82], ['Jun', 0.9], ['Jul', 1]] as const;
+  const G = layout.gutter;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
-        <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia', textTransform: 'capitalize' }}>Analytics</Text>
-        <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 16 }}>Your coaching business at a glance</Text>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+
+        <View style={{ paddingTop: sp.md }}>
+          <Text style={{ ...ty.micro, color: t.ink3 }}>Your coaching business</Text>
+          <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Analytics</Text>
+        </View>
+
         {clients === 0 ? (
-          <View style={{ backgroundColor: t.surface, borderRadius: 12, borderWidth: 1, borderColor: t.ring, padding: 14, marginBottom: 16 }}>
-            <Text style={{ color: t.ink3, fontSize: 13, lineHeight: 19 }}>No clients yet — revenue, adherence and roster health populate as you add clients and run sessions.</Text>
-          </View>
+          <Card style={{ marginTop: sp.lg }}>
+            <Text style={{ ...ty.label, color: t.ink2 }}>
+              No clients yet — revenue, adherence and roster health populate as you add clients and run sessions.
+            </Text>
+          </Card>
         ) : null}
-        <Pressable onPress={() => router.push('/(trainer)/leaderboard')} style={{ backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 16, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}><Text style={{ color: t.ink, fontWeight: '700', fontSize: 14 }}>Client leaderboard</Text><Text style={{ color: t.ink3, fontSize: 18 }}>›</Text></Pressable>
 
-        <View style={{ flexDirection: 'row', gap: 12, marginBottom: 12 }}>
-          <Big t={t} label="Monthly revenue" value={'$' + revenue.toLocaleString()} sub={`${sessionsMo} sessions × $${sessionFee}`} tint />
-          <Big t={t} label="Net after fee" value={'$' + net.toLocaleString()} sub={`− $${platformFee} platform`} />
-        </View>
-        <View style={{ flexDirection: 'row', gap: 12, marginBottom: 16 }}>
-          <Big t={t} label="Active clients" value={String(clients)} sub="all retained" />
-          <Big t={t} label="Avg adherence" value={avgAdh + '%'} sub="across clients" />
-        </View>
+        {/* ── the hero ───────────────────────────────────────────────────── */}
+        <Hero
+          label="Monthly revenue"
+          figure={'$' + revenue.toLocaleString()}
+          note={clients ? `${sessionsMo} sessions × $${sessionFee} · $${net.toLocaleString()} net after the $${platformFee} platform fee` : 'Set your session rate and add clients to start tracking.'}
+          arc={goals.revenue ? goalPct(revenue, goals.revenue) : undefined}
+          onPress={() => router.push('/(trainer)/payments')}
+        />
 
-        <View style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18, marginBottom: 14 }}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-            <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16 }}>Your goals</Text>
-            <Pressable onPress={() => { setGRev(String(goals.revenue)); setGCli(String(goals.clients)); setGoalOpen(true); }}><Text style={{ color: t.brand, fontWeight: '800', fontSize: 12 }}>Edit</Text></Pressable>
-          </View>
-          {[{ label: 'Monthly revenue', cur: revenue, goal: goals.revenue, money: true }, { label: 'Active clients', cur: clients, goal: goals.clients, money: false }].map((g) => { const pc = goalPct(g.cur, g.goal); return (
-            <View key={g.label} style={{ marginBottom: 12 }}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 }}>
-                <Text style={{ color: t.ink2, fontSize: 13, fontWeight: '600' }}>{g.label}</Text>
-                <Text style={{ color: t.ink, fontSize: 13, fontWeight: '700' }}>{g.money ? '$' + g.cur.toLocaleString() : g.cur} / {g.money ? '$' + g.goal.toLocaleString() : g.goal}</Text>
+        <Rule />
+
+        {/* ── the shape of the business ──────────────────────────────────── */}
+        <Section>
+          <SectionHead title="Roster" note="Leaderboard" onPress={() => router.push('/(trainer)/leaderboard')} />
+          <KpiRow items={[
+            { label: 'Clients', value: String(clients) },
+            { label: 'Avg adherence', value: String(avgAdh), unit: '%' },
+            { label: 'Value / client', value: '$' + valuePerClient.toLocaleString(), unit: '/mo' },
+          ]} />
+        </Section>
+
+        <Rule />
+
+        {/* ── goals ──────────────────────────────────────────────────────── */}
+        <Section>
+          <SectionHead title="Your goals" note="Edit"
+            onPress={() => { setGRev(String(goals.revenue)); setGCli(String(goals.clients)); setGoalOpen(true); }} />
+          {[
+            { label: 'Monthly revenue', cur: revenue, goal: goals.revenue, money: true },
+            { label: 'Active clients', cur: clients, goal: goals.clients, money: false },
+          ].map((g) => {
+            const pc = goalPct(g.cur, g.goal);
+            const hit = pc >= 1;
+            return (
+              <View key={g.label} style={{ marginBottom: sp.lg }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                  <Text style={{ ...ty.caption, color: t.ink2 }}>{g.label}</Text>
+                  <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>
+                    {g.money ? '$' + g.cur.toLocaleString() : g.cur} / {g.money ? '$' + g.goal.toLocaleString() : g.goal}
+                  </Text>
+                </View>
+                <View style={{ height: 3, borderRadius: 2, backgroundColor: t.surface3, marginTop: 7, overflow: 'hidden' }}>
+                  <View style={{ height: 3, borderRadius: 2, width: `${pc * 100}%`, backgroundColor: t.brand, opacity: hit ? 1 : 0.55 }} />
+                </View>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 6 }}>
+                  {hit ? <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: t.brand }} /> : null}
+                  <Text style={{ ...ty.caption, color: t.ink3 }}>{hit ? 'Goal reached' : Math.round(pc * 100) + '% there'}</Text>
+                </View>
               </View>
-              <View style={{ height: 10, borderRadius: 5, backgroundColor: t.surface3, overflow: 'hidden' }}><View style={{ height: 10, borderRadius: 5, backgroundColor: pc >= 1 ? t.brand : t.s3, width: `${(pc * 100)}%` }} /></View>
-              <Text style={{ color: pc >= 1 ? t.brand : t.ink3, fontSize: 11, marginTop: 4, fontWeight: pc >= 1 ? '800' : '400' }}>{pc >= 1 ? 'Goal reached!' : Math.round(pc * 100) + '% there'}</Text>
-            </View>); })}
-        </View>
+            );
+          })}
+        </Section>
 
-        {atRisk.length > 0 ? (
-          <Pressable onPress={() => router.push('/(trainer)/dashboard')} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.warn, padding: 15, marginBottom: 14, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-            <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: 'rgba(250,178,25,0.16)', alignItems: 'center', justifyContent: 'center' }}><Icon name="target" size={20} color={t.warn} /></View>
-            <View style={{ flex: 1 }}>
-              <Text style={{ color: t.ink, fontWeight: '800', fontSize: 15 }}>~${atRiskRevenue.toLocaleString()}/mo at risk</Text>
-              <Text style={{ color: t.ink3, fontSize: 12, marginTop: 1 }}>{atRisk.length} client{atRisk.length > 1 ? 's' : ''} slipping — check in before they churn.</Text>
-            </View>
-            <Text style={{ color: t.ink3, fontSize: 16 }}>›</Text>
-          </Pressable>
-        ) : null}
+        {/* ── at-risk revenue: the one thing to act on ────────────────────── */}
+        {atRisk.length > 0 ? (<>
+          <Rule />
+          <Section>
+            <Card tone={t.warn}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: sp.sm }}>
+                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn }} />
+                <Text style={{ ...ty.micro, color: t.ink3 }}>Revenue at risk</Text>
+              </View>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ ...value(26), color: t.ink }}>~${atRiskRevenue.toLocaleString()}<Text style={{ ...ty.caption, color: t.ink3 }}>/mo</Text></Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
+                    {atRisk.length} client{atRisk.length > 1 ? 's' : ''} slipping — check in before they churn.
+                  </Text>
+                </View>
+                <Cta label="Review" onPress={() => router.push('/(trainer)/dashboard')} />
+              </View>
+            </Card>
+          </Section>
+        </>) : null}
 
-        <Pressable onPress={() => router.push('/(trainer)/leaderboard')} style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18, marginBottom: 14 }}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-            <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16 }}>Roster health</Text>
-            <Text style={{ color: t.ink3, fontSize: 12 }}>{avgAdh}% avg adherence</Text>
-          </View>
-          <DistBar segments={[{ label: 'On track', value: onTrack, color: t.brand }, { label: 'Watch', value: watch, color: t.warn }, { label: 'At risk', value: riskCount, color: t.crit }]} />
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 }}>
-            {[['On track', onTrack, t.brand], ['Watch', watch, t.warn], ['At risk', riskCount, t.crit]].map(([l, v, c]) => (
-              <View key={l as string} style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                <View style={{ width: 9, height: 9, borderRadius: 5, backgroundColor: c as string }} />
-                <Text style={{ color: t.ink2, fontSize: 12, fontWeight: '600' }}>{l as string} {v as number}</Text>
+        <Rule />
+
+        {/* ── roster health ──────────────────────────────────────────────── */}
+        <Section>
+          <SectionHead title="Roster health" note={`${avgAdh}% avg adherence`} onPress={() => router.push('/(trainer)/leaderboard')} />
+          <DistBar segments={[
+            { label: 'On track', value: onTrack, color: t.brand },
+            { label: 'Watch', value: watch, color: t.warn },
+            { label: 'At risk', value: riskCount, color: t.crit },
+          ]} />
+          <View style={{ flexDirection: 'row', gap: sp.lg, marginTop: sp.md }}>
+            {([['On track', onTrack, t.brand], ['Watch', watch, t.warn], ['At risk', riskCount, t.crit]] as const).map(([l, v, col]) => (
+              <View key={l} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: col }} />
+                <Text style={{ ...ty.caption, color: t.ink2 }}>{l} {v}</Text>
               </View>
             ))}
           </View>
-        </Pressable>
+        </Section>
 
-        <Pressable onPress={() => router.push('/(trainer)/payments')} style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18, marginBottom: 14 }}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-            <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16 }}>Revenue trend</Text>
-            {revHist.delta !== 0 ? <DeltaBadge value={revHist.delta} unit="" suffix="vs last mo" /> : <Text style={{ color: t.ink3, fontSize: 11 }}>tracking started</Text>}
-          </View>
-          <Sparkline data={revHist.series} w={300} h={64} />
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 }}>
-            {revHist.labels.map((l, i) => (<Text key={i} style={{ color: t.ink3, fontSize: 10 }}>{l}</Text>))}
-          </View>
-        </Pressable>
+        <Rule />
 
-        <View style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18, marginBottom: 14 }}>
-          <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16, marginBottom: 4 }}>Client value</Text>
-          <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 14 }}>Estimated from revenue and adherence-based retention.</Text>
-          <View style={{ flexDirection: 'row', gap: 10 }}>
-            {[['Value / client', '$' + valuePerClient.toLocaleString() + '/mo'], ['Est. tenure', estTenureMonths + ' mo'], ['Est. LTV', '$' + estLtv.toLocaleString()]].map(([l, v]) => (
-              <View key={l as string} style={{ flex: 1, backgroundColor: t.surface2, borderRadius: 12, borderWidth: 1, borderColor: t.ring, paddingVertical: 12, alignItems: 'center' }}>
-                <Text style={{ color: t.ink, fontWeight: '800', fontSize: 16 }}>{v as string}</Text>
-                <Text style={{ color: t.ink3, fontSize: 10, marginTop: 3, textAlign: 'center' }}>{l as string}</Text>
-              </View>
+        {/* ── revenue trend ──────────────────────────────────────────────── */}
+        <Section>
+          <SectionHead title="Revenue trend"
+            note={revHist.delta !== 0 ? `${revHist.delta > 0 ? '+' : '−'}$${Math.abs(revHist.delta).toLocaleString()} vs last mo` : 'Tracking started'}
+            onPress={() => router.push('/(trainer)/payments')} />
+          <Spark data={revHist.series} />
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: sp.sm }}>
+            {revHist.labels.map((l, i) => (
+              <Text key={i} style={{ ...ty.micro, letterSpacing: 0.4, color: t.ink3 }}>{l}</Text>
             ))}
           </View>
-          <Text style={{ color: t.ink3, fontSize: 11, marginTop: 10, lineHeight: 15 }}>Higher adherence lifts estimated tenure — better retention compounds LTV. Real per-client tenure tracks once clients link accounts.</Text>
-        </View>
+        </Section>
 
-        <View style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18, marginBottom: 14 }}>
-          <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16, marginBottom: 4 }}>At-risk clients</Text>
-          <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 12 }}>Low adherence or inactive 2+ days — reach out</Text>
+        <Rule />
+
+        {/* ── client value ───────────────────────────────────────────────── */}
+        <Section>
+          <SectionHead title="Client value" note="Estimated" />
+          <KpiRow items={[
+            { label: 'Value / client', value: '$' + valuePerClient.toLocaleString(), unit: '/mo' },
+            { label: 'Est. tenure', value: String(estTenureMonths), unit: 'mo' },
+            { label: 'Est. LTV', value: '$' + estLtv.toLocaleString() },
+          ]} />
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+            Estimated from revenue and adherence-based retention — higher adherence lifts estimated tenure.
+            Real per-client tenure tracks once clients link accounts.
+          </Text>
+        </Section>
+
+        <Rule />
+
+        {/* ── at-risk clients ────────────────────────────────────────────── */}
+        <Section>
+          <SectionHead title="At-risk clients" note="Low adherence or inactive 2+ days" />
           {atRisk.length === 0 ? (
-            <Text style={{ color: t.ink3, fontSize: 13 }}>Everyone's on track — nice coaching.</Text>
-          ) : atRisk.map((c) => (
-            <View key={c.id} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 10, borderTopWidth: 1, borderTopColor: t.ring }}>
+            <Text style={{ ...ty.label, color: t.ink3 }}>Everyone is on track.</Text>
+          ) : atRisk.map((c, i) => (
+            <View key={c.id} style={{
+              flexDirection: 'row', alignItems: 'center', paddingVertical: sp.md,
+              borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
+            }}>
+              <View style={{ width: 6, height: 6, borderRadius: 3, marginRight: sp.md, backgroundColor: c.adherence < 82 ? t.crit : t.warn }} />
               <View style={{ flex: 1 }}>
-                <Text style={{ color: t.ink, fontWeight: '700', fontSize: 14, textTransform: 'capitalize' }}>{c.name}</Text>
-                <Text style={{ color: t.ink3, fontSize: 12, marginTop: 1 }}>{c.adherence}% adherence · last active {c.lastActive}</Text>
-              </View>
-              <View style={{ backgroundColor: c.adherence < 82 ? 'rgba(208,59,59,0.15)' : 'rgba(250,178,25,0.18)', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 5 }}>
-                <Text style={{ color: c.adherence < 82 ? t.crit : t.warn, fontSize: 11, fontWeight: '800' }}>{c.adherence < 82 ? 'LOW ADHERENCE' : 'INACTIVE'}</Text>
+                <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{c.name}</Text>
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                  {c.adherence < 82 ? 'Low adherence' : 'Inactive'} · {c.adherence}% · last active {c.lastActive}
+                </Text>
               </View>
             </View>
           ))}
-        </View>
+        </Section>
 
-        <View style={{ backgroundColor: t.surface, borderRadius: 20, borderWidth: 1, borderColor: t.ring, padding: 18, marginBottom: 14 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-            <Icon name="sparkle" size={16} color={t.brand} />
-            <Text style={{ color: t.ink, fontWeight: '700', fontSize: 16 }}>Weekly business digest</Text>
-          </View>
-          <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 12 }}>An AI Monday summary of your coaching business.</Text>
-          {digest ? <View style={{ backgroundColor: t.surface2, borderRadius: 12, borderWidth: 1, borderColor: t.ring, padding: 12, marginBottom: 10 }}><Text style={{ color: t.ink2, fontSize: 13, lineHeight: 19 }}>{digest}</Text></View> : null}
-          <Pressable onPress={genDigest} disabled={digestBusy} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingVertical: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+        <Rule />
+
+        {/* ── AI digest ──────────────────────────────────────────────────── */}
+        <Section>
+          <SectionHead title="Weekly business digest" />
+          {digest ? (
+            <Text style={{ ...ty.body, color: t.ink2, marginBottom: sp.lg }}>{digest}</Text>
+          ) : (
+            <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>An AI Monday summary of your coaching business.</Text>
+          )}
+          <Pressable onPress={genDigest} disabled={digestBusy}
+            style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: sp.sm,
+                     backgroundColor: t.surface2, borderRadius: radius.sm, paddingVertical: 12, opacity: digestBusy ? 0.6 : 1 }}>
             {digestBusy ? <ActivityIndicator color={t.brand} /> : <Icon name="sparkle" size={15} color={t.brand} />}
-            <Text style={{ color: t.brand, fontWeight: '800', fontSize: 13 }}>{digestBusy ? 'Writing…' : digest ? 'Regenerate' : 'Generate digest'}</Text>
+            <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>
+              {digestBusy ? 'Writing…' : digest ? 'Regenerate' : 'Generate digest'}
+            </Text>
           </Pressable>
-        </View>
+        </Section>
 
-        <View style={{ backgroundColor: t.surface2, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 16 }}>
-          <Text style={{ color: t.ink2, fontSize: 13, lineHeight: 20 }}>
-            You’re on the <Text style={{ color: t.brand, fontWeight: '800' }}>Pro</Text> plan (${platformFee}/mo to Repple). Add clients or session packages to grow — every new client at ${sessionFee}/session adds about ${sessionFee * 4}/mo.
+        <Rule />
+
+        <Section>
+          <ListRow icon="chart" title="Payments" note={`Pro plan · $${platformFee}/mo to Repple`}
+            onPress={() => router.push('/(trainer)/payments')} />
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+            Every new client at ${sessionFee}/session adds about ${(sessionFee * 4).toLocaleString()}/mo.
           </Text>
-        </View>
+        </Section>
+
       </ScrollView>
 
+      {/* ── goal editor ──────────────────────────────────────────────────── */}
       <Modal visible={goalOpen} transparent animationType="slide" onRequestClose={() => setGoalOpen(false)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setGoalOpen(false)} />
-        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, borderColor: t.ring, padding: 20, paddingBottom: 30 }}>
-          <Text style={{ color: t.ink, fontSize: 20, fontWeight: '800', marginBottom: 14 }}>Set your goals</Text>
-          <Text style={{ color: t.ink2, fontSize: 12, fontWeight: '700', marginBottom: 6 }}>Monthly revenue target ($)</Text>
-          <TextInput value={gRev} onChangeText={setGRev} keyboardType="number-pad" placeholder="4000" placeholderTextColor={t.ink3} style={{ color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 11, fontSize: 15, marginBottom: 12 }} />
-          <Text style={{ color: t.ink2, fontSize: 12, fontWeight: '700', marginBottom: 6 }}>Client target</Text>
-          <TextInput value={gCli} onChangeText={setGCli} keyboardType="number-pad" placeholder="12" placeholderTextColor={t.ink3} style={{ color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 11, fontSize: 15, marginBottom: 16 }} />
-          <Pressable onPress={() => { setGoals({ revenue: parseInt(gRev, 10) || 0, clients: parseInt(gCli, 10) || 0 }); setGoalOpen(false); }} style={{ backgroundColor: t.brand, borderRadius: 12, paddingVertical: 14, alignItems: 'center' }}><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 14 }}>Save goals</Text></Pressable>
-          <Pressable onPress={() => setGoalOpen(false)} style={{ paddingVertical: 12, alignItems: 'center' }}><Text style={{ color: t.ink3, fontWeight: '700', fontSize: 13 }}>Cancel</Text></Pressable>
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30 }}>
+          <Text style={{ ...ty.title, color: t.ink, marginBottom: sp.lg }}>Set your goals</Text>
+          <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Monthly revenue target ($)</Text>
+          <TextInput value={gRev} onChangeText={setGRev} keyboardType="number-pad" placeholder="4000" placeholderTextColor={t.ink3}
+            style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 11, marginBottom: sp.md }} />
+          <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Client target</Text>
+          <TextInput value={gCli} onChangeText={setGCli} keyboardType="number-pad" placeholder="12" placeholderTextColor={t.ink3}
+            style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 11, marginBottom: sp.xl }} />
+          <Cta label="Save goals" wide onPress={() => { setGoals({ revenue: parseInt(gRev, 10) || 0, clients: parseInt(gCli, 10) || 0 }); setGoalOpen(false); }} />
+          <View style={{ height: sp.sm }} />
+          <Ghost label="Cancel" onPress={() => setGoalOpen(false)} />
         </View>
       </Modal>
     </SafeAreaView>
