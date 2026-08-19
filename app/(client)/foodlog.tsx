@@ -32,7 +32,12 @@ const FOOD_DB: Food[] = [
 const BARCODE = { n: 'Protein Bar (barcode)', k: 210, p: 20, c: 21, f: 7 };
 // Interim baseline estimate shown after a photo; the vision backend replaces this
 // with a real read of the actual plate. User can edit before logging.
-const PHOTO_GUESS: Food = { n: 'Meal (photo estimate)', k: 520, p: 40, c: 50, f: 16 };
+// No baseline estimate. This used to be
+//   const PHOTO_GUESS: Food = { n: 'Meal (photo estimate)', k: 520, p: 40, c: 50, f: 16 };
+// filled in after a simulated 900ms "Reading Your Meal…" delay whenever the vision
+// backend was unavailable — so photographing any plate produced the same invented
+// 520 kcal, shown to the client as an AI reading of their own food. When there is no
+// real read, the fields stay empty and the UI says so.
 const round = (n: number) => Math.round(n);
 
 export default function FoodLog() {
@@ -50,6 +55,8 @@ export default function FoodLog() {
  // photo estimate modal state
  const [photoUri, setPhotoUri] = useState<string | null>(null);
  const [reading, setReading] = useState(false);
+ // True when a photo was taken but no real nutrition read was possible.
+ const [readFailed, setReadFailed] = useState(false);
  const [estN, setEstN] = useState(''); const [estK, setEstK] = useState(''); const [estP, setEstP] = useState(''); const [estC, setEstC] = useState(''); const [estF, setEstF] = useState('');
  const [serv, setServ] = useState(1);
 
@@ -68,7 +75,7 @@ export default function FoodLog() {
  const burned = useWearables().today.activeKcal || 0;
  const remK = (target.kcal + burned) - tot.k;
 
- const fillEst = (n: string, k: number, p: number, c: number, f: number) => { setEstN(n); setEstK(String(k)); setEstP(String(p)); setEstC(String(c)); setEstF(String(f)); setReading(false); };
+ const fillEst = (n: string, k: number, p: number, c: number, f: number) => { setEstN(n); setEstK(String(k)); setEstP(String(p)); setEstC(String(c)); setEstF(String(f)); setReadFailed(false); setReading(false); };
  const takeMealPhoto = async (fromCamera: boolean) => {
  const perm = fromCamera ? await ImagePicker.requestCameraPermissionsAsync() : await ImagePicker.requestMediaLibraryPermissionsAsync();
  if (!perm.granted) { Alert.alert('Permission needed', 'Allow access to ' + (fromCamera ? 'the camera' : 'your photos') + ' to log a meal by photo.'); return; }
@@ -76,7 +83,7 @@ export default function FoodLog() {
  if (res.canceled || !res.assets?.[0]) return;
  const asset = res.assets[0];
  setPhotoUri(asset.uri);
- setReading(true); setServ(1);
+ setReading(true); setReadFailed(false); setServ(1);
  // Real vision read when the backend is live; otherwise an editable estimate.
  if (visionAvailable() && asset.base64) {
  let mb = asset.base64;
@@ -84,7 +91,10 @@ export default function FoodLog() {
  const r = await analyzeMeal(mb, 'image/jpeg');
  if (r) { fillEst(r.name, r.kcal, r.protein, r.carbs, r.fat); return; }
  }
- setTimeout(() => fillEst(PHOTO_GUESS.n, PHOTO_GUESS.k, PHOTO_GUESS.p, PHOTO_GUESS.c, PHOTO_GUESS.f), 900);
+ // No real read available — do not invent one. Blank the fields and switch the
+ // sheet's copy to "enter it yourself" rather than claiming an AI estimate.
+ setEstN(''); setEstK(''); setEstP(''); setEstC(''); setEstF('');
+ setReadFailed(true); setReading(false);
  };
 
  const logPhoto = () => {
@@ -168,7 +178,7 @@ export default function FoodLog() {
  <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)' }} onPress={() => setPhotoUri(null)} />
  <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, borderColor: t.ring, padding: 18, paddingBottom: 30 }}>
  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
- <Text style={{ color: t.ink, fontSize: 18, fontWeight: '800' }}>{reading ? 'Reading Your Meal…' : 'Confirm & Log'}</Text>
+ <Text style={{ color: t.ink, fontSize: 18, fontWeight: '800' }}>{reading ? 'Reading Your Meal…' : readFailed ? 'Enter This Meal' : 'Confirm & Log'}</Text>
  <Pressable onPress={() => setPhotoUri(null)}><Text style={{ color: t.brand, fontSize: 16, fontWeight: '800' }}>Cancel</Text></Pressable>
  </View>
  {photoUri ? <Image source={{ uri: photoUri }} style={{ width: '100%', height: 150, borderRadius: 12, backgroundColor: t.surface2, marginBottom: 12 }} resizeMode="cover" /> : null}
@@ -176,7 +186,7 @@ export default function FoodLog() {
  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8 }}><ActivityIndicator color={t.brand} /><Text style={{ color: t.ink3, fontSize: 13 }}>Estimating calories and macros…</Text></View>
  ) : (
  <>
- <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 10 }}>AI estimate — adjust anything before logging. (Accurate photo reading arrives with the vision backend.)</Text>
+ <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 10 }}>{readFailed ? "Photo reading isn't available yet, so nothing was estimated from your picture — enter the calories and macros and they'll be logged against this photo." : 'AI estimate from your photo — adjust anything before logging.'}</Text>
  <TextInput value={estN} onChangeText={setEstN} placeholder="Meal name" placeholderTextColor={t.ink3} style={{ color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 11, fontSize: 14, marginBottom: 8 }} />
  <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
  {[['kcal', estK, setEstK], ['P', estP, setEstP], ['C', estC, setEstC], ['F', estF, setEstF]].map(([lbl, val, set]: any) => (

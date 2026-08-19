@@ -214,7 +214,13 @@ export default function Home() {
 
         {/* ── the one card: today's action ────────────────────────────────── */}
         <Section>
-          <SectionHead title={`Today · ${workout.focus}`} note={`${wk.workouts} of ${goalDays} this week`} />
+          {/* The header follows the card. When the adaptive call is "fuel up" or
+              "recover", naming today's muscle group here made the header and the
+              card underneath talk about two different things. */}
+          <SectionHead
+            title={today.route.includes('workouts') ? `Today · ${workout.focus}` : 'Today'}
+            note={`${wk.workouts} of ${goalDays} this week`}
+          />
           <ActionCard
             ring={goalDays ? wk.workouts / goalDays : 0}
             ringLabel={String(streak)}

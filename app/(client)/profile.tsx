@@ -1,6 +1,12 @@
-// Me — matches the mockup: avatar + serif name + stats line + edit pencil, a clean
-// 3-pill goal card, then the grouped icon hub. The full edit form (name, DOB wheel,
-// height/weight/body-fat with unit toggles, live macro preview) lives in a sheet.
+// Me — identity, the two settings that change the plan (goal + coaching mode),
+// today's target, and the navigational hub.
+//
+// Rebuilt on the instrument-panel kit (`src/ui/kit`) and the scale
+// (`src/theme/scale`). Every provider, conditional and route from the previous
+// version is preserved — only the presentation changed: no hero (a profile has
+// no single live number to lead with), hairline-separated sections instead of
+// seven stacked bordered boxes, and `<ListRow>` for the hub instead of a
+// hand-rolled row for the 3,815th time.
 import { useState, useRef, useEffect } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView, Modal, Image, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -8,6 +14,8 @@ import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
+import { Rule, Section, SectionHead, KpiRow, ListRow, Ghost } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../../src/theme/scale';
 import { ageFromDob } from '../../src/lib/age';
 import { macrosFor, applyCoachAdjust } from '../../src/lib/nutrition';
 import { useClientData, type CoachingMode } from '../../src/ui/clientData';
@@ -15,7 +23,6 @@ import { useCoachNutrition } from '../../src/ui/coachNutrition';
 import { Icon, type IconName } from '../../src/ui/Icon';
 import type { Goal, Diet } from '../../src/lib/types';
 
-const SERIF = 'Georgia';
 const GOALS: { id: Goal; label: string }[] = [
   { id: 'fatloss', label: 'Fat loss' },
   { id: 'tone', label: 'Tone' },
@@ -51,7 +58,7 @@ function Wheel({ items, index, onChange, t }: { items: string[]; index: number; 
       >
         {items.map((it, i) => (
           <View key={i} style={{ height: ITEM_H, alignItems: 'center', justifyContent: 'center' }}>
-            <Text style={{ color: i === index ? t.ink : t.ink3, fontSize: i === index ? 21 : 17, fontWeight: i === index ? '800' : '400' }}>{it}</Text>
+            <Text style={{ ...(i === index ? value(21) : ty.body), color: i === index ? t.ink : t.ink3 }}>{it}</Text>
           </View>
         ))}
       </ScrollView>
@@ -78,14 +85,14 @@ function DobPicker({ visible, iso, onClose, onSave, t }: { visible: boolean; iso
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={onClose} />
-      <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 18, borderTopWidth: 1, borderColor: t.ring }}>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-          <Pressable onPress={onClose}><Text style={{ color: t.ink3, fontSize: 16, fontWeight: '600' }}>Cancel</Text></Pressable>
-          <Text style={{ color: t.ink, fontSize: 16, fontWeight: '800' }}>Date of birth</Text>
-          <Pressable onPress={save}><Text style={{ color: t.brand, fontSize: 16, fontWeight: '800' }}>Done</Text></Pressable>
+      <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: sp.lg, borderTopWidth: hairline, borderColor: t.ring, ...elevation.e2 }}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sp.md }}>
+          <Pressable onPress={onClose} hitSlop={8}><Text style={{ ...ty.body, fontWeight: '500', color: t.ink3 }}>Cancel</Text></Pressable>
+          <Text style={{ ...ty.head, color: t.ink }}>Date of birth</Text>
+          <Pressable onPress={save} hitSlop={8}><Text style={{ ...ty.body, fontWeight: '600', color: t.brand }}>Done</Text></Pressable>
         </View>
         <View style={{ position: 'relative' }}>
-          <View pointerEvents="none" style={{ position: 'absolute', left: 0, right: 0, top: ITEM_H * 2, height: ITEM_H, borderRadius: 10, backgroundColor: t.surface2, borderWidth: 1, borderColor: t.ring }} />
+          <View pointerEvents="none" style={{ position: 'absolute', left: 0, right: 0, top: ITEM_H * 2, height: ITEM_H, borderRadius: radius.sm, backgroundColor: t.surface2, borderWidth: hairline, borderColor: t.ring }} />
           <View style={{ flexDirection: 'row' }}>
             <Wheel items={days} index={dayIdx} onChange={setD} t={t} />
             <Wheel items={MONTHS} index={m} onChange={setM} t={t} />
@@ -97,12 +104,12 @@ function DobPicker({ visible, iso, onClose, onSave, t }: { visible: boolean; iso
   );
 }
 
-function Seg({ options, value, onChange, t }: { options: string[]; value: string; onChange: (v: string) => void; t: Theme }) {
+function Seg({ options, value: val, onChange, t }: { options: string[]; value: string; onChange: (v: string) => void; t: Theme }) {
   return (
-    <View style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: 9, padding: 3, borderWidth: 1, borderColor: t.ring }}>
+    <View style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: radius.sm, padding: 3 }}>
       {options.map((o) => (
-        <Pressable key={o} onPress={() => onChange(o)} style={{ paddingHorizontal: 13, paddingVertical: 6, borderRadius: 7, backgroundColor: value === o ? t.brand : 'transparent' }}>
-          <Text style={{ color: value === o ? t.brandInk : t.ink3, fontWeight: '700', fontSize: 13 }}>{o.toUpperCase()}</Text>
+        <Pressable key={o} onPress={() => onChange(o)} style={{ paddingHorizontal: sp.md, paddingVertical: 7, borderRadius: radius.sm, backgroundColor: val === o ? t.brand : 'transparent' }}>
+          <Text style={{ ...ty.label, fontWeight: '600', color: val === o ? t.brandInk : t.ink3 }}>{o.toUpperCase()}</Text>
         </Pressable>
       ))}
     </View>
@@ -237,103 +244,104 @@ export default function Profile() {
   const soloHidden = new Set(['/(client)/messages', '/(client)/checkin']);
   const HUB_KEEP = new Set(['Connect', 'Devices & Media', 'Account']);
   const hubGroups = HUB_GROUPS.filter((g) => HUB_KEEP.has(g.title)).map((g) => ({ ...g, items: g.items.filter((it) => cd.coachingMode !== 'solo' || !soloHidden.has(it.route)) }));
+  const G = layout.gutter;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
 
-        {/* header: avatar + serif name + stats + edit pencil */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, marginTop: 4, marginBottom: 16 }}>
-          <Pressable onPress={changePhoto}>
+        {/* ── header: who you are. No hero — a profile has no live metric ─── */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md, paddingBottom: sp.lg }}>
+          <Pressable onPress={() => setShowEdit(true)} accessibilityRole="button" accessibilityLabel="Edit your profile and stats" style={{ flex: 1 }}>
+            <Text style={{ ...ty.micro, color: t.ink3 }}>Me</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 5, textTransform: 'capitalize' }} numberOfLines={1}>{cd.name}</Text>
+            <Text style={{ ...ty.label, ...numeric, color: t.ink3, marginTop: 3 }}>{statsLine}</Text>
+          </Pressable>
+          <Ghost icon="pencil" onPress={() => setShowEdit(true)} />
+          <Pressable onPress={changePhoto} accessibilityRole="button" accessibilityLabel="Change your profile photo">
             {cd.photo ? (
-              <Image source={{ uri: cd.photo }} style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: t.surface2 }} />
+              <Image source={{ uri: cd.photo }} style={{ width: 56, height: 56, borderRadius: radius.pill, backgroundColor: t.surface2 }} />
             ) : (
-              <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}>
-                <Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 21 }}>{cd.init}</Text>
+              <View style={{ width: 56, height: 56, borderRadius: radius.pill, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}>
+                <Text style={{ ...value(20), color: t.brandInk }}>{cd.init}</Text>
               </View>
             )}
-            <View style={{ position: 'absolute', bottom: -2, right: -2, width: 22, height: 22, borderRadius: 11, backgroundColor: t.surface, borderWidth: 1, borderColor: t.ring, alignItems: 'center', justifyContent: 'center' }}>
+            <View style={{ position: 'absolute', bottom: -2, right: -2, width: 22, height: 22, borderRadius: radius.pill, backgroundColor: t.surface, borderWidth: hairline, borderColor: t.ring, alignItems: 'center', justifyContent: 'center' }}>
               <Icon name="camera" size={12} color={t.ink2} />
             </View>
           </Pressable>
-          <Pressable onPress={() => setShowEdit(true)} accessibilityRole="button" accessibilityLabel="Edit your profile and stats" style={{ flex: 1 }}>
-            <Text style={{ color: t.ink, fontSize: 22, fontWeight: '700', fontFamily: SERIF, textTransform: 'capitalize' }}>{cd.name}</Text>
-            <Text style={{ color: t.ink3, fontSize: 12, marginTop: 2 }}>{statsLine}</Text>
-            <Text style={{ color: t.brand, fontSize: 11, fontWeight: '700', marginTop: 3 }}>Tap to edit ›</Text>
-          </Pressable>
-          <Pressable onPress={() => setShowEdit(true)} style={{ width: 36, height: 36, borderWidth: 1, borderColor: t.ring, borderRadius: 10, alignItems: 'center', justifyContent: 'center' }}>
-            <Icon name="pencil" size={16} color={t.ink2} />
-          </Pressable>
         </View>
 
-        {/* goal pills */}
-        <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 14, marginBottom: 6 }}>
-          <Text style={{ color: t.ink3, fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 8 }}>Your goal</Text>
-          <View style={{ flexDirection: 'row', gap: 7 }}>
+        <Rule />
+
+        {/* ── goal ───────────────────────────────────────────────────────── */}
+        <Section>
+          <SectionHead title="Your goal" />
+          <View style={{ flexDirection: 'row', gap: sp.sm }}>
             {GOALS.map((g) => {
               const on = cd.goal === g.id;
               return (
-                <Pressable key={g.id} onPress={() => cd.setGoal(g.id)} style={{ flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 10, backgroundColor: on ? t.brand : t.surface2, borderWidth: 1, borderColor: on ? t.brand : t.ring }}>
-                  <Text style={{ color: on ? t.brandInk : t.ink2, fontWeight: '700', fontSize: 12.5 }}>{g.label}</Text>
+                <Pressable key={g.id} onPress={() => cd.setGoal(g.id)} style={{ flex: 1, alignItems: 'center', paddingVertical: sp.md, borderRadius: radius.sm, backgroundColor: on ? t.brand : t.surface2 }}>
+                  <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{g.label}</Text>
                 </Pressable>
               );
             })}
           </View>
-        </View>
+        </Section>
 
-        {/* coaching mode */}
-        <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 14, marginTop: 12 }}>
-          <Text style={{ color: t.ink3, fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 4 }}>Coaching</Text>
+        <Rule />
+
+        {/* ── coaching mode ──────────────────────────────────────────────── */}
+        <Section>
+          <SectionHead title="Coaching" />
           {COACH_MODES.map((mm) => {
             const on = cd.coachingMode === mm.id;
             return (
-              <Pressable key={mm.id} onPress={() => cd.setCoachingMode(mm.id)} style={{ flexDirection: 'row', alignItems: 'center', gap: 11, paddingVertical: 11, borderTopWidth: mm.id === 'online' ? 0 : 1, borderTopColor: t.ring }}>
-                <View style={{ width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: on ? t.brand : t.ring, alignItems: 'center', justifyContent: 'center' }}>{on ? <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: t.brand }} /> : null}</View>
+              <Pressable key={mm.id} onPress={() => cd.setCoachingMode(mm.id)} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: mm.id === 'online' ? 0 : hairline, borderTopColor: t.ring }}>
+                <View style={{ width: 20, height: 20, borderRadius: radius.pill, borderWidth: 2, borderColor: on ? t.brand : t.ring, alignItems: 'center', justifyContent: 'center' }}>{on ? <View style={{ width: 10, height: 10, borderRadius: radius.pill, backgroundColor: t.brand }} /> : null}</View>
                 <View style={{ flex: 1 }}>
-                  <Text style={{ color: t.ink, fontWeight: '700', fontSize: 14 }}>{mm.label}</Text>
-                  <Text style={{ color: t.ink3, fontSize: 11.5, marginTop: 1 }}>{mm.note}</Text>
+                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{mm.label}</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{mm.note}</Text>
                 </View>
               </Pressable>
             );
           })}
-        </View>
+        </Section>
 
-        {/* live target strip */}
-        <Pressable onPress={() => router.push('/(client)/nutrition')} accessibilityRole="button" accessibilityLabel="See your meal plan" style={{ backgroundColor: t.surface2, borderRadius: 14, borderWidth: 1, borderColor: t.ring, padding: 13, marginTop: 12, marginBottom: 18, flexDirection: 'row', alignItems: 'center' }}>
-          <Text style={{ color: t.ink3, fontSize: 12, flex: 1 }}>Daily target · <Text style={{ color: t.ink, fontWeight: '700' }}>{macros.kcal.toLocaleString()} kcal</Text> · P{macros.protein} / C{macros.carbs} / F{macros.fat}</Text>
-          <Icon name="chevron" size={16} color={t.ink3} />
-        </Pressable>
+        <Rule />
 
-        <Pressable onPress={() => router.push('/(client)/explore')} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 13, marginBottom: 16 }}>
-          <View style={{ width: 34, height: 34, borderRadius: 9, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}><Icon name="search" size={16} color={t.brand} /></View>
-          <View style={{ flex: 1 }}>
-            <Text style={{ color: t.ink, fontWeight: '700', fontSize: 14 }}>Explore all features</Text>
-            <Text style={{ color: t.ink3, fontSize: 11.5, marginTop: 1 }}>Search anything in the app</Text>
-          </View>
-          <Icon name="chevron" size={17} color={t.ink3} />
-        </Pressable>
+        {/* ── what this profile adds up to ───────────────────────────────── */}
+        <Section>
+          <SectionHead title="Daily target" note={`${macros.kcal.toLocaleString()} kcal`} onPress={() => router.push('/(client)/nutrition')} />
+          <KpiRow items={[
+            { label: 'Protein', value: String(macros.protein), unit: 'g' },
+            { label: 'Carbs', value: String(macros.carbs), unit: 'g' },
+            { label: 'Fat', value: String(macros.fat), unit: 'g' },
+          ]} />
+        </Section>
 
-        {/* hub groups */}
+        <Rule />
+
+        <Section>
+          <ListRow icon="search" title="Explore all features" note="Search anything in the app"
+            onPress={() => router.push('/(client)/explore')} />
+        </Section>
+
+        {/* ── the hub: grouped, collapsible, deliberately quiet ───────────── */}
         {hubGroups.map((g) => { const gc = collapsed[g.title] ?? false; return (
           <View key={g.title}>
-            <Pressable onPress={() => setCollapsed((p) => ({ ...p, [g.title]: !gc }))} accessibilityRole="button" accessibilityLabel={(gc ? 'Expand ' : 'Collapse ') + g.title} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, marginTop: 4 }}>
-              <Text style={{ color: t.ink3, fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.7 }}>{g.title}</Text>
-              <View style={{ transform: [{ rotate: gc ? '0deg' : '90deg' }] }}><Icon name="chevron" size={13} color={t.ink3} /></View>
-            </Pressable>
-            {!gc ? (
-            <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, overflow: 'hidden', marginBottom: 16 }}>
-              {g.items.map((h, i) => (
-                <Pressable key={h.route} onPress={() => router.push(h.route as any)} style={{ flexDirection: 'row', alignItems: 'center', gap: 13, paddingHorizontal: 14, paddingVertical: 13, borderTopWidth: i === 0 ? 0 : 1, borderTopColor: t.ring }}>
-                  <View style={{ width: 34, height: 34, borderRadius: 9, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}><Icon name={HUB_ICON[h.route] || 'chevron'} size={16} color={t.brand} /></View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ color: t.ink, fontWeight: '700', fontSize: 14 }}>{h.label}</Text>
-                    <Text style={{ color: t.ink3, fontSize: 11.5, marginTop: 1 }}>{h.note}</Text>
-                  </View>
-                  <Icon name="chevron" size={17} color={t.ink3} />
-                </Pressable>
-              ))}
-            </View>
-            ) : <View style={{ marginBottom: 12 }} />}
+            <Rule />
+            <Section>
+              <Pressable onPress={() => setCollapsed((p) => ({ ...p, [g.title]: !gc }))} accessibilityRole="button" accessibilityLabel={(gc ? 'Expand ' : 'Collapse ') + g.title}
+                style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: gc ? 0 : sp.sm }}>
+                <Text style={{ ...ty.micro, color: t.ink3 }}>{g.title}</Text>
+                <View style={{ transform: [{ rotate: gc ? '0deg' : '90deg' }] }}><Icon name="chevron" size={13} color={t.ink3} /></View>
+              </Pressable>
+              {!gc ? g.items.map((h) => (
+                <ListRow key={h.route} icon={HUB_ICON[h.route] || 'chevron'} title={h.label} note={h.note}
+                  onPress={() => router.push(h.route as any)} />
+              )) : null}
+            </Section>
           </View>
         ); })}
       </ScrollView>
@@ -341,53 +349,54 @@ export default function Profile() {
       {/* edit profile sheet */}
       <Modal visible={showEdit} transparent animationType="slide" onRequestClose={() => setShowEdit(false)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setShowEdit(false)} />
-        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, borderColor: t.ring, maxHeight: '90%' }}>
-          <ScrollView contentContainerStyle={{ padding: 20 }} showsVerticalScrollIndicator={false}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <Text style={{ color: t.ink, fontSize: 20, fontWeight: '700', fontFamily: SERIF }}>Edit profile</Text>
-              <Pressable onPress={() => setShowEdit(false)}><Text style={{ color: t.brand, fontSize: 15, fontWeight: '800' }}>Close</Text></Pressable>
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, borderTopWidth: hairline, borderColor: t.ring, maxHeight: '90%', ...elevation.e2 }}>
+          <ScrollView contentContainerStyle={{ padding: G }} showsVerticalScrollIndicator={false}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sp.lg }}>
+              <Text style={{ ...ty.title, color: t.ink }}>Edit profile</Text>
+              <Pressable onPress={() => setShowEdit(false)} hitSlop={8}><Text style={{ ...ty.body, fontWeight: '600', color: t.brand }}>Close</Text></Pressable>
             </View>
 
-            <Text style={{ color: t.ink2, fontSize: 13, fontWeight: '600', marginBottom: 6 }}>Name</Text>
-            <TextInput value={nameVal} onChangeText={setNameVal} placeholder="Your name" placeholderTextColor={t.ink3} autoCapitalize="words" style={{ color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, marginBottom: 14 }} />
+            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Name</Text>
+            <TextInput value={nameVal} onChangeText={setNameVal} placeholder="Your name" placeholderTextColor={t.ink3} autoCapitalize="words" style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md, marginBottom: sp.lg }} />
 
-            <Text style={{ color: t.ink2, fontSize: 13, fontWeight: '600', marginBottom: 6 }}>Date of birth</Text>
-            <Pressable onPress={() => setShowDob(true)} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 13, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-              <Text style={{ color: t.ink, fontSize: 15, fontWeight: '600' }}>{dobLabel}</Text>
-              <Text style={{ color: t.ink3, fontSize: 13 }}>{age != null ? `${age} yrs  ▾` : '▾'}</Text>
+            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Date of birth</Text>
+            <Pressable onPress={() => setShowDob(true)} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sp.lg }}>
+              <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{dobLabel}</Text>
+              <Text style={{ ...ty.caption, color: t.ink3 }}>{age != null ? `${age} yrs  ▾` : '▾'}</Text>
             </Pressable>
 
-            <Text style={{ color: t.ink2, fontSize: 13, fontWeight: '600', marginBottom: 6 }}>Height</Text>
-            <View style={{ flexDirection: 'row', gap: 10, marginBottom: 14 }}>
-              <TextInput value={heightVal} onChangeText={setHeightVal} keyboardType="numeric" placeholderTextColor={t.ink3} style={{ flex: 1, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15 }} />
+            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Height</Text>
+            <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.lg }}>
+              <TextInput value={heightVal} onChangeText={setHeightVal} keyboardType="numeric" placeholderTextColor={t.ink3} style={{ flex: 1, ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md }} />
               <Seg options={['cm', 'in']} value={heightUnit} onChange={toggleHeight} t={t} />
             </View>
 
-            <Text style={{ color: t.ink2, fontSize: 13, fontWeight: '600', marginBottom: 6 }}>Current weight</Text>
-            <View style={{ flexDirection: 'row', gap: 10, marginBottom: 14 }}>
-              <TextInput value={weightVal} onChangeText={setWeightVal} keyboardType="numeric" placeholderTextColor={t.ink3} style={{ flex: 1, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15 }} />
+            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Current weight</Text>
+            <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.lg }}>
+              <TextInput value={weightVal} onChangeText={setWeightVal} keyboardType="numeric" placeholderTextColor={t.ink3} style={{ flex: 1, ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md }} />
               <Seg options={['kg', 'lb']} value={weightUnit} onChange={toggleWeight} t={t} />
             </View>
 
-            <Text style={{ color: t.ink2, fontSize: 13, fontWeight: '600', marginBottom: 6 }}>Body fat %</Text>
-            <TextInput value={bfVal} onChangeText={setBfVal} keyboardType="numeric" placeholder="e.g. 22" placeholderTextColor={t.ink3} style={{ color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, marginBottom: 6 }} />
-            <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 16 }}>From your latest scan, or type it in. Changes recalculate your plan.</Text>
-            <Text style={{ color: t.ink2, fontSize: 13, fontWeight: '600', marginBottom: 6 }}>Diet</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 7, marginBottom: 16 }}>
+            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Body fat %</Text>
+            <TextInput value={bfVal} onChangeText={setBfVal} keyboardType="numeric" placeholder="e.g. 22" placeholderTextColor={t.ink3} style={{ ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md, marginBottom: sp.sm }} />
+            <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>From your latest scan, or type it in. Changes recalculate your plan.</Text>
+
+            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Diet</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, marginBottom: sp.lg }}>
               {DIETS.map((d) => (
-                <Pressable key={d.id} onPress={() => cd.setDiet(d.id)} style={{ paddingHorizontal: 15, paddingVertical: 8, borderRadius: 10, backgroundColor: cd.diet === d.id ? t.brand : t.surface2, borderWidth: 1, borderColor: cd.diet === d.id ? t.brand : t.ring }}>
-                  <Text style={{ color: cd.diet === d.id ? t.brandInk : t.ink2, fontWeight: '700', fontSize: 12 }}>{d.label}</Text>
+                <Pressable key={d.id} onPress={() => cd.setDiet(d.id)} style={{ paddingHorizontal: sp.lg, paddingVertical: sp.sm, borderRadius: radius.sm, backgroundColor: cd.diet === d.id ? t.brand : t.surface2 }}>
+                  <Text style={{ ...ty.label, fontWeight: cd.diet === d.id ? '600' : '500', color: cd.diet === d.id ? t.brandInk : t.ink2 }}>{d.label}</Text>
                 </Pressable>
               ))}
             </ScrollView>
 
-            <View style={{ backgroundColor: t.surface2, borderRadius: 12, borderWidth: 1, borderColor: t.ring, padding: 13, marginBottom: 16 }}>
-              <Text style={{ color: t.ink3, fontSize: 12 }}>New target · <Text style={{ color: t.ink, fontWeight: '700' }}>{previewMacros.kcal.toLocaleString()} kcal</Text> · P{previewMacros.protein} / C{previewMacros.carbs} / F{previewMacros.fat}</Text>
+            <View style={{ backgroundColor: t.surface2, borderRadius: radius.sm, padding: sp.md, marginBottom: sp.lg }}>
+              <Text style={{ ...ty.caption, color: t.ink3 }}>New target · <Text style={{ ...ty.caption, ...numeric, fontWeight: '600', color: t.ink }}>{previewMacros.kcal.toLocaleString()} kcal</Text> · P{previewMacros.protein} / C{previewMacros.carbs} / F{previewMacros.fat}</Text>
             </View>
 
-            <Pressable style={{ backgroundColor: saved ? t.surface2 : t.brand, borderWidth: 1, borderColor: saved ? t.ring : t.brand, borderRadius: 12, paddingVertical: 14, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8 }} onPress={save}>
+            <Pressable style={{ backgroundColor: saved ? t.surface2 : t.brand, borderRadius: radius.sm, paddingVertical: sp.md, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: sp.sm }} onPress={save}>
               {saved ? <Icon name="check" size={16} color={t.ink} /> : null}
-              <Text style={{ color: saved ? t.ink : t.brandInk, fontWeight: '800', fontSize: 15 }}>{saved ? 'Saved — plan updated' : 'Save'}</Text>
+              <Text style={{ ...ty.body, fontWeight: '600', color: saved ? t.ink : t.brandInk }}>{saved ? 'Saved — plan updated' : 'Save'}</Text>
             </Pressable>
           </ScrollView>
         </View>

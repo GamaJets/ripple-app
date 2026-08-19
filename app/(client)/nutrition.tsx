@@ -1,12 +1,21 @@
-// Meals — dense briefing that matches the approved mockup: serif header + gold
-// coach chip, calorie ring + macro bars hero, clean tappable meal cards, recipe
-// & grocery sheets. Meal-plan engine + swap + grocery logic unchanged.
+// Client · Meals — the day's fuel: what is left to eat, the macro split against
+// target, today's or the week's plan, and the tools to log what actually went in.
+//
+// Rebuilt on the instrument-panel kit (`src/ui/kit`) and the scale
+// (`src/theme/scale`). Every provider, hook (same order), conditional branch and
+// route from the previous version is preserved — only the presentation changed:
+// one hero figure (calories left) instead of a ring competing with three bars,
+// hairline-separated sections instead of five stacked bordered boxes, and a
+// single card spent on the one thing you act on, logging a meal.
+//
+// Also removed: the photo-log fallback that invented a 520 kcal / 40P / 50C /
+// 16F "Meal (photo)" entry whenever vision was unavailable or failed. Nothing is
+// logged now — the app says it could not read the photo rather than making a
+// number up.
 import { useState, useEffect } from 'react';
 import { View, Text, Pressable, ScrollView, Modal, TextInput, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import Svg, { Circle } from 'react-native-svg';
 import { useTheme } from '../../src/ui/components';
-import type { Theme } from '../../src/theme/tokens';
 import { buildPlan, swapIndex, groceryData, DEPTS, DEPT_ICO, ALLERGENS, type PlannedMeal } from '../../src/lib/meals';
 import { mealPlanDoc, shareDoc } from '../../src/lib/exportShare';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -23,28 +32,13 @@ import { parseFoodText, foodAIAvailable } from '../../src/lib/foodAI';
 import { lookupBarcode, normalizeBarcode } from '../../src/lib/openfoodfacts';
 import { useFoodLog } from '../../src/ui/foodLog';
 import { notifySuccess } from '../../src/ui/haptics';
+import { Rule, Section, SectionHead, Hero, Card, Cta, Ghost, Meter, QuickRow } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../../src/theme/scale';
 
-const SERIF = 'Georgia';
 const DIETS: Diet[] = ['meat', 'vegetarian', 'vegan', 'paleo', 'keto'];
 const DIET_LABEL: Record<Diet, string> = { meat: 'Meat', vegetarian: 'Veggie', vegan: 'Vegan', paleo: 'Paleo', keto: 'Keto' };
 const GOALS: Goal[] = ['fatloss', 'tone', 'muscle'];
 const GOAL_LABEL: Record<Goal, string> = { fatloss: 'Fat loss', tone: 'Tone', muscle: 'Build muscle' };
-
-function CalRing({ t, val, target }: { t: Theme; val: number; target: number }) {
-  const r = 34, c = 2 * Math.PI * r, frac = Math.max(0, Math.min(1, target ? val / target : 0));
-  return (
-    <View style={{ alignItems: 'center', justifyContent: 'center' }}>
-      <Svg width={86} height={86} viewBox="0 0 90 90">
-        <Circle cx="45" cy="45" r={r} fill="none" stroke={t.surface3} strokeWidth={9} />
-        <Circle cx="45" cy="45" r={r} fill="none" stroke={t.brand} strokeWidth={9} strokeLinecap="round" strokeDasharray={c} strokeDashoffset={c * (1 - frac)} transform="rotate(-90 45 45)" />
-      </Svg>
-      <View style={{ position: 'absolute', alignItems: 'center' }}>
-        <Text style={{ color: t.ink, fontSize: 17, fontWeight: '800' }}>{val.toLocaleString()}</Text>
-        <Text style={{ color: t.ink3, fontSize: 9 }}>/ {target.toLocaleString()}</Text>
-      </View>
-    </View>
-  );
-}
 
 export default function Nutrition() {
   const t = useTheme();
@@ -88,7 +82,10 @@ export default function Nutrition() {
     let nb = asset.base64; try { const mm = await ImageManipulator.manipulateAsync(asset.uri, [{ resize: { width: 1512 } }], { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true }); if (mm.base64) nb = mm.base64; } catch {}
     if (visionAvailable() && nb) { const r = await analyzeMeal(nb, 'image/jpeg'); if (r) { fl.addFood({ name: r.name, kcal: r.kcal, protein: r.protein, carbs: r.carbs, fat: r.fat, via: 'photo' }); notifySuccess(); Alert.alert('Logged', r.name + ' · ' + r.kcal + ' kcal added to today.'); done = true; } }
     setLogBusy(false);
-    if (!done) { fl.addFood({ name: 'Meal (photo)', kcal: 520, protein: 40, carbs: 50, fat: 16, via: 'photo' }); Alert.alert('Logged an estimate', 'Added ~520 kcal — open Food Log to fine-tune.'); }
+    // Nothing is logged when the photo cannot be read. Guessing macros here is
+    // worse than logging nothing — the client would be planning around a number
+    // the app invented.
+    if (!done) { Alert.alert('Could not read that photo', visionAvailable() ? 'Nothing was logged. Describe it below, or add it from the Food Log.' : 'Photo logging turns on with the AI backend. Describe it below, or add it from the Food Log.'); }
   };
   const barcodeLog = () => { setBcCode(''); setBcOpen(true); };
   const runBarcodeLookup = async () => {
@@ -139,244 +136,299 @@ export default function Nutrition() {
   };
   const weekPlans = view === 'week' ? WEEKD.map((_, d) => { const ov: Record<number, number> = {}; plan.forEach((m) => { ov[m.pos] = m.idx + d; }); return buildPlan({ ...input, mealOverride: ov }); }) : [];
 
-  const macroBar = (label: string, val: number, tgt: number, col: string) => (
-    <View style={{ marginBottom: 9 }}>
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-        <Text style={{ color: t.ink3, fontSize: 11 }}>{label}</Text>
-        <Text style={{ color: t.ink2, fontSize: 11, fontWeight: '700' }}>{val}/{tgt}g</Text>
-      </View>
-      <View style={{ height: 6, borderRadius: 3, backgroundColor: t.surface3, marginTop: 4, overflow: 'hidden' }}>
-        <View style={{ height: 6, borderRadius: 3, backgroundColor: col, width: `${Math.min(100, Math.round((val / (tgt || 1)) * 100))}%` }} />
-      </View>
-    </View>
-  );
+  const G = layout.gutter;
+  const eaten = fl.consumed;
+  const kcalLeft = Math.max(0, target.kcal - eaten.kcal);
+  const cycleNote = dayType === 'training' ? '+250 kcal, more carbs' : dayType === 'rest' ? '−250 kcal, fewer carbs' : undefined;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
 
-        {/* header row: serif title + gold coach chip */}
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4, marginBottom: 14 }}>
-          <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: SERIF }}>Meals</Text>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            {coachAdjust ? (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderColor: t.s3, borderRadius: 16, paddingHorizontal: 11, paddingVertical: 6 }}>
-                <Icon name="sparkle" size={13} color={t.s3} /><Text style={{ color: t.s3, fontSize: 11, fontWeight: '700' }}>Coach-adjusted</Text>
-              </View>
-            ) : null}
-            <Pressable onPress={sharePlan} accessibilityLabel="Share plan" style={{ width: 38, height: 38, borderRadius: 12, backgroundColor: t.surface, borderWidth: 1, borderColor: t.ring, alignItems: 'center', justifyContent: 'center' }}><Icon name="share" size={16} color={t.ink2} /></Pressable>
+        {/* ── header ─────────────────────────────────────────────────────── */}
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingTop: sp.md }}>
+          <View style={{ flex: 1 }}>
+            <Text style={{ ...ty.micro, color: t.ink3 }}>Nutrition</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Meals</Text>
           </View>
+          <Pressable onPress={sharePlan} accessibilityRole="button" accessibilityLabel="Share plan"
+            style={{ width: 38, height: 38, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center', marginTop: 2 }}>
+            <Icon name="share" size={17} color={t.ink2} />
+          </Pressable>
         </View>
 
-        {/* hero: ring + macro bars */}
-        <Pressable onPress={() => router.push('/(client)/foodlog')} accessibilityRole="button" accessibilityLabel="Open food log to see and edit everything you've eaten" style={{ backgroundColor: t.surface, borderRadius: 18, borderWidth: 1, borderColor: t.ring, padding: 16, marginBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 14 }}>
-          <CalRing t={t} val={tot.K} target={target.kcal} />
-          <View style={{ flex: 1 }}>
-            {macroBar('Protein', tot.P, target.protein, t.brand)}
-            {macroBar('Carbs', tot.C, target.carbs, t.s3)}
-            {macroBar('Fat', tot.F, target.fat, t.s1)}
+        {/* A coach-adjusted plan is marked, not shouted: a coloured dot beside
+            ink-coloured text. */}
+        {coachAdjust ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.md }}>
+            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.s3 }} />
+            <Text style={{ ...ty.micro, color: t.ink3 }}>Coach-adjusted</Text>
           </View>
-          <Icon name="chevron" size={18} color={t.ink3} />
-        </Pressable>
+        ) : null}
 
-        {/* Macro cycling: training vs rest day */}
-        <View style={{ backgroundColor: t.surface, borderRadius: 14, borderWidth: 1, borderColor: t.ring, padding: 12, marginBottom: 12 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 9 }}>
-            <Icon name="flame" size={14} color={t.brand} />
-            <Text style={{ color: t.ink2, fontSize: 12, fontWeight: '800' }}>Today is a…</Text>
-            {dayType !== 'off' ? <Text style={{ color: t.ink3, fontSize: 11 }}>· {dayType === 'training' ? '+250 kcal, more carbs' : '−250 kcal, fewer carbs'}</Text> : null}
-          </View>
-          <View style={{ flexDirection: 'row', gap: 8 }}>
+        {/* ── the hero: what is left to eat today ────────────────────────── */}
+        <Hero
+          label="Calories left"
+          figure={kcalLeft.toLocaleString()}
+          unit="kcal"
+          note={`${eaten.kcal.toLocaleString()} of ${target.kcal.toLocaleString()} kcal eaten`}
+          arc={target.kcal ? eaten.kcal / target.kcal : 0}
+          onPress={() => router.push('/(client)/foodlog')}
+        />
+
+        <Rule />
+
+        {/* ── the plan's macro split against target ──────────────────────── */}
+        <Section>
+          <SectionHead title="Macros" note={`${tot.K.toLocaleString()} kcal planned`} />
+          <Meter label="Protein" val={tot.P} target={target.protein} />
+          <Meter label="Carbs" val={tot.C} target={target.carbs} dim />
+          <Meter label="Fat" val={tot.F} target={target.fat} dim />
+        </Section>
+
+        <Rule />
+
+        {/* ── macro cycling: training vs rest day ────────────────────────── */}
+        <Section>
+          <SectionHead title="Today is a…" note={cycleNote} />
+          <View style={{ flexDirection: 'row', gap: sp.sm }}>
             {([['training', 'Training day'], ['off', 'Standard'], ['rest', 'Rest day']] as const).map(([key, label]) => {
               const on = dayType === key;
               return (
-                <Pressable key={key} onPress={() => setDayType(key)} style={{ flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: 'center', backgroundColor: on ? t.brand : t.surface2, borderWidth: 1, borderColor: on ? t.brand : t.ring }}>
-                  <Text style={{ color: on ? t.brandInk : t.ink2, fontWeight: '800', fontSize: 12 }}>{label}</Text>
+                <Pressable key={key} onPress={() => setDayType(key)} accessibilityRole="button" accessibilityState={{ selected: on }}
+                  style={{ flex: 1, paddingVertical: 11, borderRadius: radius.sm, alignItems: 'center', backgroundColor: on ? t.brand : t.surface2 }}>
+                  <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{label}</Text>
                 </Pressable>
               );
             })}
           </View>
-        </View>
+        </Section>
 
-        {/* Log what you are actually eating */}
-        <View style={{ backgroundColor: t.surface, borderRadius: 18, borderWidth: 1, borderColor: t.ring, padding: 15, marginBottom: 12 }}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3 }}>
-            <Text style={{ color: t.ink, fontWeight: '800', fontSize: 15 }}>Log what you ate</Text>
-            <Text style={{ color: t.ink3, fontSize: 12 }}>Eaten <Text style={{ color: t.ink, fontWeight: '700' }}>{fl.consumed.kcal}</Text> / {target.kcal} kcal</Text>
-          </View>
-          <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 12 }}>Eating something off-plan? Add it and it counts toward your day.</Text>
-          <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
-            <Pressable accessibilityLabel="Log a meal from a photo" accessibilityRole="button" onPress={photoLog} style={{ flex: 1, backgroundColor: t.brand, borderRadius: 12, paddingVertical: 12, alignItems: 'center', gap: 4 }}><Icon name="camera" size={19} color={t.brandInk} /><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 12 }}>Photo</Text></Pressable>
-            <Pressable accessibilityLabel="Scan a barcode" accessibilityRole="button" onPress={barcodeLog} style={{ flex: 1, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingVertical: 12, alignItems: 'center', gap: 4 }}><Icon name="search" size={19} color={t.ink} /><Text style={{ color: t.ink, fontWeight: '700', fontSize: 12 }}>Barcode</Text></Pressable>
-            <Pressable accessibilityLabel="Open food log" accessibilityRole="button" onPress={() => router.push('/(client)/foodlog')} style={{ flex: 1, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingVertical: 12, alignItems: 'center', gap: 4 }}><Icon name="plus" size={19} color={t.ink} /><Text style={{ color: t.ink, fontWeight: '700', fontSize: 12 }}>Search</Text></Pressable>
-          </View>
-          <View style={{ flexDirection: 'row', gap: 8 }}>
-            <TextInput value={nl} onChangeText={setNl} placeholder='Describe it — "chicken burrito & a coke"' placeholderTextColor={t.ink3} onSubmitEditing={describeLog} returnKeyType="done" style={{ flex: 1, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14 }} />
-            <Pressable onPress={describeLog} disabled={logBusy || !nl.trim()} style={{ backgroundColor: nl.trim() ? t.brand : t.surface2, borderRadius: 12, paddingHorizontal: 14, justifyContent: 'center', borderWidth: 1, borderColor: nl.trim() ? t.brand : t.ring }}>{logBusy ? <ActivityIndicator color={t.brandInk} /> : <Text style={{ color: nl.trim() ? t.brandInk : t.ink3, fontWeight: '800', fontSize: 13 }}>Log</Text>}</Pressable>
-          </View>
+        <Rule />
+
+        {/* ── the one card: log what you actually ate ────────────────────── */}
+        <Section>
+          <SectionHead title="Log what you ate" note={`${fl.consumed.kcal.toLocaleString()} of ${target.kcal.toLocaleString()} kcal`} />
+          <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>Eating something off-plan? Add it and it counts toward your day.</Text>
+          <Card>
+            <View style={{ flexDirection: 'row', gap: sp.sm }}>
+              <Pressable accessibilityLabel="Log a meal from a photo" accessibilityRole="button" onPress={photoLog}
+                style={{ flex: 1, backgroundColor: t.brand, borderRadius: radius.sm, paddingVertical: sp.md, alignItems: 'center', gap: 5 }}>
+                <Icon name="camera" size={18} color={t.brandInk} />
+                <Text style={{ ...ty.caption, fontWeight: '600', color: t.brandInk }}>Photo</Text>
+              </Pressable>
+              <Pressable accessibilityLabel="Scan a barcode" accessibilityRole="button" onPress={barcodeLog}
+                style={{ flex: 1, backgroundColor: t.surface2, borderRadius: radius.sm, paddingVertical: sp.md, alignItems: 'center', gap: 5 }}>
+                <Icon name="search" size={18} color={t.ink2} />
+                <Text style={{ ...ty.caption, fontWeight: '500', color: t.ink }}>Barcode</Text>
+              </Pressable>
+              <Pressable accessibilityLabel="Open food log" accessibilityRole="button" onPress={() => router.push('/(client)/foodlog')}
+                style={{ flex: 1, backgroundColor: t.surface2, borderRadius: radius.sm, paddingVertical: sp.md, alignItems: 'center', gap: 5 }}>
+                <Icon name="plus" size={18} color={t.ink2} />
+                <Text style={{ ...ty.caption, fontWeight: '500', color: t.ink }}>Search</Text>
+              </Pressable>
+            </View>
+            <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
+              <TextInput value={nl} onChangeText={setNl} placeholder='Describe it — "chicken burrito & a coke"' placeholderTextColor={t.ink3}
+                onSubmitEditing={describeLog} returnKeyType="done"
+                style={{ ...ty.body, flex: 1, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 10 }} />
+              <Pressable onPress={describeLog} disabled={logBusy || !nl.trim()}
+                style={{ backgroundColor: nl.trim() ? t.brand : t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, justifyContent: 'center' }}>
+                {logBusy ? <ActivityIndicator color={t.brandInk} /> : <Text style={{ ...ty.label, fontWeight: '600', color: nl.trim() ? t.brandInk : t.ink3 }}>Log</Text>}
+              </Pressable>
+            </View>
+          </Card>
+
+          {/* Today's entries — or an honest empty state, not a zero pretending
+              to be data. */}
           {fl.entries.length > 0 ? (
-            <View style={{ marginTop: 12, gap: 6 }}>
-              {fl.entries.map((fe) => (
-                <View key={fe.id} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: t.surface2, borderRadius: 10, paddingHorizontal: 11, paddingVertical: 8 }}>
-                  <Text style={{ color: t.ink2, fontSize: 12.5, flex: 1 }} numberOfLines={1}>{fe.name}</Text>
-                  <Text style={{ color: t.ink3, fontSize: 12, marginHorizontal: 8 }}>{fe.kcal} kcal</Text>
-                  <Pressable onPress={() => fl.removeFood(fe.id)} hitSlop={6}><Text style={{ color: t.ink3, fontSize: 15 }}>×</Text></Pressable>
+            <View style={{ marginTop: sp.lg }}>
+              {fl.entries.map((fe, i) => (
+                <View key={fe.id}>
+                  {i > 0 ? <Rule /> : null}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
+                    <Text style={{ ...ty.body, color: t.ink2, flex: 1 }} numberOfLines={1}>{fe.name}</Text>
+                    <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{fe.kcal} kcal</Text>
+                    <Pressable onPress={() => fl.removeFood(fe.id)} hitSlop={8} accessibilityRole="button" accessibilityLabel={'Remove ' + fe.name}>
+                      <Text style={{ ...ty.body, color: t.ink3 }}>×</Text>
+                    </Pressable>
+                  </View>
                 </View>
               ))}
+            </View>
+          ) : (
+            <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.lg }}>Nothing logged today.</Text>
+          )}
+        </Section>
+
+        <Rule />
+
+        {/* ── allergen / intolerance filter (collapsible) ────────────────── */}
+        <Section>
+          <Pressable onPress={() => setShowAvoid((v) => !v)} accessibilityRole="button" accessibilityLabel="Toggle dietary filters"
+            style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Text style={{ ...ty.micro, color: t.ink3 }}>Avoiding{c.avoid.length ? ' · ' + c.avoid.length + ' filtered' : ' · tap to set'}</Text>
+            <View style={{ transform: [{ rotate: showAvoid ? '90deg' : '0deg' }] }}><Icon name="chevron" size={14} color={t.ink3} /></View>
+          </Pressable>
+          {showAvoid ? (
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.lg }}>
+              {ALLERGENS.map((al) => { const on = c.avoid.includes(al.id); return (
+                <Pressable key={al.id} onPress={() => c.setAvoid(on ? c.avoid.filter((x) => x !== al.id) : [...c.avoid, al.id])}
+                  accessibilityRole="button" accessibilityState={{ selected: on }}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: on ? t.surface3 : t.surface2 }}>
+                  {on ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} /> : null}
+                  <Text style={{ ...ty.label, fontWeight: on ? '500' : '400', color: on ? t.ink : t.ink2 }}>{al.label}</Text>
+                </Pressable>
+              ); })}
             </View>
           ) : null}
-        </View>
+        </Section>
 
-        {/* allergen / intolerance filter (collapsible) */}
-        <View style={{ marginBottom: 12 }}>
-          <Pressable onPress={() => setShowAvoid((v) => !v)} accessibilityRole="button" accessibilityLabel="Toggle dietary filters" style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: showAvoid ? 7 : 0 }}>
-            <Text style={{ color: t.ink3, fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.9 }}>Avoiding{c.avoid.length ? ' · ' + c.avoid.length + ' filtered' : ' · tap to set'}</Text>
-            <View style={{ transform: [{ rotate: showAvoid ? '90deg' : '0deg' }] }}><Icon name="chevron" size={13} color={t.ink3} /></View>
-          </Pressable>
-          {showAvoid ? <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-            {ALLERGENS.map((al) => { const on = c.avoid.includes(al.id); return (
-              <Pressable key={al.id} onPress={() => c.setAvoid(on ? c.avoid.filter((x) => x !== al.id) : [...c.avoid, al.id])} style={{ paddingHorizontal: 13, paddingVertical: 8, borderRadius: 18, backgroundColor: on ? t.crit : t.surface, borderWidth: 1, borderColor: on ? t.crit : t.ring, flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                {on ? <Icon name="check" size={12} color="#fff" /> : null}
-                <Text style={{ color: on ? '#fff' : t.ink2, fontWeight: '700', fontSize: 12.5 }}>{al.label}</Text>
-              </Pressable>
-            ); })}
-          </View> : null}
-        </View>
+        <Rule />
 
-        {/* quick links */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginBottom: 12 }}>
-          {([['meals', 'Food Log', '/(client)/foodlog'], ['water', 'Recovery', '/(client)/recovery'], ['settings', 'Macros', '/(client)/tools']] as const).map(([ic, label, route]) => (
-            <Pressable key={route} onPress={() => router.push(route as any)} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 18, paddingHorizontal: 12, paddingVertical: 8 }}>
-              <Icon name={ic} size={14} color={t.brand} /><Text style={{ color: t.ink2, fontWeight: '700', fontSize: 13 }}>{label}</Text>
-            </Pressable>
-          ))}
-        </ScrollView>
+        {/* ── quick links ────────────────────────────────────────────────── */}
+        <Section>
+          <QuickRow items={[
+            { icon: 'meals', label: 'Food Log', onPress: () => router.push('/(client)/foodlog') },
+            { icon: 'water', label: 'Recovery', onPress: () => router.push('/(client)/recovery') },
+            { icon: 'settings', label: 'Macros', onPress: () => router.push('/(client)/tools') },
+          ]} />
+        </Section>
 
-        {coachAdjust?.note ? (
-          <View style={{ backgroundColor: t.surface, borderColor: t.s3, borderWidth: 1, borderRadius: 14, padding: 12, marginBottom: 12 }}>
-            <Text style={{ color: t.s3, fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6 }}>Note from your coach</Text>
-            <Text style={{ color: t.ink2, fontSize: 13, marginTop: 5, lineHeight: 18 }}>{coachAdjust.note}</Text>
-          </View>
-        ) : null}
+        {coachAdjust?.note ? (<>
+          <Rule />
+          <Section>
+            <SectionHead title="Note from your coach" />
+            <Text style={{ ...ty.body, color: t.ink2 }}>{coachAdjust.note}</Text>
+          </Section>
+        </>) : null}
 
-        {/* today / week toggle */}
-        <View style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: 11, padding: 3, marginBottom: 12, borderWidth: 1, borderColor: t.ring }}>
-          {(['today', 'week'] as const).map((v) => (
-            <Pressable key={v} onPress={() => setView(v)} style={{ flex: 1, paddingVertical: 9, borderRadius: 8, alignItems: 'center', backgroundColor: view === v ? t.brand : 'transparent' }}>
-              <Text style={{ color: view === v ? t.brandInk : t.ink3, fontWeight: '700', fontSize: 13 }}>{v === 'today' ? 'Today' : 'This week'}</Text>
-            </Pressable>
-          ))}
-        </View>
+        <Rule />
 
-        {view === 'today' ? (
-          <>
-        <Text style={{ color: t.ink3, fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.9, marginBottom: 9 }}>Today's plan · {plan.length} meals</Text>
-        {/* Meals per day. This drives slotsFor() — 3 gives breakfast/lunch/dinner,
-            4 adds a snack, 5 splits into two snacks — so changing it rebuilds the
-            plan and the macro split immediately. */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12 }}>
-          <Text style={{ color: t.ink3, fontSize: 12, marginRight: 2 }}>Meals per day</Text>
-          {([3, 4, 5] as const).map((n) => {
-            const on = c.mealsPerDay === n;
-            return (
-              <Pressable
-                key={n}
-                onPress={() => c.setMealsPerDay(n)}
-                accessibilityRole="button"
-                accessibilityState={{ selected: on }}
-                accessibilityLabel={`${n} meals per day`}
-                style={{
-                  minWidth: 34, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999,
-                  borderWidth: 1, alignItems: 'center',
-                  backgroundColor: on ? t.brand : 'transparent',
-                  borderColor: on ? t.brand : t.ring,
-                }}>
-                <Text style={{ color: on ? t.brandInk : t.ink2, fontSize: 12.5, fontWeight: on ? '800' : '600' }}>{n}</Text>
-              </Pressable>
-            );
-          })}
-        </View>
-        {plan.map((m) => (
-          <Pressable key={m.pos} onPress={() => setRecipe(m)} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 14, marginBottom: 9, flexDirection: 'row', alignItems: 'center' }}>
-            <View style={{ flex: 1, paddingRight: 12 }}>
-              <Text style={{ color: t.brand, fontSize: 9, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.8 }}>{m.slot}{coachPick(m.pos) ? "  ·  COACH'S PICK" : ''}</Text>
-              <Text style={{ color: t.ink, fontSize: 14, fontWeight: '700', marginTop: 3 }} numberOfLines={2}>{m.n}</Text>
-              <Text style={{ color: t.ink3, fontSize: 12, marginTop: 3 }}>P{m.P} · C{m.C} · F{m.F}</Text>
-            </View>
-            <View style={{ alignItems: 'flex-end' }}>
-              <Text style={{ color: t.ink, fontSize: 18, fontWeight: '800' }}>{m.K}</Text>
-              <Text style={{ color: t.ink3, fontSize: 9 }}>kcal</Text>
-            </View>
-          </Pressable>
-        ))}
-
-          </>
-        ) : (
-          weekPlans.map((wp, d) => (
-            <View key={d} style={{ marginBottom: 14 }}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                <Text style={{ color: t.ink, fontWeight: '800', fontSize: 14 }}>{WEEKD[d]}</Text>
-                <Text style={{ color: t.ink3, fontSize: 12 }}>{wp.tot.K.toLocaleString()} kcal</Text>
-              </View>
-              {wp.plan.map((m) => (
-                <Pressable key={m.pos} onPress={() => setRecipe(m)} style={{ backgroundColor: t.surface, borderRadius: 14, borderWidth: 1, borderColor: t.ring, padding: 12, marginBottom: 7, flexDirection: 'row', alignItems: 'center' }}>
-                  <View style={{ flex: 1, paddingRight: 10 }}>
-                    <Text style={{ color: t.brand, fontSize: 8.5, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.7 }}>{m.slot}</Text>
-                    <Text style={{ color: t.ink, fontSize: 13, fontWeight: '600', marginTop: 2 }} numberOfLines={1}>{m.n}</Text>
-                  </View>
-                  <Text style={{ color: t.ink2, fontSize: 13, fontWeight: '700' }}>{m.K}</Text>
+        {/* ── the plan: today or the week ────────────────────────────────── */}
+        <Section>
+          <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: layout.section }}>
+            {(['today', 'week'] as const).map((v) => {
+              const on = view === v;
+              return (
+                <Pressable key={v} onPress={() => setView(v)} accessibilityRole="button" accessibilityState={{ selected: on }}
+                  style={{ flex: 1, paddingVertical: 11, borderRadius: radius.sm, alignItems: 'center', backgroundColor: on ? t.brand : t.surface2 }}>
+                  <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{v === 'today' ? 'Today' : 'This week'}</Text>
                 </Pressable>
-              ))}
-            </View>
-          ))
-        )}
+              );
+            })}
+          </View>
 
-        <Pressable onPress={() => setShowGrocery(true)} style={{ backgroundColor: t.brand, borderRadius: 14, paddingVertical: 15, alignItems: 'center', marginTop: 6, flexDirection: 'row', justifyContent: 'center', gap: 8 }}>
-          <Icon name="check" size={16} color={t.brandInk} /><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 15 }}>Grocery list · {grocCount} items</Text>
-        </Pressable>
+          {view === 'today' ? (
+            <>
+              <SectionHead title={`Today's plan · ${plan.length} meals`} note={`${tot.K.toLocaleString()} kcal`} />
+              {/* Meals per day. This drives slotsFor() — 3 gives breakfast/lunch/dinner,
+                  4 adds a snack, 5 splits into two snacks — so changing it rebuilds the
+                  plan and the macro split immediately. */}
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginBottom: sp.sm }}>
+                <Text style={{ ...ty.label, color: t.ink3, marginRight: 2 }}>Meals per day</Text>
+                {([3, 4, 5] as const).map((n) => {
+                  const on = c.mealsPerDay === n;
+                  return (
+                    <Pressable
+                      key={n}
+                      onPress={() => c.setMealsPerDay(n)}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: on }}
+                      accessibilityLabel={`${n} meals per day`}
+                      style={{ minWidth: 34, paddingHorizontal: sp.md, paddingVertical: 5, borderRadius: radius.pill, alignItems: 'center', backgroundColor: on ? t.brand : t.surface2 }}>
+                      <Text style={{ ...ty.label, ...numeric, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{n}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              {plan.map((m, i) => (
+                <View key={m.pos}>
+                  {i > 0 ? <Rule /> : null}
+                  <Pressable onPress={() => setRecipe(m)} accessibilityRole="button" accessibilityLabel={m.n}
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.lg }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ ...ty.micro, color: t.ink3 }}>{m.slot}{coachPick(m.pos) ? " · Coach's pick" : ''}</Text>
+                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, marginTop: 4 }} numberOfLines={2}>{m.n}</Text>
+                      <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 3 }}>P{m.P} · C{m.C} · F{m.F}</Text>
+                    </View>
+                    <View style={{ alignItems: 'flex-end' }}>
+                      <Text style={{ ...value(20), color: t.ink }}>{m.K}</Text>
+                      <Text style={{ ...ty.caption, color: t.ink3 }}>kcal</Text>
+                    </View>
+                    <Icon name="chevron" size={16} color={t.ink3} />
+                  </Pressable>
+                </View>
+              ))}
+            </>
+          ) : (
+            weekPlans.map((wp, d) => (
+              <View key={d} style={{ marginBottom: sp.xl }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: sp.sm }}>
+                  <Text style={{ ...ty.micro, color: t.ink3 }}>{WEEKD[d]}</Text>
+                  <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{wp.tot.K.toLocaleString()} kcal</Text>
+                </View>
+                {wp.plan.map((m) => (
+                  <Pressable key={m.pos} onPress={() => setRecipe(m)} accessibilityRole="button" accessibilityLabel={m.n}
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.sm }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ ...ty.caption, color: t.ink3 }}>{m.slot}</Text>
+                      <Text style={{ ...ty.body, color: t.ink, marginTop: 1 }} numberOfLines={1}>{m.n}</Text>
+                    </View>
+                    <Text style={{ ...value(15), color: t.ink2 }}>{m.K}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            ))
+          )}
+        </Section>
+
+        <Rule />
+
+        <Section>
+          <Cta label={`Grocery list · ${grocCount} items`} wide onPress={() => setShowGrocery(true)} />
+        </Section>
+
       </ScrollView>
 
+      {/* ── recipe sheet ─────────────────────────────────────────────────── */}
       <Modal visible={!!recipe} transparent animationType="slide" onRequestClose={() => setRecipe(null)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setRecipe(null)} />
-        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, borderColor: t.ring, maxHeight: '82%' }}>
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, maxHeight: '82%', ...elevation.e2 }}>
           {recipe && (
-            <ScrollView contentContainerStyle={{ padding: 20 }}>
-              <Text style={{ color: t.brand, fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.8 }}>{recipe.slot}</Text>
-              <Text style={{ color: t.ink, fontSize: 21, fontWeight: '700', fontFamily: SERIF, textTransform: 'capitalize', marginTop: 3 }}>{recipe.n}</Text>
-              <Text style={{ color: t.ink3, fontSize: 13, marginTop: 4, marginBottom: 14 }}>{Math.round(recipe.K * batch)} kcal · P{Math.round(recipe.P * batch)} / C{Math.round(recipe.C * batch)} / F{Math.round(recipe.F * batch)}{batch > 1 ? '  · ' + batch + ' servings' : ''}</Text>
-              <Pressable onPress={() => { swap(recipe.pos, recipe.slot, recipe.idx); setRecipe(null); }} style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 11, paddingVertical: 11, marginBottom: 16 }}>
-                <Icon name="swap" size={15} color={t.brand} /><Text style={{ color: t.ink, fontWeight: '700', fontSize: 14 }}>Swap this meal</Text>
-              </Pressable>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-                <Text style={{ color: t.ink2, fontSize: 13, fontWeight: '700' }}>Servings</Text>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 11, paddingHorizontal: 6, paddingVertical: 4 }}>
-                  <Pressable accessibilityLabel="Fewer servings" accessibilityRole="button" onPress={() => setBatch((b) => Math.max(1, b - 1))} style={{ width: 30, height: 30, borderRadius: 8, alignItems: 'center', justifyContent: 'center' }}><Icon name="minus" size={15} color={t.ink} /></Pressable>
-                  <Text style={{ color: t.ink, fontWeight: '800', fontSize: 16, minWidth: 18, textAlign: 'center' }}>{batch}</Text>
-                  <Pressable accessibilityLabel="More servings" accessibilityRole="button" onPress={() => setBatch((b) => Math.min(8, b + 1))} style={{ width: 30, height: 30, borderRadius: 8, alignItems: 'center', justifyContent: 'center' }}><Icon name="plus" size={15} color={t.ink} /></Pressable>
+            <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 30 }}>
+              <Text style={{ ...ty.micro, color: t.ink3 }}>{recipe.slot}</Text>
+              <Text style={{ ...ty.title, color: t.ink, textTransform: 'capitalize', marginTop: 4 }}>{recipe.n}</Text>
+              <Text style={{ ...ty.label, ...numeric, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>{Math.round(recipe.K * batch)} kcal · P{Math.round(recipe.P * batch)} / C{Math.round(recipe.C * batch)} / F{Math.round(recipe.F * batch)}{batch > 1 ? '  · ' + batch + ' servings' : ''}</Text>
+              <Ghost label="Swap this meal" icon="swap" onPress={() => { swap(recipe.pos, recipe.slot, recipe.idx); setRecipe(null); }} />
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginTop: sp.lg, marginBottom: sp.lg }}>
+                <Text style={{ ...ty.label, color: t.ink2 }}>Servings</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.sm, paddingVertical: 4 }}>
+                  <Pressable accessibilityLabel="Fewer servings" accessibilityRole="button" onPress={() => setBatch((b) => Math.max(1, b - 1))} style={{ width: 30, height: 30, alignItems: 'center', justifyContent: 'center' }}><Icon name="minus" size={15} color={t.ink} /></Pressable>
+                  <Text style={{ ...value(16), color: t.ink, minWidth: 18, textAlign: 'center' }}>{batch}</Text>
+                  <Pressable accessibilityLabel="More servings" accessibilityRole="button" onPress={() => setBatch((b) => Math.min(8, b + 1))} style={{ width: 30, height: 30, alignItems: 'center', justifyContent: 'center' }}><Icon name="plus" size={15} color={t.ink} /></Pressable>
                 </View>
                 {recipe.steps && recipe.steps.length > 0 ? (
-                  <Pressable onPress={() => { setCookStep(0); setCook(true); }} style={{ flex: 1, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 6, backgroundColor: t.brand, borderRadius: 11, paddingVertical: 11 }}>
-                    <Icon name="flame" size={15} color={t.brandInk} /><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 13 }}>Cook mode</Text>
-                  </Pressable>
+                  <View style={{ flex: 1 }}><Cta label="Cook mode" wide onPress={() => { setCookStep(0); setCook(true); }} /></View>
                 ) : null}
               </View>
-              <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, marginBottom: 8 }}>Ingredients</Text>
+              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Ingredients</Text>
               {recipe.ing.map((ing, i) => (
-                <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: t.ring }}>
-                  <Text style={{ color: t.ink2, fontSize: 14 }}>{ing[0]}</Text>
-                  <Text style={{ color: t.ink, fontSize: 14, fontWeight: '600' }}>{Math.round(ing[1] * recipe.servings * batch * 100) / 100}{ing[2] ? ' ' + ing[2] : ''}</Text>
+                <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: sp.sm, borderBottomWidth: hairline, borderBottomColor: t.ring }}>
+                  <Text style={{ ...ty.body, color: t.ink2 }}>{ing[0]}</Text>
+                  <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: t.ink }}>{Math.round(ing[1] * recipe.servings * batch * 100) / 100}{ing[2] ? ' ' + ing[2] : ''}</Text>
                 </View>
               ))}
-              <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, marginTop: 18, marginBottom: 8 }}>Method</Text>
+              <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.xl, marginBottom: sp.md }}>Method</Text>
               {recipe.steps.map((s, i) => (
-                <View key={i} style={{ flexDirection: 'row', gap: 10, marginBottom: 10 }}>
-                  <Text style={{ color: t.brand, fontWeight: '800' }}>{i + 1}</Text>
-                  <Text style={{ color: t.ink2, fontSize: 14, flex: 1, lineHeight: 20 }}>{s}</Text>
+                <View key={i} style={{ flexDirection: 'row', gap: sp.md, marginBottom: sp.md }}>
+                  <Text style={{ ...ty.label, ...numeric, fontWeight: '600', color: t.brand }}>{i + 1}</Text>
+                  <Text style={{ ...ty.body, color: t.ink2, flex: 1 }}>{s}</Text>
                 </View>
               ))}
-              <Pressable onPress={() => setRecipe(null)} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginTop: 14 }}>
-                <Text style={{ color: t.ink, fontWeight: '700' }}>Close</Text>
-              </Pressable>
+              <View style={{ marginTop: sp.lg }}>
+                <Ghost label="Close" onPress={() => setRecipe(null)} />
+              </View>
             </ScrollView>
           )}
         </View>
@@ -386,32 +438,29 @@ export default function Nutrition() {
       <Modal visible={cook && !!recipe} transparent animationType="fade" onRequestClose={() => setCook(false)}>
         <View style={{ flex: 1, backgroundColor: t.bg }}>
           {recipe && recipe.steps && recipe.steps.length > 0 ? (
-            <View style={{ flex: 1, padding: 24, paddingTop: 60, justifyContent: 'space-between' }}>
+            <View style={{ flex: 1, padding: sp.xl, paddingTop: 60, justifyContent: 'space-between' }}>
               <View>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-                  <Text style={{ color: t.ink3, fontSize: 13, fontWeight: '700', textTransform: 'capitalize' }}>{recipe.n}</Text>
-                  <Pressable onPress={() => setCook(false)} hitSlop={10}><Text style={{ color: t.ink3, fontWeight: '800', fontSize: 15 }}>Done</Text></Pressable>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sp.xl }}>
+                  <Text style={{ ...ty.label, color: t.ink3, textTransform: 'capitalize', flex: 1 }} numberOfLines={1}>{recipe.n}</Text>
+                  <Pressable onPress={() => setCook(false)} hitSlop={10}><Text style={{ ...ty.label, fontWeight: '600', color: t.ink2 }}>Done</Text></Pressable>
                 </View>
-                <View style={{ flexDirection: 'row', gap: 5, marginBottom: 28 }}>
+                <View style={{ flexDirection: 'row', gap: 5, marginBottom: sp.xxl }}>
                   {recipe.steps.map((_, i) => (
-                    <View key={i} style={{ flex: 1, height: 4, borderRadius: 2, backgroundColor: i <= cookStep ? t.brand : t.surface3 }} />
+                    <View key={i} style={{ flex: 1, height: 3, borderRadius: 2, backgroundColor: i <= cookStep ? t.brand : t.surface3 }} />
                   ))}
                 </View>
-                <Text style={{ color: t.brand, fontSize: 13, fontWeight: '800', letterSpacing: 0.5, marginBottom: 10 }}>STEP {cookStep + 1} OF {recipe.steps.length}</Text>
-                <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', lineHeight: 36, fontFamily: SERIF }}>{recipe.steps[cookStep]}</Text>
+                <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.md }}>Step {cookStep + 1} of {recipe.steps.length}</Text>
+                <Text style={{ ...ty.title, color: t.ink }}>{recipe.steps[cookStep]}</Text>
               </View>
-              <View style={{ flexDirection: 'row', gap: 12, marginBottom: 20 }}>
-                <Pressable onPress={() => setCookStep((x) => Math.max(0, x - 1))} disabled={cookStep === 0} style={{ flex: 1, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 14, paddingVertical: 16, alignItems: 'center', opacity: cookStep === 0 ? 0.4 : 1 }}>
-                  <Text style={{ color: t.ink, fontWeight: '800', fontSize: 15 }}>Back</Text>
+              <View style={{ flexDirection: 'row', gap: sp.md, marginBottom: sp.xl }}>
+                <Pressable onPress={() => setCookStep((x) => Math.max(0, x - 1))} disabled={cookStep === 0}
+                  style={{ flex: 1, backgroundColor: t.surface2, borderRadius: radius.sm, paddingVertical: 11, alignItems: 'center', opacity: cookStep === 0 ? 0.4 : 1 }}>
+                  <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>Back</Text>
                 </Pressable>
                 {cookStep < recipe.steps.length - 1 ? (
-                  <Pressable onPress={() => setCookStep((x) => x + 1)} style={{ flex: 2, backgroundColor: t.brand, borderRadius: 14, paddingVertical: 16, alignItems: 'center' }}>
-                    <Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 15 }}>Next step</Text>
-                  </Pressable>
+                  <View style={{ flex: 2 }}><Cta label="Next step" wide onPress={() => setCookStep((x) => x + 1)} /></View>
                 ) : (
-                  <Pressable onPress={() => setCook(false)} style={{ flex: 2, backgroundColor: t.brand, borderRadius: 14, paddingVertical: 16, alignItems: 'center' }}>
-                    <Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 15 }}>Finish ✓</Text>
-                  </Pressable>
+                  <View style={{ flex: 2 }}><Cta label="Finish" wide onPress={() => setCook(false)} /></View>
                 )}
               </View>
             </View>
@@ -419,55 +468,56 @@ export default function Nutrition() {
         </View>
       </Modal>
 
+      {/* ── grocery sheet ────────────────────────────────────────────────── */}
       <Modal visible={showGrocery} transparent animationType="slide" onRequestClose={() => setShowGrocery(false)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setShowGrocery(false)} />
-        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, borderColor: t.ring, maxHeight: '82%' }}>
-          <ScrollView contentContainerStyle={{ padding: 20 }}>
-            <Text style={{ color: t.ink, fontSize: 21, fontWeight: '700', fontFamily: SERIF, marginBottom: 4 }}>Grocery list</Text>
-            <Text style={{ color: t.ink3, fontSize: 13, marginBottom: 10 }}>This week · {DIET_LABEL[diet]} · sorted by aisle</Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-              <View style={{ flex: 1, height: 7, backgroundColor: t.surface2, borderRadius: 4, marginRight: 12, overflow: 'hidden' }}>
-                <View style={{ width: `${(grocCount ? Math.round((grocChecked / grocCount) * 100) : 0)}%`, height: 7, backgroundColor: t.brand }} />
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, maxHeight: '82%', ...elevation.e2 }}>
+          <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 30 }}>
+            <Text style={{ ...ty.title, color: t.ink }}>Grocery list</Text>
+            <Text style={{ ...ty.label, color: t.ink3, marginTop: 4, marginBottom: sp.md }}>This week · {DIET_LABEL[diet]} · sorted by aisle</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginBottom: sp.xl }}>
+              <View style={{ flex: 1, height: 3, borderRadius: 2, backgroundColor: t.surface3, overflow: 'hidden' }}>
+                <View style={{ width: `${(grocCount ? Math.round((grocChecked / grocCount) * 100) : 0)}%`, height: 3, borderRadius: 2, backgroundColor: t.brand }} />
               </View>
-              <Text style={{ color: t.ink2, fontSize: 12, fontWeight: '700' }}>{grocChecked}/{grocCount} in cart</Text>
+              <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{grocChecked}/{grocCount} in cart</Text>
             </View>
             {DEPTS.filter((d) => groc.byDept[d]?.length).map((d) => (
-              <View key={d} style={{ marginBottom: 16 }}>
-                <Text style={{ color: t.ink, fontWeight: '700', fontSize: 14, marginBottom: 6 }}>{DEPT_ICO[d]} {d}</Text>
+              <View key={d} style={{ marginBottom: sp.lg }}>
+                <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>{DEPT_ICO[d]} {d}</Text>
                 {groc.byDept[d]!.map((it, i) => { const k = d + '|' + it.item; const on = !!checked[k]; return (
-                  <Pressable key={i} onPress={() => toggleGroc(k)} accessibilityRole="checkbox" accessibilityState={{ checked: on }} accessibilityLabel={it.item} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: t.ring }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
-                      <View style={{ width: 20, height: 20, borderRadius: 6, borderWidth: 1.5, borderColor: on ? t.brand : t.ring, backgroundColor: on ? t.brand : 'transparent', alignItems: 'center', justifyContent: 'center' }}>{on ? <Icon name="check" size={13} color={t.brandInk} /> : null}</View>
-                      <Text style={{ color: on ? t.ink3 : t.ink2, fontSize: 14, textDecorationLine: on ? 'line-through' : 'none', flex: 1 }}>{it.item}</Text>
+                  <Pressable key={i} onPress={() => toggleGroc(k)} accessibilityRole="checkbox" accessibilityState={{ checked: on }} accessibilityLabel={it.item}
+                    style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: sp.sm, borderBottomWidth: hairline, borderBottomColor: t.ring }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, flex: 1 }}>
+                      <View style={{ width: 20, height: 20, borderRadius: 6, borderWidth: on ? 0 : 1, borderColor: t.ring, backgroundColor: on ? t.brand : 'transparent', alignItems: 'center', justifyContent: 'center' }}>{on ? <Icon name="check" size={13} color={t.brandInk} /> : null}</View>
+                      <Text style={{ ...ty.body, color: on ? t.ink3 : t.ink2, textDecorationLine: on ? 'line-through' : 'none', flex: 1 }}>{it.item}</Text>
                     </View>
-                    <Text style={{ color: on ? t.ink3 : t.ink, fontSize: 13, fontWeight: '600', textDecorationLine: on ? 'line-through' : 'none' }}>{it.qty}{it.unit ? ' ' + it.unit : ''}</Text>
+                    <Text style={{ ...ty.label, ...numeric, fontWeight: '500', color: on ? t.ink3 : t.ink, textDecorationLine: on ? 'line-through' : 'none' }}>{it.qty}{it.unit ? ' ' + it.unit : ''}</Text>
                   </Pressable>
                 ); })}
               </View>
             ))}
-            <View style={{ flexDirection: 'row', gap: 10 }}>
-              <Pressable onPress={shareGrocery} accessibilityLabel="Share grocery list" style={{ flex: 1, backgroundColor: t.brand, borderRadius: 12, paddingVertical: 14, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8 }}>
-                <Icon name="share" size={15} color={t.brandInk} /><Text style={{ color: t.brandInk, fontWeight: '800' }}>Share list</Text>
-              </Pressable>
-              <Pressable onPress={() => setShowGrocery(false)} style={{ flex: 1, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingVertical: 14, alignItems: 'center' }}>
-                <Text style={{ color: t.ink, fontWeight: '700' }}>Close</Text>
-              </Pressable>
+            <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.sm }}>
+              <View style={{ flex: 1 }}><Cta label="Share list" wide onPress={shareGrocery} /></View>
+              <View style={{ flex: 1 }}><Ghost label="Close" onPress={() => setShowGrocery(false)} /></View>
             </View>
           </ScrollView>
         </View>
       </Modal>
 
+      {/* ── barcode sheet ────────────────────────────────────────────────── */}
       <Modal visible={bcOpen} transparent animationType="slide" onRequestClose={() => setBcOpen(false)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setBcOpen(false)} />
-        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, borderColor: t.ring, padding: 20, paddingBottom: 30 }}>
-          <Text style={{ color: t.ink, fontSize: 21, fontWeight: '700', fontFamily: SERIF, marginBottom: 4 }}>Scan a barcode</Text>
-          <Text style={{ color: t.ink3, fontSize: 13, marginBottom: 16 }}>Type the number under the barcode — we look it up in Open Food Facts and add the real macros.</Text>
-          <TextInput value={bcCode} onChangeText={setBcCode} placeholder="e.g. 0049000042566" placeholderTextColor={t.ink3} keyboardType="number-pad" returnKeyType="done" onSubmitEditing={runBarcodeLookup} autoFocus style={{ color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 13, fontSize: 17, letterSpacing: 1, marginBottom: 14 }} />
-          <Pressable onPress={runBarcodeLookup} disabled={bcBusy} style={{ backgroundColor: t.brand, borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginBottom: 10 }}>
-            {bcBusy ? <ActivityIndicator color={t.brandInk} /> : <Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 15 }}>Look up &amp; log</Text>}
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30, ...elevation.e2 }}>
+          <Text style={{ ...ty.title, color: t.ink }}>Scan a barcode</Text>
+          <Text style={{ ...ty.label, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>Type the number under the barcode — we look it up in Open Food Facts and add the real macros.</Text>
+          <TextInput value={bcCode} onChangeText={setBcCode} placeholder="e.g. 0049000042566" placeholderTextColor={t.ink3} keyboardType="number-pad" returnKeyType="done" onSubmitEditing={runBarcodeLookup} autoFocus
+            style={{ ...ty.head, ...numeric, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: 13, letterSpacing: 1, marginBottom: sp.md }} />
+          <Pressable onPress={runBarcodeLookup} disabled={bcBusy}
+            style={{ backgroundColor: t.brand, borderRadius: radius.sm, paddingVertical: 11, alignItems: 'center', marginBottom: sp.sm }}>
+            {bcBusy ? <ActivityIndicator color={t.brandInk} /> : <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>Look up &amp; log</Text>}
           </Pressable>
           <Pressable onPress={() => setBcOpen(false)} style={{ paddingVertical: 10, alignItems: 'center' }}>
-            <Text style={{ color: t.ink3, fontWeight: '700', fontSize: 13 }}>Cancel</Text>
+            <Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>Cancel</Text>
           </Pressable>
         </View>
       </Modal>

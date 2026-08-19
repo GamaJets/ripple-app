@@ -1,10 +1,21 @@
-// Progress — matches the mockup: serif header, stat cards with deltas, weight
-// trend, progress-photo row, "Latest InBody scan" card. Full add-scan flow (camera/
-// upload + OCR + date wheel + manual entry + history) lives in a bottom sheet.
+// Client · Progress — InBody body composition: the latest scan, the metrics it
+// carries, the weight trend and progress photos. The full add-scan flow
+// (camera/upload + OCR + date wheel + manual entry + history) lives in a bottom
+// sheet, unchanged.
+//
+// Rebuilt on the instrument-panel kit (`src/ui/kit`) and the scale
+// (`src/theme/scale`). Every provider, handler, conditional and route from the
+// previous version is preserved — only the presentation changed: body fat is the
+// screen's one hero figure, the three bordered stat boxes became a hairline
+// KpiRow, six stacked cards became hairline-separated sections with a single
+// card spent on the thing you can act on, and the Georgia serif header is gone.
+//
+// Also removed: the three fake progress-photo frames labelled "Week 1 /
+// Progress / Now" that pretended to be photos the client had taken. With no
+// photos there is now an honest empty state.
 import { useState } from 'react';
 import { View, Text, Pressable, Image, TextInput, ScrollView, Modal, Alert, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import Svg, { Circle, Polyline } from 'react-native-svg';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { useTheme } from '../../src/ui/components';
@@ -14,13 +25,15 @@ import { macrosFor } from '../../src/lib/nutrition';
 import { progressDoc, shareDoc } from '../../src/lib/exportShare';
 import { useRouter } from 'expo-router';
 import { useBrand } from '../../src/ui/brand';
-import { TrendChart } from '../../src/ui/Chart';
+import {
+  Rule, Section, SectionHead, Hero, KpiRow, ActionCard, Cta, Ghost, Spark,
+} from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 import { Icon } from '../../src/ui/Icon';
 import { analyzeInBody, analyzePhysique, visionAvailable, lastVisionError, type PhysiqueVision } from '../../src/lib/vision';
 import { metricTrends, compositionInsights, METRIC_GROUPS, type ScanMetrics } from '../../src/lib/inbodyMetrics';
 import { focusToGroups, recommendedExercises } from '../../src/lib/focus';
 
-const SERIF = 'Georgia';
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const ITEM_H = 42, VISIBLE = 5;
 const YEARS = Array.from({ length: 8 }, (_, i) => 2019 + i);
@@ -59,38 +72,9 @@ function Wheel({ items, index, onChange, t }: { items: string[]; index: number; 
       <ScrollView showsVerticalScrollIndicator={false} snapToInterval={ITEM_H} decelerationRate="fast" contentOffset={{ x: 0, y: index * ITEM_H }}
         onMomentumScrollEnd={(e) => onChange(Math.max(0, Math.min(items.length - 1, Math.round(e.nativeEvent.contentOffset.y / ITEM_H))))}
         contentContainerStyle={{ paddingVertical: ITEM_H * 2 }}>
-        {items.map((it, i) => (<View key={i} style={{ height: ITEM_H, alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: i === index ? t.ink : t.ink3, fontSize: i === index ? 20 : 16, fontWeight: i === index ? '800' : '400' }}>{it}</Text></View>))}
+        {items.map((it, i) => (<View key={i} style={{ height: ITEM_H, alignItems: 'center', justifyContent: 'center' }}><Text style={i === index ? { ...value(20), color: t.ink } : { ...ty.body, ...numeric, color: t.ink3 }}>{it}</Text></View>))}
       </ScrollView>
     </View>
-  );
-}
-
-function StatCard({ t, label, value, unit, delta, good, onPress }: { t: Theme; label: string; value: string; unit: string; delta: string | null; good: boolean; onPress?: () => void }) {
-  return (
-    <Pressable disabled={!onPress} onPress={onPress} style={{ flex: 1, backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 13 }}>
-      <Text style={{ color: t.ink3, fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.6 }}>{label}</Text>
-      <Text style={{ color: t.ink, fontSize: 20, fontWeight: '800', marginTop: 3 }}>{value}<Text style={{ fontSize: 11, fontWeight: '600', color: t.ink3 }}> {unit}</Text></Text>
-      {delta ? <Text style={{ color: good ? t.brand : t.ink3, fontSize: 11, fontWeight: '700', marginTop: 1 }}>{delta}</Text> : <Text style={{ color: t.ink3, fontSize: 11, marginTop: 1 }}>—</Text>}
-    </Pressable>
-  );
-}
-
-function Spark({ t, data, times, w = 250, h = 54 }: { t: Theme; data: number[]; times?: number[]; w?: number; h?: number }) {
-  if (data.length < 2) return null;
-  const min = Math.min(...data), max = Math.max(...data), rng = max - min || 1;
-  // Position points by real elapsed time when timestamps are supplied, so unevenly
-  // spaced weigh-ins read truthfully; otherwise fall back to even index spacing.
-  const useT = !!times && times.length === data.length;
-  const t0 = useT ? Math.min(...(times as number[])) : 0;
-  const tspan = useT ? (Math.max(...(times as number[])) - t0) || 1 : 1;
-  const xAt = (i: number) => (useT ? (((times as number[])[i] - t0) / tspan) * w : (i / (data.length - 1)) * w);
-  const pts = data.map((v, i) => `${xAt(i)},${h - ((v - min) / rng) * (h - 8) - 4}`).join(' ');
-  const lx = xAt(data.length - 1), ly = h - ((data[data.length - 1] - min) / rng) * (h - 8) - 4;
-  return (
-    <Svg width="100%" height={h} viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
-      <Polyline points={pts} fill="none" stroke={t.brand} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
-      <Circle cx={lx} cy={ly} r={3.5} fill={t.brand} />
-    </Svg>
   );
 }
 
@@ -213,60 +197,97 @@ export default function Scans() {
   const fmt = (iso: string) => { const d = new Date(iso); return `${d.getDate()}/${d.getMonth() + 1}/${String(d.getFullYear()).slice(2)}`; };
   const daysAgo = latest ? Math.max(0, Math.round((Date.now() - Date.parse(latest.takenAt)) / 86400000)) : 0;
   const dlt = (cur: number, was: number | undefined, unit: string) => (was == null ? null : `${cur - was < 0 ? '▼' : cur - was > 0 ? '▲' : ''} ${Math.abs(+(cur - was).toFixed(1))} ${unit}`.trim());
+  // Presentation-only helpers: the hero's movement line and a shared "how long ago".
+  const bfMove = prev ? +(cd.bodyFatPct - prev.bodyFatPct).toFixed(1) : null;
+  const ago = daysAgo === 0 ? 'today' : daysAgo + ' days ago';
 
-  const input = { flex: 1, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 11, fontSize: 14 } as const;
+  const input = { flex: 1, ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 } as const;
+  const G = layout.gutter;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
 
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4, marginBottom: 12 }}>
-          <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: SERIF }}>Progress</Text>
-          <Pressable onPress={shareProgress} accessibilityLabel="Share progress" style={{ width: 38, height: 38, borderRadius: 12, backgroundColor: t.surface, borderWidth: 1, borderColor: t.ring, alignItems: 'center', justifyContent: 'center' }}><Icon name="share" size={16} color={t.ink2} /></Pressable>
-        </View>
-
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginBottom: 14 }}>
-          {([['chart', 'Report', '/(client)/report'], ['trending', 'Composition', '/(client)/body-trends'], ['trophy', 'Records', '/(client)/records'], ['flame', 'Consistency', '/(client)/consistency'], ['chart', 'Standards', '/(client)/standards'], ['ruler', 'Measurements', '/(client)/measurements'], ['target', 'Goal', '/(client)/goal']] as const).map(([ic, label, route]) => (
-            <Pressable key={route} onPress={() => router.push(route as any)} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 18, paddingHorizontal: 12, paddingVertical: 8 }}>
-              <Icon name={ic} size={14} color={t.brand} /><Text style={{ color: t.ink2, fontWeight: '700', fontSize: 13 }}>{label}</Text>
-            </Pressable>
-          ))}
-        </ScrollView>
-
-        {/* stat cards with deltas */}
-        <View style={{ flexDirection: 'row', gap: 9, marginBottom: 12 }}>
-          <StatCard t={t} label="Weight" value={String(cd.weightKg)} unit="kg" delta={dlt(cd.weightKg, prev?.weightKg, 'kg')} good={!prev || cd.weightKg <= prev.weightKg} onPress={() => router.push('/(client)/measurements')} />
-          <StatCard t={t} label="Body fat" value={String(cd.bodyFatPct)} unit="%" delta={dlt(cd.bodyFatPct, prev?.bodyFatPct, '')} good={!prev || cd.bodyFatPct <= prev.bodyFatPct} onPress={() => router.push('/(client)/measurements')} />
-          <StatCard t={t} label="Muscle" value={String(cd.muscleKg)} unit="kg" delta={dlt(cd.muscleKg, prev?.skeletalMuscleKg, 'kg')} good={!prev || cd.muscleKg >= prev.skeletalMuscleKg} onPress={() => router.push('/(client)/measurements')} />
-        </View>
-
-        {/* weight trend */}
-        <Pressable onPress={() => router.push('/(client)/measurements')} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 16, marginBottom: 12 }}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-            <Text style={{ color: t.ink3, fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.6 }}>Weight · {wsv.length} check-ins</Text>
-            {wDelta !== null ? <Text style={{ color: t.brand, fontSize: 11, fontWeight: '700' }}>{wDelta > 0 ? '+' : ''}{wDelta} kg</Text> : null}
+        {/* ── header ─────────────────────────────────────────────────────── */}
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingTop: sp.md }}>
+          <View style={{ flex: 1 }}>
+            <Text style={{ ...ty.micro, color: t.ink3 }}>InBody · body composition</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Progress</Text>
           </View>
-          <Spark t={t} data={wsv} times={cd.weightSeries.map((x) => Date.parse(x.t))} />
-        </Pressable>
+          <Ghost icon="share" onPress={shareProgress} />
+        </View>
 
-        {/* progress photos */}
-        <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 16, marginBottom: 12 }}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-            <Text style={{ color: t.ink, fontWeight: '800', fontSize: 14 }}>Progress photos</Text>
-            <View style={{ flexDirection: 'row', gap: 8 }}>
-              <Pressable onPress={() => addPhoto(false)} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 9, paddingHorizontal: 12, paddingVertical: 7 }}><Text style={{ color: t.ink, fontWeight: '700', fontSize: 12 }}>Upload</Text></Pressable>
-              <Pressable onPress={() => addPhoto(true)} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 9, paddingHorizontal: 12, paddingVertical: 7 }}><Text style={{ color: t.ink, fontWeight: '700', fontSize: 12 }}>Photo</Text></Pressable>
-              <Pressable onPress={() => physiqueCheck(false)} style={{ backgroundColor: t.brand, borderRadius: 9, paddingHorizontal: 12, paddingVertical: 7 }}><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 12 }}>AI check</Text></Pressable>
-            </View>
+        {/* ── the hero: one number leads the screen ───────────────────────── */}
+        <Hero
+          label="Body fat"
+          figure={String(cd.bodyFatPct)}
+          unit="%"
+          note={latest && bfMove !== null
+            ? `${bfMove <= 0 ? '−' : '+'}${Math.abs(bfMove)}% since your previous scan · scanned ${ago}`
+            : latest
+            ? `First InBody scan · ${ago}`
+            : 'No scans yet — add your InBody report to start tracking.'}
+          onPress={() => router.push('/(client)/measurements')}
+        />
+
+        <Rule />
+
+        {/* ── the one card: the scan you can act on ───────────────────────── */}
+        <Section>
+          <ActionCard
+            title={latest ? 'Latest InBody scan' : 'Add your first InBody scan'}
+            note={latest
+              ? `${latest.weightKg} kg · ${latest.bodyFatPct}% BF · ${ago}`
+              : 'Snap or upload your report — the numbers are read for you.'}
+            cta={latest ? 'Add scan' : 'Start'}
+            onPress={() => setShowAdd(true)}
+          />
+        </Section>
+
+        <Rule />
+
+        {/* ── body ───────────────────────────────────────────────────────── */}
+        <Section>
+          <SectionHead title="Body" note="Measurements" onPress={() => router.push('/(client)/measurements')} />
+          <KpiRow
+            onPress={(k) => { if (k.route) router.push(k.route as any); }}
+            items={[
+              { label: 'Weight', value: String(cd.weightKg), unit: 'kg', route: '/(client)/measurements', good: !prev || cd.weightKg <= prev.weightKg, delta: dlt(cd.weightKg, prev?.weightKg, 'kg') ?? undefined },
+              { label: 'Muscle', value: String(cd.muscleKg), unit: 'kg', route: '/(client)/measurements', good: !prev || cd.muscleKg >= prev.skeletalMuscleKg, delta: dlt(cd.muscleKg, prev?.skeletalMuscleKg, 'kg') ?? undefined },
+              { label: 'Scans', value: String(scans.length), delta: latest ? `last ${ago}` : undefined },
+            ]}
+          />
+        </Section>
+
+        <Rule />
+
+        {/* ── weight trend ───────────────────────────────────────────────── */}
+        <Section>
+          {wsv.length > 1 ? (<>
+            <SectionHead title={`Weight · ${wsv.length} check-ins`}
+              note={wDelta !== null ? `${wDelta > 0 ? '+' : wDelta < 0 ? '−' : ''}${Math.abs(wDelta)} kg` : undefined}
+              onPress={() => router.push('/(client)/measurements')} />
+            <Spark data={wsv} />
+          </>) : (<>
+            <SectionHead title="Weight" note="Measurements" onPress={() => router.push('/(client)/measurements')} />
+            <Text style={{ ...ty.label, color: t.ink3 }}>No weight history yet — the trend charts from your second check-in.</Text>
+          </>)}
+        </Section>
+
+        <Rule />
+
+        {/* ── progress photos ────────────────────────────────────────────── */}
+        <Section>
+          <SectionHead title="Progress photos" note={photos.length > 0 ? `${photos.length} saved` : undefined} />
+          <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.lg }}>
+            <View style={{ flex: 1 }}><Ghost label="Upload" onPress={() => addPhoto(false)} /></View>
+            <View style={{ flex: 1 }}><Ghost label="Photo" onPress={() => addPhoto(true)} /></View>
+            <View style={{ flex: 1 }}><Cta label="AI check" wide onPress={() => physiqueCheck(false)} /></View>
           </View>
           {photos.length === 0 ? (
-            <View style={{ flexDirection: 'row', gap: 8 }}>
-              {['Week 1', 'Progress', 'Now'].map((lbl) => (
-                <View key={lbl} style={{ flex: 1, aspectRatio: 3 / 4, borderRadius: 12, borderWidth: 1, borderColor: t.ring, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'flex-end', paddingBottom: 8 }}>
-                  <Icon name="camera" size={18} color={t.ink3} /><Text style={{ color: t.ink3, fontSize: 10, marginTop: 4 }}>{lbl}</Text>
-                </View>
-              ))}
-            </View>
+            <Text style={{ ...ty.label, color: t.ink3 }}>
+              No photos yet — add one from your camera or library, then tap two to compare before → after.
+            </Text>
           ) : (
             <View>
               {cmp.length === 2 ? (() => {
@@ -276,130 +297,147 @@ export default function Scans() {
                 const days = Math.abs(Math.round((Date.parse(newer.at) - Date.parse(older.at)) / 86400000));
                 const pair: [string, { uri: string; at: string }][] = [['Before', older], ['After', newer]];
                 return (
-                  <View style={{ marginBottom: 14 }}>
-                    <View style={{ flexDirection: 'row', gap: 10 }}>
+                  <View style={{ marginBottom: sp.lg }}>
+                    <View style={{ flexDirection: 'row', gap: sp.md }}>
                       {pair.map(([label, ph]) => (
                         <View key={label} style={{ flex: 1 }}>
-                          <Image source={{ uri: ph.uri }} style={{ width: '100%', height: 220, borderRadius: 12, backgroundColor: t.surface2 }} />
-                          <Text style={{ color: t.ink2, fontSize: 12, fontWeight: '700', marginTop: 6 }}>{label}</Text>
-                          <Text style={{ color: t.ink3, fontSize: 11 }}>{new Date(ph.at).toLocaleDateString()}</Text>
+                          <Image source={{ uri: ph.uri }} style={{ width: '100%', height: 220, borderRadius: radius.md, backgroundColor: t.surface2 }} />
+                          <Text style={{ ...ty.label, fontWeight: '500', color: t.ink, marginTop: 6 }}>{label}</Text>
+                          <Text style={{ ...ty.caption, color: t.ink3 }}>{new Date(ph.at).toLocaleDateString()}</Text>
                         </View>
                       ))}
                     </View>
-                    <Text style={{ color: t.brand, fontSize: 12, fontWeight: '700', textAlign: 'center', marginTop: 8 }}>{days === 0 ? 'Same day' : `${days} day${days === 1 ? '' : 's'} apart`}</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.sm }}>{days === 0 ? 'Same day' : `${days} day${days === 1 ? '' : 's'} apart`}</Text>
                   </View>
                 );
               })() : (
-                <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 10 }}>Tap two photos to compare before → after.</Text>
+                <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>Tap two photos to compare before → after.</Text>
               )}
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10 }}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.md }}>
                 {photos.map((p, i) => {
                   const selIdx = cmp.indexOf(i);
                   return (
                     <Pressable key={i} onPress={() => toggleCmp(i)}>
-                      <View style={{ borderRadius: 12, borderWidth: selIdx >= 0 ? 2 : 0, borderColor: t.brand, overflow: 'hidden' }}>
+                      <View style={{ borderRadius: radius.md, borderWidth: selIdx >= 0 ? 2 : 0, borderColor: t.brand, overflow: 'hidden' }}>
                         <Image source={{ uri: p.uri }} style={{ width: 110, height: 150, backgroundColor: t.surface2 }} />
-                        {selIdx >= 0 ? <View style={{ position: 'absolute', top: 6, right: 6, width: 20, height: 20, borderRadius: 10, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: t.brandInk, fontSize: 11, fontWeight: '800' }}>{selIdx + 1}</Text></View> : null}
+                        {selIdx >= 0 ? <View style={{ position: 'absolute', top: 6, right: 6, width: 20, height: 20, borderRadius: radius.pill, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}><Text style={{ ...ty.caption, fontWeight: '600', color: t.brandInk }}>{selIdx + 1}</Text></View> : null}
                       </View>
-                      <Text style={{ color: t.ink3, fontSize: 10, marginTop: 4, textAlign: 'center' }}>{new Date(p.at).toLocaleDateString()}</Text>
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, textAlign: 'center' }}>{new Date(p.at).toLocaleDateString()}</Text>
                     </Pressable>
                   );
                 })}
               </ScrollView>
             </View>
           )}
-        </View>
+        </Section>
 
-        {mByGroup.length > 0 && (
-          <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 16, marginBottom: 12 }}>
-            <Text style={{ color: t.ink, fontWeight: '800', fontSize: 14 }}>Body composition</Text>
-            <Text style={{ color: t.ink3, fontSize: 11.5, marginTop: 1, marginBottom: 12 }}>From your InBody scans · latest vs previous</Text>
+        {/* ── body composition, metric by metric ──────────────────────────── */}
+        {mByGroup.length > 0 && (<>
+          <Rule />
+          <Section>
+            <SectionHead title="Body composition" note="Latest vs previous" />
             {(mInsights.improving.length > 0 || mInsights.watch.length > 0 || mInsights.balance.length > 0) && (
-              <View style={{ backgroundColor: t.surface2, borderRadius: 12, borderWidth: 1, borderColor: t.ring, padding: 12, marginBottom: 14 }}>
-                {mInsights.improving.length > 0 ? <Text style={{ color: t.ink2, fontSize: 12.5, lineHeight: 19 }}><Text style={{ color: t.brand, fontWeight: '800' }}>Improving  </Text>{mInsights.improving.join('  ·  ')}</Text> : null}
-                {mInsights.watch.length > 0 ? <Text style={{ color: t.ink2, fontSize: 12.5, lineHeight: 19, marginTop: 4 }}><Text style={{ color: t.warn, fontWeight: '800' }}>Watch  </Text>{mInsights.watch.join('  ·  ')}</Text> : null}
-                {mInsights.balance.map((b, i) => <Text key={i} style={{ color: t.ink3, fontSize: 12, lineHeight: 18, marginTop: 4 }}>{b}</Text>)}
+              <View style={{ marginBottom: sp.lg }}>
+                {mInsights.improving.length > 0 ? (
+                  <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 7 }}>
+                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.brand, marginTop: 6 }} />
+                    <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}><Text style={{ fontWeight: '500', color: t.ink }}>Improving  </Text>{mInsights.improving.join('  ·  ')}</Text>
+                  </View>
+                ) : null}
+                {mInsights.watch.length > 0 ? (
+                  <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 7, marginTop: 6 }}>
+                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn, marginTop: 6 }} />
+                    <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}><Text style={{ fontWeight: '500', color: t.ink }}>Watch  </Text>{mInsights.watch.join('  ·  ')}</Text>
+                  </View>
+                ) : null}
+                {mInsights.balance.map((b, i) => <Text key={i} style={{ ...ty.caption, color: t.ink3, marginTop: 6 }}>{b}</Text>)}
               </View>
             )}
             {mByGroup.map((grp) => (
-              <View key={grp.group} style={{ marginBottom: 8 }}>
-                <Text style={{ color: t.ink3, fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 5 }}>{grp.group}</Text>
+              <View key={grp.group} style={{ marginBottom: sp.lg }}>
+                <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>{grp.group}</Text>
                 {grp.items.map((it) => (
                   <View key={String(it.def.key)}>
-                    <Pressable onPress={() => { if (it.series.length >= 2) setMxOpen(mxOpen === String(it.def.key) ? null : String(it.def.key)); }} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 5, borderBottomWidth: 1, borderBottomColor: t.ring }}>
-                      <Text style={{ color: t.ink2, fontSize: 13 }}>{it.def.label}{it.series.length >= 2 ? (mxOpen === String(it.def.key) ? '  ▴' : '  ▾') : ''}</Text>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                        <Text style={{ color: t.ink, fontSize: 13, fontWeight: '700' }}>{it.latest} {it.def.unit}</Text>
+                    <Pressable onPress={() => { if (it.series.length >= 2) setMxOpen(mxOpen === String(it.def.key) ? null : String(it.def.key)); }} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: sp.sm, borderBottomWidth: hairline, borderBottomColor: t.ring }}>
+                      <Text style={{ ...ty.label, color: t.ink2 }}>{it.def.label}{it.series.length >= 2 ? (mxOpen === String(it.def.key) ? '  ▴' : '  ▾') : ''}</Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+                        <Text style={{ ...ty.label, ...numeric, fontWeight: '500', color: t.ink }}>{it.latest} {it.def.unit}</Text>
                         {it.delta != null && it.delta !== 0 ? (
-                          <Text style={{ color: it.good == null ? t.ink3 : it.good ? t.brand : t.warn, fontSize: 12, fontWeight: '700', minWidth: 46, textAlign: 'right' }}>{it.delta > 0 ? '+' : ''}{it.delta}</Text>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, minWidth: 52, justifyContent: 'flex-end' }}>
+                            <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: it.good == null ? t.ink3 : it.good ? t.brand : t.warn }} />
+                            <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{it.delta > 0 ? '+' : ''}{it.delta}</Text>
+                          </View>
                         ) : (
-                          <Text style={{ color: t.ink3, fontSize: 12, minWidth: 46, textAlign: 'right' }}>—</Text>
+                          <Text style={{ ...ty.caption, color: t.ink3, minWidth: 52, textAlign: 'right' }}>—</Text>
                         )}
                       </View>
                     </Pressable>
                     {mxOpen === String(it.def.key) && it.series.length >= 2 ? (
-                      <View style={{ paddingVertical: 8 }}><Spark t={t} data={it.series} h={44} /></View>
+                      <View style={{ paddingVertical: sp.sm }}><Spark data={it.series} h={54} /></View>
                     ) : null}
                   </View>
                 ))}
               </View>
             ))}
-          </View>
-        )}
+          </Section>
+        </>)}
 
-        {/* latest InBody scan card */}
-        <Pressable onPress={() => setShowAdd(true)} style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-          <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-            <Icon name="chart" size={20} color={t.brand} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={{ color: t.ink, fontWeight: '700', fontSize: 14 }}>{latest ? 'Latest InBody scan' : 'Add your first InBody scan'}</Text>
-            <Text style={{ color: t.ink3, fontSize: 11.5, marginTop: 1 }}>{latest ? `${latest.weightKg} kg · ${latest.bodyFatPct}% BF · ${daysAgo === 0 ? 'today' : daysAgo + ' days ago'} · tap to add/view` : 'Snap or upload your report — tap to start'}</Text>
-          </View>
-          <Icon name="chevron" size={18} color={t.ink3} />
-        </Pressable>
+        <Rule />
+
+        {/* ── the rest: navigational, deliberately quiet ──────────────────── */}
+        <Section>
+          <SectionHead title="Go deeper" />
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingRight: G }}>
+            {([['chart', 'Report', '/(client)/report'], ['trending', 'Composition', '/(client)/body-trends'], ['trophy', 'Records', '/(client)/records'], ['flame', 'Consistency', '/(client)/consistency'], ['chart', 'Standards', '/(client)/standards'], ['ruler', 'Measurements', '/(client)/measurements'], ['target', 'Goal', '/(client)/goal']] as const).map(([ic, label, route]) => (
+              <Pressable key={route} onPress={() => router.push(route as any)} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: sp.sm }}>
+                <Icon name={ic} size={14} color={t.ink2} /><Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>{label}</Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        </Section>
       </ScrollView>
 
       {/* Add / view scans sheet */}
       <Modal visible={showAdd} transparent animationType="slide" onRequestClose={() => setShowAdd(false)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setShowAdd(false)} />
-        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, borderColor: t.ring, maxHeight: '90%' }}>
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, maxHeight: '90%' }}>
           <ScrollView contentContainerStyle={{ padding: 20 }} showsVerticalScrollIndicator={false}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-              <Text style={{ color: t.ink, fontSize: 20, fontWeight: '700', fontFamily: SERIF }}>Add an InBody scan</Text>
-              <Pressable onPress={() => setShowAdd(false)}><Text style={{ color: t.brand, fontSize: 15, fontWeight: '800' }}>Close</Text></Pressable>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sp.xs }}>
+              <Text style={{ ...ty.title, color: t.ink }}>Add an InBody scan</Text>
+              <Ghost label="Close" onPress={() => setShowAdd(false)} />
             </View>
-            <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 14 }}>Snap or upload your report, pick the scan date, enter the numbers.</Text>
-            <View style={{ flexDirection: 'row', gap: 10, marginBottom: 12 }}>
-              <Pressable accessibilityLabel="Take a progress photo" accessibilityRole="button" onPress={() => pick(true)} style={{ flex: 1, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingVertical: 16, alignItems: 'center', gap: 5 }}><Icon name="camera" size={22} color={t.ink} /><Text style={{ color: t.ink, fontWeight: '700', fontSize: 13 }}>Take photo</Text></Pressable>
-              <Pressable accessibilityLabel="Add photo from library" accessibilityRole="button" onPress={() => pick(false)} style={{ flex: 1, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingVertical: 16, alignItems: 'center', gap: 5 }}><Icon name="plus" size={22} color={t.ink} /><Text style={{ color: t.ink, fontWeight: '700', fontSize: 13 }}>Upload scan</Text></Pressable>
+            <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>Snap or upload your report, pick the scan date, enter the numbers.</Text>
+            <View style={{ flexDirection: 'row', gap: sp.md, marginBottom: sp.md }}>
+              <Pressable accessibilityLabel="Take a progress photo" accessibilityRole="button" onPress={() => pick(true)} style={{ flex: 1, backgroundColor: t.surface2, borderRadius: radius.md, paddingVertical: sp.lg, alignItems: 'center', gap: 5 }}><Icon name="camera" size={22} color={t.ink} /><Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>Take photo</Text></Pressable>
+              <Pressable accessibilityLabel="Add photo from library" accessibilityRole="button" onPress={() => pick(false)} style={{ flex: 1, backgroundColor: t.surface2, borderRadius: radius.md, paddingVertical: sp.lg, alignItems: 'center', gap: 5 }}><Icon name="plus" size={22} color={t.ink} /><Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>Upload scan</Text></Pressable>
             </View>
             {img && (
-              <View style={{ marginBottom: 12 }}>
-                <Image source={{ uri: img }} style={{ width: '100%', height: 180, borderRadius: 12, backgroundColor: t.surface2 }} resizeMode="cover" />
-                {reading ? <Text style={{ color: t.brand, fontSize: 12, marginTop: 6, fontWeight: '600' }}>Reading your scan…</Text> : <Text style={{ color: ocrMsg && ocrMsg.startsWith('Read') ? t.brand : t.ink3, fontSize: 11, marginTop: 6 }}>{ocrMsg || 'Scan attached — reading the numbers…'}</Text>}
+              <View style={{ marginBottom: sp.md }}>
+                <Image source={{ uri: img }} style={{ width: '100%', height: 180, borderRadius: radius.md, backgroundColor: t.surface2 }} resizeMode="cover" />
+                {reading ? <Text style={{ ...ty.caption, fontWeight: '500', color: t.ink2, marginTop: 6 }}>Reading your scan…</Text> : <Text style={{ ...ty.caption, color: ocrMsg && ocrMsg.startsWith('Read') ? t.ink2 : t.ink3, marginTop: 6 }}>{ocrMsg || 'Scan attached — reading the numbers…'}</Text>}
               </View>
             )}
-            <Text style={{ color: t.ink2, fontSize: 13, fontWeight: '600', marginBottom: 6 }}>Scan date</Text>
-            <Pressable onPress={() => setShowDate(true)} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, marginBottom: 12, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Text style={{ color: t.ink, fontSize: 15, fontWeight: '600' }}>{scanDateLabel()}</Text><Icon name="calendar" size={15} color={t.ink3} />
+            <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Scan date</Text>
+            <Pressable onPress={() => setShowDate(true)} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md, marginBottom: sp.md, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{scanDateLabel()}</Text><Icon name="calendar" size={15} color={t.ink3} />
             </Pressable>
-            <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
+            <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.lg }}>
               <TextInput value={wt} onChangeText={setWt} keyboardType="numeric" placeholder="Weight kg" placeholderTextColor={t.ink3} style={input} />
               <TextInput value={bf} onChangeText={setBf} keyboardType="numeric" placeholder="Body fat %" placeholderTextColor={t.ink3} style={input} />
               <TextInput value={sm} onChangeText={setSm} keyboardType="numeric" placeholder="Muscle kg" placeholderTextColor={t.ink3} style={input} />
             </View>
-            <Pressable onPress={saveScan} style={{ backgroundColor: t.brand, borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginBottom: 18 }}><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 15 }}>Save scan & update profile</Text></Pressable>
+            <Cta label="Save scan & update profile" wide onPress={saveScan} />
 
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-              <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15 }}>Scan history</Text><Text style={{ color: t.ink3, fontSize: 12 }}>{scans.length} scans</Text>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginTop: sp.xl, marginBottom: sp.sm }}>
+              <Text style={{ ...ty.micro, color: t.ink3 }}>Scan history</Text><Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{scans.length} scans</Text>
             </View>
+            {scans.length === 0 ? <Text style={{ ...ty.label, color: t.ink3 }}>No scans yet.</Text> : null}
             {[...chrono].reverse().map((s, i, arr) => (
-              <View key={s.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, borderBottomWidth: i < arr.length - 1 ? 1 : 0, borderBottomColor: t.ring }}>
-                {s.image ? <Image source={{ uri: s.image }} style={{ width: 40, height: 40, borderRadius: 8 }} /> : <View style={{ width: 40, height: 40, borderRadius: 8, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}><Icon name="chart" size={16} color={t.ink3} /></View>}
+              <View key={s.id} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderBottomWidth: i < arr.length - 1 ? hairline : 0, borderBottomColor: t.ring }}>
+                {s.image ? <Image source={{ uri: s.image }} style={{ width: 40, height: 40, borderRadius: radius.sm }} /> : <View style={{ width: 40, height: 40, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}><Icon name="chart" size={16} color={t.ink3} /></View>}
                 <View style={{ flex: 1 }}>
-                  <Text style={{ color: t.ink, fontWeight: '600', fontSize: 14 }}>{s.weightKg} kg · {s.bodyFatPct}% BF</Text>
-                  <Text style={{ color: t.ink3, fontSize: 11 }}>{fmt(s.takenAt)} · {s.source}</Text>
+                  <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: t.ink }}>{s.weightKg} kg · {s.bodyFatPct}% BF</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3 }}>{fmt(s.takenAt)} · {s.source}</Text>
                 </View>
               </View>
             ))}
@@ -409,14 +447,14 @@ export default function Scans() {
 
       <Modal visible={showDate} transparent animationType="slide" onRequestClose={() => setShowDate(false)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setShowDate(false)} />
-        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, borderColor: t.ring, padding: 18 }}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-            <Text style={{ color: t.ink3, fontSize: 16, fontWeight: '600' }}> </Text>
-            <Text style={{ color: t.ink, fontSize: 16, fontWeight: '800' }}>Scan date</Text>
-            <Pressable onPress={() => setShowDate(false)}><Text style={{ color: t.brand, fontSize: 16, fontWeight: '800' }}>Done</Text></Pressable>
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 18 }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sp.md }}>
+            <Text style={{ ...ty.micro, color: t.ink3 }}> </Text>
+            <Text style={{ ...ty.head, color: t.ink }}>Scan date</Text>
+            <Pressable onPress={() => setShowDate(false)} hitSlop={8}><Text style={{ ...ty.label, fontWeight: '600', color: t.brand }}>Done</Text></Pressable>
           </View>
           <View style={{ position: 'relative' }}>
-            <View pointerEvents="none" style={{ position: 'absolute', left: 0, right: 0, top: ITEM_H * 2, height: ITEM_H, borderRadius: 10, backgroundColor: t.surface2, borderWidth: 1, borderColor: t.ring }} />
+            <View pointerEvents="none" style={{ position: 'absolute', left: 0, right: 0, top: ITEM_H * 2, height: ITEM_H, borderRadius: radius.sm, backgroundColor: t.surface2 }} />
             <View style={{ flexDirection: 'row' }}>
               <Wheel items={Array.from({ length: daysIn(dM, YEARS[dY]) }, (_, i) => String(i + 1))} index={Math.min(dD, daysIn(dM, YEARS[dY]) - 1)} onChange={setDD} t={t} />
               <Wheel items={MONTHS} index={dM} onChange={setDM} t={t} />
@@ -427,47 +465,47 @@ export default function Scans() {
       </Modal>
       <Modal visible={physOpen} transparent animationType="slide" onRequestClose={() => setPhysOpen(false)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)' }} onPress={() => setPhysOpen(false)} />
-        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, borderColor: t.ring, padding: 20, paddingBottom: 30 }}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-            <Text style={{ color: t.ink, fontSize: 20, fontWeight: '800' }}>{physBusy ? 'Analyzing…' : 'AI physique read'}</Text>
-            <Pressable onPress={() => setPhysOpen(false)}><Text style={{ color: t.brand, fontSize: 16, fontWeight: '800' }}>Close</Text></Pressable>
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30 }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sp.lg }}>
+            <Text style={{ ...ty.title, color: t.ink }}>{physBusy ? 'Analyzing…' : 'AI physique read'}</Text>
+            <Ghost label="Close" onPress={() => setPhysOpen(false)} />
           </View>
           {physBusy ? (
-            <Text style={{ color: t.ink3, fontSize: 14, paddingVertical: 14 }}>Reading your photo for body composition and focus areas…</Text>
+            <Text style={{ ...ty.body, color: t.ink3, paddingVertical: sp.lg }}>Reading your photo for body composition and focus areas…</Text>
           ) : phys ? (
             <View>
               {phys.bodyFatPct != null ? (
-                <View style={{ backgroundColor: t.surface2, borderRadius: 14, borderWidth: 1, borderColor: t.ring, padding: 16, marginBottom: 12 }}>
-                  <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 }}>Estimated body fat</Text>
-                  <Text style={{ color: t.ink, fontSize: 30, fontWeight: '900', marginTop: 2 }}>{phys.bodyFatPct}%</Text>
+                <View style={{ marginBottom: sp.lg }}>
+                  <Text style={{ ...ty.micro, color: t.ink3 }}>Estimated body fat</Text>
+                  <Text style={{ ...value(30), color: t.ink, marginTop: 2 }}>{phys.bodyFatPct}%</Text>
                 </View>
               ) : null}
-              {phys.notes ? <Text style={{ color: t.ink2, fontSize: 14, lineHeight: 21, marginBottom: 14 }}>{phys.notes}</Text> : null}
+              {phys.notes ? <Text style={{ ...ty.body, color: t.ink2, marginBottom: sp.lg }}>{phys.notes}</Text> : null}
               {phys.focusAreas.length > 0 ? (
                 <View>
-                  <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>Focus next on</Text>
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                    {phys.focusAreas.map((a) => (<View key={a} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 16, paddingHorizontal: 13, paddingVertical: 8 }}><Text style={{ color: t.ink2, fontSize: 13, fontWeight: '700' }}>{a}</Text></View>))}
+                  <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Focus next on</Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
+                    {phys.focusAreas.map((a) => (<View key={a} style={{ backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: 13, paddingVertical: sp.sm }}><Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>{a}</Text></View>))}
                   </View>
                   {recommendedExercises(focusToGroups(phys.focusAreas)).length > 0 ? (
-                    <View style={{ marginTop: 16 }}>
-                      <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>Recommended moves · tap to watch form</Text>
+                    <View style={{ marginTop: sp.lg }}>
+                      <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Recommended moves · tap to watch form</Text>
                       {recommendedExercises(focusToGroups(phys.focusAreas)).map((ex) => (
-                        <Pressable key={ex.name} onPress={() => Linking.openURL('https://www.youtube.com/results?search_query=' + encodeURIComponent('how to ' + ex.name + ' proper form'))} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, marginBottom: 8 }}>
-                          <View style={{ flex: 1 }}><Text style={{ color: t.ink, fontWeight: '700', fontSize: 14 }}>{ex.name}</Text><Text style={{ color: t.ink3, fontSize: 11.5 }}>{ex.group}</Text></View>
-                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}><Icon name="play" size={14} color={t.brand} /><Text style={{ color: t.brand, fontWeight: '700', fontSize: 13 }}>Watch demo</Text></View>
+                        <Pressable key={ex.name} onPress={() => Linking.openURL('https://www.youtube.com/results?search_query=' + encodeURIComponent('how to ' + ex.name + ' proper form'))} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: sp.md, borderBottomWidth: hairline, borderBottomColor: t.ring }}>
+                          <View style={{ flex: 1 }}><Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{ex.name}</Text><Text style={{ ...ty.caption, color: t.ink3 }}>{ex.group}</Text></View>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}><Icon name="play" size={14} color={t.brand} /><Text style={{ ...ty.label, color: t.ink2 }}>Watch demo</Text></View>
                         </Pressable>
                       ))}
                     </View>
                   ) : null}
                   {focusToGroups(phys.focusAreas).length > 0 ? (
-                    <Pressable onPress={() => { cd.setFocusAreas(focusToGroups(phys.focusAreas)); setPhysOpen(false); Alert.alert('Plan updated', 'Your Train tab now emphasises ' + focusToGroups(phys.focusAreas).join(', ') + ' — those exercises are tagged and prioritised until your next photo.'); }} style={{ marginTop: 14, backgroundColor: t.brand, borderRadius: 12, paddingVertical: 14, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8 }}>
-                      <Icon name="target" size={16} color={t.brandInk} /><Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 15 }}>Emphasise these in my plan</Text>
-                    </Pressable>
+                    <View style={{ marginTop: sp.lg }}>
+                      <Cta label="Emphasise these in my plan" wide onPress={() => { cd.setFocusAreas(focusToGroups(phys.focusAreas)); setPhysOpen(false); Alert.alert('Plan updated', 'Your Train tab now emphasises ' + focusToGroups(phys.focusAreas).join(', ') + ' — those exercises are tagged and prioritised until your next photo.'); }} />
+                    </View>
                   ) : null}
                 </View>
               ) : null}
-              <Text style={{ color: t.ink3, fontSize: 11, marginTop: 16 }}>AI estimate for training guidance only — not medical advice.</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>AI estimate for training guidance only — not medical advice.</Text>
             </View>
           ) : null}
         </View>
