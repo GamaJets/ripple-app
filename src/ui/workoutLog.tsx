@@ -19,6 +19,7 @@ const Ctx = createContext<WorkoutLogValue | null>(null);
 const rowToEntry = (r: any): WorkoutEntry => ({
   t: r.performed_at, exercise: r.exercise,
   sets: r.sets ?? undefined, feel: r.feel ?? undefined, cardio: r.cardio ?? undefined, kcal: r.kcal ?? undefined,
+  zones: r.zones ?? undefined,
 });
 const entryToRow = (uid: string, e: WorkoutEntry) => ({
   user_id: uid, performed_at: e.t, exercise: e.exercise,
@@ -57,6 +58,10 @@ export function WorkoutLogProvider({ children }: { children: React.ReactNode }) 
         entries.forEach((e) => {
           if (e.feel && e.feel.length) {
             supabase.from('workouts').update({ feel: e.feel }).eq('user_id', uid).eq('performed_at', e.t).eq('exercise', e.exercise).then(() => {}, () => {});
+          }
+          // Same best-effort pattern for time-in-zone (added in the workouts_hr_zones migration).
+          if (e.zones) {
+            supabase.from('workouts').update({ zones: e.zones }).eq('user_id', uid).eq('performed_at', e.t).eq('exercise', e.exercise).then(() => {}, () => {});
           }
         });
       }, () => {});

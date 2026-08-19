@@ -28,7 +28,8 @@ import { parseWorkoutText } from '../../src/lib/workoutParse';
 import { useExerciseVideos } from '../../src/ui/exerciseVideos';
 import { injuryFlag, areaLabel, type Injury } from '../../src/lib/injuries';
 import { warmupSets, deloadCheck } from '../../src/lib/training';
-import { hrColor, hrZoneLabel } from '../../src/lib/hr';
+import { hrColor, hrZoneNo, zoneOf, zoneKey, emptyZoneSeconds, splatPoints, zoneSecondsTotal, type ZoneSeconds } from '../../src/lib/hr';
+import { ZoneNow, ZoneBoard } from '../../src/ui/ZoneBoard';
 import { SessionHrSheet } from '../../src/ui/SessionHrSheet';
 import { ageFromDob } from '../../src/lib/age';
 
@@ -656,6 +657,23 @@ function SessionRunner({ t, exercises, focus, nameOf, age, log, injuries, onComp
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => { if (typeof liveHr === 'number' && liveHr > 0) setHrPeak((p) => (p == null || liveHr > p ? liveHr : p)); }, [liveHr]);
+
+  // Time in zone, accumulated a second at a time against the latest reading.
+  // `hrRef` keeps the tick reading the current bpm without re-arming the interval.
+  const [zoneSecs, setZoneSecs] = useState<ZoneSeconds>(emptyZoneSeconds);
+  const hrRef = useRef<number | null>(null);
+  hrRef.current = typeof liveHr === 'number' && liveHr > 0 ? liveHr : null;
+  useEffect(() => {
+    const z = setInterval(() => {
+      const bpm = hrRef.current;
+      if (!bpm) return; // no reading → bank nothing, rather than crediting zone 1
+      setZoneSecs((p) => ({ ...p, [zoneKey(zoneOf(bpm, age))]: p[zoneKey(zoneOf(bpm, age))] + 1 }));
+    }, 1000);
+    return () => clearInterval(z);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [age]);
+  const liveZone = hrZoneNo(liveHr, age);
+  const hasZones = zoneSecondsTotal(zoneSecs) > 0;
   const [idx, setIdx] = useState(0);
   const [results, setResults] = useState<{ reps: number; kg: number }[][]>(() => exercises.map(() => []));
   const [reps, setReps] = useState(''); const [kg, setKg] = useState('');
@@ -713,6 +731,8 @@ function SessionRunner({ t, exercises, focus, nameOf, age, log, injuries, onComp
         sets: sets.map((s) => [s.reps, s.kg]) as [number, number][],
         feel: (rpes[i] && rpes[i].length) ? rpes[i] : undefined,
         kcal: Math.round(sets.reduce((a, s) => a + s.reps * (s.kg || 0), 0) / 60) + sets.length * 8,
+        // Only attach zones when a heart-rate source actually fed the session.
+        zones: zoneSecondsTotal(zoneSecs) > 0 ? zoneSecs : undefined,
       } : null))
       .filter(Boolean) as WorkoutEntry[];
     onComplete(entries);
@@ -750,6 +770,13 @@ function SessionRunner({ t, exercises, focus, nameOf, age, log, injuries, onComp
             <MetricCols t={t} items={strip} />
           </Section>
           <Rule />
+          {zoneSecondsTotal(zoneSecs) > 0 ? (<>
+            <Section>
+              <SectionHead title="Time in zone" note={`${splatPoints(zoneSecs)} splat`} />
+              <ZoneBoard seconds={zoneSecs} showSplat={false} />
+            </Section>
+            <Rule />
+          </>) : null}
           <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.xl, marginBottom: sp.xl }}>Logged to your history — strength trends and your coach's dashboard update automatically.</Text>
           <Cta label="Done" wide onPress={onClose} />
         </ScrollView>
@@ -760,7 +787,7 @@ function SessionRunner({ t, exercises, focus, nameOf, age, log, injuries, onComp
 
   const liveCols: { label: string; value: string; dot?: string }[] = [
     { label: 'Time', value: `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, '0')}` },
-    { label: liveHr ? hrZoneLabel(liveHr, age) : 'bpm', value: String(liveHr ?? '–'), dot: liveHr ? hrColor(liveHr, age) : undefined },
+    { label: 'bpm', value: String(liveHr ?? '–'), dot: liveHr ? hrColor(liveHr, age) : undefined },
     { label: 'kcal', value: String(sessionKcal ?? '–') },
     { label: 'Peak', value: String(hrPeak ?? '–'), dot: hrPeak ? hrColor(hrPeak, age) : undefined },
   ];
@@ -778,6 +805,18 @@ function SessionRunner({ t, exercises, focus, nameOf, age, log, injuries, onComp
 
         <MetricCols t={t} items={liveCols} />
         {liveHr == null ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>Wear your Apple Watch for live heart rate &amp; calories</Text> : null}
+
+        {/* Live effort. The zone numeral leads; colour only confirms it. */}
+        {liveZone || hasZones ? (
+          <View style={{ marginTop: sp.xl }}>
+            <ZoneNow zone={liveZone} bpm={liveHr ?? null} compact />
+            {hasZones ? (
+              <View style={{ marginTop: sp.lg }}>
+                <ZoneBoard seconds={zoneSecs} current={liveZone} />
+              </View>
+            ) : null}
+          </View>
+        ) : null}
 
         {prMsg ? (
           <View style={{ marginTop: sp.xl }}>

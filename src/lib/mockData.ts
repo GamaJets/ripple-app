@@ -32,6 +32,10 @@ export interface WorkoutEntry {
   sets?: [number, number][];       // [reps, kg]
   feel?: ('easy' | 'ok' | 'hard')[]; // per-set perceived effort (RPE), aligned to sets
   cardio?: { mins: number; dist: number; unit: string; watts?: number; hrAvg?: number; hrHigh?: number };
+  /** Seconds per heart-rate zone during the session. Absent when no HR source
+   *  was connected — never zero-filled, so "no watch" stays distinguishable
+   *  from "no effort". */
+  zones?: import('./hr').ZoneSeconds;
   kcal?: number;
 }
 

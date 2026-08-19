@@ -64,7 +64,14 @@ export function makeCloudProvider(meta: ProviderMeta): WearableProvider {
       m.heartRateAvg = typeof raw.heartRateAvg === 'number' ? raw.heartRateAvg : null;
       m.heartRateResting = typeof raw.heartRateResting === 'number' ? raw.heartRateResting : null;
       m.heartRateMax = typeof raw.heartRateMax === 'number' ? raw.heartRateMax : null;
-      m.zoneSeconds = raw.zoneSeconds && typeof raw.zoneSeconds === 'object' ? raw.zoneSeconds : null;
+      // Only accept the z1..z5 shape. An older edge-function deploy sends
+      // {rest,warmup,aerobic,threshold,max}; taking that verbatim would render
+      // as five empty zones rather than an obvious failure, so it is rejected.
+      const rz = raw.zoneSeconds;
+      const num = (v: unknown) => (typeof v === 'number' && isFinite(v) && v >= 0 ? v : 0);
+      m.zoneSeconds = rz && typeof rz === 'object' && ('z1' in rz || 'z4' in rz)
+        ? { z1: num(rz.z1), z2: num(rz.z2), z3: num(rz.z3), z4: num(rz.z4), z5: num(rz.z5) }
+        : null;
       m.workoutMins = typeof raw.workoutMins === 'number' ? raw.workoutMins : null;
       return m;
     },

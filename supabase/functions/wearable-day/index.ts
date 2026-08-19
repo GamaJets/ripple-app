@@ -106,29 +106,37 @@ async function whoopDay(token: string) {
   // Sum today's workout durations, and roll up time-in-zone.
   //
   // WHOOP exposes NO intraday heart-rate samples, so a live HR curve is not
-  // possible from this API. What it does give is per-workout zone durations, which
-  // is the Orange-Theory-style number that actually matters: how long you spent in
-  // each effort band. WHOOP uses 6 bands (0-50/50-60/60-70/70-80/80-90/90-100% of
-  // max HR); this app models 5 (rest <50, warmup 50-65, aerobic 65-80, threshold
-  // 80-90, max >=90). zone_two (60-70%) straddles warmup and aerobic and is
-  // assigned to aerobic — the only approximation in the mapping.
+  // possible from this API. What it does give is per-workout zone durations —
+  // the Orange-Theory number that actually matters: how long you spent in each
+  // effort band.
+  //
+  // WHOOP's six bands map almost exactly onto the app's five (see src/lib/hr.ts):
+  //   whoop zone_zero  0-50%   ─┐ folded into z1: below zone 1 is still "very
+  //   whoop zone_one   50-60%  ─┘ light", and WHOOP has no separate resting band
+  //   whoop zone_two   60-70%  →  z2  (app 61-70%)
+  //   whoop zone_three 70-80%  →  z3  (app 71-83%)
+  //   whoop zone_four  80-90%  →  z4  (app 84-91%)
+  //   whoop zone_five  90-100% →  z5  (app 92-100%)
+  // The previous mapping folded zone_two and zone_three together into one band,
+  // which merged what the app now calls Light and Base — the two zones a client
+  // most needs to tell apart. This is a straight 1:1 apart from the zero fold.
   try {
     const start = today() + 'T00:00:00.000Z';
     const w = await (await fetch(`https://api.prod.whoop.com/developer/v2/activity/workout?start=${start}&limit=${WHOOP_PAGE_LIMIT}`, { headers: h })).json();
     const recs = Array.isArray(w?.records) ? w.records : [];
     let mins = 0;
-    const zones = { rest: 0, warmup: 0, aerobic: 0, threshold: 0, max: 0 };
+    const zones = { z1: 0, z2: 0, z3: 0, z4: 0, z5: 0 };
     let maxHrSeen = 0;
     for (const rec of recs) {
       if (rec?.start && rec?.end) mins += Math.max(0, (Date.parse(rec.end) - Date.parse(rec.start)) / 60000);
       const zd = rec?.score?.zone_durations ?? rec?.score?.zone_duration;
       if (zd) {
         const sec = (v: any) => (Number.isFinite(Number(v)) ? Number(v) / 1000 : 0);
-        zones.rest      += sec(zd.zone_zero_milli);
-        zones.warmup    += sec(zd.zone_one_milli);
-        zones.aerobic   += sec(zd.zone_two_milli) + sec(zd.zone_three_milli);
-        zones.threshold += sec(zd.zone_four_milli);
-        zones.max       += sec(zd.zone_five_milli);
+        zones.z1 += sec(zd.zone_zero_milli) + sec(zd.zone_one_milli);
+        zones.z2 += sec(zd.zone_two_milli);
+        zones.z3 += sec(zd.zone_three_milli);
+        zones.z4 += sec(zd.zone_four_milli);
+        zones.z5 += sec(zd.zone_five_milli);
       }
       const mh = Number(rec?.score?.max_heart_rate);
       if (Number.isFinite(mh) && mh > maxHrSeen) maxHrSeen = mh;

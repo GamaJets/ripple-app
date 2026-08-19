@@ -13,9 +13,11 @@ import Svg, { Rect, Line, Circle } from 'react-native-svg';
 import { useTheme } from './components';
 import { sp, radius, hairline, type as ty, numeric, value } from '../theme/scale';
 import {
-  type HrSample, hrStats, zoneBands, timeInZones, hrZone, zoneColor,
-  maxHr, HR_ZONE_ORDER, HR_ZONE_LABEL, type HrZone,
+  type HrSample, hrStats, zoneBands, timeInZones, zoneOf, zoneColor, maxHr,
+  ZONE_NOS, zoneName, zoneKey, emptyZoneSeconds, zoneSecondsTotal,
+  type ZoneNo, type ZoneSeconds,
 } from '../lib/hr';
+import { ZoneBoard } from './ZoneBoard';
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 const mmss = (sec: number) => {
@@ -26,7 +28,7 @@ const mmss = (sec: number) => {
 export function HrZoneChart({ samples, zoneSeconds, avgBpm, maxBpm, age, title, subtitle, height = 172 }: {
   samples: HrSample[];
   /** Seconds per zone, when the source gives totals instead of a series (WHOOP). */
-  zoneSeconds?: Partial<Record<HrZone, number>> | null;
+  zoneSeconds?: Partial<ZoneSeconds> | null;
   /** Reported averages, used for the stat row when there is no series to derive them from. */
   avgBpm?: number | null;
   maxBpm?: number | null;
@@ -37,7 +39,7 @@ export function HrZoneChart({ samples, zoneSeconds, avgBpm, maxBpm, age, title, 
 
   const stats = hrStats(samples);
   const hasSeries = !!stats && samples.length >= 2;
-  const zoneTotal = zoneSeconds ? HR_ZONE_ORDER.reduce((a, z) => a + (zoneSeconds[z] || 0), 0) : 0;
+  const zoneTotal = zoneSeconds ? ZONE_NOS.reduce((a, z) => a + (zoneSeconds[zoneKey(z)] || 0), 0) : 0;
 
   if (!hasSeries && zoneTotal <= 0) {
     return (
@@ -61,11 +63,10 @@ export function HrZoneChart({ samples, zoneSeconds, avgBpm, maxBpm, age, title, 
   const bands = zoneBands(age).filter((b) => b.hiBpm > lo && b.loBpm < hi);
   // Time-in-zone comes from the series when we have one, otherwise straight from
   // the provider's own totals.
-  const tiz: Record<HrZone, number> = hasSeries
+  const tiz: ZoneSeconds = hasSeries
     ? timeInZones(pts, age)
-    : (HR_ZONE_ORDER.reduce((acc, z) => { acc[z] = zoneSeconds?.[z] || 0; return acc; }, {} as Record<HrZone, number>));
-  const totalSec = HR_ZONE_ORDER.reduce((a, z) => a + tiz[z], 0) || 1;
-  const activeZones = HR_ZONE_ORDER.filter((z) => tiz[z] > 0);
+    : ZONE_NOS.reduce((acc, z) => { acc[zoneKey(z)] = zoneSeconds?.[zoneKey(z)] || 0; return acc; }, emptyZoneSeconds());
+  const peakZone: ZoneNo | null = hasSeries ? zoneOf(stats!.high, age) : null;
   const avgY = hasSeries ? yOf(stats!.avg) : 0;
   const peakI = pts.length ? pts.reduce((best, p, i) => (p.bpm > pts[best].bpm ? i : best), 0) : 0;
 
@@ -105,11 +106,11 @@ export function HrZoneChart({ samples, zoneSeconds, avgBpm, maxBpm, age, title, 
             {bands.map((b) => {
               const yTop = yOf(Math.min(b.hiBpm, hi));
               const yBot = yOf(Math.max(b.loBpm, lo));
-              return <Rect key={b.zone} x={0} y={yTop} width={w} height={Math.max(0, yBot - yTop)} fill={b.color} opacity={0.13} />;
+              return <Rect key={b.no} x={0} y={yTop} width={w} height={Math.max(0, yBot - yTop)} fill={b.color} opacity={0.13} />;
             })}
             {pts.slice(0, -1).map((p, i) => (
               <Line key={i} x1={xOf(i)} y1={yOf(p.bpm)} x2={xOf(i + 1)} y2={yOf(pts[i + 1].bpm)}
-                stroke={zoneColor(hrZone(p.bpm, age))} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+                stroke={zoneColor(zoneOf(p.bpm, age))} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
             ))}
             <Line x1={0} y1={avgY} x2={w} y2={avgY} stroke={t.ink3} strokeWidth={1} strokeDasharray="4 4" opacity={0.7} />
             <Circle cx={xOf(peakI)} cy={yOf(pts[peakI].bpm)} r={6} fill={t.surface} />
@@ -118,18 +119,10 @@ export function HrZoneChart({ samples, zoneSeconds, avgBpm, maxBpm, age, title, 
         </View>
       ) : null}
 
-      {/* time-in-zone stacked bar */}
-      <View style={{ flexDirection: 'row', height: 10, borderRadius: 5, overflow: 'hidden', marginTop: 12 }}>
-        {HR_ZONE_ORDER.map((z) => (tiz[z] > 0 ? <View key={z} style={{ width: `${(tiz[z] / totalSec) * 100}%`, backgroundColor: zoneColor(z) }} /> : null))}
-      </View>
-      <View style={{ marginTop: 10, gap: 5 }}>
-        {activeZones.map((z: HrZone) => (
-          <View key={z} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <View style={{ width: 10, height: 10, borderRadius: 3, backgroundColor: zoneColor(z) }} />
-            <Text style={{ ...ty.caption, color: t.ink2, flex: 1 }}>{HR_ZONE_LABEL[z]}</Text>
-            <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{mmss(tiz[z])}</Text>
-          </View>
-        ))}
+      {/* Time in zone. The board leads with the zone NUMBER because these hues
+          are too close together to carry meaning alone — see src/lib/hr.ts. */}
+      <View style={{ marginTop: sp.lg, paddingTop: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
+        <ZoneBoard seconds={tiz} current={peakZone} />
       </View>
     </View>
   );

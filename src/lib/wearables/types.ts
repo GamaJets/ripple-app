@@ -3,6 +3,8 @@
 // Garmin, Fitbit) all implement WearableProvider, so the UI and the sync logic
 // never care which brand they're talking to.
 
+import type { ZoneSeconds } from '../hr';
+
 export type ProviderId = 'apple' | 'whoop' | 'garmin' | 'fitbit' | 'oura' | 'googlefit';
 export type ProviderKind = 'healthkit' | 'health-connect' | 'cloud';
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error';
@@ -16,9 +18,10 @@ export interface DailyMetrics {
   heartRateLatest: number | null; // bpm, most recent sample (live-ish during a workout)
   heartRateResting: number | null;
   heartRateMax: number | null;    // bpm, peak of today's workouts
-  /** Seconds per training zone. WHOOP reports these per workout; HealthKit gives
-   *  raw samples instead, from which the client derives the same shape. */
-  zoneSeconds: { rest: number; warmup: number; aerobic: number; threshold: number; max: number } | null;
+  /** Seconds per training zone (z1..z5, the Orange-Theory scale in src/lib/hr).
+   *  WHOOP reports these per workout; HealthKit gives raw samples instead, from
+   *  which the client derives the same shape. */
+  zoneSeconds: ZoneSeconds | null;
   workoutMins: number | null;
   updatedAt: string;            // ISO timestamp of the sync
   source: ProviderId;
