@@ -7,6 +7,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { paletteByKey, brandInkFor, DEFAULT_PALETTE, PALETTES, teal, type Theme, type PaletteMeta } from '../theme/tokens';
 import { Icon } from './Icon';
+// `value` is aliased to `figure` so it can't shadow <Tile/>'s `value` prop.
+import { sp, layout, radius, hairline, type as ty, value as figure } from '../theme/scale';
 
 interface ThemeControls {
   palette: string; setPalette: (k: string) => void;
@@ -51,9 +53,9 @@ export function Screen({ title, subtitle, children }: { title: string; subtitle?
   const t = useTheme();
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-      <ScrollView contentContainerStyle={{ padding: 18 }}>
-        <Text style={{ color: t.ink, fontSize: 24, fontWeight: '700', textTransform: 'capitalize' }}>{title}</Text>
-        {subtitle ? <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 14 }}>{subtitle}</Text> : <View style={{ height: 12 }} />}
+      <ScrollView contentContainerStyle={{ padding: layout.gutter }}>
+        <Text style={{ ...ty.title, color: t.ink, textTransform: 'capitalize' }}>{title}</Text>
+        {subtitle ? <Text style={{ ...ty.label, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>{subtitle}</Text> : <View style={{ height: sp.md }} />}
         {children}
       </ScrollView>
     </SafeAreaView>
@@ -69,11 +71,11 @@ export function Tile({ label, value, unit, foot }: { label: string; value: strin
   const t = useTheme();
   return (
     <View style={[s.tile, { backgroundColor: t.surface, borderColor: t.ring }]}>
-      <Text style={{ color: t.ink3, fontSize: 12, fontWeight: '600', textTransform: 'capitalize' }}>{label}</Text>
-      <Text style={{ color: t.ink, fontSize: 24, fontWeight: '700', marginTop: 4 }}>
-        {value}{unit ? <Text style={{ color: t.ink3, fontSize: 13 }}> {unit}</Text> : null}
+      <Text style={{ ...ty.caption, fontWeight: '500', color: t.ink3, textTransform: 'capitalize' }}>{label}</Text>
+      <Text style={{ ...figure(24), color: t.ink, marginTop: 4 }}>
+        {value}{unit ? <Text style={{ ...ty.label, color: t.ink3 }}> {unit}</Text> : null}
       </Text>
-      {foot ? <Text style={{ color: t.ink3, fontSize: 12, marginTop: 2 }}>{foot}</Text> : null}
+      {foot ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{foot}</Text> : null}
     </View>
   );
 }
@@ -86,7 +88,7 @@ export function Btn({ label, onPress, primary }: { label: string; onPress?: () =
   const t = useTheme();
   return (
     <Pressable onPress={onPress} style={[s.btn, { backgroundColor: primary ? t.brand : t.surface2, borderColor: t.ring }]}>
-      <Text style={{ color: primary ? t.brandInk : t.ink, fontWeight: '700', fontSize: 13 }}>{label}</Text>
+      <Text style={{ ...ty.label, fontWeight: '600', color: primary ? t.brandInk : t.ink }}>{label}</Text>
     </Pressable>
   );
 }
@@ -139,8 +141,8 @@ export function PasswordField({
 }
 
 const s = StyleSheet.create({
-  card: { borderWidth: 1, borderRadius: 14, padding: 16, marginBottom: 12 },
-  tile: { flex: 1, borderWidth: 1, borderRadius: 14, padding: 15 },
-  row: { flexDirection: 'row', gap: 12, marginBottom: 12 },
-  btn: { paddingHorizontal: 14, paddingVertical: 9, borderRadius: 9, borderWidth: 1, alignItems: 'center' },
+  card: { borderWidth: hairline, borderRadius: radius.md, padding: sp.lg, marginBottom: sp.md },
+  tile: { flex: 1, borderWidth: hairline, borderRadius: radius.md, padding: sp.lg },
+  row: { flexDirection: 'row', gap: sp.md, marginBottom: sp.md },
+  btn: { paddingHorizontal: sp.lg, paddingVertical: 9, borderRadius: radius.sm, borderWidth: hairline, alignItems: 'center' },
 });

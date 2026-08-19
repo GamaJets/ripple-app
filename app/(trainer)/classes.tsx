@@ -1,10 +1,25 @@
 // Trainer/Gym · Classes. Create and manage group classes across branches. Shows
 // each upcoming class with its live booked/capacity, and a form to add a new one.
+//
+// Rebuilt on the instrument-panel kit (`src/ui/kit`) and the scale
+// (`src/theme/scale`). Every provider, handler, conditional and route from the
+// previous version is preserved — only the presentation changed: the bordered
+// form card and the bordered class rows became hairline-separated sections, the
+// Georgia serif header is gone, and the booked/capacity figure reads as ink with
+// a coloured mark beside it rather than as coloured text.
+//
+// The branch field stays free text: the picker it replaced offered six hardcoded
+// Dubai locations a real gym may not have. The chips under it are only the
+// branches this gym has itself used (`branchesFrom`), and a class still cannot
+// be added without one.
 import { useMemo, useState } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
+import { Icon } from '../../src/ui/Icon';
+import { Rule, Section, SectionHead, Cta, Ghost } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, value } from '../../src/theme/scale';
 import { useClasses } from '../../src/ui/classes';
 import { CLASS_KINDS, branchesFrom, type GymClass } from '../../src/lib/classesMock';
 
@@ -47,79 +62,123 @@ export default function TrainerClasses() {
     } finally { setBusy(false); }
   };
 
-  const inp = { color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 11, fontSize: 14 } as const;
+  const G = layout.gutter;
+  const inp = { ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 } as const;
+  const lbl = { ...ty.caption, color: t.ink3, marginBottom: 6 } as const;
   const chip = (label: string, active: boolean, onPress: () => void) => (
-    <Pressable onPress={onPress} style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 16, backgroundColor: active ? t.brand : t.surface2, borderWidth: 1, borderColor: active ? t.brand : t.ring }}>
-      <Text style={{ color: active ? t.brandInk : t.ink2, fontWeight: '700', fontSize: 12 }}>{label}</Text>
+    <Pressable key={label} onPress={onPress} accessibilityRole="button" accessibilityLabel={label}
+      style={{ paddingHorizontal: 13, paddingVertical: 8, borderRadius: radius.pill, backgroundColor: active ? t.brand : t.surface2 }}>
+      <Text style={{ ...ty.label, fontWeight: '500', color: active ? t.brandInk : t.ink2 }}>{label}</Text>
     </Pressable>
   );
   const stepper = (label: string, val: string, dec: () => void, inc: () => void) => (
     <View style={{ flex: 1 }}>
-      <Text style={{ color: t.ink3, fontSize: 11, marginBottom: 5 }}>{label}</Text>
-      <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10 }}>
-        <Pressable onPress={dec} hitSlop={8} style={{ paddingHorizontal: 14, paddingVertical: 10 }}><Text style={{ color: t.brand, fontWeight: '900', fontSize: 16 }}>−</Text></Pressable>
-        <Text style={{ flex: 1, textAlign: 'center', color: t.ink, fontWeight: '800', fontSize: 14 }}>{val}</Text>
-        <Pressable onPress={inc} hitSlop={8} style={{ paddingHorizontal: 14, paddingVertical: 10 }}><Text style={{ color: t.brand, fontWeight: '900', fontSize: 16 }}>+</Text></Pressable>
+      <Text style={{ ...ty.caption, color: t.ink3, marginBottom: 5 }}>{label}</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: t.surface2, borderRadius: radius.sm }}>
+        <Pressable onPress={dec} hitSlop={8} accessibilityRole="button" accessibilityLabel={'Lower ' + label} style={{ paddingHorizontal: 12, paddingVertical: 10 }}>
+          <Icon name="minus" size={15} color={t.ink2} />
+        </Pressable>
+        <Text style={{ ...value(15), color: t.ink, flex: 1, textAlign: 'center' }}>{val}</Text>
+        <Pressable onPress={inc} hitSlop={8} accessibilityRole="button" accessibilityLabel={'Raise ' + label} style={{ paddingHorizontal: 12, paddingVertical: 10 }}>
+          <Icon name="plus" size={15} color={t.ink2} />
+        </Pressable>
       </View>
     </View>
   );
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
-        <Pressable onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Go back" style={{ marginBottom: 8 }}>
-          <Text style={{ color: t.brand, fontWeight: '700', fontSize: 15 }}>‹ Back</Text>
-        </Pressable>
-        <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia' }}>Classes</Text>
-        <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 16, fontSize: 14 }}>Schedule group classes across your branches. Members book and waitlist automatically.</Text>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
 
-        <View style={{ backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 16, padding: 15, marginBottom: 20 }}>
-          <Text style={{ color: t.ink, fontWeight: '800', fontSize: 15, marginBottom: 12 }}>New class</Text>
-          <TextInput value={title} onChangeText={setTitle} placeholder="Class title — e.g. Sunrise CrossFit" placeholderTextColor={t.ink3} style={[inp, { marginBottom: 10 }]} />
-          <Text style={{ color: t.ink3, fontSize: 11, marginBottom: 6 }}>Type</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }} contentContainerStyle={{ gap: 7 }}>{CLASS_KINDS.map((k) => chip(k, kind === k, () => setKind(k)))}</ScrollView>
-          <Text style={{ color: t.ink3, fontSize: 11, marginBottom: 6 }}>Branch</Text>
-          <TextInput value={branch} onChangeText={setBranch} placeholder="Branch or location — e.g. your main studio" placeholderTextColor={t.ink3} style={[inp, { marginBottom: knownBranches.length ? 8 : 10 }]} />
+        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
+          <View style={{ flex: 1 }}>
+            <Text style={{ ...ty.micro, color: t.ink3 }}>Your branches</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Classes</Text>
+          </View>
+          <Ghost icon="back" onPress={() => router.back()} />
+        </View>
+        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
+          Schedule group classes across your branches. Members book and waitlist automatically.
+        </Text>
+
+        <Rule inset={0} />
+
+        {/* ── new class ──────────────────────────────────────────────────── */}
+        <Section>
+          <SectionHead title="New class" />
+
+          <TextInput value={title} onChangeText={setTitle} placeholder="Class title — e.g. Sunrise CrossFit" placeholderTextColor={t.ink3} style={inp} />
+
+          <Text style={[lbl, { marginTop: sp.md }]}>Type</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -2 }} contentContainerStyle={{ gap: 7, paddingHorizontal: 2 }}>
+            {CLASS_KINDS.map((k) => chip(k, kind === k, () => setKind(k)))}
+          </ScrollView>
+
+          <Text style={[lbl, { marginTop: sp.md }]}>Branch</Text>
+          <TextInput value={branch} onChangeText={setBranch} placeholder="Branch or location — e.g. your main studio" placeholderTextColor={t.ink3} style={inp} />
           {knownBranches.length > 0 ? (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }} contentContainerStyle={{ gap: 7 }}>{knownBranches.map((b) => chip(b, branch === b, () => setBranch(b)))}</ScrollView>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -2, marginTop: sp.sm }} contentContainerStyle={{ gap: 7, paddingHorizontal: 2 }}>
+              {knownBranches.map((b) => chip(b, branch === b, () => setBranch(b)))}
+            </ScrollView>
           ) : null}
-          <View style={{ flexDirection: 'row', gap: 10, marginBottom: 10 }}>
+
+          <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
             <TextInput value={instructor} onChangeText={setInstructor} placeholder="Instructor" placeholderTextColor={t.ink3} style={[inp, { flex: 1 }]} />
             <TextInput value={room} onChangeText={setRoom} placeholder="Room (optional)" placeholderTextColor={t.ink3} style={[inp, { flex: 1 }]} />
           </View>
-          <Text style={{ color: t.ink3, fontSize: 11, marginBottom: 6 }}>Day</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }} contentContainerStyle={{ gap: 7 }}>{[0, 1, 2, 3, 4, 5, 6].map((o) => { const d = new Date(); d.setDate(d.getDate() + o); return chip(o === 0 ? 'Today' : `${DOW[d.getDay()]} ${d.getDate()}/${d.getMonth() + 1}`, dayOff === o, () => setDayOff(o)); })}</ScrollView>
-          <View style={{ flexDirection: 'row', gap: 10, marginBottom: 12 }}>
+
+          <Text style={[lbl, { marginTop: sp.md }]}>Day</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -2 }} contentContainerStyle={{ gap: 7, paddingHorizontal: 2 }}>
+            {[0, 1, 2, 3, 4, 5, 6].map((o) => { const d = new Date(); d.setDate(d.getDate() + o); return chip(o === 0 ? 'Today' : `${DOW[d.getDay()]} ${d.getDate()}/${d.getMonth() + 1}`, dayOff === o, () => setDayOff(o)); })}
+          </ScrollView>
+
+          <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
             {stepper('Start hour', `${hour % 12 || 12}${hour >= 12 ? 'pm' : 'am'}`, () => setHour((h) => (h > 5 ? h - 1 : h)), () => setHour((h) => (h < 22 ? h + 1 : h)))}
             {stepper('Minutes', String(dur), () => setDur((d) => (d > 15 ? d - 15 : d)), () => setDur((d) => (d < 90 ? d + 15 : d)))}
             {stepper('Capacity', String(cap), () => setCap((c) => (c > 4 ? c - 1 : c)), () => setCap((c) => c + 1))}
           </View>
-          <Text style={{ color: t.ink3, fontSize: 11, marginBottom: 6 }}>Repeat</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }} contentContainerStyle={{ gap: 7 }}>{([[1,'Just once'],[4,'Weekly \u00d74'],[8,'Weekly \u00d78'],[12,'Weekly \u00d712']] as [number, string][]).map(([n,label]) => chip(label, weeks === n, () => setWeeks(n)))}</ScrollView>
-          <Pressable onPress={submit} disabled={!canAdd || busy} style={{ backgroundColor: canAdd ? t.brand : t.surface2, borderWidth: 1, borderColor: canAdd ? t.brand : t.ring, borderRadius: 12, paddingVertical: 14, alignItems: 'center' }}>
-            <Text style={{ color: canAdd ? t.brandInk : t.ink3, fontWeight: '800', fontSize: 14 }}>{busy ? 'Adding…' : 'Add class'}</Text>
-          </Pressable>
-        </View>
 
-        <Text style={{ color: t.ink2, fontSize: 12, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 10 }}>Upcoming ({upcoming.length})</Text>
-        {upcoming.map((c: GymClass) => (
-          <View key={c.id} style={{ backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 14, padding: 13, marginBottom: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-            <View style={{ flex: 1, marginRight: 10 }}>
-              <Text style={{ color: t.ink, fontWeight: '800', fontSize: 14.5 }}>{c.title}</Text>
-              <Text style={{ color: t.ink3, fontSize: 12, marginTop: 2 }}>{c.branch} · {dayShort(c.startsAt)} {timeLabel(c.startsAt)} · {c.kind}</Text>
-            </View>
-            <View style={{ alignItems: 'flex-end', gap: 6 }}>
-              <View style={{ alignItems: 'flex-end' }}>
-                <Text style={{ color: c.booked >= c.capacity ? t.s3 : t.brand, fontWeight: '800', fontSize: 15 }}>{c.booked}/{c.capacity}</Text>
-                <Text style={{ color: t.ink3, fontSize: 10 }}>booked</Text>
+          <Text style={[lbl, { marginTop: sp.md }]}>Repeat</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -2 }} contentContainerStyle={{ gap: 7, paddingHorizontal: 2 }}>
+            {([[1, 'Just once'], [4, 'Weekly ×4'], [8, 'Weekly ×8'], [12, 'Weekly ×12']] as [number, string][]).map(([n, label]) => chip(label, weeks === n, () => setWeeks(n)))}
+          </ScrollView>
+
+          <View style={{ height: sp.lg }} />
+          <Cta label={busy ? 'Adding…' : 'Add class'} wide disabled={!canAdd || busy} onPress={submit} />
+        </Section>
+
+        <Rule />
+
+        {/* ── the schedule ───────────────────────────────────────────────── */}
+        <Section>
+          <SectionHead title="Upcoming" note={upcoming.length ? String(upcoming.length) : undefined} />
+          {upcoming.map((c: GymClass, i) => {
+            const full = c.booked >= c.capacity;
+            return (
+              <View key={c.id} style={{
+                flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md,
+                borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
+              }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{c.title}</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{c.branch} · {dayShort(c.startsAt)} {timeLabel(c.startsAt)} · {c.kind}</Text>
+                </View>
+                <View style={{ alignItems: 'flex-end', gap: 6 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    {full ? <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: t.warn }} /> : null}
+                    <Text style={{ ...value(16), color: t.ink }}>{c.booked}/{c.capacity}</Text>
+                  </View>
+                  <Text style={{ ...ty.caption, color: t.ink3 }}>{full ? 'full' : 'booked'}</Text>
+                </View>
+                <Ghost label="Check in" onPress={() => router.push({ pathname: '/(trainer)/class-checkin', params: { id: c.id, title: c.title, branch: c.branch } })} />
               </View>
-              <Pressable onPress={() => router.push({ pathname: '/(trainer)/class-checkin', params: { id: c.id, title: c.title, branch: c.branch } })} style={{ backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 9, paddingHorizontal: 11, paddingVertical: 6 }}>
-                <Text style={{ color: t.brand, fontWeight: '800', fontSize: 12 }}>Check in ›</Text>
-              </Pressable>
-            </View>
-          </View>
-        ))}
-        {upcoming.length === 0 ? <Text style={{ color: t.ink3, fontSize: 13, textAlign: 'center', marginTop: 20 }}>No classes yet — add your first above.</Text> : null}
+            );
+          })}
+          {upcoming.length === 0 ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>No classes yet — add your first above.</Text>
+          ) : null}
+        </Section>
+
       </ScrollView>
     </SafeAreaView>
   );

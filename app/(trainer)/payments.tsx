@@ -2,12 +2,24 @@
 // packages (memberships / session-packs) clients can buy. Money goes to the
 // trainer's connected account minus the platform fee. Credential-ready: activates
 // once Stripe Connect is enabled and keys are set. No card details in-app.
+//
+// Rebuilt on the instrument-panel kit (`src/ui/kit`) and the scale
+// (`src/theme/scale`). Every Stripe/Connect call, handler, conditional and route
+// is untouched — only the presentation changed: the four bordered cards became
+// hairline-separated sections, the one card left is the payout decision itself,
+// and the Georgia serif header is gone.
+//
+// Nothing here reports a balance, a payout or a transaction: every figure is a
+// price the trainer typed, stored in `trainer_packages`. There is no earnings
+// number on this screen because the app is not told one.
 import { useState, useEffect, useCallback } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
+import { Rule, Section, SectionHead, Cta, Ghost, Notice } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { money } from '../../src/lib/billing';
 import { startTrainerOnboarding, fetchMyConnect, fetchMyPackages, createPackage, deactivatePackage, type ConnectStatus, type TrainerPackage } from '../../src/lib/connect';
 
@@ -42,68 +54,103 @@ export default function TrainerPayments() {
   const remove = (id: string) => Alert.alert('Remove package?', 'Clients will no longer see it.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Remove', style: 'destructive', onPress: async () => { await deactivatePackage(id); load(); } }]);
 
   const active = conn?.charges_enabled;
-  const input = { color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 11, fontSize: 15 } as const;
+  const G = layout.gutter;
+  const input = { ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 } as const;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top', 'bottom']}>
-      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
-        <Pressable accessibilityLabel="Go back" accessibilityRole="button" onPress={() => router.back()} style={{ marginBottom: 8 }}><Icon name="back" size={22} color={t.ink2} /></Pressable>
-        <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia' }}>Payments</Text>
-        <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 18 }}>Get paid by your clients — memberships &amp; session packs.</Text>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+
+        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
+          <View style={{ flex: 1 }}>
+            <Text style={{ ...ty.micro, color: t.ink3 }}>Getting paid</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Payments</Text>
+          </View>
+          <Ghost icon="back" onPress={() => router.back()} />
+        </View>
+        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
+          Get paid by your clients — memberships &amp; session packs.
+        </Text>
 
         {loading ? <ActivityIndicator color={t.brand} style={{ marginVertical: 30 }} /> : (
           <>
-            {/* Payout status */}
-            <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: active ? t.brand : t.ring, padding: 16, marginBottom: 16 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}><Icon name={active ? 'check' : 'clock'} size={19} color={active ? t.brand : t.s3} /></View>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ color: t.ink, fontWeight: '800', fontSize: 15 }}>{active ? 'Payouts active' : 'Set up payouts'}</Text>
-                  <Text style={{ color: t.ink3, fontSize: 12, marginTop: 1 }}>{active ? 'You can accept client payments.' : conn?.stripe_account_id ? 'Finish verifying with Stripe to go live.' : 'Connect a payout account with Stripe.'}</Text>
-                </View>
+            {/* ── payout status: the one decision on this screen ──────────── */}
+            {!active ? (
+              <View style={{ marginTop: sp.xl }}>
+                <Notice tone={t.warn} kicker="Payouts" title="Set up payouts"
+                  note={conn?.stripe_account_id ? 'Finish verifying with Stripe to go live.' : 'Connect a payout account with Stripe.'}>
+                  <View style={{ marginTop: sp.lg }}>
+                    <Cta label={busy ? 'Opening…' : (conn?.stripe_account_id ? 'Continue setup' : 'Set up payouts')} wide disabled={busy} onPress={onboard} />
+                  </View>
+                </Notice>
               </View>
-              {!active ? (
-                <Pressable onPress={onboard} disabled={busy} style={{ marginTop: 14, backgroundColor: t.brand, borderRadius: 12, paddingVertical: 14, alignItems: 'center' }}>
-                  {busy ? <ActivityIndicator color={t.brandInk} /> : <Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 15 }}>{conn?.stripe_account_id ? 'Continue setup' : 'Set up payouts'}</Text>}
-                </Pressable>
+            ) : (
+              <Section>
+                <SectionHead title="Payouts" />
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+                  <View style={{ width: 34, height: 34, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+                    <Icon name="check" size={17} color={t.brand} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>Payouts active</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>You can accept client payments.</Text>
+                  </View>
+                </View>
+              </Section>
+            )}
+
+            <Rule />
+
+            {/* ── what clients can buy ───────────────────────────────────── */}
+            <Section>
+              <SectionHead title="Your packages" note={pkgs.filter((p) => p.active).length ? String(pkgs.filter((p) => p.active).length) : undefined} />
+              {pkgs.filter((p) => p.active).length === 0 ? (
+                <Text style={{ ...ty.label, color: t.ink3 }}>No packages yet. Add one below — a monthly membership or a pack of sessions.</Text>
               ) : null}
-            </View>
-
-            {/* Packages */}
-            <Text style={{ color: t.ink2, fontSize: 12, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 10 }}>Your packages</Text>
-            {pkgs.filter((p) => p.active).length === 0 ? <Text style={{ color: t.ink3, fontSize: 13, marginBottom: 12 }}>No packages yet. Add one below — a monthly membership or a pack of sessions.</Text> : null}
-            {pkgs.filter((p) => p.active).map((p) => (
-              <View key={p.id} style={{ backgroundColor: t.surface, borderRadius: 14, borderWidth: 1, borderColor: t.ring, padding: 14, marginBottom: 10, flexDirection: 'row', alignItems: 'center' }}>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ color: t.ink, fontWeight: '800', fontSize: 15 }}>{p.name}</Text>
-                  <Text style={{ color: t.ink3, fontSize: 12, marginTop: 1 }}>{money(p.price_cents, p.currency)}{p.sessions ? ` · ${p.sessions} sessions` : ' · membership'}</Text>
+              {pkgs.filter((p) => p.active).map((p, i) => (
+                <View key={p.id} style={{
+                  flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md,
+                  borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
+                }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{p.name}</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{money(p.price_cents, p.currency)}{p.sessions ? ` · ${p.sessions} sessions` : ' · membership'}</Text>
+                  </View>
+                  <Pressable onPress={() => remove(p.id)} hitSlop={8} accessibilityRole="button" accessibilityLabel={'Remove ' + p.name} style={{ padding: 6 }}>
+                    <Icon name="minus" size={17} color={t.ink3} />
+                  </Pressable>
                 </View>
-                <Pressable onPress={() => remove(p.id)} hitSlop={8} style={{ padding: 6 }}><Icon name="minus" size={18} color={t.ink3} /></Pressable>
-              </View>
-            ))}
+              ))}
+            </Section>
 
-            {/* Add package */}
-            <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 16, marginTop: 6 }}>
-              <Text style={{ color: t.ink, fontWeight: '800', fontSize: 14, marginBottom: 12 }}>Add a package</Text>
-              <TextInput value={name} onChangeText={setName} placeholder="Name — e.g. 10-Session Pack" placeholderTextColor={t.ink3} style={[input, { marginBottom: 10 }]} />
-              <View style={{ flexDirection: 'row', gap: 10, marginBottom: 12 }}>
+            <Rule />
+
+            {/* ── add a package ──────────────────────────────────────────── */}
+            <Section>
+              <SectionHead title="Add a package" />
+              <TextInput value={name} onChangeText={setName} placeholder="Name — e.g. 10-Session Pack" placeholderTextColor={t.ink3} style={input} />
+              <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
                 <View style={{ flex: 1 }}>
-                  <Text style={{ color: t.ink3, fontSize: 11, marginBottom: 4 }}>Price ($)</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginBottom: 5 }}>Price ($)</Text>
                   <TextInput value={price} onChangeText={setPrice} keyboardType="decimal-pad" placeholder="500" placeholderTextColor={t.ink3} style={input} />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={{ color: t.ink3, fontSize: 11, marginBottom: 4 }}>Sessions (blank = membership)</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginBottom: 5 }}>Sessions (blank = membership)</Text>
                   <TextInput value={sessions} onChangeText={setSessions} keyboardType="number-pad" placeholder="10" placeholderTextColor={t.ink3} style={input} />
                 </View>
               </View>
-              <Pressable onPress={addPkg} disabled={busy} style={{ backgroundColor: t.brand, borderRadius: 12, paddingVertical: 14, alignItems: 'center' }}>
-                {busy ? <ActivityIndicator color={t.brandInk} /> : <Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 15 }}>Add package</Text>}
-              </Pressable>
-            </View>
+              <View style={{ height: sp.lg }} />
+              <Cta label={busy ? 'Saving…' : 'Add package'} wide disabled={busy} onPress={addPkg} />
+            </Section>
 
-            <Text style={{ color: t.ink3, fontSize: 11.5, textAlign: 'center', marginTop: 14, lineHeight: 17 }}>Payments are processed by Stripe. A platform fee applies to each sale. You never handle card details.</Text>
+            <Rule />
+
+            <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.lg }}>
+              Payments are processed by Stripe. A platform fee applies to each sale. You never handle card details.
+            </Text>
           </>
         )}
+
       </ScrollView>
     </SafeAreaView>
   );

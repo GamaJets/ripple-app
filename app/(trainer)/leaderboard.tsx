@@ -1,12 +1,20 @@
 // Trainer · Leaderboard. Ranks the roster by a composite of adherence + weight
 // progress toward goal. A lightweight cohort view. Reached from Analytics.
+//
+// Rebuilt on the instrument-panel kit (`src/ui/kit`) and the scale
+// (`src/theme/scale`). The scoring, the roster provider, the route behind each
+// row and the empty state are unchanged — only the presentation: the bordered
+// per-client cards became hairline-separated rows, the Georgia serif header is
+// gone, and the `MEDALS` lookup (which held the strings '1','2','3' and was
+// drawn on top of a zero-width, negatively-offset rank label) is now just the
+// rank, rendered once.
 import { View, Text, Pressable, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
+import { Rule, Section, SectionHead, Ghost } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty, value } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
-
-const MEDALS = ['1', '2', '3'];
 
 export default function Leaderboard() {
   const t = useTheme();
@@ -24,38 +32,58 @@ export default function Leaderboard() {
 
   const maxScore = Math.max(1, ...scored.map((s) => s.score));
 
+  const G = layout.gutter;
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
-        <Pressable onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Go back" style={{ marginBottom: 8 }}>
-          <Text style={{ color: t.brand, fontWeight: '700', fontSize: 15 }}>‹ Back</Text>
-        </Pressable>
-        <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia' }}>Leaderboard</Text>
-        <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 18 }}>Adherence + progress toward goal</Text>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
 
-        {scored.length === 0 ? (
-          <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: t.ring, padding: 22, alignItems: 'center' }}>
-            <Text style={{ color: t.ink3, fontSize: 13, textAlign: 'center', lineHeight: 19 }}>No clients yet — your leaderboard fills in as clients join and log their workouts.</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
+          <View style={{ flex: 1 }}>
+            <Text style={{ ...ty.micro, color: t.ink3 }}>Your roster</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Leaderboard</Text>
           </View>
-        ) : null}
-        {scored.map(({ c, score }, i) => (
-          <Pressable key={c.id} onPress={() => router.push('/(trainer)/analytics')} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: t.surface, borderRadius: 16, borderWidth: 1, borderColor: i === 0 ? t.brand : t.ring, padding: 15, marginBottom: 10 }}>
-            <Text style={{ fontSize: 20, width: 30, textAlign: 'center' }}>{i < 3 ? MEDALS[i] : ''}</Text>
-            {i >= 3 ? <Text style={{ color: t.ink3, fontWeight: '800', width: 0, marginLeft: -30, textAlign: 'center' }}>{i + 1}</Text> : null}
-            <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-              <Text style={{ color: t.brand, fontWeight: '800', fontSize: 14 }}>{c.name.split(' ').map((x) => x[0]).join('')}</Text>
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={{ color: t.ink, fontWeight: '700', fontSize: 15, textTransform: 'capitalize' }}>{c.name}</Text>
-              <Text style={{ color: t.ink3, fontSize: 12, marginTop: 1 }}>{c.goal} · {c.adherence}% adherence · {c.weightDelta > 0 ? '+' : ''}{c.weightDelta} kg</Text>
-              <View style={{ height: 6, borderRadius: 3, backgroundColor: t.surface3, overflow: 'hidden', marginTop: 6 }}>
-                <View style={{ height: 6, borderRadius: 3, backgroundColor: t.brand, width: `${Math.round((score / maxScore) * 100)}%` }} />
+          <Ghost icon="back" onPress={() => router.back()} />
+        </View>
+        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>Adherence + progress toward goal</Text>
+
+        <Rule />
+
+        <Section>
+          <SectionHead title="Ranking" note={scored.length ? `${scored.length} client${scored.length === 1 ? '' : 's'}` : undefined} />
+
+          {scored.length === 0 ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>
+              No clients yet — your leaderboard fills in as clients join and log their workouts.
+            </Text>
+          ) : null}
+
+          {scored.map(({ c, score }, i) => (
+            <Pressable key={c.id} onPress={() => router.push('/(trainer)/analytics')}
+              accessibilityRole="button" accessibilityLabel={`${c.name}, rank ${i + 1}, score ${score}`}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+              <Text style={{ ...value(15), color: i === 0 ? t.brand : t.ink3, width: 20, textAlign: 'center' }}>{i + 1}</Text>
+              <View style={{ width: 38, height: 38, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+                <Text style={{ ...ty.label, fontWeight: '600', color: t.brand }}>{c.name.split(' ').map((x) => x[0]).join('')}</Text>
               </View>
-            </View>
-            <Text style={{ color: t.ink, fontWeight: '800', fontSize: 16 }}>{score}</Text>
-          </Pressable>
-        ))}
-        <Text style={{ color: t.ink3, fontSize: 11, textAlign: 'center', marginTop: 6 }}>Use the Broadcast button on Clients to celebrate the top of the board.</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{c.name}</Text>
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{c.goal} · {c.adherence}% adherence · {c.weightDelta > 0 ? '+' : ''}{c.weightDelta} kg</Text>
+                <View style={{ height: 3, borderRadius: 2, backgroundColor: t.surface3, overflow: 'hidden', marginTop: 7 }}>
+                  <View style={{ height: 3, borderRadius: 2, backgroundColor: t.brand, width: `${Math.round((score / maxScore) * 100)}%` }} />
+                </View>
+              </View>
+              <Text style={{ ...value(18), color: t.ink }}>{score}</Text>
+            </Pressable>
+          ))}
+        </Section>
+
+        <Rule />
+
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
+          Use the Broadcast button on Clients to celebrate the top of the board.
+        </Text>
+
       </ScrollView>
     </SafeAreaView>
   );

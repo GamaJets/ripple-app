@@ -11,6 +11,7 @@ import { useState } from 'react';
 import { View, Text } from 'react-native';
 import Svg, { Rect, Line, Circle } from 'react-native-svg';
 import { useTheme } from './components';
+import { sp, radius, hairline, type as ty, numeric, value } from '../theme/scale';
 import {
   type HrSample, hrStats, zoneBands, timeInZones, hrZone, zoneColor,
   maxHr, HR_ZONE_ORDER, HR_ZONE_LABEL, type HrZone,
@@ -40,9 +41,9 @@ export function HrZoneChart({ samples, zoneSeconds, avgBpm, maxBpm, age, title, 
 
   if (!hasSeries && zoneTotal <= 0) {
     return (
-      <View style={{ backgroundColor: t.surface, borderRadius: 18, borderWidth: 1, borderColor: t.ring, padding: 16 }}>
-        {title ? <Text style={{ color: t.ink, fontWeight: '800', fontSize: 16, marginBottom: 4 }}>{title}</Text> : null}
-        <Text style={{ color: t.ink3, fontSize: 13 }}>No heart-rate data yet. Wear your watch during a workout and it’ll appear here.</Text>
+      <View style={{ backgroundColor: t.surface, borderRadius: radius.md, borderWidth: hairline, borderColor: t.ring, padding: sp.lg }}>
+        {title ? <Text style={{ ...ty.head, color: t.ink, marginBottom: 4 }}>{title}</Text> : null}
+        <Text style={{ ...ty.label, color: t.ink3 }}>No heart-rate data yet. Wear your watch during a workout and it’ll appear here.</Text>
       </View>
     );
   }
@@ -73,23 +74,28 @@ export function HrZoneChart({ samples, zoneSeconds, avgBpm, maxBpm, age, title, 
   const showAvg = hasSeries ? stats!.avg : (typeof avgBpm === 'number' ? avgBpm : null);
   const showHigh = hasSeries ? stats!.high : (typeof maxBpm === 'number' ? maxBpm : null);
 
-  const Stat = ({ label, value, color }: { label: string; value: number; color?: string }) => (
+  // The figure stays ink; the zone it belongs to is carried by a dot beside the
+  // label, never by colouring the number itself.
+  const Stat = ({ label, value: v, tone }: { label: string; value: number; tone?: string }) => (
     <View style={{ alignItems: 'center', flex: 1 }}>
-      <Text style={{ color: color || t.ink, fontWeight: '800', fontSize: 19 }}>{value}</Text>
-      <Text style={{ color: t.ink3, fontSize: 10.5, textTransform: 'uppercase', letterSpacing: 0.4 }}>{label}</Text>
+      <Text style={{ ...value(19), color: t.ink }}>{v}</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 2 }}>
+        {tone ? <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: tone }} /> : null}
+        <Text style={{ ...ty.micro, letterSpacing: 0.4, color: t.ink3 }}>{label}</Text>
+      </View>
     </View>
   );
 
   return (
-    <View style={{ backgroundColor: t.surface, borderRadius: 18, borderWidth: 1, borderColor: t.ring, padding: 16 }}>
-      {title ? <Text style={{ color: t.ink, fontWeight: '800', fontSize: 16 }}>{title}</Text> : null}
-      {subtitle ? <Text style={{ color: t.ink3, fontSize: 12.5, marginTop: 1 }}>{subtitle}</Text> : null}
+    <View style={{ backgroundColor: t.surface, borderRadius: radius.md, borderWidth: hairline, borderColor: t.ring, padding: sp.lg }}>
+      {title ? <Text style={{ ...ty.head, color: t.ink }}>{title}</Text> : null}
+      {subtitle ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 1 }}>{subtitle}</Text> : null}
 
       {(showLow != null || showAvg != null || showHigh != null) ? (
         <View style={{ flexDirection: 'row', marginTop: 12, marginBottom: 12 }}>
-          {showLow != null ? <Stat label="Low" value={showLow} color={t.ink2} /> : null}
-          {showAvg != null ? <Stat label="Avg" value={showAvg} color={t.brand} /> : null}
-          {showHigh != null ? <Stat label={hasSeries ? 'High' : 'Max'} value={showHigh} color="#ef4444" /> : null}
+          {showLow != null ? <Stat label="Low" value={showLow} /> : null}
+          {showAvg != null ? <Stat label="Avg" value={showAvg} tone={t.brand} /> : null}
+          {showHigh != null ? <Stat label={hasSeries ? 'High' : 'Max'} value={showHigh} tone={t.crit} /> : null}
         </View>
       ) : <View style={{ height: 12 }} />}
 
@@ -103,10 +109,11 @@ export function HrZoneChart({ samples, zoneSeconds, avgBpm, maxBpm, age, title, 
             })}
             {pts.slice(0, -1).map((p, i) => (
               <Line key={i} x1={xOf(i)} y1={yOf(p.bpm)} x2={xOf(i + 1)} y2={yOf(pts[i + 1].bpm)}
-                stroke={zoneColor(hrZone(p.bpm, age))} strokeWidth={2.6} strokeLinecap="round" strokeLinejoin="round" />
+                stroke={zoneColor(hrZone(p.bpm, age))} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
             ))}
             <Line x1={0} y1={avgY} x2={w} y2={avgY} stroke={t.ink3} strokeWidth={1} strokeDasharray="4 4" opacity={0.7} />
-            <Circle cx={xOf(peakI)} cy={yOf(pts[peakI].bpm)} r={3.6} fill="#ef4444" />
+            <Circle cx={xOf(peakI)} cy={yOf(pts[peakI].bpm)} r={6} fill={t.surface} />
+            <Circle cx={xOf(peakI)} cy={yOf(pts[peakI].bpm)} r={4} fill={t.crit} />
           </Svg>
         </View>
       ) : null}
@@ -119,8 +126,8 @@ export function HrZoneChart({ samples, zoneSeconds, avgBpm, maxBpm, age, title, 
         {activeZones.map((z: HrZone) => (
           <View key={z} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <View style={{ width: 10, height: 10, borderRadius: 3, backgroundColor: zoneColor(z) }} />
-            <Text style={{ color: t.ink2, fontSize: 12.5, flex: 1 }}>{HR_ZONE_LABEL[z]}</Text>
-            <Text style={{ color: t.ink3, fontSize: 12.5, fontWeight: '700' }}>{mmss(tiz[z])}</Text>
+            <Text style={{ ...ty.caption, color: t.ink2, flex: 1 }}>{HR_ZONE_LABEL[z]}</Text>
+            <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{mmss(tiz[z])}</Text>
           </View>
         ))}
       </View>

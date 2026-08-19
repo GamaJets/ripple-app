@@ -35,14 +35,14 @@ export interface PublishResult { posted: SocialPlatform[]; pending: SocialPlatfo
 export async function publishToSocials(opts: { uri?: string; caption: string; platforms: SocialPlatform[] }): Promise<PublishResult> {
   const posted: SocialPlatform[] = [];
   const pending: SocialPlatform[] = [];
-  for (const p of opts.platforms) {
-    if (socialConnected(p)) {
-      // TODO: call the platform's upload endpoint via a server function when keys are set.
-      posted.push(p);
-    } else {
-      pending.push(p);
-    }
-  }
+  // Nothing here uploads. `socialConnected()` only tests whether an
+  // EXPO_PUBLIC_*_CLIENT_ID is set — it is not an OAuth session and there is no
+  // linked account — yet a platform passing that test used to be pushed onto
+  // `posted`, which the broadcast screen announced as "Posted to YouTube,
+  // Instagram, Facebook." Nothing had been posted. Until an upload endpoint
+  // exists, every selected platform comes back pending and the caller falls
+  // back to the OS share sheet, which genuinely works.
+  for (const p of opts.platforms) pending.push(p);
   return { posted, pending };
 }
 

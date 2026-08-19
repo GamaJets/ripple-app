@@ -1,6 +1,23 @@
 // Trainer · Broadcast a session. Pick a recorded session clip, write one caption,
 // choose platforms, and publish to all at once. Connected platforms auto-post;
 // unconnected ones prompt to connect (and offer native share right now).
+//
+// Re-skinned onto the instrument-panel kit (`src/ui/kit`) and the scale
+// (`src/theme/scale`). No hero — a compose screen has no live number to lead
+// with. Five bordered boxes became one card (the clip drop, the only thing you
+// act on) plus hairline-separated sections. Same picker, same publish call,
+// same alerts branch-for-branch.
+//
+// Two claims the code could not back were removed:
+//   · "Published · Posted to YouTube, Instagram…" — `publishToSocials` has never
+//     uploaded anything (the platform hand-off is still a TODO in
+//     `src/lib/social.ts`), so the success alert announced posts that did not
+//     happen. The branch survives; it now says what actually occurred and
+//     offers the share sheet, which is the one thing that really works.
+//   · The trailing "Connect each account once (Settings → Integrations)" —
+//     there is no Integrations screen anywhere in the app.
+// The right-hand "Connect" label went too: tapping a row toggles selection, it
+// never opened a connect flow. The row now states the platform's status.
 import { useState } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -8,6 +25,8 @@ import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
+import { Rule, Section, SectionHead, Card, Ghost } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { SOCIAL_PLATFORMS, socialConnected, publishToSocials, shareSessionNatively, type SocialPlatform } from '../../src/lib/social';
 
 export default function BroadcastSession() {
@@ -43,48 +62,93 @@ export default function BroadcastSession() {
         [{ text: 'Not now' }, { text: 'Share now', onPress: () => shareSessionNatively(caption.trim() || 'My training session', uri) }],
       );
     } else {
-      Alert.alert('Published', 'Posted to ' + r.posted.map((p) => SOCIAL_PLATFORMS.find((x) => x.key === p)?.name).join(', ') + '.');
+      const names = r.posted.map((p) => SOCIAL_PLATFORMS.find((x) => x.key === p)?.name || p).join(', ');
+      Alert.alert(
+        'Nothing uploaded',
+        `Repple cannot upload to ${names} yet — no platform upload is wired. Share the clip from your phone instead?`,
+        [{ text: 'Not now' }, { text: 'Share now', onPress: () => shareSessionNatively(caption.trim() || 'My training session', uri) }],
+      );
     }
   };
 
+  const G = layout.gutter;
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-          <Pressable onPress={() => router.back()} hitSlop={8}><Text style={{ color: t.brand, fontWeight: '700', fontSize: 15 }}>‹ Back</Text></Pressable>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
+          <Ghost icon="back" onPress={() => router.back()} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ ...ty.micro, color: t.ink3 }}>Your channels</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Broadcast a session</Text>
+          </View>
         </View>
-        <Text style={{ color: t.ink, fontSize: 24, fontWeight: '800' }}>Broadcast a session</Text>
-        <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 16, fontSize: 14 }}>Post one clip to all your channels at once.</Text>
+        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>Post one clip to all your channels at once.</Text>
 
-        <Pressable onPress={() => pick(false)} style={{ height: 150, borderRadius: 16, borderWidth: 1, borderColor: uri ? t.brand : t.ring, backgroundColor: t.surface, alignItems: 'center', justifyContent: 'center', marginBottom: 10 }}>
-          <Icon name={uri ? 'play' : 'video'} size={26} color={t.brand} />
-          <Text style={{ color: t.ink, fontWeight: '800', fontSize: 14, marginTop: 8 }}>{uri ? 'Clip ready · tap to replace' : 'Choose session video'}</Text>
-        </Pressable>
-        <Pressable onPress={() => pick(true)} style={{ alignItems: 'center', paddingVertical: 8, marginBottom: 14 }}><Text style={{ color: t.brand, fontWeight: '700', fontSize: 13 }}>Or record now</Text></Pressable>
+        {/* ── the clip: the one thing on this screen you act on ──────────── */}
+        <Section>
+          <Card onPress={() => pick(false)} tone={uri ? t.brand : undefined} style={{ alignItems: 'center', paddingVertical: sp.xxl }}>
+            <Icon name={uri ? 'play' : 'video'} size={26} color={t.brand} />
+            <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, marginTop: sp.sm }}>
+              {uri ? 'Clip ready · tap to replace' : 'Choose session video'}
+            </Text>
+          </Card>
+          <View style={{ alignItems: 'center', marginTop: sp.md }}>
+            <Ghost label="Or record now" onPress={() => pick(true)} />
+          </View>
+        </Section>
 
-        <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 6 }}>Caption</Text>
-        <TextInput value={caption} onChangeText={setCaption} placeholder="Today's session — 20 min full-body burner 🔥 #Warehouse" placeholderTextColor={t.ink3} multiline style={{ color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 14, minHeight: 80, marginBottom: 16, textAlignVertical: 'top' }} />
+        <Rule />
 
-        <Text style={{ color: t.ink3, fontSize: 12, marginBottom: 8 }}>Post to</Text>
-        {SOCIAL_PLATFORMS.map((p) => {
-          const on = sel.includes(p.key); const connected = socialConnected(p.key);
-          return (
-            <Pressable key={p.key} onPress={() => toggle(p.key)} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: t.surface, borderColor: on ? t.brand : t.ring, borderWidth: 1, borderRadius: 14, padding: 14, marginBottom: 9 }}>
-              <View style={{ width: 24, height: 24, borderRadius: 7, borderWidth: 2, borderColor: on ? t.brand : t.ring, backgroundColor: on ? t.brand : 'transparent', alignItems: 'center', justifyContent: 'center' }}>{on ? <Icon name="check" size={13} color={t.brandInk} /> : null}</View>
-              <View style={{ flex: 1 }}>
-                <Text style={{ color: t.ink, fontWeight: '800', fontSize: 14 }}>{p.name}</Text>
-                <Text style={{ color: t.ink3, fontSize: 12 }}>{p.hint}</Text>
-              </View>
-              <Text style={{ color: connected ? t.good ?? t.brand : t.ink3, fontSize: 11, fontWeight: '800' }}>{connected ? 'Connected' : 'Connect'}</Text>
-            </Pressable>
-          );
-        })}
+        {/* ── caption ────────────────────────────────────────────────────── */}
+        <Section>
+          <SectionHead title="Caption" />
+          <TextInput value={caption} onChangeText={setCaption} placeholder="Today's session — 20 min full-body burner 🔥 #Warehouse"
+            placeholderTextColor={t.ink3} multiline
+            style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md, minHeight: 88, textAlignVertical: 'top' }} />
+        </Section>
 
-        <Pressable onPress={publish} disabled={busy} style={{ backgroundColor: t.brand, borderRadius: 14, paddingVertical: 15, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8, marginTop: 8, opacity: busy ? 0.7 : 1 }}>
-          {busy ? <ActivityIndicator color={t.brandInk} /> : <Icon name="share" size={16} color={t.brandInk} />}
-          <Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 15 }}>{busy ? 'Publishing…' : 'Publish to all'}</Text>
-        </Pressable>
-        <Text style={{ color: t.ink3, fontSize: 11.5, lineHeight: 17, marginTop: 12 }}>Connect each account once (Settings → Integrations) to auto-post. Until then, "Publish" lets you share the clip to any app from your phone.</Text>
+        <Rule />
+
+        {/* ── platforms ──────────────────────────────────────────────────── */}
+        <Section>
+          <SectionHead title="Post to" note={sel.length ? `${sel.length} selected` : 'None selected'} />
+          {SOCIAL_PLATFORMS.map((p, i) => {
+            const on = sel.includes(p.key); const connected = socialConnected(p.key);
+            return (
+              <Pressable key={p.key} onPress={() => toggle(p.key)} accessibilityRole="checkbox" accessibilityState={{ checked: on }} accessibilityLabel={p.name}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+                <View style={{ width: 22, height: 22, borderRadius: 7, borderWidth: hairline, borderColor: on ? t.brand : t.ink3, backgroundColor: on ? t.brand : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
+                  {on ? <Icon name="check" size={13} color={t.brandInk} /> : null}
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{p.name}</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{p.hint}</Text>
+                </View>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: connected ? t.good : t.ink3 }} />
+                  <Text style={{ ...ty.caption, color: t.ink2 }}>{connected ? 'Set up' : 'Not linked'}</Text>
+                </View>
+              </Pressable>
+            );
+          })}
+        </Section>
+
+        <Rule />
+
+        {/* ── publish ────────────────────────────────────────────────────── */}
+        <Section>
+          <Pressable onPress={publish} disabled={busy} accessibilityRole="button" accessibilityLabel="Publish to all"
+            style={{ backgroundColor: t.brand, borderRadius: radius.sm, paddingVertical: 13, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: sp.sm, opacity: busy ? 0.7 : 1 }}>
+            {busy ? <ActivityIndicator color={t.brandInk} /> : <Icon name="share" size={16} color={t.brandInk} />}
+            <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>{busy ? 'Publishing…' : 'Publish to all'}</Text>
+          </Pressable>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+            No platform upload is wired yet, so publishing opens your phone's share sheet and you post the clip yourself.
+          </Text>
+        </Section>
+
       </ScrollView>
     </SafeAreaView>
   );

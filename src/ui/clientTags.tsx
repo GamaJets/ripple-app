@@ -13,11 +13,13 @@ interface TagsValue {
   removeTag: (clientId: string, tag: string) => void;
 }
 
-const SEED: Record<string, string[]> = {
-  c1: ['comp prep', 'high-touch'],
-  c2: ['new'],
-  c4: ['paused'],
-};
+// No seed. This used to be
+//   { c1: ['comp prep', 'high-touch'], c2: ['new'], c4: ['paused'] }
+// merged unconditionally into `allTags`, so every real coach saw four segments
+// they had never created — rendered as selectable chips on the broadcast screen,
+// where each one matched zero recipients. The ids are the mock clients that were
+// deleted from the roster long ago.
+const SEED: Record<string, string[]> = {};
 
 const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ').slice(0, 24);
 

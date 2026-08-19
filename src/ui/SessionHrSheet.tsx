@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import { View, Text, Pressable, Modal, ActivityIndicator } from 'react-native';
 import { useTheme } from './components';
 import { HrZoneChart } from './HrZoneChart';
+import { sp, radius, hairline, elevation, type as ty } from '../theme/scale';
 import type { HrSample } from '../lib/hr';
 import { PROVIDERS } from '../lib/wearables/registry';
 import { reportError } from '../lib/reportError';
@@ -48,13 +49,13 @@ export function SessionHrSheet({ visible, onClose, title, startISO, durationMin,
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)' }} onPress={onClose} accessibilityLabel="Close heart-rate detail" />
-      <View style={{ backgroundColor: t.bg, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, borderColor: t.ring, padding: 18, paddingBottom: 34 }}>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-          <View style={{ flex: 1, paddingRight: 10 }}>
-            <Text style={{ color: t.ink, fontSize: 18, fontWeight: '800', textTransform: 'capitalize' }} numberOfLines={1}>{title}</Text>
-            <Text style={{ color: t.ink3, fontSize: 12.5, marginTop: 1 }}>{when}</Text>
+      <View style={{ backgroundColor: t.bg, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, borderTopWidth: hairline, borderColor: t.ring, padding: sp.lg, paddingBottom: 34, ...elevation.e2 }}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sp.md }}>
+          <View style={{ flex: 1, paddingRight: sp.sm }}>
+            <Text style={{ ...ty.head, color: t.ink, textTransform: 'capitalize' }} numberOfLines={1}>{title}</Text>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 1 }}>{when}</Text>
           </View>
-          <Pressable onPress={onClose} accessibilityRole="button" accessibilityLabel="Close"><Text style={{ color: t.brand, fontSize: 16, fontWeight: '800' }}>Close</Text></Pressable>
+          <Pressable onPress={onClose} accessibilityRole="button" accessibilityLabel="Close" hitSlop={8}><Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>Close</Text></Pressable>
         </View>
         {state == null ? (
           <View style={{ paddingVertical: 40, alignItems: 'center' }}><ActivityIndicator color={t.brand} /></View>

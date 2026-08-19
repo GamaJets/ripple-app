@@ -9,6 +9,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { View, Text, Pressable, Alert } from 'react-native';
 import { Icon } from './Icon';
 import { useTheme } from './components';
+import { Card } from './kit';
+import { sp, radius, hairline, type as ty } from '../theme/scale';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
@@ -79,29 +81,29 @@ export function CoachRequests() {
   if (reqs.length === 0) return null;
 
   return (
-    <View style={{ backgroundColor: t.surface, borderRadius: 18, borderWidth: 1, borderColor: t.brand, padding: 16, marginBottom: 16 }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+    <Card tone={t.brand} style={{ marginBottom: sp.lg }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginBottom: sp.sm }}>
         <Icon name="people" size={15} color={t.brand} />
-        <Text style={{ color: t.brand, fontSize: 11, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6 }}>
+        <Text style={{ ...ty.micro, color: t.ink3 }}>
           Coaching request{reqs.length > 1 ? 's' : ''} · {reqs.length}
         </Text>
       </View>
       {reqs.map((r) => (
-        <View key={r.id} style={{ paddingTop: 8 }}>
-          <Text style={{ color: t.ink, fontSize: 15, fontWeight: '800' }}>{r.name}</Text>
-          <Text style={{ color: t.ink3, fontSize: 12.5, marginTop: 2, marginBottom: 10 }}>
+        <View key={r.id} style={{ paddingTop: sp.sm }}>
+          <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{r.name}</Text>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2, marginBottom: sp.md }}>
             Asked for {r.mode === 'inperson' ? 'in-person' : 'online'} coaching. Accepting adds them to your roster.
           </Text>
-          <View style={{ flexDirection: 'row', gap: 10, marginBottom: 6 }}>
-            <Pressable disabled={busy === r.id} onPress={() => respond(r, false)} style={{ flex: 1, paddingVertical: 11, borderRadius: 12, alignItems: 'center', backgroundColor: t.surface2, borderWidth: 1, borderColor: t.ring, opacity: busy === r.id ? 0.5 : 1 }}>
-              <Text style={{ color: t.ink2, fontWeight: '800' }}>Decline</Text>
+          <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: 6 }}>
+            <Pressable disabled={busy === r.id} onPress={() => respond(r, false)} style={{ flex: 1, paddingVertical: 11, borderRadius: radius.sm, alignItems: 'center', backgroundColor: t.surface2, borderWidth: hairline, borderColor: t.ring, opacity: busy === r.id ? 0.5 : 1 }}>
+              <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>Decline</Text>
             </Pressable>
-            <Pressable disabled={busy === r.id} onPress={() => respond(r, true)} style={{ flex: 2, paddingVertical: 11, borderRadius: 12, alignItems: 'center', backgroundColor: t.brand, opacity: busy === r.id ? 0.5 : 1 }}>
-              <Text style={{ color: t.brandInk, fontWeight: '800' }}>Accept</Text>
+            <Pressable disabled={busy === r.id} onPress={() => respond(r, true)} style={{ flex: 2, paddingVertical: 11, borderRadius: radius.sm, alignItems: 'center', backgroundColor: t.brand, opacity: busy === r.id ? 0.5 : 1 }}>
+              <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>Accept</Text>
             </Pressable>
           </View>
         </View>
       ))}
-    </View>
+    </Card>
   );
 }

@@ -1,10 +1,24 @@
 // Trainer · Broadcast. Message a whole segment of clients at once — everyone, or
 // a specific tag. Inserts into each client's thread and sends a push. OTA-safe.
+//
+// Re-skinned onto the instrument-panel kit (`src/ui/kit`) and the scale
+// (`src/theme/scale`). No hero — a composer has no live number to lead with, so
+// the segment, the recipient list and the message are three hairline-separated
+// sections and the Georgia serif title is gone. Same segment logic, same insert,
+// same push, same route.
+//
+// One claim removed: the confirmation said "Message delivered to N clients"
+// while the insert's error was swallowed and the push is a best-effort no-op on
+// builds without notifications — a delivery receipt the app never receives. It
+// now reports what it can actually see (the rows written to the threads) and
+// says so plainly when the write fails.
 import { useMemo, useState } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
+import { Rule, Section, SectionHead, Cta, Ghost } from '../../src/ui/kit';
+import { sp, layout, radius, type as ty } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { useClientTags } from '../../src/ui/clientTags';
 import { supabase } from '../../src/lib/supabase';
@@ -28,45 +42,71 @@ export default function Broadcast() {
     setBusy(true);
     try {
       if (USE_SUPABASE) {
-        try { await supabase.from('messages').insert(recipients.map((c) => ({ client_id: c.id, sender: 'coach', body: b }))); } catch { /* best-effort */ }
+        const { error } = await supabase.from('messages').insert(recipients.map((c) => ({ client_id: c.id, sender: 'coach', body: b })));
+        if (error) { Alert.alert('Not sent', 'The message could not be written to your clients’ threads. Check your connection and try again.'); return; }
         sendPush(recipients.map((c) => c.id), 'Message from your coach', b, { route: '/(client)/messages' });
       }
       setBody('');
-      Alert.alert('Sent', `Message delivered to ${recipients.length} client${recipients.length === 1 ? '' : 's'}${seg ? ' in “' + seg + '”' : ''}.`);
+      Alert.alert('Sent', `Added to ${recipients.length} client thread${recipients.length === 1 ? '' : 's'}${seg ? ' in “' + seg + '”' : ''}.`);
+    } catch {
+      Alert.alert('Not sent', 'The message could not be written to your clients’ threads. Check your connection and try again.');
     } finally { setBusy(false); }
   };
 
   const chip = (label: string, active: boolean, onPress: () => void) => (
-    <Pressable onPress={onPress} style={{ paddingHorizontal: 13, paddingVertical: 8, borderRadius: 16, backgroundColor: active ? t.brand : t.surface2, borderWidth: 1, borderColor: active ? t.brand : t.ring }}>
-      <Text style={{ color: active ? t.brandInk : t.ink2, fontWeight: '700', fontSize: 12 }}>{label}</Text>
+    <Pressable key={label} onPress={onPress} accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ selected: active }}
+      style={{ paddingHorizontal: sp.md + 2, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: active ? t.brand : t.surface2 }}>
+      <Text style={{ ...ty.label, fontWeight: '500', color: active ? t.brandInk : t.ink2 }}>{label}</Text>
     </Pressable>
   );
 
+  const G = layout.gutter;
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
-        <Pressable onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Go back" style={{ marginBottom: 8 }}>
-          <Text style={{ color: t.brand, fontWeight: '700', fontSize: 15 }}>‹ Back</Text>
-        </Pressable>
-        <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia' }}>Broadcast</Text>
-        <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 16, fontSize: 14 }}>Send one message to a whole segment of your clients.</Text>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
 
-        <Text style={{ color: t.ink3, fontSize: 11, fontWeight: '700', marginBottom: 7 }}>Send to</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 14 }} contentContainerStyle={{ gap: 8 }}>
-          {chip('All clients', seg === null, () => setSeg(null))}
-          {allTags.map((tg) => chip(tg, seg === tg, () => setSeg(tg === seg ? null : tg)))}
-        </ScrollView>
-
-        <View style={{ backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 12, padding: 12, marginBottom: 12 }}>
-          <Text style={{ color: t.ink2, fontSize: 13, fontWeight: '700' }}>{recipients.length} recipient{recipients.length === 1 ? '' : 's'}</Text>
-          <Text style={{ color: t.ink3, fontSize: 12, marginTop: 3 }} numberOfLines={2}>{recipients.map((c) => c.name).join(', ') || 'No clients in this segment.'}</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
+          <Ghost icon="back" onPress={() => router.back()} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ ...ty.micro, color: t.ink3 }}>Your clients</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Broadcast</Text>
+          </View>
         </View>
+        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>Send one message to a whole segment of your clients.</Text>
 
-        <TextInput value={body} onChangeText={setBody} placeholder="Your message…" placeholderTextColor={t.ink3} multiline style={{ color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, minHeight: 120, textAlignVertical: 'top', marginBottom: 14 }} />
+        {/* ── the segment ────────────────────────────────────────────────── */}
+        <Section>
+          <SectionHead title="Send to" />
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm }}>
+            {chip('All clients', seg === null, () => setSeg(null))}
+            {allTags.map((tg) => chip(tg, seg === tg, () => setSeg(tg === seg ? null : tg)))}
+          </ScrollView>
+        </Section>
 
-        <Pressable onPress={send} disabled={!body.trim() || !recipients.length || busy} style={{ backgroundColor: body.trim() && recipients.length ? t.brand : t.surface2, borderWidth: 1, borderColor: body.trim() && recipients.length ? t.brand : t.ring, borderRadius: 14, paddingVertical: 15, alignItems: 'center' }}>
-          <Text style={{ color: body.trim() && recipients.length ? t.brandInk : t.ink3, fontWeight: '800', fontSize: 15 }}>{busy ? 'Sending…' : `Send to ${recipients.length}`}</Text>
-        </Pressable>
+        <Rule />
+
+        {/* ── who that is ────────────────────────────────────────────────── */}
+        <Section>
+          <SectionHead title="Recipients" note={recipients.length ? `${recipients.length}` : undefined} />
+          {recipients.length === 0 ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>No clients in this segment.</Text>
+          ) : (
+            <Text style={{ ...ty.body, color: t.ink2 }} numberOfLines={2}>{recipients.map((c) => c.name).join(', ')}</Text>
+          )}
+        </Section>
+
+        <Rule />
+
+        {/* ── the message ────────────────────────────────────────────────── */}
+        <Section>
+          <SectionHead title="Message" />
+          <TextInput value={body} onChangeText={setBody} placeholder="Your message…" placeholderTextColor={t.ink3} multiline
+            style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md, minHeight: 120, textAlignVertical: 'top', marginBottom: sp.lg }} />
+          <Cta label={busy ? 'Sending…' : `Send to ${recipients.length}`} wide
+            disabled={!body.trim() || !recipients.length || busy} onPress={send} />
+        </Section>
+
       </ScrollView>
     </SafeAreaView>
   );

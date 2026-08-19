@@ -3,6 +3,7 @@
 import { View, Text } from 'react-native';
 import Svg, { Polyline, Path, Circle, Line, Defs, LinearGradient, Stop } from 'react-native-svg';
 import { useTheme } from './components';
+import { type as ty, numeric } from '../theme/scale';
 
 export interface Point { t: string; v: number }
 
@@ -10,7 +11,7 @@ export function TrendChart({ data, unit = '', color, height = 150, goodDown = fa
   const t = useTheme();
   const stroke = color || t.brand;
   if (!data || data.length < 2) {
-    return <View style={{ height, alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: t.ink3, fontSize: 13 }}>Not enough data yet</Text></View>;
+    return <View style={{ height, alignItems: 'center', justifyContent: 'center' }}><Text style={{ ...ty.label, color: t.ink3 }}>Not enough data yet</Text></View>;
   }
   const W = 320, H = height, pl = 6, pr = 6, pt = 12, pb = 18;
   const vs = data.map((d) => d.v);
@@ -36,13 +37,19 @@ export function TrendChart({ data, unit = '', color, height = 150, goodDown = fa
         </Defs>
         <Line x1={pl} y1={H - pb} x2={W - pr} y2={H - pb} stroke={t.ring} strokeWidth="1" />
         <Path d={area} fill="url(#areaFill)" />
-        <Polyline points={pts} fill="none" stroke={stroke} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
-        {data.map((d, i) => <Circle key={i} cx={X(i)} cy={Y(d.v)} r={i === data.length - 1 ? 4 : 2.5} fill={stroke} />)}
+        <Polyline points={pts} fill="none" stroke={stroke} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+        {/* One end dot, ringed in the ground colour — no sub-8px per-point marks. */}
+        <Circle cx={X(data.length - 1)} cy={Y(last.v)} r={6} fill={t.bg} />
+        <Circle cx={X(data.length - 1)} cy={Y(last.v)} r={4} fill={stroke} />
       </Svg>
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 }}>
-        <Text style={{ color: t.ink3, fontSize: 11 }}>{fmt(data[0].t)}</Text>
-        <Text style={{ color: good ? t.good : t.serious, fontSize: 12, fontWeight: '700' }}>{delta > 0 ? '▲' : '▼'} {Math.abs(delta)}{unit}</Text>
-        <Text style={{ color: t.ink3, fontSize: 11 }}>{fmt(last.t)} · {last.v}{unit}</Text>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
+        <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{fmt(data[0].t)}</Text>
+        {/* Direction is a dot; the delta itself stays ink. */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+          <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: good ? t.good : t.serious }} />
+          <Text style={{ ...ty.caption, ...numeric, fontWeight: '500', color: t.ink2 }}>{delta > 0 ? '▲' : '▼'} {Math.abs(delta)}{unit}</Text>
+        </View>
+        <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{fmt(last.t)} · {last.v}{unit}</Text>
       </View>
     </View>
   );

@@ -1,11 +1,18 @@
 // Shared "Send Feedback" screen used by the client & trainer portals. Rating +
 // category + note -> saved to Supabase (owner reads it in their portal).
+//
+// On the scale (`src/theme/scale`) and the kit's controls: the Georgia serif
+// title and the 700/800 weights are gone, the uppercase field labels are the
+// scale's `micro`, and the submit button is the kit's `Cta`. Every handler,
+// route and piece of copy is unchanged — this is a re-skin.
 import { useState } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView, KeyboardAvoidingView, Platform, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from './components';
 import { Icon } from './Icon';
+import { Cta, Ghost } from './kit';
+import { sp, layout, radius, hairline, type as ty } from '../theme/scale';
 import { submitAppFeedback } from './appFeedback';
 import { notifySuccess } from './haptics';
 
@@ -31,37 +38,38 @@ export default function FeedbackScreen({ audience }: { audience: string }) {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-          <Pressable onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Go back" style={{ marginBottom: 8 }}>
-            <Text style={{ color: t.brand, fontWeight: '700', fontSize: 15 }}>‹ Back</Text>
-          </Pressable>
-          <Text style={{ color: t.ink, fontSize: 26, fontWeight: '700', fontFamily: 'Georgia' }}>Send feedback</Text>
-          <Text style={{ color: t.ink3, marginTop: 3, marginBottom: 18 }}>{audience}. Tell us what to fix, what is confusing, or what you would love to see.</Text>
+        <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+          <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
+            <View style={{ flex: 1 }}>
+              <Text style={{ ...ty.micro, color: t.ink3 }}>Feedback</Text>
+              <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Send feedback</Text>
+            </View>
+            <Ghost icon="back" onPress={() => router.back()} />
+          </View>
+          <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, marginBottom: sp.xl }}>{audience}. Tell us what to fix, what is confusing, or what you would love to see.</Text>
 
-          <Text style={{ color: t.ink3, fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 8 }}>How is the experience?</Text>
-          <View style={{ flexDirection: 'row', gap: 8, marginBottom: 18 }}>
+          <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>How is the experience?</Text>
+          <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.xl }}>
             {[1, 2, 3, 4, 5].map((n) => (
-              <Pressable key={n} onPress={() => setRating(n)} hitSlop={6} style={{ flex: 1, alignItems: 'center', paddingVertical: 12, borderRadius: 12, backgroundColor: rating >= n ? t.brand : t.surface, borderWidth: 1, borderColor: rating >= n ? t.brand : t.ring }}>
+              <Pressable key={n} onPress={() => setRating(n)} hitSlop={6} style={{ flex: 1, alignItems: 'center', paddingVertical: sp.md, borderRadius: radius.sm, backgroundColor: rating >= n ? t.brand : t.surface2, borderWidth: hairline, borderColor: rating >= n ? t.brand : t.ring }}>
                 <Icon name="trophy" size={18} color={rating >= n ? t.brandInk : t.ink3} />
               </Pressable>
             ))}
           </View>
 
-          <Text style={{ color: t.ink3, fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 8 }}>Type</Text>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 18 }}>
+          <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Type</Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginBottom: sp.xl }}>
             {CATS.map((c) => (
-              <Pressable key={c} onPress={() => setCat(c)} style={{ paddingHorizontal: 14, paddingVertical: 9, borderRadius: 18, backgroundColor: cat === c ? t.brand : t.surface, borderWidth: 1, borderColor: cat === c ? t.brand : t.ring }}>
-                <Text style={{ color: cat === c ? t.brandInk : t.ink2, fontWeight: '700', fontSize: 13 }}>{c}</Text>
+              <Pressable key={c} onPress={() => setCat(c)} style={{ paddingHorizontal: sp.lg, paddingVertical: 9, borderRadius: radius.pill, backgroundColor: cat === c ? t.brand : t.surface2, borderWidth: hairline, borderColor: cat === c ? t.brand : t.ring }}>
+                <Text style={{ ...ty.label, fontWeight: '500', color: cat === c ? t.brandInk : t.ink2 }}>{c}</Text>
               </Pressable>
             ))}
           </View>
 
-          <Text style={{ color: t.ink3, fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 8 }}>Details</Text>
-          <TextInput value={body} onChangeText={setBody} placeholder="What happened, or what would make this better?" placeholderTextColor={t.ink3} multiline style={{ color: t.ink, backgroundColor: t.surface, borderColor: t.ring, borderWidth: 1, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, minHeight: 120, textAlignVertical: 'top', marginBottom: 20 }} />
+          <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Details</Text>
+          <TextInput value={body} onChangeText={setBody} placeholder="What happened, or what would make this better?" placeholderTextColor={t.ink3} multiline style={{ ...ty.body, color: t.ink, backgroundColor: t.surface, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md, minHeight: 120, textAlignVertical: 'top', marginBottom: sp.xl }} />
 
-          <Pressable onPress={submit} disabled={busy} style={{ backgroundColor: t.brand, borderRadius: 14, paddingVertical: 15, alignItems: 'center', opacity: busy ? 0.6 : 1 }}>
-            <Text style={{ color: t.brandInk, fontWeight: '800', fontSize: 15 }}>{busy ? 'Sending...' : 'Send feedback'}</Text>
-          </Pressable>
+          <Cta label={busy ? 'Sending...' : 'Send feedback'} onPress={submit} disabled={busy} wide />
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
