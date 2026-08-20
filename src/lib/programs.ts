@@ -12,17 +12,19 @@ export interface Program { title: string; focus: string[]; note: string; days: P
 const E = (key: string, name: string, group: string, sets: number, reps: string, alternatives: string[]): ProgramExercise => ({ key, name, group, sets, reps, alternatives });
 
 /** Focus areas inferred from body composition + goal (stands in for the scan/photo analysis). */
-export function focusAreas(bodyFatPct: number, goal: Goal): string[] {
+export function focusAreas(bodyFatPct: number | null | undefined, goal: Goal): string[] {
   const f: string[] = [];
   if (goal === 'fatloss') f.push('Full-body strength', 'Conditioning');
   else if (goal === 'muscle') f.push('Hypertrophy', 'Progressive overload');
   else f.push('Muscle tone', 'Definition');
-  if (bodyFatPct >= 25) f.push('Glutes & core');
+  if (bodyFatPct != null && bodyFatPct >= 25) f.push('Glutes & core');
   else f.push('Shoulders & back');
   return f;
 }
 
-export function buildProgram(goal: Goal, bodyFatPct: number): Program {
+/** bodyFatPct may be null: a client with no scan still gets a program, it just
+ *  is not biased by a body-composition figure nobody measured. */
+export function buildProgram(goal: Goal, bodyFatPct: number | null | undefined): Program {
   const focus = focusAreas(bodyFatPct, goal);
   // Says only what is true. This used to read "Built from your latest InBody scan
   // (N% body fat) and goal. Your coach flagged X as a priority…" — but the caller

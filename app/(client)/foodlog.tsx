@@ -57,7 +57,11 @@ export default function FoodLog() {
  const router = useRouter();
  const cd = useClientData();
  const _adj = useCoachNutrition().get(cd.id);
- const target = applyCoachAdjust(macrosFor({ weightKg: cd.weightKg, bodyFatPct: cd.bodyFatPct, activity: cd.activity, goal: cd.goal, diet: cd.diet }), cd.coachingMode === 'solo' ? undefined : (_adj || undefined));
+ // null until there is a body to scale to — the 70 kg / 20% placeholder that
+ // used to stand in produced a target belonging to nobody.
+ const target = (cd.weightKg != null && cd.bodyFatPct != null)
+  ? applyCoachAdjust(macrosFor({ weightKg: cd.weightKg, bodyFatPct: cd.bodyFatPct, activity: cd.activity, goal: cd.goal, diet: cd.diet }), cd.coachingMode === 'solo' ? undefined : (_adj || undefined))
+  : null;
 
  const fl = useFoodLog();
  const [q, setQ] = useState('');
@@ -85,7 +89,7 @@ export default function FoodLog() {
 
  const tot = { k: fl.consumed.kcal, p: fl.consumed.protein, c: fl.consumed.carbs, f: fl.consumed.fat };
  const burned = useWearables().today.activeKcal || 0;
- const remK = (target.kcal + burned) - tot.k;
+ const remK = target ? (target.kcal + burned) - tot.k : 0;
 
  const fillEst = (n: string, k: number, p: number, c: number, f: number) => { setEstN(n); setEstK(String(k)); setEstP(String(p)); setEstC(String(c)); setEstF(String(f)); setReadFailed(false); setReading(false); };
  const takeMealPhoto = async (fromCamera: boolean) => {
@@ -155,8 +159,8 @@ export default function FoodLog() {
  label={remK >= 0 ? 'Calories remaining' : 'Calories over'}
  figure={String(Math.abs(remK))}
  unit="kcal"
- note={`${tot.k} of ${target.kcal} kcal eaten${burned ? ` · ${burned} kcal burned` : ''}`}
- arc={target.kcal ? tot.k / target.kcal : 0}
+ note={target ? `${tot.k} of ${target.kcal} kcal eaten${burned ? ` · ${burned} kcal burned` : ''}` : `${tot.k} kcal eaten${burned ? ` · ${burned} kcal burned` : ''} · add your weight for a target`}
+ arc={target && target.kcal ? tot.k / target.kcal : undefined}
  tone={remK < 0 ? t.crit : undefined}
  />
 
@@ -165,9 +169,9 @@ export default function FoodLog() {
  {/* ── macros against target ──────────────────────────────────────── */}
  <Section>
  <SectionHead title="Macros" />
- {macroRow('Protein', tot.p, target.protein)}
- {macroRow('Carbs', tot.c, target.carbs, true)}
- {macroRow('Fat', tot.f, target.fat, true)}
+ {target ? macroRow('Protein', tot.p, target.protein) : null}
+ {target ? macroRow('Carbs', tot.c, target.carbs, true) : null}
+ {target ? macroRow('Fat', tot.f, target.fat, true) : null}
  </Section>
 
  <Rule />

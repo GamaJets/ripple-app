@@ -90,7 +90,12 @@ const WTYPES = [['strength', 'Program'], ['cardio', 'Cardio'], ['hiit', 'HIIT'],
 const MET: Record<string, number> = Object.fromEntries(
   [...CARDIO_ACTS, ...HIIT_ACTS, ...MOBILITY_ACTS].map((a) => [a.name, a.met]),
 );
-const cardioKcal = (type: string, mins: number, weightKg?: number) => Math.round((MET[type] ?? 7) * (weightKg && weightKg > 0 ? weightKg : 70) * (mins / 60));
+// Returns null when we do not know what the client weighs. It used to fall
+// back to 70 kg, so the burn shown next to a session was MET x 70 regardless
+// of who was training, and that number was written into the workout log and
+// re-surfaced in the weekly report as a measured figure.
+const cardioKcal = (type: string, mins: number, weightKg?: number | null): number | null =>
+  (weightKg && weightKg > 0) ? Math.round((MET[type] ?? 7) * weightKg * (mins / 60)) : null;
 
 /** Metric columns divided by a hairline — the KpiRow idiom, where a status dot is needed. */
 function MetricCols({ t, items }: { t: Theme; items: { label: string; value: string; dot?: string }[] }) {
@@ -123,7 +128,7 @@ export default function Train() {
   const [mode, setMode] = useState<'strength' | 'cardio' | 'hiit' | 'mobility'>('strength');
   const [swaps, setSwaps] = useState<Record<string, string>>({});
   const [logged, setLogged] = useState<Record<string, { reps: string; kg: string }[]>>({});
-  const [cardioLog, setCardioLog] = useState<{ type: string; mins: number; dist: number; unit: string; kcal: number }[]>([]);
+  const [cardioLog, setCardioLog] = useState<{ type: string; mins: number; dist: number; unit: string; kcal: number | null }[]>([]);
   const [nlw, setNlw] = useState('');
   const logWorkoutNL = () => {
     const lifts = parseWorkoutText(nlw);
@@ -221,9 +226,11 @@ export default function Train() {
     const m = parseInt(mins, 10) || 0, d = parseFloat(dist) || 0; if (!m) return;
     const w = parseInt(watts, 10) || 0;
     const kIn = parseInt(kcalIn, 10) || 0;
+    // Null when there is no weight to estimate from, and null is stored rather
+    // than a stand-in — an unknown burn is not zero, and it is not 70 kg's.
     const kcal = kIn > 0 ? kIn : cardioKcal(ctype, m, cd.weightKg);
     setCardioLog([{ type: ctype, mins: m, dist: d, unit, kcal }, ...cardioLog]);
-    addWorkouts([{ t: new Date().toISOString(), exercise: ctype, cardio: { mins: m, dist: d, unit, ...(w > 0 ? { watts: w } : {}) }, kcal }]);
+    addWorkouts([{ t: new Date().toISOString(), exercise: ctype, cardio: { mins: m, dist: d, unit, ...(w > 0 ? { watts: w } : {}) }, kcal: kcal ?? undefined }]);
     setMins(''); setDist(''); setWatts(''); setKcalIn(''); tapLight();
   };
   const saveManual = () => {
@@ -472,7 +479,7 @@ export default function Train() {
                       {i > 0 ? <Rule /> : null}
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: sp.md, paddingVertical: sp.md }}>
                         <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{c.type}</Text>
-                        <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{[`${c.mins} min`, c.dist > 0 ? `${c.dist} ${c.unit}` : null, c.watts > 0 ? `${c.watts} W` : null, `${c.kcal} kcal`].filter(Boolean).join(' · ')}</Text>
+                        <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{[`${c.mins} min`, c.dist > 0 ? `${c.dist} ${c.unit}` : null, c.watts > 0 ? `${c.watts} W` : null, c.kcal != null ? `${c.kcal} kcal` : null].filter(Boolean).join(' · ')}</Text>
                       </View>
                     </View>
                   ))

@@ -195,11 +195,11 @@ export default function Profile() {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
   const [heightUnit, setHeightUnit] = useState<'cm' | 'in'>('cm');
-  const [heightVal, setHeightVal] = useState(String(cd.heightCm));
+  const [heightVal, setHeightVal] = useState(cd.heightCm != null ? String(cd.heightCm) : '');
   const [weightUnit, setWeightUnit] = useState<'kg' | 'lb'>('kg');
-  const [weightVal, setWeightVal] = useState(String(round1(cd.weightKg)));
+  const [weightVal, setWeightVal] = useState(cd.weightKg != null ? String(round1(cd.weightKg)) : '');
   const [nameVal, setNameVal] = useState(cd.name);
-  const [bfVal, setBfVal] = useState(String(round1(cd.bodyFatPct)));
+  const [bfVal, setBfVal] = useState(cd.bodyFatPct != null ? String(round1(cd.bodyFatPct)) : '');
   const [saved, setSaved] = useState(false);
 
   const toggleHeight = (u: string) => {
@@ -230,9 +230,16 @@ export default function Profile() {
 
   const age = ageFromDob(cd.dob);
   const _adj = useCoachNutrition().get(cd.id);
-  const macros = applyCoachAdjust(macrosFor({ weightKg: cd.weightKg, bodyFatPct: cd.bodyFatPct, activity: cd.activity, goal: cd.goal, diet: cd.diet }), cd.coachingMode === 'solo' ? undefined : (_adj || undefined));
+  // No weight, no target. This used to run on the 70 kg / 20% placeholder and
+  // present the result as the client's own daily calorie and protein target.
+  const macros = (cd.weightKg != null && cd.bodyFatPct != null)
+    ? applyCoachAdjust(macrosFor({ weightKg: cd.weightKg, bodyFatPct: cd.bodyFatPct, activity: cd.activity, goal: cd.goal, diet: cd.diet }), cd.coachingMode === 'solo' ? undefined : (_adj || undefined))
+    : null;
   const _bfPrev = parseFloat(bfVal);
-  const previewMacros = macrosFor({ weightKg, bodyFatPct: isNaN(_bfPrev) ? cd.bodyFatPct : _bfPrev, activity: cd.activity, goal: cd.goal, diet: cd.diet });
+  const _bfForPreview = isNaN(_bfPrev) ? cd.bodyFatPct : _bfPrev;
+  const previewMacros = (weightKg > 0 && _bfForPreview != null)
+    ? macrosFor({ weightKg, bodyFatPct: _bfForPreview, activity: cd.activity, goal: cd.goal, diet: cd.diet })
+    : null;
 
   const dobLabel = (() => {
     const dd = new Date(cd.dob);
@@ -240,7 +247,8 @@ export default function Profile() {
     return `${dd.getDate()} ${MONTHS[dd.getMonth()]} ${dd.getFullYear()}`;
   })();
 
-  const statsLine = `${age != null ? age + ' yrs' : '—'} · ${cd.heightCm} cm · ${round1(cd.weightKg)} kg`;
+  const statsLine = [age != null ? age + ' yrs' : null, cd.heightCm != null ? cd.heightCm + ' cm' : null, cd.weightKg != null ? round1(cd.weightKg) + ' kg' : null]
+    .filter(Boolean).join(' · ') || 'Add your height and weight';
   const soloHidden = new Set(['/(client)/messages', '/(client)/checkin']);
   const HUB_KEEP = new Set(['Connect', 'Devices & Media', 'Account']);
   const hubGroups = HUB_GROUPS.filter((g) => HUB_KEEP.has(g.title)).map((g) => ({ ...g, items: g.items.filter((it) => cd.coachingMode !== 'solo' || !soloHidden.has(it.route)) }));
@@ -312,12 +320,16 @@ export default function Profile() {
 
         {/* ── what this profile adds up to ───────────────────────────────── */}
         <Section>
-          <SectionHead title="Daily target" note={`${macros.kcal.toLocaleString()} kcal`} onPress={() => router.push('/(client)/nutrition')} />
-          <KpiRow items={[
-            { label: 'Protein', value: String(macros.protein), unit: 'g' },
-            { label: 'Carbs', value: String(macros.carbs), unit: 'g' },
-            { label: 'Fat', value: String(macros.fat), unit: 'g' },
-          ]} />
+          <SectionHead title="Daily target" note={macros ? `${macros.kcal.toLocaleString()} kcal` : undefined} onPress={() => router.push('/(client)/nutrition')} />
+          {macros ? (
+            <KpiRow items={[
+              { label: 'Protein', value: String(macros.protein), unit: 'g' },
+              { label: 'Carbs', value: String(macros.carbs), unit: 'g' },
+              { label: 'Fat', value: String(macros.fat), unit: 'g' },
+            ]} />
+          ) : (
+            <Text style={{ ...ty.label, color: t.ink3 }}>Add your weight and body fat above and your daily targets appear here.</Text>
+          )}
         </Section>
 
         <Rule />
@@ -391,7 +403,7 @@ export default function Profile() {
             </ScrollView>
 
             <View style={{ backgroundColor: t.surface2, borderRadius: radius.sm, padding: sp.md, marginBottom: sp.lg }}>
-              <Text style={{ ...ty.caption, color: t.ink3 }}>New target · <Text style={{ ...ty.caption, ...numeric, fontWeight: '600', color: t.ink }}>{previewMacros.kcal.toLocaleString()} kcal</Text> · P{previewMacros.protein} / C{previewMacros.carbs} / F{previewMacros.fat}</Text>
+              <Text style={{ ...ty.caption, color: t.ink3 }}>{previewMacros ? <>New target · <Text style={{ ...ty.caption, ...numeric, fontWeight: '600', color: t.ink }}>{previewMacros.kcal.toLocaleString()} kcal</Text> · P{previewMacros.protein} / C{previewMacros.carbs} / F{previewMacros.fat}</> : 'Enter a weight and body fat to see your target.'}</Text>
             </View>
 
             <Pressable style={{ backgroundColor: saved ? t.surface2 : t.brand, borderRadius: radius.sm, paddingVertical: sp.md, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: sp.sm }} onPress={save}>

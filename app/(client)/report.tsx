@@ -58,7 +58,9 @@ export default function WeeklyReport() {
     `Trained ${wk.workouts} time(s) across ${wk.days} active day(s).`,
     `Volume ${(wk.volumeKg / 1000).toFixed(1)} tonnes, ~${wk.kcal} kcal.`,
     `Streak ${streak} day(s).`,
-    hasBody ? `Weight ${c.weightKg} kg (${wDelta > 0 ? '+' : ''}${wDelta} kg overall), body fat ${c.bodyFatPct}%, muscle ${c.muscleKg} kg.` : '',
+    hasBody ? [`Weight ${c.weightKg} kg (${wDelta > 0 ? '+' : ''}${wDelta} kg overall)`,
+      c.bodyFatPct != null ? `body fat ${c.bodyFatPct}%` : null,
+      c.muscleKg != null ? `muscle ${c.muscleKg} kg` : null].filter(Boolean).join(', ') + '.' : '',
     waistD != null ? `Waist ${mLatest.waist} cm (${waistD > 0 ? '+' : ''}${waistD} cm).` : '',
     checkIn ? `Check-in energy ${checkIn.energy}/5, sleep ${checkIn.sleep}/5, mood ${checkIn.mood}/5, adherence ${checkIn.adherence}/5.` : '',
     comp.improving.length ? `Body composition improving: ${comp.improving.join(', ')}.` : '',
@@ -94,8 +96,11 @@ export default function WeeklyReport() {
 
   const bodyItems = [
     { label: 'Weight', value: `${c.weightKg}`, unit: 'kg', delta: wDelta !== 0 ? `${wDelta > 0 ? '+' : ''}${wDelta} kg overall` : 'no change', good: wDelta <= 0 },
-    { label: 'Body fat', value: `${c.bodyFatPct}`, unit: '%' },
-    { label: 'Muscle', value: `${c.muscleKg}`, unit: 'kg' },
+    // hasBody only checks that a weight exists — a client can log a weight in a
+    // check-in without ever having a scan, in which case body fat and muscle are
+    // still unknown and used to print the 20% / 0 kg placeholders.
+    { label: 'Body fat', value: c.bodyFatPct != null ? `${c.bodyFatPct}` : '—', unit: c.bodyFatPct != null ? '%' : undefined },
+    { label: 'Muscle', value: c.muscleKg != null ? `${c.muscleKg}` : '—', unit: c.muscleKg != null ? 'kg' : undefined },
     ...(waistD != null ? [{ label: 'Waist', value: `${mLatest.waist}`, unit: 'cm', delta: `${waistD > 0 ? '+' : ''}${waistD} cm`, good: waistD <= 0 }] : []),
   ];
 

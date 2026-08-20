@@ -48,7 +48,7 @@ export default function CheckIn() {
   const ci = useCheckIns();
 
   // Blank unless there is a weight actually on record for this client.
-  const [weight, setWeight] = useState(cd.weightSeries.length ? String(Math.round(cd.weightKg * 10) / 10) : '');
+  const [weight, setWeight] = useState(cd.weightKg != null ? String(Math.round(cd.weightKg * 10) / 10) : '');
   const [energy, setEnergy] = useState(0);
   const [sleep, setSleep] = useState(0);
   const [mood, setMood] = useState(0);

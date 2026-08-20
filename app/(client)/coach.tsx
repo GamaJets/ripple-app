@@ -36,7 +36,12 @@ export default function Coach() {
   const cd = useClientData();
   const coachProgram = useAssignedPrograms().getProgram(cd.id);
   const _adj = useCoachNutrition().get(cd.id);
-  const macros = applyCoachAdjust(macrosFor({ weightKg: cd.weightKg, bodyFatPct: cd.bodyFatPct, activity: cd.activity, goal: cd.goal, diet: cd.diet }), cd.coachingMode === 'solo' ? undefined : (_adj || undefined));
+  // null until there is a body to scale to. This used to run on the 70 kg /
+  // 20% placeholder from clientData and present the result as the client's
+  // own daily targets.
+  const macros = (cd.weightKg != null && cd.bodyFatPct != null)
+    ? applyCoachAdjust(macrosFor({ weightKg: cd.weightKg, bodyFatPct: cd.bodyFatPct, activity: cd.activity, goal: cd.goal, diet: cd.diet }), cd.coachingMode === 'solo' ? undefined : (_adj || undefined))
+    : null;
   const program = coachProgram ?? buildProgram(cd.goal, cd.bodyFatPct);
   const { sleep } = useWellness();
   const { water, waterGoal } = useHabits();
@@ -53,12 +58,12 @@ export default function Coach() {
   const _lastEx = log.length ? log[0].exercise : '';
   const _prog = suggestProgression(log)[0];
   const context = {
-    name: cd.name, goal: cd.goal, diet: cd.diet, weightKg: Math.round(cd.weightKg * 10) / 10,
+    name: cd.name, goal: cd.goal, diet: cd.diet, weightKg: cd.weightKg != null ? Math.round(cd.weightKg * 10) / 10 : 'not recorded',
     bodyFatPct: cd.bodyFatPct, muscleKg: cd.muscleKg, mealsPerDay: cd.mealsPerDay,
-    kcal: macros.kcal, protein: macros.protein, carbs: macros.carbs, fat: macros.fat,
+    kcal: macros?.kcal ?? 'not set', protein: macros?.protein ?? 'not set', carbs: macros?.carbs ?? 'not set', fat: macros?.fat ?? 'not set',
     programTitle: program.title, programFocus: program.focus.join(', '),
     readiness: _readiness ? `${_readiness.score}/100 (${_readiness.label})` : 'not enough data',
-    eatenToday: `${consumed.kcal}/${macros.kcal} kcal, protein ${consumed.protein}/${macros.protein}g`,
+    eatenToday: macros ? `${consumed.kcal}/${macros.kcal} kcal, protein ${consumed.protein}/${macros.protein}g` : `${consumed.kcal} kcal eaten, no target set`,
     streak: _streak,
     lastTrained: _lastEx || undefined,
     nextLift: _prog ? `${_prog.exercise}: ${_prog.nextWeight}kg x ${_prog.nextReps} (${_prog.action})` : undefined,

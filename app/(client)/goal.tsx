@@ -29,7 +29,10 @@ export default function Goal() {
   const [input, setInput] = useState('');
 
   const series = c.weightSeries;
-  const current = c.weightKg;
+  // 0 when there is no weight on record. Every figure derived from it is behind
+  // `hasWeight` below, so the zero never reaches the screen — it just keeps the
+  // arithmetic total.
+  const current = c.weightKg ?? 0;
   const start = series.length ? series[0].v : current;
   const tgt = target.targetWeightKg;
   const hasTarget = tgt > 0;

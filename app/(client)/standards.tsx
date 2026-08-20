@@ -46,7 +46,7 @@ export default function Standards() {
  .reduce((mx, p) => Math.max(mx, p.est1RM), 0);
  const ratio = best && bw ? best / bw : 0;
  const lvl = best ? levelFor(ratio, lift.mult) : -2;
- const nextTarget = lvl >= 0 && lvl < LEVELS.length - 1 ? Math.round(lift.mult[lvl + 1] * bw) : null;
+ const nextTarget = (bw != null && lvl >= 0 && lvl < LEVELS.length - 1) ? Math.round(lift.mult[lvl + 1] * bw) : null;
  return { lift, best, ratio, lvl, nextTarget };
  });
  const G = layout.gutter;
@@ -67,7 +67,7 @@ export default function Standards() {
   <Rule />
 
   <Section>
-   <SectionHead title="The big lifts" note={`bodyweight ${bw} kg`} />
+   <SectionHead title="The big lifts" note={bw != null ? `bodyweight ${bw} kg` : 'add your weight for ratios'} />
    {rows.map(({ lift, best, ratio, lvl, nextTarget }, i) => (
     <View key={lift.name} style={{ paddingVertical: sp.lg, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' }}>

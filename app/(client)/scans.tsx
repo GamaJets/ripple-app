@@ -160,13 +160,20 @@ export default function Scans() {
     // stored for history/graphs but must not re-tune the plan.
     const curLatestISO = cd.scans.length ? cd.scans[cd.scans.length - 1].takenAt.slice(0, 10) : '';
     const isNewest = !curLatestISO || newISO >= curLatestISO;
-    const before = macrosFor({ weightKg: cd.weightKg, bodyFatPct: cd.bodyFatPct, activity: cd.activity, goal: cd.goal, diet: cd.diet });
+    // Only meaningful when there was a previous body to compare against.
+    const before = (cd.weightKg != null && cd.bodyFatPct != null)
+      ? macrosFor({ weightKg: cd.weightKg, bodyFatPct: cd.bodyFatPct, activity: cd.activity, goal: cd.goal, diet: cd.diet })
+      : null;
     const after = macrosFor({ weightKg: w, bodyFatPct: f, activity: cd.activity, goal: cd.goal, diet: cd.diet });
     const pw = cd.weightKg, pf = cd.bodyFatPct;
     cd.addScan({ id: 's' + Date.now(), takenAt: newISO, weightKg: w, bodyFatPct: f, skeletalMuscleKg: m, source: scanMx ? 'InBody (OCR)' : 'InBody (manual)', image: img || undefined, metrics: scanMx ?? undefined });
     setImg(null); setWt(''); setBf(''); setSm(''); setScanMx(null); setShowAdd(false);
     if (!isNewest) {
       Alert.alert('Scan saved to history', 'This scan is dated ' + fmt(newISO) + ', earlier than your most recent scan (' + fmt(curLatestISO) + '). It\'s added to your progress tracking and graphs — but your meal plan stays on your most recent scan. Only a newer scan re-tunes your plan.');
+      return;
+    }
+    if (!before) {
+      Alert.alert('Scan saved', 'Your first measurements are in — daily targets are now ' + after.kcal + ' kcal / ' + after.protein + 'g protein, and your meal plan is built from them.');
       return;
     }
     const dK = after.kcal - before.kcal, dP = after.protein - before.protein;
@@ -212,7 +219,7 @@ export default function Scans() {
   const daysAgo = latest ? Math.max(0, Math.round((Date.now() - Date.parse(latest.takenAt)) / 86400000)) : 0;
   const dlt = (cur: number, was: number | undefined, unit: string) => (was == null ? null : `${cur - was < 0 ? '▼' : cur - was > 0 ? '▲' : ''} ${Math.abs(+(cur - was).toFixed(1))} ${unit}`.trim());
   // Presentation-only helpers: the hero's movement line and a shared "how long ago".
-  const bfMove = prev ? +(cd.bodyFatPct - prev.bodyFatPct).toFixed(1) : null;
+  const bfMove = (prev && cd.bodyFatPct != null) ? +(cd.bodyFatPct - prev.bodyFatPct).toFixed(1) : null;
   const ago = daysAgo === 0 ? 'today' : daysAgo + ' days ago';
 
   const input = { flex: 1, ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 } as const;
@@ -234,8 +241,8 @@ export default function Scans() {
         {/* ── the hero: one number leads the screen ───────────────────────── */}
         <Hero
           label="Body fat"
-          figure={String(cd.bodyFatPct)}
-          unit="%"
+          figure={cd.bodyFatPct != null ? String(cd.bodyFatPct) : '—'}
+          unit={cd.bodyFatPct != null ? '%' : undefined}
           note={latest && bfMove !== null
             ? `${bfMove <= 0 ? '−' : '+'}${Math.abs(bfMove)}% since your previous scan · scanned ${ago}`
             : latest
@@ -266,8 +273,8 @@ export default function Scans() {
           <KpiRow
             onPress={(k) => { if (k.route) router.push(k.route as any); }}
             items={[
-              { label: 'Weight', value: String(cd.weightKg), unit: 'kg', route: '/(client)/measurements', good: !prev || cd.weightKg <= prev.weightKg, delta: dlt(cd.weightKg, prev?.weightKg, 'kg') ?? undefined },
-              { label: 'Muscle', value: String(cd.muscleKg), unit: 'kg', route: '/(client)/measurements', good: !prev || cd.muscleKg >= prev.skeletalMuscleKg, delta: dlt(cd.muscleKg, prev?.skeletalMuscleKg, 'kg') ?? undefined },
+              { label: 'Weight', value: cd.weightKg != null ? String(cd.weightKg) : '—', unit: cd.weightKg != null ? 'kg' : undefined, route: '/(client)/measurements', good: !prev || (cd.weightKg != null && cd.weightKg <= prev.weightKg), delta: (cd.weightKg != null ? dlt(cd.weightKg, prev?.weightKg, 'kg') : null) ?? undefined },
+              { label: 'Muscle', value: cd.muscleKg != null ? String(cd.muscleKg) : '—', unit: cd.muscleKg != null ? 'kg' : undefined, route: '/(client)/measurements', good: !prev || (cd.muscleKg != null && cd.muscleKg >= prev.skeletalMuscleKg), delta: (cd.muscleKg != null ? dlt(cd.muscleKg, prev?.skeletalMuscleKg, 'kg') : null) ?? undefined },
               { label: 'Scans', value: String(scans.length), delta: latest ? `last ${ago}` : undefined },
             ]}
           />

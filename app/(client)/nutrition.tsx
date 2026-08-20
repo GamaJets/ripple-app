@@ -47,8 +47,13 @@ export default function Nutrition() {
   const { appName } = useBrand();
   const _adj = useCoachNutrition().get(c.id);
   const coachAdjust = c.coachingMode === 'solo' ? null : _adj;
-  const w = c.weightKg;
-  const bf = c.bodyFatPct;
+  // A meal plan is scaled to lean body mass. Without a weight and body fat there
+  // is nothing to scale, and the whole screen used to run on a 70 kg / 20%
+  // placeholder and present the result as the client's plan. Zeros here are
+  // never rendered — `hasBody` swaps the screen for a prompt below.
+  const hasBody = c.weightKg != null && c.bodyFatPct != null;
+  const w = c.weightKg ?? 0;
+  const bf = c.bodyFatPct ?? 0;
   const diet = c.diet;
   const [override, setOverride] = useState<Record<number, number>>({});
   const [ovHydrated, setOvHydrated] = useState(false);
@@ -140,6 +145,27 @@ export default function Nutrition() {
   const eaten = fl.consumed;
   const kcalLeft = Math.max(0, target.kcal - eaten.kcal);
   const cycleNote = dayType === 'training' ? '+250 kcal, more carbs' : dayType === 'rest' ? '−250 kcal, fewer carbs' : undefined;
+
+  if (!hasBody) {
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
+        <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingTop: sp.md }}>
+            <View style={{ flex: 1 }}>
+              <Text style={{ ...ty.micro, color: t.ink3 }}>Nutrition</Text>
+              <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Meals</Text>
+              <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>Your targets and meal plan are scaled to your body, so they need a weight and body fat to work from.</Text>
+            </View>
+            <Ghost icon="back" onPress={() => router.back()} />
+          </View>
+          <Rule />
+          <Section>
+            <Cta label="Add your measurements" wide onPress={() => router.push('/(client)/scans')} />
+          </Section>
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>

@@ -92,12 +92,17 @@ export default function Home() {
   const prs = personalRecords(log);
   const goalDays = program.days.length || 4;
 
-  const macros = applyCoachAdjust(macrosFor({ weightKg: c.weightKg, bodyFatPct: c.bodyFatPct, activity: c.activity, goal: c.goal, diet: c.diet }), solo ? undefined : (nutriAdjust || undefined));
+  // null until there is a body to scale to. This used to run on the 70 kg /
+  // 20% placeholder from clientData and present the result as the client's
+  // own daily targets.
+  const macros = (c.weightKg != null && c.bodyFatPct != null)
+    ? applyCoachAdjust(macrosFor({ weightKg: c.weightKg, bodyFatPct: c.bodyFatPct, activity: c.activity, goal: c.goal, diet: c.diet }), solo ? undefined : (nutriAdjust || undefined))
+    : null;
   // Real logged intake (shared with the Meals tab + Food Log); reflects what was actually eaten today.
   const consumed = { kcal: foodToday.kcal, p: foodToday.protein, cbs: foodToday.carbs, f: foodToday.fat };
   const _todayKey = new Date().toISOString().slice(0, 10);
   const trainedToday = log.some((e) => (e.t || '').slice(0, 10) === _todayKey);
-  const kcalLeft = Math.max(0, macros.kcal + burnedToday - consumed.kcal);
+  const kcalLeft = macros ? Math.max(0, macros.kcal + burnedToday - consumed.kcal) : 0;
   const today = readiness.tone === 'low'
     ? { headline: 'Recover today', tip: 'Under-recovered — keep it light or take a rest day.', cta: 'Recovery', route: '/(client)/recovery', tone: t.warn }
     : !trainedToday
@@ -123,7 +128,7 @@ export default function Home() {
   const hi = d.getHours() < 12 ? 'Good morning' : d.getHours() < 18 ? 'Good afternoon' : 'Good evening';
 
   const firstName = (c.name || '').trim().split(' ')[0] || '';
-  const kcalNote = `${consumed.kcal.toLocaleString()} of ${macros.kcal.toLocaleString()} kcal`;
+  const kcalNote = macros ? `${consumed.kcal.toLocaleString()} of ${macros.kcal.toLocaleString()} kcal` : `${consumed.kcal.toLocaleString()} kcal eaten — add your weight for a target`;
   const G = layout.gutter;
 
   return (
@@ -268,9 +273,11 @@ export default function Home() {
         {/* ── fuel ───────────────────────────────────────────────────────── */}
         <Section>
           <SectionHead title="Fuel today" note={kcalNote} onPress={() => router.push('/(client)/nutrition')} />
-          <Meter label="Protein" val={consumed.p} target={macros.protein} />
-          <Meter label="Carbs" val={consumed.cbs} target={macros.carbs} dim />
-          <Meter label="Fat" val={consumed.f} target={macros.fat} dim />
+          {macros ? (<>
+            <Meter label="Protein" val={consumed.p} target={macros.protein} />
+            <Meter label="Carbs" val={consumed.cbs} target={macros.carbs} dim />
+            <Meter label="Fat" val={consumed.f} target={macros.fat} dim />
+          </>) : null}
         </Section>
 
         <Rule />

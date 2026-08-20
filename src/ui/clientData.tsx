@@ -20,7 +20,9 @@ interface Value {
   id: string; name: string; init: string; setName: (v: string) => void;
   dob: string; setDob: (v: string) => void;
   photo: string | null; setPhoto: (v: string | null) => void;
-  heightCm: number; setHeightCm: (v: number) => void;
+  /** null until the client tells us. Defaulted to 170 and rendered on their
+   *  profile as their own height. */
+  heightCm: number | null; setHeightCm: (v: number) => void;
   goal: Goal; setGoal: (v: Goal) => void;
   coachingMode: CoachingMode; setCoachingMode: (v: CoachingMode) => void;
   diet: Diet; setDiet: (v: Diet) => void;
@@ -29,7 +31,11 @@ interface Value {
   focusAreas: string[]; setFocusAreas: (v: string[]) => void;
   activity: number;
   mealsPerDay: 3 | 4 | 5; setMealsPerDay: (v: 3 | 4 | 5) => void;
-  weightKg: number; bodyFatPct: number; muscleKg: number;
+  /** null until there is a scan or a manual entry. These used to fall back to
+   *  70 kg / 20% / 0 kg, which the dashboard, profile, scans, report, standards
+   *  and the macro calculator all rendered and computed against as though the
+   *  client had been measured. */
+  weightKg: number | null; bodyFatPct: number | null; muscleKg: number | null;
   setWeightKg: (v: number) => void; setBodyFat: (v: number) => void;
   scans: ScanRec[]; addScan: (s: ScanRec) => void;
   weightSeries: Series[]; bodyFatSeries: Series[]; muscleSeries: Series[];
@@ -44,7 +50,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
   const [name, setName] = useState('');
   const [dob, setDob] = useState('');
   const [photo, setPhoto] = useState<string | null>(null);
-  const [heightCm, setHeightCm] = useState(170);
+  const [heightCm, setHeightCm] = useState<number | null>(null);
   const [goal, setGoal] = useState<Goal>('muscle');
   const [coachingMode, setCoachingMode] = useState<CoachingMode>('online');
   const [diet, setDiet] = useState<Diet>('meat');
@@ -215,11 +221,15 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
     for (const s of scans) byDay[s.takenAt.slice(0, 10)] = s; // one InBody scan per day, latest added wins
     return Object.values(byDay).sort((a, b) => Date.parse(a.takenAt) - Date.parse(b.takenAt)).map((s) => (s.metrics ? s : (scanMetrics[s.takenAt.slice(0, 10)] ? { ...s, metrics: scanMetrics[s.takenAt.slice(0, 10)] } : s)));
   }, [scans, scanMetrics]);
-  const latest = sorted[sorted.length - 1] ?? { id: 'none', takenAt: new Date(0).toISOString(), weightKg: manualWeight ?? 70, bodyFatPct: manualBodyFat ?? 20, skeletalMuscleKg: 0, source: '' };
+  // No placeholder body. When there is no scan, weight/body fat come from a
+  // manual entry if there is one and are null otherwise - callers decide what
+  // to show. The old fallback object handed out 70 kg and 20% body fat, and
+  // every downstream calculation treated them as measurements.
+  const latest = sorted[sorted.length - 1] ?? null;
   // Single source of truth: the most RECENT of {manual edit, latest scan} wins.
-  const manualIsCurrent = manualAt != null && Date.parse(manualAt) >= Date.parse(latest.takenAt);
-  const weightKg = (manualWeight != null && manualIsCurrent) ? manualWeight : latest.weightKg;
-  const bodyFatPct = (manualBodyFat != null && manualIsCurrent) ? manualBodyFat : latest.bodyFatPct;
+  const manualIsCurrent = manualAt != null && (latest == null || Date.parse(manualAt) >= Date.parse(latest.takenAt));
+  const weightKg = (manualWeight != null && manualIsCurrent) ? manualWeight : (latest ? latest.weightKg : null);
+  const bodyFatPct = (manualBodyFat != null && manualIsCurrent) ? manualBodyFat : (latest ? latest.bodyFatPct : null);
 
   const value: Value = {
     id: sbUid ?? 'unknown', name, init: initials(name), setName,
@@ -232,7 +242,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
     removeInjury: (id) => setInjuries((p) => p.filter((i) => i.id !== id)),
     coachingMode, setCoachingMode,
     activity: 1.5, mealsPerDay, setMealsPerDay,
-    weightKg, bodyFatPct, muscleKg: latest.skeletalMuscleKg,
+    weightKg, bodyFatPct, muscleKg: latest ? latest.skeletalMuscleKg : null,
     setWeightKg: (v) => { setManualWeight(v); setManualAt(new Date().toISOString()); }, setBodyFat: (v) => { setManualBodyFat(v); setManualAt(new Date().toISOString()); },
     scans: sorted, addScan: (s) => { setScans((p) => [...p, s]); if (s.metrics && Object.values(s.metrics).some((v) => v != null)) { setScanMetrics((prev) => { const nm = { ...prev, [s.takenAt.slice(0, 10)]: s.metrics! }; AsyncStorage.setItem('repple.scanMetrics', JSON.stringify(nm)).catch(() => {}); return nm; }); } setManualWeight(null); setManualBodyFat(null); if (USE_SUPABASE && sbUid) { try { supabase.from('scans').insert({ client_id: sbUid, taken_at: String(s.takenAt).slice(0, 10), weight_kg: s.weightKg, body_fat_pct: s.bodyFatPct, skeletal_muscle_kg: s.skeletalMuscleKg, source: s.source }).select('id').single().then((res: any) => { const rid = res && res.data && res.data.id; if (rid && s.metrics && Object.values(s.metrics).some((v) => v != null)) { supabase.from('scans').update({ metrics: s.metrics }).eq('id', rid).then(() => {}, () => {}); } }, () => {}); } catch { /* ignore */ } } },
     weightSeries: [...sorted.map((s) => ({ t: s.takenAt, v: s.weightKg })), ...(manualIsCurrent && manualWeight != null ? [{ t: manualAt as string, v: manualWeight }] : [])],
