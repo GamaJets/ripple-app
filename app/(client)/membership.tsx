@@ -49,7 +49,7 @@ export default function Membership() {
   }, [log]);
 
   const actions: { label: string; note: string; icon: IconName; route: string; hero?: boolean }[] = [
-    { label: 'Entry barcode', note: 'Scan at the gym entrance', icon: 'grid', route: '/(client)/access', hero: true },
+    { label: 'Entry barcode', note: 'Your Repple ID — link it at reception', icon: 'grid', route: '/(client)/access', hero: true },
     { label: 'Classes', note: 'Book a group class at your branch', icon: 'calendar', route: '/(client)/classes' },
     { label: 'Personal training', note: 'Approve sessions your trainer delivered', icon: 'people', route: '/(client)/pt-sessions' },
     { label: 'My bookings', note: 'Everything you have booked', icon: 'check', route: '/(client)/bookings' },

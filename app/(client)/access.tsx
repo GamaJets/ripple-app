@@ -6,8 +6,11 @@
 // requirement, not a palette choice.
 //
 // The encoded number is `memberNoFrom(...)` — derived from the signed-in user and
-// stable for them. No gym billing system issues it, so a turnstile only accepts it
-// if the gym has been given the same number.
+// stable for them. No gym billing system issues it, so a turnstile will NOT open
+// on it unless the gym has been given this exact number and loaded it against the
+// member. The screen used to read "Hold this to the scanner at the gym entrance",
+// which promised a door that opens; it now says what the number is and what has
+// to happen before it works.
 import { useMemo } from 'react';
 import { View, Text, Pressable, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -34,7 +37,7 @@ export default function Access() {
           <Icon name="back" size={20} color="#fff" />
         </Pressable>
         <Text style={{ ...ty.title, color: '#fff', marginBottom: 4 }}>{c.name || 'Member'}</Text>
-        <Text style={{ ...ty.body, ...numeric, color: '#8a8a8a', marginBottom: sp.huge }}>Membership {memberNo}</Text>
+        <Text style={{ ...ty.body, ...numeric, color: '#8a8a8a', marginBottom: sp.huge }}>Repple ID {memberNo}</Text>
 
         <View style={{ backgroundColor: '#fff', borderRadius: radius.md, paddingVertical: sp.xl, paddingHorizontal: sp.xl, alignItems: 'center' }}>
           <View style={{ flexDirection: 'row', alignItems: 'stretch', height: 130 }}>
@@ -45,7 +48,7 @@ export default function Access() {
           <Text style={{ ...value(15), letterSpacing: 3, color: '#000', marginTop: sp.md }}>{memberNo}</Text>
         </View>
 
-        <Text style={{ ...ty.label, color: '#8a8a8a', textAlign: 'center', marginTop: sp.xxl }}>Hold this to the scanner at the gym entrance.{'\n'}Turn your screen brightness up for a clean read.</Text>
+        <Text style={{ ...ty.label, color: '#8a8a8a', textAlign: 'center', marginTop: sp.xxl }}>This is your Repple ID, not a membership number your gym issued.{'\n'}Give it to reception once and they can link it to your account — after that the entrance scanner will read it.{'\n'}Turn your screen brightness up for a clean read.</Text>
       </ScrollView>
     </SafeAreaView>
   );
