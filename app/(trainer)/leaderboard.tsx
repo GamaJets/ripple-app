@@ -26,7 +26,9 @@ export default function Leaderboard() {
   const scored = roster.map((c) => {
     const goalDown = /fat|tone/i.test(c.goal);
     const prog = goalDown ? -c.weightDelta : c.weightDelta;
-    const score = Math.round(c.adherence + Math.max(0, prog) * 4);
+    // A client with no check-ins contributes 0 adherence, not a phantom 100 -
+    // otherwise strangers outrank clients who are actually training.
+    const score = Math.round((c.adherence ?? 0) + Math.max(0, prog) * 4);
     return { c, score };
   }).sort((a, b) => b.score - a.score);
 

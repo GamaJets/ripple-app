@@ -17,9 +17,12 @@ interface FoodLogValue {
 }
 
 let SEQ = 300;
-const SEED: FoodEntry[] = [
-  { id: 'fl0', name: 'Greek Yogurt (200g)', kcal: 130, protein: 20, carbs: 9, fat: 4, via: 'search' },
-];
+// Empty. This held a 130 kcal Greek yogurt marked "via search" that counted
+// into the day's macro rings on every launch. The Supabase hydration below only
+// clears it on the happy path — signed out, offline, or on any query error the
+// early return left the seed standing, so a meal nobody ate was reported as
+// eaten.
+const SEED: FoodEntry[] = [];
 
 const startOfTodayISO = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.toISOString(); };
 const rowToEntry = (r: any): FoodEntry => ({
@@ -45,7 +48,7 @@ export function FoodLogProvider({ children }: { children: ReactNode }) {
           .eq('client_id', id).gte('logged_at', startOfTodayISO()).order('logged_at', { ascending: true });
         if (error || cancelled) return;
         setEntries(data && data.length ? data.map(rowToEntry) : []);
-      } catch { /* stay on seed */ }
+      } catch { /* leave the log empty rather than inventing entries */ }
     })();
     return () => { cancelled = true; };
   }, []);

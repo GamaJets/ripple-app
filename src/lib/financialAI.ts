@@ -77,7 +77,11 @@ export function reviewFinances(f: FinInputs): FinReview {
   if (recurringShare >= 70) strengths.push({ tone: 'good', title: `${recurringShare.toFixed(0)}% recurring revenue`, detail: `Predictable membership income de-risks the business.` });
   if (f.ptRevenue + f.classRevenue < f.revenue * 0.15) improvements.push({ tone: 'watch', title: `Ancillary revenue is light`, detail: `PT + classes are only ${money(f.ptRevenue + f.classRevenue)}/mo. Promote packs and premium classes to members already in the door — high margin, low cost.` });
 
-  const summary = grade >= 'A' || grade === 'A'
+  // `grade >= 'A'` was a string comparison, and every grade from A to E sorts at
+  // or above 'A' — so this branch always won and the two honest summaries below
+  // were dead code. A gym on grade E read "in strong financial health (E) …
+  // low churn and positive growth" with its own bad numbers spliced in.
+  const summary = score >= 85
     ? `Your gym is in strong financial health (${grade}). ${money(netProfit)}/mo profit on a ${marginPct.toFixed(0)}% margin, low churn and positive growth. Keep protecting retention and reinvest into what's working.`
     : score >= 55
     ? `Solid but improvable (${grade}). The business is profitable at ${money(netProfit)}/mo, but ${churnPct > 4 ? 'churn' : 'margin'} is the lever to pull next. Focus there and the score climbs quickly.`

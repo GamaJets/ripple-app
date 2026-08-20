@@ -6,7 +6,10 @@
 // injuries, which shipped in the production bundle.
 export interface RosterClient {
   id: string; name: string; goal: string; weightDelta: number;
-  adherence: number; lastActive: string; next: string; unread: number;
+  /** null = this client has never submitted a check-in. It used to default to
+   *  100, so a client nobody knew anything about scored a perfect adherence
+   *  and could never be flagged at risk. */
+  adherence: number | null; lastActive: string; next: string; unread: number;
   mode: 'online' | 'inperson';
   injuries?: { area: string; severity: string; note?: string; isNew?: boolean }[];
   metrics?: import('./inbodyMetrics').ScanMetrics;
@@ -19,7 +22,7 @@ export interface ExVideo { id: string; name: string; group: string; dur: string;
 
 // Shared "at-risk" definition so every trainer screen agrees (adherence low OR inactive 2+ days).
 export function staleDays(str: string): number { const m = /([0-9]+)d/.exec(str || ''); return m ? parseInt(m[1], 10) : 0; }
-export function atRiskClient(c: { adherence: number; lastActive: string }): boolean { return c.adherence < 80 || staleDays(c.lastActive) >= 2; }
+export function atRiskClient(c: { adherence: number | null; lastActive: string }): boolean { return (c.adherence != null && c.adherence < 80) || staleDays(c.lastActive) >= 2; }
 // Built-in exercise library. Each ships with a real proper-form demo (opens
 // relevant videos so the row is never a dead end); a trainer replaces any of
 // these with their own recorded clip from the Videos screen.

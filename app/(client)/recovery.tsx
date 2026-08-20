@@ -78,8 +78,12 @@ export default function Recovery() {
  const whoopMetrics = wear.metrics?.whoop ?? null;
  const zoneSeconds = hr.source === 'apple' ? null : (whoopMetrics?.zoneSeconds ?? null);
  const hrSource: 'apple' | 'whoop' | null = hr.source === 'apple' ? 'apple' : (zoneSeconds ? 'whoop' : null);
- const [hrs, setHrs] = useState('7.5');
- const [q, setQ] = useState(4);
+ // Empty, not pre-filled. These used to start at 7.5 hours / quality 4, so
+ // tapping Log sleep without touching either control filed a night the client
+ // never had - which then became their sleep average and fed the readiness
+ // score on the home screen.
+ const [hrs, setHrs] = useState('');
+ const [q, setQ] = useState(0);
  const [openRoutine, setOpenRoutine] = useState<number | null>(0);
 
  const avgSleep = sleep.length ? (sleep.reduce((a, s) => a + s.hours, 0) / sleep.length).toFixed(1) : '—';
@@ -146,7 +150,7 @@ export default function Recovery() {
     ))}
    </View>
    <View style={{ height: sp.md }} />
-   <Cta label="Log sleep" wide onPress={() => addSleep(parseFloat(hrs) || 0, q)} />
+   <Cta label="Log sleep" wide disabled={!(parseFloat(hrs) > 0) || q < 1} onPress={() => { addSleep(parseFloat(hrs) || 0, q); setHrs(''); setQ(0); }} />
    {sleep.length === 0 ? (
     <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.lg }}>No nights logged yet — log one above and your average appears here.</Text>
    ) : null}

@@ -214,16 +214,16 @@ export default function TrainerClients() {
   };
   // Who needs proactive attention, and why — drives the suggested check-ins.
   const attnReason = (c: RosterClient): string | null => {
-    if (atRiskClient(c)) return c.adherence < 80 ? 'Adherence ' + c.adherence + '% — below target' : 'Inactive ' + c.lastActive + ' — check in';
+    if (atRiskClient(c)) return (c.adherence != null && c.adherence < 80) ? 'Adherence ' + c.adherence + '% — below target' : 'Inactive ' + c.lastActive + ' — check in';
     if (c.unread > 0) return c.unread + ' unread message' + (c.unread > 1 ? 's' : '');
     return null;
   };
-  const needsAttention = roster.filter((c) => attnReason(c)).sort((a, b) => a.adherence - b.adherence);
+  const needsAttention = roster.filter((c) => attnReason(c)).sort((a, b) => (a.adherence ?? 999) - (b.adherence ?? 999));
   // AI-draft a personalised check-in the coach reviews before sending.
   const draftNudge = async (client: RosterClient) => {
     setDraftClient(client); setDraftText(''); setDraftBusy(true);
     const reason = attnReason(client) || 'general check-in';
-    const ctx = { name: client.name, goal: client.goal, adherence: client.adherence + '%', reason };
+    const ctx = { name: client.name, goal: client.goal, adherence: client.adherence != null ? client.adherence + '%' : 'no check-ins yet', reason };
     const reply = await askCoach([{ role: 'user', content: 'Draft a short, warm, personalised check-in message (2-3 sentences) I can send to this client as their coach. Reason for reaching out: ' + reason + '. Encourage them, reference their goal, and invite a reply. Write only the message, no preamble.' }], ctx);
     setDraftBusy(false);
     setDraftText(reply || ('Hey ' + client.name.split(' ')[0] + ' — checking in on how your week is going. You are working toward ' + client.goal.toLowerCase() + ', and I am here to help. What can I do to make this week easier?'));
@@ -251,7 +251,7 @@ export default function TrainerClients() {
     setAiBusy(true); setAiSummary('');
     const m = client.metrics;
     const compStr = m ? [m.visceralFat != null ? 'visceral fat ' + m.visceralFat : '', m.inbodyScore != null ? 'InBody score ' + m.inbodyScore : '', m.leanMassKg != null ? 'lean mass ' + m.leanMassKg + 'kg' : '', m.fatMassKg != null ? 'fat mass ' + m.fatMassKg + 'kg' : '', (m.leanArmLKg != null && m.leanArmRKg != null && Math.abs(m.leanArmLKg - m.leanArmRKg) / Math.max(m.leanArmLKg, m.leanArmRKg) >= 0.1) ? 'arm imbalance' : '', (m.leanLegLKg != null && m.leanLegRKg != null && Math.abs(m.leanLegLKg - m.leanLegRKg) / Math.max(m.leanLegLKg, m.leanLegRKg) >= 0.1) ? 'leg imbalance' : ''].filter(Boolean).join(', ') : '';
-    const ctx = { name: client.name, goal: client.goal, adherence: client.adherence + '%', recentMeals: clientMeals.map((mm) => mm.name).join(', ') || 'no meals logged yet', composition: compStr || 'no InBody scan yet' };
+    const ctx = { name: client.name, goal: client.goal, adherence: client.adherence != null ? client.adherence + '%' : 'no check-ins yet', recentMeals: clientMeals.map((mm) => mm.name).join(', ') || 'no meals logged yet', composition: compStr || 'no InBody scan yet' };
     const reply = await askCoach([{ role: 'user', content: 'Write a concise 3-4 sentence weekly coaching summary for this client: what is going well, one concern to watch, and one focus for next week. Use their adherence, recent meals and InBody composition where available.' }], ctx);
     setAiBusy(false);
     setAiSummary(reply || 'Could not generate a summary right now — the AI backend may be unavailable.');
@@ -484,9 +484,9 @@ export default function TrainerClients() {
               <View style={{ marginTop: sp.md }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
                   <Text style={{ ...ty.caption, color: t.ink3 }}>Plan adherence</Text>
-                  <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{c.adherence}%</Text>
+                  <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{c.adherence != null ? c.adherence + '%' : 'no check-ins yet'}</Text>
                 </View>
-                <Bar t={t} pct={c.adherence} good={c.adherence >= 85} />
+                {c.adherence != null ? <Bar t={t} pct={c.adherence} good={c.adherence >= 85} /> : null}
               </View>
             </Pressable>
           ))}
@@ -501,7 +501,7 @@ export default function TrainerClients() {
           {sel && (
             <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 30 }} showsVerticalScrollIndicator={false}>
               <Text style={{ ...ty.title, color: t.ink, textTransform: 'capitalize' }}>{sel.name}</Text>
-              <Text style={{ ...ty.label, color: t.ink3, marginTop: 3, marginBottom: sp.xl }}>{sel.goal} · {sel.weightDelta > 0 ? '+' : ''}{sel.weightDelta} kg · {sel.adherence}% adherence</Text>
+              <Text style={{ ...ty.label, color: t.ink3, marginTop: 3, marginBottom: sp.xl }}>{sel.goal} · {sel.weightDelta > 0 ? '+' : ''}{sel.weightDelta} kg · {sel.adherence != null ? sel.adherence + '% adherence' : 'no check-ins yet'}</Text>
 
               <View style={{ marginBottom: sp.xl }}>
                 <SheetHead t={t} title="Delivery" />

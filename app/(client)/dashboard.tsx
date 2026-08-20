@@ -53,10 +53,15 @@ export default function Home() {
   const { water, waterGoal, addWater, removeWater } = useHabits();
   const { sleep } = useWellness();
   const _recentSleep = sleep.slice(0, 3);
-  const _avgSleep = _recentSleep.length ? _recentSleep.reduce((a, x) => a + x.hours, 0) / _recentSleep.length : 7;
+  // No sleep logged means no readiness score. This used to fall back to 7 hours,
+  // which awards 43.75 of the 50 sleep points - so a brand-new account with zero
+  // inputs opened on ~64/100 'Moderately recovered' and a tip telling them how to
+  // train, all of it computed from a literal.
+  const _avgSleep = _recentSleep.length ? _recentSleep.reduce((a, x) => a + x.hours, 0) / _recentSleep.length : null;
+  const _hasReadiness = _avgSleep != null;
   const _since2d = Date.now() - 2 * 86400000;
   const _load2d = new Set(log.filter((e) => Date.parse(e.t) >= _since2d).map((e) => e.t.slice(0, 10))).size;
-  const readiness = readinessScore({ avgSleepHours: _avgSleep, hydrationPct: waterGoal ? water / waterGoal : 0, workoutsLast2Days: _load2d });
+  const readiness = readinessScore({ avgSleepHours: _avgSleep ?? 0, hydrationPct: waterGoal ? water / waterGoal : 0, workoutsLast2Days: _load2d });
   const readinessColor = readiness.tone === 'good' ? t.brand : readiness.tone === 'moderate' ? t.warn : t.crit;
   const [needsOnboard, setNeedsOnboard] = useState(false);
   useFocusEffect(useCallback(() => { let c = false; (async () => { try { const v = await AsyncStorage.getItem(ONBOARD_KEY); if (!c) setNeedsOnboard(!v); } catch { /* ignore */ } })(); return () => { c = true; }; }, []));
@@ -202,11 +207,11 @@ export default function Home() {
         {/* ── the hero: one number leads the screen ───────────────────────── */}
         <Hero
           label="Readiness"
-          figure={String(readiness.score)}
-          unit="/100"
-          note={readiness.tip}
-          arc={readiness.score / 100}
-          tone={readinessColor}
+          figure={_hasReadiness ? String(readiness.score) : '—'}
+          unit={_hasReadiness ? '/100' : undefined}
+          note={_hasReadiness ? readiness.tip : 'Log a night of sleep to see your readiness.'}
+          arc={_hasReadiness ? readiness.score / 100 : undefined}
+          tone={_hasReadiness ? readinessColor : undefined}
           onPress={() => router.push('/(client)/recovery')}
         />
 

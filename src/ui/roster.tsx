@@ -43,7 +43,7 @@ export function RosterProvider({ children }: { children: ReactNode }) {
         let manual: RosterClient[] = [];
         try {
           const { data: mc } = await supabase.from('coach_clients').select('id, name, goal, mode, created_at').eq('trainer_id', uid).order('created_at', { ascending: true });
-          manual = (mc || []).map((r: any) => ({ id: r.id, name: r.name, goal: r.goal || 'General', weightDelta: 0, adherence: 100, lastActive: 'added by you', next: '—', unread: 0, mode: (r.mode === 'inperson' ? 'inperson' : 'online') as 'online' | 'inperson' }));
+          manual = (mc || []).map((r: any) => ({ id: r.id, name: r.name, goal: r.goal || 'General', weightDelta: 0, adherence: null, lastActive: 'added by you', next: '—', unread: 0, mode: (r.mode === 'inperson' ? 'inperson' : 'online') as 'online' | 'inperson' }));
         } catch { /* table may not exist yet */ }
         const { data: cls, error } = await supabase.from('clients').select('id, goal, diet, meals_per_day, avoid, mode').eq('trainer_id', uid);
         if (cancelled) return;
@@ -75,7 +75,7 @@ export function RosterProvider({ children }: { children: ReactNode }) {
             st[r.user_id].adh = Math.round((Math.max(1, Math.min(5, r.adherence)) / 5) * 100); } } });
         } catch { /* ignore */ }
         const goalMap: Record<string, string> = { fatloss: 'Fat loss', tone: 'Tone', muscle: 'Build muscle' };
-        const real: RosterClient[] = cls.map((c: any) => { const sc = st[c.id]; return { id: c.id, name: names[c.id] || 'Client', goal: goalMap[c.goal] || 'General', weightDelta: sc.wDelta, adherence: sc.adh != null ? sc.adh : 100, lastActive: sc.last ? ago(sc.last) : 'recently', next: '—', unread: 0, mode: (c.mode === 'inperson' ? 'inperson' : 'online') as 'online' | 'inperson', metrics: sc.mx ?? undefined, diet: c.diet ?? undefined, mealsPerDay: c.meals_per_day ?? undefined, avoid: Array.isArray(c.avoid) ? c.avoid : undefined }; });
+        const real: RosterClient[] = cls.map((c: any) => { const sc = st[c.id]; return { id: c.id, name: names[c.id] || 'Client', goal: goalMap[c.goal] || 'General', weightDelta: sc.wDelta, adherence: sc.adh != null ? sc.adh : null, lastActive: sc.last ? ago(sc.last) : 'no activity yet', next: '—', unread: 0, mode: (c.mode === 'inperson' ? 'inperson' : 'online') as 'online' | 'inperson', metrics: sc.mx ?? undefined, diet: c.diet ?? undefined, mealsPerDay: c.meals_per_day ?? undefined, avoid: Array.isArray(c.avoid) ? c.avoid : undefined }; });
         if (!cancelled) setRoster([...real, ...manual]);
       } catch { /* stay on demo roster */ }
     })();
@@ -85,7 +85,7 @@ export function RosterProvider({ children }: { children: ReactNode }) {
     const n = name.trim();
     if (!n) return;
     const localId = `c${SEQ++}`;
-    setRoster((p) => [...p, { id: localId, name: n, goal, weightDelta: 0, adherence: 100, lastActive: 'just added', next: '—', unread: 0, mode }]);
+    setRoster((p) => [...p, { id: localId, name: n, goal, weightDelta: 0, adherence: null, lastActive: 'just added', next: '—', unread: 0, mode }]);
     // Durable: persist to coach_clients so the roster survives restarts/devices.
     if (USE_SUPABASE && uid) {
       try {

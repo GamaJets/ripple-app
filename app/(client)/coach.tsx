@@ -43,10 +43,12 @@ export default function Coach() {
   const { log } = useWorkoutLog();
   const { consumed } = useFoodLog();
   const _recentSleep = sleep.slice(0, 3);
-  const _avgSleep = _recentSleep.length ? _recentSleep.reduce((a, x) => a + x.hours, 0) / _recentSleep.length : 7;
+  // null, not 7 - the coach was being told a readiness score derived from a
+  // sleep figure nobody recorded, and repeating it back as fact.
+  const _avgSleep = _recentSleep.length ? _recentSleep.reduce((a, x) => a + x.hours, 0) / _recentSleep.length : null;
   const _since2d = Date.now() - 2 * 86400000;
   const _load2d = new Set(log.filter((e) => Date.parse(e.t) >= _since2d).map((e) => e.t.slice(0, 10))).size;
-  const _readiness = readinessScore({ avgSleepHours: _avgSleep, hydrationPct: waterGoal ? water / waterGoal : 0, workoutsLast2Days: _load2d });
+  const _readiness = _avgSleep == null ? null : readinessScore({ avgSleepHours: _avgSleep, hydrationPct: waterGoal ? water / waterGoal : 0, workoutsLast2Days: _load2d });
   const _streak = currentStreak(log);
   const _lastEx = log.length ? log[0].exercise : '';
   const _prog = suggestProgression(log)[0];
@@ -55,7 +57,7 @@ export default function Coach() {
     bodyFatPct: cd.bodyFatPct, muscleKg: cd.muscleKg, mealsPerDay: cd.mealsPerDay,
     kcal: macros.kcal, protein: macros.protein, carbs: macros.carbs, fat: macros.fat,
     programTitle: program.title, programFocus: program.focus.join(', '),
-    readiness: `${_readiness.score}/100 (${_readiness.label})`,
+    readiness: _readiness ? `${_readiness.score}/100 (${_readiness.label})` : 'not enough data',
     eatenToday: `${consumed.kcal}/${macros.kcal} kcal, protein ${consumed.protein}/${macros.protein}g`,
     streak: _streak,
     lastTrained: _lastEx || undefined,

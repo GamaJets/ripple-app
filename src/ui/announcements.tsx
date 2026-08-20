@@ -1,12 +1,21 @@
 // Coach announcements — a broadcast the trainer sends to all their clients.
-// Clients see the latest on their dashboard. Reactive, seeded for the demo.
+// Clients see the latest on their dashboard.
+//
+// The seed is empty. It used to contain a fabricated message ("New week, new
+// PRs 💪 Gym reformer class added Thursdays 6pm — book from your calendar"),
+// timestamped a day ago, shown under a "From your coach" heading with an unread
+// dot. No trainer wrote it and no such class existed. Because clientData
+// defaults coachingMode to 'online', it reached every client, including those
+// with no coach at all.
+//
+// Note this store is in-memory only: a trainer's real announcement does not
+// reach any other device. That is a separate gap, tracked, and no longer
+// papered over by a fake one.
 import { createContext, useContext, useState, type ReactNode } from 'react';
 
 export interface Announcement { id: string; at: string; body: string }
 let SEQ = 1;
-const seed: Announcement[] = [
-  { id: 'a0', at: new Date(Date.now() - 1 * 86400000).toISOString(), body: 'New week, new PRs 💪 Gym reformer class added Thursdays 6pm — book from your calendar.' },
-];
+const seed: Announcement[] = [];
 
 interface AnnValue { announcements: Announcement[]; latest: Announcement | null; addAnnouncement: (body: string) => void }
 const Ctx = createContext<AnnValue | null>(null);

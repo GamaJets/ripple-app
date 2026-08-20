@@ -37,12 +37,16 @@ export default function TrainerAnalytics() {
   const platformFee = 99;
   const net = revenue - platformFee;
   const valuePerClient = clients ? Math.round(revenue / clients) : 0;
-  const avgAdh = clients ? Math.round(roster.reduce((a, c) => a + c.adherence, 0) / clients) : 0;
+  // Average over clients who have actually checked in. Averaging a null-as-100
+  // default meant a roster of strangers reported 100% adherence.
+  const _adhKnown = roster.map((c) => c.adherence).filter((a): a is number => a != null);
+  const avgAdh = _adhKnown.length ? Math.round(_adhKnown.reduce((a, x) => a + x, 0) / _adhKnown.length) : 0;
   const estTenureMonths = Math.max(3, Math.min(24, Math.round(6 + (avgAdh - 70) / 10 * 3)));
   const estLtv = valuePerClient * estTenureMonths;
-  const onTrack = roster.filter((c) => c.adherence >= 85).length;
-  const watch = roster.filter((c) => c.adherence >= 70 && c.adherence < 85).length;
-  const riskCount = roster.filter((c) => c.adherence < 70).length;
+  // Clients with no check-in are counted as unknown, not as on-track.
+  const onTrack = roster.filter((c) => c.adherence != null && c.adherence >= 85).length;
+  const watch = roster.filter((c) => c.adherence != null && c.adherence >= 70 && c.adherence < 85).length;
+  const riskCount = roster.filter((c) => c.adherence != null && c.adherence < 70).length;
   const atRiskRevenue = atRisk.length * sessionFee * 4;
   const { goals, setGoals } = useTrainerGoals();
   const [goalOpen, setGoalOpen] = useState(false);
@@ -215,11 +219,11 @@ export default function TrainerAnalytics() {
               flexDirection: 'row', alignItems: 'center', paddingVertical: sp.md,
               borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
             }}>
-              <View style={{ width: 6, height: 6, borderRadius: 3, marginRight: sp.md, backgroundColor: c.adherence < 82 ? t.crit : t.warn }} />
+              <View style={{ width: 6, height: 6, borderRadius: 3, marginRight: sp.md, backgroundColor: (c.adherence != null && c.adherence < 82) ? t.crit : t.warn }} />
               <View style={{ flex: 1 }}>
                 <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{c.name}</Text>
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
-                  {c.adherence < 82 ? 'Low adherence' : 'Inactive'} · {c.adherence}% · last active {c.lastActive}
+                  {(c.adherence != null && c.adherence < 82) ? `Low adherence · ${c.adherence}%` : 'Inactive'} · last active {c.lastActive}
                 </Text>
               </View>
             </View>
