@@ -206,11 +206,25 @@ export default function TrainerClients() {
     : seg === 'inperson' ? c.mode === 'inperson'
     : tagsFor(c.id).includes(seg);
   const shownRoster = roster.filter(matchSeg);
-  const sendNudge = (client: RosterClient) => {
+  // Awaits the insert and reports what actually happened. This used to be
+  // fire-and-forget with both handlers empty, and the alert fired synchronously
+  // regardless — so a client added by hand (a coach_clients row with no user
+  // account behind it) got "Nudge sent" while the insert failed on the foreign
+  // key and no push had anywhere to go.
+  const deliverMessage = async (client: RosterClient, body: string, pushTitle: string): Promise<{ ok: boolean; error?: string }> => {
+    try {
+      const { error } = await supabase.from('messages').insert({ client_id: client.id, sender: 'coach', body });
+      if (error) return { ok: false, error: error.message };
+    } catch (e: any) { return { ok: false, error: e?.message || 'Could not reach the server.' }; }
+    try { supabase.functions.invoke('send-push', { body: { user_ids: [client.id], title: pushTitle, body, data: { route: '/(client)/messages' } } }).then(() => {}, () => {}); } catch { /* the message is saved; the push is a bonus */ }
+    return { ok: true };
+  };
+  const sendNudge = async (client: RosterClient) => {
     const body = 'Hey ' + client.name.split(' ')[0] + ' — checking in! How is your week going? Let me know if you need anything.';
-    try { supabase.from('messages').insert({ client_id: client.id, sender: 'coach', body }).then(() => {}, () => {}); } catch { /* ignore */ }
-    try { supabase.functions.invoke('send-push', { body: { user_ids: [client.id], title: 'A nudge from your coach', body, data: { route: '/(client)/messages' } } }).then(() => {}, () => {}); } catch { /* ignore */ }
-    Alert.alert('Nudge sent', 'A check-in message was sent to ' + client.name.split(' ')[0] + '.');
+    const r = await deliverMessage(client, body, 'A nudge from your coach');
+    Alert.alert(r.ok ? 'Nudge sent' : 'Not sent',
+      r.ok ? 'Saved to your thread with ' + client.name.split(' ')[0] + '. They will see it next time they open Repple.'
+           : 'Could not send to ' + client.name.split(' ')[0] + ': ' + (r.error || 'unknown error') + '. Clients you added by hand cannot receive messages until they join.');
   };
   // Who needs proactive attention, and why — drives the suggested check-ins.
   const attnReason = (c: RosterClient): string | null => {
@@ -228,24 +242,33 @@ export default function TrainerClients() {
     setDraftBusy(false);
     setDraftText(reply || ('Hey ' + client.name.split(' ')[0] + ' — checking in on how your week is going. You are working toward ' + client.goal.toLowerCase() + ', and I am here to help. What can I do to make this week easier?'));
   };
-  const sendDraft = () => {
+  const sendDraft = async () => {
     const client = draftClient; const body = draftText.trim();
     if (!client || !body) return;
-    try { supabase.from('messages').insert({ client_id: client.id, sender: 'coach', body }).then(() => {}, () => {}); } catch { /* ignore */ }
-    try { supabase.functions.invoke('send-push', { body: { user_ids: [client.id], title: 'A note from your coach', body, data: { route: '/(client)/messages' } } }).then(() => {}, () => {}); } catch { /* ignore */ }
+    const r = await deliverMessage(client, body, 'A note from your coach');
+    if (!r.ok) { Alert.alert('Not sent', 'Could not send to ' + client.name.split(' ')[0] + ': ' + (r.error || 'unknown error') + '. Your draft is still here.'); return; }
     setDraftClient(null); setDraftText('');
-    Alert.alert('Sent', 'Your check-in was sent to ' + client.name.split(' ')[0] + '.');
+    Alert.alert('Sent', 'Saved to your thread with ' + client.name.split(' ')[0] + '.');
   };
   const bulkMessage = () => {
     const list = shownRoster;
     if (!list.length) return;
-    Alert.alert('Message ' + list.length + ' clients?', 'Send a check-in nudge to everyone in this segment.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Send', onPress: () => { list.forEach((c) => sendNudge(c)); } }]);
+    Alert.alert('Message ' + list.length + ' clients?', 'Send a check-in nudge to everyone in this segment.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Send', onPress: () => { (async () => {
+      const results = await Promise.all(list.map((c) => deliverMessage(c, 'Hey ' + c.name.split(' ')[0] + ' — checking in! How is your week going? Let me know if you need anything.', 'A nudge from your coach')));
+      const sent = results.filter((r) => r.ok).length;
+      const failed = results.length - sent;
+      Alert.alert(failed ? 'Partly sent' : 'Sent', failed ? sent + ' of ' + results.length + ' went through. ' + failed + ' could not be delivered — clients added by hand cannot receive messages until they join.' : 'Sent to all ' + sent + '.');
+    })(); } }]);
   };
-  const bulkAssign = (tpl: any) => {
+  const bulkAssign = async (tpl: any) => {
     const list = shownRoster;
-    list.forEach((c) => assignProgram(c.id, tpl.program));
+    const results = await Promise.all(list.map((c) => assignProgram(c.id, tpl.program)));
+    const okCount = results.filter(Boolean).length;
     setBulkTplOpen(false);
-    Alert.alert('Assigned', '"' + tpl.name + '" assigned to ' + list.length + ' client' + (list.length > 1 ? 's' : '') + ' in this segment.');
+    Alert.alert(okCount === list.length ? 'Assigned' : 'Partly assigned',
+      okCount === list.length
+        ? '"' + tpl.name + '" assigned to ' + list.length + ' client' + (list.length > 1 ? 's' : '') + ' in this segment.'
+        : okCount + ' of ' + list.length + ' saved. The rest are on this device only — clients you added by hand have no Train tab until they join.');
   };
   const genSummary = async (client: RosterClient) => {
     setAiBusy(true); setAiSummary('');
@@ -767,7 +790,7 @@ export default function TrainerClients() {
             <View style={{ flexDirection: 'row', gap: sp.md }}>
               <View style={{ flex: 1 }}><Ghost label="Cancel" onPress={() => setAddOpen(false)} /></View>
               <View style={{ flex: 2 }}>
-                <Cta label="Add client" wide onPress={() => { if (!newName.trim()) { Alert.alert('Add a name', 'Enter the client name.'); return; } addClient(newName, newGoal, newMode); const em = newEmail.trim(); const invited = !!em && em.includes('@'); if (invited) { sendInvite(em, newMode); } setAddOpen(false); Alert.alert('Client added', invited ? newName.trim() + ' is on your roster and an invite was sent to ' + em + '. They link to you through the app when they accept.' : newName.trim() + ' is now on your roster.', [{ text: 'Great' }]); }} />
+                <Cta label="Add client" wide onPress={() => { if (!newName.trim()) { Alert.alert('Add a name', 'Enter the client name.'); return; } addClient(newName, newGoal, newMode); const em = newEmail.trim(); const invited = !!em && em.includes('@'); if (invited) { sendInvite(em, newMode); } setAddOpen(false); Alert.alert('Client added', invited ? newName.trim() + ' is on your roster. Repple does not send email — ' + em + ' is recorded as an invite, and they link to you the first time they sign in to Repple with that address. Tell them yourself so they know to install it.' : newName.trim() + ' is now on your roster.', [{ text: 'Great' }]); }} />
               </View>
             </View>
           </View>

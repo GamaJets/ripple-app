@@ -9,7 +9,11 @@ import { USE_SUPABASE } from '../lib/config';
 interface AssignedProgramsValue {
   programs: Record<string, Program>;
   getProgram: (clientId: string) => Program | null;
-  assignProgram: (clientId: string, program: Program) => void;
+  /** Resolves true only when the assignment reached the server. Three screens
+   *  told the coach "they'll see it on their Train tab" off a fire-and-forget
+   *  upsert whose rejection handler was empty, and which was skipped entirely
+   *  when uid was still null. */
+  assignProgram: (clientId: string, program: Program) => Promise<boolean>;
   clearProgram: (clientId: string) => void;
 }
 
@@ -37,9 +41,13 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
   }, []);
 
   const getProgram = (clientId: string) => programs[clientId] ?? null;
-  const assignProgram = (clientId: string, program: Program) => {
+  const assignProgram = async (clientId: string, program: Program): Promise<boolean> => {
     setPrograms((p) => ({ ...p, [clientId]: program }));
-    if (USE_SUPABASE && uid) { try { supabase.from('assigned_programs').upsert({ client_id: clientId, coach_id: uid, program }, { onConflict: 'client_id' }).then(() => {}, () => {}); } catch { /* ignore */ } }
+    if (!USE_SUPABASE || !uid) return false;
+    try {
+      const { error } = await supabase.from('assigned_programs').upsert({ client_id: clientId, coach_id: uid, program }, { onConflict: 'client_id' });
+      return !error;
+    } catch { return false; }
   };
   const clearProgram = (clientId: string) => {
     setPrograms((p) => { const n = { ...p }; delete n[clientId]; return n; });

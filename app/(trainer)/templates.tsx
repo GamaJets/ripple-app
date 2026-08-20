@@ -31,13 +31,16 @@ export default function Templates() {
 
   const openAssign = (tpl: ProgramTemplate) => { setPicked({}); setAssignTpl(tpl); };
   const pickedIds = Object.keys(picked).filter((k) => picked[k]);
-  const doAssign = () => {
+  const doAssign = async () => {
     if (!assignTpl || pickedIds.length === 0) return;
-    pickedIds.forEach((id) => assignProgram(id, assignTpl.program));
+    const results = await Promise.all(pickedIds.map((id) => assignProgram(id, assignTpl.program)));
+    const okCount = results.filter(Boolean).length;
     notifySuccess();
     const tpl = assignTpl; const n = pickedIds.length;
     setAssignTpl(null);
-    Alert.alert('Assigned', `“${tpl.name}” assigned to ${n} client${n > 1 ? 's' : ''}. They'll see it on their Train tab.`);
+    Alert.alert(okCount === n ? 'Assigned' : 'Partly assigned', okCount === n
+      ? `“${tpl.name}” assigned to ${n} client${n > 1 ? 's' : ''}. They'll see it on their Train tab.`
+      : `${okCount} of ${n} saved. The rest are on this device only — clients you added by hand have no Train tab until they join.`);
   };
 
   const dayCount = (tpl: ProgramTemplate) => tpl.program.days.length;

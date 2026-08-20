@@ -32,7 +32,7 @@ export default function OwnerOverview() {
   const t = useTheme(); const router = useRouter();
   const { trainers, activeMrr } = usePlatformTrainers();
   const roll = platformRollup(trainers as TrainerLike[]);
-  const { series, labels, delta } = useMrrHistory(activeMrr);
+  const { series, labels, delta, months } = useMrrHistory(activeMrr);
   const [sel, setSel] = useState<TrainerLike | null>(null);
 
   const byPlan = PLANS.map((p) => ({ name: p.name, revenue: trainers.filter((x) => x.plan === p.name && x.status !== 'suspended').reduce((a, x) => a + x.mrr, 0), clients: trainers.filter((x) => x.plan === p.name).reduce((a, x) => a + x.clients, 0) }));
@@ -152,12 +152,18 @@ export default function OwnerOverview() {
           <SectionHead title="MRR trend"
             note={delta !== 0 ? `${delta > 0 ? '+' : '−'}$${Math.abs(delta).toLocaleString()} vs last mo` : 'Tracking started'}
             onPress={() => router.push('/(owner)/revenue')} />
-          <Spark data={series} />
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: sp.sm }}>
-            {labels.map((l, i) => (
-              <Text key={i} style={{ ...ty.micro, letterSpacing: 0.4, color: t.ink3 }}>{l}</Text>
-            ))}
-          </View>
+          {months >= 2 ? (
+            <>
+              <Spark data={series.filter((v): v is number => v != null)} />
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: sp.sm }}>
+                {labels.map((l, i) => (
+                  <Text key={i} style={{ ...ty.micro, letterSpacing: 0.4, color: t.ink3 }}>{series[i] != null ? l : ''}</Text>
+                ))}
+              </View>
+            </>
+          ) : (
+            <Text style={{ ...ty.label, color: t.ink3 }}>Not enough history yet — a snapshot is recorded each month, and the trend appears from the second one.</Text>
+          )}
         </Section>
 
         <Rule />

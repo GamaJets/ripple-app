@@ -6,7 +6,10 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export interface TrainerGoals { revenue: number; clients: number }
 const KEY = 'repple.trainer.goals';
-const DEFAULT: TrainerGoals = { revenue: 4000, clients: 12 };
+// Zero means "not set". These used to default to $4,000 and 12 clients and
+// render under the heading "Your goals", with a progress arc on the hero, as
+// though the trainer had chosen them.
+const DEFAULT: TrainerGoals = { revenue: 0, clients: 0 };
 
 export function useTrainerGoals() {
   const [goals, setGoals] = useState<TrainerGoals>(DEFAULT);

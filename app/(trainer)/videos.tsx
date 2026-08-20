@@ -53,9 +53,11 @@ export default function TrainerVideos() {
       url = await uploadExerciseVideo(pendUri);
       if (!url) { setUpBusy(false); Alert.alert('Upload failed', 'Could not upload the clip right now. Check your connection and try again, or add it as a link.'); return; }
     }
-    await addVideo({ name: upName.trim() || 'Exercise clip', group: upGroup.trim() || 'Uncategorised', url: url || undefined });
+    const where = await addVideo({ name: upName.trim() || 'Exercise clip', group: upGroup.trim() || 'Uncategorised', url: url || undefined });
     setUpBusy(false); setPendUri(null);
-    Alert.alert('Clip added', videoUploadAvailable() ? 'Uploaded — your clients can watch it in their program on any device.' : 'Saved to your library on this device.');
+    Alert.alert('Clip added', where === 'remote'
+      ? 'Uploaded — your clients can watch it in their program on any device.'
+      : 'Saved to your library on this device only. It did not reach the server, so your clients cannot see it yet — try again when you have a connection.');
   };
 
   // Tap a clip's play button to watch it; tap a not-yet-recorded exercise to add one.

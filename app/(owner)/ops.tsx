@@ -73,10 +73,10 @@ export default function OwnerOps() {
           <View>
             <Section>
               <SectionHead title="New announcement" />
-              <TextInput value={text} onChangeText={setText} placeholder="Announcement to all trainers…" placeholderTextColor={t.ink3} multiline
+              <TextInput value={text} onChangeText={setText} placeholder="Note to self — this does not reach trainers yet…" placeholderTextColor={t.ink3} multiline
                 style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: sp.md, minHeight: 80, textAlignVertical: 'top', marginBottom: sp.md }} />
-              <Cta wide label="Send to all trainers"
-                onPress={() => { if (!text.trim()) { Alert.alert('Write something', 'Enter an announcement.'); return; } addAnn(text); setText(''); Alert.alert('Sent', 'All trainers will see this.'); }} />
+              <Cta wide label="Save announcement"
+                onPress={() => { if (!text.trim()) { Alert.alert('Write something', 'Enter an announcement.'); return; } addAnn(text); setText(''); Alert.alert('Noted', 'Saved to this device only — announcements do not reach trainers yet.'); }} />
             </Section>
 
             <Rule />

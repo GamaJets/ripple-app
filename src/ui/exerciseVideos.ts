@@ -33,7 +33,11 @@ export async function uploadExerciseVideo(uri: string): Promise<string | null> {
   } catch { return null; }
 }
 
-const rowToItem = (r: any): VideoItem => ({ id: 'db' + r.id, name: r.name, group: r.muscle_group || 'Uncategorised', dur: r.url ? 'clip' : 'link', uploaded: true, url: r.url || undefined });
+// `uploaded` means a client can actually open something. It was hardcoded true
+// for every item, so a library entry with no clip and no link still rendered
+// as "Live" and counted toward "N of M recorded" - the figure was always M of M
+// and the "not recorded yet" branch in videos.tsx was unreachable.
+const rowToItem = (r: any): VideoItem => ({ id: 'db' + r.id, name: r.name, group: r.muscle_group || 'Uncategorised', dur: r.url ? 'clip' : 'link', uploaded: !!r.url, url: r.url || undefined });
 
 export function useExerciseVideos() {
   const [added, setAdded] = useState<VideoItem[]>([]);
@@ -55,8 +59,11 @@ export function useExerciseVideos() {
     try { AsyncStorage.setItem(KEY, JSON.stringify(next)); } catch { /* ignore */ }
   };
 
-  const addVideo = async (v: { name: string; group?: string; url?: string }) => {
-    const name = (v.name || '').trim(); if (!name) return;
+  /** Returns where it landed: 'remote' is visible to clients on any device,
+   *  'local' is this phone only. videos.tsx used to announce the former in
+   *  both cases, because it branched on a build flag rather than the result. */
+  const addVideo = async (v: { name: string; group?: string; url?: string }): Promise<'remote' | 'local' | 'none'> => {
+    const name = (v.name || '').trim(); if (!name) return 'none';
     const group = (v.group || 'Uncategorised').trim() || 'Uncategorised';
     if (USE_SUPABASE) {
       try {
@@ -64,12 +71,13 @@ export function useExerciseVideos() {
         const uid = auth?.user?.id;
         if (uid) {
           const { data } = await supabase.from('exercise_videos').insert({ trainer_id: uid, name, muscle_group: group, url: v.url || null }).select().single();
-          if (data) { setRemote((p) => [rowToItem(data), ...p]); return; }
+          if (data) { setRemote((p) => [rowToItem(data), ...p]); return 'remote'; }
         }
       } catch { /* fall through to local */ }
     }
-    const item: VideoItem = { id: 'vx' + Date.now().toString(36) + SEQ++, name, group, dur: v.url ? 'link' : 'clip', uploaded: true, url: v.url?.trim() || undefined };
+    const item: VideoItem = { id: 'vx' + Date.now().toString(36) + SEQ++, name, group, dur: v.url ? 'link' : 'clip', uploaded: !!v.url?.trim(), url: v.url?.trim() || undefined };
     persist([item, ...added]);
+    return 'local';
   };
 
   const removeVideo = (id: string) => {

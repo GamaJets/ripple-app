@@ -126,9 +126,12 @@ export default function BroadcastSession() {
                   <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{p.name}</Text>
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{p.hint}</Text>
                 </View>
+                {/* socialConnected() only tests whether a build-time client id exists.
+                    It is not an OAuth session and no account is linked, so this used to
+                    read "Set up" in green while nothing could post. */}
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: connected ? t.good : t.ink3 }} />
-                  <Text style={{ ...ty.caption, color: t.ink2 }}>{connected ? 'Set up' : 'Not linked'}</Text>
+                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.ink3 }} />
+                  <Text style={{ ...ty.caption, color: t.ink2 }}>{connected ? 'Not linked yet' : 'Not available'}</Text>
                 </View>
               </Pressable>
             );

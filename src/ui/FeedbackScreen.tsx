@@ -32,7 +32,12 @@ export default function FeedbackScreen({ audience }: { audience: string }) {
     const ok = await submitAppFeedback(rating || 0, cat, body);
     setBusy(false);
     if (ok) notifySuccess();
-    Alert.alert(ok ? 'Thank you' : 'Saved', ok ? 'Your feedback went to the Repple team.' : 'Thanks - your feedback was recorded.', [{ text: 'Done', onPress: () => router.back() }]);
+    // The failure branch used to read "Saved - Thanks, your feedback was
+    // recorded." It was not recorded: ok===false means no signed-in user, a
+    // rejected insert, or a thrown error. The text was discarded and the screen
+    // popped, so it never reached the owner's Feedback inbox.
+    if (!ok) { Alert.alert('Not sent', 'Your feedback could not be saved just now — check your connection and try again. Your text is still here.'); return; }
+    Alert.alert('Thank you', 'Your feedback went to the Repple team.', [{ text: 'Done', onPress: () => router.back() }]);
   };
 
   return (

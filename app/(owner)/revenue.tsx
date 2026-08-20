@@ -31,12 +31,19 @@ export default function OwnerRevenue() {
   const router = useRouter();
   const { trainers } = usePlatformTrainers();
   const roll = platformRollup(trainers as TrainerLike[]);
-  const { series, labels, delta } = useMrrHistory(roll.mrr);
+  const { series, labels, delta, months } = useMrrHistory(roll.mrr);
 
   // Monthly growth rate from the accumulating history (geometric, clamped).
-  const first = series.find((v) => v > 0) ?? roll.mrr;
-  const n = series.length;
-  let growth = n >= 2 && first > 0 ? Math.pow(roll.mrr / first, 1 / (n - 1)) - 1 : 0;
+  // `n` is the number of months ACTUALLY recorded, not the window length. It
+  // used to be series.length, a constant 6, so two real snapshots were divided
+  // over a five-month base and four of the six inputs were back-filled copies
+  // of today's figure. With fewer than two real months there is no growth rate
+  // and no forecast — the screen says so instead of projecting a flat line.
+  const recorded = series.filter((v): v is number => v != null);
+  const first = recorded.find((v) => v > 0) ?? roll.mrr;
+  const n = months;
+  const canForecast = n >= 2 && first > 0;
+  let growth = canForecast ? Math.pow(roll.mrr / first, 1 / (n - 1)) - 1 : 0;
   growth = Math.max(-0.5, Math.min(0.5, growth));
   const forecast = Array.from({ length: 6 }, (_, i) => Math.round(roll.mrr * Math.pow(1 + growth, i + 1)));
 
@@ -94,28 +101,38 @@ export default function OwnerRevenue() {
         <Section>
           <SectionHead title="MRR trend"
             note={delta !== 0 ? `${delta > 0 ? '+' : '−'}${usd(Math.abs(delta))} vs last mo` : 'Tracking started'} />
-          <Spark data={series} />
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: sp.sm }}>
-            {labels.map((l, i) => (
-              <Text key={i} style={{ ...ty.micro, letterSpacing: 0.4, color: t.ink3 }}>{l}</Text>
-            ))}
-          </View>
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>Accumulates a real monthly snapshot.</Text>
+          {months >= 2 ? (
+            <>
+              <Spark data={series.filter((v): v is number => v != null)} />
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: sp.sm }}>
+                {labels.map((l, i) => (
+                  <Text key={i} style={{ ...ty.micro, letterSpacing: 0.4, color: t.ink3 }}>{series[i] != null ? l : ''}</Text>
+                ))}
+              </View>
+            </>
+          ) : (
+            <Text style={{ ...ty.label, color: t.ink3 }}>Not enough history yet — a snapshot is recorded each month, and the trend appears from the second one.</Text>
+          )}
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>One real snapshot per month — months before you started are left blank.</Text>
         </Section>
 
         <Rule />
 
         {/* ── forecast ───────────────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="6-month forecast" note={`${growth >= 0 ? '+' : ''}${Math.round(growth * 100)}%/mo`} />
-          <Spark data={[roll.mrr, ...forecast]} h={58} />
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: sp.sm }}>
-            <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>Now {usd(roll.mrr)}</Text>
-            <Text style={{ ...ty.caption, ...numeric, color: t.ink }}>6 mo → {usd(forecast[5])}</Text>
-          </View>
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-            Projected from your recent growth rate — a guide, not a guarantee.
-          </Text>
+          <SectionHead title="6-month forecast" note={canForecast ? `${growth >= 0 ? '+' : ''}${Math.round(growth * 100)}%/mo` : undefined} />
+          {canForecast ? (<>
+            <Spark data={[roll.mrr, ...forecast]} h={58} />
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: sp.sm }}>
+              <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>Now {usd(roll.mrr)}</Text>
+              <Text style={{ ...ty.caption, ...numeric, color: t.ink }}>6 mo → {usd(forecast[5])}</Text>
+            </View>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+              Projected from {n} months of your own history — a guide, not a guarantee.
+            </Text>
+          </>) : (
+            <Text style={{ ...ty.label, color: t.ink3 }}>A forecast needs at least two months of recorded MRR. Come back next month.</Text>
+          )}
         </Section>
 
         <Rule />

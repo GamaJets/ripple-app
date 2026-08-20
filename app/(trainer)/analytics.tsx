@@ -1,4 +1,4 @@
-// Trainer · Analytics — revenue, clients, retention, platform fee.
+// Trainer · Analytics — sessions delivered, clients, retention.
 //
 // Rebuilt on the instrument-panel kit (`src/ui/kit`) and the scale
 // (`src/theme/scale`). Same numbers, same routes, same AI digest — the ten
@@ -24,30 +24,47 @@ import { DistBar } from '../../src/ui/charts';
 import { askCoach } from '../../src/lib/coach';
 import { useTrainerGoals, goalPct } from '../../src/ui/trainerGoals';
 import { useMonthlyHistory } from '../../src/ui/useMrrHistory';
+import { useSessions } from '../../src/ui/sessions';
 
 export default function TrainerAnalytics() {
   const t = useTheme();
   const router = useRouter();
   const { roster } = useRoster();
   const { sessionFee } = useCoachProfile();
+  const { sessions } = useSessions();
   const atRisk = roster.filter(atRiskClient);
   const clients = roster.length;
-  const sessionsMo = clients * 4;
+
+  // Sessions actually delivered this calendar month: booked, and already
+  // started. This used to be `clients * 4` - an assumption that every client
+  // trains four times a month - multiplied by the rate the trainer typed into
+  // their profile, and rendered as "Monthly revenue". A trainer with five
+  // clients who trained nobody was shown "$1,500 · 20 sessions". The real
+  // sessions were sitting in the same store the calendar screen already reads.
+  const _monthStart = new Date(); _monthStart.setDate(1); _monthStart.setHours(0, 0, 0, 0);
+  const _deliveredMo = sessions.filter((sx) => sx.status === 'booked'
+    && Date.parse(sx.startsAt) >= _monthStart.getTime()
+    && Date.parse(sx.startsAt) <= Date.now());
+  const sessionsMo = _deliveredMo.length;
+  // Still arithmetic, but on a real count and the trainer's own rate, and the
+  // note on screen says exactly that. The $99 "platform fee" that used to be
+  // subtracted here is gone: nothing charges it, and billing.tsx reports that
+  // billing is not switched on while this screen called them a paying Pro
+  // customer.
   const revenue = sessionsMo * sessionFee;
-  const platformFee = 99;
-  const net = revenue - platformFee;
   const valuePerClient = clients ? Math.round(revenue / clients) : 0;
   // Average over clients who have actually checked in. Averaging a null-as-100
   // default meant a roster of strangers reported 100% adherence.
   const _adhKnown = roster.map((c) => c.adherence).filter((a): a is number => a != null);
   const avgAdh = _adhKnown.length ? Math.round(_adhKnown.reduce((a, x) => a + x, 0) / _adhKnown.length) : 0;
-  const estTenureMonths = Math.max(3, Math.min(24, Math.round(6 + (avgAdh - 70) / 10 * 3)));
-  const estLtv = valuePerClient * estTenureMonths;
   // Clients with no check-in are counted as unknown, not as on-track.
   const onTrack = roster.filter((c) => c.adherence != null && c.adherence >= 85).length;
   const watch = roster.filter((c) => c.adherence != null && c.adherence >= 70 && c.adherence < 85).length;
   const riskCount = roster.filter((c) => c.adherence != null && c.adherence < 70).length;
-  const atRiskRevenue = atRisk.length * sessionFee * 4;
+  // Sessions those clients actually took this month, at the trainer's rate -
+  // not `at-risk count x rate x 4`, which invented a subscription nobody pays.
+  const _atRiskIds = new Set(atRisk.map((c) => c.id));
+  const atRiskRevenue = _deliveredMo.filter((sx) => sx.clientId && _atRiskIds.has(sx.clientId)).length * sessionFee;
   const { goals, setGoals } = useTrainerGoals();
   const [goalOpen, setGoalOpen] = useState(false);
   const [gRev, setGRev] = useState('');
@@ -56,8 +73,8 @@ export default function TrainerAnalytics() {
   const [digestBusy, setDigestBusy] = useState(false);
   const genDigest = async () => {
     setDigestBusy(true); setDigest('');
-    const ctx = { revenueUsd: revenue, netUsd: net, clients, avgAdherence: avgAdh + '%', atRiskClients: atRisk.length, onTrack, watch, atRiskLow: riskCount };
-    const reply = await askCoach([{ role: 'user', content: 'You are my fitness-coaching business assistant. Write a short Monday digest (3-4 sentences) from these numbers (revenueUsd/netUsd are US dollars/month): one line on revenue and clients, one on roster health (on-track vs at-risk), and one concrete action to grow or retain. Encouraging and specific.' }], ctx);
+    const ctx = { sessionsDeliveredThisMonth: sessionsMo, revenueAtOwnRateUsd: revenue, clients, avgAdherence: _adhKnown.length ? avgAdh + '%' : 'no check-ins yet', atRiskClients: atRisk.length, onTrack, watch, atRiskLow: riskCount };
+    const reply = await askCoach([{ role: 'user', content: 'You are my fitness-coaching business assistant. Write a short Monday digest (3-4 sentences) from these numbers (revenueAtOwnRateUsd is sessions delivered multiplied by the coach own session rate, in US dollars): one line on revenue and clients, one on roster health (on-track vs at-risk), and one concrete action to grow or retain. Encouraging and specific.' }], ctx);
     setDigestBusy(false);
     setDigest(reply || 'Could not generate the digest right now — the AI backend may be unavailable.');
   };
@@ -83,10 +100,13 @@ export default function TrainerAnalytics() {
 
         {/* ── the hero ───────────────────────────────────────────────────── */}
         <Hero
-          label="Monthly revenue"
-          figure={'$' + revenue.toLocaleString()}
-          note={clients ? `${sessionsMo} sessions × $${sessionFee} · $${net.toLocaleString()} net after the $${platformFee} platform fee` : 'Set your session rate and add clients to start tracking.'}
-          arc={goals.revenue ? goalPct(revenue, goals.revenue) : undefined}
+          label="Sessions delivered"
+          figure={String(sessionsMo)}
+          unit={sessionsMo === 1 ? 'this month' : 'this month'}
+          note={sessionFee > 0
+            ? `$${revenue.toLocaleString()} at your $${sessionFee} session rate — Repple does not process this, so it is your own arithmetic, not a payout.`
+            : 'Set a session rate in your profile to see what that is worth.'}
+          arc={goals.revenue > 0 ? goalPct(revenue, goals.revenue) : undefined}
           onPress={() => router.push('/(trainer)/payments')}
         />
 
@@ -111,7 +131,7 @@ export default function TrainerAnalytics() {
           {[
             { label: 'Monthly revenue', cur: revenue, goal: goals.revenue, money: true },
             { label: 'Active clients', cur: clients, goal: goals.clients, money: false },
-          ].map((g) => {
+          ].filter((g) => g.goal > 0).map((g) => {
             const pc = goalPct(g.cur, g.goal);
             const hit = pc >= 1;
             return (
@@ -183,31 +203,21 @@ export default function TrainerAnalytics() {
           <SectionHead title="Revenue trend"
             note={revHist.delta !== 0 ? `${revHist.delta > 0 ? '+' : '−'}$${Math.abs(revHist.delta).toLocaleString()} vs last mo` : 'Tracking started'}
             onPress={() => router.push('/(trainer)/payments')} />
-          <Spark data={revHist.series} />
+          {revHist.months >= 2 ? (<>
+          <Spark data={revHist.series.filter((v): v is number => v != null)} />
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: sp.sm }}>
             {revHist.labels.map((l, i) => (
-              <Text key={i} style={{ ...ty.micro, letterSpacing: 0.4, color: t.ink3 }}>{l}</Text>
+              <Text key={i} style={{ ...ty.micro, letterSpacing: 0.4, color: t.ink3 }}>{revHist.series[i] != null ? l : ''}</Text>
             ))}
           </View>
+          </>) : (
+            <Text style={{ ...ty.label, color: t.ink3 }}>Not enough history yet — a snapshot is recorded each month, and the trend appears from the second one.</Text>
+          )}
         </Section>
 
         <Rule />
 
         {/* ── client value ───────────────────────────────────────────────── */}
-        <Section>
-          <SectionHead title="Client value" note="Estimated" />
-          <KpiRow items={[
-            { label: 'Value / client', value: '$' + valuePerClient.toLocaleString(), unit: '/mo' },
-            { label: 'Est. tenure', value: String(estTenureMonths), unit: 'mo' },
-            { label: 'Est. LTV', value: '$' + estLtv.toLocaleString() },
-          ]} />
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-            Estimated from revenue and adherence-based retention — higher adherence lifts estimated tenure.
-            Real per-client tenure tracks once clients link accounts.
-          </Text>
-        </Section>
-
-        <Rule />
 
         {/* ── at-risk clients ────────────────────────────────────────────── */}
         <Section>
@@ -253,7 +263,7 @@ export default function TrainerAnalytics() {
         <Rule />
 
         <Section>
-          <ListRow icon="chart" title="Payments" note={`Pro plan · $${platformFee}/mo to Repple`}
+          <ListRow icon="chart" title="Payments"
             onPress={() => router.push('/(trainer)/payments')} />
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
             Every new client at ${sessionFee}/session adds about ${(sessionFee * 4).toLocaleString()}/mo.

@@ -53,7 +53,10 @@ export default function OwnerClassAnalytics() {
   const router = useRouter();
   const [range, setRange] = useState<Range>('week');
   const [rows, setRows] = useState<ClassSummaryRow[]>([]);
-  const [rate, setRate] = useState('25');
+  // Empty, not 25. The hero renders a payroll total above the rate field, so a
+  // default put a specific AED figure on screen - belonging to no pay
+  // agreement - before the owner could see what it was multiplied by.
+  const [rate, setRate] = useState('');
 
   useEffect(() => {
     let on = true;
@@ -128,8 +131,10 @@ export default function OwnerClassAnalytics() {
           {/* ── the hero: what this screen is for ────────────────────────── */}
           <Hero
             label="Trainer payroll (AED)"
-            figure={totals.payroll.toLocaleString()}
-            note={`${totals.attended} check-ins × AED ${rate$} · ${totals.classes} classes · ${totals.fill}% avg fill`}
+            figure={rate$ > 0 ? totals.payroll.toLocaleString() : '—'}
+            note={rate$ > 0
+              ? `${totals.attended} check-ins × AED ${rate$} · ${totals.classes} classes · ${totals.fill}% avg fill`
+              : `${totals.attended} check-ins · ${totals.classes} classes · ${totals.fill}% avg fill · enter your per-check-in rate below`}
           />
 
           <Rule />
@@ -147,7 +152,7 @@ export default function OwnerClassAnalytics() {
 
           {/* ── payroll by trainer ───────────────────────────────────────── */}
           <Section>
-            <SectionHead title="Payroll by trainer" note={`AED ${totals.payroll.toLocaleString()}`} />
+            <SectionHead title="Payroll by trainer" note={rate$ > 0 ? `AED ${totals.payroll.toLocaleString()}` : undefined} />
             {rateField}
             {byTrainer.map(([name, v], i) => (
               <View key={name} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
@@ -155,7 +160,7 @@ export default function OwnerClassAnalytics() {
                   <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{name}</Text>
                   <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{v.classes} classes · {v.attended} check-ins</Text>
                 </View>
-                <Text style={{ ...ty.body, fontWeight: '600', ...numeric, color: t.ink }}>AED {(v.attended * rate$).toLocaleString()}</Text>
+                <Text style={{ ...ty.body, fontWeight: '600', ...numeric, color: t.ink }}>{rate$ > 0 ? `AED ${(v.attended * rate$).toLocaleString()}` : '—'}</Text>
               </View>
             ))}
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>

@@ -130,7 +130,7 @@ export default function TrainerSchedule() {
     setAddOpen(false);
     if (addClient) {
       sendPush([addClient], 'Session booked', `Your session on ${DOW[selDate.getDay()]} at ${timeLabel(s.startsAt)} is confirmed.`, { route: '/(client)/calendar' });
-      Alert.alert('Session booked', `${timeLabel(s.startsAt)} with ${nameOf(addClient)} confirmed.\n\nA confirmation push has been sent to both your app and ${nameOf(addClient)}'s client app.`, [{ text: 'Great' }]);
+      Alert.alert('Session booked', `${timeLabel(s.startsAt)} with ${nameOf(addClient)} confirmed.\n\nA notification was sent to ${nameOf(addClient)} — they will see it if they have notifications on.`, [{ text: 'Great' }]);
     }
   }
 
@@ -144,8 +144,10 @@ export default function TrainerSchedule() {
     Alert.alert(
       'Session cancelled',
       `${timeLabel(s.startsAt)} with ${nameOf(s.clientId)} was cancelled.\n\n` +
-      `${nameOf(s.clientId)} has been notified. The freed slot was re-offered to ${others.length} other client${others.length === 1 ? '' : 's'} (${others.slice(0, 3).join(', ')}${others.length > 3 ? '…' : ''}) — first to accept books it.` +
-      (res.charged ? `\n\nInside 24h: a ${sessionFee} late-cancel fee applies.` : ''),
+      `${nameOf(s.clientId)} was sent a notification. The slot is open again and ${others.length} other client${others.length === 1 ? '' : 's'} can book it (${others.slice(0, 3).join(', ')}${others.length > 3 ? '…' : ''}) — first to book takes it.` +
+      // Repple does not charge anything. This used to say the fee "applies",
+      // which described a charge that no code anywhere makes.
+      (res.charged ? `\n\nInside 24h — your ${sessionFee} late-cancel policy would apply. Repple does not charge it; settle it with the client yourself.` : ''),
       [{ text: 'Done' }]
     );
   }
@@ -168,7 +170,7 @@ export default function TrainerSchedule() {
       { text: 'Cancel', style: 'cancel' },
       { text: `Notify ${ids.length}`, onPress: () => {
         if (ids.length) sendPush(ids, 'A slot just opened', `${timeLabel(s.startsAt)} on ${DOW[new Date(s.startsAt).getDay()]} is available — first to book it gets it.`, { route: '/(client)/calendar' });
-        Alert.alert('Re-offered', `Offered to ${ids.length} client${ids.length === 1 ? '' : 's'}.`);
+        Alert.alert('Slot re-opened', `Notified ${ids.length} client${ids.length === 1 ? '' : 's'} — delivery depends on their notification settings.`);
       } },
     ]);
   }

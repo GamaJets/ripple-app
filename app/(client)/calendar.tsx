@@ -84,7 +84,7 @@ export default function Calendar() {
     bookSession(s.id, cd.id);
     redeemSession(s.trainerId).then((r) => { if (r.ok) sessionsRemaining().then(setPackLeft).catch(() => {}); }).catch(() => {});
     sendPush([s.trainerId], 'New booking', `A client booked ${DOW[new Date(s.startsAt).getDay()]} ${timeLabel(s.startsAt)}.`, { route: '/(trainer)/calendar' });
-    Alert.alert('Session booked ', `${DOW[new Date(s.startsAt).getDay()]} ${timeLabel(s.startsAt)} with ${coach.name} is confirmed.\n\nA confirmation has been sent to you and your coach.`, [{ text: 'Great' }]);
+    Alert.alert('Session booked ', `${DOW[new Date(s.startsAt).getDay()]} ${timeLabel(s.startsAt)} with ${coach.name} is confirmed.\n\nYour coach has been notified.`, [{ text: 'Great' }]);
   }
   function cancel(s: TrainingSession) {
     const late = Date.parse(s.startsAt) - Date.now() < 24 * 3600 * 1000;

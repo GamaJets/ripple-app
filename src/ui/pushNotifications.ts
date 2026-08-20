@@ -22,6 +22,22 @@ export async function sendPush(userIds: string[], title: string, body: string, d
   try { supabase.functions.invoke('send-push', { body: { user_ids: ids, title, body, data: data || {} } }).then(() => {}, () => {}); } catch { /* best-effort */ }
 }
 
+/** Same send, but awaited and reporting what happened. Use this anywhere the UI
+ *  is about to tell someone a message was delivered — sendPush() above discards
+ *  both outcomes, so a screen built on it can only ever claim success. */
+export async function sendPushChecked(userIds: string[], title: string, body: string, data?: Record<string, unknown>): Promise<{ ok: boolean; error?: string }> {
+  if (!USE_SUPABASE) return { ok: false, error: 'Not connected to the server.' };
+  const ids = (userIds || []).filter(Boolean);
+  if (!ids.length) return { ok: false, error: 'Nobody to send to.' };
+  try {
+    const { error } = await supabase.functions.invoke('send-push', { body: { user_ids: ids, title, body, data: data || {} } });
+    if (error) return { ok: false, error: error.message };
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, error: e?.message || 'Could not reach the server.' };
+  }
+}
+
 if (Notifications?.setNotificationHandler) {
   try {
     Notifications.setNotificationHandler({

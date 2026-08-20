@@ -22,7 +22,7 @@ import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../
 import { usePromos } from '../../src/ui/promos';
 import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
-import { sendPush } from '../../src/ui/pushNotifications';
+import { sendPushChecked } from '../../src/ui/pushNotifications';
 
 export default function Promotions() {
   const t = useTheme();
@@ -34,14 +34,19 @@ export default function Promotions() {
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
 
-  const pushToMembers = async (body: string): Promise<number> => {
-    if (!USE_SUPABASE) return 0;
+  // Returns what actually happened, not how many member rows exist. This used
+  // to return ids.length and report it as "Sent to N members" while sendPush
+  // swallowed every failure — so an undeployed function, or members with no
+  // push token, still read as N delivered.
+  const pushToMembers = async (body: string): Promise<{ ok: boolean; queued: number; error?: string }> => {
+    if (!USE_SUPABASE) return { ok: false, queued: 0, error: 'Not connected to the server.' };
     try {
       const { data } = await supabase.rpc('all_member_ids');
       const ids = Array.isArray(data) ? data.map((r: any) => r.user_id).filter(Boolean) : [];
-      if (ids.length) sendPush(ids, title.trim() || 'A new offer', body, { route: '/(client)/explore' });
-      return ids.length;
-    } catch { return 0; }
+      if (!ids.length) return { ok: false, queued: 0, error: 'No members to push to yet.' };
+      const res = await sendPushChecked(ids, title.trim() || 'A new offer', body, { route: '/(client)/explore' });
+      return { ok: res.ok, queued: ids.length, error: res.error };
+    } catch (e: any) { return { ok: false, queued: 0, error: e?.message || 'Could not reach the server.' }; }
   };
 
   const create = async (push: boolean) => {
@@ -51,11 +56,13 @@ export default function Promotions() {
     try {
       const res = addPromo(c, disc);
       if (!res.ok) { Alert.alert('Could not create', res.reason || 'Try a different code.'); return; }
-      let n = 0;
       const body = (msg.trim() || `${disc}% off with code ${c}`);
-      if (push) n = await pushToMembers(body);
+      const pushRes = push ? await pushToMembers(body) : null;
       setTitle(''); setCode(''); setMsg('');
-      Alert.alert('Promotion created', push ? `“${c}” created and pushed to ${n} member${n === 1 ? '' : 's'}.` : `“${c}” created. Push it to members any time.`);
+      Alert.alert('Promotion created',
+        !pushRes ? `“${c}” created. Push it to members any time.`
+          : pushRes.ok ? `“${c}” created and queued to ${pushRes.queued} member${pushRes.queued === 1 ? '' : 's'}. Only members on a push-enabled build with notifications on will receive it.`
+          : `“${c}” created, but the push did not go out: ${pushRes.error || 'unknown error'}. You can push it again from the list below.`);
     } finally { setBusy(false); }
   };
 
@@ -80,7 +87,7 @@ export default function Promotions() {
           figure={String(promos.length)}
           unit={promos.length === 1 ? 'code' : 'codes'}
           note={promos.length
-            ? 'Push any code to every member — it lands in their app instantly.'
+            ? 'Push any code to every member. Delivery depends on their notification settings, so treat it as queued rather than guaranteed.'
             : 'Create an offer and push it straight to your members.'}
         />
 
@@ -134,7 +141,7 @@ export default function Promotions() {
                 <Text style={{ ...ty.body, ...numeric, fontWeight: '600', color: t.ink, letterSpacing: 1 }}>{p.code}</Text>
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{p.discountPct}% off</Text>
               </View>
-              <Ghost label="Push" onPress={() => { const body = `${p.discountPct}% off with code ${p.code}`; pushToMembers(body).then((n) => Alert.alert('Pushed', `Sent to ${n} member${n === 1 ? '' : 's'}.`)); }} />
+              <Ghost label="Push" onPress={() => { const body = `${p.discountPct}% off with code ${p.code}`; pushToMembers(body).then((r) => Alert.alert(r.ok ? 'Queued' : 'Not sent', r.ok ? `Queued to ${r.queued} member${r.queued === 1 ? '' : 's'}.` : (r.error || 'The push did not go out.'))); }} />
               <Pressable onPress={() => removePromo(p.id)} hitSlop={6} accessibilityRole="button" accessibilityLabel={'Remove ' + p.code}>
                 <Icon name="minus" size={16} color={t.ink3} />
               </Pressable>

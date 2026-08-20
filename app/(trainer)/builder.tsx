@@ -150,7 +150,7 @@ export default function Builder() {
     setSaveOpen(false); setTplName('');
     Alert.alert('Template saved', 'It is in your Program Templates — assign it to as many clients as you like.');
   };
-  const assign = () => {
+  const assign = async () => {
     if (!canAssign) return;
     const program: Program = {
       title: title.trim() || 'Custom program',
@@ -161,8 +161,11 @@ export default function Builder() {
         exercises: d.exercises.map((e, i) => ({ key: `${d.day}-${i}`, name: e.name, group: e.group || '', sets: e.sets, reps: e.reps || '8-12', alternatives: [] })),
       })),
     };
-    assignProgram(clientId, program);
-    Alert.alert('Program assigned', `${client?.name ?? 'Your client'} will now see this in their Train tab.`, [{ text: 'Done' }]);
+    const saved = await assignProgram(clientId, program);
+    Alert.alert(saved ? 'Program assigned' : 'Saved on this device only',
+      saved ? `${client?.name ?? 'Your client'} will now see this in their Train tab.`
+            : `It could not be saved to the server, so ${client?.name ?? 'your client'} cannot see it yet. Clients you added by hand have no Train tab until they join.`,
+      [{ text: 'Done' }]);
   };
 
   const revert = () => {
