@@ -2,7 +2,7 @@
   "name": "repple-app",
   "version": "0.1.0",
   "private": true,
-  "description": "Repple — white-label fitness platform (Expo + Supabase). Production scaffold.",
+  "description": "Repple \u2014 white-label fitness platform (Expo + Supabase). Production scaffold.",
   "main": "expo-router/entry",
   "scripts": {
     "start": "expo start",
@@ -11,7 +11,9 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test:logic": "tsc -p tsconfig.test.json && node .tmp/lib/logic.test.js",
     "test": "tsc -p tsconfig.test.json && node .tmp/lib/logic.test.js && node .tmp/lib/coverage.test.js",
-    "test:coverage": "tsc -p tsconfig.test.json && node .tmp/lib/coverage.test.js"
+    "test:coverage": "tsc -p tsconfig.test.json && node .tmp/lib/coverage.test.js",
+    "db:build": "node scripts/build-supabase-setup.mjs",
+    "db:check": "node scripts/build-supabase-setup.mjs --check"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",

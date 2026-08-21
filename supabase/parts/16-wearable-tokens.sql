@@ -1,3 +1,4 @@
+-- ─────────────────────────────────────────────────────────────────────────
 -- Repple wearable OAuth tokens — one row per (user, cloud provider). Written ONLY
 -- by the wearable-oauth / wearable-day edge functions via the service role, so
 -- access/refresh tokens are never exposed to the app. Users may delete their own
@@ -18,3 +19,6 @@ alter table wearable_tokens enable row level security;
 drop policy if exists wearable_tokens_delete_own on wearable_tokens;
 create policy wearable_tokens_delete_own on wearable_tokens for delete
   using (user_id = auth.uid());
+
+
+-- ─────────────────────────────────────────────────────────────────────────

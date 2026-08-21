@@ -1,3 +1,4 @@
+-- ─────────────────────────────────────────────────────────────────────────
 -- Repple in-app feedback. Any signed-in user (trainer tester, client) submits a
 -- rating + note; the platform owner reads them all in the Owner portal.
 -- Depends on schema.sql (profiles/tenants) + domain-schema.sql (is_owner_of).
@@ -29,3 +30,6 @@ create policy fb_owner on feedback for select using (
   is_owner_of(tenant_id)
   or exists (select 1 from profiles p where p.id = auth.uid() and p.role = 'owner')
 );
+
+
+-- ─────────────────────────────────────────────────────────────────────────

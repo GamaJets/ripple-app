@@ -1,3 +1,4 @@
+-- ─────────────────────────────────────────────────────────────────────────
 -- Repple messaging — RLS + realtime for the coach↔client chat thread.
 -- The thread is keyed by the client's id (messages.client_id = the client).
 -- Depends on schema.sql (messages, clients) + domain-schema.sql (is_my_client).
@@ -24,3 +25,6 @@ begin
     when others then null;
   end;
 end $$;
+
+
+-- ─────────────────────────────────────────────────────────────────────────

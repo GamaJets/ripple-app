@@ -90,7 +90,7 @@ Deno.serve(async (req: Request) => {
 
   // Class fill (attended / booked) over last 30d via the analytics RPC — totals + breakdowns.
   try {
-    const { data: rows, error } = await admin.rpc('class_attendance_summary', { from_ts: iso(30 * DAY), to_ts: iso(0) });
+    const { data: rows, error } = await admin.rpc('class_attendance_summary', { p_from: iso(30 * DAY), p_to: iso(0) });
     if (!error && Array.isArray(rows) && rows.length) {
       let att = 0, bkd = 0;
       const byBranch: Record<string, { a: number; b: number }> = {};

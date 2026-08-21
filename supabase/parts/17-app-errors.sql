@@ -1,3 +1,4 @@
+-- ─────────────────────────────────────────────────────────────────────────
 -- Repple crash/error log — the app's ErrorBoundary writes caught render errors
 -- here (best-effort) so the platform owner can review them in the Owner ▸ Feedback
 -- inbox without a heavyweight crash reporter. Any signed-in user logs their own
@@ -27,3 +28,6 @@ drop policy if exists app_errors_owner on app_errors;
 create policy app_errors_owner on app_errors for select using (
   exists (select 1 from profiles p where p.id = auth.uid() and p.role = 'owner')
 );
+
+
+-- ─────────────────────────────────────────────────────────────────────────

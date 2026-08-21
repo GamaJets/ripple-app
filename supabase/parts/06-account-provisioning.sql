@@ -1,3 +1,4 @@
+-- ─────────────────────────────────────────────────────────────────────────
 -- Repple account provisioning. Makes every profile a real domain record:
 --  • a personal tenant (if none)
 --  • a clients row (role=client) or trainers row (role=trainer)
@@ -71,3 +72,6 @@ returns void language sql security definer set search_path = public as $$
   on conflict (coach_id, client_id) do update set mode = excluded.mode, status = 'active';
   update clients set trainer_id = p_coach where id = p_client;
 $$;
+
+
+-- ─────────────────────────────────────────────────────────────────────────

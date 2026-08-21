@@ -1,3 +1,4 @@
+-- ─────────────────────────────────────────────────────────────────────────
 -- ═══════════════════════════════════════════════════════════════════════════
 -- FitForge — Postgres schema for Supabase
 -- Multi-tenant white-label fitness platform (owner ▸ trainers ▸ clients)
@@ -7,7 +8,7 @@
 create extension if not exists "uuid-ossp";
 
 -- ── Tenancy: one row per trainer's white-label brand ────────────────────────
-create table tenants (
+create table if not exists tenants (
   id            uuid primary key default uuid_generate_v4(),
   name          text not null,
   logo          text,
@@ -18,7 +19,7 @@ create table tenants (
 );
 
 -- ── Profiles: extends Supabase auth.users, carries the role ─────────────────
-create table profiles (
+create table if not exists profiles (
   id         uuid primary key references auth.users(id) on delete cascade,
   role       text not null check (role in ('owner','trainer','client')),
   tenant_id  uuid references tenants(id) on delete set null,
@@ -28,14 +29,14 @@ create table profiles (
 );
 
 -- ── Trainers ────────────────────────────────────────────────────────────────
-create table trainers (
+create table if not exists trainers (
   id         uuid primary key references profiles(id) on delete cascade,
   tenant_id  uuid not null references tenants(id) on delete cascade,
   bio        text
 );
 
 -- ── Clients ─────────────────────────────────────────────────────────────────
-create table clients (
+create table if not exists clients (
   id            uuid primary key references profiles(id) on delete cascade,
   trainer_id    uuid references trainers(id) on delete set null,
   tenant_id     uuid not null references tenants(id) on delete cascade,
@@ -51,7 +52,7 @@ create table clients (
 );
 
 -- ── InBody scans (source of the body-stat time series) ──────────────────────
-create table scans (
+create table if not exists scans (
   id                 uuid primary key default uuid_generate_v4(),
   client_id          uuid not null references clients(id) on delete cascade,
   taken_at           date not null,
@@ -62,10 +63,10 @@ create table scans (
   image_path         text,                    -- storage key of the uploaded sheet
   created_at         timestamptz not null default now()
 );
-create index on scans (client_id, taken_at);
+create index if not exists on scans (client_id, taken_at);
 
 -- ── Progress photos ─────────────────────────────────────────────────────────
-create table progress_photos (
+create table if not exists progress_photos (
   id         uuid primary key default uuid_generate_v4(),
   client_id  uuid not null references clients(id) on delete cascade,
   taken_at   timestamptz not null default now(),
@@ -75,13 +76,13 @@ create table progress_photos (
 );
 
 -- ── Exercise library + trainer videos ───────────────────────────────────────
-create table exercises (
+create table if not exists exercises (
   id       text primary key,                  -- 'squat', 'bench', 'tread' ...
   name     text not null,
   muscle_group text,
   is_cardio boolean not null default false
 );
-create table exercise_videos (
+create table if not exists exercise_videos (
   id           uuid primary key default uuid_generate_v4(),
   exercise_id  text not null references exercises(id),
   trainer_id   uuid references trainers(id) on delete cascade,  -- null = platform "Academy"
@@ -91,14 +92,14 @@ create table exercise_videos (
 );
 
 -- ── Programs & workout logs ─────────────────────────────────────────────────
-create table programs (
+create table if not exists programs (
   id         uuid primary key default uuid_generate_v4(),
   client_id  uuid not null references clients(id) on delete cascade,
   day        text not null,                   -- 'Mon' ...
   focus      text,
   exercises  jsonb not null default '[]'      -- [{exercise_id, sets, reps, kg}]
 );
-create table workout_logs (
+create table if not exists workout_logs (
   id          uuid primary key default uuid_generate_v4(),
   client_id   uuid not null references clients(id) on delete cascade,
   logged_at   timestamptz not null default now(),
@@ -109,10 +110,10 @@ create table workout_logs (
   avg_hr      int,
   source      text default 'manual'            -- 'manual' | 'watch'
 );
-create index on workout_logs (client_id, logged_at);
+create index if not exists on workout_logs (client_id, logged_at);
 
 -- ── Meal plans (generated, cached; regenerated on stat change) ──────────────
-create table meal_plans (
+create table if not exists meal_plans (
   id          uuid primary key default uuid_generate_v4(),
   client_id   uuid not null references clients(id) on delete cascade,
   generated_at timestamptz not null default now(),
@@ -121,7 +122,7 @@ create table meal_plans (
 );
 
 -- ── Calendar: in-person sessions, availability & blocks ─────────────────────
-create table sessions (
+create table if not exists sessions (
   id           uuid primary key default uuid_generate_v4(),
   trainer_id   uuid not null references trainers(id) on delete cascade,
   client_id    uuid references clients(id) on delete set null,
@@ -131,10 +132,10 @@ create table sessions (
   released     boolean not null default false, -- re-offered after a cancellation
   created_at   timestamptz not null default now()
 );
-create index on sessions (trainer_id, starts_at);
+create index if not exists on sessions (trainer_id, starts_at);
 
 -- recurring availability templates (generate concrete sessions ahead of time)
-create table availability_templates (
+create table if not exists availability_templates (
   id          uuid primary key default uuid_generate_v4(),
   trainer_id  uuid not null references trainers(id) on delete cascade,
   weekday     int not null check (weekday between 0 and 6),  -- 0 = Monday
@@ -144,7 +145,7 @@ create table availability_templates (
 );
 
 -- waitlist for a released/opened slot (FIFO auto-assign)
-create table session_waitlist (
+create table if not exists session_waitlist (
   session_id uuid not null references sessions(id) on delete cascade,
   client_id  uuid not null references clients(id) on delete cascade,
   joined_at  timestamptz not null default now(),
@@ -152,7 +153,7 @@ create table session_waitlist (
 );
 
 -- ── Charges (late-cancellation fees etc.) ───────────────────────────────────
-create table charges (
+create table if not exists charges (
   id         uuid primary key default uuid_generate_v4(),
   client_id  uuid not null references clients(id) on delete cascade,
   amount     numeric(8,2) not null,
@@ -162,17 +163,17 @@ create table charges (
 );
 
 -- ── Messages (coach ↔ client threads) ───────────────────────────────────────
-create table messages (
+create table if not exists messages (
   id         uuid primary key default uuid_generate_v4(),
   client_id  uuid not null references clients(id) on delete cascade,  -- the thread
   sender     text not null check (sender in ('client','coach')),
   body       text not null,
   created_at timestamptz not null default now()
 );
-create index on messages (client_id, created_at);
+create index if not exists on messages (client_id, created_at);
 
 -- ── Food log (search / barcode / photo entries against a daily macro target) ─
-create table food_logs (
+create table if not exists food_logs (
   id         uuid primary key default uuid_generate_v4(),
   client_id  uuid not null references clients(id) on delete cascade,
   logged_at  timestamptz not null default now(),
@@ -183,10 +184,10 @@ create table food_logs (
   fat        numeric(6,1) not null default 0,
   via        text not null default 'search' check (via in ('search','barcode','photo','manual'))
 );
-create index on food_logs (client_id, logged_at);
+create index if not exists on food_logs (client_id, logged_at);
 
 -- ── Notifications (backs the in-app bell; pushed via APNs/FCM edge fn) ───────
-create table notifications (
+create table if not exists notifications (
   id         uuid primary key default uuid_generate_v4(),
   user_id    uuid not null references profiles(id) on delete cascade,
   icon       text,
@@ -195,7 +196,7 @@ create table notifications (
   read       boolean not null default false,
   created_at timestamptz not null default now()
 );
-create index on notifications (user_id, read);
+create index if not exists on notifications (user_id, read);
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- Row Level Security — the heart of multi-tenant isolation.
@@ -285,3 +286,6 @@ drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
+
+
+-- ─────────────────────────────────────────────────────────────────────────

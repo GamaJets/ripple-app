@@ -1,12 +1,13 @@
 -- ═══════════════════════════════════════════════════════════════════════════
 -- Repple — ONE-SHOT Supabase setup. Paste this whole file into the Supabase
 -- SQL editor (Dashboard ▸ SQL Editor ▸ New query) and Run.
--- Every file below is idempotent; order is dependency-correct. Regenerate from
--- supabase/*.sql — do not hand-edit.
+-- Every part below is idempotent; order is dependency-correct and safe to re-run.
+-- GENERATED from supabase/parts/*.sql by scripts/build-supabase-setup.mjs.
+-- Do not hand-edit — edit the part and rebuild.
 -- ═══════════════════════════════════════════════════════════════════════════
 
--- ─────────────────────────────────────────────────────────────────────────
 -- ▶ schema.sql
+
 -- ─────────────────────────────────────────────────────────────────────────
 -- ═══════════════════════════════════════════════════════════════════════════
 -- FitForge — Postgres schema for Supabase
@@ -17,7 +18,7 @@
 create extension if not exists "uuid-ossp";
 
 -- ── Tenancy: one row per trainer's white-label brand ────────────────────────
-create table tenants (
+create table if not exists tenants (
   id            uuid primary key default uuid_generate_v4(),
   name          text not null,
   logo          text,
@@ -28,7 +29,7 @@ create table tenants (
 );
 
 -- ── Profiles: extends Supabase auth.users, carries the role ─────────────────
-create table profiles (
+create table if not exists profiles (
   id         uuid primary key references auth.users(id) on delete cascade,
   role       text not null check (role in ('owner','trainer','client')),
   tenant_id  uuid references tenants(id) on delete set null,
@@ -38,14 +39,14 @@ create table profiles (
 );
 
 -- ── Trainers ────────────────────────────────────────────────────────────────
-create table trainers (
+create table if not exists trainers (
   id         uuid primary key references profiles(id) on delete cascade,
   tenant_id  uuid not null references tenants(id) on delete cascade,
   bio        text
 );
 
 -- ── Clients ─────────────────────────────────────────────────────────────────
-create table clients (
+create table if not exists clients (
   id            uuid primary key references profiles(id) on delete cascade,
   trainer_id    uuid references trainers(id) on delete set null,
   tenant_id     uuid not null references tenants(id) on delete cascade,
@@ -61,7 +62,7 @@ create table clients (
 );
 
 -- ── InBody scans (source of the body-stat time series) ──────────────────────
-create table scans (
+create table if not exists scans (
   id                 uuid primary key default uuid_generate_v4(),
   client_id          uuid not null references clients(id) on delete cascade,
   taken_at           date not null,
@@ -72,10 +73,10 @@ create table scans (
   image_path         text,                    -- storage key of the uploaded sheet
   created_at         timestamptz not null default now()
 );
-create index on scans (client_id, taken_at);
+create index if not exists on scans (client_id, taken_at);
 
 -- ── Progress photos ─────────────────────────────────────────────────────────
-create table progress_photos (
+create table if not exists progress_photos (
   id         uuid primary key default uuid_generate_v4(),
   client_id  uuid not null references clients(id) on delete cascade,
   taken_at   timestamptz not null default now(),
@@ -85,13 +86,13 @@ create table progress_photos (
 );
 
 -- ── Exercise library + trainer videos ───────────────────────────────────────
-create table exercises (
+create table if not exists exercises (
   id       text primary key,                  -- 'squat', 'bench', 'tread' ...
   name     text not null,
   muscle_group text,
   is_cardio boolean not null default false
 );
-create table exercise_videos (
+create table if not exists exercise_videos (
   id           uuid primary key default uuid_generate_v4(),
   exercise_id  text not null references exercises(id),
   trainer_id   uuid references trainers(id) on delete cascade,  -- null = platform "Academy"
@@ -101,14 +102,14 @@ create table exercise_videos (
 );
 
 -- ── Programs & workout logs ─────────────────────────────────────────────────
-create table programs (
+create table if not exists programs (
   id         uuid primary key default uuid_generate_v4(),
   client_id  uuid not null references clients(id) on delete cascade,
   day        text not null,                   -- 'Mon' ...
   focus      text,
   exercises  jsonb not null default '[]'      -- [{exercise_id, sets, reps, kg}]
 );
-create table workout_logs (
+create table if not exists workout_logs (
   id          uuid primary key default uuid_generate_v4(),
   client_id   uuid not null references clients(id) on delete cascade,
   logged_at   timestamptz not null default now(),
@@ -119,10 +120,10 @@ create table workout_logs (
   avg_hr      int,
   source      text default 'manual'            -- 'manual' | 'watch'
 );
-create index on workout_logs (client_id, logged_at);
+create index if not exists on workout_logs (client_id, logged_at);
 
 -- ── Meal plans (generated, cached; regenerated on stat change) ──────────────
-create table meal_plans (
+create table if not exists meal_plans (
   id          uuid primary key default uuid_generate_v4(),
   client_id   uuid not null references clients(id) on delete cascade,
   generated_at timestamptz not null default now(),
@@ -131,7 +132,7 @@ create table meal_plans (
 );
 
 -- ── Calendar: in-person sessions, availability & blocks ─────────────────────
-create table sessions (
+create table if not exists sessions (
   id           uuid primary key default uuid_generate_v4(),
   trainer_id   uuid not null references trainers(id) on delete cascade,
   client_id    uuid references clients(id) on delete set null,
@@ -141,10 +142,10 @@ create table sessions (
   released     boolean not null default false, -- re-offered after a cancellation
   created_at   timestamptz not null default now()
 );
-create index on sessions (trainer_id, starts_at);
+create index if not exists on sessions (trainer_id, starts_at);
 
 -- recurring availability templates (generate concrete sessions ahead of time)
-create table availability_templates (
+create table if not exists availability_templates (
   id          uuid primary key default uuid_generate_v4(),
   trainer_id  uuid not null references trainers(id) on delete cascade,
   weekday     int not null check (weekday between 0 and 6),  -- 0 = Monday
@@ -154,7 +155,7 @@ create table availability_templates (
 );
 
 -- waitlist for a released/opened slot (FIFO auto-assign)
-create table session_waitlist (
+create table if not exists session_waitlist (
   session_id uuid not null references sessions(id) on delete cascade,
   client_id  uuid not null references clients(id) on delete cascade,
   joined_at  timestamptz not null default now(),
@@ -162,7 +163,7 @@ create table session_waitlist (
 );
 
 -- ── Charges (late-cancellation fees etc.) ───────────────────────────────────
-create table charges (
+create table if not exists charges (
   id         uuid primary key default uuid_generate_v4(),
   client_id  uuid not null references clients(id) on delete cascade,
   amount     numeric(8,2) not null,
@@ -172,17 +173,17 @@ create table charges (
 );
 
 -- ── Messages (coach ↔ client threads) ───────────────────────────────────────
-create table messages (
+create table if not exists messages (
   id         uuid primary key default uuid_generate_v4(),
   client_id  uuid not null references clients(id) on delete cascade,  -- the thread
   sender     text not null check (sender in ('client','coach')),
   body       text not null,
   created_at timestamptz not null default now()
 );
-create index on messages (client_id, created_at);
+create index if not exists on messages (client_id, created_at);
 
 -- ── Food log (search / barcode / photo entries against a daily macro target) ─
-create table food_logs (
+create table if not exists food_logs (
   id         uuid primary key default uuid_generate_v4(),
   client_id  uuid not null references clients(id) on delete cascade,
   logged_at  timestamptz not null default now(),
@@ -193,10 +194,10 @@ create table food_logs (
   fat        numeric(6,1) not null default 0,
   via        text not null default 'search' check (via in ('search','barcode','photo','manual'))
 );
-create index on food_logs (client_id, logged_at);
+create index if not exists on food_logs (client_id, logged_at);
 
 -- ── Notifications (backs the in-app bell; pushed via APNs/FCM edge fn) ───────
-create table notifications (
+create table if not exists notifications (
   id         uuid primary key default uuid_generate_v4(),
   user_id    uuid not null references profiles(id) on delete cascade,
   icon       text,
@@ -205,7 +206,7 @@ create table notifications (
   read       boolean not null default false,
   created_at timestamptz not null default now()
 );
-create index on notifications (user_id, read);
+create index if not exists on notifications (user_id, read);
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- Row Level Security — the heart of multi-tenant isolation.
@@ -298,7 +299,9 @@ create trigger on_auth_user_created
 
 
 -- ─────────────────────────────────────────────────────────────────────────
+
 -- ▶ domain-schema.sql
+
 -- ─────────────────────────────────────────────────────────────────────────
 -- Repple domain addendum — reconciled with the existing FitForge schema.sql.
 -- Adds ONLY new tables (no name collisions with tenants/profiles/clients/scans/
@@ -559,7 +562,9 @@ create policy ann_write on announcements for insert with check (author_id = auth
 
 
 -- ─────────────────────────────────────────────────────────────────────────
+
 -- ▶ scan-metrics.sql
+
 -- ─────────────────────────────────────────────────────────────────────────
 -- Repple — optional richer InBody metrics on scans (visceral fat, InBody score,
 -- BMR, fat/lean mass, body water/protein/minerals, segmental lean). Stored as a
@@ -570,7 +575,9 @@ alter table scans add column if not exists metrics jsonb;
 
 
 -- ─────────────────────────────────────────────────────────────────────────
+
 -- ▶ coach-macros.sql
+
 -- ─────────────────────────────────────────────────────────────────────────
 -- Repple — full-macro coach editor: carb & fat deltas on coach_nutrition so a
 -- trainer can shape all four macros (not just calories + protein). The client's
@@ -580,7 +587,9 @@ alter table coach_nutrition add column if not exists fat_delta int default 0;
 
 
 -- ─────────────────────────────────────────────────────────────────────────
+
 -- ▶ coach-meal-plan.sql
+
 -- ─────────────────────────────────────────────────────────────────────────
 -- Repple — coach meal-plan picker: the coach can set specific meals per slot for
 -- a client. Needs the client's diet + meals/day (so the coach picks from the right
@@ -592,7 +601,9 @@ alter table coach_nutrition add column if not exists meal_override jsonb;
 
 
 -- ─────────────────────────────────────────────────────────────────────────
+
 -- ▶ account-provisioning.sql
+
 -- ─────────────────────────────────────────────────────────────────────────
 -- Repple account provisioning. Makes every profile a real domain record:
 --  • a personal tenant (if none)
@@ -670,7 +681,9 @@ $$;
 
 
 -- ─────────────────────────────────────────────────────────────────────────
+
 -- ▶ auth-setup.sql
+
 -- ─────────────────────────────────────────────────────────────────────────
 -- ═══════════════════════════════════════════════════════════════════════════
 -- Repple — Phase 1 auth wiring ONLY.
@@ -726,7 +739,9 @@ create trigger on_auth_user_created
 
 
 -- ─────────────────────────────────────────────────────────────────────────
+
 -- ▶ roster-access.sql
+
 -- ─────────────────────────────────────────────────────────────────────────
 -- Repple roster access — lets a trainer read their own clients (and those
 -- clients' names) so linked accounts appear in the coach's roster with real IDs.
@@ -742,7 +757,9 @@ create policy profiles_trainer_read on profiles for select
 
 
 -- ─────────────────────────────────────────────────────────────────────────
+
 -- ▶ sessions-access.sql
+
 -- ─────────────────────────────────────────────────────────────────────────
 -- Repple sessions/bookings access. A trainer manages their own slots; a client
 -- reads their coach's slots + their own bookings, and books/cancels via RPCs
@@ -779,7 +796,9 @@ end $$;
 
 
 -- ─────────────────────────────────────────────────────────────────────────
+
 -- ▶ messages-setup.sql
+
 -- ─────────────────────────────────────────────────────────────────────────
 -- Repple messaging — RLS + realtime for the coach↔client chat thread.
 -- The thread is keyed by the client's id (messages.client_id = the client).
@@ -810,7 +829,9 @@ end $$;
 
 
 -- ─────────────────────────────────────────────────────────────────────────
+
 -- ▶ coach-invites.sql
+
 -- ─────────────────────────────────────────────────────────────────────────
 -- Repple coach invites — a trainer invites a client by email; the client accepts
 -- to link the two accounts. Depends on link_coaching() from
@@ -863,7 +884,9 @@ end $$;
 
 
 -- ─────────────────────────────────────────────────────────────────────────
+
 -- ▶ trainer-invites.sql
+
 -- ─────────────────────────────────────────────────────────────────────────
 -- Repple owner → trainer invites. The platform owner invites a trainer by email;
 -- the trainer signs in with that email, accepts, and is attached to the owner's
@@ -921,7 +944,9 @@ end $$;
 
 
 -- ─────────────────────────────────────────────────────────────────────────
+
 -- ▶ program-templates.sql
+
 -- ─────────────────────────────────────────────────────────────────────────
 -- Repple program templates — a coach's reusable weekly programs ("build once,
 -- assign to many"). Each row is one saved template owned by the coach; the
@@ -945,7 +970,9 @@ create policy program_templates_self on program_templates for all
 
 
 -- ─────────────────────────────────────────────────────────────────────────
+
 -- ▶ client-tags.sql
+
 -- ─────────────────────────────────────────────────────────────────────────
 -- Repple client tags — coach-owned labels on clients ("comp prep", "new",
 -- "paused", "high-touch"…) that drive roster segments/filters. Each row is one
@@ -969,7 +996,9 @@ create policy client_tags_self on client_tags for all
 
 
 -- ─────────────────────────────────────────────────────────────────────────
+
 -- ▶ push-tokens.sql
+
 -- ─────────────────────────────────────────────────────────────────────────
 -- Repple push tokens — each user's Expo push token(s) for remote notifications.
 -- The app upserts here on login; the send-push edge function reads them (via the
@@ -991,7 +1020,9 @@ create policy pt_self on push_tokens for all
 
 
 -- ─────────────────────────────────────────────────────────────────────────
+
 -- ▶ wearable-tokens.sql
+
 -- ─────────────────────────────────────────────────────────────────────────
 -- Repple wearable OAuth tokens — one row per (user, cloud provider). Written ONLY
 -- by the wearable-oauth / wearable-day edge functions via the service role, so
@@ -1016,7 +1047,9 @@ create policy wearable_tokens_delete_own on wearable_tokens for delete
 
 
 -- ─────────────────────────────────────────────────────────────────────────
+
 -- ▶ app-errors.sql
+
 -- ─────────────────────────────────────────────────────────────────────────
 -- Repple crash/error log — the app's ErrorBoundary writes caught render errors
 -- here (best-effort) so the platform owner can review them in the Owner ▸ Feedback
@@ -1050,7 +1083,9 @@ create policy app_errors_owner on app_errors for select using (
 
 
 -- ─────────────────────────────────────────────────────────────────────────
+
 -- ▶ feedback.sql
+
 -- ─────────────────────────────────────────────────────────────────────────
 -- Repple in-app feedback. Any signed-in user (trainer tester, client) submits a
 -- rating + note; the platform owner reads them all in the Owner portal.
@@ -1086,7 +1121,9 @@ create policy fb_owner on feedback for select using (
 
 
 -- ─────────────────────────────────────────────────────────────────────────
+
 -- ▶ trainer-read-access.sql
+
 -- ─────────────────────────────────────────────────────────────────────────
 -- Repple trainer read access — lets a trainer SELECT their linked clients'
 -- domain data so the coach roster & client detail show REAL progress (weight
@@ -1111,3 +1148,460 @@ drop policy if exists habits_trainer_read on habit_logs;
 create policy habits_trainer_read on habit_logs for select
   using (exists (select 1 from clients c where c.id = habit_logs.user_id and c.trainer_id = auth.uid()));
 
+-- ▶ billing.sql
+
+-- Repple billing (Stripe). The platform owner charges TRAINERS a subscription
+-- (the white-label fee). These tables are written ONLY by the stripe-webhook
+-- edge function via the service role; the app reads its own rows. Idempotent.
+-- Depends on schema.sql (profiles with a `role` column). Client payments to
+-- trainers (Stripe Connect) are a separate later phase — not in this file.
+
+create table if not exists billing_customers (
+  trainer_id uuid primary key references profiles(id) on delete cascade,
+  stripe_customer_id text not null unique,
+  email text,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists subscriptions (
+  trainer_id uuid primary key references profiles(id) on delete cascade,
+  stripe_subscription_id text unique,
+  plan text,
+  status text,                     -- active | trialing | past_due | canceled | unpaid | incomplete
+  current_period_end timestamptz,
+  cancel_at_period_end boolean not null default false,
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists invoices (
+  id text primary key,             -- stripe invoice id
+  trainer_id uuid references profiles(id) on delete set null,
+  amount_due integer,              -- cents
+  currency text,
+  status text,                     -- paid | open | uncollectible | void
+  attempt_count integer,
+  hosted_invoice_url text,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_invoices_trainer on invoices (trainer_id, created_at desc);
+
+alter table billing_customers enable row level security;
+alter table subscriptions enable row level security;
+alter table invoices enable row level security;
+
+-- A trainer sees their own billing; the owner sees everyone's (for dunning).
+drop policy if exists cust_read on billing_customers;
+create policy cust_read on billing_customers for select using (
+  trainer_id = auth.uid() or exists (select 1 from profiles p where p.id = auth.uid() and p.role = 'owner'));
+drop policy if exists sub_read on subscriptions;
+create policy sub_read on subscriptions for select using (
+  trainer_id = auth.uid() or exists (select 1 from profiles p where p.id = auth.uid() and p.role = 'owner'));
+drop policy if exists inv_read on invoices;
+create policy inv_read on invoices for select using (
+  trainer_id = auth.uid() or exists (select 1 from profiles p where p.id = auth.uid() and p.role = 'owner'));
+
+-- ▶ connect.sql
+
+-- Stripe Connect — trainers get paid by THEIR clients (marketplace layer on top
+-- of the platform subscription billing in billing.sql). Each trainer is a Stripe
+-- Express connected account; clients pay via Checkout with the platform taking an
+-- application fee. Connect tables are written by the connect-* edge functions via
+-- the service role; trainers manage their own packages directly (RLS). Idempotent.
+
+create table if not exists connect_accounts (
+  trainer_id uuid primary key references profiles(id) on delete cascade,
+  stripe_account_id text unique,
+  charges_enabled boolean not null default false,
+  details_submitted boolean not null default false,
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists trainer_packages (
+  id uuid primary key default gen_random_uuid(),
+  trainer_id uuid not null references profiles(id) on delete cascade,
+  name text not null,
+  price_cents integer not null,        -- price in cents
+  currency text not null default 'usd',
+  sessions integer,                    -- null = membership/one-off; N = a session pack
+  active boolean not null default true,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_packages_trainer on trainer_packages (trainer_id) where active;
+
+create table if not exists client_purchases (
+  id uuid primary key default gen_random_uuid(),
+  client_id uuid references profiles(id) on delete set null,
+  trainer_id uuid references profiles(id) on delete set null,
+  package_id uuid references trainer_packages(id) on delete set null,
+  stripe_session_id text unique,
+  amount_cents integer,
+  sessions_total integer,
+  sessions_used integer not null default 0,
+  status text not null default 'paid',
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_purchases_client on client_purchases (client_id, created_at desc);
+create index if not exists idx_purchases_trainer on client_purchases (trainer_id, created_at desc);
+
+alter table connect_accounts enable row level security;
+alter table trainer_packages enable row level security;
+alter table client_purchases enable row level security;
+
+-- Connect account: the trainer reads their own; the owner reads all.
+drop policy if exists conn_read on connect_accounts;
+create policy conn_read on connect_accounts for select using (
+  trainer_id = auth.uid() or exists (select 1 from profiles p where p.id = auth.uid() and p.role = 'owner'));
+
+-- Packages: any signed-in user reads ACTIVE packages (clients browse); a trainer
+-- fully manages their own (create/edit/deactivate) straight from the app.
+drop policy if exists pkg_read on trainer_packages;
+create policy pkg_read on trainer_packages for select using (active or trainer_id = auth.uid());
+drop policy if exists pkg_write on trainer_packages;
+create policy pkg_write on trainer_packages for all using (trainer_id = auth.uid()) with check (trainer_id = auth.uid());
+
+-- Purchases: the client sees their own, the trainer sees theirs, the owner all.
+drop policy if exists purch_read on client_purchases;
+create policy purch_read on client_purchases for select using (
+  client_id = auth.uid() or trainer_id = auth.uid()
+  or exists (select 1 from profiles p where p.id = auth.uid() and p.role = 'owner'));
+
+-- ▶ session-approvals.sql
+
+-- Client approval of a delivered PT session, with the optional comment the
+-- pt-sessions screen has always collected and never sent anywhere.
+--
+-- The approval lives in its own table rather than as columns on `sessions`
+-- because `sessions_client_read` lets a client read sessions belonging to their
+-- trainer. A note column on `sessions` would therefore be readable by every
+-- other client of that trainer. Row-level security cannot restrict individual
+-- columns, so the note gets its own table with its own policy: the client who
+-- wrote it, and the trainer who delivered the session.
+
+create table if not exists public.session_approvals (
+  session_id  uuid primary key references public.sessions(id) on delete cascade,
+  client_id   uuid not null references auth.users(id) on delete cascade,
+  approved_at timestamptz not null default now(),
+  note        text
+);
+
+alter table public.session_approvals enable row level security;
+
+drop policy if exists session_approvals_read on public.session_approvals;
+create policy session_approvals_read on public.session_approvals
+  for select using (
+    client_id = (select auth.uid())
+    or exists (
+      select 1 from public.sessions s
+       where s.id = session_approvals.session_id
+         and s.trainer_id = (select auth.uid())
+    )
+  );
+
+-- Deliberately no insert/update/delete policies. Every write goes through
+-- approve_session() so a client cannot approve on someone else's behalf, and
+-- cannot reach status or trainer_id while doing it.
+grant select on public.session_approvals to authenticated;
+
+create or replace function public.approve_session(p_session uuid, p_note text default null)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $function$
+declare
+  v_note text := nullif(btrim(coalesce(p_note, '')), '');
+begin
+  if not exists (
+    select 1 from sessions s
+     where s.id = p_session
+       and s.client_id = auth.uid()
+       and s.status = 'booked'
+       and s.starts_at <= now()
+  ) then
+    -- Covers all three refusals: not yours, not booked, or not yet delivered.
+    raise exception 'That session cannot be approved.';
+  end if;
+
+  insert into session_approvals (session_id, client_id, note)
+  values (p_session, auth.uid(), v_note)
+  on conflict (session_id) do update
+     set note = excluded.note, approved_at = now();
+end
+$function$;
+
+revoke all on function public.approve_session(uuid, text) from public;
+revoke execute on function public.approve_session(uuid, text) from anon;
+grant execute on function public.approve_session(uuid, text) to authenticated;
+
+-- Unrelated to approvals, found while reading the policy: clients could read
+-- every session of their trainer, including which client was booked into each
+-- slot. Every client screen already filters to `available` or `mine`, so
+-- narrowing this changes no UI -- it just stops other clients' rows leaving the
+-- database.
+drop policy if exists sessions_client_read on public.sessions;
+create policy sessions_client_read on public.sessions
+  for select using (
+    client_id = (select auth.uid())
+    or (
+      status = 'available'
+      and exists (
+        select 1 from public.clients c
+         where c.id = (select auth.uid())
+           and c.trainer_id = sessions.trainer_id
+      )
+    )
+  );
+
+-- ▶ trainer-directory.sql
+
+-- Trainer directory → coaching request → roster. The three pieces of that chain
+-- were live in the app but had never been written down as SQL: the app queried
+-- `trainers.listed`, inserted into `coach_requests` and upserted `coach_clients`,
+-- none of which existed here. Reconstructed from the call sites:
+--   app/(client)/trainers.tsx, src/ui/CoachRequests.tsx, src/ui/roster.tsx,
+--   src/ui/coachProfile.tsx
+--
+-- Idempotent in both directions: `if not exists` for a fresh project, and
+-- `add column if not exists` so it also converges on a database where these were
+-- created by hand.
+
+-- ── Public-facing trainer profile ───────────────────────────────────────────
+-- `trainers` had only (id, tenant_id, bio); coachProfile.tsx reads and writes
+-- five more, and the client directory filters on `listed`. Without these the
+-- directory query fails outright and no coach is ever discoverable.
+alter table trainers add column if not exists tagline     text;
+alter table trainers add column if not exists offers      text[] not null default '{}';
+alter table trainers add column if not exists specialties text[] not null default '{}';
+alter table trainers add column if not exists session_fee numeric(8,2) not null default 75;
+alter table trainers add column if not exists listed      boolean not null default false;
+
+comment on column trainers.listed is
+  'Opt-in. The trainer sets this themselves; only listed trainers appear in the client directory.';
+
+create index if not exists idx_trainers_listed on trainers(listed) where listed;
+
+-- ── Coaching requests ───────────────────────────────────────────────────────
+-- A client asks a listed trainer to coach them. The trainer sees pending rows on
+-- their dashboard and accepts or declines. The client's "Request pending" state
+-- is this row, so it must be readable by both sides.
+create table if not exists coach_requests (
+  id           uuid primary key default gen_random_uuid(),
+  client_id    uuid not null references profiles(id) on delete cascade,
+  trainer_id   uuid not null references profiles(id) on delete cascade,
+  mode         text not null default 'online' check (mode in ('online','inperson')),
+  status       text not null default 'pending' check (status in ('pending','accepted','declined')),
+  created_at   timestamptz not null default now(),
+  responded_at timestamptz,
+  unique (client_id, trainer_id)
+);
+
+-- trainers.tsx treats a unique violation as "already sent" rather than an error,
+-- which is why the constraint above is load-bearing and not just hygiene.
+create index if not exists idx_coach_requests_trainer on coach_requests(trainer_id, status);
+
+alter table coach_requests enable row level security;
+
+drop policy if exists coach_requests_client_read on coach_requests;
+create policy coach_requests_client_read on coach_requests
+  for select using (client_id = (select auth.uid()));
+
+drop policy if exists coach_requests_client_insert on coach_requests;
+create policy coach_requests_client_insert on coach_requests
+  for insert with check (client_id = (select auth.uid()));
+
+drop policy if exists coach_requests_trainer_read on coach_requests;
+create policy coach_requests_trainer_read on coach_requests
+  for select using (trainer_id = (select auth.uid()));
+
+-- Only the trainer answers a request. A client cannot accept on their own behalf.
+drop policy if exists coach_requests_trainer_update on coach_requests;
+create policy coach_requests_trainer_update on coach_requests
+  for update using (trainer_id = (select auth.uid()))
+  with check (trainer_id = (select auth.uid()));
+
+grant select, insert, update on coach_requests to authenticated;
+
+-- ── Coach-created roster entries ────────────────────────────────────────────
+-- Two kinds of row land here: a client accepted from the directory (id = that
+-- client's auth id, upserted on conflict) and a client the coach typed in by
+-- hand, who has no auth account at all. `id` therefore defaults to a fresh uuid
+-- and is deliberately NOT a foreign key to profiles — dashboard.tsx already
+-- documents that a hand-added client has no user account behind it.
+create table if not exists coach_clients (
+  id         uuid primary key default gen_random_uuid(),
+  trainer_id uuid not null references profiles(id) on delete cascade,
+  name       text not null,
+  goal       text,
+  mode       text not null default 'online' check (mode in ('online','inperson')),
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_coach_clients_trainer on coach_clients(trainer_id, created_at);
+
+alter table coach_clients enable row level security;
+
+drop policy if exists coach_clients_own on coach_clients;
+create policy coach_clients_own on coach_clients
+  for all using (trainer_id = (select auth.uid()))
+  with check (trainer_id = (select auth.uid()));
+
+grant select, insert, update, delete on coach_clients to authenticated;
+
+-- ▶ trainer-availability.sql
+
+-- Trainer weekly availability template — the recurring day-of-week + hour slots a
+-- coach offers, which "generate" turns into concrete open sessions.
+-- Reconstructed from src/ui/availability.ts, which reads and writes this table
+-- and falls back to a per-device AsyncStorage copy when it is absent. That
+-- fallback is why the loss was invisible: a schedule survived on the device that
+-- created it and existed nowhere else.
+
+create table if not exists trainer_availability (
+  id         uuid primary key default gen_random_uuid(),
+  trainer_id uuid not null references profiles(id) on delete cascade,
+  dow        smallint not null check (dow between 0 and 6),   -- 0 = Sunday
+  hour       smallint not null check (hour between 0 and 23),
+  dur        smallint not null default 60 check (dur > 0),    -- minutes
+  created_at timestamptz not null default now(),
+  unique (trainer_id, dow, hour)
+);
+
+-- availability.ts already refuses a duplicate (dow, hour) client-side; the
+-- constraint makes that hold across devices, where the client check cannot see
+-- what another device already wrote.
+
+create index if not exists idx_trainer_availability_trainer
+  on trainer_availability(trainer_id, dow, hour);
+
+alter table trainer_availability enable row level security;
+
+drop policy if exists trainer_availability_own on trainer_availability;
+create policy trainer_availability_own on trainer_availability
+  for all using (trainer_id = (select auth.uid()))
+  with check (trainer_id = (select auth.uid()));
+
+grant select, insert, update, delete on trainer_availability to authenticated;
+
+-- ▶ class-attendance.sql
+
+-- Group-class attendance: the trainer checks members into a class so they get
+-- paid per attendee, and the owner reads fill rates for payroll and analytics.
+-- `gym_classes` and `class_bookings` exist (02-domain-schema) but there was
+-- nowhere to record who actually turned up, and all three RPCs the app calls
+-- were missing. Reconstructed from src/lib/classAttendance.ts,
+-- app/(trainer)/class-checkin.tsx and functions/owner-metrics.
+
+-- ── Attendance lives on the booking ─────────────────────────────────────────
+alter table class_bookings add column if not exists attended    boolean not null default false;
+alter table class_bookings add column if not exists attended_at timestamptz;
+
+create index if not exists idx_class_bookings_attended
+  on class_bookings(class_id) where attended;
+
+-- ── The check-in roster for one class ───────────────────────────────────────
+-- Trainer-only: this is the screen that decides who gets paid for what.
+create or replace function class_roster(p_class uuid)
+returns table (user_id uuid, name text, status text, attended boolean)
+language sql
+security definer
+set search_path to 'public'
+as $function$
+  select b.user_id,
+         coalesce(nullif(btrim(p.full_name), ''), 'Member') as name,
+         b.status,
+         b.attended
+    from class_bookings b
+    join gym_classes g on g.id = b.class_id
+    left join profiles p on p.id = b.user_id
+   where b.class_id = p_class
+     and g.trainer_id = auth.uid()
+   order by 2;
+$function$;
+
+revoke all on function class_roster(uuid) from public;
+revoke execute on function class_roster(uuid) from anon;
+grant execute on function class_roster(uuid) to authenticated;
+
+-- ── Mark one member present or absent ───────────────────────────────────────
+create or replace function set_class_attendance(p_class uuid, p_user uuid, p_present boolean)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $function$
+begin
+  if not exists (
+    select 1 from gym_classes g
+     where g.id = p_class
+       and g.trainer_id = auth.uid()
+  ) then
+    raise exception 'That class is not yours to check in.';
+  end if;
+
+  update class_bookings
+     set attended    = p_present,
+         attended_at = case when p_present then now() else null end
+   where class_id = p_class
+     and user_id  = p_user;
+end
+$function$;
+
+revoke all on function set_class_attendance(uuid, uuid, boolean) from public;
+revoke execute on function set_class_attendance(uuid, uuid, boolean) from anon;
+grant execute on function set_class_attendance(uuid, uuid, boolean) to authenticated;
+
+-- ── Gym-wide attendance over a date range ───────────────────────────────────
+-- Parameter names are load-bearing: PostgREST binds by name, so `p_from`/`p_to`
+-- must match src/lib/classAttendance.ts exactly. functions/owner-metrics was
+-- calling this with `from_ts`/`to_ts` and could never have bound to any single
+-- signature; that call site is corrected to match.
+--
+-- This one crosses trainers, so it is owner-scoped rather than caller-scoped.
+-- auth.uid() is null when owner-metrics calls it with the service role; EXECUTE
+-- is revoked from anon so a null uid here means a trusted server-side caller.
+create or replace function class_attendance_summary(p_from timestamptz, p_to timestamptz)
+returns table (
+  class_id     uuid,
+  title        text,
+  kind         text,
+  branch       text,
+  trainer_id   uuid,
+  trainer_name text,
+  starts_at    timestamptz,
+  booked       int,
+  attended     int
+)
+language plpgsql
+security definer
+set search_path to 'public'
+as $function$
+begin
+  if auth.uid() is not null and not exists (
+    select 1 from profiles where id = auth.uid() and role = 'owner'
+  ) then
+    raise exception 'Owner access required.';
+  end if;
+
+  return query
+    select g.id,
+           g.title,
+           coalesce(g.kind, ''),
+           coalesce(nullif(btrim(g.branch), ''), '—'),
+           g.trainer_id,
+           coalesce(nullif(btrim(p.full_name), ''), 'Trainer'),
+           g.starts_at,
+           count(b.id) filter (where b.status = 'booked')::int,
+           count(b.id) filter (where b.attended)::int
+      from gym_classes g
+      left join profiles p on p.id = g.trainer_id
+      left join class_bookings b on b.class_id = g.id
+     where g.starts_at >= p_from
+       and g.starts_at <= p_to
+     group by g.id, p.full_name
+     order by g.starts_at desc;
+end
+$function$;
+
+revoke all on function class_attendance_summary(timestamptz, timestamptz) from public;
+revoke execute on function class_attendance_summary(timestamptz, timestamptz) from anon;
+grant execute on function class_attendance_summary(timestamptz, timestamptz) to authenticated;

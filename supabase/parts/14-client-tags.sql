@@ -1,3 +1,4 @@
+-- ─────────────────────────────────────────────────────────────────────────
 -- Repple client tags — coach-owned labels on clients ("comp prep", "new",
 -- "paused", "high-touch"…) that drive roster segments/filters. Each row is one
 -- (coach, client, tag). A coach manages only their own tags. Idempotent.
@@ -17,3 +18,6 @@ alter table client_tags enable row level security;
 drop policy if exists client_tags_self on client_tags;
 create policy client_tags_self on client_tags for all
   using (coach_id = auth.uid()) with check (coach_id = auth.uid());
+
+
+-- ─────────────────────────────────────────────────────────────────────────

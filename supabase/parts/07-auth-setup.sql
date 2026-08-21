@@ -1,3 +1,4 @@
+-- ─────────────────────────────────────────────────────────────────────────
 -- ═══════════════════════════════════════════════════════════════════════════
 -- Repple — Phase 1 auth wiring ONLY.
 -- Safe to run on a database that already has the tables (idempotent):
@@ -49,3 +50,6 @@ drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
+
+
+-- ─────────────────────────────────────────────────────────────────────────

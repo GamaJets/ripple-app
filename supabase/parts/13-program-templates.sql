@@ -1,3 +1,4 @@
+-- ─────────────────────────────────────────────────────────────────────────
 -- Repple program templates — a coach's reusable weekly programs ("build once,
 -- assign to many"). Each row is one saved template owned by the coach; the
 -- `program` JSONB is the same shape assigned to clients. Idempotent.
@@ -17,3 +18,6 @@ alter table program_templates enable row level security;
 drop policy if exists program_templates_self on program_templates;
 create policy program_templates_self on program_templates for all
   using (coach_id = auth.uid()) with check (coach_id = auth.uid());
+
+
+-- ─────────────────────────────────────────────────────────────────────────

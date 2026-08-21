@@ -1,3 +1,4 @@
+-- ─────────────────────────────────────────────────────────────────────────
 -- Repple sessions/bookings access. A trainer manages their own slots; a client
 -- reads their coach's slots + their own bookings, and books/cancels via RPCs
 -- (SECURITY DEFINER, so no broad client UPDATE grant is needed).
@@ -30,3 +31,6 @@ begin
   update sessions set client_id = null, status = 'available', released = true
    where id = p_session and client_id = auth.uid();
 end $$;
+
+
+-- ─────────────────────────────────────────────────────────────────────────

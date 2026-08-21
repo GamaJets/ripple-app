@@ -1,3 +1,4 @@
+-- ─────────────────────────────────────────────────────────────────────────
 -- Repple owner → trainer invites. The platform owner invites a trainer by email;
 -- the trainer signs in with that email, accepts, and is attached to the owner's
 -- tenant as a trainer with a trial billing record — then completes their profile.
@@ -51,3 +52,6 @@ begin
      set status = 'accepted', accepted_at = now(), accepted_by = auth.uid()
    where id = p_invite;
 end $$;
+
+
+-- ─────────────────────────────────────────────────────────────────────────

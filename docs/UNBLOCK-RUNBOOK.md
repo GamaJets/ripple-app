@@ -18,10 +18,10 @@ run one SQL file, create two accounts, link them in-app. ~15 minutes.
 ## Step 1 — Apply the database (one paste)
 
 I've bundled every schema/RLS/function file into a single, idempotent script in
-dependency order so you don't have to run 16 files by hand.
+dependency order so you don't have to run the 22 parts by hand.
 
 1. Open your Supabase project ▸ **SQL Editor** ▸ **New query**.
-2. Paste the entire contents of **`production/repple-setup.sql`** and click **Run**.
+2. Paste the entire contents of **`supabase/setup.sql`** and click **Run**.
 3. It's safe to re-run any time — every statement is `create ... if not exists`,
    `create or replace`, or `drop policy if exists`.
 
@@ -157,8 +157,7 @@ match what the client entered.
 
 If the client still shows as a placeholder: confirm step 4's `trainer_id` verify
 query returns the coach id, confirm the OTA from step 5 was pulled, and confirm
-the trainer-read RLS ran (it's the `▶ trainer-read-access.sql` section of
-`repple-setup.sql`).
+the trainer-read RLS ran (it's `supabase/parts/19-trainer-read-access.sql`).
 
 ---
 
@@ -168,7 +167,7 @@ the trainer-read RLS ran (it's the `▶ trainer-read-access.sql` section of
   fix is to expose a client/trainer choice on the sign-up screen (or an
   owner-issued trainer invite that pre-sets the role). Until then, step 3 is the
   manual promotion.
-- **Owner → trainer invites** exist too (`trainer-invites.sql`, in the bundle) if
+- **Owner → trainer invites** exist too (`supabase/parts/12-trainer-invites.sql`) if
   you'd rather the platform owner provision trainers into the owner's tenant.
 - Everything the app writes is **best-effort and RLS-gated** — if a policy is
   missing the app falls back to demo data rather than crashing, so a partial

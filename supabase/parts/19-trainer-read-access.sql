@@ -1,3 +1,4 @@
+-- ─────────────────────────────────────────────────────────────────────────
 -- Repple trainer read access — lets a trainer SELECT their linked clients'
 -- domain data so the coach roster & client detail show REAL progress (weight
 -- change, last-active, self-reported adherence), not placeholders.

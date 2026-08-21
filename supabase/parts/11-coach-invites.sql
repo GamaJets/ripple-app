@@ -1,3 +1,4 @@
+-- ─────────────────────────────────────────────────────────────────────────
 -- Repple coach invites — a trainer invites a client by email; the client accepts
 -- to link the two accounts. Depends on link_coaching() from
 -- account-provisioning.sql (run that first). Idempotent; safe to re-run.
@@ -46,3 +47,6 @@ begin
      set status = 'accepted', accepted_at = now(), accepted_by = auth.uid()
    where id = p_invite;
 end $$;
+
+
+-- ─────────────────────────────────────────────────────────────────────────

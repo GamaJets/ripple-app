@@ -25,7 +25,7 @@ npm run test:logic     # ALL PRODUCTION-LOGIC TESTS PASSED
 - `src/theme/tokens.ts` — dark/light design tokens
 - `app/` — Expo Router screens: home + client (dashboard, workouts, nutrition,
   scans, calendar, profile) + trainer (dashboard)
-- `supabase/schema.sql` — full database schema + RLS starters
+- `supabase/` — database. Start with `supabase/README.md`; schema is `supabase/setup.sql`, generated from `supabase/parts/`
 
 ## Going live (Phase 1)
 Fill `.env` from `.env.example` after creating the Supabase/Stripe accounts, then
