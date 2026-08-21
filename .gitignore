@@ -11,3 +11,7 @@ android/
 .scratch*
 .DS_Store
 _to_delete/
+
+dist-verify/
+.fuse_hidden*
+.claude/settings.local.json
