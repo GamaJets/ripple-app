@@ -49,58 +49,51 @@ script exists.
   references. They come first for a reason.
 - `20-billing.sql` and `21-connect.sql` both need `profiles` from `01`.
 
-## Reconstructed parts (23–25) — read before applying
+## Parts 23–25 are dumped from the live database
 
-Parts `23`–`25` were **reconstructed from the app's call sites**, not dumped from
-the live database. Six objects and five columns the app uses at runtime had never
-been written down here:
+These were applied by hand in an earlier session and never written down. They
+were briefly reconstructed from the app's call sites; that reconstruction was
+wrong in ways that would have caused damage, so they are now the database's own
+definitions, verified against project `phgfwzpkkwdysftlgkoq`. Applying them to
+live is a no-op.
 
-| Added in | What | Why it was invisible |
+What the reconstruction got wrong, kept here as the reason not to guess:
+
+| Guessed | Actually live | Damage avoided |
 | --- | --- | --- |
-| `23` | `trainers.listed / tagline / offers / specialties / session_fee` | the client directory query filters on `listed`; without the column the whole find-a-coach flow returns nothing |
-| `23` | `coach_requests` table | the directory's "request coaching" write |
-| `23` | `coach_clients` table | the trainer's roster; `roster.tsx` swallows the error and keeps an optimistic local copy |
-| `24` | `trainer_availability` table | `availability.ts` falls back to per-device AsyncStorage, so a schedule survived on one device and nowhere else |
-| `25` | `class_bookings.attended / attended_at` | there was nowhere to record who turned up |
-| `25` | `class_roster`, `set_class_attendance`, `class_attendance_summary` | all three RPCs the check-in and owner-analytics screens call |
+| `class_bookings.attended` boolean | attendance is `attended_at is not null`; no such column | adding it and repointing the functions would have orphaned every attendance already recorded |
+| `class_roster` trainer-only | trainer **or** owner | would have cut owners out of the check-in roster |
+| `class_attendance_summary` owner-only | class's own trainer **or** owner | would have broken a trainer viewing their own class analytics |
+| `unique (client_id, trainer_id)` | partial unique **where status = 'pending'** | a declined request could never be sent again |
+| `coach_clients.trainer_id → profiles` | → `auth.users` | wrong FK target |
+| `trainers.offers/specialties/session_fee` NOT NULL + defaults | nullable, no defaults | `add column if not exists` would have skipped it, leaving repo and live disagreeing |
 
-**Before applying these to the live database**, dump what is actually there and
-compare — these tables may already exist, created by hand:
+## Live gaps — the drift runs the other way too
+
+Two things this repo defines have **never been applied to the live database**,
+and both are broken in production right now:
+
+| Missing live | Defined in | Breaks |
+| --- | --- | --- |
+| `feedback` table | `18-feedback.sql` | the in-app Send Feedback screen (`src/ui/appFeedback.ts`) — every submission fails |
+| `all_member_ids()` | `02-domain-schema.sql` | the owner's member-wide promo push (`app/(owner)/promotions.tsx`) |
+
+Applying just those two is the smallest safe change:
 
 ```sql
-select table_name, column_name, data_type
-  from information_schema.columns
- where table_name in ('coach_clients','coach_requests','trainer_availability','trainers','class_bookings')
- order by table_name, ordinal_position;
-
-select proname, pg_get_function_identity_arguments(oid)
-  from pg_proc where proname in ('class_roster','set_class_attendance','class_attendance_summary');
+-- paste 18-feedback.sql, then the all_member_ids() block from 02-domain-schema.sql
 ```
 
-`create table if not exists` will not reshape a table that already exists, but
-`create or replace function` **will** overwrite a live function body. If the
-dumps disagree with parts 23–25, reconcile before running, not after.
+## Not mirrored here, deliberately
 
-### Decisions baked into these parts
+`notify_on_message()` — a live trigger function that calls the `notify-message`
+edge function — carries the hook secret **as a plaintext literal in its body**.
+It is not reproduced in this repo because that would commit the secret to git.
+It should be rewritten to read the value from Vault and the secret rotated; the
+old value is readable by anything that can read `pg_proc`.
 
-- **`class_attendance_summary(p_from, p_to)`** — the app sent `p_from`/`p_to`
-  while `functions/owner-metrics` sent `from_ts`/`to_ts`. PostgREST binds
-  arguments by name, so those two could never have shared one signature. The
-  app's naming won and the edge function was corrected; **`owner-metrics` needs
-  redeploying** for that fix to take effect.
-- **`class_attendance_summary` is owner-scoped** — it crosses trainers, so a
-  signed-in caller must have `profiles.role = 'owner'`. This depends on the
-  `role = 'owner'` question that `docs/OWNER-PORTAL.md` is still blocked on. If
-  that resolves to "platform admin", a gym owner will need a different check.
-- **`coach_clients.id` is not a foreign key.** Coaches add clients by hand who
-  have no auth account; making it reference `profiles` would reject exactly those.
+## Corrections to earlier notes in this file
 
-## Still open
-
-- **`trainers` has no row-level security at all** — no `enable row level
-  security`, no policies, so with the anon key any signed-in user can read and
-  write every trainer's row. Adding RLS here is a behaviour change that needs
-  testing against the live database, so it is deliberately not in these parts.
-- Parts `01`–`22` were made idempotent (`create table`/`create index` now carry
-  `if not exists`). Before that, re-running `setup.sql` aborted on the first
-  `create table tenants`, despite the runbook promising it was safe to re-run.
+- `trainers` **does** have row-level security enabled live, with five policies
+  including `trainers_public_directory_r` (`listed = true`). An earlier version
+  of this file said it had none — that was true of the repo, not the database.

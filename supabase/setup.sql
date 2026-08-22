@@ -1354,254 +1354,239 @@ create policy sessions_client_read on public.sessions
 
 -- ▶ trainer-directory.sql
 
--- Trainer directory → coaching request → roster. The three pieces of that chain
--- were live in the app but had never been written down as SQL: the app queried
--- `trainers.listed`, inserted into `coach_requests` and upserted `coach_clients`,
--- none of which existed here. Reconstructed from the call sites:
---   app/(client)/trainers.tsx, src/ui/CoachRequests.tsx, src/ui/roster.tsx,
---   src/ui/coachProfile.tsx
+-- Trainer directory → coaching request → roster.
 --
--- Idempotent in both directions: `if not exists` for a fresh project, and
--- `add column if not exists` so it also converges on a database where these were
--- created by hand.
+-- DUMPED FROM THE LIVE DATABASE (project phgfwzpkkwdysftlgkoq), not authored
+-- here. These objects were applied by hand in an earlier session and had never
+-- been written down; an earlier reconstruction of them from the app's call sites
+-- got several details wrong, so this file is the database's own definition.
+-- Re-running it against live is a no-op.
 
 -- ── Public-facing trainer profile ───────────────────────────────────────────
--- `trainers` had only (id, tenant_id, bio); coachProfile.tsx reads and writes
--- five more, and the client directory filters on `listed`. Without these the
--- directory query fails outright and no coach is ever discoverable.
+-- Nullable with no defaults, matching live. (A reconstruction had these NOT NULL
+-- with defaults, which `add column if not exists` would have silently skipped.)
 alter table trainers add column if not exists tagline     text;
-alter table trainers add column if not exists offers      text[] not null default '{}';
-alter table trainers add column if not exists specialties text[] not null default '{}';
-alter table trainers add column if not exists session_fee numeric(8,2) not null default 75;
+alter table trainers add column if not exists offers      text[];
+alter table trainers add column if not exists specialties text[];
+alter table trainers add column if not exists session_fee numeric;
 alter table trainers add column if not exists listed      boolean not null default false;
 
-comment on column trainers.listed is
-  'Opt-in. The trainer sets this themselves; only listed trainers appear in the client directory.';
+create index if not exists trainers_listed_idx on trainers(listed) where listed;
 
-create index if not exists idx_trainers_listed on trainers(listed) where listed;
+alter table trainers enable row level security;
+
+-- Five policies, all SELECT except the trainer's own row. `trainers` is readable
+-- far more narrowly than the repo previously suggested.
+drop policy if exists trainers_self_rw on trainers;
+create policy trainers_self_rw on trainers
+  for all using ((select auth.uid()) = id);
+
+drop policy if exists trainers_public_directory_r on trainers;
+create policy trainers_public_directory_r on trainers
+  for select to authenticated using (listed = true);
+
+drop policy if exists trainers_owner_r on trainers;
+create policy trainers_owner_r on trainers
+  for select using (is_owner_of(tenant_id));
+
+drop policy if exists trainers_peer_r on trainers;
+create policy trainers_peer_r on trainers
+  for select using (exists (
+    select 1 from trainers t1
+     where t1.id = (select auth.uid()) and t1.tenant_id = trainers.tenant_id));
+
+drop policy if exists trainers_assigned_client_r on trainers;
+create policy trainers_assigned_client_r on trainers
+  for select using (exists (
+    select 1 from coach_clients
+     where coach_clients.trainer_id = trainers.id
+       and coach_clients.id = (select auth.uid())));
 
 -- ── Coaching requests ───────────────────────────────────────────────────────
--- A client asks a listed trainer to coach them. The trainer sees pending rows on
--- their dashboard and accepts or declines. The client's "Request pending" state
--- is this row, so it must be readable by both sides.
 create table if not exists coach_requests (
   id           uuid primary key default gen_random_uuid(),
   client_id    uuid not null references profiles(id) on delete cascade,
   trainer_id   uuid not null references profiles(id) on delete cascade,
-  mode         text not null default 'online' check (mode in ('online','inperson')),
-  status       text not null default 'pending' check (status in ('pending','accepted','declined')),
+  mode         text not null default 'online'  check (mode in ('online','inperson')),
+  status       text not null default 'pending' check (status in ('pending','accepted','declined','withdrawn')),
+  note         text,
   created_at   timestamptz not null default now(),
-  responded_at timestamptz,
-  unique (client_id, trainer_id)
+  responded_at timestamptz
 );
 
--- trainers.tsx treats a unique violation as "already sent" rather than an error,
--- which is why the constraint above is load-bearing and not just hygiene.
-create index if not exists idx_coach_requests_trainer on coach_requests(trainer_id, status);
+-- Partial unique: one PENDING request per pair, but a declined request can be
+-- sent again later. A plain unique (client_id, trainer_id) would have blocked
+-- that forever; this is what makes trainers.tsx's duplicate handling correct.
+create unique index if not exists coach_requests_one_pending
+  on coach_requests(client_id, trainer_id) where status = 'pending';
+create index if not exists coach_requests_client_idx  on coach_requests(client_id, status);
+create index if not exists coach_requests_trainer_idx on coach_requests(trainer_id, status);
 
 alter table coach_requests enable row level security;
 
-drop policy if exists coach_requests_client_read on coach_requests;
-create policy coach_requests_client_read on coach_requests
-  for select using (client_id = (select auth.uid()));
+drop policy if exists coach_requests_client_rw on coach_requests;
+create policy coach_requests_client_rw on coach_requests
+  for all to authenticated
+  using (client_id = (select auth.uid()))
+  with check (client_id = (select auth.uid()));
 
-drop policy if exists coach_requests_client_insert on coach_requests;
-create policy coach_requests_client_insert on coach_requests
-  for insert with check (client_id = (select auth.uid()));
+drop policy if exists coach_requests_trainer_r on coach_requests;
+create policy coach_requests_trainer_r on coach_requests
+  for select to authenticated using (trainer_id = (select auth.uid()));
 
-drop policy if exists coach_requests_trainer_read on coach_requests;
-create policy coach_requests_trainer_read on coach_requests
-  for select using (trainer_id = (select auth.uid()));
-
--- Only the trainer answers a request. A client cannot accept on their own behalf.
-drop policy if exists coach_requests_trainer_update on coach_requests;
-create policy coach_requests_trainer_update on coach_requests
-  for update using (trainer_id = (select auth.uid()))
+drop policy if exists coach_requests_trainer_u on coach_requests;
+create policy coach_requests_trainer_u on coach_requests
+  for update to authenticated
+  using (trainer_id = (select auth.uid()))
   with check (trainer_id = (select auth.uid()));
 
-grant select, insert, update on coach_requests to authenticated;
-
 -- ── Coach-created roster entries ────────────────────────────────────────────
--- Two kinds of row land here: a client accepted from the directory (id = that
--- client's auth id, upserted on conflict) and a client the coach typed in by
--- hand, who has no auth account at all. `id` therefore defaults to a fresh uuid
--- and is deliberately NOT a foreign key to profiles — dashboard.tsx already
--- documents that a hand-added client has no user account behind it.
+-- `id` is not a foreign key: a coach adds clients by hand who have no auth
+-- account. `trainer_id` references auth.users directly, not profiles.
 create table if not exists coach_clients (
   id         uuid primary key default gen_random_uuid(),
-  trainer_id uuid not null references profiles(id) on delete cascade,
+  trainer_id uuid not null references auth.users(id) on delete cascade,
   name       text not null,
   goal       text,
   mode       text not null default 'online' check (mode in ('online','inperson')),
   created_at timestamptz not null default now()
 );
 
-create index if not exists idx_coach_clients_trainer on coach_clients(trainer_id, created_at);
+create index if not exists coach_clients_trainer_idx on coach_clients(trainer_id, created_at);
 
 alter table coach_clients enable row level security;
 
-drop policy if exists coach_clients_own on coach_clients;
-create policy coach_clients_own on coach_clients
+-- cc_own and coach_clients_trainer_rw are redundant with each other; both exist
+-- live and both are reproduced so this file matches the database exactly.
+drop policy if exists cc_own on coach_clients;
+create policy cc_own on coach_clients
   for all using (trainer_id = (select auth.uid()))
   with check (trainer_id = (select auth.uid()));
 
-grant select, insert, update, delete on coach_clients to authenticated;
+drop policy if exists coach_clients_trainer_rw on coach_clients;
+create policy coach_clients_trainer_rw on coach_clients
+  for all using ((select auth.uid()) = trainer_id);
+
+drop policy if exists coach_clients_client_r on coach_clients;
+create policy coach_clients_client_r on coach_clients
+  for select using ((select auth.uid()) = id);
+
+drop policy if exists coach_clients_owner_r on coach_clients;
+create policy coach_clients_owner_r on coach_clients
+  for select using (exists (
+    select 1 from profiles
+     where profiles.id = (select auth.uid()) and profiles.role = 'owner'));
 
 -- ▶ trainer-availability.sql
 
--- Trainer weekly availability template — the recurring day-of-week + hour slots a
--- coach offers, which "generate" turns into concrete open sessions.
--- Reconstructed from src/ui/availability.ts, which reads and writes this table
--- and falls back to a per-device AsyncStorage copy when it is absent. That
--- fallback is why the loss was invisible: a schedule survived on the device that
--- created it and existed nowhere else.
+-- Trainer weekly availability template — recurring day-of-week + hour slots.
+--
+-- DUMPED FROM THE LIVE DATABASE. Note `integer` (not smallint) and the absence
+-- of a unique constraint on (trainer_id, dow, hour): availability.ts dedups
+-- client-side only, so two devices can still create the same slot twice. Left as
+-- live has it rather than silently tightening a constraint on existing rows.
 
 create table if not exists trainer_availability (
   id         uuid primary key default gen_random_uuid(),
-  trainer_id uuid not null references profiles(id) on delete cascade,
-  dow        smallint not null check (dow between 0 and 6),   -- 0 = Sunday
-  hour       smallint not null check (hour between 0 and 23),
-  dur        smallint not null default 60 check (dur > 0),    -- minutes
-  created_at timestamptz not null default now(),
-  unique (trainer_id, dow, hour)
+  trainer_id uuid not null references auth.users(id) on delete cascade,
+  dow        integer not null check (dow >= 0 and dow <= 6),   -- 0 = Sunday
+  hour       integer not null check (hour >= 0 and hour <= 23),
+  dur        integer not null default 60,                      -- minutes
+  created_at timestamptz not null default now()
 );
 
--- availability.ts already refuses a duplicate (dow, hour) client-side; the
--- constraint makes that hold across devices, where the client check cannot see
--- what another device already wrote.
-
-create index if not exists idx_trainer_availability_trainer
+create index if not exists trainer_availability_idx
   on trainer_availability(trainer_id, dow, hour);
 
 alter table trainer_availability enable row level security;
 
-drop policy if exists trainer_availability_own on trainer_availability;
-create policy trainer_availability_own on trainer_availability
+drop policy if exists ta_own on trainer_availability;
+create policy ta_own on trainer_availability
   for all using (trainer_id = (select auth.uid()))
   with check (trainer_id = (select auth.uid()));
 
-grant select, insert, update, delete on trainer_availability to authenticated;
-
 -- ▶ class-attendance.sql
 
--- Group-class attendance: the trainer checks members into a class so they get
--- paid per attendee, and the owner reads fill rates for payroll and analytics.
--- `gym_classes` and `class_bookings` exist (02-domain-schema) but there was
--- nowhere to record who actually turned up, and all three RPCs the app calls
--- were missing. Reconstructed from src/lib/classAttendance.ts,
--- app/(trainer)/class-checkin.tsx and functions/owner-metrics.
+-- Group-class attendance: the trainer checks members into a class, the owner
+-- reads fill rates for payroll and analytics.
+--
+-- DUMPED FROM THE LIVE DATABASE. The important detail, and the one a
+-- reconstruction got wrong: attendance is recorded as `class_bookings.attended_at
+-- is not null`. There is no `attended` boolean column. Adding one and switching
+-- the functions to it would have orphaned every attendance already recorded.
 
--- ── Attendance lives on the booking ─────────────────────────────────────────
-alter table class_bookings add column if not exists attended    boolean not null default false;
 alter table class_bookings add column if not exists attended_at timestamptz;
 
-create index if not exists idx_class_bookings_attended
-  on class_bookings(class_id) where attended;
+create index if not exists idx_class_bookings_user_id on class_bookings(user_id);
+
+-- The owner of the tenant that owns the class can read its bookings.
+drop policy if exists class_bookings_owner_r on class_bookings;
+create policy class_bookings_owner_r on class_bookings
+  for select using (exists (
+    select 1 from gym_classes gc
+      join trainers t on t.id = gc.trainer_id
+     where gc.id = class_bookings.class_id and is_owner_of(t.tenant_id)));
 
 -- ── The check-in roster for one class ───────────────────────────────────────
--- Trainer-only: this is the screen that decides who gets paid for what.
-create or replace function class_roster(p_class uuid)
-returns table (user_id uuid, name text, status text, attended boolean)
+-- Readable by the class's trainer OR an owner.
+create or replace function public.class_roster(p_class uuid)
+returns table(user_id uuid, name text, status text, attended boolean)
 language sql
 security definer
 set search_path to 'public'
 as $function$
-  select b.user_id,
-         coalesce(nullif(btrim(p.full_name), ''), 'Member') as name,
-         b.status,
-         b.attended
-    from class_bookings b
-    join gym_classes g on g.id = b.class_id
-    left join profiles p on p.id = b.user_id
-   where b.class_id = p_class
-     and g.trainer_id = auth.uid()
-   order by 2;
+  select cb.user_id,
+         coalesce(p.full_name, 'Member') as name,
+         cb.status,
+         (cb.attended_at is not null) as attended
+  from class_bookings cb
+  left join profiles p on p.id = cb.user_id
+  where cb.class_id = p_class
+    and ( exists (select 1 from gym_classes gc where gc.id = p_class and gc.trainer_id = auth.uid())
+          or exists (select 1 from profiles o where o.id = auth.uid() and o.role = 'owner') )
+  order by name;
 $function$;
 
-revoke all on function class_roster(uuid) from public;
-revoke execute on function class_roster(uuid) from anon;
-grant execute on function class_roster(uuid) to authenticated;
-
 -- ── Mark one member present or absent ───────────────────────────────────────
-create or replace function set_class_attendance(p_class uuid, p_user uuid, p_present boolean)
+create or replace function public.set_class_attendance(p_class uuid, p_user uuid, p_present boolean)
 returns void
 language plpgsql
 security definer
 set search_path to 'public'
 as $function$
 begin
-  if not exists (
-    select 1 from gym_classes g
-     where g.id = p_class
-       and g.trainer_id = auth.uid()
-  ) then
-    raise exception 'That class is not yours to check in.';
+  if not exists (select 1 from gym_classes gc where gc.id = p_class and gc.trainer_id = auth.uid()) then
+    raise exception 'not your class';
   end if;
-
   update class_bookings
-     set attended    = p_present,
-         attended_at = case when p_present then now() else null end
-   where class_id = p_class
-     and user_id  = p_user;
-end
-$function$;
+     set attended_at = case when p_present then now() else null end
+   where class_id = p_class and user_id = p_user;
+end; $function$;
 
-revoke all on function set_class_attendance(uuid, uuid, boolean) from public;
-revoke execute on function set_class_attendance(uuid, uuid, boolean) from anon;
-grant execute on function set_class_attendance(uuid, uuid, boolean) to authenticated;
-
--- ── Gym-wide attendance over a date range ───────────────────────────────────
--- Parameter names are load-bearing: PostgREST binds by name, so `p_from`/`p_to`
--- must match src/lib/classAttendance.ts exactly. functions/owner-metrics was
--- calling this with `from_ts`/`to_ts` and could never have bound to any single
--- signature; that call site is corrected to match.
+-- ── Attendance over a date range ────────────────────────────────────────────
+-- Visible to the class's own trainer OR an owner, and the range is half-open
+-- (>= p_from, < p_to). Parameter names are load-bearing: PostgREST binds by
+-- name, so they must match src/lib/classAttendance.ts exactly.
 --
--- This one crosses trainers, so it is owner-scoped rather than caller-scoped.
--- auth.uid() is null when owner-metrics calls it with the service role; EXECUTE
--- is revoked from anon so a null uid here means a trusted server-side caller.
-create or replace function class_attendance_summary(p_from timestamptz, p_to timestamptz)
-returns table (
-  class_id     uuid,
-  title        text,
-  kind         text,
-  branch       text,
-  trainer_id   uuid,
-  trainer_name text,
-  starts_at    timestamptz,
-  booked       int,
-  attended     int
-)
-language plpgsql
+-- Note for anything calling this server-side: the guard is on auth.uid(), which
+-- is NULL under the service role, so a service-role call returns zero rows.
+create or replace function public.class_attendance_summary(p_from timestamptz, p_to timestamptz)
+returns table(class_id uuid, title text, kind text, branch text, trainer_id uuid,
+              trainer_name text, starts_at timestamptz, booked integer, attended integer)
+language sql
 security definer
 set search_path to 'public'
 as $function$
-begin
-  if auth.uid() is not null and not exists (
-    select 1 from profiles where id = auth.uid() and role = 'owner'
-  ) then
-    raise exception 'Owner access required.';
-  end if;
-
-  return query
-    select g.id,
-           g.title,
-           coalesce(g.kind, ''),
-           coalesce(nullif(btrim(g.branch), ''), '—'),
-           g.trainer_id,
-           coalesce(nullif(btrim(p.full_name), ''), 'Trainer'),
-           g.starts_at,
-           count(b.id) filter (where b.status = 'booked')::int,
-           count(b.id) filter (where b.attended)::int
-      from gym_classes g
-      left join profiles p on p.id = g.trainer_id
-      left join class_bookings b on b.class_id = g.id
-     where g.starts_at >= p_from
-       and g.starts_at <= p_to
-     group by g.id, p.full_name
-     order by g.starts_at desc;
-end
+  select gc.id, gc.title, gc.kind, gc.branch, gc.trainer_id,
+         coalesce(tp.full_name, 'Trainer') as trainer_name, gc.starts_at,
+         count(cb.id) filter (where cb.status = 'booked')::int as booked,
+         count(cb.attended_at)::int as attended
+  from gym_classes gc
+  left join class_bookings cb on cb.class_id = gc.id
+  left join profiles tp on tp.id = gc.trainer_id
+  where gc.starts_at >= p_from and gc.starts_at < p_to
+    and ( gc.trainer_id = auth.uid()
+          or exists (select 1 from profiles o where o.id = auth.uid() and o.role = 'owner') )
+  group by gc.id, tp.full_name
+  order by gc.starts_at desc;
 $function$;
-
-revoke all on function class_attendance_summary(timestamptz, timestamptz) from public;
-revoke execute on function class_attendance_summary(timestamptz, timestamptz) from anon;
-grant execute on function class_attendance_summary(timestamptz, timestamptz) to authenticated;
