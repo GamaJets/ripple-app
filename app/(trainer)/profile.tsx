@@ -17,7 +17,7 @@ import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
-import { Rule, Section, SectionHead, Card, ListRow, Ghost, QuickRow, Cta } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Card, ListRow, QuickRow, Cta } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, value } from '../../src/theme/scale';
 import { useCoachProfile } from '../../src/ui/coachProfile';
 
@@ -97,7 +97,6 @@ export default function CoachProfile() {
             <Text style={{ ...ty.micro, color: t.ink3 }}>Your profile</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>How clients see you</Text>
           </View>
-          <Ghost label="Switch role" onPress={() => router.push('/')} />
         </View>
 
         {/* ── live preview: the one surface on this screen that groups ────── */}

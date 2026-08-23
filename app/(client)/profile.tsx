@@ -7,8 +7,8 @@
 // no single live number to lead with), hairline-separated sections instead of
 // seven stacked bordered boxes, and `<ListRow>` for the hub instead of a
 // hand-rolled row for the 3,815th time.
-import { useState, useRef, useEffect } from 'react';
-import { View, Text, TextInput, Pressable, ScrollView, Modal, Image, Alert } from 'react-native';
+import { useState, useRef } from 'react';
+import { View, Text, TextInput, Pressable, ScrollView, Modal, Image, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
@@ -45,7 +45,11 @@ const daysIn = (m: number, y: number) => new Date(y, m + 1, 0).getDate();
 
 function Wheel({ items, index, onChange, t }: { items: string[]; index: number; onChange: (i: number) => void; t: Theme }) {
   const ref = useRef<ScrollView>(null);
-  useEffect(() => { const id = setTimeout(() => ref.current?.scrollTo({ y: index * ITEM_H, animated: false }), 0); return () => clearTimeout(id); }, []);
+  const placed = useRef(false);
+  // Line the wheel up with the current value the first time it has a size.
+  // A mount-time scrollTo lands on a ScrollView with no layout yet and is
+  // silently dropped, which left every wheel parked on its first item.
+  const place = () => { if (placed.current) return; placed.current = true; ref.current?.scrollTo({ y: index * ITEM_H, animated: false }); };
   return (
     <View style={{ flex: 1, height: ITEM_H * VISIBLE }}>
       <ScrollView
@@ -54,6 +58,7 @@ function Wheel({ items, index, onChange, t }: { items: string[]; index: number; 
         snapToInterval={ITEM_H}
         decelerationRate="fast"
         onMomentumScrollEnd={(e) => onChange(Math.max(0, Math.min(items.length - 1, Math.round(e.nativeEvent.contentOffset.y / ITEM_H))))}
+        onContentSizeChange={place}
         contentContainerStyle={{ paddingVertical: ITEM_H * 2 }}
       >
         {items.map((it, i) => (
@@ -66,7 +71,7 @@ function Wheel({ items, index, onChange, t }: { items: string[]; index: number; 
   );
 }
 
-function DobPicker({ visible, iso, onClose, onSave, t }: { visible: boolean; iso: string; onClose: () => void; onSave: (iso: string) => void; t: Theme }) {
+function DobPicker({ iso, onClose, onSave, t }: { iso: string; onClose: () => void; onSave: (iso: string) => void; t: Theme }) {
   const init = new Date(iso && !isNaN(Date.parse(iso)) ? iso : '1997-06-15');
   const [d, setD] = useState(init.getDate() - 1);
   const [m, setM] = useState(init.getMonth());
@@ -83,7 +88,7 @@ function DobPicker({ visible, iso, onClose, onSave, t }: { visible: boolean; iso
   };
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={onClose} />
       <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: sp.lg, borderTopWidth: hairline, borderColor: t.ring, ...elevation.e2 }}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sp.md }}>
@@ -370,6 +375,7 @@ export default function Profile() {
 
       {/* edit profile sheet */}
       <Modal visible={showEdit} transparent animationType="slide" onRequestClose={() => setShowEdit(false)}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end' }}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setShowEdit(false)} />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, borderTopWidth: hairline, borderColor: t.ring, maxHeight: '90%', ...elevation.e2 }}>
           <ScrollView contentContainerStyle={{ padding: G }} showsVerticalScrollIndicator={false}>
@@ -422,9 +428,15 @@ export default function Profile() {
             </Pressable>
           </ScrollView>
         </View>
-      </Modal>
+        </KeyboardAvoidingView>
 
-      <DobPicker visible={showDob} iso={cd.dob} onClose={() => setShowDob(false)} onSave={(v) => { cd.setDob(v); setShowDob(false); }} t={t} />
+        {/* Inside the edit sheet, not beside it. iOS will not present a second
+            modal while the first one is up, so as a sibling this rendered
+            nothing at all and "Select date" looked dead. */}
+        {showDob ? (
+          <DobPicker iso={cd.dob} onClose={() => setShowDob(false)} onSave={(v) => { cd.setDob(v); setShowDob(false); }} t={t} />
+        ) : null}
+      </Modal>
     </SafeAreaView>
   );
 }

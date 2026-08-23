@@ -41,7 +41,7 @@ export default function Tour() {
 
   const leave = async () => {
     await markTourSeen(VARIANT);
-    const home = VARIANT === 'all' ? '/' : HOME_ROUTE[VARIANT];
+    const home = HOME_ROUTE[VARIANT];
     router.replace(home as any);
   };
 

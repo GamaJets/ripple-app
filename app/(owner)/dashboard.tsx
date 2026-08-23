@@ -72,7 +72,6 @@ export default function OwnerOverview() {
           <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: 2 }}>
             <Ghost icon="search" onPress={() => router.push('/(owner)/explore')} />
             <Ghost icon="share" onPress={exportReport} />
-            <Ghost label="Switch role" onPress={() => router.push('/')} />
           </View>
         </View>
 

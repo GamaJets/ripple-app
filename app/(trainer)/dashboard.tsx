@@ -306,7 +306,6 @@ export default function TrainerClients() {
           </View>
           <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: 2 }}>
             <Ghost icon="search" onPress={() => router.push('/(trainer)/explore')} />
-            <Ghost label="Switch role" onPress={() => router.push('/')} />
           </View>
         </View>
 

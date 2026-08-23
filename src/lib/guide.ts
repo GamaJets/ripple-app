@@ -128,14 +128,14 @@ const OWNER: GuideSection[] = [
   { tab: 'Ops', summary: 'The day-to-day running of the gym.', points: ['Classes, announcements and operational notes.'] },
 ];
 
-const BY_VARIANT: Record<Exclude<AppVariant, 'all'>, GuideSection[]> = {
+const BY_VARIANT: Record<AppVariant, GuideSection[]> = {
   client: CLIENT,
   trainer: TRAINER,
   owner: OWNER,
 };
 
 export function guideFor(v: AppVariant): GuideSection[] {
-  return v === 'all' ? CLIENT : BY_VARIANT[v];
+  return BY_VARIANT[v];
 }
 
 /** One line under the title on both the tour and the guide. */
@@ -143,5 +143,4 @@ export const GUIDE_INTRO: Record<AppVariant, string> = {
   client: 'Five tabs. Here is what each one is for.',
   trainer: 'Five tabs for running your coaching. Here is what each one does.',
   owner: 'Five tabs across the business.',
-  all: 'Five tabs. Here is what each one is for.',
 };
