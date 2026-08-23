@@ -4,6 +4,7 @@
 // activates once STRIPE_SECRET_KEY / STRIPE_WEBHOOK_SECRET are set as Supabase
 // secrets and each plan's Stripe price id is provided via EXPO_PUBLIC_STRIPE_PRICE_*.
 import { Linking } from 'react-native';
+import { appLink } from './deepLink';
 import { supabase } from './supabase';
 
 export interface Subscription { trainer_id: string; plan: string | null; status: string | null; current_period_end: string | null; cancel_at_period_end: boolean }
@@ -26,7 +27,7 @@ export async function subscribeToPlan(planName: string): Promise<{ ok: boolean; 
   const priceId = PRICE_IDS[planName];
   if (!priceId) return { ok: false, error: 'This plan has no Stripe price id yet (set EXPO_PUBLIC_STRIPE_PRICE_' + planName.toUpperCase() + ').' };
   try {
-    const { data, error } = await supabase.functions.invoke('stripe-checkout', { body: { price_id: priceId, success_url: 'repple://billing/success', cancel_url: 'repple://billing/cancel' } });
+    const { data, error } = await supabase.functions.invoke('stripe-checkout', { body: { price_id: priceId, success_url: appLink('billing/success'), cancel_url: appLink('billing/cancel') } });
     if (error) return { ok: false, error: error.message };
     if (data?.url) { await openUrl(data.url); return { ok: true }; }
     return { ok: false, error: data?.error || 'No checkout url returned.' };
@@ -36,7 +37,7 @@ export async function subscribeToPlan(planName: string): Promise<{ ok: boolean; 
 /** Open the Stripe billing portal for the signed-in trainer. */
 export async function openBillingPortal(): Promise<{ ok: boolean; error?: string }> {
   try {
-    const { data, error } = await supabase.functions.invoke('stripe-portal', { body: { return_url: 'repple://billing' } });
+    const { data, error } = await supabase.functions.invoke('stripe-portal', { body: { return_url: appLink('billing') } });
     if (error) return { ok: false, error: error.message };
     if (data?.url) { await openUrl(data.url); return { ok: true }; }
     return { ok: false, error: data?.error || 'No portal url returned.' };

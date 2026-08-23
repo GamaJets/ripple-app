@@ -35,6 +35,9 @@ const env = (k: string): string => {
 
 // The redirect must exactly match what you register with each vendor.
 // Scheme comes from app.json ("repple"); path is stable.
+// Deliberately fixed, not built with appLink(): WHOOP, Oura and the rest match
+// this against a redirect URI registered in their dashboards, so it cannot vary
+// per app. Wearables are a client-app feature, so `repple` is the right scheme.
 export const OAUTH_REDIRECT = 'repple://wearables/callback';
 
 export const OAUTH_VENDORS: Partial<Record<ProviderId, OAuthVendor>> = {

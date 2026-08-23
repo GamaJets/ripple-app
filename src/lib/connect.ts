@@ -4,6 +4,7 @@
 // Trainers manage packages directly (RLS); money flows through the connect-* edge
 // functions. Credential-ready: activates once Stripe Connect is enabled + keys set.
 import { Linking } from 'react-native';
+import { appLink } from './deepLink';
 import { supabase } from './supabase';
 
 export interface ConnectStatus { stripe_account_id: string | null; charges_enabled: boolean; details_submitted: boolean }
@@ -15,7 +16,7 @@ const openUrl = async (url?: string | null) => { if (url) { try { await Linking.
 /** Start / resume Stripe Express onboarding for the signed-in trainer. */
 export async function startTrainerOnboarding(): Promise<{ ok: boolean; error?: string }> {
   try {
-    const { data, error } = await supabase.functions.invoke('connect-onboard', { body: { refresh_url: 'repple://connect/refresh', return_url: 'repple://connect/return' } });
+    const { data, error } = await supabase.functions.invoke('connect-onboard', { body: { refresh_url: appLink('connect/refresh'), return_url: appLink('connect/return') } });
     if (error) return { ok: false, error: error.message };
     if (data?.url) { await openUrl(data.url); return { ok: true }; }
     return { ok: false, error: data?.error || 'Could not start onboarding.' };
@@ -66,7 +67,7 @@ export async function fetchTrainerPackages(trainerId: string): Promise<TrainerPa
 /** Client buys a package → Stripe Checkout (funds to the trainer, minus fee). */
 export async function buyPackage(packageId: string): Promise<{ ok: boolean; error?: string }> {
   try {
-    const { data, error } = await supabase.functions.invoke('connect-checkout', { body: { package_id: packageId, success_url: 'repple://purchase/success', cancel_url: 'repple://purchase/cancel' } });
+    const { data, error } = await supabase.functions.invoke('connect-checkout', { body: { package_id: packageId, success_url: appLink('purchase/success'), cancel_url: appLink('purchase/cancel') } });
     if (error) return { ok: false, error: error.message };
     if (data?.url) { await openUrl(data.url); return { ok: true }; }
     return { ok: false, error: data?.error || 'Could not start checkout.' };

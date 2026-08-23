@@ -18,6 +18,7 @@ import {
   verifyRecoveryToken as sbVerifyRecoveryToken,
   updatePassword as sbUpdatePassword,
 } from '../lib/supabase';
+import { appLink } from '../lib/deepLink';
 import { reportError } from '../lib/reportError';
 
 export type Role = 'owner' | 'trainer' | 'client';
@@ -27,7 +28,9 @@ export interface SignUpResult { needsConfirmation: boolean }
 // One shared Supabase identity signs in to all 3 portals (Client / Trainer /
 // Platform Owner) — the portal picker on `/` just routes by role, it isn't a
 // separate credential store. So a single reset-password flow covers everyone.
-const RESET_REDIRECT_URL = 'repple://reset-password';
+// Built per app rather than written out, so a reset requested from Repple
+// Coach comes back to Repple Coach. See src/lib/deepLink.ts.
+const resetRedirectUrl = () => appLink('reset-password');
 
 interface AuthValue {
   authed: boolean;
@@ -137,7 +140,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const sendPasswordReset = async (email: string) => {
     if (!USE_SUPABASE) return; // demo mode — no real inbox to email
-    await sbSendPasswordReset(email, RESET_REDIRECT_URL);
+    await sbSendPasswordReset(email, resetRedirectUrl());
   };
 
   const beginPasswordRecoveryWithTokenHash = async (tokenHash: string, email: string) => {

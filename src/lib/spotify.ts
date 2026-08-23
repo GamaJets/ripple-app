@@ -6,6 +6,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const STORE = 'repple.spotify.token';
+// Deliberately fixed, not built with appLink(): Spotify matches this against
+// the redirect URI registered in its dashboard, so it cannot vary per app.
+// Music is a client-app feature, so `repple` is the right scheme for it.
 const REDIRECT = 'repple://spotify/callback';
 const SCOPES = ['playlist-modify-public', 'playlist-modify-private', 'user-read-email', 'user-read-private'];
 const DISCOVERY = { authorizationEndpoint: 'https://accounts.spotify.com/authorize', tokenEndpoint: 'https://accounts.spotify.com/api/token' };
