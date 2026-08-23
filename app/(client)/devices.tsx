@@ -12,21 +12,18 @@
 // rollout". They connect today — `makeCloudProvider` runs the vendor OAuth and
 // reads the day through the edge function, and WHOOP already feeds the workout
 // importer above it. The line described behaviour the code no longer has.
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback } from 'react';
 import { View, Text, Pressable, ScrollView, Alert, ActivityIndicator, Modal } from 'react-native';
 import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { PROVIDERS } from '../../src/lib/wearables/registry';
 import type { WearableProvider, WorkoutSample } from '../../src/lib/wearables/types';
 import { useWearables } from '../../src/ui/wearables';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
-import { hrStats } from '../../src/lib/hr';
-import type { WorkoutEntry } from '../../src/lib/mockData';
+import { importSources, withHr, useImportedIds, isLogged, fetchRecent } from '../../src/ui/watchImport';
 import { tapLight } from '../../src/ui/haptics';
-import { reportError } from '../../src/lib/reportError';
 import { Rule, Section, SectionHead, Hero, ListRow, Cta, Ghost } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 
@@ -58,45 +55,18 @@ export default function Devices() {
  const appleReady = !!apple && apple.isAvailable();
  // Import is no longer Apple-only: any connected provider that implements
  // fetchWorkouts can feed the log. WHOOP does now, via the wearable-day function.
- const importSources = PROVIDERS.filter(
-   (pv) => typeof pv.fetchWorkouts === 'function' && pv.isAvailable() && w.states[pv.meta.id] === 'connected',
- );
- const canImport = importSources.length > 0;
+ const sources = importSources(w.states);
+ const canImport = sources.length > 0;
  // How far back to pull. WHOOP documents no floor on `start` and HealthKit holds
  // everything on device, so this is a product choice, not an API limit.
  const LOOKBACKS = [14, 30, 90, 365] as const;
  const [lookback, setLookback] = useState<number>(14);
  const lookbackLabel = (d: number) => (d >= 365 ? '1 year' : d >= 90 ? '90 days' : `${d} days`);
- const importLabel = importSources.length === 1 ? importSources[0].meta.name : 'your devices';
+ const importLabel = sources.length === 1 ? sources[0].meta.name : 'your devices';
  const [wk, setWk] = useState<WorkoutSample[] | null>(null);
  const [wkBusy, setWkBusy] = useState(false);
- const [importedIds, setImportedIds] = useState<Set<string>>(() => new Set());
- useEffect(() => { (async () => { try { const raw = await AsyncStorage.getItem('repple.hk.imported'); if (raw) setImportedIds(new Set(JSON.parse(raw))); } catch { /* ignore */ } })(); }, []);
- const alreadyLogged = (sm: WorkoutSample) => importedIds.has(sm.id) || log.some((l) => l.t === sm.start && l.exercise === sm.activity);
- const toEntry = (sm: WorkoutSample): WorkoutEntry => ({ t: sm.start, exercise: sm.activity, cardio: { mins: sm.mins, dist: sm.distanceKm ?? 0, unit: 'km' }, kcal: sm.kcal ?? undefined });
- // Best-effort: attach avg/high heart rate from HealthKit for the workout's window.
- const withHr = async (sm: WorkoutSample): Promise<WorkoutEntry> => {
-  const e = toEntry(sm);
-  // WHOOP reports avg/max HR on the workout itself. Prefer that over deriving it,
-  // and never ask HealthKit about a session it did not record.
-  if (sm.source !== 'apple') {
-   if (e.cardio) {
-    if (typeof sm.avgHr === 'number') e.cardio.hrAvg = sm.avgHr;
-    if (typeof sm.maxHr === 'number') e.cardio.hrHigh = sm.maxHr;
-   }
-   return e;
-  }
-  const fetchHr = apple?.fetchHeartRateSeries;
-  if (fetchHr && apple && apple.isAvailable()) {
-   try {
-    const endISO = new Date(Date.parse(sm.start) + Math.max(1, sm.mins) * 60000).toISOString();
-    const st = hrStats(await fetchHr(sm.start, endISO));
-    if (st && e.cardio) { e.cardio.hrAvg = st.avg; e.cardio.hrHigh = st.high; }
-   } catch (err) { reportError('devices.withHr', err); }
-  }
-  return e;
- };
- const markImported = (ids: string[]) => { const next = new Set(importedIds); ids.forEach((i) => next.add(i)); setImportedIds(next); AsyncStorage.setItem('repple.hk.imported', JSON.stringify([...next])).catch(() => {}); };
+ const { ids: importedIds, mark: markImported } = useImportedIds();
+ const alreadyLogged = (sm: WorkoutSample) => isLogged(sm, importedIds, log);
  const findWorkouts = async () => {
    if (!canImport) {
      Alert.alert('Import workouts', 'Connect Apple Health or WHOOP first (in Available Devices below), then tap Find my workouts.');
@@ -104,13 +74,7 @@ export default function Devices() {
    }
    setWkBusy(true);
    try {
-     const lists = await Promise.all(importSources.map(async (pv) => {
-       try { return (await pv.fetchWorkouts!(lookback)) || []; }
-       catch (e) { reportError('devices.fetchWorkouts', e, { provider: pv.meta.id }); return []; }
-     }));
-     // Merge across sources, newest first. Ids are source-prefixed so the same
-     // session recorded by two devices stays two rows rather than silently merging.
-     const merged = lists.flat().sort((a, b) => Date.parse(b.start) - Date.parse(a.start));
+     const merged = await fetchRecent(w.states, lookback);
      setWk(merged);
      if (!merged.length) Alert.alert('Import workouts', `No workouts found in the last ${lookbackLabel(lookback)} from ${importLabel}.`);
    } catch (e: any) {

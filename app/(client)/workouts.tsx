@@ -5,10 +5,10 @@
 // sections and list rows instead of eighteen bordered cards, and accent spent
 // only on the live metric and the primary action.
 // Guided session runner, cardio logging & month calendar preserved.
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView, Modal, Alert, Linking } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { tapLight } from '../../src/ui/haptics';
 import { Icon } from '../../src/ui/Icon';
 import { useTheme } from '../../src/ui/components';
@@ -20,10 +20,12 @@ import { useClientData } from '../../src/ui/clientData';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
 import { useWearables } from '../../src/ui/wearables';
 import type { WorkoutEntry } from '../../src/lib/mockData';
+import type { WorkoutSample } from '../../src/lib/wearables/types';
 import { suggestForExercise, priorBest1RM } from '../../src/lib/progression';
 import { est1RM } from '../../src/lib/streaks';
 import { Confetti } from '../../src/ui/Confetti';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
+import { importSources, withHr, useImportedIds, isLogged, fetchRecent } from '../../src/ui/watchImport';
 import { parseWorkoutText } from '../../src/lib/workoutParse';
 import { useExerciseVideos } from '../../src/ui/exerciseVideos';
 import { injuryFlag, areaLabel, type Injury } from '../../src/lib/injuries';
@@ -161,6 +163,36 @@ export default function Train() {
   const [showCal, setShowCal] = useState(false);
   const [selCalDay, setSelCalDay] = useState('');
   const [editEntry, setEditEntry] = useState<WorkoutEntry | null>(null);
+
+  // Workouts recorded on a watch used to be importable only from Watch &
+  // Devices, which is not a tab. People looked for them here, found nothing,
+  // and concluded the app had dropped the session. Look for them here instead.
+  // Nothing is written without a tap: a watch records plenty a person would not
+  // choose to log, so this offers rather than assumes.
+  const { ids: importedIds, mark: markImported } = useImportedIds();
+  const [pending, setPending] = useState<WorkoutSample[]>([]);
+  const [importing, setImporting] = useState(false);
+  const canImport = importSources(w.states).length > 0;
+  useFocusEffect(useCallback(() => {
+    if (!canImport) { setPending([]); return; }
+    let live = true;
+    (async () => {
+      const found = await fetchRecent(w.states, 14);
+      if (live) setPending(found.filter((sm) => !isLogged(sm, importedIds, workoutLog)));
+    })();
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canImport, importedIds, workoutLog.length]));
+  const importPending = async () => {
+    if (!pending.length || importing) return;
+    setImporting(true);
+    try {
+      addWorkouts(await Promise.all(pending.map(withHr)));
+      markImported(pending.map((sm) => sm.id));
+      setPending([]);
+      tapLight();
+    } finally { setImporting(false); }
+  };
   const [confetti, setConfetti] = useState(false);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [customEx, setCustomEx] = useState<ProgramExercise[]>([]);
@@ -607,6 +639,22 @@ export default function Train() {
                   <Text style={{ ...ty.label, color: t.ink3 }}>Rest day — no workout logged.</Text>
                 ) : (
                   <View>
+                    {pending.length ? (
+                      <View style={{ marginBottom: sp.lg }}>
+                        <Notice
+                          kicker="FROM YOUR WATCH"
+                          title={`${pending.length} workout${pending.length > 1 ? 's' : ''} not in your log`}
+                          note={pending.slice(0, 3).map((sm) => sm.activity).join(' · ') + (pending.length > 3 ? ` and ${pending.length - 3} more` : '')}
+                        >
+                          <View style={{ marginTop: sp.md }}>
+                            <Ghost
+                              label={importing ? 'Importing…' : `Import ${pending.length === 1 ? 'it' : 'them'}`}
+                              onPress={importPending}
+                            />
+                          </View>
+                        </Notice>
+                      </View>
+                    ) : null}
                     <KpiRow items={[
                       { label: 'Exercises', value: String(dayEntries.length) },
                       { label: 'Sets', value: String(daySets) },
