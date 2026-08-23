@@ -68,21 +68,26 @@ What the reconstruction got wrong, kept here as the reason not to guess:
 | `coach_clients.trainer_id → profiles` | → `auth.users` | wrong FK target |
 | `trainers.offers/specialties/session_fee` NOT NULL + defaults | nullable, no defaults | `add column if not exists` would have skipped it, leaving repo and live disagreeing |
 
-## Live gaps — the drift runs the other way too
+## Applied to live on 2026-08-23
 
-Two things this repo defines have **never been applied to the live database**,
-and both are broken in production right now:
+Two things this repo defined had never been applied to the database, and both
+were broken in production. Both are now applied and verified:
 
-| Missing live | Defined in | Breaks |
+| Applied | Defined in | Was breaking |
 | --- | --- | --- |
-| `feedback` table | `18-feedback.sql` | the in-app Send Feedback screen (`src/ui/appFeedback.ts`) — every submission fails |
+| `feedback` table + 3 policies, RLS on | `18-feedback.sql` | the in-app Send Feedback screen (`src/ui/appFeedback.ts`) — every submission failed |
 | `all_member_ids()` | `02-domain-schema.sql` | the owner's member-wide promo push (`app/(owner)/promotions.tsx`) |
 
-Applying just those two is the smallest safe change:
+`all_member_ids()` had `EXECUTE` granted to `anon` on creation (the Supabase
+default for a new function). It is owner-gated in its body, so an anonymous
+caller got no rows, but EXECUTE is now revoked from `anon` and granted only to
+`authenticated`, matching the pattern in part 22.
 
-```sql
--- paste 18-feedback.sql, then the all_member_ids() block from 02-domain-schema.sql
-```
+`owner-metrics` was redeployed (version 7) with the corrected `p_from`/`p_to`
+argument names, `verify_jwt` still true, and the deployed source read back and
+checked. It still returns no class rows: `class_attendance_summary` gates on
+`auth.uid()`, which is NULL under the service role that function uses. Fixing
+that means widening the SQL function, which has not been done.
 
 ## Not mirrored here, deliberately
 

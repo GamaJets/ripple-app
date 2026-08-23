@@ -155,6 +155,11 @@ returns table(user_id uuid) language sql security definer set search_path = publ
   select c.id from clients c
   where exists (select 1 from profiles p where p.id = auth.uid() and p.role = 'owner');
 $$;
+
+-- Owner-only by role, and not reachable at all without signing in.
+revoke all on function all_member_ids() from public;
+revoke execute on function all_member_ids() from anon;
+grant execute on function all_member_ids() to authenticated;
 grant execute on function all_member_ids() to authenticated;
 
 create table if not exists measurements (
