@@ -1,0 +1,108 @@
+/* repple.com — shared styles.
+   Deliberately one plain stylesheet with no build step, so the site can be
+   dropped on any static host. The palette is the app's: teal brand, a neutral
+   with a slight green bias so it sits with the brand rather than under it. */
+
+:root{
+  --bg:#F7F9F8; --panel:#FFFFFF; --sunk:#EDF2F0;
+  --ink:#0C1714; --ink2:#46564F; --ink3:#7B8B84;
+  --line:#DEE6E3; --hair:#E9EFEC;
+  --brand:#0D9488; --brand-ink:#FFFFFF; --brand-soft:#D8F0EC;
+  --coach:#4338CA; --studio:#B45309;
+  --sans:"Inter","Helvetica Neue",Arial,sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,monospace;
+  --measure:68ch;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#0A1210; --panel:#111B18; --sunk:#0E1714;
+    --ink:#E7EEEB; --ink2:#9FB0AA; --ink3:#6C7D77;
+    --line:#1E2A26; --hair:#18231F;
+    --brand:#2DD4BF; --brand-ink:#04211C; --brand-soft:#122E2A;
+    --coach:#818CF8; --studio:#E9A23B;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0A1210; --panel:#111B18; --sunk:#0E1714;
+  --ink:#E7EEEB; --ink2:#9FB0AA; --ink3:#6C7D77;
+  --line:#1E2A26; --hair:#18231F;
+  --brand:#2DD4BF; --brand-ink:#04211C; --brand-soft:#122E2A;
+  --coach:#818CF8; --studio:#E9A23B;
+}
+
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:var(--sans); font-size:17px; line-height:1.6;
+  -webkit-font-smoothing:antialiased;
+}
+a{color:var(--brand); text-decoration:none}
+a:hover{text-decoration:underline}
+a:focus-visible,button:focus-visible{outline:2px solid var(--brand); outline-offset:3px; border-radius:3px}
+h1,h2,h3{margin:0; text-wrap:balance; letter-spacing:-.02em; line-height:1.15}
+img,svg{max-width:100%}
+
+.wrap{max-width:1000px; margin:0 auto; padding:0 24px}
+.prose{max-width:var(--measure)}
+
+/* ── header / footer ─────────────────────────────── */
+header.site{border-bottom:1px solid var(--hair); background:var(--panel)}
+header.site .wrap{display:flex; align-items:center; justify-content:space-between; gap:20px; height:68px}
+.brand{display:flex; align-items:center; gap:11px; color:var(--ink); font-weight:600; font-size:18px}
+.brand:hover{text-decoration:none}
+.mark{width:30px; height:30px; border-radius:7px; background:var(--brand); display:grid; place-items:center; flex:none}
+nav.site{display:flex; gap:22px; font-size:15px}
+nav.site a{color:var(--ink2)}
+nav.site a:hover{color:var(--ink)}
+
+footer.site{border-top:1px solid var(--hair); margin-top:80px; padding:34px 0 60px; color:var(--ink3); font-size:14.5px}
+footer.site .wrap{display:flex; flex-wrap:wrap; gap:14px 26px; align-items:center; justify-content:space-between}
+footer.site a{color:var(--ink2)}
+
+/* ── hero ────────────────────────────────────────── */
+.hero{padding:84px 0 62px}
+.hero h1{font-size:clamp(34px,5.4vw,56px); font-weight:700}
+.hero p{font-size:19px; color:var(--ink2); max-width:60ch; margin:20px 0 0}
+
+/* ── app cards ───────────────────────────────────── */
+.apps{display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:18px; padding-bottom:40px}
+.app{background:var(--panel); border:1px solid var(--line); border-radius:9px; padding:24px}
+.app .tile{width:44px; height:44px; border-radius:11px; display:grid; place-items:center; margin-bottom:16px}
+.app h3{font-size:19px; font-weight:650}
+.app p{margin:9px 0 0; color:var(--ink2); font-size:15.5px}
+.app .who{display:block; margin-top:14px; font-family:var(--mono); font-size:11.5px;
+          letter-spacing:.09em; text-transform:uppercase; color:var(--ink3)}
+
+/* ── generic page ────────────────────────────────── */
+.page{padding:56px 0 0}
+.page h1{font-size:clamp(30px,4.4vw,42px); font-weight:700}
+.page .updated{margin:14px 0 0; color:var(--ink3); font-size:15px; font-family:var(--mono)}
+.page h2{font-size:22px; font-weight:650; margin:44px 0 0}
+.page h3{font-size:17.5px; font-weight:600; margin:28px 0 0}
+.page p,.page li{color:var(--ink2); font-size:16.5px}
+.page p{margin:14px 0 0}
+.page ul{margin:14px 0 0; padding-left:22px}
+.page li{margin:7px 0}
+.page li strong,.page p strong{color:var(--ink); font-weight:600}
+
+.callout{margin:26px 0 0; padding:18px 20px; background:var(--panel);
+         border:1px solid var(--line); border-left:3px solid var(--brand); border-radius:7px}
+.callout p{margin:0}
+
+table.data{width:100%; border-collapse:collapse; margin:18px 0 0; font-size:15.5px}
+table.data th,table.data td{text-align:left; padding:11px 12px; border-bottom:1px solid var(--hair); vertical-align:top}
+table.data th{font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:var(--ink3); font-weight:600}
+table.data td{color:var(--ink2)}
+.scroll{overflow-x:auto}
+
+.contact{display:inline-block; margin-top:20px; background:var(--brand); color:var(--brand-ink);
+         padding:12px 20px; border-radius:7px; font-weight:600; font-size:16px}
+.contact:hover{text-decoration:none; opacity:.92}
+
+@media (max-width:620px){
+  body{font-size:16px}
+  .hero{padding:56px 0 40px}
+  nav.site{gap:16px; font-size:14px}
+  header.site .wrap{height:60px}
+}
