@@ -3,6 +3,7 @@
 // no workout history until the user logs one. Never seeds demo data.
 import { createContext, useContext, useEffect, useState } from 'react';
 import type { WorkoutEntry } from '../lib/mockData';
+import { rowToEntry, entryToRow } from '../lib/workoutRow';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
@@ -16,23 +17,6 @@ interface WorkoutLogValue {
 }
 
 const Ctx = createContext<WorkoutLogValue | null>(null);
-
-const rowToEntry = (r: any): WorkoutEntry => ({
-  id: r.id, t: r.performed_at, exercise: r.exercise,
-  sets: r.sets ?? undefined, feel: r.feel ?? undefined, cardio: r.cardio ?? undefined, kcal: r.kcal ?? undefined,
-  zones: r.zones ?? undefined,
-});
-// `feel` and `zones` go in with the insert. They used to be sent afterwards as
-// separate updates, back when the columns were new migrations that a given
-// database might not have had yet; both exist everywhere now, and the follow-up
-// update matched on timestamp and exercise, which is not a key — a session
-// writes every exercise with one timestamp, so the update could touch the wrong
-// row, and its errors were discarded either way.
-const entryToRow = (uid: string, e: WorkoutEntry) => ({
-  user_id: uid, performed_at: e.t, exercise: e.exercise,
-  sets: e.sets ?? null, feel: e.feel ?? null, cardio: e.cardio ?? null,
-  kcal: e.kcal ?? null, zones: e.zones ?? null,
-});
 
 /** Narrow a query to one row: by primary key when we have it. */
 const matchRow = (q: any, uid: string, e: WorkoutEntry) =>

@@ -3,12 +3,14 @@ import { currentStreak, longestStreak, personalRecords, weekStats, est1RM, isNew
 import { parseRepRange, suggestNextWeight, suggestForExercise, priorBest1RM, suggestProgression } from './progression';
 import { overlaps, isLateCancellation, cancelSession, nextFromWaitlist } from './booking';
 import type { WorkoutEntry } from './mockData';
+import { rowToEntry, entryToRow, PERSISTED_FIELDS } from './workoutRow';
 import { buildIcs } from './ics';
 import { estimateDish, searchDishes, DISHES } from './restaurant';
 import type { TrainingSession } from './types';
 
 const errors: string[] = [];
-const ok = (c: boolean, m: string) => { if (!c) errors.push(m); };
+let checks = 0;
+const ok = (c: boolean, m: string) => { checks++; if (!c) errors.push(m); };
 const day = (n: number) => { const d = new Date(); d.setDate(d.getDate() - n); return d.toISOString(); };
 
 // ── streaks ──
@@ -86,5 +88,47 @@ const cr = cancelSession(existing[0], 75, ['c1', 'c2', 'c3']);
 ok(cr.notifyClientIds.length === 2 && !cr.notifyClientIds.includes('c1'), 'cancel excludes canceller');
 ok(nextFromWaitlist(['c9', 'c8']) === 'c9' && nextFromWaitlist([]) === null, 'waitlist FIFO');
 
+// ── workout row round trip ──────────────────────────────────────────────────
+// `entryToRow` silently omitted `feel` and `zones` for months. Both were read
+// back on the way in, so the pair looked symmetrical while every session's
+// perceived effort and time-in-zone went nowhere. These assertions hold both
+// ends and fail if a field is ever dropped again.
+const fullEntry: WorkoutEntry = {
+  t: '2026-08-23T10:00:00.000Z',
+  exercise: 'Back Squat',
+  sets: [[8, 100], [8, 102.5]] as [number, number][],
+  feel: ['ok', 'hard'],
+  cardio: { mins: 12, dist: 2.4, unit: 'km', watts: 180, hrAvg: 141, hrHigh: 168 },
+  kcal: 315,
+  zones: { z1: 60, z2: 420, z3: 180, z4: 30, z5: 0 },
+};
+
+const roundTripped = rowToEntry(entryToRow('user-1', fullEntry));
+for (const f of PERSISTED_FIELDS) {
+  ok(JSON.stringify(roundTripped[f]) === JSON.stringify(fullEntry[f]),
+     `workout field "${String(f)}" did not survive the round trip to a row`);
+}
+
+// Every persisted field must actually appear on the row — the exact failure
+// that hid the zones bug, where the key was simply absent from the insert.
+const row = entryToRow('user-1', fullEntry) as unknown as Record<string, unknown>;
+ok(row.user_id === 'user-1', 'row must carry the user id');
+ok(row.performed_at === fullEntry.t, 'row must carry performed_at');
+for (const [entryKey, rowKey] of [['exercise', 'exercise'], ['sets', 'sets'], ['feel', 'feel'],
+                                  ['cardio', 'cardio'], ['kcal', 'kcal'], ['zones', 'zones']] as const) {
+  ok(rowKey in row, `row is missing the "${rowKey}" column`);
+  ok(row[rowKey] !== undefined && row[rowKey] !== null,
+     `row column "${rowKey}" was dropped even though the entry had a value for ${entryKey}`);
+}
+
+// An absent value must become null rather than vanish, so an edit can clear a
+// field instead of leaving whatever was there before.
+const sparse: WorkoutEntry = { t: fullEntry.t, exercise: 'Walk' };
+const sparseRow = entryToRow('user-1', sparse) as unknown as Record<string, unknown>;
+for (const k of ['sets', 'feel', 'cardio', 'kcal', 'zones']) {
+  ok(k in sparseRow && sparseRow[k] === null, `absent "${k}" should be sent as null, not omitted`);
+}
+ok(rowToEntry(sparseRow as never).sets === undefined, 'a null column should read back as undefined');
+
 if (errors.length) { console.log('COVERAGE FAILURES:\n' + errors.join('\n')); process.exit(1); }
-console.log(`ALL COVERAGE TESTS PASSED (${23} assertions)`);
+console.log(`ALL COVERAGE TESTS PASSED (${checks} assertions)`);
