@@ -89,13 +89,42 @@ checked. It still returns no class rows: `class_attendance_summary` gates on
 `auth.uid()`, which is NULL under the service role that function uses. Fixing
 that means widening the SQL function, which has not been done.
 
-## Not mirrored here, deliberately
+## Secret handling
 
-`notify_on_message()` — a live trigger function that calls the `notify-message`
-edge function — carries the hook secret **as a plaintext literal in its body**.
-It is not reproduced in this repo because that would commit the secret to git.
-It should be rewritten to read the value from Vault and the secret rotated; the
-old value is readable by anything that can read `pg_proc`.
+`notify_on_message()` used to carry the `notify-message` hook secret as a
+plaintext literal in its body. It now reads it from Vault at call time and is
+mirrored here as `26-message-notifications.sql`; the old value has been rotated.
+
+That secret matters more than it looks: `notify-message` runs with
+`verify_jwt: false`, so it is publicly reachable and the secret is its **only**
+authentication. Anyone holding it can push notifications to any user.
+
+To rotate it, change the value in **both** places — no code change needed:
+
+| Where | How |
+| --- | --- |
+| Vault secret `hook_secret` | Dashboard ▸ Project Settings ▸ Vault |
+| edge secret `HOOK_SECRET` | Dashboard ▸ Project Settings ▸ Edge Functions ▸ Secrets |
+
+Between saving one and the other, `notify-message` returns 403 and the trigger
+swallows it, so pushes are skipped for that window. Messages still send and save.
+
+To verify a rotation end to end without sending anything to anyone — the secret
+check happens before the payload check, so a request carrying only the secret
+returns `skipped: missing fields`:
+
+```sql
+select net.http_post(
+  url     := 'https://phgfwzpkkwdysftlgkoq.supabase.co/functions/v1/notify-message',
+  headers := jsonb_build_object('Content-Type', 'application/json'),
+  body    := jsonb_build_object(
+    'secret', (select decrypted_secret from vault.decrypted_secrets where name = 'hook_secret'))) as request_id;
+
+-- then, using the id returned above:
+select status_code, content from net._http_response where id = <request_id>;
+-- 200 {"ok":true,"skipped":"missing fields"} = the secret is accepted
+-- 403 {"error":"forbidden"}                  = the two values disagree
+```
 
 ## Corrections to earlier notes in this file
 
