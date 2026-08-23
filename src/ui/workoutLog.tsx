@@ -11,20 +11,32 @@ interface WorkoutLogValue {
   log: WorkoutEntry[];
   addWorkout: (entry: WorkoutEntry) => void;
   addWorkouts: (entries: WorkoutEntry[]) => void;
+  updateWorkout: (target: WorkoutEntry, next: Partial<WorkoutEntry>) => void;
   removeWorkout: (entry: WorkoutEntry) => void;
 }
 
 const Ctx = createContext<WorkoutLogValue | null>(null);
 
 const rowToEntry = (r: any): WorkoutEntry => ({
-  t: r.performed_at, exercise: r.exercise,
+  id: r.id, t: r.performed_at, exercise: r.exercise,
   sets: r.sets ?? undefined, feel: r.feel ?? undefined, cardio: r.cardio ?? undefined, kcal: r.kcal ?? undefined,
   zones: r.zones ?? undefined,
 });
+// `feel` and `zones` go in with the insert. They used to be sent afterwards as
+// separate updates, back when the columns were new migrations that a given
+// database might not have had yet; both exist everywhere now, and the follow-up
+// update matched on timestamp and exercise, which is not a key — a session
+// writes every exercise with one timestamp, so the update could touch the wrong
+// row, and its errors were discarded either way.
 const entryToRow = (uid: string, e: WorkoutEntry) => ({
   user_id: uid, performed_at: e.t, exercise: e.exercise,
-  sets: e.sets ?? null, cardio: e.cardio ?? null, kcal: e.kcal ?? null,
+  sets: e.sets ?? null, feel: e.feel ?? null, cardio: e.cardio ?? null,
+  kcal: e.kcal ?? null, zones: e.zones ?? null,
 });
+
+/** Narrow a query to one row: by primary key when we have it. */
+const matchRow = (q: any, uid: string, e: WorkoutEntry) =>
+  e.id ? q.eq('id', e.id) : q.eq('user_id', uid).eq('performed_at', e.t).eq('exercise', e.exercise);
 
 export function WorkoutLogProvider({ children }: { children: React.ReactNode }) {
   const [log, setLog] = useState<WorkoutEntry[]>([]);
@@ -50,33 +62,57 @@ export function WorkoutLogProvider({ children }: { children: React.ReactNode }) 
     return () => { cancelled = true; };
   }, []);
 
+  // Insert, then adopt the ids the server assigns so the new entries can be
+  // edited straight away rather than only after the next reload.
   const persist = (entries: WorkoutEntry[]) => {
     if (!USE_SUPABASE || !uid || !entries.length) return;
     try {
-      supabase.from('workouts').insert(entries.map((e) => entryToRow(uid, e))).then(() => {
-        // Best-effort: attach per-set feel (column is a newer migration; no-ops if absent).
-        entries.forEach((e) => {
-          if (e.feel && e.feel.length) {
-            supabase.from('workouts').update({ feel: e.feel }).eq('user_id', uid).eq('performed_at', e.t).eq('exercise', e.exercise).then(() => {}, () => {});
-          }
-          // Same best-effort pattern for time-in-zone (added in the workouts_hr_zones migration).
-          if (e.zones) {
-            supabase.from('workouts').update({ zones: e.zones }).eq('user_id', uid).eq('performed_at', e.t).eq('exercise', e.exercise).then(() => {}, () => {});
-          }
-        });
-      }, () => {});
-    } catch { /* ignore */ }
+      supabase.from('workouts').insert(entries.map((e) => entryToRow(uid, e))).select().then(
+        ({ data }: any) => {
+          if (!data || !data.length) return;
+          setLog((prev) => {
+            const next = [...prev];
+            for (const row of data) {
+              const i = next.findIndex((x) => !x.id && x.t === row.performed_at && x.exercise === row.exercise);
+              if (i >= 0) next[i] = { ...next[i], id: row.id };
+            }
+            return next;
+          });
+        },
+        (e: unknown) => reportError('workoutLog.persist', e),
+      );
+    } catch (e) { reportError('workoutLog.persist', e); }
   };
   const addWorkout = (entry: WorkoutEntry) => { setLog((p) => [entry, ...p]); persist([entry]); };
   const addWorkouts = (entries: WorkoutEntry[]) => { if (entries.length) { setLog((p) => [...entries, ...p]); persist(entries); } };
+  const updateWorkout = (target: WorkoutEntry, next: Partial<WorkoutEntry>) => {
+    setLog((p) => p.map((e) => (e === target || (target.id && e.id === target.id) ? { ...e, ...next } : e)));
+    if (!USE_SUPABASE || !uid) return;
+    const patch: Record<string, unknown> = {};
+    if ('exercise' in next) patch.exercise = next.exercise;
+    if ('t' in next) patch.performed_at = next.t;
+    if ('sets' in next) patch.sets = next.sets ?? null;
+    if ('feel' in next) patch.feel = next.feel ?? null;
+    if ('cardio' in next) patch.cardio = next.cardio ?? null;
+    if ('kcal' in next) patch.kcal = next.kcal ?? null;
+    if ('zones' in next) patch.zones = next.zones ?? null;
+    if (!Object.keys(patch).length) return;
+    try {
+      matchRow(supabase.from('workouts').update(patch), uid, target)
+        .then(() => {}, (e: unknown) => reportError('workoutLog.update', e));
+    } catch (e) { reportError('workoutLog.update', e); }
+  };
   const removeWorkout = (entry: WorkoutEntry) => {
     setLog((p) => { const i = p.indexOf(entry); return i >= 0 ? [...p.slice(0, i), ...p.slice(i + 1)] : p.filter((e) => !(e.t === entry.t && e.exercise === entry.exercise)); });
     if (USE_SUPABASE && uid) {
-      try { supabase.from('workouts').delete().eq('user_id', uid).eq('performed_at', entry.t).eq('exercise', entry.exercise).then(() => {}, () => {}); } catch { /* ignore */ }
+      try {
+        matchRow(supabase.from('workouts').delete(), uid, entry)
+          .then(() => {}, (e: unknown) => reportError('workoutLog.remove', e));
+      } catch (e) { reportError('workoutLog.remove', e); }
     }
   };
 
-  return <Ctx.Provider value={{ log, addWorkout, addWorkouts, removeWorkout }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ log, addWorkout, addWorkouts, updateWorkout, removeWorkout }}>{children}</Ctx.Provider>;
 }
 
 export function useWorkoutLog(): WorkoutLogValue {

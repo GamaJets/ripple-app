@@ -21,6 +21,9 @@ create table if not exists workouts (
 );
 create index if not exists idx_workouts_user on workouts(user_id, performed_at desc);
 alter table workouts add column if not exists feel jsonb;
+-- Seconds spent in each heart-rate zone, written when a session had a live HR
+-- source. Live already had this column; the repo did not describe it.
+alter table workouts add column if not exists zones jsonb;
 
 -- ── Referrals (attribution when a new user signs up with a code) ─────────────
 create table if not exists referrals (

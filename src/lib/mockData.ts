@@ -27,6 +27,12 @@ export interface MockClient {
   log: WorkoutEntry[];
 }
 export interface WorkoutEntry {
+  /** Primary key of the `workouts` row, once it has been saved. Absent on an
+   *  entry that has only just been logged and not yet come back from the
+   *  server. Edits and deletes match on this when it is there: matching on
+   *  timestamp and exercise name instead would hit every row of a session,
+   *  since one session writes all its exercises with the same timestamp. */
+  id?: string;
   t: string;
   exercise: string;
   sets?: [number, number][];       // [reps, kg]

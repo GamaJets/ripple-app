@@ -121,7 +121,7 @@ export default function Train() {
   const _cp = useAssignedPrograms().getProgram(cd.id);
   const coachProgram = cd.coachingMode === 'solo' ? null : _cp;
   const w = useWearables();
-  const { log: workoutLog, addWorkouts, removeWorkout } = useWorkoutLog();
+  const { log: workoutLog, addWorkouts, updateWorkout, removeWorkout } = useWorkoutLog();
   const program = coachProgram ?? buildProgram(cd.goal, cd.bodyFatPct);
   const jsToMon = (new Date().getDay() + 6) % 7;
   const [dayIdx, setDayIdx] = useState(jsToMon);
@@ -160,6 +160,7 @@ export default function Train() {
   const [hrEntry, setHrEntry] = useState<WorkoutEntry | null>(null);
   const [showCal, setShowCal] = useState(false);
   const [selCalDay, setSelCalDay] = useState('');
+  const [editEntry, setEditEntry] = useState<WorkoutEntry | null>(null);
   const [confetti, setConfetti] = useState(false);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [customEx, setCustomEx] = useState<ProgramExercise[]>([]);
@@ -520,6 +521,15 @@ export default function Train() {
 
       </ScrollView>
 
+      {editEntry ? (
+        <EditEntrySheet
+          t={t}
+          entry={editEntry}
+          onClose={() => setEditEntry(null)}
+          onSave={(patch) => { updateWorkout(editEntry, patch); setEditEntry(null); }}
+        />
+      ) : null}
+
       <Modal visible={!!swapFor} transparent animationType="slide" onRequestClose={() => setSwapFor(null)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setSwapFor(null)} />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, ...elevation.e2 }}>
@@ -610,6 +620,7 @@ export default function Train() {
                           <View style={{ paddingVertical: sp.md }}>
                             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
                               <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize', flex: 1 }}>{l.exercise}</Text>
+                              <Pressable accessibilityLabel={'Edit ' + l.exercise} onPress={() => setEditEntry(l)} hitSlop={8} style={{ padding: 4, marginRight: sp.sm }}><Icon name="pencil" size={16} color={t.ink3} /></Pressable>
                               <Pressable accessibilityLabel={'Delete ' + l.exercise} onPress={() => Alert.alert('Delete this entry?', l.exercise + ' will be removed from your log.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Delete', style: 'destructive', onPress: () => removeWorkout(l) }])} hitSlop={8} style={{ padding: 4, marginRight: -4 }}><Icon name="minus" size={16} color={t.crit} /></Pressable>
                             </View>
                             {l.sets ? (
@@ -955,5 +966,102 @@ function SessionRunner({ t, exercises, focus, nameOf, age, log, injuries, onComp
       </ScrollView>
       <Confetti show={confetti} onDone={() => setConfetti(false)} />
     </SafeAreaView>
+  );
+}
+
+// Edit one logged entry. Until now the only thing you could do to a mistake was
+// delete it and log the whole thing again, which also lost the heart-rate zones
+// recorded against it.
+//
+// Mounted only while it is open (see the caller) so it always opens on the
+// entry's current values rather than the first one ever edited.
+function EditEntrySheet({ t, entry, onClose, onSave }: {
+  t: Theme; entry: WorkoutEntry; onClose: () => void; onSave: (patch: Partial<WorkoutEntry>) => void;
+}) {
+  const [name, setName] = useState(entry.exercise);
+  const [sets, setSets] = useState<[number, number][]>(entry.sets ? entry.sets.map((s) => [s[0], s[1]] as [number, number]) : []);
+  const [mins, setMins] = useState(entry.cardio ? String(entry.cardio.mins) : '');
+  const [dist, setDist] = useState(entry.cardio ? String(entry.cardio.dist) : '');
+  const [watts, setWatts] = useState(entry.cardio && entry.cardio.watts ? String(entry.cardio.watts) : '');
+  const [kcal, setKcal] = useState(entry.kcal != null ? String(entry.kcal) : '');
+
+  const isCardio = !!entry.cardio;
+  const setAt = (i: number, j: 0 | 1, v: string) =>
+    setSets((prev) => prev.map((s, k) => (k === i ? (j === 0 ? [parseInt(v, 10) || 0, s[1]] : [s[0], parseFloat(v) || 0]) : s)));
+
+  const save = () => {
+    const patch: Partial<WorkoutEntry> = {};
+    const nm = name.trim();
+    if (nm && nm !== entry.exercise) patch.exercise = nm;
+
+    if (isCardio) {
+      const m = parseInt(mins, 10) || 0;
+      const d = parseFloat(dist) || 0;
+      const w = parseInt(watts, 10) || 0;
+      patch.cardio = { ...entry.cardio!, mins: m, dist: d, ...(w > 0 ? { watts: w } : {}) };
+      if (w <= 0) delete (patch.cardio as { watts?: number }).watts;
+    } else {
+      const kept = sets.filter((s) => s[0] > 0);
+      patch.sets = kept.length ? kept : undefined;
+      // Perceived effort is recorded per set, so a set that no longer exists
+      // must not keep carrying someone's answer for it.
+      if (entry.feel) patch.feel = kept.length ? entry.feel.slice(0, kept.length) : undefined;
+    }
+
+    // Blank means "no figure", which is not the same as zero.
+    patch.kcal = kcal.trim() === '' ? undefined : (parseInt(kcal, 10) || 0);
+    onSave(patch);
+  };
+
+  const inp = { color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 10, ...ty.body } as const;
+
+  return (
+    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={onClose} />
+      <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, borderTopWidth: hairline, borderColor: t.ring, maxHeight: '86%', ...elevation.e2 }}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: sp.lg }}>
+          <Pressable onPress={onClose} hitSlop={8}><Text style={{ ...ty.body, fontWeight: '500', color: t.ink3 }}>Cancel</Text></Pressable>
+          <Text style={{ ...ty.head, color: t.ink }}>Edit entry</Text>
+          <Pressable onPress={save} hitSlop={8}><Text style={{ ...ty.body, fontWeight: '600', color: t.brand }}>Save</Text></Pressable>
+        </View>
+        <Rule />
+        <ScrollView contentContainerStyle={{ padding: sp.lg, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
+          <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 6 }}>EXERCISE</Text>
+          <TextInput value={name} onChangeText={setName} style={inp} placeholder="Exercise" placeholderTextColor={t.ink3} />
+
+          {isCardio ? (
+            <View style={{ marginTop: sp.xl }}>
+              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 6 }}>CARDIO</Text>
+              <View style={{ flexDirection: 'row', gap: sp.sm }}>
+                <TextInput value={mins} onChangeText={setMins} keyboardType="numeric" placeholder="Minutes" placeholderTextColor={t.ink3} style={{ ...inp, flex: 1 }} />
+                <TextInput value={dist} onChangeText={setDist} keyboardType="numeric" placeholder={`Distance (${entry.cardio!.unit})`} placeholderTextColor={t.ink3} style={{ ...inp, flex: 1 }} />
+              </View>
+              <TextInput value={watts} onChangeText={setWatts} keyboardType="numeric" placeholder="Watts (optional)" placeholderTextColor={t.ink3} style={{ ...inp, marginTop: sp.sm }} />
+            </View>
+          ) : (
+            <View style={{ marginTop: sp.xl }}>
+              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 6 }}>SETS</Text>
+              {sets.map((s, i) => (
+                <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginBottom: sp.sm }}>
+                  <Text style={{ ...ty.caption, color: t.ink3, width: 22 }}>{i + 1}</Text>
+                  <TextInput value={s[0] ? String(s[0]) : ''} onChangeText={(v) => setAt(i, 0, v)} keyboardType="numeric" placeholder="Reps" placeholderTextColor={t.ink3} style={{ ...inp, flex: 1 }} />
+                  <Text style={{ ...ty.caption, color: t.ink3 }}>×</Text>
+                  <TextInput value={s[1] ? String(s[1]) : ''} onChangeText={(v) => setAt(i, 1, v)} keyboardType="numeric" placeholder="kg" placeholderTextColor={t.ink3} style={{ ...inp, flex: 1 }} />
+                  <Pressable accessibilityLabel={`Remove set ${i + 1}`} hitSlop={8} onPress={() => setSets((p) => p.filter((_, k) => k !== i))} style={{ padding: 4 }}>
+                    <Icon name="minus" size={16} color={t.crit} />
+                  </Pressable>
+                </View>
+              ))}
+              <Ghost label="Add set" onPress={() => setSets((p) => [...p, [0, p.length ? p[p.length - 1][1] : 0]])} />
+            </View>
+          )}
+
+          <View style={{ marginTop: sp.xl }}>
+            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 6 }}>CALORIES</Text>
+            <TextInput value={kcal} onChangeText={setKcal} keyboardType="numeric" placeholder="Leave blank if unknown" placeholderTextColor={t.ink3} style={inp} />
+          </View>
+        </ScrollView>
+      </View>
+    </Modal>
   );
 }
