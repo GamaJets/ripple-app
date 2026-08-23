@@ -262,7 +262,11 @@ export default function Profile() {
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md, paddingBottom: sp.lg }}>
           <Pressable onPress={() => setShowEdit(true)} accessibilityRole="button" accessibilityLabel="Edit your profile and stats" style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Me</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5, textTransform: 'capitalize' }} numberOfLines={1}>{cd.name}</Text>
+            {/* An empty name used to render as an empty line under "ME". Say
+                what to do about it instead of showing nothing. */}
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 5, textTransform: 'capitalize' }} numberOfLines={1}>
+              {cd.name || 'Add your name'}
+            </Text>
             <Text style={{ ...ty.label, ...numeric, color: t.ink3, marginTop: 3 }}>{statsLine}</Text>
           </Pressable>
           <Ghost icon="pencil" onPress={() => setShowEdit(true)} />
@@ -271,7 +275,11 @@ export default function Profile() {
               <Image source={{ uri: cd.photo }} style={{ width: 56, height: 56, borderRadius: radius.pill, backgroundColor: t.surface2 }} />
             ) : (
               <View style={{ width: 56, height: 56, borderRadius: radius.pill, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}>
-                <Text style={{ ...value(20), color: t.brandInk }}>{cd.init}</Text>
+                {cd.init ? (
+                  <Text style={{ ...value(20), color: t.brandInk }}>{cd.init}</Text>
+                ) : (
+                  <Icon name="me" size={24} color={t.brandInk} />
+                )}
               </View>
             )}
             <View style={{ position: 'absolute', bottom: -2, right: -2, width: 22, height: 22, borderRadius: radius.pill, backgroundColor: t.surface, borderWidth: hairline, borderColor: t.ring, alignItems: 'center', justifyContent: 'center' }}>

@@ -43,7 +43,10 @@ interface Value {
 const Ctx = createContext<Value | null>(null);
 const KEY = 'repple.profile';
 
-const initials = (n: string) => n.trim().split(/\s+/).map((x) => x[0]).join('').slice(0, 2).toUpperCase() || 'Y';
+// No name yet means no initial. The old fallback was a hardcoded 'Y' — a
+// letter belonging to nobody, shown in the avatar of every user whose name
+// had not loaded, which was everyone while the profiles read was failing.
+const initials = (n: string) => n.trim().split(/\s+/).map((x) => x[0]).join('').slice(0, 2).toUpperCase();
 
 export function ClientDataProvider({ children }: { children: ReactNode }) {
   // NO mock data — always start empty. Real data loads from Supabase if user is authenticated.
