@@ -3,11 +3,18 @@
 // Configuration, not layout: every Tabs.Screen, name, href, title and their
 // order are untouched. Only the tab label and the bar's padding moved onto the
 // scale (`src/theme/scale`); the dead emoji TabIcon is gone.
-import { Tabs } from 'expo-router';
+import { Tabs, Redirect } from 'expo-router';
+import { groupAllowed } from '../../src/lib/variant';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
 import { sp, type as ty } from '../../src/theme/scale';
 export default function OwnerLayout() {
+  // This build is one of three separate apps. If the owner portal is not
+  // the one it ships, nothing here is reachable — a deep link or a tapped
+  // notification pointing into it goes home instead of rendering a portal
+  // this user's app is not supposed to have.
+  if (!groupAllowed('owner')) return <Redirect href="/" />;
+
   const t = useTheme();
   return (
     <Tabs backBehavior="history" screenOptions={{ headerShown: false, tabBarStyle: { backgroundColor: t.surface, borderTopColor: t.ring, height: 62, paddingTop: sp.sm, paddingBottom: sp.sm }, tabBarActiveTintColor: t.brand, tabBarInactiveTintColor: t.ink3, tabBarLabelStyle: { ...ty.micro, textTransform: 'none', letterSpacing: 0.2, fontWeight: '500' }, sceneStyle: { backgroundColor: t.bg } }}>

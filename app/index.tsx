@@ -14,6 +14,7 @@ import { useAuth } from '../src/ui/auth';
 import { useBrand } from '../src/ui/brand';
 import { Rule, Section, SectionHead, ListRow, Ghost } from '../src/ui/kit';
 import { sp, layout, radius, type as ty } from '../src/theme/scale';
+import { VARIANT, HOME_ROUTE, SHOWS_PORTAL_CHOOSER } from '../src/lib/variant';
 
 function Ripple({ size, color }: { size: number; color: string }) {
   return (
@@ -42,6 +43,13 @@ export default function Home() {
   }
   if (!authed) return <Redirect href="/welcome" />;
 
+  // Repple ships as three separate apps. A store build has exactly one portal,
+  // so there is nothing to choose: go straight in. The chooser below only ever
+  // renders in a development build, where VARIANT is `all`.
+  if (!SHOWS_PORTAL_CHOOSER) {
+    return <Redirect href={HOME_ROUTE[VARIANT as Exclude<typeof VARIANT, 'all'>] as any} />;
+  }
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingTop: sp.huge, paddingBottom: 40 }}>
@@ -61,7 +69,7 @@ export default function Home() {
 
         {/* ── the three portals ──────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Choose a portal" />
+          <SectionHead title="Choose a portal" note="development build" />
           <ListRow icon="me" title="Client App" note="Program, meals, progress, booking"
             onPress={() => router.push('/(client)/dashboard')} />
           <ListRow icon="people" title="Trainer Portal" note="Clients, schedule, videos, analytics"

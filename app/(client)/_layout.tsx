@@ -5,13 +5,20 @@
 // bar's padding come off the scale (`src/theme/scale`) instead of being raw
 // numbers, and a dead emoji-based TabIcon (nothing rendered it since the Icon
 // set landed) is gone.
-import { Tabs } from 'expo-router';
+import { Tabs, Redirect } from 'expo-router';
+import { groupAllowed } from '../../src/lib/variant';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
 import { sp, type as ty } from '../../src/theme/scale';
 
 export default function ClientLayout() {
+  // This build is one of three separate apps. If the client portal is not
+  // the one it ships, nothing here is reachable — a deep link or a tapped
+  // notification pointing into it goes home instead of rendering a portal
+  // this user's app is not supposed to have.
+  if (!groupAllowed('client')) return <Redirect href="/" />;
+
   const t = useTheme();
   const insets = useSafeAreaInsets();
   const bottomPad = Math.max(insets.bottom, 10);

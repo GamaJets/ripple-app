@@ -3,13 +3,20 @@
 // Configuration, not layout: every Tabs.Screen, name, href, title and the order
 // they appear in is untouched. Only the tab label and the bar's padding moved
 // onto the scale (`src/theme/scale`); the dead emoji TabIcon is gone.
-import { Tabs } from 'expo-router';
+import { Tabs, Redirect } from 'expo-router';
+import { groupAllowed } from '../../src/lib/variant';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
 import { sp, type as ty } from '../../src/theme/scale';
 
 export default function TrainerLayout() {
+  // This build is one of three separate apps. If the trainer portal is not
+  // the one it ships, nothing here is reachable — a deep link or a tapped
+  // notification pointing into it goes home instead of rendering a portal
+  // this user's app is not supposed to have.
+  if (!groupAllowed('trainer')) return <Redirect href="/" />;
+
   const t = useTheme();
   const insets = useSafeAreaInsets();
   const bottomPad = Math.max(insets.bottom, 10);
