@@ -45,8 +45,10 @@ export default function OwnerOps() {
   const allTickets = [...fbTickets, ...tickets];
   const resolveAny = (id: string) => { if (id.startsWith('fb')) setLocalResolved((p) => ({ ...p, [id]: true })); else resolveTicket(id); };
   const openCount = allTickets.filter((x) => !x.resolved).length;
-  const { events } = usePlatformTrainers();
-  const feed = [...events, ...activity].sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
+  // The owner event log used to be built in memory as you clicked around —
+  // "X moved to Pro", "Y suspended" — and vanished on close. Those actions no
+  // longer exist, so the feed is the real activity stream and nothing else.
+  const feed = [...activity].sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
   const [tab, setTab] = useState<'announce' | 'support' | 'activity'>('announce');
   const [text, setText] = useState('');
   const [openT, setOpenT] = useState<string | null>(null);

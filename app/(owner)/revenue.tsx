@@ -20,9 +20,9 @@ import {
 } from '../../src/ui/kit';
 import { sp, layout, type as ty, numeric } from '../../src/theme/scale';
 import { usePlatformTrainers } from '../../src/ui/trainers';
-import { PLANS } from '../../src/lib/ownerMock';
-import { platformRollup, type TrainerLike } from '../../src/lib/ownerAnalytics';
-import { useMrrHistory } from '../../src/ui/useMrrHistory';
+import { useTenant } from '../../src/ui/tenant';
+import { gymRollup, type TrainerLike } from '../../src/lib/ownerAnalytics';
+import { useSessionsHistory } from '../../src/ui/useMrrHistory';
 
 const usd = (n: number) => '$' + Math.round(n).toLocaleString();
 
@@ -30,8 +30,9 @@ export default function OwnerRevenue() {
   const t = useTheme();
   const router = useRouter();
   const { trainers } = usePlatformTrainers();
-  const roll = platformRollup(trainers as TrainerLike[]);
-  const { series, labels, delta, months } = useMrrHistory(roll.mrr);
+  const { tenant } = useTenant();
+  const roll = gymRollup(trainers as TrainerLike[], tenant?.sessionFee ?? null);
+  const { series, labels, delta, months } = useSessionsHistory(roll.sessions30);
 
   // Monthly growth rate from the accumulating history (geometric, clamped).
   // `n` is the number of months ACTUALLY recorded, not the window length. It
@@ -40,27 +41,28 @@ export default function OwnerRevenue() {
   // of today's figure. With fewer than two real months there is no growth rate
   // and no forecast — the screen says so instead of projecting a flat line.
   const recorded = series.filter((v): v is number => v != null);
-  const first = recorded.find((v) => v > 0) ?? roll.mrr;
+  const first = recorded.find((v) => v > 0) ?? roll.sessions30;
   const n = months;
   const canForecast = n >= 2 && first > 0;
-  let growth = canForecast ? Math.pow(roll.mrr / first, 1 / (n - 1)) - 1 : 0;
+  let growth = canForecast ? Math.pow(roll.sessions30 / first, 1 / (n - 1)) - 1 : 0;
   growth = Math.max(-0.5, Math.min(0.5, growth));
-  const forecast = Array.from({ length: 6 }, (_, i) => Math.round(roll.mrr * Math.pow(1 + growth, i + 1)));
+  const forecast = Array.from({ length: 6 }, (_, i) => Math.round(roll.sessions30 * Math.pow(1 + growth, i + 1)));
 
-  // Revenue by plan (active trainers only).
-  const byPlan = PLANS.map((p) => ({
-    name: p.name,
-    revenue: trainers.filter((x) => x.plan === p.name && x.status !== 'suspended').reduce((a, x) => a + x.mrr, 0),
-  })).filter((p) => p.revenue > 0).sort((a, b) => b.revenue - a.revenue);
-  const planTotal = byPlan.reduce((a, p) => a + p.revenue, 0) || 1;
+  // Sessions delivered per trainer. The old split was by Repple plan, which is
+  // what a trainer pays us — never a figure in the gym's own revenue.
+  const byTrainer = [...trainers]
+    .map((x) => ({ id: x.id, name: x.name, sessions: x.sessions30 }))
+    .filter((x) => x.sessions > 0)
+    .sort((a, b) => b.sessions - a.sessions);
+  const trainerTotal = byTrainer.reduce((a, x) => a + x.sessions, 0) || 1;
 
-  // Trainer LTV: avg revenue per paying trainer × observed lifespan (1 / churn).
-  // No churn observed yet → no lifespan to divide by, so no LTV. It is not 24.
-  const payingMrr = trainers.filter((x) => x.status === 'active').reduce((a, x) => a + x.mrr, 0);
-  const avgMrr = roll.paying > 0 ? payingMrr / roll.paying : 0;
-  const churnRate = roll.trainers > 0 ? roll.suspended / roll.trainers : 0;
-  const lifespanMo = churnRate > 0 ? Math.min(48, Math.round(1 / churnRate)) : null;
-  const ltv = lifespanMo != null ? Math.round(avgMrr * lifespanMo) : null;
+  // Value per client, from what the gym actually collects. `client_purchases`
+  // is empty until payments are switched on, so this stays null rather than
+  // dividing by a number nobody has earned.
+  const fee = tenant?.sessionFee ?? null;
+  const revenue30 = roll.payroll30;
+  const valuePerClient = revenue30 != null && roll.clients > 0 ? Math.round(revenue30 / roll.clients) : null;
+
   const G = layout.gutter;
 
   return (
@@ -76,22 +78,24 @@ export default function OwnerRevenue() {
 
         {/* ── the hero ───────────────────────────────────────────────────── */}
         <Hero
-          label="MRR"
-          figure={usd(roll.mrr)}
+          label="Sessions delivered · 30 days"
+          figure={String(roll.sessions30)}
           note={delta !== 0
-            ? `${delta > 0 ? '+' : '−'}${usd(Math.abs(delta))} vs last mo · ${usd(roll.arr)} annualised`
-            : `${usd(roll.arr)} annualised · trainer fees`}
+            ? `${delta > 0 ? '+' : '−'}${Math.abs(delta)} vs last month${revenue30 != null ? ` · ${usd(revenue30)} at your fee` : ''}`
+            : revenue30 != null
+              ? `${usd(revenue30)} at your session fee`
+              : 'Set a session fee in Ops to value these'}
         />
 
         <Rule />
 
         {/* ── unit economics ─────────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Unit economics" note="Per paying trainer" />
+          <SectionHead title="Unit economics" note="Per client" />
           <KpiRow items={[
-            { label: 'ARR', value: usd(roll.arr), delta: 'annualised' },
-            { label: 'Avg / trainer', value: usd(avgMrr), delta: `${roll.paying} paying` },
-            { label: 'Trainer LTV', value: ltv != null ? usd(ltv) : '—', delta: lifespanMo != null ? `~${lifespanMo} mo lifespan` : 'No churn history yet' },
+            { label: 'Session fee', value: fee == null ? '—' : usd(fee), delta: fee == null ? 'not set' : 'per delivered session' },
+            { label: 'Value / client', value: valuePerClient == null ? '—' : usd(valuePerClient), delta: valuePerClient == null ? 'needs a session fee' : 'last 30 days' },
+            { label: 'Clients', value: String(roll.clients), delta: `${roll.avgClientsPerTrainer} avg / trainer` },
           ]} />
         </Section>
 
@@ -99,7 +103,7 @@ export default function OwnerRevenue() {
 
         {/* ── trend ──────────────────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="MRR trend"
+          <SectionHead title="Sessions trend"
             note={delta !== 0 ? `${delta > 0 ? '+' : '−'}${usd(Math.abs(delta))} vs last mo` : 'Tracking started'} />
           {months >= 2 ? (
             <>
@@ -122,16 +126,16 @@ export default function OwnerRevenue() {
         <Section>
           <SectionHead title="6-month forecast" note={canForecast ? `${growth >= 0 ? '+' : ''}${Math.round(growth * 100)}%/mo` : undefined} />
           {canForecast ? (<>
-            <Spark data={[roll.mrr, ...forecast]} h={58} />
+            <Spark data={[roll.sessions30, ...forecast]} h={58} />
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: sp.sm }}>
-              <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>Now {usd(roll.mrr)}</Text>
-              <Text style={{ ...ty.caption, ...numeric, color: t.ink }}>6 mo → {usd(forecast[5])}</Text>
+              <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>Now {roll.sessions30}</Text>
+              <Text style={{ ...ty.caption, ...numeric, color: t.ink }}>6 mo → {forecast[5]}</Text>
             </View>
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
               Projected from {n} months of your own history — a guide, not a guarantee.
             </Text>
           </>) : (
-            <Text style={{ ...ty.label, color: t.ink3 }}>A forecast needs at least two months of recorded MRR. Come back next month.</Text>
+            <Text style={{ ...ty.label, color: t.ink3 }}>A forecast needs at least two months of recorded sessions. Come back next month.</Text>
           )}
         </Section>
 
@@ -139,16 +143,16 @@ export default function OwnerRevenue() {
 
         {/* ── revenue by plan ────────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Revenue by plan" note={byPlan.length > 0 ? usd(planTotal) + '/mo' : undefined} />
-          {byPlan.length === 0 ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>No plan revenue yet.</Text>
-          ) : byPlan.map((p) => {
-            const pct = Math.round((p.revenue / planTotal) * 100);
+          <SectionHead title="Sessions by trainer" note={byTrainer.length > 0 ? `${trainerTotal} in 30d` : undefined} />
+          {byTrainer.length === 0 ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>No sessions delivered in the last 30 days.</Text>
+          ) : byTrainer.map((p) => {
+            const pct = Math.round((p.sessions / trainerTotal) * 100);
             return (
-              <View key={p.name} style={{ marginBottom: sp.lg }}>
+              <View key={p.id} style={{ marginBottom: sp.lg }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                   <Text style={{ ...ty.caption, color: t.ink2 }}>{p.name}</Text>
-                  <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{usd(p.revenue)}/mo · {pct}%</Text>
+                  <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{p.sessions} · {pct}%</Text>
                 </View>
                 <View style={{ height: 3, borderRadius: 2, backgroundColor: t.surface3, marginTop: 7, overflow: 'hidden' }}>
                   <View style={{ height: 3, borderRadius: 2, width: `${pct}%`, backgroundColor: t.brand }} />
@@ -162,9 +166,9 @@ export default function OwnerRevenue() {
 
         {/* ── revenue at risk ────────────────────────────────────────────── */}
         <Section>
-          {roll.atRiskMrr > 0 ? (
-            <Notice tone={t.warn} kicker="Revenue at risk" title={`${usd(roll.atRiskMrr)}/mo`}
-              note={`${roll.atRiskCount} trainer${roll.atRiskCount === 1 ? '' : 's'} flagged watch/high — that's ${usd(roll.atRiskMrr * 12)} of ARR to defend.`}>
+          {roll.atRiskCount > 0 ? (
+            <Notice tone={t.warn} kicker="Needs a look" title={`${roll.atRiskCount} trainer${roll.atRiskCount === 1 ? '' : 's'} flagged`}
+              note={`${roll.atRiskClients} client${roll.atRiskClients === 1 ? '' : 's'} are with them.`}>
               <View style={{ marginTop: sp.lg }}>
                 <Cta label="Review trainers" wide onPress={() => router.push('/(owner)/trainers')} />
               </View>

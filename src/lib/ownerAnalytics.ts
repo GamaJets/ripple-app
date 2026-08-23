@@ -1,13 +1,27 @@
-// Owner analytics — pure functions that turn the trainer roster into real
-// operating signals: a per-trainer health score, churn risk, and platform
-// roll-ups (at-risk MRR, trial conversion). No UI, no state → unit-testable.
+// Gym analytics — pure functions over the gym's own roster.
+//
+// `profiles.role = 'owner'` means a gym owner, so these describe a gym, not
+// Repple's SaaS business. The previous version scored trainers on `plan`, `mrr`
+// and `status: suspended` — what a trainer pays Repple, which is not a figure a
+// gym owner has any business seeing on their own dashboard, and which nothing
+// in the database was writing anyway.
+//
+// What a gym owner actually knows about a coach: how many clients they carry
+// and how many sessions they actually delivered. Both come from rows.
+// No UI, no state → unit-testable.
 
 export interface TrainerLike {
-  id: string; name: string; plan: string; clients: number; mrr: number;
-  status: 'active' | 'trial' | 'suspended'; since?: string;
+  id: string;
+  name: string;
+  /** Clients assigned to this trainer. */
+  clients: number;
+  /** Sessions delivered in the last 30 days. */
+  sessions30: number;
+  /** ISO timestamp they joined, or null. */
+  since?: string | null;
 }
 
-export type Risk = 'ok' | 'watch' | 'high' | 'suspended';
+export type Risk = 'ok' | 'watch' | 'high' | 'idle';
 export type Tone = 'good' | 'moderate' | 'low';
 
 export interface Health {
@@ -17,84 +31,107 @@ export interface Health {
   reason: string;  // short, human
 }
 
-/** Health from what we know: paying-vs-trial, client load, and engagement. */
+/**
+ * Health from the two things a gym can observe: client load and delivered
+ * sessions. A coach with clients who is running no sessions is the signal an
+ * owner wants — it is invisible on a headcount.
+ */
 export function trainerHealth(tr: TrainerLike): Health {
-  if (tr.status === 'suspended') {
-    return { score: 0, tone: 'low', risk: 'suspended', reason: 'Suspended — no active revenue.' };
+  const clients = tr.clients || 0;
+  const sessions = tr.sessions30 || 0;
+
+  if (clients === 0 && sessions === 0) {
+    return { score: 0, tone: 'low', risk: 'idle', reason: 'No clients and no sessions in the last 30 days.' };
   }
-  const statusPts = tr.status === 'active' ? 45 : 25;          // paying beats trial
-  const clientPts = Math.min(tr.clients, 12) / 12 * 45;        // client load
-  const engagePts = tr.clients > 0 ? 10 : 0;                   // any activity at all
-  const score = Math.max(0, Math.min(100, Math.round(statusPts + clientPts + engagePts)));
+
+  // Client load and delivery weigh roughly equally; 12 clients and 20 sessions
+  // in a month is a full book, not a ceiling on quality.
+  const clientPts = Math.min(clients, 12) / 12 * 50;
+  const sessionPts = Math.min(sessions, 20) / 20 * 50;
+  const score = Math.max(0, Math.min(100, Math.round(clientPts + sessionPts)));
 
   let risk: Risk, reason: string;
-  if (tr.clients === 0) {
+  if (clients > 0 && sessions === 0) {
     risk = 'high';
-    reason = tr.status === 'trial' ? 'Trial with no clients yet — nudge onboarding.' : 'Paying but zero clients — likely to cancel.';
-  } else if (tr.clients <= 1) {
+    reason = `${clients} client${clients === 1 ? '' : 's'} but no sessions delivered in 30 days.`;
+  } else if (clients === 0) {
     risk = 'watch';
-    reason = 'Only just started adding clients.';
+    reason = 'Delivering sessions but has no clients on the roster.';
+  } else if (sessions < 4) {
+    risk = 'watch';
+    reason = 'Few sessions delivered this month.';
   } else {
     risk = 'ok';
-    reason = tr.status === 'trial' ? 'Trial going well — ripe to convert.' : 'Healthy and active.';
+    reason = 'Carrying clients and delivering sessions.';
   }
-  const tone: Tone = score >= 70 ? 'good' : score >= 45 ? 'moderate' : 'low';
+  const tone: Tone = score >= 70 ? 'good' : score >= 40 ? 'moderate' : 'low';
   return { score, tone, risk, reason };
 }
 
-export interface PlatformRollup {
-  mrr: number;
-  arr: number;
+export interface GymRollup {
   trainers: number;
-  paying: number;
-  trial: number;
-  suspended: number;
   clients: number;
-  atRiskMrr: number;       // active/trial revenue on trainers flagged watch/high
+  /** Sessions delivered across the gym in the last 30 days. */
+  sessions30: number;
+  /** Worth of those sessions at the tenant's fee, or null when no fee is set. */
+  payroll30: number | null;
+  /** Trainers flagged watch/high/idle. */
   atRiskCount: number;
-  trialConversionPct: number | null; // paying / (paying + trial)
+  /** Clients carried by those trainers — the exposure, not the headcount. */
+  atRiskClients: number;
   avgClientsPerTrainer: number;
+  avgSessionsPerTrainer: number;
 }
 
-export function platformRollup(trainers: TrainerLike[]): PlatformRollup {
-  const active = trainers.filter((t) => t.status !== 'suspended');
-  const mrr = active.reduce((a, t) => a + (t.mrr || 0), 0);
-  const paying = trainers.filter((t) => t.status === 'active').length;
-  const trial = trainers.filter((t) => t.status === 'trial').length;
-  const suspended = trainers.filter((t) => t.status === 'suspended').length;
+export function gymRollup(trainers: TrainerLike[], sessionFee: number | null): GymRollup {
   const clients = trainers.reduce((a, t) => a + (t.clients || 0), 0);
-  let atRiskMrr = 0, atRiskCount = 0;
+  const sessions30 = trainers.reduce((a, t) => a + (t.sessions30 || 0), 0);
+  let atRiskCount = 0, atRiskClients = 0;
   for (const t of trainers) {
     const h = trainerHealth(t);
-    if (t.status !== 'suspended' && (h.risk === 'high' || h.risk === 'watch')) { atRiskMrr += t.mrr || 0; atRiskCount++; }
+    if (h.risk !== 'ok') { atRiskCount++; atRiskClients += t.clients || 0; }
   }
+  const n = trainers.length;
   return {
-    mrr, arr: mrr * 12, trainers: trainers.length, paying, trial, suspended, clients,
-    atRiskMrr, atRiskCount,
-    trialConversionPct: paying + trial > 0 ? Math.round((paying / (paying + trial)) * 100) : null,
-    avgClientsPerTrainer: trainers.length ? Math.round((clients / trainers.length) * 10) / 10 : 0,
+    trainers: n,
+    clients,
+    sessions30,
+    payroll30: sessionFee == null ? null : Math.round(sessions30 * sessionFee),
+    atRiskCount,
+    atRiskClients,
+    avgClientsPerTrainer: n ? Math.round((clients / n) * 10) / 10 : 0,
+    avgSessionsPerTrainer: n ? Math.round((sessions30 / n) * 10) / 10 : 0,
   };
 }
 
 export interface Cohort { label: string; total: number; active: number; pct: number }
 
-const MONTH_IDX: Record<string, number> = { jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11 };
-function sinceKey(since?: string): number {
-  if (!since) return 0;
-  const m = /([A-Za-z]{3})\s+(\d{4})/.exec(since);
-  if (!m) return 0;
-  const mi = MONTH_IDX[m[1].toLowerCase()] ?? 0;
-  return parseInt(m[2], 10) * 12 + mi;
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+/** "2026-08-19T…" → "Aug 2026". Null/unparseable → null, never a guess. */
+function monthLabel(iso?: string | null): string | null {
+  if (!iso) return null;
+  const t = Date.parse(iso);
+  if (!isFinite(t)) return null;
+  const d = new Date(t);
+  return `${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
 }
 
-/** Group trainers by signup month → retention (% still active). Oldest first. */
+/**
+ * Trainers grouped by the month they joined, with the share still delivering.
+ * Trainers whose join date is unknown are left out rather than bucketed into a
+ * fabricated "Unknown" cohort that would drag every percentage.
+ */
 export function cohorts(trainers: TrainerLike[]): Cohort[] {
   const map = new Map<string, { total: number; active: number; key: number }>();
   for (const t of trainers) {
-    const label = t.since || "Unknown";
-    const cur = map.get(label) || { total: 0, active: 0, key: sinceKey(t.since) };
+    const label = monthLabel(t.since);
+    if (!label) continue;
+    const d = new Date(Date.parse(t.since as string));
+    const key = d.getFullYear() * 12 + d.getMonth();
+    const cur = map.get(label) || { total: 0, active: 0, key };
     cur.total++;
-    if (t.status !== "suspended") cur.active++;
+    if ((t.sessions30 || 0) > 0) cur.active++;
     map.set(label, cur);
   }
   return [...map.entries()]
@@ -103,36 +140,33 @@ export function cohorts(trainers: TrainerLike[]): Cohort[] {
     .map(({ key, ...rest }) => rest);
 }
 
-// Platform-wide end-client analytics (owner #7): total end-clients, an
-// engagement proxy (clients served by a healthy vs at-risk trainer), average
-// per trainer, and the client distribution by plan. Pure over the roster.
+/** The gym's members, seen through who coaches them. */
 export interface ClientAnalytics {
   total: number;
-  engaged: number;      // clients on trainers whose health.risk is 'ok'
-  atRisk: number;       // clients on watch/high/suspended trainers
+  /** Clients whose trainer is healthy. */
+  engaged: number;
+  /** Clients whose trainer is flagged. */
+  atRisk: number;
   engagementPct: number;
   avgPerTrainer: number;
-  byPlan: { plan: string; clients: number; pct: number }[];
+  /** Client load per trainer, biggest book first. */
+  byTrainer: { id: string; name: string; clients: number; pct: number }[];
 }
 
 export function clientAnalytics(trainers: TrainerLike[]): ClientAnalytics {
   const total = trainers.reduce((a, t) => a + (t.clients || 0), 0);
   let engaged = 0, atRisk = 0;
-  const planMap: Record<string, number> = {};
   for (const tr of trainers) {
     const c = tr.clients || 0;
-    const h = trainerHealth(tr);
-    if (tr.status !== 'suspended' && h.risk === 'ok') engaged += c; else atRisk += c;
-    const key = tr.plan || '—';
-    planMap[key] = (planMap[key] || 0) + c;
+    if (trainerHealth(tr).risk === 'ok') engaged += c; else atRisk += c;
   }
-  const byPlan = Object.entries(planMap)
-    .map(([plan, clients]) => ({ plan, clients, pct: total ? Math.round((clients / total) * 100) : 0 }))
+  const byTrainer = trainers
+    .map((t) => ({ id: t.id, name: t.name, clients: t.clients || 0, pct: total ? Math.round(((t.clients || 0) / total) * 100) : 0 }))
     .sort((a, b) => b.clients - a.clients);
   return {
     total, engaged, atRisk,
     engagementPct: total ? Math.round((engaged / total) * 100) : 0,
     avgPerTrainer: trainers.length ? Math.round((total / trainers.length) * 10) / 10 : 0,
-    byPlan,
+    byTrainer,
   };
 }

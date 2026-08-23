@@ -16,27 +16,30 @@ import {
   Rule, Section, SectionHead, Hero, KpiRow, ListRow, Card, Cta, Ghost, QuickRow, Spark, Notice,
 } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty, numeric, value } from '../../src/theme/scale';
+import { useTenant } from '../../src/ui/tenant';
 import { usePlatformTrainers } from '../../src/ui/trainers';
-import { PLANS } from '../../src/lib/ownerMock';
-import { platformRollup, trainerHealth, type TrainerLike } from '../../src/lib/ownerAnalytics';
+import { gymRollup, trainerHealth, type TrainerLike } from '../../src/lib/ownerAnalytics';
 import { HealthPill } from '../../src/ui/charts';
-import { useMrrHistory } from '../../src/ui/useMrrHistory';
+import { useSessionsHistory } from '../../src/ui/useMrrHistory';
 import { cohorts } from '../../src/lib/ownerAnalytics';
 import { ownerReportDoc, shareDoc } from '../../src/lib/exportShare';
 import { fetchFailedInvoices, money, type Invoice } from '../../src/lib/billing';
 import { Linking } from 'react-native';
 
-const RISK_LABEL: Record<string, string> = { high: 'Churn risk', watch: 'Watch', ok: 'Healthy', suspended: 'Suspended' };
+const RISK_LABEL: Record<string, string> = { high: 'Not delivering', watch: 'Watch', ok: 'Healthy', idle: 'Idle' };
 
 export default function OwnerOverview() {
   const t = useTheme(); const router = useRouter();
-  const { trainers, activeMrr } = usePlatformTrainers();
-  const roll = platformRollup(trainers as TrainerLike[]);
-  const { series, labels, delta, months } = useMrrHistory(activeMrr);
+  const { trainers, sessions30, payroll30 } = usePlatformTrainers();
+  const { tenant } = useTenant();
+  const roll = gymRollup(trainers as TrainerLike[], tenant?.sessionFee ?? null);
+  const { series, labels, delta, months } = useSessionsHistory(sessions30);
   const [sel, setSel] = useState<TrainerLike | null>(null);
 
-  const byPlan = PLANS.map((p) => ({ name: p.name, revenue: trainers.filter((x) => x.plan === p.name && x.status !== 'suspended').reduce((a, x) => a + x.mrr, 0), clients: trainers.filter((x) => x.plan === p.name).reduce((a, x) => a + x.clients, 0) }));
-  const maxPlan = Math.max(1, ...byPlan.map((p) => p.revenue));
+  // Client load per trainer. The old version split revenue by Repple plan,
+  // which is what a trainer pays us, not anything the gym earns.
+  const byTrainer = [...trainers].sort((a, b) => b.clients - a.clients).slice(0, 5);
+  const maxLoad = Math.max(1, ...byTrainer.map((x) => x.clients));
   // Trainers sorted worst-health first so problems surface at the top.
   const ranked = [...(trainers as TrainerLike[])].map((tr) => ({ tr, h: trainerHealth(tr) })).sort((a, b) => a.h.score - b.h.score);
   const selHealth = sel ? trainerHealth(sel) : null;
@@ -45,8 +48,9 @@ export default function OwnerOverview() {
   const dunningTotal = dunning.reduce((a, i) => a + (i.amount_due || 0), 0);
   const exportReport = async () => {
     const doc = ownerReportDoc({
-      mrr: roll.mrr, arr: roll.arr, trainers: roll.trainers, paying: roll.paying, trial: roll.trial,
-      clients: roll.clients, atRiskMrr: roll.atRiskMrr, trialConversionPct: roll.trialConversionPct,
+      trainers: roll.trainers, clients: roll.clients, sessions30: roll.sessions30,
+      payroll30: roll.payroll30, atRiskCount: roll.atRiskCount, atRiskClients: roll.atRiskClients,
+      avgClientsPerTrainer: roll.avgClientsPerTrainer,
       cohorts: cohorts(trainers as TrainerLike[]),
       generatedOn: new Date().toLocaleDateString(),
     });
@@ -85,9 +89,9 @@ export default function OwnerOverview() {
         {/* ── interrupts: things that need a decision now ─────────────────── */}
         <View style={{ marginTop: sp.lg }}>
           {roll.atRiskCount > 0 ? (
-            <Notice tone={t.warn} kicker="Revenue at risk"
-              title={`$${roll.atRiskMrr.toLocaleString()}/mo at risk`}
-              note={`${roll.atRiskCount} trainer${roll.atRiskCount > 1 ? 's' : ''} flagged — review the most urgent.`}>
+            <Notice tone={t.warn} kicker="Needs a look"
+              title={`${roll.atRiskCount} trainer${roll.atRiskCount > 1 ? 's' : ''} flagged`}
+              note={`${roll.atRiskClients} client${roll.atRiskClients === 1 ? '' : 's'} are with them — review the most urgent.`}>
               <View style={{ marginTop: sp.lg }}>
                 <Cta label="Review" wide
                   onPress={() => { const first = ranked.find((r) => r.h.risk === 'high' || r.h.risk === 'watch'); if (first) setSel(first.tr); }} />
@@ -118,18 +122,20 @@ export default function OwnerOverview() {
         {roll.trainers === 0 ? (
           <Card style={{ marginTop: sp.sm }}>
             <Text style={{ ...ty.label, color: t.ink2 }}>
-              No trainers on the platform yet — MRR, clients and trainer health populate as trainers sign up.
+              No trainers yet — clients, delivered sessions and trainer health fill in as they join your gym.
             </Text>
           </Card>
         ) : null}
 
         {/* ── the hero ───────────────────────────────────────────────────── */}
         <Hero
-          label="Platform MRR"
-          figure={'$' + roll.mrr.toLocaleString()}
+          label="Sessions delivered · 30 days"
+          figure={String(roll.sessions30)}
           note={delta !== 0
-            ? `${delta > 0 ? '+' : '−'}$${Math.abs(delta).toLocaleString()} vs last mo · trainer subscription fees`
-            : 'Trainer subscription fees · tracking started'}
+            ? `${delta > 0 ? '+' : '−'}${Math.abs(delta)} vs last month`
+            : roll.payroll30 == null
+              ? 'Set a session fee in Ops to value these'
+              : `Worth $${roll.payroll30.toLocaleString()} at your session fee`}
           onPress={() => router.push('/(owner)/revenue')}
         />
 
@@ -137,11 +143,11 @@ export default function OwnerOverview() {
 
         {/* ── the shape of the platform ──────────────────────────────────── */}
         <Section>
-          <SectionHead title="Platform" note="Trainers" onPress={() => router.push('/(owner)/trainers')} />
+          <SectionHead title="Your gym" note="Trainers" onPress={() => router.push('/(owner)/trainers')} />
           <KpiRow items={[
-            { label: 'Trainers', value: String(roll.trainers), delta: `${roll.paying} paying · ${roll.trial} trial` },
-            { label: 'End clients', value: String(roll.clients), delta: `${roll.avgClientsPerTrainer} avg / trainer` },
-            { label: 'ARR', value: '$' + roll.arr.toLocaleString(), delta: roll.trialConversionPct != null ? `${roll.trialConversionPct}% paying` : 'annualised' },
+            { label: 'Trainers', value: String(roll.trainers), delta: `${roll.avgSessionsPerTrainer} sessions avg` },
+            { label: 'Clients', value: String(roll.clients), delta: `${roll.avgClientsPerTrainer} avg / trainer` },
+            { label: 'Payroll · 30d', value: roll.payroll30 == null ? '—' : '$' + roll.payroll30.toLocaleString(), delta: roll.payroll30 == null ? 'no session fee set' : 'at your session fee' },
           ]} />
         </Section>
 
@@ -149,7 +155,7 @@ export default function OwnerOverview() {
 
         {/* ── MRR trend (real, accumulating) ─────────────────────────────── */}
         <Section>
-          <SectionHead title="MRR trend"
+          <SectionHead title="Sessions trend"
             note={delta !== 0 ? `${delta > 0 ? '+' : '−'}$${Math.abs(delta).toLocaleString()} vs last mo` : 'Tracking started'}
             onPress={() => router.push('/(owner)/revenue')} />
           {months >= 2 ? (
@@ -182,10 +188,10 @@ export default function OwnerOverview() {
                 <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{tr.name}</Text>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
                   <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: h.risk === 'high' ? t.crit : h.risk === 'watch' ? t.warn : t.brand }} />
-                  <Text style={{ ...ty.caption, color: t.ink3 }}>{RISK_LABEL[h.risk]} · {tr.clients} client{tr.clients === 1 ? '' : 's'} · {tr.plan}</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3 }}>{RISK_LABEL[h.risk]} · {tr.clients} client{tr.clients === 1 ? '' : 's'} · {tr.sessions30} session{tr.sessions30 === 1 ? '' : 's'}</Text>
                 </View>
               </View>
-              <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>${tr.status === 'suspended' ? 0 : tr.mrr}/mo</Text>
+              <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{tr.sessions30} in 30d</Text>
             </Pressable>
           ))}
         </Section>
@@ -194,15 +200,15 @@ export default function OwnerOverview() {
 
         {/* ── revenue by plan ────────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Revenue by plan" note="Revenue" onPress={() => router.push('/(owner)/revenue')} />
-          {byPlan.map((p) => (
-            <View key={p.name} style={{ marginBottom: sp.lg }}>
+          <SectionHead title="Client load" note="Revenue" onPress={() => router.push('/(owner)/revenue')} />
+          {byTrainer.map((p) => (
+            <View key={p.id} style={{ marginBottom: sp.lg }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                <Text style={{ ...ty.caption, color: t.ink2 }}>{p.name} · {p.clients} clients</Text>
-                <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>${p.revenue}/mo</Text>
+                <Text style={{ ...ty.caption, color: t.ink2 }}>{p.name}</Text>
+                <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{p.clients} client{p.clients === 1 ? '' : 's'}</Text>
               </View>
               <View style={{ height: 3, borderRadius: 2, backgroundColor: t.surface3, marginTop: 7, overflow: 'hidden' }}>
-                <View style={{ height: 3, borderRadius: 2, width: `${Math.round((p.revenue / maxPlan) * 100)}%`, backgroundColor: t.brand, opacity: p.revenue > 0 ? 1 : 0.55 }} />
+                <View style={{ height: 3, borderRadius: 2, width: `${Math.round((p.clients / maxLoad) * 100)}%`, backgroundColor: t.brand, opacity: p.clients > 0 ? 1 : 0.55 }} />
               </View>
             </View>
           ))}
@@ -238,7 +244,7 @@ export default function OwnerOverview() {
                 <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}>{selHealth.reason}</Text>
               </View>
               <View style={{ flexDirection: 'row', marginBottom: sp.xl }}>
-                {[['Plan', sel.plan], ['Clients', String(sel.clients)], ['Revenue', `$${sel.status === 'suspended' ? 0 : sel.mrr}/mo`], ['Since', sel.since || '—']].map(([l, v], i) => (
+                {[['Clients', String(sel.clients)], ['Sessions · 30d', String(sel.sessions30)], ['Health', String(trainerHealth(sel).score)]].map(([l, v], i) => (
                   <View key={l} style={{ flex: 1, paddingRight: sp.sm, paddingLeft: i === 0 ? 0 : sp.md, borderLeftWidth: i === 0 ? 0 : hairline, borderLeftColor: t.ring }}>
                     <Text style={{ ...ty.caption, color: t.ink3 }}>{l}</Text>
                     <Text style={{ ...value(15), color: t.ink, marginTop: 3 }} numberOfLines={1}>{v}</Text>

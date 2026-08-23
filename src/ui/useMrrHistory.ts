@@ -55,3 +55,13 @@ export function useMonthlyHistory(storageKey: string, currentValue: number): Mon
 export function useMrrHistory(currentMrr: number): MonthlyHistory {
   return useMonthlyHistory('repple.owner.mrrHistory', currentMrr);
 }
+
+/**
+ * Sessions delivered per month for the gym owner. Deliberately a different key
+ * from the MRR history: that one holds dollars from when the owner portal was a
+ * SaaS console, and feeding session counts into it would draw one line out of
+ * two different units without saying so.
+ */
+export function useSessionsHistory(currentSessions: number): MonthlyHistory {
+  return useMonthlyHistory('repple.owner.sessionsHistory', currentSessions);
+}

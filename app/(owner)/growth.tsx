@@ -22,7 +22,7 @@ import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../
 import { DistBar } from '../../src/ui/charts';
 import { usePromos } from '../../src/ui/promos';
 import { usePlatformTrainers } from '../../src/ui/trainers';
-import { platformRollup, cohorts, clientAnalytics, type TrainerLike } from '../../src/lib/ownerAnalytics';
+import { gymRollup, cohorts, clientAnalytics, type TrainerLike } from '../../src/lib/ownerAnalytics';
 
 const DISCOUNTS = [10, 20, 30, 50];
 
@@ -30,12 +30,22 @@ export default function OwnerGrowth() {
   const t = useTheme();
   const { promos, addPromo, toggleActive, removePromo } = usePromos();
   const { trainers } = usePlatformTrainers();
-  const roll = platformRollup(trainers as TrainerLike[]);
+  const roll = gymRollup(trainers as TrainerLike[], null);
   const coh = cohorts(trainers as TrainerLike[]);
   const ca = clientAnalytics(trainers as TrainerLike[]);
-  const thisMonth = new Date().toLocaleString(undefined, { month: 'short' }) + ' ' + new Date().getFullYear();
-  const newThisMonth = trainers.filter((x) => x.since === thisMonth).length;
-  const churnPct = trainers.length ? Math.round((roll.suspended / trainers.length) * 100) : 0;
+  // Joined this month, from the real `profiles.created_at` rather than a
+  // hand-formatted "Aug 2026" string that only matched by luck.
+  const now = new Date();
+  const newThisMonth = trainers.filter((x) => {
+    const ts = x.since ? Date.parse(x.since) : NaN;
+    if (!isFinite(ts)) return false;
+    const d = new Date(ts);
+    return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+  }).length;
+  // Idle = carrying no clients and delivering nothing. That is the gym's
+  // equivalent of churn; a subscription "suspended" flag never existed here.
+  const idle = trainers.filter((x) => (x.clients || 0) === 0 && (x.sessions30 || 0) === 0).length;
+  const idlePct = trainers.length ? Math.round((idle / trainers.length) * 100) : 0;
   const [code, setCode] = useState('');
   const [disc, setDisc] = useState(20);
   // Trainer funnel, derived from the real roster. There is no analytics on
@@ -46,7 +56,7 @@ export default function OwnerGrowth() {
   const funnel: [string, number, number][] = [
     ['Signed up', roll.trainers, 100],
     ['Activated (has clients)', activated, funnelPct(activated)],
-    ['Paying', roll.paying, funnelPct(roll.paying)],
+    ['Delivering sessions', roll.trainers - idle, funnelPct(roll.trainers - idle)],
   ];
 
   const create = () => {
@@ -83,11 +93,11 @@ export default function OwnerGrowth() {
 
         {/* ── the hero ───────────────────────────────────────────────────── */}
         <Hero
-          label={`New trainers · ${thisMonth}`}
+          label={`New trainers · ${now.toLocaleString(undefined, { month: 'short' })} ${now.getFullYear()}`}
           figure={'+' + newThisMonth}
           note={roll.trainers > 0
-            ? `${roll.trainers} on the platform · ${roll.paying} paying · ${roll.trial} on trial`
-            : 'No trainers on the platform yet — this fills in as they sign up.'}
+            ? `${roll.trainers} on the roster · ${roll.trainers - idle} delivering sessions`
+            : 'No trainers yet — this fills in as they join your gym.'}
         />
 
         <Rule />
@@ -96,9 +106,9 @@ export default function OwnerGrowth() {
         <Section>
           <SectionHead title="Retention" />
           <KpiRow items={[
-            { label: 'Suspended', value: String(churnPct), unit: '%', delta: `${roll.suspended} of ${roll.trainers}` },
-            { label: 'Trial→paid', value: roll.trialConversionPct != null ? String(roll.trialConversionPct) : '—', unit: roll.trialConversionPct != null ? '%' : undefined, delta: `${roll.paying} paying · ${roll.trial} trial` },
-            { label: 'End clients', value: String(ca.total), delta: `${ca.avgPerTrainer} avg / trainer` },
+            { label: 'Idle', value: String(idlePct), unit: '%', delta: `${idle} of ${roll.trainers}` },
+            { label: 'Sessions · 30d', value: String(roll.sessions30), delta: `${roll.avgSessionsPerTrainer} avg / trainer` },
+            { label: 'Clients', value: String(ca.total), delta: `${ca.avgPerTrainer} avg / trainer` },
           ]} />
         </Section>
 
@@ -127,10 +137,10 @@ export default function OwnerGrowth() {
             </View>
           </View>
           <View style={{ marginTop: sp.xl }}>
-            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.md }}>Clients by plan</Text>
-            {ca.byPlan.length === 0 ? <Text style={{ ...ty.label, color: t.ink3 }}>No clients on any plan yet.</Text> : null}
-            {ca.byPlan.map((bp) => (
-              <Bar key={bp.plan} label={bp.plan} right={`${bp.clients} · ${bp.pct}%`} pct={bp.pct} />
+            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.md }}>Clients by trainer</Text>
+            {ca.byTrainer.length === 0 ? <Text style={{ ...ty.label, color: t.ink3 }}>No clients on the roster yet.</Text> : null}
+            {ca.byTrainer.map((bt) => (
+              <Bar key={bt.id} label={bt.name} right={`${bt.clients} · ${bt.pct}%`} pct={bt.pct} />
             ))}
           </View>
         </Section>

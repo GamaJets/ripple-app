@@ -105,23 +105,28 @@ export function progressDoc(name: string, rows: ProgressRow[], brand = 'Repple',
 
 // ── Owner investor/board report ──────────────────────────────────────────────
 export interface OwnerReportData {
-  mrr: number; arr: number; trainers: number; paying: number; trial: number;
-  clients: number; atRiskMrr: number; trialConversionPct: number | null;
+  trainers: number;
+  clients: number;
+  sessions30: number;
+  payroll30: number | null;
+  atRiskCount: number;
+  atRiskClients: number;
+  avgClientsPerTrainer: number;
   cohorts: { label: string; total: number; active: number; pct: number }[];
   generatedOn: string;
 }
 
 export function ownerReportDoc(d: OwnerReportData, brand = 'Repple'): { html: string; text: string } {
   const metrics: [string, string][] = [
-    ['MRR', '$' + d.mrr.toLocaleString()],
-    ['ARR', '$' + d.arr.toLocaleString()],
     ['Trainers', String(d.trainers)],
-    ['Paying', String(d.paying)],
-    ['On trial', String(d.trial)],
-    ['End clients', String(d.clients)],
-    ['Trial→paid', d.trialConversionPct != null ? d.trialConversionPct + '%' : '—'],
-    ['At-risk MRR', '$' + d.atRiskMrr.toLocaleString()],
+    ['Clients', String(d.clients)],
+    ['Sessions · 30d', String(d.sessions30)],
+    ['Value of those sessions', d.payroll30 == null ? '—' : '$' + d.payroll30.toLocaleString()],
+    ['Avg clients / trainer', String(d.avgClientsPerTrainer)],
+    ['Trainers needing a look', String(d.atRiskCount)],
+    ['Clients with those trainers', String(d.atRiskClients)],
   ];
+
   const mRows = metrics.map(([k, v]) => `<tr><td>${k}</td><td class="r">${v}</td></tr>`).join('');
   const cRows = d.cohorts.map((c) => `<tr><td>${c.label}</td><td class="r">${c.active}/${c.total}</td><td class="r">${c.pct}%</td></tr>`).join('');
   const body = `
