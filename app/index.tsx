@@ -6,6 +6,7 @@
 // the presentation changed: no hero (a chooser has no live number to lead
 // with), the brand mark and the white-label app name lead instead, and the
 // three bordered portal cards became hairline-separated `<ListRow>`s.
+import { useEffect, useState } from 'react';
 import { View, Text, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Redirect, useRouter } from 'expo-router';
@@ -15,6 +16,7 @@ import { useBrand } from '../src/ui/brand';
 import { Rule, Section, SectionHead, ListRow, Ghost } from '../src/ui/kit';
 import { sp, layout, radius, type as ty } from '../src/theme/scale';
 import { VARIANT, HOME_ROUTE, SHOWS_PORTAL_CHOOSER } from '../src/lib/variant';
+import { hasSeenTour } from './tour';
 
 function Ripple({ size, color }: { size: number; color: string }) {
   return (
@@ -32,9 +34,15 @@ export default function Home() {
   const { authed, user, loading, signOut } = useAuth();
   const { appName } = useBrand();
 
+  // First launch of this app shows the tour once. `null` means we have not
+  // finished asking AsyncStorage yet — treat it as "keep the splash up" rather
+  // than flashing the dashboard and yanking it away a frame later.
+  const [seenTour, setSeenTour] = useState<boolean | null>(null);
+  useEffect(() => { let live = true; hasSeenTour(VARIANT).then((v) => { if (live) setSeenTour(v); }); return () => { live = false; }; }, []);
+
   // Live mode: brief splash while the persisted session is rehydrated so we
   // don't flash the welcome screen for an already signed-in user.
-  if (loading) {
+  if (loading || (authed && seenTour === null)) {
     return (
       <View style={{ flex: 1, backgroundColor: t.bg, alignItems: 'center', justifyContent: 'center' }}>
         <Ripple size={52} color={t.brand} />
@@ -42,6 +50,9 @@ export default function Home() {
     );
   }
   if (!authed) return <Redirect href="/welcome" />;
+
+  // Never seen the tour in this app: show it before anything else.
+  if (seenTour === false) return <Redirect href="/tour" />;
 
   // Repple ships as three separate apps. A store build has exactly one portal,
   // so there is nothing to choose: go straight in. The chooser below only ever

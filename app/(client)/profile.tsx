@@ -335,6 +335,8 @@ export default function Profile() {
         <Rule />
 
         <Section>
+          <ListRow icon="search" title="User guide" note="What each tab does, any time"
+            onPress={() => router.push('/guide')} />
           <ListRow icon="search" title="Explore all features" note="Search anything in the app"
             onPress={() => router.push('/(client)/explore')} />
         </Section>

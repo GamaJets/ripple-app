@@ -219,6 +219,8 @@ export default function CoachProfile() {
         {/* ── money ──────────────────────────────────────────────────────── */}
         <Section>
           <SectionHead title="Money" />
+          <ListRow icon="search" title="User guide" note="What each tab does, any time"
+            onPress={() => router.push('/guide')} />
           <ListRow icon="people" title="Payments" note="Get paid by clients — memberships & packs"
             onPress={() => router.push('/(trainer)/payments')} />
           <ListRow icon="chart" title="Billing & subscription" note="Your plan, payment method & invoices"

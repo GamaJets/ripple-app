@@ -15,8 +15,9 @@
 import { useState, useEffect } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Cta } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Cta, ListRow } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { useOwnerOps } from '../../src/ui/ownerOps';
 import { fetchAllFeedback, type FeedbackRow } from '../../src/ui/appFeedback';
@@ -35,6 +36,7 @@ function Empty({ tone, children }: { tone: string; children: string }) {
 
 export default function OwnerOps() {
   const t = useTheme();
+  const router = useRouter();
   const { anns, addAnn, tickets, resolveTicket, activity, openTickets } = useOwnerOps();
   const [fbRows, setFbRows] = useState<FeedbackRow[]>([]);
   const [localResolved, setLocalResolved] = useState<Record<string, boolean>>({});
@@ -72,6 +74,11 @@ export default function OwnerOps() {
         {tab === 'announce' ? (
           <View>
             <Section>
+          <ListRow icon="search" title="User guide" note="What each tab does, any time"
+            onPress={() => router.push('/guide')} />
+        </Section>
+
+        <Section>
               <SectionHead title="New announcement" />
               <TextInput value={text} onChangeText={setText} placeholder="Note to self — this does not reach trainers yet…" placeholderTextColor={t.ink3} multiline
                 style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: sp.md, minHeight: 80, textAlignVertical: 'top', marginBottom: sp.md }} />
