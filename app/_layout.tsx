@@ -34,6 +34,7 @@ import { AuthProvider } from '../src/ui/auth';
 import { ErrorBoundary } from '../src/ui/ErrorBoundary';
 import { AppThemeProvider, useTheme } from '../src/ui/components';
 import { BrandProvider } from '../src/ui/brand';
+import { TenantProvider } from '../src/ui/tenant';
 
 function ThemedStack() {
   const t = useTheme();
@@ -70,6 +71,7 @@ export default function RootLayout() {
       <AppThemeProvider>
         <BrandProvider>
         <AuthProvider>
+        <TenantProvider>
         <ClientDataProvider>
           <WearablesProvider>
             <SessionsProvider>
@@ -127,6 +129,7 @@ export default function RootLayout() {
             </SessionsProvider>
           </WearablesProvider>
         </ClientDataProvider>
+        </TenantProvider>
         </AuthProvider>
       </BrandProvider>
       </AppThemeProvider>
