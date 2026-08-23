@@ -84,7 +84,9 @@
       }
     },
     "production-coach": {
-      "ios": {}
+      "ios": {
+        "ascAppId": "6804358275"
+      }
     },
     "production-owner": {
       "ios": {}
