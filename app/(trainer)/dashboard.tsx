@@ -734,7 +734,8 @@ export default function TrainerClients() {
                 {getNotes(sel.id).map((n, i) => (
                   <View key={n.id} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.sm, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                     <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}>{n.body}</Text>
-                    <Pressable onPress={() => removeNote(sel.id, n.id)} hitSlop={8}>
+                    <Pressable onPress={() => removeNote(sel.id, n.id)} hitSlop={8}
+                          accessibilityRole="button" accessibilityLabel="Remove note">
                       <Icon name="minus" size={14} color={t.ink3} />
                     </Pressable>
                   </View>

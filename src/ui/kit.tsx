@@ -223,12 +223,30 @@ export function Cta({ label, onPress, tone, wide, disabled }: {
   );
 }
 
+// What an icon-only button should be called out loud. `Ghost` renders no text
+// when it has only an icon, and it passed `label` straight through as the
+// accessibility label — so 65 buttons, 57 of them the back button on nearly
+// every screen, announced themselves to VoiceOver as an unnamed "button".
+//
+// A screen with a genuinely unusual icon should pass `a11yLabel` rather than
+// hope the name here fits.
+const ICON_NAMES: Partial<Record<IconName, string>> = {
+  back: 'Back', search: 'Search', share: 'Share', pencil: 'Edit', minus: 'Remove',
+  message: 'Messages', chat: 'Messages', calendar: 'Calendar', bell: 'Notifications',
+  plus: 'Add', settings: 'Settings', heart: 'Heart rate', camera: 'Camera',
+  video: 'Video', chart: 'Charts', trophy: 'Records', clock: 'History',
+  swap: 'Swap', sparkle: 'Suggestions', grid: 'More', chevron: 'More',
+};
+
 /** A low-emphasis button — no border, just a barely-there fill. */
-export function Ghost({ label, onPress, icon }: { label?: string; onPress: () => void; icon?: IconName }) {
+export function Ghost({ label, onPress, icon, a11yLabel }: {
+  label?: string; onPress: () => void; icon?: IconName; a11yLabel?: string;
+}) {
   const t = useTheme();
   const round = !label;
+  const spoken = label || a11yLabel || (icon ? ICON_NAMES[icon] ?? icon : undefined);
   return (
-    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={label}
+    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={spoken}
       style={{
         backgroundColor: t.surface2,
         borderRadius: round ? radius.pill : radius.sm,

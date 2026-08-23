@@ -56,7 +56,10 @@ export default function FeedbackScreen({ audience }: { audience: string }) {
           <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>How is the experience?</Text>
           <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.xl }}>
             {[1, 2, 3, 4, 5].map((n) => (
-              <Pressable key={n} onPress={() => setRating(n)} hitSlop={6} style={{ flex: 1, alignItems: 'center', paddingVertical: sp.md, borderRadius: radius.sm, backgroundColor: rating >= n ? t.brand : t.surface2, borderWidth: hairline, borderColor: rating >= n ? t.brand : t.ring }}>
+              <Pressable key={n} onPress={() => setRating(n)} hitSlop={6}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Rate ${n} out of 5`}
+                  accessibilityState={{ selected: rating >= n }} style={{ flex: 1, alignItems: 'center', paddingVertical: sp.md, borderRadius: radius.sm, backgroundColor: rating >= n ? t.brand : t.surface2, borderWidth: hairline, borderColor: rating >= n ? t.brand : t.ring }}>
                 <Icon name="trophy" size={18} color={rating >= n ? t.brandInk : t.ink3} />
               </Pressable>
             ))}
