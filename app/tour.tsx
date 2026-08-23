@@ -74,15 +74,23 @@ export default function Tour() {
 
         <View style={{ gap: sp.sm, marginTop: sp.xl }}>
           <Cta label={last ? 'Start using the app' : 'Next'} onPress={() => (last ? leave() : setI(i + 1))} />
+          {/* Back and Skip take the row; the hint sits under them on its own
+              line. It used to share the row and had nowhere to wrap, so it ran
+              off the right edge and lost its last word. */}
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: sp.sm }}>
             <View style={{ minWidth: 64 }}>
               {i > 0 ? <Ghost label="Back" onPress={() => setI(i - 1)} /> : null}
             </View>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>You can reopen this any time from the user guide.</Text>
             <View style={{ minWidth: 64, alignItems: 'flex-end' }}>
               <Ghost label="Skip" onPress={leave} />
             </View>
           </View>
+          {/* ty.caption, not ty.micro: micro is uppercase with wide tracking,
+              which is right for a label like GETTING STARTED and wrong for a
+              sentence — it was what made this too wide to fit in the first place. */}
+          <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', paddingHorizontal: sp.lg }}>
+            You can reopen this any time from the user guide.
+          </Text>
         </View>
       </ScrollView>
     </SafeAreaView>
