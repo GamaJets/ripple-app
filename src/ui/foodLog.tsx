@@ -1,7 +1,7 @@
 // Shared food-log store — what the client actually ate today (via photo, barcode,
 // AI description, or search), counting toward the day's macros. Persists to
 // Supabase `food_logs` per client (hydrate today + optimistic) with a defensive
-// in-memory fallback + demo seed. Shared by the Meals tab and the Food Log screen.
+// in-memory fallback that starts empty. Shared by the Meals tab and the Food Log screen.
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';

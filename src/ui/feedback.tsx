@@ -1,6 +1,6 @@
 // Coach feedback — advice a trainer leaves on a client, shown on the client's
 // dashboard. Persists to Supabase `coach_feedback` (coach writes; client reads
-// their own) with a defensive in-memory fallback + demo seed. Keyed by clientId,
+// their own) with an in-memory fallback that starts empty. Keyed by clientId,
 // which is the client's real account id once signed in.
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
@@ -16,16 +16,8 @@ interface FeedbackValue {
 const Ctx = createContext<FeedbackValue | null>(null);
 let SEQ = 1;
 
-const seed: Record<string, FeedbackItem[]> = {
-  c1: [{
-    id: 'f0',
-    at: new Date(Date.now() - 2 * 86400000).toISOString(),
-    body: 'Strong week — your squat is moving up nicely. Keep the descent controlled and hit the top of the rep range before adding weight.',
-  }],
-};
-
 export function CoachFeedbackProvider({ children }: { children: ReactNode }) {
-  const [map, setMap] = useState<Record<string, FeedbackItem[]>>(() => JSON.parse(JSON.stringify(seed)));
+  const [map, setMap] = useState<Record<string, FeedbackItem[]>>({});
   const [uid, setUid] = useState<string | null>(null);
 
   useEffect(() => {
@@ -43,7 +35,7 @@ export function CoachFeedbackProvider({ children }: { children: ReactNode }) {
         const m: Record<string, FeedbackItem[]> = {};
         for (const r of data as any[]) { (m[r.client_id] = m[r.client_id] || []).push({ id: String(r.id), at: r.created_at, body: r.body }); }
         if (Object.keys(m).length) setMap((prev) => ({ ...prev, ...m }));
-      } catch { /* stay on seed */ }
+      } catch { /* keep whatever is already loaded */ }
     })();
     return () => { cancelled = true; };
   }, []);
