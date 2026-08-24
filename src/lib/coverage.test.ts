@@ -7,6 +7,7 @@ import { rowToEntry, entryToRow, PERSISTED_FIELDS } from './workoutRow';
 import { summarise, money, type MembershipPlan, type Membership, type GymPayment } from './gymRecord';
 import { weeklyOccurrences, summariseAttendance, pct, type GymClass, type NewClass } from './gymSchedule';
 import { buildIcs } from './ics';
+import { dwellMinutes, averageDwellMinutes, uniqueMembers, summariseVisits, visitsByHour, peakHour, visitsPerDay, lastSeenDays, type Visit } from './gymVisits';
 import { remainingUses, isExpired, isRedeemable, expiryFor, passRevenueCents, summarisePasses, guestsByHost, passStatus, type GymPass } from './gymPasses';
 import { estimateDish, searchDishes, DISHES } from './restaurant';
 import type { TrainingSession } from './types';
@@ -282,6 +283,80 @@ ok(guests[0].hostMemberId === 'm1' && guests[0].guests === 2, 'hosts are ranked 
 ok(passStatus(pass({ usesTotal: 1, usesSpent: 1 }), '2026-08-15') === 'used up', 'status: used up');
 ok(passStatus(pass({ expiresOn: '2026-08-01' }), '2026-08-15') === 'expired', 'status: expired');
 ok(passStatus(pass({ expiresOn: '2026-08-30' }), '2026-08-15') === 'live', 'status: live');
+
+// ── the door log (F21) ──
+// The rule under test: an unfinished visit is not a zero-minute visit, and an
+// hour with no visits is information rather than a gap to interpolate through.
+const visit = (o: Partial<Visit>): Visit => ({
+  id: 'v', memberId: 'm1', memberName: null, passId: null, classId: null,
+  enteredAt: '2026-08-20T09:00:00Z', exitedAt: null, source: 'desk', note: null, ...o,
+});
+
+ok(dwellMinutes({ enteredAt: '2026-08-20T09:00:00Z', exitedAt: '2026-08-20T10:15:00Z' }) === 75, 'dwell in minutes');
+ok(dwellMinutes({ enteredAt: '2026-08-20T09:00:00Z', exitedAt: null }) === null, 'an open visit has null dwell, not 0');
+ok(dwellMinutes({ enteredAt: '2026-08-20T10:00:00Z', exitedAt: '2026-08-20T09:00:00Z' }) === null, 'a negative dwell is refused, not averaged in');
+
+// The average must never be dragged down by visits nobody closed.
+const dw = averageDwellMinutes([
+  { enteredAt: '2026-08-20T09:00:00Z', exitedAt: '2026-08-20T10:00:00Z' }, // 60
+  { enteredAt: '2026-08-20T09:00:00Z', exitedAt: '2026-08-20T11:00:00Z' }, // 120
+  { enteredAt: '2026-08-20T09:00:00Z', exitedAt: null },                    // open
+]);
+ok(dw.minutes === 90, `dwell averages only closed visits (got ${dw.minutes})`);
+ok(dw.closed === 2 && dw.total === 3, 'dwell reports how many it could measure');
+ok(averageDwellMinutes([{ enteredAt: '2026-08-20T09:00:00Z', exitedAt: null }]).minutes === null, 'no closed visits gives null dwell, not 0');
+ok(averageDwellMinutes([]).minutes === null, 'no visits at all gives null dwell');
+
+// Anonymous head-counts still count as visits but not as members.
+const vs = [
+  visit({ id: 'a', memberId: 'm1' }),
+  visit({ id: 'b', memberId: 'm1' }),
+  visit({ id: 'c', memberId: 'm2' }),
+  visit({ id: 'd', memberId: null }),
+];
+ok(uniqueMembers(vs) === 2, 'unique members ignores repeat visits');
+ok(uniqueMembers([visit({ memberId: null })]) === 0, 'an anonymous visit identifies nobody');
+
+const vsum = summariseVisits(vs);
+ok(vsum.visits === 4, 'every visit is counted, identified or not');
+ok(vsum.anonymous === 1, 'anonymous visits are reported separately');
+ok(vsum.uniqueMembers === 2, 'summary counts distinct members');
+ok(vsum.visitsPerMember === 1.5, `visits per member excludes anonymous (got ${vsum.visitsPerMember})`);
+ok(vsum.inside === 4, 'visits with no exit are counted as still inside');
+ok(summariseVisits([visit({ memberId: null })]).visitsPerMember === null, 'no identified members gives null, not a divide by zero');
+ok(summariseVisits([]).peak === null, 'no visits means no peak hour');
+
+// Every hour is present, including the quiet ones.
+const byHour = visitsByHour([{ enteredAt: '2026-08-20T09:30:00' }, { enteredAt: '2026-08-20T09:45:00' }, { enteredAt: '2026-08-20T18:10:00' }]);
+ok(byHour.length === 24, 'every hour of the day is present, including empty ones');
+ok(byHour[9].visits === 2 && byHour[18].visits === 1, 'visits land in the right hour');
+ok(byHour[14].visits === 0, 'a quiet hour reads 0 rather than being omitted');
+
+const pk = peakHour([{ enteredAt: '2026-08-20T09:30:00' }, { enteredAt: '2026-08-20T09:45:00' }, { enteredAt: '2026-08-20T18:10:00' }]);
+ok(pk !== null && pk.hour === 9 && pk.visits === 2, 'peak hour is the busiest');
+
+// A tie resolves to the earlier hour.
+const tie = peakHour([{ enteredAt: '2026-08-20T07:10:00' }, { enteredAt: '2026-08-20T19:10:00' }]);
+ok(tie !== null && tie.hour === 7, 'a tied peak resolves to the earlier hour');
+
+// Per-day grouping, oldest first.
+const days = visitsPerDay([
+  { enteredAt: '2026-08-20T09:00:00' }, { enteredAt: '2026-08-20T18:00:00' }, { enteredAt: '2026-08-18T09:00:00' },
+]);
+ok(days.length === 2 && days[0].day === '2026-08-18', 'days come back oldest first');
+ok(days[1].visits === 2, 'two visits on the same day group together');
+
+// Last seen — the retention input.
+const now = Date.parse('2026-08-25T12:00:00Z');
+const seen = lastSeenDays([
+  { memberId: 'm1', enteredAt: '2026-08-24T09:00:00Z' },
+  { memberId: 'm2', enteredAt: '2026-08-10T09:00:00Z' },
+  { memberId: 'm1', enteredAt: '2026-08-01T09:00:00Z' },  // older, must not win
+  { memberId: null, enteredAt: '2026-08-24T09:00:00Z' },
+], now);
+ok(seen.length === 2, 'anonymous visits cannot be attributed to a member');
+ok(seen[0].memberId === 'm2' && seen[0].days === 15, `longest absent first (got ${seen[0]?.days})`);
+ok(seen[1].memberId === 'm1' && seen[1].days === 1, 'a member is measured from their most recent visit');
 
 if (errors.length) { console.log('COVERAGE FAILURES:\n' + errors.join('\n')); process.exit(1); }
 console.log(`ALL COVERAGE TESTS PASSED (${checks} assertions)`);

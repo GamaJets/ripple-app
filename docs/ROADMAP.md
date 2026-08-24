@@ -47,6 +47,7 @@ because the underlying tables did not exist.
 | Owner rollups and trainer health | `src/lib/ownerAnalytics.ts` |
 | Studio web console — overview, money, timetable | `studio-web/` |
 | **Drop-ins, guest passes and class packs** | `supabase/parts/31-drop-ins-and-passes.sql`, `src/lib/gymPasses.ts` |
+| **Door log** — visits that are not class bookings | `supabase/parts/32-door-log.sql`, `src/lib/gymVisits.ts` |
 
 A cross-tenant read leak was found and fixed while building the timetable:
 `gym_classes` was readable by any signed-in user rather than scoped to the
@@ -62,8 +63,6 @@ gym. Worth remembering as the class of bug to look for first.
 - **Equipment register** — what the gym owns, servicing due, what is out of
   action. Feeds capacity honestly: a class capacity of 14 is a lie if six
   rowers are broken.
-- **Door log** — check-ins that are not bookings, so attendance is not
-  under-counted by everyone who just came in and trained.
 - **CSV import** — members, plans and historical payments. Without this a gym
   starts from nothing and never gets a comparison year.
 
@@ -97,6 +96,8 @@ problem before it is a revenue one.
 - Lapse risk per member, from attendance pattern breaks.
 - The intervention loop: surface, contact, record what was tried, measure.
 - Guest-pass conversion — `guestsByHost` in `gymPasses.ts` is the first piece.
+- Absence detection — `gymVisits.lastSeenDays` is the input; the membership
+  join (who is frozen, who cancelled) is still to do.
 
 ---
 
@@ -158,6 +159,8 @@ In practice:
   (`gymRecord.summarise`, `gymTrainers.payroll30For`, `gymPasses.passRevenueCents`).
 - Rates return `null` when the denominator is unmeasured
   (`gymSchedule.summariseAttendance` — show rate and fill rate).
+- An unfinished visit is not a zero-minute visit: `gymVisits.averageDwellMinutes`
+  averages only over visits that recorded an exit, and says how many that was.
 - An unpriced pass is not a free pass. A deliberately free one is `0`, and the
   two are distinguishable.
 
