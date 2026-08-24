@@ -4,6 +4,7 @@ import { parseRepRange, suggestNextWeight, suggestForExercise, priorBest1RM, sug
 import { overlaps, isLateCancellation, cancelSession, nextFromWaitlist } from './booking';
 import type { WorkoutEntry } from './mockData';
 import { rowToEntry, entryToRow, PERSISTED_FIELDS } from './workoutRow';
+import { summarise, money, type MembershipPlan, type Membership, type GymPayment } from './gymRecord';
 import { buildIcs } from './ics';
 import { estimateDish, searchDishes, DISHES } from './restaurant';
 import type { TrainingSession } from './types';
@@ -129,6 +130,46 @@ for (const k of ['sets', 'feel', 'cardio', 'kcal', 'zones']) {
   ok(k in sparseRow && sparseRow[k] === null, `absent "${k}" should be sent as null, not omitted`);
 }
 ok(rowToEntry(sparseRow as never).sets === undefined, 'a null column should read back as undefined');
+
+
+// ── gym revenue summary ─────────────────────────────────────────────────────
+// The whole point of these figures is that they refuse to invent. A gym with
+// nothing recorded must read as unknown, not as zero — the failure that once
+// put a fabricated AED 214,000/mo in front of an owner.
+const plan = (id: string, cents: number, interval: 'month'|'year'|'once'): MembershipPlan =>
+  ({ id, name: id, priceCents: cents, currency: 'AED', interval, active: true });
+const mem = (id: string, planId: string | null, status: Membership['status'] = 'active'): Membership =>
+  ({ id, memberId: 'm' + id, memberName: 'M', planId, planName: null,
+     startedOn: '2026-01-01', endsOn: null, status });
+const pay = (cents: number): GymPayment =>
+  ({ id: 'p' + cents, memberId: 'm', memberName: 'M', amountCents: cents,
+     currency: 'AED', method: 'card', takenAt: '2026-08-01T00:00:00Z', note: null });
+
+const emptyGym = summarise([], [], []);
+ok(emptyGym.takenCents === null, 'a gym with no payments must report null, not 0');
+ok(emptyGym.mrrCents === null, 'a gym with no priced memberships must report null MRR, not 0');
+ok(emptyGym.activeMembers === 0, 'active member count is a real count and may be 0');
+
+const plans = [plan('monthly', 20000, 'month'), plan('annual', 240000, 'year'), plan('daypass', 5000, 'once')];
+const s = summarise([pay(20000), pay(5000)], [mem('a','monthly'), mem('b','annual'), mem('c','daypass')], plans);
+ok(s.takenCents === 25000, 'payments must sum in minor units');
+ok(s.payments === 2, 'payment count');
+// 200.00/mo + 2400.00/yr -> 200.00 + 200.00 = 400.00; the day pass adds nothing.
+ok(s.mrrCents === 40000, `annual should amortise to monthly and once should not recur (got ${s.mrrCents})`);
+ok(s.activeMembers === 3, 'active members counted');
+
+// A cancelled membership contributes nothing.
+const s2 = summarise([], [mem('a','monthly','cancelled')], plans);
+ok(s2.activeMembers === 0, 'cancelled membership is not active');
+ok(s2.mrrCents === null, 'no active priced membership means unknown MRR, not 0');
+
+// A membership whose plan was retired and unlinked cannot be priced.
+const s3 = summarise([], [mem('a', null)], plans);
+ok(s3.mrrCents === null, 'membership with no plan cannot contribute a price');
+
+ok(money(null) === null, 'money(null) must stay null so a caller cannot render 0.00 for unknown');
+ok(money(123456, 'AED') === 'AED 1,234.56', `money formats minor units (got ${money(123456,'AED')})`);
+ok(money(0) === 'AED 0.00', 'a real zero still formats as zero');
 
 if (errors.length) { console.log('COVERAGE FAILURES:\n' + errors.join('\n')); process.exit(1); }
 console.log(`ALL COVERAGE TESTS PASSED (${checks} assertions)`);
