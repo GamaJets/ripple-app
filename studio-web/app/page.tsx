@@ -194,6 +194,21 @@ function SignIn() {
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [sent, setSent] = useState<string | null>(null);
+
+  // The reset link lands on the website rather than in one app's URL scheme,
+  // so the same mail works for someone on a phone, a desk, or neither.
+  const forgot = async () => {
+    const addr = email.trim();
+    if (!addr) { setErr('Enter your email first, then tap Forgot password.'); return; }
+    setErr(null); setSent(null);
+    await supabase.auth.resetPasswordForEmail(addr, {
+      redirectTo: 'https://www.repple.com/reset-password.html',
+    });
+    // Same answer either way: telling a stranger which addresses have accounts
+    // is a way of enumerating your members.
+    setSent('If that address has an account, a reset link is on its way.');
+  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -202,6 +217,11 @@ function SignIn() {
     if (error) { setErr(error.message); setBusy(false); return; }
     location.reload();
   };
+
+  const linkish = {
+    background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+    color: 'var(--brand)', fontSize: 13, fontFamily: 'var(--sans)',
+  } as const;
 
   const field = {
     width: '100%', padding: '10px 12px', borderRadius: 7, fontSize: 14,
@@ -221,11 +241,17 @@ function SignIn() {
                onChange={(e) => setEmail(e.target.value)} style={{ ...field, margin: '6px 0 14px' }} />
         <PasswordField label="Password" value={password} onChange={setPassword} required />
         {err ? <div style={{ color: 'var(--crit)', fontSize: 13, marginBottom: 12 }}>{err}</div> : null}
+        {sent ? <div style={{ color: 'var(--brand)', fontSize: 13, marginBottom: 12 }}>{sent}</div> : null}
         <button type="submit" disabled={busy}
                 style={{ ...field, background: 'var(--brand)', color: 'var(--brand-ink)',
                          fontWeight: 600, cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.7 : 1 }}>
           {busy ? 'Signing in…' : 'Sign in'}
         </button>
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginTop: 14, fontSize: 13 }}>
+          <button type="button" onClick={forgot} style={linkish}>Forgot password?</button>
+          <a href="https://www.repple.com/signup.html" style={{ color: 'var(--ink3)' }}>Create an account</a>
+        </div>
       </form>
     </div>
   );
