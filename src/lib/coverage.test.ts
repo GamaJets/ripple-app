@@ -7,6 +7,7 @@ import { rowToEntry, entryToRow, PERSISTED_FIELDS } from './workoutRow';
 import { summarise, money, type MembershipPlan, type Membership, type GymPayment } from './gymRecord';
 import { weeklyOccurrences, summariseAttendance, pct, type GymClass, type NewClass } from './gymSchedule';
 import { buildIcs } from './ics';
+import { remainingUses, isExpired, isRedeemable, expiryFor, passRevenueCents, summarisePasses, guestsByHost, passStatus, type GymPass } from './gymPasses';
 import { estimateDish, searchDishes, DISHES } from './restaurant';
 import type { TrainingSession } from './types';
 
@@ -211,6 +212,76 @@ ok(a.showRate === 0.5, `show rate is attended/booked (got ${a.showRate})`);
 ok(a.fillRate === 0.5, `fill rate is booked/capacity (got ${a.fillRate})`);
 ok(pct(a.showRate) === '50%', 'pct formats');
 ok(pct(null) === null, 'pct(null) stays null so a caller cannot render 0%');
+
+// ── drop-ins, guest passes and packs (F16) ──
+// The rule under test throughout: an unpriced pass is not a free pass, and an
+// expiry date is inclusive of its own day.
+const pass = (o: Partial<GymPass>): GymPass => ({
+  id: 'p', passTypeId: null, passTypeName: null, kind: 'drop_in', holderId: null,
+  holderName: 'Walk-in', hostMemberId: null, issuedOn: '2026-08-01', expiresOn: null,
+  usesTotal: 1, usesSpent: 0, paidCents: 1500, currency: 'AED', note: null, ...o,
+});
+
+ok(remainingUses({ usesTotal: 10, usesSpent: 3 }) === 7, 'remaining uses subtracts');
+ok(remainingUses({ usesTotal: 1, usesSpent: 4 }) === 0, 'remaining uses never goes negative');
+
+ok(isExpired({ expiresOn: '2026-08-10' }, '2026-08-11'), 'a pass is expired the day after');
+ok(!isExpired({ expiresOn: '2026-08-10' }, '2026-08-10'), 'a pass is still good on its expiry day');
+ok(!isExpired({ expiresOn: null }, '2030-01-01'), 'no expiry set never expires');
+
+ok(isRedeemable({ usesTotal: 5, usesSpent: 1, expiresOn: '2026-08-10' }, '2026-08-10'), 'redeemable with uses left, on expiry day');
+ok(!isRedeemable({ usesTotal: 5, usesSpent: 5, expiresOn: null }, '2026-08-10'), 'not redeemable once spent');
+ok(!isRedeemable({ usesTotal: 5, usesSpent: 0, expiresOn: '2026-08-09' }, '2026-08-10'), 'not redeemable once expired');
+
+ok(expiryFor('2026-08-01', null) === null, 'no valid_days means no expiry date');
+ok(expiryFor('2026-08-01', 30) === '2026-08-31', 'expiry is issue + valid_days');
+ok(expiryFor('2026-08-20', 30) === '2026-09-19', 'expiry crosses a month boundary');
+ok(expiryFor('2026-12-20', 30) === '2027-01-19', 'expiry crosses a year boundary');
+ok(expiryFor('2026-02-27', 2) === '2026-03-01', 'expiry handles a non-leap February');
+
+// Revenue must never report zero for "nobody wrote the price down".
+const unpriced = passRevenueCents([pass({ paidCents: null }), pass({ paidCents: null })]);
+ok(unpriced.cents === null, 'no recorded prices gives null revenue, not 0');
+ok(unpriced.total === 2 && unpriced.priced === 0, 'unpriced passes are still counted as issued');
+
+const mixed = passRevenueCents([pass({ paidCents: 1500 }), pass({ paidCents: null }), pass({ paidCents: 2500 })]);
+ok(mixed.cents === 4000, 'revenue sums only the passes carrying a price');
+ok(mixed.priced === 2 && mixed.total === 3, 'revenue reports how many of the total it could price');
+
+const free = passRevenueCents([pass({ paidCents: 0 })]);
+ok(free.cents === 0 && free.priced === 1, 'a deliberately free pass is 0, which is not the same as null');
+
+// Bucketing: a pass that is both spent and expired is counted once.
+const sum = summarisePasses([
+  pass({ id: 'a', usesTotal: 10, usesSpent: 2, expiresOn: '2026-12-31', paidCents: 9000 }), // live, 8 left
+  pass({ id: 'b', usesTotal: 1, usesSpent: 0, expiresOn: '2026-08-01', paidCents: null }),  // expired, 1 left
+  pass({ id: 'c', usesTotal: 1, usesSpent: 1, expiresOn: '2026-08-01', paidCents: null }),  // spent AND expired
+  pass({ id: 'd', usesTotal: 5, usesSpent: 5, expiresOn: null, paidCents: 4000 }),          // used up
+], '2026-08-15');
+ok(sum.issued === 4, 'every issued pass is counted');
+ok(sum.live === 1, 'one pass is live');
+ok(sum.expired === 1, 'a spent-and-expired pass is not double counted as expired');
+ok(sum.usedUp === 2, 'spent passes are used up regardless of expiry');
+ok(sum.live + sum.expired + sum.usedUp === sum.issued, 'the buckets partition the passes exactly');
+ok(sum.visitsRemaining === 9, `visits remaining sums across passes (got ${sum.visitsRemaining})`);
+ok(sum.revenueCents === 13000 && sum.priced === 2, 'summary revenue only counts priced passes');
+
+ok(summarisePasses([], '2026-08-15').revenueCents === null, 'no passes at all gives null revenue, not 0');
+
+// Guest attribution.
+const guests = guestsByHost([
+  pass({ kind: 'guest', hostMemberId: 'm1' }),
+  pass({ kind: 'guest', hostMemberId: 'm2' }),
+  pass({ kind: 'guest', hostMemberId: 'm1' }),
+  pass({ kind: 'drop_in', hostMemberId: 'm3' }),
+  pass({ kind: 'guest', hostMemberId: null }),
+]);
+ok(guests.length === 2, 'only guest passes with a host are attributed');
+ok(guests[0].hostMemberId === 'm1' && guests[0].guests === 2, 'hosts are ranked by guests brought');
+
+ok(passStatus(pass({ usesTotal: 1, usesSpent: 1 }), '2026-08-15') === 'used up', 'status: used up');
+ok(passStatus(pass({ expiresOn: '2026-08-01' }), '2026-08-15') === 'expired', 'status: expired');
+ok(passStatus(pass({ expiresOn: '2026-08-30' }), '2026-08-15') === 'live', 'status: live');
 
 if (errors.length) { console.log('COVERAGE FAILURES:\n' + errors.join('\n')); process.exit(1); }
 console.log(`ALL COVERAGE TESTS PASSED (${checks} assertions)`);
