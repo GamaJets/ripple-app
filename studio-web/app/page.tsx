@@ -10,6 +10,7 @@ import { useEffect, useState } from 'react';
 import { supabase, loadMe, type Me } from '@/lib/supabase';
 import { Shell } from '@/components/Shell';
 import { DataTable, type Column } from '@/components/DataTable';
+import { PasswordField } from '@/components/PasswordField';
 import { fetchGymTrainers, payroll30For, type GymTrainer } from '@lib/gymTrainers';
 import { gymRollup, trainerHealth, type GymRollup } from '@lib/ownerAnalytics';
 
@@ -218,9 +219,7 @@ function SignIn() {
         <label className="micro" htmlFor="email">Email</label>
         <input id="email" type="email" autoComplete="email" required value={email}
                onChange={(e) => setEmail(e.target.value)} style={{ ...field, margin: '6px 0 14px' }} />
-        <label className="micro" htmlFor="password">Password</label>
-        <input id="password" type="password" autoComplete="current-password" required value={password}
-               onChange={(e) => setPassword(e.target.value)} style={{ ...field, margin: '6px 0 18px' }} />
+        <PasswordField label="Password" value={password} onChange={setPassword} required />
         {err ? <div style={{ color: 'var(--crit)', fontSize: 13, marginBottom: 12 }}>{err}</div> : null}
         <button type="submit" disabled={busy}
                 style={{ ...field, background: 'var(--brand)', color: 'var(--brand-ink)',
