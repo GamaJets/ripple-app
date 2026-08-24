@@ -1,7 +1,7 @@
 # repplefitness.com
 
-The public site. Four static pages, one stylesheet, no build step — so it can be
-dropped on any static host as-is.
+The public site. Seven static pages, one stylesheet, no build step — so it can
+be dropped on any static host as-is.
 
 Two of these pages are not optional marketing: `/support` and `/privacy` are the
 Support URL and Privacy Policy URL on all three App Store listings, and App
@@ -9,12 +9,20 @@ Review checks that both resolve. Until this is live, all three apps are blocked.
 
 ## Files
 
-    index.html     home — what the three apps are
-    support.html   Support URL for the App Store listings
-    privacy.html   Privacy Policy URL for the App Store listings
-    terms.html     terms of use
-    styles.css     shared styles, light and dark
+    index.html            home — what the three apps are
+    support.html          Support URL for the App Store listings
+    privacy.html          Privacy Policy URL for the App Store listings
+    terms.html            terms of use
+    signup.html           create an account from the web
+    forgot-password.html  request a reset link
+    reset-password.html   where the reset link lands; sets the new password
+    styles.css            shared styles, light and dark
     favicon.png
+
+Links between pages are written without the `.html` — `href="/support"`, not
+`href="support.html"`. Cloudflare Pages serves the extensionless form and
+308-redirects the other, so writing the clean form avoids a redirect on every
+navigation, including the reset link.
 
 ## Deploying
 
@@ -28,9 +36,22 @@ Netlify:
 
     npx netlify deploy --dir=web --prod
 
-Then point the apex domain and `www` at the host, and confirm in a browser that
-`https://www.repplefitness.com/support` and `https://www.repplefitness.com/privacy` both load
-over HTTPS — those are the exact URLs on the App Store listings.
+Currently deployed to Cloudflare Pages at `repple.pages.dev`. The custom domain
+still has to be attached in the Pages project and pointed from GoDaddy DNS.
+
+## Two things that must line up elsewhere
+
+The reset flow spans three systems, and it only works if all three agree:
+
+1. **Supabase → Authentication → URL Configuration.** The redirect allow-list
+   must contain `https://www.repplefitness.com/**`. A `redirectTo` that is not
+   on the list is *silently ignored* and falls back to the Site URL — the link
+   still arrives, it just goes somewhere useless.
+2. **The email template** must build its link from the redirect, not a
+   hardcoded `repple://`, or Coach and Studio resets land in the client app.
+3. **Resend** must have `repplefitness.com` verified before the sender is moved
+   to `noreply@repplefitness.com`. Until then the sender stays on Resend's
+   shared test address, which only delivers to the account owner.
 
 ## Before it goes live
 
