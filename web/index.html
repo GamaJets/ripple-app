@@ -3,8 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Repple — the gym, run properly</title>
-<meta name="description" content="Repple is three apps for a gym: one for members, one for coaches, one for the people running the place.">
+<title>Repple — the operating record for gyms, coaches and the people they train</title>
+<meta name="description" content="One system, three ways in. Repple keeps the training record for members, the client book for coaches, and the whole operating picture for the gym that runs them both.">
+<meta property="og:title" content="Repple — the operating record for gyms, coaches and the people they train">
+<meta property="og:description" content="One system, three ways in. Members log the work, coaches run their book, owners see how every part of the business moves together.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://www.repplefitness.com/">
 <link rel="stylesheet" href="styles.css">
 <link rel="icon" href="favicon.png">
 </head>
@@ -14,82 +18,311 @@
   <div class="wrap">
     <a class="brand" href="/">
       <span class="mark">
-        <svg width="18" height="18" viewBox="0 0 100 100" aria-hidden="true">
-          <g fill="none" stroke="#fff" stroke-width="7"><circle cx="50" cy="50" r="32" opacity=".38"/><circle cx="50" cy="50" r="21" opacity=".65"/></g>
-          <circle cx="50" cy="50" r="9" fill="#fff"/>
+        <svg width="17" height="17" viewBox="0 0 100 100" aria-hidden="true">
+          <g fill="none" stroke="#04211d" stroke-width="8"><circle cx="50" cy="50" r="32" opacity=".45"/><circle cx="50" cy="50" r="20" opacity=".75"/></g>
+          <circle cx="50" cy="50" r="8.5" fill="#04211d"/>
         </svg>
       </span>
       Repple
     </a>
     <nav class="site">
-      <a href="/signup">Sign up</a>
-      <a href="/support">Support</a>
-      <a href="/privacy">Privacy</a>
-      <a href="/terms">Terms</a>
+      <a href="/client">Members</a>
+      <a href="/trainer">Coaches</a>
+      <a href="/studio">Gyms</a>
+      <a href="/support" class="sm-hide">Support</a>
+      <a class="cta" href="/signup">Create account</a>
     </nav>
   </div>
 </header>
 
 <main>
-  <section class="wrap hero">
-    <h1>The gym, run properly.</h1>
-    <p>Repple is three apps sharing one backbone: one for the people who train, one for the people who coach them, and one for the people who have to keep the lights on.</p>
-  </section>
 
-  <section class="wrap">
-    <div class="apps">
-      <div class="app">
-        <div class="tile" style="background:var(--brand)">
-          <svg width="22" height="22" viewBox="0 0 100 100" aria-hidden="true">
-            <g fill="none" stroke="#fff" stroke-width="8"><circle cx="50" cy="50" r="32" opacity=".4"/><circle cx="50" cy="50" r="20" opacity=".7"/></g>
-            <circle cx="50" cy="50" r="9" fill="#fff"/>
-          </svg>
+<!-- ── hero ──────────────────────────────────────────────────────────── -->
+<section class="hero">
+  <div class="wrap">
+    <div class="hero-grid">
+      <div>
+        <div class="eyebrow">One system · three ways in</div>
+        <h1 class="display">The gym runs<br>on one <em>record</em>.</h1>
+        <p class="lede" style="margin-top:26px">
+          A member logs a set. Their coach sees it that evening. The owner sees what it did to
+          attendance, to payroll, to the month. Same row in the same database — read three ways,
+          by three people who each need something different from it.
+        </p>
+        <div class="btn-row">
+          <a class="btn primary" href="/studio">
+            See it from the front desk
+            <svg class="arw" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6"/></svg>
+          </a>
+          <a class="btn" href="#three">The three apps</a>
         </div>
-        <h3>Repple</h3>
-        <p>Your programme, your meals, your progress and your bookings. Reads your Apple Watch so a session you have already done does not need typing in again.</p>
-        <span class="who">For members</span>
       </div>
 
-      <div class="app">
-        <div class="tile" style="background:var(--coach)">
-          <svg width="22" height="22" viewBox="0 0 100 100" aria-hidden="true">
-            <g fill="none" stroke="#fff" stroke-width="8"><circle cx="50" cy="50" r="32" opacity=".4"/><circle cx="50" cy="50" r="20" opacity=".7"/></g>
-            <circle cx="50" cy="50" r="9" fill="#fff"/>
-          </svg>
+      <!-- an honest sketch of the Studio overview: real shapes, real empty states -->
+      <div class="surface" role="img" aria-label="Sketch of the Repple Studio overview: trainers, members, sessions and a session-value figure that reads as a dash because no session fee has been set.">
+        <div class="surface-bar">
+          <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+          <span class="ttl">repple studio — overview</span>
         </div>
-        <h3>Repple Coach</h3>
-        <p>Your clients, your schedule, your programme templates and your exercise library — with the analytics to see who is drifting before they leave.</p>
-        <span class="who">For trainers</span>
-      </div>
-
-      <div class="app">
-        <div class="tile" style="background:var(--studio)">
-          <svg width="22" height="22" viewBox="0 0 100 100" aria-hidden="true">
-            <g fill="none" stroke="#fff" stroke-width="8"><circle cx="50" cy="50" r="32" opacity=".4"/><circle cx="50" cy="50" r="20" opacity=".7"/></g>
-            <circle cx="50" cy="50" r="9" fill="#fff"/>
-          </svg>
+        <div class="kpis">
+          <div class="kpi"><div class="k">Trainers</div><div class="v">6</div></div>
+          <div class="kpi"><div class="k">Members</div><div class="v">248</div></div>
+          <div class="kpi"><div class="k">Sessions 30d</div><div class="v">412</div></div>
+          <div class="kpi"><div class="k">Session value</div><div class="v dash">—</div><div class="n">no session fee set</div></div>
         </div>
-        <h3>Repple Studio</h3>
-        <p>The gym itself: trainers, classes, revenue and retention in one place, so the state of the business is something you can see rather than something you sense.</p>
-        <span class="who">For gym owners</span>
+        <div class="surface-body" style="border-top:1px solid var(--line)">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px">
+            <span class="tiny" style="color:var(--ink2);font-weight:600">Attendance, last 12 weeks</span>
+            <span class="mono tiny">fill 78%</span>
+          </div>
+          <div class="bars" aria-hidden="true">
+            <div class="b" style="height:44%"></div><div class="b" style="height:56%"></div>
+            <div class="b" style="height:51%"></div><div class="b" style="height:63%"></div>
+            <div class="b" style="height:58%"></div><div class="b" style="height:71%"></div>
+            <div class="b" style="height:66%"></div><div class="b" style="height:79%"></div>
+            <div class="b" style="height:74%"></div><div class="b" style="height:86%"></div>
+            <div class="b" style="height:81%"></div><div class="b mute" style="height:38%"></div>
+          </div>
+          <div class="axis"><span>12 wks ago</span><span>this week</span></div>
+        </div>
+        <div class="rows" style="border-top:1px solid var(--line)">
+          <div class="row"><span class="nm">Marcus Vaughn</span><span class="mt">31 sessions</span><span class="pill ok">healthy</span></div>
+          <div class="row"><span class="nm">Priya Raman</span><span class="mt">24 sessions</span><span class="pill ok">healthy</span></div>
+          <div class="row"><span class="nm">Dane Whitfield</span><span class="mt">9 sessions</span><span class="pill warn">watch</span></div>
+        </div>
       </div>
     </div>
-  </section>
+  </div>
+</section>
 
-  <section class="wrap prose" style="padding-bottom:20px">
-    <h2 style="font-size:23px;font-weight:650">Every number comes from somewhere</h2>
-    <p style="color:var(--ink2);margin-top:14px">Repple does not fill an empty screen with a plausible figure. If a measurement has not been taken, the app says so and asks for it. A number on screen can always be traced back to a row, a reading, or something you typed.</p>
-  </section>
+<!-- ── the three apps ────────────────────────────────────────────────── -->
+<section class="band" id="three" style="padding-top:0">
+  <div class="wrap">
+    <div style="max-width:60ch;margin-bottom:38px">
+      <h2 class="hd">Three apps. <span class="serif">One truth.</span></h2>
+      <p class="lede" style="margin-top:18px">
+        Splitting them apart means nobody wades through a screen built for someone else's job.
+        Keeping one database underneath means nobody has to reconcile anything.
+      </p>
+    </div>
+
+    <div class="rails">
+      <a class="rail" href="/client" style="--c:var(--client)">
+        <div class="who">Repple</div>
+        <h3>For the person training</h3>
+        <p>Every session, lift, meal and measurement in one history that actually goes back — and a coach who can see it without being asked.</p>
+        <span class="go">Explore Repple <svg class="arw" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6"/></svg></span>
+      </a>
+      <a class="rail" href="/trainer" style="--c:var(--coach)">
+        <div class="who">Repple Coach</div>
+        <h3>For the coach</h3>
+        <p>Your whole book — clients, programmes, schedule, check-ins — in the place you already look, instead of four apps and a notes file.</p>
+        <span class="go">Explore Coach <svg class="arw" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6"/></svg></span>
+      </a>
+      <a class="rail" href="/studio" style="--c:var(--studio)">
+        <div class="who">Repple Studio</div>
+        <h3>For the gym</h3>
+        <p>Timetable, memberships, payroll, retention and revenue on one board — so you can see which one is moving the others.</p>
+        <span class="go">Explore Studio <svg class="arw" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6"/></svg></span>
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- ── why one system ────────────────────────────────────────────────── -->
+<section class="band">
+  <div class="wrap">
+    <div style="max-width:64ch">
+      <div class="eyebrow">Why it has to be one system</div>
+      <h2 class="hd">A gym is not a stack of<br>separate problems.</h2>
+      <p class="lede" style="margin-top:22px">
+        Attendance is a coaching problem until it becomes a revenue problem. A trainer's schedule
+        is a staffing problem until it becomes a churn problem. When those live in different
+        tools, you find out in the wrong order — usually at the end of the month.
+      </p>
+    </div>
+
+    <div class="flow">
+      <div class="node" style="--c:var(--client)">
+        <div class="cap">Member logs</div>
+        <h4>The work that happened</h4>
+        <p>Sets, reps, load, effort, cardio, time in heart-rate zone. Imported from the watch or typed in by hand.</p>
+      </div>
+      <div class="node" style="--c:var(--coach)">
+        <div class="cap">Coach sees</div>
+        <h4>Who is drifting</h4>
+        <p>Not a wall of numbers — the three clients whose pattern changed this week, and what changed.</p>
+      </div>
+      <div class="node" style="--c:var(--studio)">
+        <div class="cap">Owner sees</div>
+        <h4>What it costs and earns</h4>
+        <p>Sessions delivered, classes filled, payroll owed, memberships lapsing. The same events, priced.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── the principle ─────────────────────────────────────────────────── -->
+<section class="band">
+  <div class="wrap">
+    <div class="split">
+      <div class="principle">
+        <div class="eyebrow" style="margin-bottom:18px">The rule we build to</div>
+        <p class="q">If we don't know the number,<br>you get a dash — never a guess.</p>
+        <p class="lede" style="margin-top:24px;font-size:17px">
+          Plenty of software fills a gap with a plausible figure. We think that is worse than
+          useless in a business where you make staffing and pricing decisions off the screen.
+          Every figure in Repple traces to a row someone actually created: a logged session, a
+          recorded payment, a measurement taken. When the input is missing, the app says so and
+          tells you what to enter.
+        </p>
+      </div>
+
+      <div class="surface">
+        <div class="surface-bar">
+          <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+          <span class="ttl">what a missing number looks like</span>
+        </div>
+        <div class="kpis">
+          <div class="kpi"><div class="k">Sessions 30d</div><div class="v">412</div><div class="n">from the log</div></div>
+          <div class="kpi"><div class="k">Payroll 30d</div><div class="v dash">—</div><div class="n">set a session fee to see this</div></div>
+        </div>
+        <div class="surface-body" style="border-top:1px solid var(--line)">
+          <p class="tiny" style="margin:0 0 14px">
+            The left figure is counted. The right one can't be derived until somebody tells Repple
+            what a session is worth — so it stays a dash, and says why.
+          </p>
+          <div class="rows" style="border:1px solid var(--line);border-radius:9px">
+            <div class="row" style="grid-template-columns:1fr auto"><span class="nm">Heart-rate zones</span><span class="mt">needs live samples</span></div>
+            <div class="row" style="grid-template-columns:1fr auto"><span class="nm">Show rate</span><span class="mt">needs attendance marked</span></div>
+            <div class="row" style="grid-template-columns:1fr auto"><span class="nm">Monthly recurring</span><span class="mt">needs plans priced</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── shared foundations ────────────────────────────────────────────── -->
+<section class="band">
+  <div class="wrap">
+    <div style="max-width:58ch;margin-bottom:36px">
+      <div class="eyebrow">Underneath all three</div>
+      <h2 class="hd">The parts you only notice<br><span class="serif">when they're missing.</span></h2>
+    </div>
+    <div class="strip">
+      <div>
+        <div class="stat-n">1</div>
+        <div class="lbl"><strong style="color:var(--ink)">One account.</strong> The same email and password signs you into whichever app your role calls for.</div>
+      </div>
+      <div>
+        <div class="stat-n">RLS</div>
+        <div class="lbl"><strong style="color:var(--ink)">Enforced at the database.</strong> Row-level rules mean one gym's data is unreachable from another account, even if the app asked.</div>
+      </div>
+      <div>
+        <div class="stat-n">↔</div>
+        <div class="lbl"><strong style="color:var(--ink)">Apple Health, both ways.</strong> Pull workouts off the watch; write finished sessions back so the rings stay honest.</div>
+      </div>
+      <div>
+        <div class="stat-n">0</div>
+        <div class="lbl"><strong style="color:var(--ink)">Ads, trackers, resale.</strong> Health data is used to show you your training. Nothing else.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── FAQ ───────────────────────────────────────────────────────────── -->
+<section class="band">
+  <div class="wrap narrow">
+    <h2 class="hd" style="margin-bottom:34px">Straight answers</h2>
+    <div class="faq">
+      <details>
+        <summary>Do I need all three apps?</summary>
+        <div class="a"><p>No. Install the one that matches what you do. A member never needs Coach; a coach without a gym never needs Studio. They share an account, so if your role changes you sign in to a different app with the same details.</p></div>
+      </details>
+      <details>
+        <summary>Does it work without an Apple Watch?</summary>
+        <div class="a"><p>Yes — everything can be entered by hand. What a watch adds is live heart rate during a session and automatic import of workouts you already recorded. One thing it uniquely enables is the heart-rate zone breakdown, which needs samples taken <em>during</em> the session; devices that only report a daily average can't produce it, and Repple won't fake one from a daily figure.</p></div>
+      </details>
+      <details>
+        <summary>Who can see a member's data?</summary>
+        <div class="a"><p>The member, always. A coach they have deliberately linked to. And their gym, for the membership and attendance information needed to run the place — not private messages. Nobody else, and never for advertising. The full detail is in <a href="/privacy">Privacy</a>.</p></div>
+      </details>
+      <details>
+        <summary>Can a gym export its own data?</summary>
+        <div class="a"><p>Yes. It is your operating record, not ours. Ask and we export everything we hold for your gym.</p></div>
+      </details>
+      <details>
+        <summary>What does it cost?</summary>
+        <div class="a"><p>Pricing isn't published yet — the apps are in their first release and we would rather set it against how gyms actually use them than guess in advance. Email <a href="mailto:support@repplefitness.com">support@repplefitness.com</a> and we'll talk plainly about it.</p></div>
+      </details>
+    </div>
+  </div>
+</section>
+
+<!-- ── close ─────────────────────────────────────────────────────────── -->
+<section class="close-cta">
+  <div class="wrap">
+    <h2 class="display">Start with the <em>record</em>.</h2>
+    <p class="lede" style="margin:22px auto 0;text-align:left;max-width:52ch">
+      Create one account, pick the app that fits what you do, and start putting real
+      sessions into it. Everything else in Repple is built on top of that.
+    </p>
+    <div class="btn-row">
+      <a class="btn primary" href="/signup">Create an account</a>
+      <a class="btn" href="mailto:support@repplefitness.com?subject=Repple%20for%20my%20gym">Talk to us about your gym</a>
+    </div>
+  </div>
+</section>
+
 </main>
 
 <footer class="site">
   <div class="wrap">
-    <span>© 2026 Repple</span>
-    <span>
-      <a href="/support">Support</a> ·
-      <a href="/privacy">Privacy</a> ·
-      <a href="/terms">Terms</a>
-    </span>
+    <div class="cols">
+      <div>
+        <a class="brand" href="/">
+          <span class="mark">
+            <svg width="17" height="17" viewBox="0 0 100 100" aria-hidden="true">
+              <g fill="none" stroke="#04211d" stroke-width="8"><circle cx="50" cy="50" r="32" opacity=".45"/><circle cx="50" cy="50" r="20" opacity=".75"/></g>
+              <circle cx="50" cy="50" r="8.5" fill="#04211d"/>
+            </svg>
+          </span>
+          Repple
+        </a>
+        <p class="tiny" style="margin-top:14px;max-width:34ch">
+          The operating record for gyms, the coaches who work in them, and the people they train.
+        </p>
+      </div>
+      <div>
+        <h5>Apps</h5>
+        <ul>
+          <li><a href="/client">Repple</a></li>
+          <li><a href="/trainer">Repple Coach</a></li>
+          <li><a href="/studio">Repple Studio</a></li>
+        </ul>
+      </div>
+      <div>
+        <h5>Account</h5>
+        <ul>
+          <li><a href="/signup">Create account</a></li>
+          <li><a href="/forgot-password">Reset password</a></li>
+          <li><a href="/support" class="sm-hide">Support</a></li>
+        </ul>
+      </div>
+      <div>
+        <h5>Legal</h5>
+        <ul>
+          <li><a href="/privacy">Privacy</a></li>
+          <li><a href="/terms">Terms</a></li>
+          <li><a href="mailto:support@repplefitness.com">Contact</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="base">
+      <span>© 2026 Repple · Operated by Washateria LLC</span>
+      <span><a href="mailto:support@repplefitness.com">support@repplefitness.com</a></span>
+    </div>
   </div>
 </footer>
 

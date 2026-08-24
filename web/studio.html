@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Repple Studio — run the whole gym from one board</title>
+<meta name="description" content="Timetable, memberships, payroll, retention and revenue in one operating picture — so you can see which part of the business is moving the others.">
+<meta property="og:title" content="Repple Studio — run the whole gym from one board">
+<meta property="og:description" content="Every part of the gym on one board, so you can see which one is moving the others.">
+<meta property="og:url" content="https://www.repplefitness.com/studio">
+<link rel="stylesheet" href="styles.css">
+<link rel="icon" href="favicon.png">
+</head>
+<body style="--accent:var(--studio); --accent-soft:rgba(224,145,47,0.14); --brand-ink:#2a1704">
+
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="/">
+      <span class="mark">
+        <svg width="17" height="17" viewBox="0 0 100 100" aria-hidden="true">
+          <g fill="none" stroke="#2a1704" stroke-width="8"><circle cx="50" cy="50" r="32" opacity=".45"/><circle cx="50" cy="50" r="20" opacity=".75"/></g>
+          <circle cx="50" cy="50" r="8.5" fill="#2a1704"/>
+        </svg>
+      </span>
+      Repple
+    </a>
+    <nav class="site">
+      <a href="/client">Members</a>
+      <a href="/trainer">Coaches</a>
+      <a href="/studio" aria-current="page">Gyms</a>
+      <a href="/support" class="sm-hide">Support</a>
+      <a class="cta" href="/signup">Create account</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+<section class="hero">
+  <div class="wrap">
+    <div class="hero-grid">
+      <div>
+        <div class="eyebrow">Repple Studio · for the gym</div>
+        <h1 class="display">The whole gym.<br>One <em>board</em>.</h1>
+        <p class="lede" style="margin-top:26px">
+          Most gym software manages one department well and leaves you to reconcile the rest.
+          Studio holds the timetable, the memberships, the payments, the staff rota and the
+          training itself in a single record — so the question stops being "what happened in
+          each area" and becomes "which area is moving the others."
+        </p>
+        <div class="btn-row">
+          <a class="btn primary" href="mailto:support@repplefitness.com?subject=Repple%20Studio%20for%20my%20gym">Talk to us about your gym</a>
+          <a class="btn" href="#board">See the board</a>
+        </div>
+      </div>
+
+      <div class="surface" role="img" aria-label="Sketch of the Repple Studio overview: members, sessions, class fill rate, payroll owed and monthly recurring revenue, with the trainers whose numbers are drifting.">
+        <div class="surface-bar">
+          <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+          <span class="ttl">repple studio — this month</span>
+        </div>
+        <div class="kpis">
+          <div class="kpi"><div class="k">Members</div><div class="v">248</div><div class="n">+6 net</div></div>
+          <div class="kpi"><div class="k">MRR</div><div class="v">£19,240</div></div>
+          <div class="kpi"><div class="k">Class fill</div><div class="v">78%</div></div>
+          <div class="kpi"><div class="k">Payroll owed</div><div class="v">£6,180</div></div>
+        </div>
+        <div class="surface-body" style="border-top:1px solid var(--line)">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px">
+            <span class="tiny" style="color:var(--ink2);font-weight:600">Attendance vs capacity, 12 weeks</span>
+            <span class="mono tiny" style="color:var(--accent)">Tue 18:00 is the gap</span>
+          </div>
+          <div class="bars" aria-hidden="true">
+            <div class="b" style="height:52%"></div><div class="b" style="height:61%"></div>
+            <div class="b" style="height:57%"></div><div class="b" style="height:68%"></div>
+            <div class="b" style="height:64%"></div><div class="b" style="height:74%"></div>
+            <div class="b" style="height:70%"></div><div class="b" style="height:81%"></div>
+            <div class="b" style="height:77%"></div><div class="b" style="height:88%"></div>
+            <div class="b" style="height:84%"></div><div class="b mute" style="height:41%"></div>
+          </div>
+          <div class="axis"><span>12 wks ago</span><span>this week</span></div>
+        </div>
+        <div class="rows" style="border-top:1px solid var(--line)">
+          <div class="row"><span class="nm">Marcus Vaughn</span><span class="mt">31 sessions · 12 clients</span><span class="pill ok">healthy</span></div>
+          <div class="row"><span class="nm">Dane Whitfield</span><span class="mt">9 sessions · 4 clients</span><span class="pill warn">under-loaded</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── the connective thesis ─────────────────────────────────────────── -->
+<section class="band" id="board" style="padding-top:0">
+  <div class="wrap">
+    <div style="max-width:64ch;margin-bottom:8px">
+      <div class="eyebrow">Why one board</div>
+      <h2 class="hd">Nothing in a gym<br><span class="serif">happens on its own.</span></h2>
+      <p class="lede" style="margin-top:20px">
+        A quiet Tuesday class is not a timetable problem. It is a staffing cost, a retention
+        signal and a revenue forecast wearing a timetable's clothes. Studio is built so you can
+        follow that thread instead of finding each end of it in a different tool.
+      </p>
+    </div>
+
+    <div class="surface" style="margin-top:38px">
+      <div class="surface-bar">
+        <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+        <span class="ttl">one event, four consequences</span>
+      </div>
+      <div class="surface-body">
+        <p class="tiny" style="margin:0 0 20px;color:var(--ink2)">
+          A member stops attending. Here is the same fact, read by each part of the business:
+        </p>
+        <div class="rows" style="border:1px solid var(--line);border-radius:10px">
+          <div class="row" style="grid-template-columns:150px 1fr"><span class="nm" style="color:var(--accent)">Coaching</span><span class="mt" style="font-family:var(--sans);font-size:14.5px">Their coach sees the pattern break in week two and can reach out.</span></div>
+          <div class="row" style="grid-template-columns:150px 1fr"><span class="nm" style="color:var(--accent)">Timetable</span><span class="mt" style="font-family:var(--sans);font-size:14.5px">A recurring slot frees up — worth re-timing before it becomes a habit.</span></div>
+          <div class="row" style="grid-template-columns:150px 1fr"><span class="nm" style="color:var(--accent)">Payroll</span><span class="mt" style="font-family:var(--sans);font-size:14.5px">Fewer delivered sessions this month, which changes what is owed.</span></div>
+          <div class="row" style="grid-template-columns:150px 1fr"><span class="nm" style="color:var(--accent)">Revenue</span><span class="mt" style="font-family:var(--sans);font-size:14.5px">A membership that will very likely lapse at renewal, showing up now rather than in the bank.</span></div>
+        </div>
+        <p class="tiny" style="margin:20px 0 0">
+          In four separate systems this is four unrelated rows that nobody joins up until quarter
+          end. In Studio it is one member, one record, four views.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── departments ───────────────────────────────────────────────────── -->
+<section class="band">
+  <div class="wrap">
+    <div style="max-width:58ch;margin-bottom:38px">
+      <div class="eyebrow">What it runs</div>
+      <h2 class="hd">The facets, and how<br>they meet.</h2>
+    </div>
+
+    <div class="split">
+      <div class="surface">
+        <div class="surface-bar">
+          <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+          <span class="ttl">the week — capacity and fill</span>
+        </div>
+        <div class="rows">
+          <div class="row"><span class="nm">Mon 06:00 · Strength</span><span class="mt">14 / 14</span><span class="pill ok">full</span></div>
+          <div class="row"><span class="nm">Mon 18:00 · Conditioning</span><span class="mt">13 / 14</span><span class="pill ok">full</span></div>
+          <div class="row"><span class="nm">Tue 18:00 · Conditioning</span><span class="mt">5 / 14</span><span class="pill crit">36%</span></div>
+          <div class="row"><span class="nm">Wed 06:00 · Strength</span><span class="mt">12 / 14</span><span class="pill ok">good</span></div>
+          <div class="row"><span class="nm">Thu 18:00 · Mobility</span><span class="mt">8 / 14</span><span class="pill warn">57%</span></div>
+          <div class="row"><span class="nm">Sat 09:00 · Open floor</span><span class="mt">14 / 14</span><span class="pill ok">full</span></div>
+        </div>
+        <div class="surface-body" style="border-top:1px solid var(--line)">
+          <p class="tiny" style="margin:0">
+            Two slots are structurally quiet and one is turning people away. That is a timetable
+            decision the room can't tell you and a spreadsheet won't volunteer.
+          </p>
+        </div>
+      </div>
+
+      <div>
+        <ul class="ticks" style="margin-top:0">
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>Timetable &amp; classes.</strong> Build the week once as a real series, take bookings against it, and tick people off at the desk. Fill rate and show rate become measured numbers.</span></li>
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>Memberships &amp; plans.</strong> Who is on what, at what price, renewing when. Monthly and annual plans amortised properly, one-off payments kept out of recurring revenue where they don't belong.</span></li>
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>Payments &amp; invoices.</strong> What was taken, what is outstanding, what is about to lapse — traced to the membership it belongs to.</span></li>
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>Staff &amp; payroll.</strong> Sessions delivered per trainer, drawn from the sessions they actually logged in Coach, priced at the rate you set.</span></li>
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>Members &amp; retention.</strong> Who is drifting, who is thriving, who has quietly not been in for a month — surfaced while it can still be changed.</span></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── the web view ──────────────────────────────────────────────────── -->
+<section class="band">
+  <div class="wrap">
+    <div class="split flip">
+      <div>
+        <div class="eyebrow">On the desk, not just the phone</div>
+        <h2 class="hd">Some jobs need<br>a proper screen.</h2>
+        <p class="lede" style="margin-top:20px">
+          Studio runs on the phone for the floor and on the web for the office. Reconciling a
+          month, restructuring a timetable, or reading a year of revenue is work for a keyboard
+          and a wide table — so the web console exists for exactly that, on the same account and
+          the same data.
+        </p>
+        <ul class="ticks">
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>Wide tables that sort and export</strong> — the roster, the money, the timetable, in a form you can actually work through.</span></li>
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>Same figures, same rules</strong> — the web console calls the identical functions the phone does, through the identical row-level permissions. There is no second version of the truth.</span></li>
+        </ul>
+      </div>
+
+      <div class="surface">
+        <div class="surface-bar">
+          <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+          <span class="ttl">studio on the web — money</span>
+        </div>
+        <div class="kpis">
+          <div class="kpi"><div class="k">Taken, 30d</div><div class="v">£21,405</div></div>
+          <div class="kpi"><div class="k">Outstanding</div><div class="v">£1,860</div><div class="n">7 invoices</div></div>
+          <div class="kpi"><div class="k">Lapsing 30d</div><div class="v">14</div><div class="n">memberships</div></div>
+        </div>
+        <div class="rows" style="border-top:1px solid var(--line)">
+          <div class="row"><span class="nm">Off-peak monthly</span><span class="mt">72 × £39</span><span class="pill ok">£2,808</span></div>
+          <div class="row"><span class="nm">Full monthly</span><span class="mt">118 × £69</span><span class="pill ok">£8,142</span></div>
+          <div class="row"><span class="nm">Annual (amortised)</span><span class="mt">41 × £58</span><span class="pill ok">£2,378</span></div>
+          <div class="row"><span class="nm">PT blocks</span><span class="mt">once-off</span><span class="pill">excluded from MRR</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── forecasting, honestly framed ──────────────────────────────────── -->
+<section class="band">
+  <div class="wrap">
+    <div class="split">
+      <div class="principle">
+        <div class="eyebrow" style="margin-bottom:18px">Forecasting</div>
+        <p class="q">A forecast is only worth<br>the record beneath it.</p>
+        <p class="lede" style="margin-top:22px;font-size:17px">
+          Studio can look ahead — which memberships are likely to lapse, where next month's
+          revenue lands, which slot to move and what it is probably worth. But every projection is
+          built on your gym's own history, it tells you what it is reading, and it declines to
+          produce one at all when there isn't enough recorded to stand on.
+        </p>
+        <p class="lede" style="margin-top:16px;font-size:17px">
+          A confident number from a thin record is the most expensive thing a business tool can
+          hand you. You get the dash instead, and what to record to remove it.
+        </p>
+      </div>
+
+      <div class="surface">
+        <div class="surface-bar">
+          <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+          <span class="ttl">what needs more record</span>
+        </div>
+        <div class="rows">
+          <div class="row" style="grid-template-columns:1fr auto"><span class="nm">Next-month revenue</span><span class="pill ok">ready</span></div>
+          <div class="row" style="grid-template-columns:1fr auto"><span class="nm">Lapse risk by member</span><span class="pill ok">ready</span></div>
+          <div class="row" style="grid-template-columns:1fr auto"><span class="nm">Class re-timing value</span><span class="pill warn">needs 8 more weeks</span></div>
+          <div class="row" style="grid-template-columns:1fr auto"><span class="nm">Trainer capacity model</span><span class="pill warn">set session rates</span></div>
+          <div class="row" style="grid-template-columns:1fr auto"><span class="nm">Seasonality</span><span class="pill crit">needs a full year</span></div>
+        </div>
+        <div class="surface-body" style="border-top:1px solid var(--line)">
+          <p class="tiny" style="margin:0">
+            Each row says what is missing and how to fix it — so the forecast improves because
+            your record improved, not because the model got louder.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── control ───────────────────────────────────────────────────────── -->
+<section class="band">
+  <div class="wrap">
+    <div style="max-width:58ch;margin-bottom:36px">
+      <div class="eyebrow">Control</div>
+      <h2 class="hd">Your gym's data,<br><span class="serif">fenced off properly.</span></h2>
+    </div>
+    <div class="strip">
+      <div>
+        <div class="stat-n">RLS</div>
+        <div class="lbl"><strong style="color:var(--ink)">Isolated at the database.</strong> Every table carries row-level rules keyed to your gym. Another gym's account cannot reach your rows even if its app asked.</div>
+      </div>
+      <div>
+        <div class="stat-n">Roles</div>
+        <div class="lbl"><strong style="color:var(--ink)">Owner, trainer, member.</strong> Staff see their own clients and rota. Owners see the business. Nobody sees private coaching messages.</div>
+      </div>
+      <div>
+        <div class="stat-n">Export</div>
+        <div class="lbl"><strong style="color:var(--ink)">Yours to take.</strong> It is your operating record. Ask and we export the lot — no hostage-taking at renewal.</div>
+      </div>
+      <div>
+        <div class="stat-n">Brand</div>
+        <div class="lbl"><strong style="color:var(--ink)">Your colours.</strong> Set the palette, or a custom brand colour, so what members see looks like your gym.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="close-cta">
+  <div class="wrap">
+    <h2 class="display">See the whole <em>picture</em>.</h2>
+    <p class="lede" style="margin:22px auto 0;max-width:52ch">
+      Tell us how your gym runs and what you currently can't see. If Studio isn't the right fit
+      we would rather say so than sell you a migration.
+    </p>
+    <div class="btn-row">
+      <a class="btn primary" href="mailto:support@repplefitness.com?subject=Repple%20Studio%20for%20my%20gym">Talk to us about your gym</a>
+      <a class="btn" href="/signup">Create an account</a>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="site">
+  <div class="wrap">
+    <div class="cols">
+      <div>
+        <a class="brand" href="/">
+          <span class="mark">
+            <svg width="17" height="17" viewBox="0 0 100 100" aria-hidden="true">
+              <g fill="none" stroke="#2a1704" stroke-width="8"><circle cx="50" cy="50" r="32" opacity=".45"/><circle cx="50" cy="50" r="20" opacity=".75"/></g>
+              <circle cx="50" cy="50" r="8.5" fill="#2a1704"/>
+            </svg>
+          </span>
+          Repple
+        </a>
+        <p class="tiny" style="margin-top:14px;max-width:34ch">
+          The operating record for gyms, the coaches who work in them, and the people they train.
+        </p>
+      </div>
+      <div>
+        <h5>Apps</h5>
+        <ul>
+          <li><a href="/client">Repple</a></li>
+          <li><a href="/trainer">Repple Coach</a></li>
+          <li><a href="/studio">Repple Studio</a></li>
+        </ul>
+      </div>
+      <div>
+        <h5>Account</h5>
+        <ul>
+          <li><a href="/signup">Create account</a></li>
+          <li><a href="/forgot-password">Reset password</a></li>
+          <li><a href="/support" class="sm-hide">Support</a></li>
+        </ul>
+      </div>
+      <div>
+        <h5>Legal</h5>
+        <ul>
+          <li><a href="/privacy">Privacy</a></li>
+          <li><a href="/terms">Terms</a></li>
+          <li><a href="mailto:support@repplefitness.com">Contact</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="base">
+      <span>© 2026 Repple · Operated by Washateria LLC</span>
+      <span><a href="mailto:support@repplefitness.com">support@repplefitness.com</a></span>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>
