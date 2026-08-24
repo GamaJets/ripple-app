@@ -115,16 +115,25 @@
     "production": {
       "ios": {
         "ascAppId": "6790096518"
+      },
+      "android": {
+        "track": "internal"
       }
     },
     "production-coach": {
       "ios": {
         "ascAppId": "6804358275"
+      },
+      "android": {
+        "track": "internal"
       }
     },
     "production-owner": {
       "ios": {
         "ascAppId": "6804417240"
+      },
+      "android": {
+        "track": "internal"
       }
     }
   }
