@@ -203,7 +203,7 @@ function SignIn() {
     if (!addr) { setErr('Enter your email first, then tap Forgot password.'); return; }
     setErr(null); setSent(null);
     await supabase.auth.resetPasswordForEmail(addr, {
-      redirectTo: 'https://www.repple.com/reset-password.html',
+      redirectTo: 'https://www.repplefitness.com/reset-password.html',
     });
     // Same answer either way: telling a stranger which addresses have accounts
     // is a way of enumerating your members.
@@ -250,7 +250,7 @@ function SignIn() {
 
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginTop: 14, fontSize: 13 }}>
           <button type="button" onClick={forgot} style={linkish}>Forgot password?</button>
-          <a href="https://www.repple.com/signup.html" style={{ color: 'var(--ink3)' }}>Create an account</a>
+          <a href="https://www.repplefitness.com/signup.html" style={{ color: 'var(--ink3)' }}>Create an account</a>
         </div>
       </form>
     </div>

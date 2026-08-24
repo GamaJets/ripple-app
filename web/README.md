@@ -1,4 +1,4 @@
-# repple.com
+# repplefitness.com
 
 The public site. Four static pages, one stylesheet, no build step — so it can be
 dropped on any static host as-is.
@@ -29,12 +29,12 @@ Netlify:
     npx netlify deploy --dir=web --prod
 
 Then point the apex domain and `www` at the host, and confirm in a browser that
-`https://www.repple.com/support` and `https://www.repple.com/privacy` both load
+`https://www.repplefitness.com/support` and `https://www.repplefitness.com/privacy` both load
 over HTTPS — those are the exact URLs on the App Store listings.
 
 ## Before it goes live
 
-- `support@repple.com` has to receive mail. Every page points there, and a
+- `support@repplefitness.com` has to receive mail. Every page points there, and a
   reviewer may well test it.
 - The operating entity is written as Washateria LLC, taken from the Apple
   Developer team name. Correct it in `privacy.html` and `terms.html` if the
