@@ -15,3 +15,7 @@ _to_delete/
 dist-verify/
 .fuse_hidden*
 .claude/settings.local.json
+
+# Google Play service-account key. Grants Admin on the Play developer account,
+# so it never belongs in the repo — eas.json only points at it by path.
+/play-service-account.json
