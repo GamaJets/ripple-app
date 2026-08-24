@@ -5,6 +5,7 @@ import { overlaps, isLateCancellation, cancelSession, nextFromWaitlist } from '.
 import type { WorkoutEntry } from './mockData';
 import { rowToEntry, entryToRow, PERSISTED_FIELDS } from './workoutRow';
 import { summarise, money, type MembershipPlan, type Membership, type GymPayment } from './gymRecord';
+import { weeklyOccurrences, summariseAttendance, pct, type GymClass, type NewClass } from './gymSchedule';
 import { buildIcs } from './ics';
 import { estimateDish, searchDishes, DISHES } from './restaurant';
 import type { TrainingSession } from './types';
@@ -170,6 +171,46 @@ ok(s3.mrrCents === null, 'membership with no plan cannot contribute a price');
 ok(money(null) === null, 'money(null) must stay null so a caller cannot render 0.00 for unknown');
 ok(money(123456, 'AED') === 'AED 1,234.56', `money formats minor units (got ${money(123456,'AED')})`);
 ok(money(0) === 'AED 0.00', 'a real zero still formats as zero');
+
+
+// ── timetable and attendance ────────────────────────────────────────────────
+const base: NewClass = {
+  title: 'Spin', startsAt: '2026-09-01T18:00:00.000Z', durationMin: 45, capacity: 20,
+};
+
+// A weekly series is materialised so a single week can be edited or dropped.
+const series = weeklyOccurrences(base, 4);
+ok(series.length === 4, 'four weeks means four occurrences');
+ok(series[0].startsAt === base.startsAt, 'the first occurrence is the one given');
+const wk = (i: number) => new Date(series[i].startsAt).getTime();
+ok(wk(1) - wk(0) === 7 * 86400000, 'occurrences are exactly a week apart');
+ok(series.every((c) => c.title === 'Spin' && c.capacity === 20), 'series carries the class details');
+
+// A public holiday is a skipped date, not a broken series.
+const skipped = weeklyOccurrences(base, 4, ['2026-09-15']);
+ok(skipped.length === 3, `skipping one date drops one occurrence (got ${skipped.length})`);
+ok(!skipped.some((c) => c.startsAt.slice(0, 10) === '2026-09-15'), 'the skipped date is absent');
+
+// Attendance figures must not invent a rate.
+const cls = (booked: number, attended: number, capacity: number): GymClass => ({
+  id: 'c' + booked + attended, title: 'Spin', room: null, instructor: null, trainerId: null,
+  startsAt: base.startsAt, durationMin: 45, capacity, booked, attended,
+});
+
+const none = summariseAttendance([]);
+ok(none.showRate === null, 'no classes means no show rate, not 0%');
+ok(none.fillRate === null, 'no classes means no fill rate, not 0%');
+
+const emptyClass = summariseAttendance([cls(0, 0, 20)]);
+ok(emptyClass.showRate === null, 'a class nobody booked has no show rate, not 0%');
+ok(emptyClass.fillRate === 0, 'a class nobody booked has a real fill rate of 0');
+
+const a = summariseAttendance([cls(10, 8, 20), cls(10, 2, 20)]);
+ok(a.booked === 20 && a.attended === 10, 'bookings and attendance sum');
+ok(a.showRate === 0.5, `show rate is attended/booked (got ${a.showRate})`);
+ok(a.fillRate === 0.5, `fill rate is booked/capacity (got ${a.fillRate})`);
+ok(pct(a.showRate) === '50%', 'pct formats');
+ok(pct(null) === null, 'pct(null) stays null so a caller cannot render 0%');
 
 if (errors.length) { console.log('COVERAGE FAILURES:\n' + errors.join('\n')); process.exit(1); }
 console.log(`ALL COVERAGE TESTS PASSED (${checks} assertions)`);

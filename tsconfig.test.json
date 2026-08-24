@@ -22,6 +22,7 @@
     "src/lib/format.ts",
     "src/lib/logic.test.ts",
     "src/lib/gymRecord.ts",
+    "src/lib/gymSchedule.ts",
     "src/lib/coverage.test.ts"
   ]
 }
