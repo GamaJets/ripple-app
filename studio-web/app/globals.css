@@ -1,0 +1,79 @@
+/* Repple Studio on the web.
+ *
+ * The palette is the phone app's default theme, lifted from src/theme/tokens.ts
+ * so the two never disagree about what "brand" or "surface2" means. The scale is
+ * not: a desk is not a phone, and a console people operate all day wants denser
+ * type and tighter rows than a screen held at arm's length. */
+
+:root {
+  /* dark — the app's default theme */
+  --bg: #0c1413;
+  --surface: #10201d;
+  --surface2: #14261f;
+  --surface3: #1b3229;
+  --ink: #e8f2f0;
+  --ink2: #b6c9c4;
+  --ink3: #6f8b87;
+  --ring: rgba(255, 255, 255, 0.09);
+  --brand: #16b8a6;
+  --brand-ink: #04211d;
+
+  --good: #0ca30c;
+  --warn: #fab219;
+  --serious: #ec835a;
+  --crit: #d03b3b;
+
+  --sans: ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+
+  --row: 40px;
+  --gutter: 24px;
+}
+
+/* light — "clinical" from the same file, for anyone running the desk in daylight */
+:root[data-theme="light"] {
+  --bg: #f4f6fb;
+  --surface: #ffffff;
+  --surface2: #eef2f9;
+  --surface3: #e3e9f4;
+  --ink: #0f1830;
+  --ink2: #3c4a63;
+  --ink3: #6b7896;
+  --ring: rgba(15, 24, 48, 0.12);
+  --brand: #2f6bff;
+  --brand-ink: #ffffff;
+  --good: #0ca30c;
+  --warn: #fab219;
+  --serious: #ec835a;
+  --crit: #d03b3b;
+}
+
+* { box-sizing: border-box; }
+html, body { padding: 0; margin: 0; height: 100%; }
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--brand); text-decoration: none; }
+a:hover { text-decoration: underline; }
+:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; border-radius: 3px; }
+
+h1, h2, h3 { margin: 0; letter-spacing: -0.015em; line-height: 1.2; }
+h1 { font-size: 24px; font-weight: 650; }
+h2 { font-size: 17px; font-weight: 600; }
+
+.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.micro {
+  font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--ink3);
+}
+
+/* a figure that has no value is a dash, never a zero — the rule the app
+ * already enforces, carried over so the web cannot quietly invent one */
+.dash { color: var(--ink3); }
