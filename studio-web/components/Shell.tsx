@@ -15,6 +15,8 @@ export const NAV: NavItem[] = [
   { href: '/', label: 'Overview', roles: ['owner', 'trainer'] },
   { href: '/timetable', label: 'Timetable', roles: ['owner'] },
   { href: '/money', label: 'Money', roles: ['owner'] },
+  // Staff work the door, so this is the one operational screen a trainer sees.
+  { href: '/door', label: 'Door', roles: ['owner', 'trainer'] },
 ];
 
 export function Shell({
