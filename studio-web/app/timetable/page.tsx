@@ -165,6 +165,12 @@ function AddClass({ tenantId, onChange }: { tenantId: string; onChange: () => vo
   const [instructor, setInstructor] = useState('');
   const [weeks, setWeeks] = useState('1');
   const [needs, setNeeds] = useState('');
+  // Dates to leave out of a series. weeklyOccurrences() has taken these since
+  // it was written — a gym closes for Eid, for a public holiday, for a
+  // refurbishment — and nothing ever passed them, so the capability existed
+  // and was unreachable. Comma-separated yyyy-mm-dd, because that is what the
+  // library takes and inventing a picker for four dates a year is not worth it.
+  const [skip, setSkip] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
@@ -198,7 +204,8 @@ function AddClass({ tenantId, onChange }: { tenantId: string; onChange: () => vo
     try {
       const n = parseInt(weeks, 10) || 1;
       if (n > 1) {
-        const made = await createSeries(supabase, tenantId, c, n);
+        const skipDates = skip.split(',').map((d) => d.trim()).filter(Boolean);
+        const made = await createSeries(supabase, tenantId, c, n, skipDates);
         setMsg(`Added ${made} weekly occurrences.`);
       } else {
         await createClass(supabase, tenantId, c);
@@ -232,6 +239,9 @@ function AddClass({ tenantId, onChange }: { tenantId: string; onChange: () => vo
           <input value={weeks} onChange={(e) => setWeeks(e.target.value)} inputMode="numeric" style={{ ...field, width: 56 }} />
           weeks
         </label>
+          <input value={skip} onChange={(e) => setSkip(e.target.value)}
+                 placeholder="Skip dates — 2026-12-25, 2027-01-01"
+                 style={{ ...field, width: 210 }} />
         <button type="submit" disabled={busy} style={primaryBtn}>Add</button>
       </form>
       {check ? (
