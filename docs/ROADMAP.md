@@ -66,15 +66,24 @@ both worth remembering as the class to look for first:
 
 ### Still to do
 
-- **PT session scheduling** — one-to-ones and classes on one timetable. The
-  outcome and payroll half is done; the booking half still lives in the
-  trainer's own calendar rather than the gym's.
-- **Session approval** — schema exists (`22-session-approvals.sql`) and the
-  owner can now mark an outcome, but the client-side approval loop that
-  table was built for is still unwired.
-- **Trainer rota** — who is on the floor when, against class and PT load.
-- **CSV import** — members, plans and historical payments. Without this a gym
-  starts from nothing and never gets a comparison year.
+Re-verified against the code on 25 Aug 2026 (evening). Two of the four listed
+here were wrong, so the status column now says what was actually checked.
+
+| Item | Status | Evidence |
+|---|---|---|
+| **PT session scheduling** — one-to-ones and classes on one timetable | **Genuinely open.** The outcome and payroll half is done; the booking half still lives in the trainer's own calendar rather than the gym's. | No `pt_session`/`bookSession` reference in `app/(owner)/` or `studio-web/app/`. `studio-web/app/timetable` covers classes only. |
+| **Session approval** | **DONE — this entry was wrong.** Wired end to end. | `app/(client)/pt-sessions.tsx:34` takes `approveSession` from `useSessions()` and splits the list on `approvedAt`; `src/ui/sessions.tsx:25` calls the RPC; the RPC is `supabase/parts/22-session-approvals.sql:36`. |
+| **Trainer rota** — who is on the floor when | **Genuinely open.** | No rota or shift table anywhere in `supabase/parts/`; the single grep hit is an unrelated word in `26-message-notifications.sql`. |
+| **CSV import** — members, plans, historical payments | **Two thirds done.** Members and payments import; **plans do not**. | `src/lib/csvImport.ts` exports `previewMembers` and `previewPayments` — there is no `previewPlans`. `studio-web/app/import/page.tsx` offers members and payments. |
+
+So Phase 1's real remainder is **PT scheduling, the trainer rota, and plan
+import** — not four items.
+
+This is the third time a roadmap entry has claimed something was missing that
+was already built (see the correction section below). The pattern is
+consistent enough to be worth a rule: **before starting any item, grep for it
+first.** The document is a statement of intent that ages badly, not a record
+of what exists; the code is the record.
 
 ---
 
@@ -215,8 +224,15 @@ same work is not commissioned twice.
 | R064 · payroll page with settlement | "same flow as the app" | Substantially built. `/sessions` computes `payrollByTrainer`, `payrollTotal` and `settlementBlocker`, and marks outcomes. What is genuinely missing is recording that a settled payroll was *paid*. |
 
 Two of the four are wholly done; two are narrower than described. R065 (CSV
-import screen) and R072 (realtime) were checked at the same time and are
-genuinely absent.
+import screen) and R072 (realtime) were checked at the same time and were
+genuinely absent **at the moment of writing**.
+
+R065 stopped being true six minutes later: this section landed in `529f4fd`
+at 15:31 and the importer shipped in `5d0506a` at 15:37 the same afternoon.
+Worth leaving visible rather than quietly editing, because it shows the real
+failure mode with a document like this — not that anyone checked carelessly,
+but that a status written down is only true at the instant it is written.
+R072 (realtime) remains genuinely absent.
 
 The lesson is not that the list was careless in general — most items were
 traced to a specific file or a missing table. It is that "no screen does this"
