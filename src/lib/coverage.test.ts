@@ -5,7 +5,7 @@ import { overlaps, isLateCancellation, cancelSession, nextFromWaitlist } from '.
 import type { WorkoutEntry } from './mockData';
 import { rowToEntry, entryToRow, PERSISTED_FIELDS } from './workoutRow';
 import { summarise, money, type MembershipPlan, type Membership, type GymPayment } from './gymRecord';
-import { weeklyOccurrences, summariseAttendance, pct, type GymClass, type NewClass } from './gymSchedule';
+import { weeklyOccurrences, summariseAttendance, weeklyAttendance, pct, type GymClass, type NewClass } from './gymSchedule';
 import { buildIcs } from './ics';
 import { serviceState, nextServiceDue, usableUnits, outOfServiceUnits, capacityFor, summariseRegister, needsAttention, type Equipment } from './gymEquipment';
 import { parseCsv, parseSheet, sniffDelimiter, mapColumns } from './csv';
@@ -685,6 +685,54 @@ ok(queue[0].state === 'overdue' && queue[0].item.name === 'Rower 1', 'overdue so
 ok(queue[1].state === 'due', 'due sorts above unrecorded');
 ok(queue[2].state === 'unrecorded', 'never-recorded still surfaces rather than hiding');
 ok(!queue.some((q) => q.item.status === 'retired'), 'retired kit never appears in the queue');
+}
+
+
+// ── weekly attendance series (the chart the site draws) ──
+{
+const NOW = Date.parse('2026-08-25T12:00:00Z');   // a Tuesday; its Monday is the 24th
+const gc = (startsAt: string, capacity: number, booked: number, attended: number): GymClass => ({
+  id: startsAt + capacity, title: 'Conditioning', room: null, instructor: null, trainerId: null,
+  startsAt, durationMin: 45, capacity, booked, attended,
+});
+
+const w3 = weeklyAttendance([
+  gc('2026-08-24T07:00:00Z', 20, 15, 12),   // this week
+  gc('2026-08-23T09:00:00Z', 10, 10, 9),    // SUNDAY — belongs to the week of the 17th
+  gc('2026-07-01T07:00:00Z', 20, 20, 20),   // far outside the window
+], 3, NOW);
+
+ok(w3.length === 3, 'weeklyAttendance returns exactly the weeks asked for');
+ok(w3[0].weekOf === '2026-08-10' && w3[2].weekOf === '2026-08-24', 'series runs oldest to newest');
+ok(w3[2].classes === 1 && w3[2].booked === 15 && w3[2].attended === 12, 'this week totals');
+ok(w3[1].weekOf === '2026-08-17' && w3[1].classes === 1, 'a Sunday class counts to the Monday that opened its week');
+ok(w3.reduce((a, x) => a + x.classes, 0) === 2, 'classes outside the window are dropped, not clamped into the edge week');
+
+// A quiet week is a gap in the chart, not a missing point.
+ok(w3[0].classes === 0 && w3[0].booked === 0, 'empty weeks stay in the series');
+ok(w3[0].fillRate === null && w3[0].showRate === null, 'an empty week has no rate — not 0%');
+
+ok(Math.abs((w3[2].fillRate ?? 0) - 15 / 20) < 1e-9, 'fillRate is booked/capacity');
+ok(Math.abs((w3[2].showRate ?? 0) - 12 / 15) < 1e-9, 'showRate is attended/booked');
+
+// Capacity recorded as 0 must not read as a 100%-full week.
+const noCap = weeklyAttendance([gc('2026-08-24T07:00:00Z', 0, 5, 4)], 1, NOW);
+ok(noCap[0].fillRate === null, 'no capacity recorded means no fill rate');
+ok(noCap[0].showRate !== null, 'but attendance still has a show rate');
+
+// Nothing booked is not everybody failing to turn up.
+const noBook = weeklyAttendance([gc('2026-08-24T07:00:00Z', 20, 0, 0)], 1, NOW);
+ok(noBook[0].showRate === null, 'a class nobody booked has no show rate');
+ok(noBook[0].fillRate === 0, 'but its fill rate is a real, measured 0%');
+
+// Two classes in one week add up rather than overwrite.
+const two = weeklyAttendance([
+  gc('2026-08-24T07:00:00Z', 20, 15, 12), gc('2026-08-26T19:00:00Z', 10, 5, 5),
+], 1, NOW);
+ok(two[0].classes === 2 && two[0].capacity === 30 && two[0].booked === 20 && two[0].attended === 17, 'a week sums its classes');
+
+ok(weeklyAttendance([gc('nonsense', 20, 5, 5)], 1, NOW)[0].classes === 0, 'an unparseable date is skipped, not counted');
+ok(weeklyAttendance([], 12, NOW).length === 12, 'a gym with no classes still yields a full, empty series');
 }
 
 if (errors.length) { console.log('COVERAGE FAILURES:\n' + errors.join('\n')); process.exit(1); }

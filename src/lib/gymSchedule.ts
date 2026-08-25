@@ -210,6 +210,79 @@ export function summariseAttendance(classes: GymClass[]): AttendanceSummary {
   };
 }
 
+export interface AttendanceWeek {
+  /** ISO date of the Monday that opens the week. */
+  weekOf: string;
+  classes: number;
+  capacity: number;
+  booked: number;
+  attended: number;
+  /** booked / capacity, or null when no class that week recorded a capacity. */
+  fillRate: number | null;
+  /** attended / booked, or null when nothing was booked that week. */
+  showRate: number | null;
+}
+
+/** The Monday that opens the week containing `d`, as an ISO date. */
+function mondayOf(d: Date): string {
+  const x = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  // getUTCDay: 0 = Sunday, so Sunday belongs to the week that began 6 days ago.
+  const back = (x.getUTCDay() + 6) % 7;
+  x.setUTCDate(x.getUTCDate() - back);
+  return x.toISOString().slice(0, 10);
+}
+
+/**
+ * Attendance week by week, oldest first — the series behind a trend chart.
+ *
+ * Returns exactly `weeks` entries, **including the empty ones**. A week with no
+ * classes is information: it is the gap a chart should show as a gap, not a
+ * point the line skips over on its way to the next busy week.
+ *
+ * Both rates stay null rather than 0 when their denominator is missing, for the
+ * same reason `summariseAttendance` does it — a week nobody booked has no show
+ * rate, which is not the same as everybody failing to turn up.
+ */
+export function weeklyAttendance(
+  classes: GymClass[],
+  weeks = 12,
+  now: number = Date.now(),
+): AttendanceWeek[] {
+  const thisMonday = mondayOf(new Date(now));
+
+  // Seed every week first, so quiet weeks survive into the series.
+  const out: AttendanceWeek[] = [];
+  const index = new Map<string, AttendanceWeek>();
+  for (let i = weeks - 1; i >= 0; i--) {
+    const d = new Date(`${thisMonday}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() - i * 7);
+    const weekOf = d.toISOString().slice(0, 10);
+    const w: AttendanceWeek = {
+      weekOf, classes: 0, capacity: 0, booked: 0, attended: 0,
+      fillRate: null, showRate: null,
+    };
+    out.push(w);
+    index.set(weekOf, w);
+  }
+
+  for (const c of classes) {
+    const t = Date.parse(c.startsAt);
+    if (Number.isNaN(t)) continue;
+    const w = index.get(mondayOf(new Date(t)));
+    if (!w) continue; // outside the window
+    w.classes += 1;
+    w.capacity += c.capacity || 0;
+    w.booked += c.booked;
+    w.attended += c.attended;
+  }
+
+  for (const w of out) {
+    w.fillRate = w.capacity > 0 ? w.booked / w.capacity : null;
+    w.showRate = w.booked > 0 ? w.attended / w.booked : null;
+  }
+  return out;
+}
+
 /** A percentage, or null passed straight through so a caller cannot render
  *  "0%" for something that was never measured. */
 export function pct(v: number | null | undefined): string | null {

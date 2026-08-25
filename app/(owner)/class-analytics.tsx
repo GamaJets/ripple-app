@@ -71,7 +71,7 @@ export default function OwnerClassAnalytics() {
     const classes = rows.length;
     const attended = rows.reduce((a, r) => a + r.attended, 0);
     const booked = rows.reduce((a, r) => a + r.booked, 0);
-    return { classes, attended, booked, fill: booked ? Math.round((attended / booked) * 100) : 0, payroll: Math.round(attended * rate$) };
+    return { classes, attended, booked, show: booked ? Math.round((attended / booked) * 100) : 0, payroll: Math.round(attended * rate$) };
   }, [rows, rate$]);
 
   const byGroup = (key: (r: ClassSummaryRow) => string) => {
@@ -133,8 +133,8 @@ export default function OwnerClassAnalytics() {
             label="Trainer payroll (AED)"
             figure={rate$ > 0 ? totals.payroll.toLocaleString() : '—'}
             note={rate$ > 0
-              ? `${totals.attended} check-ins × AED ${rate$} · ${totals.classes} classes · ${totals.fill}% avg fill`
-              : `${totals.attended} check-ins · ${totals.classes} classes · ${totals.fill}% avg fill · enter your per-check-in rate below`}
+              ? `${totals.attended} check-ins × AED ${rate$} · ${totals.classes} classes · ${totals.show}% avg show`
+              : `${totals.attended} check-ins · ${totals.classes} classes · ${totals.show}% avg show · enter your per-check-in rate below`}
           />
 
           <Rule />
@@ -144,7 +144,7 @@ export default function OwnerClassAnalytics() {
             <KpiRow items={[
               { label: 'Classes', value: String(totals.classes) },
               { label: 'Check-ins', value: String(totals.attended) },
-              { label: 'Avg fill', value: String(totals.fill), unit: '%' },
+              { label: 'Avg show', value: String(totals.show), unit: '%' },
             ]} />
           </Section>
 

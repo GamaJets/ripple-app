@@ -1,0 +1,149 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+  <style>
+    body { margin: 0; background: #0a1211; color: #e9f2f0;
+           font-family: 'Inter Tight', -apple-system, system-ui, sans-serif;
+           font-size: 17px; line-height: 1.6; -webkit-font-smoothing: antialiased; }
+    a { color: #16b8a6; text-decoration: none; }
+    a:hover { color: #3fd3c2; }
+    .mono { font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-variant-numeric: tabular-nums; }
+  </style>
+</helmet>
+
+<div style="padding: 56px 56px 64px; display: flex; flex-direction: column; gap: 44px;">
+
+  <div>
+    <div style="display: flex; align-items: center; gap: 10px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; font-weight: 500; letter-spacing: 0.16em; text-transform: uppercase; color: #67807b; margin-bottom: 18px;">
+      <span style="width: 22px; height: 1px; background: #f0c04e;"></span>
+      Findings 01 and 04 · the numbers
+    </div>
+    <h1 style="margin: 0; font-family: 'Instrument Serif', Georgia, serif; font-weight: 400; font-size: 44px; line-height: 1.05; letter-spacing: -0.015em;">
+      Wrong currency, and one word<br>that means two things.
+    </h1>
+  </div>
+
+  <!-- currency -->
+  <div>
+    <h2 style="margin: 0 0 4px; font-size: 15px; font-weight: 600;">Currency</h2>
+    <p style="margin: 0 0 18px; font-size: 14.5px; color: #67807b;">
+      The Studio hero, as it renders today and as the app would print it.
+    </p>
+
+    <div style="display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 14px;">
+      <sc-for list="{{currencyCols}}" as="col" hint-placeholder-count="2">
+        <div style="border: 1px solid {{col.border}}; border-radius: 13px; background: #0f1c1a; overflow: hidden;">
+          <div style="padding: 11px 15px; border-bottom: 1px solid rgba(233,242,240,0.10); background: #081210; display: flex; align-items: center; justify-content: space-between; gap: 10px;">
+            <span class="mono" style="font-size: 11.5px; color: #67807b; letter-spacing: .06em;">repple studio — this month</span>
+            <span class="mono" style="font-size: 11px; letter-spacing: .13em; text-transform: uppercase; color: {{col.tint}};">{{col.kicker}}</span>
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 1px; background: rgba(233,242,240,0.10);">
+            <sc-for list="{{col.kpis}}" as="k" hint-placeholder-count="4">
+              <div style="background: #0f1c1a; padding: 15px 16px;">
+                <span class="mono" style="display: block; font-size: 10.5px; letter-spacing: .13em; text-transform: uppercase; color: #67807b; line-height: 1.35; min-height: 2.7em;">{{k.k}}</span>
+                <span class="mono" style="display: block; font-size: 25px; letter-spacing: -0.02em; margin-top: 5px; color: {{k.tint}};">{{k.v}}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+    <p style="margin: 14px 0 0; font-size: 14px; color: #67807b; line-height: 1.55; max-width: 92ch;">
+      Every currency default in the shipped code is AED, and the owner's own screens print it beside
+      the rate. Ten sterling figures on one page is not a rounding difference — it tells a Gulf gym
+      the product was built for somewhere else.
+    </p>
+  </div>
+
+  <!-- the fill collision -->
+  <div>
+    <h2 style="margin: 0 0 4px; font-size: 15px; font-weight: 600;">One class, two &ldquo;fill&rdquo; percentages</h2>
+    <p style="margin: 0 0 18px; font-size: 14.5px; color: #67807b;">
+      A Tuesday conditioning class: 14 places, 10 booked, 8 turned up.
+    </p>
+
+    <div style="border: 1px solid rgba(233,242,240,0.10); border-radius: 13px; background: #0f1c1a; overflow: hidden;">
+      <sc-for list="{{fillRows}}" as="r" hint-placeholder-count="3">
+        <div style="display: grid; grid-template-columns: minmax(0,210px) minmax(0,1fr) 120px 110px; align-items: center; border-top: 1px solid rgba(233,242,240,0.06);">
+          <div style="padding: 16px;">
+            <span class="mono" style="display: block; font-size: 11px; letter-spacing: .13em; text-transform: uppercase; color: {{r.tint}};">{{r.where}}</span>
+            <span style="display: block; font-size: 15px; font-weight: 600; margin-top: 6px;">{{r.label}}</span>
+          </div>
+          <div style="padding: 16px; border-left: 1px solid rgba(233,242,240,0.06);">
+            <span class="mono" style="font-size: 13.5px; color: #a6bcb7;">{{r.formula}}</span>
+          </div>
+          <div style="padding: 16px; border-left: 1px solid rgba(233,242,240,0.06);">
+            <span class="mono" style="font-size: 22px; letter-spacing: -0.02em; color: {{r.tint}};">{{r.value}}</span>
+          </div>
+          <div style="padding: 16px; border-left: 1px solid rgba(233,242,240,0.06);">
+            <span style="font-size: 11.5px; padding: 3px 9px; border-radius: 20px; border: 1px solid {{r.tint}}; color: {{r.tint}}; white-space: nowrap;">{{r.verdict}}</span>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="display: flex; align-items: flex-start; gap: 12px; padding: 18px 20px; border: 1px solid rgba(233,242,240,0.10); border-left: 3px solid #16b8a6; border-radius: 12px; background: #0f1c1a; margin-top: 16px;">
+      <p style="margin: 0; font-size: 14.5px; line-height: 1.55; color: #a6bcb7; max-width: 96ch;">
+        <strong style="color: #e9f2f0;">71% and 80% are both correct and both called fill.</strong>
+        An owner comparing the class screen against the overview sees two numbers for one class and
+        has no way to tell which is which. The library's split is the right one — booked against
+        capacity is how full the room is; attended against booked is whether they showed — so the
+        app's label is what changes, and the site keeps quoting the library.
+      </p>
+    </div>
+  </div>
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{}'>
+class Component extends DCLogic {
+  renderVals() {
+    const RED = '#ef8080', TEAL = '#16b8a6', AMBER = '#f0c04e', INK = '#e9f2f0';
+    return {
+      currencyCols: [
+        {
+          kicker: 'site today', tint: RED, border: 'rgba(239,128,128,0.35)',
+          kpis: [
+            { k: 'Members', v: '248', tint: INK },
+            { k: 'MRR', v: '£19,240', tint: RED },
+            { k: 'Class fill', v: '78%', tint: INK },
+            { k: 'Payroll owed', v: '£6,180', tint: RED },
+          ],
+        },
+        {
+          kicker: 'as the app prints it', tint: TEAL, border: 'rgba(22,184,166,0.35)',
+          kpis: [
+            { k: 'Members', v: '248', tint: INK },
+            { k: 'MRR', v: 'AED 19,240', tint: TEAL },
+            { k: 'Class fill', v: '71%', tint: TEAL },
+            { k: 'Payroll owed', v: 'AED 6,180', tint: TEAL },
+          ],
+        },
+      ],
+      fillRows: [
+        {
+          where: 'gymSchedule.ts', label: 'fillRate', formula: 'booked ÷ capacity  =  10 ÷ 14',
+          value: '71%', tint: TEAL, verdict: 'correct',
+        },
+        {
+          where: 'gymSchedule.ts', label: 'showRate', formula: 'attended ÷ booked  =  8 ÷ 10',
+          value: '80%', tint: TEAL, verdict: 'correct',
+        },
+        {
+          where: 'class-analytics.tsx', label: '"Avg fill"', formula: 'attended ÷ booked  =  8 ÷ 10',
+          value: '80%', tint: RED, verdict: 'mislabelled',
+        },
+      ],
+    };
+  }
+}
+</script>
+</body>
+</html>

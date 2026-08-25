@@ -1,0 +1,25 @@
+{
+  "artboards": [
+    { "file": "Main.dc.html",       "title": "The six findings",        "x": 0,    "y": 0,    "w": 1320, "h": 1180 },
+    { "file": "Vocabulary.dc.html", "title": "02 + 03 — the words",     "x": 1410, "y": 0,    "w": 1320, "h": 1080 },
+    { "file": "Money.dc.html",      "title": "01 + 04 — the numbers",   "x": 0,    "y": 1280, "w": 1320, "h": 1180 },
+    { "file": "Charts.dc.html",     "title": "05 — the charts",         "x": 1410, "y": 1280, "w": 1320, "h": 1120 }
+  ],
+  "annotations": [
+    {
+      "id": "how-checked",
+      "x": 0,
+      "y": -230,
+      "w": 620,
+      "text": "SYNC AUDIT — website claims checked against shipped app source.\n\nEvery figure, label and chart on repplefitness.com read against the code that ships. Six divergences, each with the file that settles it.\n\nFour are the site overstating the app. One is a genuine bug in the app (two screens print different numbers under the word 'fill'). One is the app disagreeing with itself.\n\nOne correction I made mid-audit: 'On track' and 'At risk' DO exist in Coach (analytics.tsx:190) — I had them down as invented until I checked. Only 'drifting' and 'under-loaded' are."
+    },
+    {
+      "id": "not-checked",
+      "x": 1410,
+      "y": -230,
+      "w": 560,
+      "text": "WHAT I DID NOT CHECK.\n\nThe app has ~80 screens; this audit covers every claim the four marketing pages make, not every screen.\n\nNot verified: the coach page's 8-week per-client series, and the exact metric and window of the client page's per-exercise chart. Both have plausible counterparts in the app (analytics.tsx, trends.tsx) — I could not confirm the shapes match without reading further, and the toolchain is too degraded right now to be quick about it.\n\nSay the word and I will finish those two."
+    }
+  ],
+  "launch": { "view": "canvas" }
+}

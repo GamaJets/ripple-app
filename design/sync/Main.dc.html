@@ -1,0 +1,167 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+  <style>
+    body { margin: 0; background: #0a1211; color: #e9f2f0;
+           font-family: 'Inter Tight', -apple-system, system-ui, sans-serif;
+           font-size: 17px; line-height: 1.6; -webkit-font-smoothing: antialiased; }
+    a { color: #16b8a6; text-decoration: none; }
+    a:hover { color: #3fd3c2; text-decoration: underline; text-underline-offset: 3px; }
+    .mono { font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-variant-numeric: tabular-nums; }
+  </style>
+</helmet>
+
+<div style="padding: 56px 56px 64px;">
+
+  <div style="display: flex; align-items: center; gap: 10px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; font-weight: 500; letter-spacing: 0.16em; text-transform: uppercase; color: #67807b; margin-bottom: 20px;">
+    <span style="width: 22px; height: 1px; background: #ef8080;"></span>
+    Sync audit · site claims checked against app source
+  </div>
+
+  <h1 style="margin: 0; font-family: 'Instrument Serif', Georgia, serif; font-weight: 400; font-size: 50px; line-height: 1.04; letter-spacing: -0.015em;">
+    Six things the site says<br>that the app does not do.
+  </h1>
+
+  <p style="margin: 18px 0 0; font-size: 17.5px; line-height: 1.55; color: #a6bcb7; max-width: 74ch;">
+    Every figure, label and chart on repplefitness.com checked against the shipped source. Four of
+    these are the site overstating the app. One is a real bug in the app. One is the same word
+    meaning two different things in two places.
+  </p>
+
+  <div style="display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 14px; margin-top: 30px;">
+    <sc-for list="{{tallies}}" as="t" hint-placeholder-count="3">
+      <div style="border: 1px solid rgba(233,242,240,0.10); border-radius: 12px; background: #0f1c1a; padding: 16px 18px; position: relative;">
+        <span style="position: absolute; inset: 0 0 auto 0; height: 3px; background: {{t.tint}};"></span>
+        <span class="mono" style="display: block; font-size: 30px; letter-spacing: -0.03em; margin-top: 4px; color: {{t.tint}};">{{t.n}}</span>
+        <span style="display: block; font-size: 14px; color: #a6bcb7; line-height: 1.45; margin-top: 6px;">{{t.label}}</span>
+      </div>
+    </sc-for>
+  </div>
+
+  <!-- the findings -->
+  <div style="border: 1px solid rgba(233,242,240,0.10); border-radius: 14px; overflow: hidden; background: #0f1c1a; margin-top: 30px;">
+    <div style="display: grid; grid-template-columns: 44px minmax(0,1.35fr) minmax(0,1.35fr) 150px; gap: 0; background: #081210; border-bottom: 1px solid rgba(233,242,240,0.10);">
+      <div style="padding: 12px 0 12px 18px;"></div>
+      <div class="mono" style="padding: 12px 16px; font-size: 11px; letter-spacing: .13em; text-transform: uppercase; color: #67807b;">The site shows</div>
+      <div class="mono" style="padding: 12px 16px; font-size: 11px; letter-spacing: .13em; text-transform: uppercase; color: #67807b;">The app actually does</div>
+      <div class="mono" style="padding: 12px 16px; font-size: 11px; letter-spacing: .13em; text-transform: uppercase; color: #67807b;">Which side moves</div>
+    </div>
+
+    <sc-for list="{{findings}}" as="f" hint-placeholder-count="6">
+      <div style="display: grid; grid-template-columns: 44px minmax(0,1.35fr) minmax(0,1.35fr) 150px; border-top: 1px solid rgba(233,242,240,0.06);">
+        <div style="padding: 16px 0 16px 18px;">
+          <span class="mono" style="font-size: 12px; color: {{f.tint}};">{{f.n}}</span>
+        </div>
+
+        <div style="padding: 16px; border-left: 1px solid rgba(233,242,240,0.06);">
+          <span style="display: block; font-size: 15px; font-weight: 600; letter-spacing: -0.015em;">{{f.title}}</span>
+          <span style="display: block; font-size: 13.5px; line-height: 1.5; color: #a6bcb7; margin-top: 5px;">{{f.site}}</span>
+          <span class="mono" style="display: block; font-size: 11.5px; color: #67807b; margin-top: 7px;">{{f.where}}</span>
+        </div>
+
+        <div style="padding: 16px; border-left: 1px solid rgba(233,242,240,0.06);">
+          <span style="display: block; font-size: 13.5px; line-height: 1.5; color: #a6bcb7;">{{f.app}}</span>
+          <span class="mono" style="display: block; font-size: 11.5px; color: #67807b; margin-top: 7px;">{{f.source}}</span>
+        </div>
+
+        <div style="padding: 16px; border-left: 1px solid rgba(233,242,240,0.06);">
+          <span style="display: inline-block; font-size: 11.5px; padding: 3px 9px; border-radius: 20px; border: 1px solid {{f.tint}}; color: {{f.tint}}; white-space: nowrap;">{{f.verdict}}</span>
+          <span style="display: block; font-size: 13px; line-height: 1.45; color: #67807b; margin-top: 8px;">{{f.fix}}</span>
+        </div>
+      </div>
+    </sc-for>
+  </div>
+
+  <div style="display: flex; align-items: flex-start; gap: 12px; padding: 18px 20px; border: 1px solid rgba(233,242,240,0.10); border-left: 3px solid #16b8a6; border-radius: 12px; background: #0f1c1a; margin-top: 22px;">
+    <p style="margin: 0; font-size: 14.5px; line-height: 1.55; color: #a6bcb7; max-width: 92ch;">
+      <strong style="color: #e9f2f0;">Finding 4 is not a website problem.</strong> The app's class
+      screen labels <span class="mono" style="font-size: 13px;">attended / booked</span> as
+      &ldquo;Avg fill&rdquo;, but the shared library calls that the show rate and reserves
+      &ldquo;fill&rdquo; for <span class="mono" style="font-size: 13px;">booked / capacity</span>.
+      Two screens can therefore print different percentages under the same word. That one gets fixed
+      in the app, and the site follows the library.
+    </p>
+  </div>
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{}'>
+class Component extends DCLogic {
+  renderVals() {
+    const RED = '#ef8080', AMBER = '#f0c04e', TEAL = '#16b8a6';
+
+    return {
+      tallies: [
+        { n: '4', label: 'Site overstates what the app does', tint: RED },
+        { n: '1', label: 'Real bug in the app', tint: TEAL },
+        { n: '1', label: 'One word, two meanings', tint: AMBER },
+      ],
+      findings: [
+        {
+          n: '01', tint: RED, verdict: 'Site moves',
+          title: 'Money is in pounds',
+          site: 'Ten sterling figures — £19,240 MRR, £6,180 payroll, £69 plans.',
+          where: 'studio.html',
+          app: 'Every currency default in the app is AED, and the owner screens print "AED" beside the rate.',
+          source: 'gymRecord.money(), financials.tsx',
+          fix: 'Use AED, or drop the symbol and show the shape.',
+        },
+        {
+          n: '02', tint: RED, verdict: 'Site moves',
+          title: 'Two status words are invented',
+          site: '"drifting" for a client, "under-loaded" for a trainer.',
+          where: 'trainer.html, studio.html',
+          app: 'Clients are On track / Watch / At risk — the site got two of three right and invented the middle one. Trainers are Healthy / Watch / Not delivering / Idle; "under-loaded" is in neither.',
+          source: 'analytics.tsx:190, RISK_LABEL',
+          fix: 'Say Watch and Idle. The app also runs two status vocabularies of its own — worth settling.',
+        },
+        {
+          n: '03', tint: RED, verdict: 'Site moves',
+          title: 'Effort is shown as numeric RPE',
+          site: 'Sets tagged RPE 6, RPE 7.5, RPE 9, RPE 9.5 — a 1–10 scale.',
+          where: 'client.html',
+          app: 'Perceived effort is recorded as three values: easy, ok, hard.',
+          source: 'WorkoutEntry.feel',
+          fix: 'Draw the three-value scale, or add numeric RPE to the app first.',
+        },
+        {
+          n: '04', tint: TEAL, verdict: 'App moves',
+          title: '"Fill" means two things',
+          site: 'Class fill 78%, quoting the library definition.',
+          where: 'index.html, studio.html',
+          app: 'The class screen labels attended/booked as "Avg fill" — the library calls that show rate.',
+          source: 'class-analytics.tsx vs gymSchedule.ts',
+          fix: 'Fix the app label. Two screens can print different numbers under one word.',
+        },
+        {
+          n: '05', tint: AMBER, verdict: 'Site moves for now',
+          title: 'A 12-week attendance chart',
+          site: 'A twelve-bar attendance-vs-capacity series on two pages.',
+          where: 'index.html, studio.html',
+          app: 'Class analytics offers this week / this month / season — 7, 30 and 90 days. No weekly series exists.',
+          source: 'RANGES in class-analytics.tsx',
+          fix: 'Draw the ranges that exist, or build the series and keep the chart.',
+        },
+        {
+          n: '06', tint: AMBER, verdict: 'App moves',
+          title: 'MRR has two sources',
+          site: 'Presented as a figure Studio derives for you.',
+          where: 'studio.html',
+          app: 'The financials screen asks the owner to type MRR in; the library separately derives it from priced memberships.',
+          source: 'financials.tsx vs gymRecord.summarise',
+          fix: 'Converge on the derived figure; keep typing it in as a fallback only.',
+        },
+      ],
+    };
+  }
+}
+</script>
+</body>
+</html>

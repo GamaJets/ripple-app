@@ -1,0 +1,168 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+  <style>
+    body { margin: 0; background: #0a1211; color: #e9f2f0;
+           font-family: 'Inter Tight', -apple-system, system-ui, sans-serif;
+           font-size: 17px; line-height: 1.6; -webkit-font-smoothing: antialiased; }
+    a { color: #16b8a6; text-decoration: none; }
+    a:hover { color: #3fd3c2; }
+    .mono { font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-variant-numeric: tabular-nums; }
+  </style>
+</helmet>
+
+<div style="padding: 56px 56px 64px; display: flex; flex-direction: column; gap: 40px;">
+
+  <div>
+    <div style="display: flex; align-items: center; gap: 10px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; font-weight: 500; letter-spacing: 0.16em; text-transform: uppercase; color: #67807b; margin-bottom: 18px;">
+      <span style="width: 22px; height: 1px; background: #f0c04e;"></span>
+      Finding 05 · the charts
+    </div>
+    <h1 style="margin: 0; font-family: 'Instrument Serif', Georgia, serif; font-weight: 400; font-size: 44px; line-height: 1.05; letter-spacing: -0.015em;">
+      The site draws a chart<br>the app has never had.
+    </h1>
+    <p style="margin: 18px 0 0; font-size: 17px; line-height: 1.55; color: #a6bcb7; max-width: 76ch;">
+      Twelve weekly bars appear on the home page and again on the Studio page. The owner's class
+      screen offers three fixed windows and no weekly series at all.
+    </p>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 14px;">
+
+    <!-- the site's invented chart -->
+    <div style="border: 1px solid rgba(239,128,128,0.35); border-radius: 13px; background: #0f1c1a; overflow: hidden;">
+      <div style="padding: 11px 15px; border-bottom: 1px solid rgba(233,242,240,0.10); background: #081210; display: flex; align-items: center; justify-content: space-between; gap: 10px;">
+        <span class="mono" style="font-size: 11.5px; color: #67807b; letter-spacing: .06em;">index.html &middot; studio.html</span>
+        <span class="mono" style="font-size: 11px; letter-spacing: .13em; text-transform: uppercase; color: #ef8080;">does not exist</span>
+      </div>
+      <div style="padding: 20px;">
+        <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px;">
+          <span style="font-size: 13.5px; font-weight: 600; color: #a6bcb7;">Attendance vs capacity, 12 weeks</span>
+        </div>
+        <div style="display: flex; align-items: flex-end; gap: 7px; height: 110px; padding: 4px 0;">
+          <sc-for list="{{fakeBars}}" as="b" hint-placeholder-count="12">
+            <div style="{{b.style}}"></div>
+          </sc-for>
+        </div>
+        <div style="display: flex; justify-content: space-between; margin-top: 9px;">
+          <span class="mono" style="font-size: 10.5px; color: #67807b;">12 wks ago</span>
+          <span class="mono" style="font-size: 10.5px; color: #67807b;">this week</span>
+        </div>
+      </div>
+      <div style="padding: 14px 16px; border-top: 1px solid rgba(233,242,240,0.10);">
+        <p style="margin: 0; font-size: 13.5px; line-height: 1.5; color: #67807b;">
+          Nothing in the app produces a per-week attendance series. This shape was drawn for the
+          page, not lifted from a screen.
+        </p>
+      </div>
+    </div>
+
+    <!-- what the app actually offers -->
+    <div style="border: 1px solid rgba(22,184,166,0.35); border-radius: 13px; background: #0f1c1a; overflow: hidden;">
+      <div style="padding: 11px 15px; border-bottom: 1px solid rgba(233,242,240,0.10); background: #081210; display: flex; align-items: center; justify-content: space-between; gap: 10px;">
+        <span class="mono" style="font-size: 11.5px; color: #67807b; letter-spacing: .06em;">class-analytics.tsx</span>
+        <span class="mono" style="font-size: 11px; letter-spacing: .13em; text-transform: uppercase; color: #16b8a6;">shipped</span>
+      </div>
+      <div style="padding: 20px;">
+        <div style="display: flex; gap: 0; border: 1px solid rgba(233,242,240,0.10); border-radius: 9px; overflow: hidden; margin-bottom: 18px;">
+          <sc-for list="{{ranges}}" as="r" hint-placeholder-count="3">
+            <div style="{{r.style}}">{{r.label}}</div>
+          </sc-for>
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: rgba(233,242,240,0.10); border: 1px solid rgba(233,242,240,0.10); border-radius: 9px; overflow: hidden;">
+          <sc-for list="{{kpis}}" as="k" hint-placeholder-count="3">
+            <div style="background: #0f1c1a; padding: 14px 15px;">
+              <span class="mono" style="display: block; font-size: 10.5px; letter-spacing: .13em; text-transform: uppercase; color: #67807b;">{{k.k}}</span>
+              <span class="mono" style="display: block; font-size: 24px; letter-spacing: -0.02em; margin-top: 5px;">{{k.v}}</span>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+      <div style="padding: 14px 16px; border-top: 1px solid rgba(233,242,240,0.10);">
+        <p style="margin: 0; font-size: 13.5px; line-height: 1.5; color: #67807b;">
+          Three windows &mdash; 7, 30 and 90 days &mdash; with totals per window. No trend line,
+          because no per-week history is stored.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 14px;">
+    <sc-for list="{{routes}}" as="r" hint-placeholder-count="2">
+      <div style="border: 1px solid rgba(233,242,240,0.10); border-left: 3px solid {{r.tint}}; border-radius: 12px; background: #0f1c1a; padding: 20px 22px;">
+        <span class="mono" style="display: block; font-size: 11px; letter-spacing: .13em; text-transform: uppercase; color: {{r.tint}};">{{r.kicker}}</span>
+        <h3 style="margin: 11px 0 8px; font-size: 18px; font-weight: 600; letter-spacing: -0.02em;">{{r.title}}</h3>
+        <p style="margin: 0 0 12px; font-size: 14.5px; line-height: 1.55; color: #a6bcb7;">{{r.body}}</p>
+        <span class="mono" style="font-size: 12px; color: #67807b;">{{r.cost}}</span>
+      </div>
+    </sc-for>
+  </div>
+
+  <div style="display: flex; align-items: flex-start; gap: 12px; padding: 18px 20px; border: 1px solid rgba(233,242,240,0.10); border-left: 3px solid #16b8a6; border-radius: 12px; background: #0f1c1a;">
+    <p style="margin: 0; font-size: 14.5px; line-height: 1.55; color: #a6bcb7; max-width: 96ch;">
+      <strong style="color: #e9f2f0;">One chart on the site does match.</strong> The client page&rsquo;s
+      training graph has a real counterpart &mdash; the app charts weekly volume over ten weeks
+      <span class="mono" style="font-size: 13px;">(trends.tsx)</span>. The site draws a different
+      metric over a different window, so the window and the axis label are what need aligning there,
+      not the whole chart.
+    </p>
+  </div>
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{}'>
+class Component extends DCLogic {
+  renderVals() {
+    const heights = [52, 61, 57, 68, 64, 74, 70, 81, 77, 88, 84, 41];
+    const fakeBars = heights.map((h, i) => ({
+      style:
+        'flex: 1; border-radius: 3px 3px 0 0; min-height: 3px; ' +
+        `height: ${h}%; background: ${i === heights.length - 1 ? 'rgba(233,242,240,0.10)' : '#ef8080'}; ` +
+        `opacity: ${i === heights.length - 1 ? 1 : 0.55};`,
+    }));
+
+    const seg = (on) =>
+      'flex: 1; text-align: center; padding: 9px 10px; font-size: 13px; ' +
+      (on
+        ? 'background: rgba(22,184,166,0.14); color: #16b8a6; font-weight: 600;'
+        : 'color: #67807b;');
+
+    return {
+      fakeBars,
+      ranges: [
+        { label: 'This week',  style: seg(true) },
+        { label: 'This month', style: seg(false) },
+        { label: 'Season',     style: seg(false) },
+      ],
+      kpis: [
+        { k: 'Classes', v: '18' },
+        { k: 'Check-ins', v: '164' },
+        { k: 'Avg fill', v: '80%' },
+      ],
+      routes: [
+        {
+          kicker: 'Route A', tint: '#16b8a6',
+          title: 'Draw what exists',
+          body: 'Replace the twelve bars with the three windows the owner actually sees, and the site stops promising a trend it cannot show.',
+          cost: 'Site only · an afternoon',
+        },
+        {
+          kicker: 'Route B', tint: '#f0c04e',
+          title: 'Build the series, keep the chart',
+          body: 'Store weekly attendance-against-capacity and the chart becomes true. It is also the input Phase 5 forecasting needs, so it is not throwaway work.',
+          cost: 'App + schema · larger, but on the roadmap anyway',
+        },
+      ],
+    };
+  }
+}
+</script>
+</body>
+</html>

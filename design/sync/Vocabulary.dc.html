@@ -1,0 +1,177 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+  <style>
+    body { margin: 0; background: #0a1211; color: #e9f2f0;
+           font-family: 'Inter Tight', -apple-system, system-ui, sans-serif;
+           font-size: 17px; line-height: 1.6; -webkit-font-smoothing: antialiased; }
+    a { color: #16b8a6; text-decoration: none; }
+    a:hover { color: #3fd3c2; }
+    .mono { font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-variant-numeric: tabular-nums; }
+  </style>
+</helmet>
+
+<div style="padding: 56px 56px 64px; display: flex; flex-direction: column; gap: 44px;">
+
+  <div>
+    <div style="display: flex; align-items: center; gap: 10px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; font-weight: 500; letter-spacing: 0.16em; text-transform: uppercase; color: #67807b; margin-bottom: 18px;">
+      <span style="width: 22px; height: 1px; background: #ef8080;"></span>
+      Findings 02 and 03 · the words themselves
+    </div>
+    <h1 style="margin: 0; font-family: 'Instrument Serif', Georgia, serif; font-weight: 400; font-size: 44px; line-height: 1.05; letter-spacing: -0.015em;">
+      Two invented words, and two<br>vocabularies inside the app itself.
+    </h1>
+  </div>
+
+  <!-- trainer / client status -->
+  <div>
+    <h2 style="margin: 0 0 4px; font-size: 15px; font-weight: 600;">Client status &mdash; the middle word</h2>
+    <p style="margin: 0 0 18px; font-size: 14.5px; color: #67807b;">
+      The site gets two of three right. &ldquo;Drifting&rdquo; is not a word the app uses.
+    </p>
+
+    <div style="display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 14px;">
+      <sc-for list="{{statusCols}}" as="col" hint-placeholder-count="3">
+        <div style="border: 1px solid {{col.border}}; border-radius: 13px; background: #0f1c1a; overflow: hidden;">
+          <div style="padding: 12px 16px; border-bottom: 1px solid rgba(233,242,240,0.10); background: #081210; display: flex; align-items: center; justify-content: space-between; gap: 10px;">
+            <span class="mono" style="font-size: 11px; letter-spacing: .13em; text-transform: uppercase; color: {{col.tint}};">{{col.kicker}}</span>
+            <span class="mono" style="font-size: 11px; color: #67807b;">{{col.note}}</span>
+          </div>
+          <div style="display: flex; flex-direction: column;">
+            <sc-for list="{{col.rows}}" as="r" hint-placeholder-count="4">
+              <div style="display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center; padding: 12px 16px; border-top: 1px solid rgba(233,242,240,0.06);">
+                <span style="font-size: 14.5px; color: #a6bcb7;">{{r.who}}</span>
+                <span style="{{r.pill}}">{{r.label}}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+
+  <!-- perceived effort -->
+  <div>
+    <h2 style="margin: 0 0 4px; font-size: 15px; font-weight: 600;">Perceived effort</h2>
+    <p style="margin: 0 0 18px; font-size: 14.5px; color: #67807b;">
+      The site promises a 1&ndash;10 scale. The app records three values.
+    </p>
+
+    <div style="display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 14px;">
+      <sc-for list="{{effortCols}}" as="col" hint-placeholder-count="3">
+        <div style="border: 1px solid {{col.border}}; border-radius: 13px; background: #0f1c1a; overflow: hidden;">
+          <div style="padding: 12px 16px; border-bottom: 1px solid rgba(233,242,240,0.10); background: #081210; display: flex; align-items: center; justify-content: space-between; gap: 10px;">
+            <span class="mono" style="font-size: 11px; letter-spacing: .13em; text-transform: uppercase; color: {{col.tint}};">{{col.kicker}}</span>
+            <span class="mono" style="font-size: 11px; color: #67807b;">{{col.note}}</span>
+          </div>
+          <div style="display: flex; flex-direction: column;">
+            <sc-for list="{{col.rows}}" as="r" hint-placeholder-count="4">
+              <div style="display: grid; grid-template-columns: 1fr auto auto; gap: 12px; align-items: center; padding: 12px 16px; border-top: 1px solid rgba(233,242,240,0.06);">
+                <span style="font-size: 14.5px; color: #a6bcb7;">{{r.who}}</span>
+                <span class="mono" style="font-size: 13.5px; color: #a6bcb7;">{{r.load}}</span>
+                <span style="{{r.pill}}">{{r.label}}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+
+  <div style="display: flex; align-items: flex-start; gap: 12px; padding: 18px 20px; border: 1px solid rgba(233,242,240,0.10); border-left: 3px solid #16b8a6; border-radius: 12px; background: #0f1c1a;">
+    <p style="margin: 0; font-size: 14.5px; line-height: 1.55; color: #a6bcb7; max-width: 96ch;">
+      <strong style="color: #e9f2f0;">The site moves, but the app has its own split to settle.</strong>
+      A client is <span class="mono" style="font-size: 13px;">On track / Watch / At risk</span>; a
+      trainer is <span class="mono" style="font-size: 13px;">Healthy / Watch / Not delivering / Idle</span>.
+      Two scales sharing one middle word, inside one product — and the site&rsquo;s
+      &ldquo;under-loaded&rdquo; belongs to neither. Worth picking one scale before the site copies
+      either. <span class="mono" style="font-size: 13px;">Not delivering</span> is also a hard thing to
+      print beside a person&rsquo;s name on their employer&rsquo;s dashboard.
+    </p>
+  </div>
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{}'>
+class Component extends DCLogic {
+  renderVals() {
+    const RED = '#ef8080', TEAL = '#16b8a6', AMBER = '#f0c04e', INK3 = '#67807b';
+    const pill = (color) =>
+      `font-size: 11.5px; padding: 3px 9px; border-radius: 20px; white-space: nowrap; ` +
+      `border: 1px solid ${color}33; color: ${color};`;
+
+    return {
+      statusCols: [
+        {
+          kicker: 'On the site today', note: '1 of 3 invented', tint: RED,
+          border: 'rgba(239,128,128,0.35)',
+          rows: [
+            { who: 'Elena Marsh',  label: 'on track', pill: pill('#7ddba7') },
+            { who: 'Rachel Dunne', label: 'drifting', pill: pill(RED) },
+            { who: 'Sam Iqbal',    label: 'at risk',  pill: pill(AMBER) },
+          ],
+        },
+        {
+          kicker: 'In the app today', note: 'analytics.tsx', tint: TEAL,
+          border: 'rgba(233,242,240,0.10)',
+          rows: [
+            { who: 'Elena Marsh',  label: 'On track', pill: pill('#7ddba7') },
+            { who: 'Rachel Dunne', label: 'Watch',    pill: pill(AMBER) },
+            { who: 'Sam Iqbal',    label: 'At risk',  pill: pill(RED) },
+          ],
+        },
+        {
+          kicker: 'Synced', note: 'one word changes', tint: TEAL,
+          border: 'rgba(22,184,166,0.35)',
+          rows: [
+            { who: 'Elena Marsh',  label: 'On track', pill: pill('#7ddba7') },
+            { who: 'Rachel Dunne', label: 'Watch',    pill: pill(AMBER) },
+            { who: 'Sam Iqbal',    label: 'At risk',  pill: pill(RED) },
+          ],
+        },
+      ],
+      effortCols: [
+        {
+          kicker: 'On the site today', note: 'RPE 1–10', tint: RED,
+          border: 'rgba(239,128,128,0.35)',
+          rows: [
+            { who: 'Set 1', load: '60 kg × 10',   label: 'RPE 6',   pill: pill(INK3) },
+            { who: 'Set 2', load: '80 kg × 8',    label: 'RPE 7.5', pill: pill(INK3) },
+            { who: 'Set 3', load: '90 kg × 5',    label: 'RPE 9',   pill: pill(AMBER) },
+            { who: 'Set 4', load: '92.5 kg × 3',  label: 'RPE 9.5', pill: pill(RED) },
+          ],
+        },
+        {
+          kicker: 'In the app today', note: 'three values', tint: TEAL,
+          border: 'rgba(233,242,240,0.10)',
+          rows: [
+            { who: 'Set 1', load: '60 kg × 10',  label: 'easy', pill: pill('#7ddba7') },
+            { who: 'Set 2', load: '80 kg × 8',   label: 'ok',   pill: pill(INK3) },
+            { who: 'Set 3', load: '90 kg × 5',   label: 'hard', pill: pill(AMBER) },
+            { who: 'Set 4', load: '92.5 kg × 3', label: 'hard', pill: pill(AMBER) },
+          ],
+        },
+        {
+          kicker: 'Synced', note: 'site draws what exists', tint: TEAL,
+          border: 'rgba(22,184,166,0.35)',
+          rows: [
+            { who: 'Set 1', load: '60 kg × 10',  label: 'easy', pill: pill('#7ddba7') },
+            { who: 'Set 2', load: '80 kg × 8',   label: 'ok',   pill: pill(INK3) },
+            { who: 'Set 3', load: '90 kg × 5',   label: 'hard', pill: pill(AMBER) },
+            { who: 'Set 4', load: '92.5 kg × 3', label: 'hard', pill: pill(AMBER) },
+          ],
+        },
+      ],
+    };
+  }
+}
+</script>
+</body>
+</html>
