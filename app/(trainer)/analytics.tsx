@@ -17,6 +17,7 @@ import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Card, Cta, Ghost, Sp
 import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 import { useCoachProfile } from '../../src/ui/coachProfile';
 import { atRiskClient } from '../../src/lib/trainerMock';
+import { STATUS_LABEL } from '../../src/lib/status';
 import { useRoster } from '../../src/ui/roster';
 import { DistBar } from '../../src/ui/charts';
 import { askCoach } from '../../src/lib/coach';
@@ -180,12 +181,12 @@ export default function TrainerAnalytics() {
         <Section>
           <SectionHead title="Roster health" note={`${avgAdh}% avg adherence`} onPress={() => router.push('/(trainer)/leaderboard')} />
           <DistBar segments={[
-            { label: 'On track', value: onTrack, color: t.brand },
-            { label: 'Watch', value: watch, color: t.warn },
-            { label: 'At risk', value: riskCount, color: t.crit },
+            { label: STATUS_LABEL.on_track, value: onTrack, color: t.brand },
+            { label: STATUS_LABEL.watch, value: watch, color: t.warn },
+            { label: STATUS_LABEL.at_risk, value: riskCount, color: t.crit },
           ]} />
           <View style={{ flexDirection: 'row', gap: sp.lg, marginTop: sp.md }}>
-            {([['On track', onTrack, t.brand], ['Watch', watch, t.warn], ['At risk', riskCount, t.crit]] as const).map(([l, v, col]) => (
+            {([[STATUS_LABEL.on_track, onTrack, t.brand], [STATUS_LABEL.watch, watch, t.warn], [STATUS_LABEL.at_risk, riskCount, t.crit]] as const).map(([l, v, col]) => (
               <View key={l} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                 <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: col }} />
                 <Text style={{ ...ty.caption, color: t.ink2 }}>{l} {v}</Text>

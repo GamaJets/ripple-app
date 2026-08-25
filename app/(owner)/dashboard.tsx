@@ -17,6 +17,7 @@ import { sp, layout, hairline, type as ty, numeric, value } from '../../src/them
 import { useTenant } from '../../src/ui/tenant';
 import { usePlatformTrainers } from '../../src/ui/trainers';
 import { gymRollup, trainerHealth, type TrainerLike } from '../../src/lib/ownerAnalytics';
+import { riskLabel } from '../../src/lib/status';
 import { HealthPill } from '../../src/ui/charts';
 import { useSessionsHistory } from '../../src/ui/useMrrHistory';
 import { cohorts } from '../../src/lib/ownerAnalytics';
@@ -24,7 +25,8 @@ import { ownerReportDoc, shareDoc } from '../../src/lib/exportShare';
 import { fetchFailedInvoices, money, type Invoice } from '../../src/lib/billing';
 import { Linking } from 'react-native';
 
-const RISK_LABEL: Record<string, string> = { high: 'Not delivering', watch: 'Watch', ok: 'Healthy', idle: 'Idle' };
+// Labels come from the one settled scale now — see src/lib/status.ts for why
+// "Not delivering" is gone and what "Idle" does and does not mean.
 
 export default function OwnerOverview() {
   const t = useTheme(); const router = useRouter();
@@ -186,7 +188,7 @@ export default function OwnerOverview() {
                 <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{tr.name}</Text>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
                   <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: h.risk === 'high' ? t.crit : h.risk === 'watch' ? t.warn : t.brand }} />
-                  <Text style={{ ...ty.caption, color: t.ink3 }}>{RISK_LABEL[h.risk]} · {tr.clients} client{tr.clients === 1 ? '' : 's'} · {tr.sessions30} session{tr.sessions30 === 1 ? '' : 's'}</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3 }}>{riskLabel(h.risk)} · {tr.clients} client{tr.clients === 1 ? '' : 's'} · {tr.sessions30} session{tr.sessions30 === 1 ? '' : 's'}</Text>
                 </View>
               </View>
               <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{tr.sessions30} in 30d</Text>

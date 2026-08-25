@@ -7,6 +7,7 @@ import { rowToEntry, entryToRow, PERSISTED_FIELDS } from './workoutRow';
 import { summarise, money, type MembershipPlan, type Membership, type GymPayment } from './gymRecord';
 import { weeklyOccurrences, summariseAttendance, weeklyAttendance, pct, type GymClass, type NewClass } from './gymSchedule';
 import { summariseClassRows, type ClassSummaryRow } from './classRates';
+import { STATUS_LABEL, STATUS_RANK, statusFromRisk, riskLabel } from './status';
 import { buildIcs } from './ics';
 import { serviceState, nextServiceDue, usableUnits, outOfServiceUnits, capacityFor, summariseRegister, needsAttention, type Equipment } from './gymEquipment';
 import { parseCsv, parseSheet, sniffDelimiter, mapColumns } from './csv';
@@ -760,6 +761,26 @@ ok(summariseClassRows([cr(20, 0, 0)]).show === null, 'nobody booked means no sho
 ok(summariseClassRows([cr(20, 0, 0)]).fill === 0, 'but an empty class has a real, measured 0% fill');
 const none = summariseClassRows([]);
 ok(none.classes === 0 && none.fill === null && none.show === null, 'no classes yields no rates at all');
+}
+
+
+// ── one status vocabulary ──
+{
+ok(riskLabel('high') === 'At risk', '"Not delivering" is gone from the product');
+ok(riskLabel('ok') === 'On track', 'trainer "Healthy" and client "On track" are now the same word');
+ok(riskLabel('watch') === 'Watch', 'the shared middle word survives');
+ok(riskLabel('idle') === 'Idle', 'idle is its own state');
+ok(riskLabel('something-new') === 'Idle', 'an unknown risk key reads as no assessment, not as a verdict');
+ok(statusFromRisk('high') === 'at_risk' && statusFromRisk('') === 'idle', 'mapping is total');
+
+// Idle sits outside the ranking: no activity is not the worst news, it is no news.
+ok(STATUS_RANK.at_risk < STATUS_RANK.watch, 'at risk sorts above watch');
+ok(STATUS_RANK.watch < STATUS_RANK.on_track, 'watch sorts above on track');
+ok(STATUS_RANK.idle > STATUS_RANK.on_track, 'idle sorts last so it cannot bury rows needing action');
+
+const labels = Object.values(STATUS_LABEL);
+ok(new Set(labels).size === labels.length, 'no two levels share a label');
+ok(!labels.some((l) => /deliver/i.test(l)), 'nothing in the scale judges the person');
 }
 
 if (errors.length) { console.log('COVERAGE FAILURES:\n' + errors.join('\n')); process.exit(1); }
