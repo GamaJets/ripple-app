@@ -25,6 +25,9 @@
 // Both providers are still mounted (they are shared context) but nothing on this
 // screen renders one person's data as another's.
 import { useEffect, useState } from 'react';
+import { fetchAwaitingOutcome } from '../../src/lib/gymSessions';
+import { useTenant } from '../../src/ui/tenant';
+import { reportError } from '../../src/lib/reportError';
 import { View, Text, Pressable, ScrollView, Modal, TextInput, Alert, KeyboardAvoidingView, Platform, ActivityIndicator, type ViewStyle, type TextStyle } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -129,6 +132,47 @@ const SHORTCUTS: [IconName, string, string][] = [
   ['trophy', 'Leaderboard', '/(trainer)/leaderboard'],
   ['message', 'Feedback', '/(trainer)/feedback'],
 ];
+
+/**
+ * Sessions that have happened but nobody has said what happened.
+ *
+ * Renders NOTHING when the queue is empty — a dashboard that permanently
+ * carries an "all clear" card teaches people to stop reading it. It appears
+ * only when there is something to do, which is also exactly when payroll is
+ * blocked, because payrollTotal() refuses to guess while any session is
+ * unmarked.
+ */
+function UnmarkedSessions() {
+  const t = useTheme();
+  const router = useRouter();
+  const { tenant } = useTenant();
+  const [n, setN] = useState(0);
+
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      if (!tenant?.id) return;
+      try {
+        const since = new Date(Date.now() - 90 * 86400_000).toISOString();
+        const rows = await fetchAwaitingOutcome(supabase, tenant.id, since);
+        if (live) setN(rows.length);
+      } catch (e) { reportError('dashboard.awaiting', e); }
+    })();
+    return () => { live = false; };
+  }, [tenant?.id]);
+
+  if (n === 0) return null;
+  return (
+    <Card onPress={() => router.push('/(trainer)/sessions')} tone={t.s3} style={{ marginBottom: sp.md }}>
+      <Text style={{ ...ty.body, fontWeight: '600', color: t.ink }}>
+        {n} session{n === 1 ? '' : 's'} need an outcome
+      </Text>
+      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
+        Payroll cannot be worked out until {n === 1 ? 'it is' : 'they are'} marked. One tap each.
+      </Text>
+    </Card>
+  );
+}
 
 export default function TrainerClients() {
   const t = useTheme();
@@ -310,6 +354,7 @@ export default function TrainerClients() {
         {/* Clients who found this coach in the public directory and asked to
             be coached. Renders nothing at all when there are none. */}
         <CoachRequests />
+        <UnmarkedSessions />
 
         {/* ── interrupts: things that need a decision now ─────────────────── */}
         <View style={{ marginTop: sp.lg }}>
