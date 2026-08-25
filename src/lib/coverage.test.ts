@@ -6,6 +6,7 @@ import type { WorkoutEntry } from './mockData';
 import { rowToEntry, entryToRow, PERSISTED_FIELDS } from './workoutRow';
 import { summarise, money, type MembershipPlan, type Membership, type GymPayment } from './gymRecord';
 import { weeklyOccurrences, summariseAttendance, weeklyAttendance, pct, type GymClass, type NewClass } from './gymSchedule';
+import { summariseClassRows, type ClassSummaryRow } from './classRates';
 import { buildIcs } from './ics';
 import { serviceState, nextServiceDue, usableUnits, outOfServiceUnits, capacityFor, summariseRegister, needsAttention, type Equipment } from './gymEquipment';
 import { parseCsv, parseSheet, sniffDelimiter, mapColumns } from './csv';
@@ -733,6 +734,32 @@ ok(two[0].classes === 2 && two[0].capacity === 30 && two[0].booked === 20 && two
 
 ok(weeklyAttendance([gc('nonsense', 20, 5, 5)], 1, NOW)[0].classes === 0, 'an unparseable date is skipped, not counted');
 ok(weeklyAttendance([], 12, NOW).length === 12, 'a gym with no classes still yields a full, empty series');
+}
+
+
+// ── class rates: fill and show are different questions ──
+{
+const cr = (capacity: number, booked: number, attended: number): ClassSummaryRow => ({
+  classId: 'c' + capacity + booked + attended, title: 'HIIT', kind: 'hiit', branch: 'Main',
+  trainerId: 't1', trainerName: 'Nadia', startsAt: '2026-08-24T07:00:00Z', capacity, booked, attended,
+});
+
+// The exact case that read 71% on one screen and 80% on another.
+const one = summariseClassRows([cr(14, 10, 8)]);
+ok(Math.abs((one.fill ?? 0) - 10 / 14) < 1e-9, 'fill is booked/capacity');
+ok(Math.abs((one.show ?? 0) - 8 / 10) < 1e-9, 'show is attended/booked');
+ok(one.fill !== one.show, 'fill and show are not interchangeable');
+
+const many = summariseClassRows([cr(20, 15, 12), cr(10, 5, 5)]);
+ok(many.classes === 2 && many.capacity === 30 && many.booked === 20 && many.attended === 17, 'rows sum');
+ok(Math.abs((many.fill ?? 0) - 20 / 30) < 1e-9, 'fill sums before dividing, not an average of averages');
+
+ok(summariseClassRows([cr(0, 5, 4)]).fill === null, 'no capacity recorded means no fill rate');
+ok(summariseClassRows([cr(0, 5, 4)]).show !== null, 'but a show rate still exists');
+ok(summariseClassRows([cr(20, 0, 0)]).show === null, 'nobody booked means no show rate, not 0%');
+ok(summariseClassRows([cr(20, 0, 0)]).fill === 0, 'but an empty class has a real, measured 0% fill');
+const none = summariseClassRows([]);
+ok(none.classes === 0 && none.fill === null && none.show === null, 'no classes yields no rates at all');
 }
 
 if (errors.length) { console.log('COVERAGE FAILURES:\n' + errors.join('\n')); process.exit(1); }

@@ -29,11 +29,10 @@ export async function setAttendance(classId: string, userId: string, present: bo
 }
 
 // ── Owner analytics + payroll ──────────────────────────────────────────────
-export interface ClassSummaryRow {
-  classId: string; title: string; kind: string; branch: string;
-  trainerId: string; trainerName: string; startsAt: string; booked: number; attended: number;
-}
-
+// The row shape and the rate maths live in classRates.ts, which imports
+// nothing — see the note at the top of that file.
+export { summariseClassRows, type ClassSummaryRow, type ClassRates } from './classRates';
+import type { ClassSummaryRow } from './classRates';
 
 /** Class attendance over a date range for payroll + analytics (owner-wide). */
 export async function classSummary(fromISO: string, toISO: string): Promise<ClassSummaryRow[]> {
@@ -43,7 +42,8 @@ export async function classSummary(fromISO: string, toISO: string): Promise<Clas
       if (Array.isArray(data) && data.length) return data.map((r: any) => ({
         classId: String(r.class_id), title: String(r.title || 'Class'), kind: String(r.kind || ''),
         branch: String(r.branch || '—'), trainerId: String(r.trainer_id || ''), trainerName: String(r.trainer_name || 'Trainer'),
-        startsAt: String(r.starts_at || ''), booked: Number(r.booked || 0), attended: Number(r.attended || 0),
+        startsAt: String(r.starts_at || ''), capacity: Number(r.capacity || 0),
+          booked: Number(r.booked || 0), attended: Number(r.attended || 0),
       }));
     } catch { /* fall back to demo */ }
   }

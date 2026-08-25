@@ -19,7 +19,7 @@ import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { Rule, Section, SectionHead, Hero, KpiRow, Ghost } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
-import { classSummary, type ClassSummaryRow } from '../../src/lib/classAttendance';
+import { classSummary, summariseClassRows, type ClassSummaryRow } from '../../src/lib/classAttendance';
 
 type Range = 'week' | 'month' | 'season';
 const RANGES: [Range, string, number][] = [['week', 'This week', 7], ['month', 'This month', 30], ['season', 'Season', 90]];
@@ -68,10 +68,16 @@ export default function OwnerClassAnalytics() {
 
   const rate$ = parseFloat(rate) || 0;
   const totals = useMemo(() => {
-    const classes = rows.length;
-    const attended = rows.reduce((a, r) => a + r.attended, 0);
-    const booked = rows.reduce((a, r) => a + r.booked, 0);
-    return { classes, attended, booked, show: booked ? Math.round((attended / booked) * 100) : 0, payroll: Math.round(attended * rate$) };
+    // Both rates come from one helper, so this screen and the timetable can no
+    // longer disagree about what "fill" means. Each stays null when its
+    // denominator was never recorded, and renders as — rather than 0%.
+    const r = summariseClassRows(rows);
+    return {
+      ...r,
+      showPct: r.show == null ? null : Math.round(r.show * 100),
+      fillPct: r.fill == null ? null : Math.round(r.fill * 100),
+      payroll: Math.round(r.attended * rate$),
+    };
   }, [rows, rate$]);
 
   const byGroup = (key: (r: ClassSummaryRow) => string) => {
@@ -133,8 +139,8 @@ export default function OwnerClassAnalytics() {
             label="Trainer payroll (AED)"
             figure={rate$ > 0 ? totals.payroll.toLocaleString() : '—'}
             note={rate$ > 0
-              ? `${totals.attended} check-ins × AED ${rate$} · ${totals.classes} classes · ${totals.show}% avg show`
-              : `${totals.attended} check-ins · ${totals.classes} classes · ${totals.show}% avg show · enter your per-check-in rate below`}
+              ? `${totals.attended} check-ins × AED ${rate$} · ${totals.classes} classes · ${totals.showPct ?? '—'}% turned up`
+              : `${totals.attended} check-ins · ${totals.classes} classes · ${totals.showPct ?? '—'}% turned up · enter your per-check-in rate below`}
           />
 
           <Rule />
@@ -144,7 +150,10 @@ export default function OwnerClassAnalytics() {
             <KpiRow items={[
               { label: 'Classes', value: String(totals.classes) },
               { label: 'Check-ins', value: String(totals.attended) },
-              { label: 'Avg show', value: String(totals.show), unit: '%' },
+              // Fill is booked/capacity; show is attended/booked. Both are on
+              // screen now, so neither has to stand in for the other.
+              { label: 'Avg fill', value: totals.fillPct == null ? '—' : String(totals.fillPct), unit: totals.fillPct == null ? undefined : '%' },
+              { label: 'Avg show', value: totals.showPct == null ? '—' : String(totals.showPct), unit: totals.showPct == null ? undefined : '%' },
             ]} />
           </Section>
 
