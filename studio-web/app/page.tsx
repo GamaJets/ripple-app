@@ -13,6 +13,9 @@ import { DataTable, type Column } from '@/components/DataTable';
 import { PasswordField } from '@/components/PasswordField';
 import { fetchGymTrainers, payrollBlocker, type GymTrainer } from '@lib/gymTrainers';
 import { gymRollup, trainerHealth, type GymRollup } from '@lib/ownerAnalytics';
+import { fetchMemberships, fetchPayments, fetchPlans, summarise, money, type Membership } from '@lib/gymRecord';
+import { fetchClasses, summariseAttendance, pct } from '@lib/gymSchedule';
+import { fetchVisits, summariseVisits } from '@lib/gymVisits';
 
 interface Gym { id: string; name: string | null; sessionFee: number | null }
 
@@ -21,6 +24,19 @@ export default function Overview() {
   const [gym, setGym] = useState<Gym | null>(null);
   const [trainers, setTrainers] = useState<GymTrainer[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // The rest of the business, so the departments can be seen against each
+  // other rather than one screen at a time. Each is loaded independently and
+  // allowed to fail on its own: a door log that will not read should not blank
+  // out the revenue figure beside it.
+  const [hub, setHub] = useState<{
+    revenueCents: number | null;
+    mrrCents: number | null;
+    activeMembers: number | null;
+    fillRate: number | null;
+    visitsToday: number | null;
+    inNow: number | null;
+  } | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -41,6 +57,41 @@ export default function Overview() {
       } catch (e: any) {
         if (live) { setError(e?.message ?? 'Could not read the roster.'); setTrainers([]); }
       }
+
+      // allSettled, not all: one failing read must not take the others with it.
+      // A department that cannot be read shows a dash; the rest still report.
+      const from30 = new Date(Date.now() - 30 * 86400_000).toISOString();
+      const dayStart = new Date(new Date().toISOString().slice(0, 10) + 'T00:00:00Z').toISOString();
+      const [mRes, pRes, plRes, cRes, vRes] = await Promise.allSettled([
+        fetchMemberships(supabase, who.tenantId),
+        fetchPayments(supabase, who.tenantId),
+        fetchPlans(supabase, who.tenantId),
+        fetchClasses(supabase, who.tenantId, from30, new Date().toISOString()),
+        fetchVisits(supabase, who.tenantId, { sinceIso: dayStart }),
+      ]);
+      if (!live) return;
+
+      const memberships = mRes.status === 'fulfilled' ? mRes.value : null;
+      const payments = pRes.status === 'fulfilled' ? pRes.value : null;
+      const plans = plRes.status === 'fulfilled' ? plRes.value : null;
+      const classes = cRes.status === 'fulfilled' ? cRes.value : null;
+      const visits = vRes.status === 'fulfilled' ? vRes.value : null;
+
+      const rec = (memberships && payments && plans) ? summarise(payments, memberships, plans) : null;
+      const att = classes ? summariseAttendance(classes) : null;
+      const door = visits ? summariseVisits(visits) : null;
+
+      // Every figure is null rather than 0 when the read failed or the gym has
+      // recorded nothing. summarise and summariseAttendance already refuse to
+      // invent a denominator; this must not undo that on the way to the screen.
+      setHub({
+        revenueCents: rec?.takenCents ?? null,
+        mrrCents: rec?.mrrCents ?? null,
+        activeMembers: rec ? rec.activeMembers : null,
+        fillRate: att?.fillRate ?? null,
+        visitsToday: door ? door.visits : null,
+        inNow: door ? door.inside : null,
+      });
     })();
     return () => { live = false; };
   }, []);
@@ -115,6 +166,35 @@ export default function Overview() {
 
       {error ? <Notice tone="crit">{error}</Notice> : null}
 
+
+      {/* The morning glance — the whole operation on one line, so departments
+          can be read against each other rather than one screen at a time.
+          Anything not recorded shows a dash and says what is missing; none of
+          these tiles is allowed to guess. */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(168px, 1fr))',
+          gap: 1,
+          background: 'var(--ring)',
+          border: '1px solid var(--ring)',
+          borderRadius: 8,
+          overflow: 'hidden',
+          margin: '20px 0 10px',
+        }}
+      >
+        <Kpi label="Taken · 30d" text={hub ? money(hub.revenueCents) : null}
+             note={hub && hub.revenueCents == null ? 'no payments recorded' : undefined} />
+        <Kpi label="Recurring / mo" text={hub ? money(hub.mrrCents) : null}
+             note={hub && hub.mrrCents == null ? 'no priced plan on an active membership' : undefined} />
+        <Kpi label="Active members" value={hub?.activeMembers ?? null} />
+        <Kpi label="Class fill" text={hub ? pct(hub.fillRate) : null}
+             note={hub && hub.fillRate == null ? 'no capacity recorded' : 'booked ÷ capacity'} />
+        <Kpi label="In the building" value={hub?.inNow ?? null}
+             note={hub?.visitsToday != null ? `${hub.visitsToday} through the door today` : undefined} />
+        <Kpi label="Cash position" text={null} note="connect accounting" />
+      </div>
+
       <div
         style={{
           display: 'grid',
@@ -161,8 +241,12 @@ export default function Overview() {
   );
 }
 
-function Kpi({ label, value, note }: { label: string; value?: number | null; note?: string }) {
-  const missing = value == null;
+function Kpi({ label, value, text, note }: {
+  label: string; value?: number | null; text?: string | null; note?: string;
+}) {
+  // `text` carries an already-formatted figure — money, a percentage. Null
+  // means the same thing it means for `value`: not recorded, render a dash.
+  const missing = text !== undefined ? text == null : value == null;
   return (
     <div style={{ background: 'var(--surface)', padding: '14px 16px' }}>
       <div className="micro">{label}</div>
@@ -170,7 +254,7 @@ function Kpi({ label, value, note }: { label: string; value?: number | null; not
         className="mono"
         style={{ fontSize: 25, marginTop: 5, color: missing ? 'var(--ink3)' : 'var(--ink)', letterSpacing: '-0.02em' }}
       >
-        {missing ? '—' : value.toLocaleString()}
+        {missing ? '—' : (text ?? value!.toLocaleString())}
       </div>
       {note ? <div style={{ fontSize: 11.5, color: 'var(--ink3)', marginTop: 3 }}>{note}</div> : null}
     </div>
