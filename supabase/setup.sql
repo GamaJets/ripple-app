@@ -2577,3 +2577,780 @@ create policy settlements_owner on public.payroll_settlements for all
 drop policy if exists settlements_trainer_read on public.payroll_settlements;
 create policy settlements_trainer_read on public.payroll_settlements for select
   using (trainer_id = auth.uid());
+
+-- ▶ member-invites.sql
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- Gym → member invites. The hole this fills is a hard one:
+--
+--   memberships.member_id is `uuid not null references profiles(id)`
+--
+-- so a membership cannot exist before the person does. A gym owner opening the
+-- Studio member screen — or feeding last year's spreadsheet through the CSV
+-- importer — hits that wall on the very first row, because their members have
+-- names and email addresses, not Repple accounts. There has been no path from
+-- "person the gym knows about" to "profiles row". This is that path.
+--
+-- The shape is deliberately the same as 11-coach-invites.sql and
+-- 12-trainer-invites.sql: a pending row addressed to an email, readable by the
+-- person it names, redeemed by a security-definer function that does the
+-- cross-account writes RLS would otherwise forbid. A gym that has already
+-- learned one invite flow should not have to learn a second.
+--
+-- WHY AN INVITE ROW AND NOT A PLACEHOLDER PROFILE. The tempting shortcut is to
+-- relax the foreign key and insert a stub profile per member. That trades one
+-- missing feature for a permanent data-quality problem: stub rows that never
+-- get claimed are indistinguishable from real accounts, they accumulate, and
+-- every count of "members" in the product silently starts including ghosts. An
+-- invite is honestly a different kind of thing from a membership, and it is
+-- modelled as one.
+--
+-- Depends on 01-schema.sql (tenants/profiles/clients), 02-domain-schema.sql
+-- (is_owner_of) and 29-gym-operating-record.sql (membership_plans/memberships).
+-- Idempotent; safe to re-run.
+-- ─────────────────────────────────────────────────────────────────────────
+
+create table if not exists public.member_invites (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references public.tenants(id) on delete cascade,
+
+  -- Stored as typed, matched case-insensitively everywhere. Keeping the
+  -- original casing means the gym's own record of the address is intact if
+  -- they have to read it back to someone over the phone.
+  email text not null,
+
+  -- What the gym calls them. Nullable because a gym importing a mailing list
+  -- may genuinely only have the address, and a blank name is not a reason to
+  -- refuse the import — it is a reason to show the address in the UI.
+  full_name text,
+
+  -- The plan the membership opens on. Nullable on purpose: "join the gym, we
+  -- will sort the package out at the desk" is a real thing gyms do, and a
+  -- forced plan choice would push owners into inventing one.
+  plan_id uuid references public.membership_plans(id) on delete set null,
+
+  invited_by uuid references public.profiles(id) on delete set null,
+
+  -- The share link's secret. A uuid rather than encode(gen_random_bytes(...)):
+  -- gen_random_bytes needs pgcrypto, which nothing else in this schema assumes
+  -- is installed, and 122 random bits is already far beyond guessable for a
+  -- value that also has to survive an email-address check to be worth anything.
+  token uuid not null unique default gen_random_uuid(),
+
+  -- Only ever the three states somebody DECIDED. 'expired' is deliberately not
+  -- in this list — see the note on expires_at below.
+  status text not null default 'pending'
+    check (status in ('pending', 'accepted', 'revoked')),
+
+  created_at timestamptz not null default now(),
+
+  -- An invite that stays open forever is a permanent unauthenticated way into
+  -- a gym's tenant, so every invite carries an expiry. It is a stored column
+  -- rather than a derived one so the owner can extend a specific invite for
+  -- somebody who was on holiday, without loosening the rule for everyone.
+  --
+  -- NOTE what does NOT happen here: nothing flips status to 'expired' when the
+  -- clock passes. That would need a cron job, and until it ran the row would
+  -- lie. Instead expiry is derived at read time — in SQL by accept_member_
+  -- invite below, and in TypeScript by inviteState() in src/lib/memberInvites.ts
+  -- — so the two never disagree and the table only ever stores facts.
+  expires_at timestamptz not null default now() + interval '30 days',
+
+  accepted_at timestamptz,
+  accepted_by uuid references public.profiles(id) on delete set null
+);
+
+-- One open invite per address per gym. Partial, and only over the pending ones,
+-- because a member who joined, left and is being invited back a year later must
+-- not be blocked by their own accepted invite from last time. coach_invites
+-- uses a plain unique (coach_id, email) and has exactly that problem.
+create unique index if not exists uq_member_invites_open
+  on public.member_invites (tenant_id, lower(email))
+  where status = 'pending';
+
+-- The owner's list view: their gym's invites, newest first.
+create index if not exists idx_member_invites_tenant
+  on public.member_invites (tenant_id, status, created_at desc);
+
+-- The invitee's lookup, which comes in by address and has no tenant to narrow
+-- it. Must be on lower(email) to match the RLS policy, or the policy scans.
+create index if not exists idx_member_invites_email
+  on public.member_invites (lower(email));
+
+-- ── access ─────────────────────────────────────────────────────────────────
+alter table public.member_invites enable row level security;
+
+-- The owner of THIS gym manages its invites: create, list, extend, revoke.
+-- is_owner_of(tenant_id) asks whether the caller owns this particular tenant,
+-- not merely whether they own something.
+drop policy if exists mi_owner on public.member_invites;
+create policy mi_owner on public.member_invites for all
+  using (is_owner_of(tenant_id))
+  with check (is_owner_of(tenant_id));
+
+-- The invited person, matched on the email they signed in with, can read the
+-- invite addressed to them — that read is what lets the app show "Fit Republic
+-- has invited you to join" the first time they open it.
+--
+-- SELECT only. Accepting is not an UPDATE they are allowed to make; it goes
+-- through accept_member_invite, which validates before it writes.
+drop policy if exists mi_invitee_read on public.member_invites;
+create policy mi_invitee_read on public.member_invites for select
+  using (lower(email) = lower(coalesce(auth.jwt() ->> 'email', '')));
+
+-- ── redeeming ──────────────────────────────────────────────────────────────
+-- Accept the invite addressed to me: attach my profile to the gym's tenant and
+-- open the membership. SECURITY DEFINER because the writes span rows the
+-- invitee has no rights over — memberships belongs to the owner under RLS.
+--
+-- TENANT SCOPING, which is the whole risk in a definer function. Every write
+-- below targets inv.tenant_id — the tenant on the invite row the caller proved
+-- they are addressed by — and never the caller's current tenant, never "a"
+-- tenant, never a tenant read from an argument. The bug this is written
+-- against is the one fixed in 35-class-capacity-and-scope.sql, where a definer
+-- function guarded on "is this caller AN owner" instead of "does this caller
+-- own THIS gym" and leaked every tenant's data to every other tenant's owner.
+-- The equivalent mistake here would be trusting a tenant id passed in as a
+-- parameter: anyone could then post themselves into any gym. The function
+-- therefore takes only the invite id, and derives everything else from the row.
+create or replace function public.accept_member_invite(p_invite uuid)
+returns uuid language plpgsql security definer set search_path = public as $$
+declare
+  inv public.member_invites;
+  my_email text;
+  -- Named caller_* deliberately. my_role() and my_tenant() are existing SQL
+  -- helpers in this schema (28-fix-profiles-recursion.sql), and a plpgsql
+  -- variable sharing their name is a shadowing accident waiting to happen.
+  caller_role text;
+  caller_tenant uuid;
+  mem uuid;
+begin
+  if auth.uid() is null then
+    raise exception 'not signed in';
+  end if;
+
+  select email into my_email from auth.users where id = auth.uid();
+  select role, tenant_id into caller_role, caller_tenant from profiles where id = auth.uid();
+
+  select * into inv from member_invites where id = p_invite;
+  if inv.id is null then
+    raise exception 'invite not found';
+  end if;
+
+  -- Identity, first and hardest. The invite id alone proves nothing.
+  if lower(inv.email) <> lower(coalesce(my_email, '')) then
+    raise exception 'invite not addressed to you';
+  end if;
+
+  -- Already settled one way or the other. Distinguished from expiry so the app
+  -- can say something true: "you have already joined" is not "this has lapsed".
+  if inv.status = 'accepted' then
+    raise exception 'invite already accepted';
+  elsif inv.status = 'revoked' then
+    raise exception 'invite was withdrawn';
+  end if;
+
+  if inv.expires_at <= now() then
+    raise exception 'invite has expired';
+  end if;
+
+  -- WHO MAY BE MOVED. Accepting rewrites profiles.tenant_id, which is the spine
+  -- of every RLS policy in the schema, so it must not be able to strip somebody
+  -- of a role they hold elsewhere.
+  --
+  --  · an owner would be moved out of the gym they own, taking is_owner_of with
+  --    them and locking them out of their own business
+  --  · a trainer would be detached from the roster they coach
+  --
+  -- Both refuse rather than half-succeed. A trainer holding a membership where
+  -- they work is legitimate and is allowed — they are already in that tenant,
+  -- so nothing moves and only the membership opens.
+  if caller_role = 'owner' then
+    raise exception 'an owner cannot join a gym as a member from this account';
+  elsif caller_role = 'trainer' and caller_tenant is distinct from inv.tenant_id then
+    raise exception 'a trainer cannot be moved to another gym by a member invite';
+  end if;
+
+  if caller_role = 'client' then
+    update profiles
+       set tenant_id = inv.tenant_id,
+           -- Only fills a gap. The name the member typed about themselves beats
+           -- the one the gym typed about them.
+           full_name  = coalesce(nullif(trim(full_name), ''), nullif(trim(inv.full_name), ''))
+     where id = auth.uid();
+
+    -- provision_profile() gave them a clients row against their personal tenant
+    -- at signup. Left behind it would point at the wrong gym, and the roster
+    -- policies read clients.tenant_id — so it moves with the profile. Same
+    -- upsert shape as accept_trainer_invite uses for trainers.
+    insert into clients (id, tenant_id) values (auth.uid(), inv.tenant_id)
+      on conflict (id) do update set tenant_id = excluded.tenant_id;
+  end if;
+
+  -- Open the membership — unless one is already running. There is no unique
+  -- constraint on (tenant_id, member_id) and there should not be: a member who
+  -- cancelled and rejoined has two real, separate membership rows and the gym's
+  -- history depends on both surviving. So the guard is on live memberships
+  -- only, and it is here rather than in an index.
+  select id into mem
+    from memberships
+   where tenant_id = inv.tenant_id
+     and member_id = auth.uid()
+     and status in ('active', 'frozen')
+   order by started_on desc
+   limit 1;
+
+  if mem is null then
+    insert into memberships (tenant_id, member_id, plan_id, started_on, status)
+    values (inv.tenant_id, auth.uid(), inv.plan_id, current_date, 'active')
+    returning id into mem;
+  end if;
+
+  update member_invites
+     set status = 'accepted', accepted_at = now(), accepted_by = auth.uid()
+   where id = p_invite;
+
+  -- The membership, so the app can go straight to it instead of refetching and
+  -- guessing which row it just caused.
+  return mem;
+end $$;
+
+grant execute on function public.accept_member_invite(uuid) to authenticated;
+
+
+-- ─────────────────────────────────────────────────────────────────────────
+
+-- ▶ tenant-isolation.sql
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- Tenant isolation: the three holes that made every other policy decorative.
+--
+-- A security review of all 37 parts found eleven cross-tenant problems. Eight
+-- are the "is this caller AN owner rather than THIS gym's owner" mistake, and
+-- they are fixed in 39-owner-policy-scope.sql. The three here are different in
+-- kind: while any of them stands, fixing the other eight changes nothing,
+-- because an attacker does not need to defeat a policy — they can simply
+-- become someone the policy already trusts.
+-- ─────────────────────────────────────────────────────────────────────────
+
+
+-- ── 1 · Anyone could make themselves the owner of any gym ──────────────────
+--
+-- profiles_self is:
+--
+--   create policy profiles_self on profiles
+--     for all using (id = auth.uid()) with check (id = auth.uid());
+--
+-- FOR ALL includes UPDATE, and RLS cannot restrict which COLUMNS an update
+-- touches. So any signed-in user could run
+--
+--   update profiles set role = 'owner', tenant_id = '<any gym>' where id = auth.uid();
+--
+-- and is_owner_of(t) — which is exactly `role = 'owner' and tenant_id = t` —
+-- would then return true for a gym they have nothing to do with. Every
+-- correctly written policy in parts 29 to 37 was reachable this way.
+--
+-- RLS is the wrong tool for a column-level rule, so this is a trigger.
+--
+-- WHY THE current_user TEST: a SECURITY DEFINER function runs as its owner
+-- (postgres), while an ordinary request from the app runs as `authenticated`
+-- or `anon`. The legitimate ways a person changes tenant — accepting a trainer
+-- or member invite — all go through definer functions, so they pass. A direct
+-- UPDATE from a client does not. This keeps the invite flows working without
+-- needing a flag that a caller could learn to set.
+--
+-- Note what is NOT blocked: signing up as an owner. That is harmless, because
+-- provision_profile() gives every new profile its own fresh tenant — you become
+-- the owner of your own empty gym, which is the intended way to start. The
+-- danger was never the role; it was moving an existing profile into somebody
+-- else's tenant.
+
+create or replace function public.guard_profile_identity()
+returns trigger language plpgsql as $$
+begin
+  if current_user in ('authenticated', 'anon') then
+    if new.role is distinct from old.role then
+      raise exception 'A profile cannot change its own role. Ask the gym owner to change it for you.'
+        using errcode = '42501';
+    end if;
+    if new.tenant_id is distinct from old.tenant_id then
+      raise exception 'A profile cannot move itself between gyms. Joining a gym happens by invitation.'
+        using errcode = '42501';
+    end if;
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists guard_profile_identity_t on public.profiles;
+create trigger guard_profile_identity_t
+  before update on public.profiles
+  for each row execute function public.guard_profile_identity();
+
+
+-- ── 2 · link_coaching() had no authorization at all ────────────────────────
+--
+-- It is SECURITY DEFINER, never references auth.uid(), and nothing revoked it
+-- from PUBLIC — so it was callable as an RPC by anyone holding the anon key,
+-- which ships inside the mobile bundle. It re-points any client at any trainer:
+--
+--   update clients set trainer_id = p_coach where id = p_client;
+--
+-- and is_my_client() then opens that member's workouts, measurements, check-ins,
+-- habit logs, scans, food logs and their private coach conversation. Pointing a
+-- stranger's client record at yourself was a complete read of their health
+-- history.
+--
+-- Other definer functions in this schema (all_member_ids, approve_session) do
+-- revoke from anon, so this was an omission rather than a convention.
+--
+-- The rule: you may create a coaching link only if you are one of the two
+-- people in it, or you own the gym they belong to. Anything else raises.
+
+create or replace function public.link_coaching(
+  p_coach uuid, p_client uuid, p_mode text default 'online'
+) returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare client_tenant uuid;
+begin
+  select tenant_id into client_tenant from profiles where id = p_client;
+
+  if not (
+    auth.uid() = p_coach
+    or auth.uid() = p_client
+    or (client_tenant is not null and is_owner_of(client_tenant))
+  ) then
+    raise exception 'You can only link a coach and a client you are part of.'
+      using errcode = '42501';
+  end if;
+
+  insert into coaching_relationships (coach_id, client_id, mode, status)
+  values (p_coach, p_client, coalesce(p_mode, 'online'), 'active')
+  on conflict (coach_id, client_id) do update set mode = excluded.mode, status = 'active';
+
+  update clients set trainer_id = p_coach where id = p_client;
+end $$;
+
+revoke execute on function public.link_coaching(uuid, uuid, text) from anon;
+revoke execute on function public.link_coaching(uuid, uuid, text) from public;
+grant execute on function public.link_coaching(uuid, uuid, text) to authenticated;
+
+
+-- ── 3 · Four tables never had row-level security switched on ───────────────
+--
+-- tenants, exercise_videos, availability_templates and session_waitlist all
+-- hold tenant data and none of them had `enable row level security`.
+--
+-- The trap is that 28-fix-profiles-recursion.sql creates policies for tenants
+-- and exercise_videos, so reading the migrations they look protected. A policy
+-- on a table without RLS enabled is inert: Postgres never consults it, and
+-- Supabase's default grants to anon and authenticated apply in full. The anon
+-- key is compiled into the shipped app, so every gym's name, brand colour, plan
+-- and session_fee was world-readable AND world-writable — including the
+-- tenants.id values needed to exploit the profiles hole above.
+
+alter table public.tenants enable row level security;
+alter table public.exercise_videos enable row level security;
+alter table public.availability_templates enable row level security;
+alter table public.session_waitlist enable row level security;
+
+-- Your own gym: everybody inside it can read it (the app shows its name and
+-- brand everywhere); only its owner can change it.
+drop policy if exists tenants_read on public.tenants;
+create policy tenants_read on public.tenants for select
+  using (id = my_tenant());
+
+drop policy if exists tenants_owner_rw on public.tenants;
+create policy tenants_owner_rw on public.tenants for all
+  using (is_owner_of(id)) with check (is_owner_of(id));
+
+-- Exercise demos are content, not customer data, and the whole point is that a
+-- client can watch one. Readable by any signed-in user; writable only by the
+-- owner of the gym that added it.
+drop policy if exists exvid_read on public.exercise_videos;
+create policy exvid_read on public.exercise_videos for select
+  to authenticated using (true);
+
+-- exercise_videos has no tenant_id — it is keyed on trainer_id, and a NULL
+-- trainer means a platform-wide "Academy" video belonging to nobody. So the
+-- write rule reaches the tenant through the trainer, and platform videos are
+-- deliberately not writable by any gym.
+drop policy if exists exvid_trainer_rw on public.exercise_videos;
+create policy exvid_trainer_rw on public.exercise_videos for all
+  using (trainer_id = auth.uid()) with check (trainer_id = auth.uid());
+
+drop policy if exists exvid_owner_rw on public.exercise_videos;
+create policy exvid_owner_rw on public.exercise_videos for all
+  using (exists (
+    select 1 from trainers tr
+    where tr.id = exercise_videos.trainer_id and is_owner_of(tr.tenant_id)))
+  with check (exists (
+    select 1 from trainers tr
+    where tr.id = exercise_videos.trainer_id and is_owner_of(tr.tenant_id)));
+
+-- A trainer's working pattern. Theirs to set; their gym's owner may see it.
+drop policy if exists avail_self on public.availability_templates;
+create policy avail_self on public.availability_templates for all
+  using (trainer_id = auth.uid()) with check (trainer_id = auth.uid());
+
+drop policy if exists avail_owner_r on public.availability_templates;
+create policy avail_owner_r on public.availability_templates for select
+  using (exists (
+    select 1 from trainers tr
+    where tr.id = availability_templates.trainer_id and is_owner_of(tr.tenant_id)));
+
+-- session_waitlist is (session_id, client_id) against `sessions`, not classes —
+-- it is the PT waitlist, not the class one. A queue entry belongs to the client
+-- on it; the trainer whose session it is, and that gym's owner, may see it.
+drop policy if exists waitlist_self on public.session_waitlist;
+create policy waitlist_self on public.session_waitlist for all
+  using (client_id = auth.uid()) with check (client_id = auth.uid());
+
+drop policy if exists waitlist_gym_r on public.session_waitlist;
+create policy waitlist_gym_r on public.session_waitlist for select
+  using (exists (
+    select 1 from sessions s
+    where s.id = session_waitlist.session_id
+      and (s.trainer_id = auth.uid() or is_owner_of(s.tenant_id))));
+
+
+-- ── 4 · class_roster() — the leak that 35 missed ───────────────────────────
+--
+-- 35-class-capacity-and-scope.sql fixed class_attendance_summary and left its
+-- neighbour in the same file carrying a byte-identical guard. This one is
+-- worse: the summary gave counts, this gives member NAMES.
+
+drop function if exists public.class_roster(uuid);
+
+create function public.class_roster(p_class uuid)
+returns table(user_id uuid, name text, status text, attended boolean)
+language sql
+security definer
+set search_path to 'public'
+as $function$
+  select cb.user_id,
+         coalesce(p.full_name, 'Member') as name,
+         cb.status,
+         (cb.attended_at is not null) as attended
+  from class_bookings cb
+  join gym_classes gc on gc.id = cb.class_id
+  left join profiles p on p.id = cb.user_id
+  where cb.class_id = p_class
+    and ( gc.trainer_id = auth.uid()
+          -- the caller must own THIS class's gym, not merely be an owner
+          or is_owner_of(gc.tenant_id) );
+$function$;
+
+revoke execute on function public.class_roster(uuid) from anon;
+grant execute on function public.class_roster(uuid) to authenticated;
+
+
+-- ── 5 · Three more unguarded definer functions ─────────────────────────────
+
+-- all_member_ids() tested only that the caller was AN owner, and its select had
+-- no join to the caller's tenant — so it returned every member id on the
+-- platform. Ids alone are low value, but they are the join key that made the
+-- other leaks usable.
+create or replace function public.all_member_ids()
+returns setof uuid
+language sql
+security definer
+set search_path = public
+as $$
+  select c.id from clients c where is_owner_of(c.tenant_id);
+$$;
+
+-- class_counts() had no guard whatsoever, so any signed-in user could read
+-- booking counts for every class in every gym.
+create or replace function public.class_counts()
+returns table(class_id uuid, booked bigint)
+language sql
+security definer
+set search_path = public
+as $$
+  select cb.class_id, count(*)::bigint
+  from class_bookings cb
+  join gym_classes gc on gc.id = cb.class_id
+  where gc.tenant_id = my_tenant()
+  group by cb.class_id;
+$$;
+
+revoke execute on function public.class_counts() from anon;
+grant execute on function public.class_counts() to authenticated;
+
+
+-- ── 6 · announcements were world-readable and anyone could plant one ───────
+--
+--   create policy ann_read on announcements for select using (true);
+--   create policy ann_write on announcements for insert with check (author_id = auth.uid());
+--
+-- ann_read had no `to authenticated`, so it covered anon — and the anon key is
+-- in the app bundle. ann_write constrained only the author, never the
+-- tenant_id, so any user could post an announcement into a competitor's gym
+-- and have it appear to their members as if the gym had written it.
+
+drop policy if exists ann_read on public.announcements;
+create policy ann_read on public.announcements for select
+  using (tenant_id = my_tenant());
+
+drop policy if exists ann_write on public.announcements;
+create policy ann_write on public.announcements for insert
+  with check (author_id = auth.uid() and is_owner_of(tenant_id));
+
+drop policy if exists ann_owner_rw on public.announcements;
+create policy ann_owner_rw on public.announcements for all
+  using (is_owner_of(tenant_id)) with check (is_owner_of(tenant_id));
+
+
+-- ── 7 · book_class() could take a seat in another gym's class ──────────────
+--
+-- Both functions are SECURITY DEFINER and their only filter is `where id =
+-- p_class`, so a member of gym A could book — and hold — seats in gym B's
+-- classes. The return value ('booked' / 'waitlist' / 'notfound') also confirmed
+-- cross-tenant whether a class existed and whether it was full, which is a
+-- capacity denial-of-service with a built-in progress indicator.
+--
+-- The guard is the same question the rest of this file asks: is this class in
+-- the caller's gym? Returning 'notfound' rather than raising is deliberate — a
+-- distinct error would still confirm the class exists to someone who should not
+-- know that.
+
+create or replace function public.book_class(p_class uuid)
+returns text language plpgsql security definer set search_path = public as $$
+declare v_cap int; v_count int; v_status text; v_tenant uuid;
+begin
+  perform 1 from gym_classes where id = p_class for update;
+  select capacity, tenant_id into v_cap, v_tenant from gym_classes where id = p_class;
+  if v_cap is null then return 'notfound'; end if;
+  -- A class outside your gym is indistinguishable from one that is not there.
+  if v_tenant is distinct from my_tenant() then return 'notfound'; end if;
+
+  select count(*) into v_count from class_bookings where class_id = p_class and status = 'booked';
+  v_status := case when v_count < v_cap then 'booked' else 'waitlist' end;
+  insert into class_bookings (class_id, user_id, status) values (p_class, auth.uid(), v_status)
+    on conflict (class_id, user_id) do update set status = excluded.status;
+  return v_status;
+end; $$;
+
+create or replace function public.cancel_class(p_class uuid)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  -- Cancelling only ever touches the caller's own booking, so the tenant check
+  -- guards the promotion below rather than the delete.
+  delete from class_bookings where class_id = p_class and user_id = auth.uid();
+
+  if not exists (select 1 from gym_classes gc
+                 where gc.id = p_class and gc.tenant_id = my_tenant()) then
+    return;
+  end if;
+
+  update class_bookings set status = 'booked'
+   where id = (
+     select cb.id from class_bookings cb join gym_classes gc on gc.id = cb.class_id
+     where cb.class_id = p_class and cb.status = 'waitlist'
+       and (select count(*) from class_bookings b where b.class_id = p_class and b.status = 'booked') < gc.capacity
+     order by cb.created_at asc limit 1
+   );
+end; $$;
+
+revoke execute on function public.book_class(uuid) from anon;
+revoke execute on function public.cancel_class(uuid) from anon;
+grant execute on function public.book_class(uuid) to authenticated;
+grant execute on function public.cancel_class(uuid) to authenticated;
+
+
+-- ── 8 · An owner could not read their own members' profiles ────────────────
+--
+-- Not a leak — the opposite, and found while fixing the leaks. There is no
+-- owner-scoped SELECT policy on `profiles` anywhere in the schema: only
+-- profiles_self and three trainer-scoped ones. So a gym owner could read their
+-- own row and nobody else's.
+--
+-- 27-owner-portal-access.sql opens by asserting "an owner can already see their
+-- tenant's profiles". That is not true of the checked-in policies, and several
+-- things were quietly built on the assumption — the member search on the Studio
+-- members screen queries profiles by tenant and would have returned an empty
+-- list for every owner, which reads as "nobody matches" rather than "you are
+-- not allowed to ask".
+--
+-- WHY my_role()/my_tenant() AND NOT is_owner_of(): this policy is ON profiles,
+-- and is_owner_of() is a plain `stable` function that selects from profiles —
+-- so it would re-enter this policy and Postgres would raise infinite recursion.
+-- my_role() and my_tenant() are SECURITY DEFINER precisely so they can be used
+-- here; that is what 28-fix-profiles-recursion.sql exists for.
+
+drop policy if exists profiles_owner_r on public.profiles;
+create policy profiles_owner_r on public.profiles for select
+  using (my_role() = 'owner' and tenant_id = my_tenant());
+
+-- ▶ owner-policy-scope.sql
+
+-- ── "AN owner" is not "the owner of THIS row" ───────────────────────────────
+--
+-- `profiles.role = 'owner'` used to mean the PLATFORM owner — one person, who
+-- was genuinely allowed to read everything. 27-owner-portal-access.sql redefined
+-- it to mean a GYM owner, scoped to their own tenant, and every policy written
+-- from that point on asks the scoped question through is_owner_of(tenant_id).
+--
+-- The policies written BEFORE that redefinition were never revisited. Nine of
+-- them still ask the unscoped question, in one of two spellings:
+--
+--     exists (select 1 from profiles p where p.id = auth.uid() and p.role = 'owner')
+--     my_role() = 'owner'
+--
+-- Both mean "is this caller an owner of some gym, anywhere on the platform".
+-- Neither mentions the row being read. So the owner of gym A could read gym B's
+-- Stripe customer ids, subscription status and invoice amounts, gym B's clients'
+-- purchase history, gym B's Connect payout accounts, gym B's coach rosters,
+-- gym B's crash logs and gym B's members' written feedback. Every gym owner on
+-- the platform is a signed-in user, so this is not a theoretical hole: it is
+-- readable today from the app's own Supabase client with no special tooling.
+-- 35-class-capacity-and-scope.sql fixed the same mistake inside
+-- class_attendance_summary; this file finishes the job for the RLS policies.
+--
+-- WHY THIS IS NOT A ONE-WORD SWAP. The billing tables (billing_customers,
+-- subscriptions, invoices, connect_accounts, client_purchases) have no
+-- tenant_id column at all — they are keyed on trainer_id, because they were
+-- built when billing was platform→trainer and a gym was not part of the model.
+-- Their tenant has to be reached by joining trainers, which is exactly the hop
+-- 27-owner-portal-access.sql already makes for sessions:
+--
+--     exists (select 1 from trainers tr
+--              where tr.id = <table>.trainer_id and is_owner_of(tr.tenant_id))
+--
+-- That join is safe to write inline because `trainers` has trainers_owner_r
+-- (is_owner_of(tenant_id)), so an owner can read the rows the join needs.
+--
+-- DUPLICATES. Several of these tables carry TWO stale policies — the original
+-- in 20/21, and a rewrite in 28-fix-profiles-recursion.sql that swapped the
+-- profiles sub-select for my_role() without noticing it was preserving an
+-- unscoped test. Same policy name in both files for most of them, but
+-- `subscriptions` has sub_read (20) AND sub_owner (28) under different names.
+-- Permissive policies OR together, so dropping one and leaving the other fixes
+-- nothing. Every stale name is dropped below.
+--
+-- SELF-ACCESS IS PRESERVED. A trainer still reads their own billing, Connect
+-- and invoice rows; a client still reads their own purchases; a member still
+-- reads their own feedback (fb_own, untouched). Only the owner arm narrows.
+
+-- ── a tenant lookup that does not re-enter RLS ──────────────────────────────
+-- Two of the nine tables cannot use the inline trainers join.
+--
+--   * `coach_clients` would deadlock on it. trainers has
+--     trainers_assigned_client_r, whose USING clause reads coach_clients — so a
+--     coach_clients policy that reads trainers closes a cycle and Postgres
+--     raises "infinite recursion detected in policy for relation". That is the
+--     precise failure 28-fix-profiles-recursion.sql existed to remove, and the
+--     remedy there applies here: ask through SECURITY DEFINER.
+--
+--   * `app_errors` reaches its tenant only through profiles, and there is no
+--     owner-scoped SELECT policy on profiles — an inline sub-select would
+--     return no rows for the very caller it is meant to authorise, silently
+--     emptying the owner's crash inbox.
+--
+-- profiles.tenant_id is the spine (37-member-invites.sql rewrites it, and
+-- clients.tenant_id, when a member moves gyms), so it is the right source. The
+-- trainers row wins when both exist because trainers.tenant_id is NOT NULL and
+-- is what the billing joins above key on; this keeps the two paths agreeing.
+create or replace function public.tenant_of_user(u uuid)
+returns uuid language sql stable security definer set search_path to 'public', 'pg_temp'
+as $function$
+  select coalesce(
+    (select t.tenant_id from trainers t where t.id = u),
+    (select p.tenant_id from profiles p where p.id = u)
+  );
+$function$;
+
+revoke all on function public.tenant_of_user(uuid) from public;
+grant execute on function public.tenant_of_user(uuid) to authenticated;
+
+-- ── billing: trainer_id → trainers.tenant_id ────────────────────────────────
+-- Stripe customer ids and the email they were opened with. Leaked the identity
+-- of every other gym's trainers as Stripe billing contacts.
+drop policy if exists cust_read on billing_customers;
+create policy cust_read on billing_customers for select using (
+  trainer_id = (select auth.uid())
+  or exists (select 1 from trainers tr
+              where tr.id = billing_customers.trainer_id and is_owner_of(tr.tenant_id)));
+
+-- Both stale policies dropped: sub_read (20-billing.sql) had the self arm,
+-- sub_owner (28) was owner-only. They OR'd, so the pair behaved as one policy
+-- and is replaced by one — plan, status and renewal date for a competitor's
+-- trainers is commercial intelligence, not gym data.
+drop policy if exists sub_read on subscriptions;
+drop policy if exists sub_owner on subscriptions;
+create policy sub_read on subscriptions for select using (
+  trainer_id = (select auth.uid())
+  or exists (select 1 from trainers tr
+              where tr.id = subscriptions.trainer_id and is_owner_of(tr.tenant_id)));
+
+-- Invoice amounts and the hosted Stripe URL. The URL is the sharper end of it:
+-- it renders a payable invoice document, not just a number.
+drop policy if exists inv_read on invoices;
+create policy inv_read on invoices for select using (
+  trainer_id = (select auth.uid())
+  or exists (select 1 from trainers tr
+              where tr.id = invoices.trainer_id and is_owner_of(tr.tenant_id)));
+
+-- Connect payout accounts — which of a rival's trainers can actually take money
+-- and which are still stuck in onboarding.
+drop policy if exists conn_read on connect_accounts;
+create policy conn_read on connect_accounts for select using (
+  trainer_id = (select auth.uid())
+  or exists (select 1 from trainers tr
+              where tr.id = connect_accounts.trainer_id and is_owner_of(tr.tenant_id)));
+
+-- Client purchases: who bought what, for how much, and how much of the pack is
+-- used. The client and the selling trainer keep their own rows; the owner arm
+-- now only covers trainers who belong to the owner's gym.
+drop policy if exists purch_read on client_purchases;
+create policy purch_read on client_purchases for select using (
+  client_id = (select auth.uid())
+  or trainer_id = (select auth.uid())
+  or exists (select 1 from trainers tr
+              where tr.id = client_purchases.trainer_id and is_owner_of(tr.tenant_id)));
+
+-- ── tables that already carry their tenant, or reach it through a person ────
+-- feedback.tenant_id was already being checked — and then undone on the very
+-- next line. `is_owner_of(tenant_id) or my_role() = 'owner'` is two permissive
+-- arms in one policy: the second is strictly wider than the first, so the
+-- scoped test never decided anything. Dropping it is the whole fix. Rows with
+-- a null tenant_id are now invisible to owners rather than visible to all of
+-- them; their author still reads them via fb_own.
+drop policy if exists fb_owner on feedback;
+create policy fb_owner on feedback for select using (is_owner_of(tenant_id));
+
+-- Crash logs carry a stack trace and whatever the message happened to contain,
+-- attributed to a named user. Scoped through the reporting user's tenant.
+-- app_errors_insert allows a null user_id (an error caught before sign-in);
+-- those rows have no tenant to belong to and are now readable by nobody
+-- through RLS, which is the fail-closed side of the choice.
+drop policy if exists app_errors_owner on app_errors;
+create policy app_errors_owner on app_errors for select using (
+  is_owner_of(tenant_of_user(user_id)));
+
+-- Coach rosters — client names and goals, typed in by hand for people who have
+-- no account. coach_clients.trainer_id references auth.users directly and the
+-- table has no tenant_id, so the coach's own tenant is the row's tenant. Via
+-- tenant_of_user rather than a trainers join: see the note on the function.
+drop policy if exists coach_clients_owner_r on coach_clients;
+create policy coach_clients_owner_r on coach_clients for select using (
+  is_owner_of(tenant_of_user(trainer_id)));
+
+-- ── exercise_videos: deliberately NOT touched here ──────────────────────────
+-- The ninth stale policy was exvid_read, whose `or my_role() = 'owner'` arm let
+-- any owner read any gym's coaching videos. 38-tenant-isolation.sql — which
+-- sorts immediately before this file and therefore runs immediately before it —
+-- has already replaced that policy, and answered the underlying question
+-- differently: it treats exercise demos as content rather than customer data,
+-- opens SELECT to every authenticated user, and scopes WRITES to the gym via
+-- `exists (select 1 from trainers tr where tr.id = exercise_videos.trainer_id
+-- and is_owner_of(tr.tenant_id))`. Either answer closes the owner leak — 38's
+-- version has no owner-specific read arm left to escalate through.
+--
+-- Re-creating exvid_read here would win purely on filename order and revert a
+-- deliberate product decision without either author noticing. So it is left
+-- alone on purpose. If the demos-are-private reading is the one you want, the
+-- change belongs in 38 next to its own reasoning, not silently after it.
