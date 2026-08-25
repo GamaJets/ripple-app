@@ -203,3 +203,37 @@ the app or `studio-web`.
 
 **The durable fix** is the Phase 8 roadmap item: move the repo off the
 iCloud-synced Desktop, or turn off *Optimise Mac Storage* for it.
+
+## The repo lives at ~/repple-app, not on the Desktop
+
+Moved 25 Aug 2026, from `~/Desktop/repple-app` to `~/repple-app`.
+
+**Why.** Desktop & Documents syncing is on, so the old location was inside
+iCloud. A `node_modules` of ~30,000 files is a poor thing to hand to a sync
+engine, and the working theory is that this is what produced the hollow
+install that cost most of a day: 797 packages present as manifests and stubs,
+`react-native` at 568 KB instead of 84 MB, `typescript` at 100 KB instead of
+23 MB. `tsc` appeared to hang because it was never a working binary, and
+`expo config --json` exited 1 with nothing on stdout or stderr. `npm ci`
+repaired it in minutes once the cause was understood.
+
+That diagnosis is not proven — iCloud eviction leaves `.icloud` placeholders
+and there were none. But an interrupted install inside a folder a sync daemon
+is actively rewriting is the likeliest story, and the fix costs nothing.
+
+**How it was done safely.** `~/Desktop` and `~` are the same APFS volume, so
+`mv` is `rename(2)`: a metadata operation where no file content is copied. It
+either succeeds completely or changes nothing — there is no partial state to
+recover from. Checked first that the working tree was clean, that no `.icloud`
+placeholders existed, and that nothing was running from inside the tree.
+Verified after: 57,629 files before and after, identical git HEAD, `tsc` clean,
+337 assertions passing, `expo config` resolving.
+
+**What needs rebuilding.** Nothing in git, node_modules or the Pods project —
+all checked and clean. Xcode's DerivedData still refers to the old path, so
+the first iOS build after the move rebuilds from scratch. That is time, not
+loss.
+
+**If a tool still points at the old path**, it is holding a cached absolute
+path — restart it rather than recreating the directory. Claude Code sessions
+started before the move need reopening at `~/repple-app`.
