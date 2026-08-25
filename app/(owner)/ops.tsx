@@ -78,6 +78,8 @@ export default function OwnerOps() {
             <Section>
           <ListRow icon="wrench" title="Equipment register" note="What the gym owns, and what is due a service"
             onPress={() => router.push('/(owner)/equipment')} />
+          <ListRow icon="clock" title="Deletion requests" note="Members who asked to be erased, and the 30-day clock"
+            onPress={() => router.push('/(owner)/deletions')} />
           <ListRow icon="search" title="User guide" note="What each tab does, any time"
             onPress={() => router.push('/guide')} />
         </Section>
