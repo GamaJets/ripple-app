@@ -63,6 +63,14 @@ create trigger guard_profile_identity_t
   for each row execute function public.guard_profile_identity();
 
 
+-- NOTE ON REVOKE, learned the hard way against the live database: `revoke
+-- execute ... from anon` accomplishes nothing on its own. Postgres grants
+-- EXECUTE to PUBLIC on every new function, and that is the grant anon actually
+-- resolves through — has_function_privilege('anon', ...) stayed true after
+-- revoking from anon alone. Every revoke here therefore names PUBLIC, and the
+-- roles that should still call the function are granted back explicitly.
+
+
 -- ── 2 · link_coaching() had no authorization at all ────────────────────────
 --
 -- It is SECURITY DEFINER, never references auth.uid(), and nothing revoked it
@@ -109,8 +117,7 @@ begin
   update clients set trainer_id = p_coach where id = p_client;
 end $$;
 
-revoke execute on function public.link_coaching(uuid, uuid, text) from anon;
-revoke execute on function public.link_coaching(uuid, uuid, text) from public;
+revoke execute on function public.link_coaching(uuid, uuid, text) from public, anon;
 grant execute on function public.link_coaching(uuid, uuid, text) to authenticated;
 
 
@@ -219,7 +226,7 @@ as $function$
           or is_owner_of(gc.tenant_id) );
 $function$;
 
-revoke execute on function public.class_roster(uuid) from anon;
+revoke execute on function public.class_roster(uuid) from public, anon;
 grant execute on function public.class_roster(uuid) to authenticated;
 
 
@@ -253,7 +260,7 @@ as $$
   group by cb.class_id;
 $$;
 
-revoke execute on function public.class_counts() from anon;
+revoke execute on function public.class_counts() from public, anon;
 grant execute on function public.class_counts() to authenticated;
 
 
@@ -331,8 +338,8 @@ begin
    );
 end; $$;
 
-revoke execute on function public.book_class(uuid) from anon;
-revoke execute on function public.cancel_class(uuid) from anon;
+revoke execute on function public.book_class(uuid) from public, anon;
+revoke execute on function public.cancel_class(uuid) from public, anon;
 grant execute on function public.book_class(uuid) to authenticated;
 grant execute on function public.cancel_class(uuid) to authenticated;
 

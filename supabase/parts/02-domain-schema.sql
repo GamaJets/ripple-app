@@ -161,7 +161,7 @@ $$;
 
 -- Owner-only by role, and not reachable at all without signing in.
 revoke all on function all_member_ids() from public;
-revoke execute on function all_member_ids() from anon;
+revoke execute on function all_member_ids() from public, anon;
 grant execute on function all_member_ids() to authenticated;
 grant execute on function all_member_ids() to authenticated;
 

@@ -61,7 +61,7 @@ end
 $function$;
 
 revoke all on function public.approve_session(uuid, text) from public;
-revoke execute on function public.approve_session(uuid, text) from anon;
+revoke execute on function public.approve_session(uuid, text) from public, anon;
 grant execute on function public.approve_session(uuid, text) to authenticated;
 
 -- Unrelated to approvals, found while reading the policy: clients could read
