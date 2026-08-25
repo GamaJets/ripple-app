@@ -14,7 +14,7 @@ import { tipsFor, nextTip, markShown, isDue, tipToShow, EMPTY_TIP_STATE, type Ti
 import { buildIcs } from './ics';
 import { serviceState, nextServiceDue, usableUnits, outOfServiceUnits, capacityFor, summariseRegister, needsAttention, type Equipment } from './gymEquipment';
 import { parseCsv, parseSheet, sniffDelimiter, mapColumns } from './csv';
-import { parseMoneyCents, parseDate, detectDateOrder, previewMembers, previewPayments, describePreview, MEMBER_ALIASES } from './csvImport';
+import { parseMoneyCents, parseDate, detectDateOrder, previewMembers, previewPayments, previewPlans, describePreview, MEMBER_ALIASES } from './csvImport';
 import { payroll30For, payrollBlocker, type GymTrainer } from './gymTrainers';
 import { gymRollup } from './ownerAnalytics';
 import { isDelivered, isAwaitingOutcome, isPayable, payrollByTrainer, payrollTotal, settlementBlocker, settleableSessions, settlementAmount, settleBlocker, PAY_DELIVERED_ONLY, type PtSession } from './gymSessions';
@@ -1054,6 +1054,61 @@ for (const v of ['client', 'trainer', 'owner'] as const) {
   ok(tipsFor(v).length > 0, `${v} has tips of its own`);
 }
 ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a first tip');
+}
+
+// ── plan import ─────────────────────────────────────────────────────────────
+// The third of CSV import that did not exist. A price list is the one sheet
+// where a misread cell becomes a wrong amount of money charged every month.
+{
+  const p = previewPlans('name,price,interval\nOff-peak,180,month\nAnnual,1800,year\nDay pass,45,once\n');
+  ok(p.ready.length === 3, 'three plans read');
+  ok(p.rejected.length === 0, 'nothing rejected from a clean sheet');
+  ok(p.ready[0].priceCents === 18000, 'price becomes minor units');
+  ok(p.ready[0].interval === 'month', 'month read');
+  ok(p.ready[1].interval === 'year', 'year read');
+  ok(p.ready[2].interval === 'once', 'one-off read');
+  ok(p.ready[0].currency === 'AED', 'currency defaults');
+  ok(p.ready[0].active === true, 'plans default to on sale');
+
+  // The refusal that matters most. membership_plans.interval accepts only
+  // month/year/once, so a quarterly plan has nowhere truthful to go: mapping
+  // it to month divides the gym's recurring revenue by three.
+  const q = previewPlans('name,price,interval\nQuarterly,500,quarterly\n');
+  ok(q.ready.length === 0, 'a quarterly plan is not silently repriced');
+  ok(q.rejected.length === 1, 'it is refused, not dropped');
+  ok(/not month, year or one-off/.test(q.rejected[0]?.errors.join(' ') ?? ''), 'and says why');
+
+  // A blank price is an unfinished row, not a free plan.
+  const blank = previewPlans('name,price\nUnnamed,\n');
+  ok(blank.ready.length === 0, 'a blank price is refused');
+  ok(/unfinished row/.test(blank.rejected[0]?.errors.join(' ') ?? ''), 'blank price explains itself');
+
+  // But a deliberate zero is a real thing a gym sells: staff, comp, founder.
+  const free = previewPlans('name,price\nStaff,0\n');
+  ok(free.ready.length === 1, 'a deliberate zero IS a plan');
+  ok(free.ready[0]?.priceCents === 0, 'and stays zero');
+
+  const neg = previewPlans('name,price\nOops,-50\n');
+  ok(neg.ready.length === 0, 'a negative price is refused');
+
+  // Same plan twice is two prices for one thing.
+  const dup = previewPlans('name,price\nGold,200\ngold,250\n');
+  ok(dup.ready.length === 1, 'a duplicate plan name is refused');
+  ok(/duplicate of line 2/.test(dup.rejected[0]?.errors.join(' ') ?? ''), 'and points at the first one');
+
+  const cur = previewPlans('name,price,currency\nGold,200,GBP\n');
+  ok(cur.ready[0]?.currency === 'GBP', 'a real currency code is kept');
+  const badCur = previewPlans('name,price,currency\nGold,200,pounds\n');
+  ok(badCur.ready.length === 0, 'a currency that is not a code is refused');
+
+  const off = previewPlans('name,price,active\nRetired,200,no\n');
+  ok(off.ready.length === 1 && off.ready[0].active === false, 'no means not on sale');
+  const odd = previewPlans('name,price,active\nGold,200,maybe\n');
+  ok(odd.ready.length === 0, 'an unreadable yes/no is refused, not defaulted on sale');
+
+  const noCols = previewPlans('something,else\na,b\n');
+  ok(noCols.missingRequired.includes('name') && noCols.missingRequired.includes('price'),
+     'a sheet with neither column says so');
 }
 
 if (errors.length) { console.log('COVERAGE FAILURES:\n' + errors.join('\n')); process.exit(1); }

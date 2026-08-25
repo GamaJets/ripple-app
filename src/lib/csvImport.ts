@@ -421,6 +421,156 @@ export function previewPayments(text: string, order?: DateOrder): ImportPreview<
   };
 }
 
+/* ── plans ─────────────────────────────────────────────────────────────────── */
+
+export const PLAN_ALIASES: Record<string, string[]> = {
+  name:     ['name', 'plan', 'plan name', 'membership', 'membership plan', 'package', 'tier', 'product'],
+  price:    ['price', 'amount', 'cost', 'fee', 'rate', 'monthly', 'monthly price', 'value'],
+  interval: ['interval', 'period', 'billing', 'billing period', 'frequency', 'recurrence', 'term'],
+  currency: ['currency', 'ccy', 'cur'],
+  active:   ['active', 'status', 'state', 'enabled', 'available'],
+};
+
+export interface PlanRow {
+  name: string;
+  priceCents: number;
+  /** Matches membership_plans.interval — `once` is a day pass or joining fee. */
+  interval: 'month' | 'year' | 'once';
+  currency: string;
+  active: boolean;
+}
+
+/**
+ * How a billing period is written in the wild.
+ *
+ * Only spellings that are unambiguous appear here. "Quarterly", "weekly" and
+ * "6 months" are deliberately ABSENT: membership_plans.interval accepts exactly
+ * month, year and once, so there is nowhere truthful to put them. Mapping a
+ * quarterly plan onto `month` would divide a gym's recurring revenue by three,
+ * and onto `year` would multiply it by four. Those rows are refused with a
+ * reason so somebody decides, rather than being silently repriced.
+ */
+const INTERVALS: Record<string, PlanRow['interval']> = {
+  month: 'month', monthly: 'month', 'per month': 'month', 'a month': 'month',
+  pm: 'month', mo: 'month', m: 'month', '1 month': 'month', 'every month': 'month',
+  year: 'year', yearly: 'year', annual: 'year', annually: 'year',
+  'per year': 'year', 'a year': 'year', pa: 'year', yr: 'year', y: 'year',
+  '12 months': 'year', '1 year': 'year',
+  once: 'once', 'one off': 'once', 'one-off': 'once', oneoff: 'once',
+  single: 'once', 'day pass': 'once', daypass: 'once', 'drop in': 'once',
+  'drop-in': 'once', joining: 'once', 'joining fee': 'once', 'sign up': 'once',
+};
+
+/** Words that mean a plan is NOT on sale. Anything else unrecognised is refused. */
+const INACTIVE_WORDS = new Set([
+  'no', 'n', 'false', '0', 'inactive', 'disabled', 'archived', 'retired',
+  'hidden', 'off', 'discontinued', 'closed',
+]);
+const ACTIVE_WORDS = new Set([
+  'yes', 'y', 'true', '1', 'active', 'enabled', 'live', 'on', 'available', 'current',
+]);
+
+/**
+ * Read a sheet of membership plans.
+ *
+ * Name and price are both required. A plan with no price is not a plan whose
+ * price is zero — it is a row somebody has not finished writing, and importing
+ * it as free is how a gym ends up selling memberships for nothing.
+ *
+ * Zero itself IS allowed, because a complimentary or staff plan is a real
+ * thing a gym sells at nothing on purpose. The distinction is between an
+ * absent cell and a deliberate 0.
+ */
+export function previewPlans(text: string): ImportPreview<PlanRow> {
+  const sheet = parseSheet(text);
+  const { index, unmatched } = mapColumns(sheet.header, PLAN_ALIASES);
+
+  const missingRequired: string[] = [];
+  if (index.name === undefined) missingRequired.push('name');
+  if (index.price === undefined) missingRequired.push('price');
+
+  const at = (r: string[], f: string): string =>
+    index[f] === undefined ? '' : (r[index[f]] ?? '');
+
+  // Plans carry no dates, so there is no convention to settle. Reported as
+  // 'unknown' rather than omitted, because ImportPreview is shared and a
+  // missing field would read as a bug in the caller.
+  const seen = new Map<string, number>();
+
+  const rows: RowResult<PlanRow>[] = sheet.rows.map((r, i) => {
+    const line = i + 2; // +1 for zero-index, +1 for the header
+    const errors: string[] = [];
+
+    const name = at(r, 'name').trim();
+    if (!name) errors.push('no name');
+
+    // A price list with the same plan twice is usually two prices for one
+    // thing. Importing both leaves the gym selling at whichever the UI
+    // happens to list first.
+    const key = name.toLowerCase();
+    if (name) {
+      const first = seen.get(key);
+      if (first !== undefined) errors.push(`duplicate of line ${first}`);
+      else seen.set(key, line);
+    }
+
+    let priceCents = 0;
+    const rawPrice = at(r, 'price').trim();
+    if (!rawPrice) {
+      errors.push('no price — a blank price is an unfinished row, not a free plan');
+    } else {
+      const m = parseMoneyCents(rawPrice);
+      if (m.ok) {
+        if (m.value < 0) errors.push('price is negative');
+        else priceCents = m.value;
+      } else errors.push(`price: ${m.reason}`);
+    }
+
+    let interval: PlanRow['interval'] = 'month';
+    const rawInterval = at(r, 'interval').trim().toLowerCase();
+    if (rawInterval) {
+      const hit = INTERVALS[rawInterval];
+      if (hit) interval = hit;
+      else errors.push(`billing period "${at(r, 'interval').trim()}" is not month, year or one-off`);
+    }
+
+    // Currency defaults at the database, so an absent column is fine. A
+    // present one that is not a 3-letter code is not.
+    let currency = 'AED';
+    const rawCurrency = at(r, 'currency').trim().toUpperCase();
+    if (rawCurrency) {
+      if (/^[A-Z]{3}$/.test(rawCurrency)) currency = rawCurrency;
+      else errors.push(`currency "${at(r, 'currency').trim()}" is not a three-letter code`);
+    }
+
+    let active = true;
+    const rawActive = at(r, 'active').trim().toLowerCase();
+    if (rawActive) {
+      if (ACTIVE_WORDS.has(rawActive)) active = true;
+      else if (INACTIVE_WORDS.has(rawActive)) active = false;
+      // Same reasoning as member status: a retired plan imported as active
+      // goes back on sale.
+      else errors.push(`"${at(r, 'active').trim()}" is not a yes/no I can read`);
+    }
+
+    const value: PlanRow = { name, priceCents, interval, currency, active };
+    return errors.length ? { line, errors } : { line, value, errors };
+  });
+
+  const ready = rows.filter((r) => r.value !== undefined).map((r) => r.value as PlanRow);
+  const rejected = rows.filter((r) => r.value === undefined);
+
+  return {
+    sheet,
+    missingRequired,
+    unmatchedColumns: unmatched,
+    dateOrder: 'unknown',
+    rows,
+    ready,
+    rejected,
+  };
+}
+
 /** One line summarising what an import would do, for the confirm step. */
 export function describePreview<T>(p: ImportPreview<T>): string {
   if (p.missingRequired.length) {
