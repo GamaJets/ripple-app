@@ -13,7 +13,7 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { personalRecords } from '../../src/lib/streaks';
-import { Rule, Section, SectionHead, Hero, Ghost } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 
 export default function Records() {
@@ -48,7 +48,7 @@ export default function Records() {
    {/* ── the hero: the heaviest thing you have lifted ────────────────── */}
    <Hero
     label="Heaviest lift"
-    figure={String(top.est1RM)}
+    figure={fig(top.est1RM)}
     unit="kg est. 1RM"
     note={`${top.exercise} · best set ${top.weight} kg × ${top.reps} on ${dstr(top.at)}`}
    />

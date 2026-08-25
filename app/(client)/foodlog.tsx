@@ -29,7 +29,7 @@ import { notifySuccess } from '../../src/ui/haptics';
 import { useFoodLog } from '../../src/ui/foodLog';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
 import { useWearables } from '../../src/ui/wearables';
-import { Rule, Section, SectionHead, Hero, Ghost, ListRow } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, Ghost, ListRow, fig } from '../../src/ui/kit';
 import { sp, layout, radius, elevation, type as ty, numeric } from '../../src/theme/scale';
 
 type Food = { n: string; k: number; p: number; c: number; f: number };
@@ -157,7 +157,7 @@ export default function FoodLog() {
  {/* ── the hero: what is left in the day ──────────────────────────── */}
  <Hero
  label={remK >= 0 ? 'Calories remaining' : 'Calories over'}
- figure={String(Math.abs(remK))}
+ figure={fig(Math.abs(remK))}
  unit="kcal"
  note={target ? `${tot.k} of ${target.kcal} kcal eaten${burned ? ` · ${burned} kcal burned` : ''}` : `${tot.k} kcal eaten${burned ? ` · ${burned} kcal burned` : ''} · add your weight for a target`}
  arc={target && target.kcal ? tot.k / target.kcal : undefined}

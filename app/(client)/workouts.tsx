@@ -12,7 +12,7 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { tapLight } from '../../src/ui/haptics';
 import { Icon } from '../../src/ui/Icon';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, Notice } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, Notice, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../../src/theme/scale';
 import type { Theme } from '../../src/theme/tokens';
 import { buildProgram, type ProgramExercise } from '../../src/lib/programs';
@@ -385,7 +385,7 @@ export default function Train() {
         {/* ── the hero: today's session, one number ───────────────────────── */}
         <Hero
           label={`Today · ${workout.focus}`}
-          figure={String(exercises.length)}
+          figure={fig(exercises.length)}
           unit={exercises.length === 1 ? 'exercise' : 'exercises'}
           note={heroNote}
           arc={exercises.length > 0 ? doneCount / exercises.length : undefined}
@@ -723,10 +723,10 @@ export default function Train() {
                       </View>
                     ) : null}
                     <KpiRow items={[
-                      { label: 'Exercises', value: String(dayEntries.length) },
-                      { label: 'Sets', value: String(daySets) },
+                      { label: 'Exercises', value: fig(dayEntries.length) },
+                      { label: 'Sets', value: fig(daySets) },
                       { label: 'Volume', value: dayVolume ? `${(dayVolume / 1000).toFixed(1)}t` : '—' },
-                      { label: 'kcal', value: String(dayKcal) },
+                      { label: 'kcal', value: fig(dayKcal) },
                     ]} />
                     <View style={{ marginTop: sp.lg }}>
                       {dayEntries.map((l, i) => (
@@ -941,9 +941,9 @@ function SessionRunner({ t, exercises, focus, nameOf, age, log, injuries, onComp
     const strip: { label: string; value: string; dot?: string }[] = [
       { label: 'Time', value: `${Math.floor(finalElapsed / 60)}:${String(finalElapsed % 60).padStart(2, '0')}` },
     ];
-    if (sessionKcal != null) strip.push({ label: 'kcal burned', value: String(sessionKcal) });
-    if (hrPeak != null) strip.push({ label: 'Peak bpm', value: String(hrPeak), dot: hrColor(hrPeak, age) });
-    if (typeof w.today.heartRateAvg === 'number') strip.push({ label: 'Avg bpm', value: String(w.today.heartRateAvg) });
+    if (sessionKcal != null) strip.push({ label: 'kcal burned', value: fig(sessionKcal) });
+    if (hrPeak != null) strip.push({ label: 'Peak bpm', value: fig(hrPeak), dot: hrColor(hrPeak, age) });
+    if (typeof w.today.heartRateAvg === 'number') strip.push({ label: 'Avg bpm', value: fig(w.today.heartRateAvg) });
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
         <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40, paddingTop: topPad + 10 }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
@@ -953,7 +953,7 @@ function SessionRunner({ t, exercises, focus, nameOf, age, log, injuries, onComp
           <Section>
             <KpiRow items={[
               { label: 'Exercises', value: `${exDone}/${exercises.length}` },
-              { label: 'Sets', value: String(totalSets) },
+              { label: 'Sets', value: fig(totalSets) },
               { label: 'Volume', value: `${(volume / 1000).toFixed(1)}t` },
             ]} />
           </Section>
@@ -979,9 +979,9 @@ function SessionRunner({ t, exercises, focus, nameOf, age, log, injuries, onComp
 
   const liveCols: { label: string; value: string; dot?: string }[] = [
     { label: 'Time', value: `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, '0')}` },
-    { label: 'bpm', value: String(liveHr ?? '–'), dot: liveHr ? hrColor(liveHr, age) : undefined },
-    { label: 'kcal', value: String(sessionKcal ?? '–') },
-    { label: 'Peak', value: String(hrPeak ?? '–'), dot: hrPeak ? hrColor(hrPeak, age) : undefined },
+    { label: 'bpm', value: fig(liveHr ?? '–'), dot: liveHr ? hrColor(liveHr, age) : undefined },
+    { label: 'kcal', value: fig(sessionKcal ?? '–') },
+    { label: 'Peak', value: fig(hrPeak ?? '–'), dot: hrPeak ? hrColor(hrPeak, age) : undefined },
   ];
 
   return (

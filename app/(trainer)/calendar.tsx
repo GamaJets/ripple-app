@@ -17,7 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
-import { Rule, Section, SectionHead, Hero, ListRow, Cta, Ghost } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, ListRow, Cta, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, radius, elevation, type as ty, numeric } from '../../src/theme/scale';
 import { useCoachProfile } from '../../src/ui/coachProfile';
 import { cancelSession } from '../../src/lib/booking';
@@ -199,7 +199,7 @@ export default function TrainerSchedule() {
         {/* ── the hero: how much of the schedule is spoken for ────────────── */}
         <Hero
           label="Booked"
-          figure={String(booked.length)}
+          figure={fig(booked.length)}
           unit={booked.length === 1 ? 'session' : 'sessions'}
           note={totalSlots === 0
             ? 'Nothing scheduled yet — add a session or set your weekly availability.'

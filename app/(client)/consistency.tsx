@@ -9,7 +9,7 @@ import { View, Text, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Hero, KpiRow, Ghost } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, KpiRow, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty } from '../../src/theme/scale';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { currentStreak, longestStreak, freezeBudget, currentStreakFrozen } from '../../src/lib/streaks';
@@ -69,7 +69,7 @@ export default function Consistency() {
         {/* ── the hero: the streak the heatmap is about ───────────────────── */}
         <Hero
           label="Current streak"
-          figure={String(streak)}
+          figure={fig(streak)}
           unit={streak === 1 ? 'day' : 'days'}
           note={freezes > 0
             ? `Best ${best} · ${freezes} freeze${freezes === 1 ? '' : 's'} in reserve`
@@ -81,9 +81,9 @@ export default function Consistency() {
         <Section>
           <SectionHead title="Totals" />
           <KpiRow items={[
-            { label: 'Sessions', value: String(totalSessions) },
-            { label: 'Days trained', value: String(trainedDays) },
-            { label: 'Best streak', value: String(best) },
+            { label: 'Sessions', value: fig(totalSessions) },
+            { label: 'Days trained', value: fig(trainedDays) },
+            { label: 'Best streak', value: fig(best) },
           ]} />
         </Section>
 

@@ -26,7 +26,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Hero, Ghost } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { tapLight } from '../../src/ui/haptics';
 import { classRoster, setAttendance, type RosterMember } from '../../src/lib/classAttendance';
@@ -73,7 +73,7 @@ export default function ClassCheckin() {
         {/* ── the hero: the count payroll is built from ───────────────────── */}
         <Hero
           label="Checked in"
-          figure={String(present)}
+          figure={fig(present)}
           unit={'/ ' + booked}
           note={booked === 0 ? 'No bookings on this class yet.' : present === booked ? 'Everyone booked is here.' : `${booked - present} still to arrive`}
           arc={booked > 0 ? present / booked : undefined}

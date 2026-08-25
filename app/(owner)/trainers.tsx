@@ -13,7 +13,7 @@ import { View, Text, ScrollView, Pressable, Modal, TextInput, KeyboardAvoidingVi
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, Notice } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, Notice, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../../src/theme/scale';
 import { usePlatformTrainers, type GymTrainer } from '../../src/ui/trainers';
 import { useTrainerInvites } from '../../src/ui/trainerInvites';
@@ -156,9 +156,9 @@ export default function OwnerTrainers() {
                 <Text style={{ ...ty.head, color: t.ink }}>{current.name}</Text>
                 <Text style={{ ...ty.label, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>{h.reason}</Text>
                 <KpiRow items={[
-                  { label: 'Clients', value: String(current.clients) },
-                  { label: 'Delivered · 30d', value: String(current.delivered30) },
-                  { label: 'Health', value: String(h.score) },
+                  { label: 'Clients', value: fig(current.clients) },
+                  { label: 'Delivered · 30d', value: fig(current.delivered30) },
+                  { label: 'Health', value: fig(h.score) },
                 ]} />
                 {/* Value the confirmed work only. This used to multiply the fee
                     by every booking whose start time had passed, which priced

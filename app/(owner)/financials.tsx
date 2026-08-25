@@ -21,7 +21,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Cta, Ghost } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Cta, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { emptyFinances, hasFigures, reviewFinances, type FinInputs, type FinFlag } from '../../src/lib/financialAI';
 
@@ -180,7 +180,7 @@ export default function Financials() {
             {/* ── the hero ─────────────────────────────────────────────── */}
             <Hero
               label="Health score"
-              figure={String(r.score)}
+              figure={fig(r.score)}
               unit="/100"
               note={`Grade ${r.grade} · ${money(r.netProfit)} net profit on a ${r.marginPct.toFixed(0)}% margin`}
               arc={r.score / 100}

@@ -12,7 +12,7 @@ import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Hero, KpiRow, Notice, Cta, Ghost } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, KpiRow, Notice, Cta, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, type as ty } from '../../src/theme/scale';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { deloadCheck } from '../../src/lib/training';
@@ -69,7 +69,7 @@ export default function RestDay() {
         {/* ── the hero: how loaded this week already is ───────────────────── */}
         <Hero
           label="Trained this week"
-          figure={String(wk.days)}
+          figure={fig(wk.days)}
           unit={wk.days === 1 ? 'day' : 'days'}
           arc={wk.days / 7}
           tone={tone}
@@ -81,7 +81,7 @@ export default function RestDay() {
         <Section>
           <SectionHead title="Load" />
           <KpiRow items={[
-            { label: 'Hard weeks', value: String(dl.hardWeeks) },
+            { label: 'Hard weeks', value: fig(dl.hardWeeks) },
             { label: 'Volume this week', value: (wk.volumeKg / 1000).toFixed(1), unit: 't' },
           ]} />
         </Section>

@@ -16,7 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { useTheme } from '../../src/ui/components';
 import { useRouter } from 'expo-router';
-import { Rule, Section, SectionHead, Hero, ListRow, Cta, Ghost } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, ListRow, Cta, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/theme/scale';
 import { useExerciseVideos, uploadExerciseVideo, videoUploadAvailable, type VideoItem } from '../../src/ui/exerciseVideos';
 
@@ -111,7 +111,7 @@ export default function TrainerVideos() {
         {/* ── the hero ───────────────────────────────────────────────────── */}
         <Hero
           label="In your library"
-          figure={String(vids.length)}
+          figure={fig(vids.length)}
           unit={vids.length === 1 ? 'clip' : 'clips'}
           note={vids.length ? `${done} of ${vids.length} recorded · clients see these in their program` : 'Record a clip or paste a link and it appears in every client’s program.'}
         />

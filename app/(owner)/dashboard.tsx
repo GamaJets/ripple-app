@@ -12,9 +12,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Icon } from '../../src/ui/Icon';
 import { useTheme } from '../../src/ui/components';
-import {
-  Rule, Section, SectionHead, Hero, KpiRow, ListRow, Card, Cta, Ghost, QuickRow, Spark, Notice,
-} from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Card, Cta, Ghost, QuickRow, Spark, Notice, fig } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 import { useTenant } from '../../src/ui/tenant';
 import { usePlatformTrainers } from '../../src/ui/trainers';
@@ -130,7 +128,7 @@ export default function OwnerOverview() {
         {/* ── the hero ───────────────────────────────────────────────────── */}
         <Hero
           label="Sessions delivered · 30 days"
-          figure={String(roll.sessions30)}
+          figure={fig(roll.sessions30)}
           note={delta !== 0
             ? `${delta > 0 ? '+' : '−'}${Math.abs(delta)} vs last month`
             : roll.payroll30 == null
@@ -145,8 +143,8 @@ export default function OwnerOverview() {
         <Section>
           <SectionHead title="Your gym" note="Trainers" onPress={() => router.push('/(owner)/trainers')} />
           <KpiRow items={[
-            { label: 'Trainers', value: String(roll.trainers), delta: `${roll.avgSessionsPerTrainer} sessions avg` },
-            { label: 'Clients', value: String(roll.clients), delta: `${roll.avgClientsPerTrainer} avg / trainer` },
+            { label: 'Trainers', value: fig(roll.trainers), delta: `${roll.avgSessionsPerTrainer} sessions avg` },
+            { label: 'Clients', value: fig(roll.clients), delta: `${roll.avgClientsPerTrainer} avg / trainer` },
             { label: 'Payroll · 30d', value: roll.payroll30 == null ? '—' : '$' + roll.payroll30.toLocaleString(), delta: roll.payroll30 == null ? 'no session fee set' : 'at your session fee' },
           ]} />
         </Section>

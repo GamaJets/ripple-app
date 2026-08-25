@@ -11,10 +11,7 @@ import { View, Text, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import {
-  Rule, Section, SectionHead, Hero, KpiRow, ActionCard, ListRow,
-  Cta, Ghost, QuickRow, Meter, Spark, WeekDots, Notice, Card,
-} from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, KpiRow, ActionCard, ListRow, Cta, Ghost, QuickRow, Meter, Spark, WeekDots, Notice, Card, fig } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty, numeric, value } from '../../src/theme/scale';
 import { Icon } from '../../src/ui/Icon';
 import { macrosFor, applyCoachAdjust } from '../../src/lib/nutrition';
@@ -250,9 +247,9 @@ export default function Home() {
           <KpiRow
             onPress={() => router.push('/(client)/scans')}
             items={[
-              { label: 'Weight', value: String(c.weightKg), unit: 'kg', route: '/(client)/scans', good: wDelta <= 0, delta: wDelta !== 0 ? `${wDelta < 0 ? '−' : '+'}${Math.abs(wDelta)} kg` : undefined },
-              { label: 'Body fat', value: String(c.bodyFatPct), unit: '%', route: '/(client)/scans', good: bfD <= 0, delta: bfD !== 0 ? `${bfD < 0 ? '−' : '+'}${Math.abs(bfD)}` : undefined },
-              { label: 'Muscle', value: String(c.muscleKg), unit: 'kg', route: '/(client)/scans', good: muD >= 0, delta: muD !== 0 ? `${muD < 0 ? '−' : '+'}${Math.abs(muD)}` : undefined },
+              { label: 'Weight', value: fig(c.weightKg), unit: 'kg', route: '/(client)/scans', good: wDelta <= 0, delta: wDelta !== 0 ? `${wDelta < 0 ? '−' : '+'}${Math.abs(wDelta)} kg` : undefined },
+              { label: 'Body fat', value: fig(c.bodyFatPct), unit: '%', route: '/(client)/scans', good: bfD <= 0, delta: bfD !== 0 ? `${bfD < 0 ? '−' : '+'}${Math.abs(bfD)}` : undefined },
+              { label: 'Muscle', value: fig(c.muscleKg), unit: 'kg', route: '/(client)/scans', good: muD >= 0, delta: muD !== 0 ? `${muD < 0 ? '−' : '+'}${Math.abs(muD)}` : undefined },
             ]}
           />
         </Section>
@@ -311,9 +308,9 @@ export default function Home() {
         <Section>
           <SectionHead title="This week" note="All activity" onPress={() => router.push('/(client)/trends')} />
           <KpiRow items={[
-            { label: 'Sessions', value: String(wk.workouts), unit: `/${goalDays}` },
+            { label: 'Sessions', value: fig(wk.workouts), unit: `/${goalDays}` },
             { label: 'Lifted', value: Math.round(wk.volumeKg).toLocaleString(), unit: 'kg' },
-            { label: 'New PRs', value: String(prs.length) },
+            { label: 'New PRs', value: fig(prs.length) },
           ]} />
           <WeekDots done={wk.days} />
         </Section>

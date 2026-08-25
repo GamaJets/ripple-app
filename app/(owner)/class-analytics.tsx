@@ -17,7 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
-import { Rule, Section, SectionHead, Hero, KpiRow, Ghost } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, KpiRow, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { classSummary, summariseClassRows, type ClassSummaryRow } from '../../src/lib/classAttendance';
 
@@ -148,8 +148,8 @@ export default function OwnerClassAnalytics() {
           <Section>
             <SectionHead title="This range" />
             <KpiRow items={[
-              { label: 'Classes', value: String(totals.classes) },
-              { label: 'Check-ins', value: String(totals.attended) },
+              { label: 'Classes', value: fig(totals.classes) },
+              { label: 'Check-ins', value: fig(totals.attended) },
               // Fill is booked/capacity; show is attended/booked. Both are on
               // screen now, so neither has to stand in for the other.
               { label: 'Avg fill', value: totals.fillPct == null ? '—' : String(totals.fillPct), unit: totals.fillPct == null ? undefined : '%' },

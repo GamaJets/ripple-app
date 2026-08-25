@@ -15,9 +15,7 @@ import { View, Text, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import {
-  Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, Spark, Notice,
-} from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, Spark, Notice, fig } from '../../src/ui/kit';
 import { sp, layout, type as ty, numeric } from '../../src/theme/scale';
 import { usePlatformTrainers } from '../../src/ui/trainers';
 import { useTenant } from '../../src/ui/tenant';
@@ -79,7 +77,7 @@ export default function OwnerRevenue() {
         {/* ── the hero ───────────────────────────────────────────────────── */}
         <Hero
           label="Sessions delivered · 30 days"
-          figure={String(roll.sessions30)}
+          figure={fig(roll.sessions30)}
           note={delta !== 0
             ? `${delta > 0 ? '+' : '−'}${Math.abs(delta)} vs last month${revenue30 != null ? ` · ${usd(revenue30)} at your fee` : ''}`
             : revenue30 != null
@@ -95,7 +93,7 @@ export default function OwnerRevenue() {
           <KpiRow items={[
             { label: 'Session fee', value: fee == null ? '—' : usd(fee), delta: fee == null ? 'not set' : 'per delivered session' },
             { label: 'Value / client', value: valuePerClient == null ? '—' : usd(valuePerClient), delta: valuePerClient == null ? 'needs a session fee' : 'last 30 days' },
-            { label: 'Clients', value: String(roll.clients), delta: `${roll.avgClientsPerTrainer} avg / trainer` },
+            { label: 'Clients', value: fig(roll.clients), delta: `${roll.avgClientsPerTrainer} avg / trainer` },
           ]} />
         </Section>
 

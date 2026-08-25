@@ -13,7 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Hero, Ghost } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty } from '../../src/theme/scale';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { longestStreak, personalRecords } from '../../src/lib/streaks';
@@ -61,7 +61,7 @@ export default function Achievements() {
         {/* ── the hero: how much of the set is unlocked ───────────────────── */}
         <Hero
           label="Unlocked"
-          figure={String(earnedCount)}
+          figure={fig(earnedCount)}
           unit={`of ${badges.length}`}
           arc={earnedCount / badges.length}
           note={earnedCount === 0 ? 'Log a workout to unlock your first badge' : `${badges.length - earnedCount} left to earn`}

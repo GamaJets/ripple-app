@@ -18,7 +18,7 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { useFoodLog } from '../../src/ui/foodLog';
 import { CUISINES, PORTIONS, searchDishes, estimateDish, type Dish } from '../../src/lib/restaurant';
-import { Rule, Section, SectionHead, KpiRow, Cta, Ghost } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, KpiRow, Cta, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, radius, elevation, type as ty, numeric, value } from '../../src/theme/scale';
 
 export default function Restaurant() {
@@ -128,10 +128,10 @@ export default function Restaurant() {
                   </Pressable>); })}
               </View>
               <KpiRow items={[
-                { label: 'kcal', value: String(est.kcal) },
-                { label: 'Protein', value: String(est.protein), unit: 'g' },
-                { label: 'Carbs', value: String(est.carbs), unit: 'g' },
-                { label: 'Fat', value: String(est.fat), unit: 'g' },
+                { label: 'kcal', value: fig(est.kcal) },
+                { label: 'Protein', value: fig(est.protein), unit: 'g' },
+                { label: 'Carbs', value: fig(est.carbs), unit: 'g' },
+                { label: 'Fat', value: fig(est.fat), unit: 'g' },
               ]} />
               <View style={{ height: sp.xl }} />
               <Cta label="Add to today" wide onPress={logIt} />

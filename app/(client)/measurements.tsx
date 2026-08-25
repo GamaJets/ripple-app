@@ -14,7 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { useMeasurements, METRICS, type MeasureEntry } from '../../src/ui/measurements';
-import { Rule, Section, SectionHead, Hero, Cta, Ghost } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, Cta, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 
 function fmtDate(iso: string) {
@@ -65,7 +65,7 @@ export default function Measurements() {
   {waistNow != null ? (
    <Hero
     label="Waist"
-    figure={String(waistNow)}
+    figure={fig(waistNow)}
     unit="cm"
     note={waistMove !== null && waistMove !== 0
      ? `${waistMove < 0 ? '−' : '+'}${Math.abs(waistMove)} cm since ${fmtDate(prev!.at)}`

@@ -17,7 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Hero, Cta, Ghost } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, Cta, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 import { usePromos } from '../../src/ui/promos';
 import { supabase } from '../../src/lib/supabase';
@@ -84,7 +84,7 @@ export default function Promotions() {
         {/* ── the hero ───────────────────────────────────────────────────── */}
         <Hero
           label="Live codes"
-          figure={String(promos.length)}
+          figure={fig(promos.length)}
           unit={promos.length === 1 ? 'code' : 'codes'}
           note={promos.length
             ? 'Push any code to every member. Delivery depends on their notification settings, so treat it as queued rather than guaranteed.'

@@ -14,7 +14,7 @@ import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
-import { Rule, Section, SectionHead, KpiRow, ListRow, Ghost } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, KpiRow, ListRow, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../../src/theme/scale';
 import { ageFromDob } from '../../src/lib/age';
 import { macrosFor, applyCoachAdjust } from '../../src/lib/nutrition';
@@ -336,9 +336,9 @@ export default function Profile() {
           <SectionHead title="Daily target" note={macros ? `${macros.kcal.toLocaleString()} kcal` : undefined} onPress={() => router.push('/(client)/nutrition')} />
           {macros ? (
             <KpiRow items={[
-              { label: 'Protein', value: String(macros.protein), unit: 'g' },
-              { label: 'Carbs', value: String(macros.carbs), unit: 'g' },
-              { label: 'Fat', value: String(macros.fat), unit: 'g' },
+              { label: 'Protein', value: fig(macros.protein), unit: 'g' },
+              { label: 'Carbs', value: fig(macros.carbs), unit: 'g' },
+              { label: 'Fat', value: fig(macros.fat), unit: 'g' },
             ]} />
           ) : (
             <Text style={{ ...ty.label, color: t.ink3 }}>Add your weight and body fat above and your daily targets appear here.</Text>

@@ -27,9 +27,7 @@ import { macrosFor } from '../../src/lib/nutrition';
 import { progressDoc, shareDoc } from '../../src/lib/exportShare';
 import { useRouter } from 'expo-router';
 import { useBrand } from '../../src/ui/brand';
-import {
-  Rule, Section, SectionHead, Hero, KpiRow, ActionCard, Cta, Ghost, Spark,
-} from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, KpiRow, ActionCard, Cta, Ghost, Spark, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 import { Icon } from '../../src/ui/Icon';
 import { analyzeInBody, analyzePhysique, visionAvailable, lastVisionError, type PhysiqueVision } from '../../src/lib/vision';
@@ -275,7 +273,7 @@ export default function Scans() {
             items={[
               { label: 'Weight', value: cd.weightKg != null ? String(cd.weightKg) : '—', unit: cd.weightKg != null ? 'kg' : undefined, route: '/(client)/measurements', good: !prev || (cd.weightKg != null && cd.weightKg <= prev.weightKg), delta: (cd.weightKg != null ? dlt(cd.weightKg, prev?.weightKg, 'kg') : null) ?? undefined },
               { label: 'Muscle', value: cd.muscleKg != null ? String(cd.muscleKg) : '—', unit: cd.muscleKg != null ? 'kg' : undefined, route: '/(client)/measurements', good: !prev || (cd.muscleKg != null && cd.muscleKg >= prev.skeletalMuscleKg), delta: (cd.muscleKg != null ? dlt(cd.muscleKg, prev?.skeletalMuscleKg, 'kg') : null) ?? undefined },
-              { label: 'Scans', value: String(scans.length), delta: latest ? `last ${ago}` : undefined },
+              { label: 'Scans', value: fig(scans.length), delta: latest ? `last ${ago}` : undefined },
             ]}
           />
         </Section>

@@ -13,7 +13,7 @@ import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Hero, KpiRow, Card, ListRow, Cta, Ghost } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, KpiRow, Card, ListRow, Cta, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../../src/theme/scale';
 import { useSessions } from '../../src/ui/sessions';
 import { useCoachProfile } from '../../src/ui/coachProfile';
@@ -119,7 +119,7 @@ export default function Calendar() {
         {/* ── the hero: what you have booked ──────────────────────────────── */}
         <Hero
           label="Booked with your coach"
-          figure={String(mine.length)}
+          figure={fig(mine.length)}
           unit={mine.length === 1 ? 'session' : 'sessions'}
           note={open.length > 0
             ? `${open.length} open slot${open.length === 1 ? '' : 's'} — tap a day to book`
@@ -132,8 +132,8 @@ export default function Calendar() {
         <Section>
           <SectionHead title="Availability" />
           <KpiRow items={[
-            { label: 'Open slots', value: String(open.length) },
-            ...(packLeft != null && packLeft > 0 ? [{ label: 'Pack credits', value: String(packLeft) }] : []),
+            { label: 'Open slots', value: fig(open.length) },
+            ...(packLeft != null && packLeft > 0 ? [{ label: 'Pack credits', value: fig(packLeft) }] : []),
           ]} />
           {mine.length > 0 ? (
             <View style={{ alignSelf: 'flex-start', marginTop: sp.lg }}>

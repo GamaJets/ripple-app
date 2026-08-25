@@ -33,9 +33,7 @@ import { billingAvailable } from '../../src/lib/billing';
 import { Icon, type IconName } from '../../src/ui/Icon';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
-import {
-  Rule, Section, SectionHead, Hero, KpiRow, ListRow, Card, Cta, Ghost, Notice,
-} from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Card, Cta, Ghost, Notice, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric } from '../../src/theme/scale';
 import { useCoachProfile } from '../../src/ui/coachProfile';
 import { CoachRequests } from '../../src/ui/CoachRequests';
@@ -366,7 +364,7 @@ export default function TrainerClients() {
         {/* ── the hero: one number leads the screen ───────────────────────── */}
         <Hero
           label="Active clients"
-          figure={String(active)}
+          figure={fig(active)}
           note={active === 0
             ? 'No clients yet — add or invite your first below.'
             : atRisk > 0 ? `${atRisk} need a check-in` : 'Everyone is on track'}
@@ -381,8 +379,8 @@ export default function TrainerClients() {
           <SectionHead title="This month" note="Analytics" onPress={() => router.push('/(trainer)/analytics')} />
           <KpiRow items={[
             { label: 'Est. revenue', value: '$' + revenue.toLocaleString(), unit: '/mo' },
-            { label: 'Unread', value: String(unread) },
-            { label: 'Needs check-in', value: String(atRisk) },
+            { label: 'Unread', value: fig(unread) },
+            { label: 'Needs check-in', value: fig(atRisk) },
           ]} />
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
             {active === 0

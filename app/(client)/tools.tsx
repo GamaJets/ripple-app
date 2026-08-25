@@ -15,7 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
-import { Rule, Section, SectionHead, Hero, KpiRow, Ghost } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, KpiRow, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty, numeric, value } from '../../src/theme/scale';
 
 const PLATES = [25, 20, 15, 10, 5, 2.5, 1.25];
@@ -39,7 +39,7 @@ function OneRM({ t }: { t: Theme }) {
  </View>
  </Section>
 
- <Hero label="Estimated 1RM · Epley" figure={String(oneRm)} unit="kg"
+ <Hero label="Estimated 1RM · Epley" figure={fig(oneRm)} unit="kg"
  note={oneRm ? `From ${weight} kg × ${reps} reps` : 'Enter a weight and rep count.'} />
 
  {oneRm > 0 ? (<>
@@ -95,9 +95,9 @@ function PlateCalc({ t }: { t: Theme }) {
  <Section>
  <SectionHead title="Per side" />
  <KpiRow items={[
- { label: 'Each side', value: String(perSide), unit: 'kg' },
- { label: 'Plates a side', value: String(plates.length) },
- { label: 'Loadable total', value: String(achievable), unit: 'kg' },
+ { label: 'Each side', value: fig(perSide), unit: 'kg' },
+ { label: 'Plates a side', value: fig(plates.length) },
+ { label: 'Loadable total', value: fig(achievable), unit: 'kg' },
  ]} />
  </Section>
 

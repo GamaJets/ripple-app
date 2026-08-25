@@ -17,7 +17,7 @@ import { useTheme } from '../../src/ui/components';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { est1RM } from '../../src/lib/streaks';
 import type { WorkoutEntry } from '../../src/lib/mockData';
-import { Rule, Section, SectionHead, Hero, KpiRow, Ghost, Spark } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, KpiRow, Ghost, Spark, fig } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty } from '../../src/theme/scale';
 
 const WEEKS = 10;
@@ -110,7 +110,7 @@ export default function Trends() {
           <View style={{ height: sp.lg }} />
           <KpiRow items={[
             { label: 'This week', value: Math.round(thisWeek.vol).toLocaleString(), unit: 'kg' },
-            { label: 'Training days', value: String(thisWeek.sessions) },
+            { label: 'Training days', value: fig(thisWeek.sessions) },
             { label: 'Best week', value: Math.round(bestWeek.vol).toLocaleString(), unit: 'kg', delta: anyVolume ? `w/c ${bestWeek.label}` : undefined },
           ]} />
         </Section>
@@ -140,12 +140,12 @@ export default function Trends() {
                 <>
                   <KpiRow items={[
                     {
-                      label: 'Est. 1RM', value: String(last), unit: 'kg',
+                      label: 'Est. 1RM', value: fig(last), unit: 'kg',
                       good: delta >= 0,
                       delta: series.length >= 2 ? `${delta >= 0 ? '+' : '−'}${Math.abs(delta)} kg` : undefined,
                     },
-                    { label: 'Best', value: String(maxE), unit: 'kg' },
-                    { label: 'Sessions', value: String(series.length) },
+                    { label: 'Best', value: fig(maxE), unit: 'kg' },
+                    { label: 'Sessions', value: fig(series.length) },
                   ]} />
                   {series.length >= 2 ? (<>
                     <View style={{ height: sp.lg }} />

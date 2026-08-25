@@ -16,7 +16,7 @@ import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { suggestProgression, type ProgressAction } from '../../src/lib/progression';
-import { Rule, Section, SectionHead, KpiRow, Cta, Ghost } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, KpiRow, Cta, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 
 const META: Record<ProgressAction, { label: string; icon: string; color: (t: any) => string }> = {
@@ -82,11 +82,11 @@ export default function Progression() {
                   <View style={{ height: sp.md }} />
                   <KpiRow items={[
                     {
-                      label: 'Target load', value: String(tip.nextWeight), unit: 'kg',
+                      label: 'Target load', value: fig(tip.nextWeight), unit: 'kg',
                       good: bump >= 0,
                       delta: bump !== 0 ? `${bump > 0 ? '+' : '−'}${Math.abs(bump)} kg` : 'same weight',
                     },
-                    { label: 'Target reps', value: String(tip.nextReps) },
+                    { label: 'Target reps', value: fig(tip.nextReps) },
                   ]} />
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{tip.rationale}</Text>
                 </View>

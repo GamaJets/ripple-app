@@ -16,7 +16,7 @@ import { View, Text, ScrollView, TextInput, Alert, Pressable } from 'react-nativ
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
 import { useGoalTracker } from '../../src/ui/goalTracker';
@@ -85,13 +85,13 @@ export default function Goal() {
 
         {hasTarget && hasWeight ? (
           <View>
-            <Hero label="Now" figure={String(current)} unit="kg" arc={pct / 100}
+            <Hero label="Now" figure={fig(current)} unit="kg" arc={pct / 100}
               note={`${pct}% of the way · ${Math.abs(remaining)} kg to go`} />
             <Rule />
             <Section>
               <KpiRow items={[
-                { label: 'Start', value: String(start), unit: 'kg' },
-                { label: 'Target', value: String(tgt), unit: 'kg' },
+                { label: 'Start', value: fig(start), unit: 'kg' },
+                { label: 'Target', value: fig(tgt), unit: 'kg' },
                 { label: 'Target date', value: targetDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }), delta: daysToDate > 0 ? `${daysToDate} days` : 'passed', good: daysToDate > 0 },
               ]} />
             </Section>

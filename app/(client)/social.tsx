@@ -21,7 +21,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { useClientData } from '../../src/ui/clientData';
-import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, type as ty } from '../../src/theme/scale';
 
 export default function Social() {
@@ -83,7 +83,7 @@ export default function Social() {
  <KpiRow items={[
  { label: 'Weight', value: `${wtDrop >= 0 ? '−' : '+'}${Math.abs(wtDrop)}`, unit: 'kg' },
  { label: 'Body fat', value: `${bfDrop >= 0 ? '−' : '+'}${Math.abs(bfDrop)}`, unit: '%' },
- { label: 'Scans', value: String(cd.scans.length) },
+ { label: 'Scans', value: fig(cd.scans.length) },
  ]} />
  </Section>
  <Rule />

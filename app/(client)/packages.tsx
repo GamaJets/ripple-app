@@ -13,7 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Hero, Meter, Ghost } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, Meter, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, type as ty, numeric } from '../../src/theme/scale';
 import { money } from '../../src/lib/billing';
 import { fetchMyPurchases, type Purchase } from '../../src/lib/connect';
@@ -48,7 +48,7 @@ export default function ClientPackages() {
         {loading ? <ActivityIndicator color={t.brand} style={{ marginVertical: 30 }} /> : (
           <>
             {activePacks.length > 0 ? (
-              <Hero label="Sessions remaining" figure={String(remaining)}
+              <Hero label="Sessions remaining" figure={fig(remaining)}
                 note={`Across ${activePacks.length} active pack${activePacks.length === 1 ? '' : 's'}`} />
             ) : null}
 

@@ -23,7 +23,7 @@ import { ageFromDob, type HrSample } from '../../src/lib/hr';
 import { useWearables } from '../../src/ui/wearables';
 import { reportError } from '../../src/lib/reportError';
 import { PROVIDERS } from '../../src/lib/wearables/registry';
-import { Rule, Section, SectionHead, Hero, Cta, Ghost } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, Cta, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { Icon } from '../../src/ui/Icon';
 
@@ -106,7 +106,7 @@ export default function Recovery() {
   {/* ── the hero: today's hydration ─────────────────────────────────── */}
   <Hero
    label="Hydration"
-   figure={String(cups)}
+   figure={fig(cups)}
    unit={`of ${goalCups} cups`}
    arc={pct / 100}
    note={cups >= goalCups ? 'Goal met today — nice.' : `${goalCups - cups} more to hit today's goal.`}

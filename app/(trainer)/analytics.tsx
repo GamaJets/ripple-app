@@ -13,9 +13,7 @@ import { useState } from 'react';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import {
-  Rule, Section, SectionHead, Hero, KpiRow, ListRow, Card, Cta, Ghost, Spark,
-} from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Card, Cta, Ghost, Spark, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 import { useCoachProfile } from '../../src/ui/coachProfile';
 import { atRiskClient } from '../../src/lib/trainerMock';
@@ -101,7 +99,7 @@ export default function TrainerAnalytics() {
         {/* ── the hero ───────────────────────────────────────────────────── */}
         <Hero
           label="Sessions delivered"
-          figure={String(sessionsMo)}
+          figure={fig(sessionsMo)}
           unit={sessionsMo === 1 ? 'this month' : 'this month'}
           note={sessionFee > 0
             ? `$${revenue.toLocaleString()} at your $${sessionFee} session rate — Repple does not process this, so it is your own arithmetic, not a payout.`
@@ -116,8 +114,8 @@ export default function TrainerAnalytics() {
         <Section>
           <SectionHead title="Roster" note="Leaderboard" onPress={() => router.push('/(trainer)/leaderboard')} />
           <KpiRow items={[
-            { label: 'Clients', value: String(clients) },
-            { label: 'Avg adherence', value: String(avgAdh), unit: '%' },
+            { label: 'Clients', value: fig(clients) },
+            { label: 'Avg adherence', value: fig(avgAdh), unit: '%' },
             { label: 'Value / client', value: '$' + valuePerClient.toLocaleString(), unit: '/mo' },
           ]} />
         </Section>

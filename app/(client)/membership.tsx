@@ -19,7 +19,7 @@ import { View, Text, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Hero, ActionCard, ListRow, Ghost } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, ActionCard, ListRow, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, type as ty, numeric } from '../../src/theme/scale';
 import type { IconName } from '../../src/ui/Icon';
 import { useClientData } from '../../src/ui/clientData';
@@ -77,7 +77,7 @@ export default function Membership() {
         {/* ── the hero: the only live number this screen has ──────────────── */}
         <Hero
           label="Sessions logged this month"
-          figure={String(visits)}
+          figure={fig(visits)}
           note={visits > 0 ? `Last logged ${last}` : 'No sessions logged yet this month'}
         />
 

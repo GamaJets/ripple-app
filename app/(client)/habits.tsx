@@ -9,7 +9,7 @@ import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Hero, Cta, Ghost } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, Cta, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { useHabits } from '../../src/ui/habits';
 
@@ -35,7 +35,7 @@ export default function Habits() {
         {/* ── the hero: today, in one number ──────────────────────────────── */}
         <Hero
           label="Today's progress"
-          figure={String(pct)}
+          figure={fig(pct)}
           unit="%"
           arc={pct / 100}
           note={`${h.doneCount} of ${h.habits.length} habits done`}

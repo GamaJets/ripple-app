@@ -16,7 +16,7 @@ import { View, Text, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Hero, KpiRow, Notice, Cta, Ghost } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, KpiRow, Notice, Cta, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, type as ty } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
@@ -121,7 +121,7 @@ export default function WeeklyReport() {
           </View>
         ) : null}
 
-        <Hero label="Trained this week" figure={String(wk.workouts)} unit={wk.workouts === 1 ? 'session' : 'sessions'}
+        <Hero label="Trained this week" figure={fig(wk.workouts)} unit={wk.workouts === 1 ? 'session' : 'sessions'}
           note={`${wk.days} active day${wk.days === 1 ? '' : 's'}${streak > 0 ? ` · ${streak}-day streak` : ''}`} />
 
         <Rule />
@@ -131,7 +131,7 @@ export default function WeeklyReport() {
           <KpiRow items={[
             { label: 'Volume', value: `${(wk.volumeKg / 1000).toFixed(1)}`, unit: 't', delta: `${wk.kcal.toLocaleString()} kcal` },
             { label: 'Streak', value: `${streak}`, unit: streak === 1 ? 'day' : 'days', delta: streak > 0 ? 'running' : 'not started', good: streak > 0 },
-            { label: 'PRs on record', value: String(prs.length), delta: 'all-time' },
+            { label: 'PRs on record', value: fig(prs.length), delta: 'all-time' },
           ]} />
         </Section>
 

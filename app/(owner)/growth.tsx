@@ -15,9 +15,7 @@ import { useState } from 'react';
 import { View, Text, ScrollView, Pressable, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
-import {
-  Rule, Section, SectionHead, Hero, KpiRow, Cta,
-} from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, KpiRow, Cta, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 import { DistBar } from '../../src/ui/charts';
 import { usePromos } from '../../src/ui/promos';
@@ -106,9 +104,9 @@ export default function OwnerGrowth() {
         <Section>
           <SectionHead title="Retention" />
           <KpiRow items={[
-            { label: 'Idle', value: String(idlePct), unit: '%', delta: `${idle} of ${roll.trainers}` },
-            { label: 'Sessions · 30d', value: String(roll.sessions30), delta: `${roll.avgSessionsPerTrainer} avg / trainer` },
-            { label: 'Clients', value: String(ca.total), delta: `${ca.avgPerTrainer} avg / trainer` },
+            { label: 'Idle', value: fig(idlePct), unit: '%', delta: `${idle} of ${roll.trainers}` },
+            { label: 'Sessions · 30d', value: fig(roll.sessions30), delta: `${roll.avgSessionsPerTrainer} avg / trainer` },
+            { label: 'Clients', value: fig(ca.total), delta: `${ca.avgPerTrainer} avg / trainer` },
           ]} />
         </Section>
 
@@ -118,9 +116,9 @@ export default function OwnerGrowth() {
         <Section>
           <SectionHead title="Platform clients" note="Across every trainer" />
           <KpiRow items={[
-            { label: 'Active clients', value: String(ca.total) },
-            { label: 'Engaged', value: String(ca.engagementPct), unit: '%' },
-            { label: 'Avg / trainer', value: String(ca.avgPerTrainer) },
+            { label: 'Active clients', value: fig(ca.total) },
+            { label: 'Engaged', value: fig(ca.engagementPct), unit: '%' },
+            { label: 'Avg / trainer', value: fig(ca.avgPerTrainer) },
           ]} />
           <View style={{ marginTop: sp.xl }}>
             <DistBar segments={[

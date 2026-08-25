@@ -16,6 +16,25 @@ import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } f
 /* ── structure ────────────────────────────────────────────────────────────── */
 
 /** A 1px divider. Sections are separated by this + air, not by boxing them. */
+/**
+ * A figure for a Hero or a Kpi, or an em dash when there is nothing to show.
+ *
+ * Exists because `String(x)` is the obvious thing to write and is silently
+ * wrong: `String(null)` is the four-letter string "null", which TypeScript
+ * cannot object to and which shipped to the client dashboard as
+ * "null kg / null % / null kg" for anyone with no body scan on record.
+ *
+ * NaN is caught too — `0/0` reaching a screen as "NaN" is the same failure
+ * wearing a different word. Both mean "not measured", and both must read as a
+ * dash rather than as a value the reader might believe.
+ */
+export function fig(v: number | string | null | undefined): string {
+  if (v == null) return '—';
+  if (typeof v === 'number' && !Number.isFinite(v)) return '—';
+  const s = String(v);
+  return s === 'null' || s === 'undefined' || s === 'NaN' ? '—' : s;
+}
+
 export function Rule({ inset = 0 }: { inset?: number }) {
   const t = useTheme();
   return <View style={{ height: hairline, backgroundColor: t.ring, marginLeft: inset }} />;
