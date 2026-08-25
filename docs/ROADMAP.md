@@ -223,3 +223,11 @@ traced to a specific file or a missing table. It is that "no screen does this"
 is a claim about the whole codebase, and it was verified against only part of
 it. Anything still unstarted should be re-checked against `studio-web/` before
 work begins on it.
+
+## Deferred by the owner
+
+- **R085 · Arabic alongside English** — deferred 25 Aug 2026. Approved in the
+  bulk review, then set aside on reflection. It is a business decision about
+  which market to serve first rather than a backlog item, and it is one of the
+  fourteen large items, so parking it removes roughly a week from the
+  outstanding work. Not cancelled; not scheduled.

@@ -16,6 +16,8 @@ import { DataTable, type Column } from '@/components/DataTable';
 import {
   fetchSessions, markOutcome, clearOutcome,
   isAwaitingOutcome, payrollByTrainer, payrollTotal, settlementBlocker,
+  settleableSessions, settlementAmount, settleBlocker, recordSettlement, fetchSettlements,
+  type Settlement,
   PAY_DELIVERED_ONLY,
   type PtSession, type SessionOutcome, type PayPolicy,
 } from '@lib/gymSessions';
@@ -41,11 +43,16 @@ export default function Sessions() {
   // It is a control on the page so the owner states it and can see what it does
   // to the number, rather than discovering it in a payslip.
   const [policy, setPolicy] = useState<PayPolicy>(PAY_DELIVERED_ONLY);
+  const [settlements, setSettlements] = useState<Settlement[] | null>(null);
+  const [settling, setSettling] = useState<string | null>(null);
 
   const load = useCallback(async (tenantId: string) => {
     try {
-      const rows = await fetchSessions(supabase, tenantId, new Date(Date.now() - 30 * DAY).toISOString());
-      setSessions(rows); setErr(null);
+      const [rows, runs] = await Promise.all([
+        fetchSessions(supabase, tenantId, new Date(Date.now() - 30 * DAY).toISOString()),
+        fetchSettlements(supabase, tenantId).catch(() => [] as Settlement[]),
+      ]);
+      setSessions(rows); setSettlements(runs); setErr(null);
     } catch (e: any) {
       setErr(e?.message ?? 'Could not read the session record.');
       setSessions([]);
@@ -105,6 +112,49 @@ export default function Sessions() {
   };
 
   const blocker = settlementBlocker(total);
+
+  // What each trainer is actually owed RIGHT NOW: marked, priced, payable and
+  // not already settled. Derived from the sessions rather than from the payroll
+  // line, because the line counts everything in the window while a settlement
+  // must only ever cover what has not been paid.
+  const owed = useMemo(() => {
+    const byTrainer = new Map<string, { name: string | null; rows: PtSession[]; unmarked: number }>();
+    for (const s of sessions ?? []) {
+      const e = byTrainer.get(s.trainerId)
+        ?? { name: s.trainerName, rows: [] as PtSession[], unmarked: 0 };
+      if (isAwaitingOutcome(s)) e.unmarked += 1;
+      byTrainer.set(s.trainerId, e);
+    }
+    for (const s of settleableSessions(sessions ?? [], policy)) {
+      const e = byTrainer.get(s.trainerId);
+      if (e) e.rows.push(s);
+    }
+    return [...byTrainer.entries()]
+      .map(([trainerId, e]) => ({
+        trainerId, name: e.name, rows: e.rows, unmarked: e.unmarked,
+        cents: settlementAmount(e.rows),
+        blocker: settleBlocker(e.rows, e.unmarked),
+      }))
+      .filter((x) => x.rows.length > 0 || x.unmarked > 0);
+  }, [sessions, policy]);
+
+  const settle = async (t: (typeof owed)[number]) => {
+    if (!me?.tenantId || t.blocker) return;
+    const dates = t.rows.map((s) => s.startsAt.slice(0, 10)).sort();
+    setSettling(t.trainerId);
+    try {
+      await recordSettlement(supabase, me.tenantId, {
+        trainerId: t.trainerId,
+        periodFrom: dates[0],
+        periodTo: dates[dates.length - 1],
+        amountCents: t.cents,
+        sessionIds: t.rows.map((s) => s.id),
+      });
+      await load(me.tenantId);
+    } catch (e: any) {
+      setErr(e?.message ?? 'Could not record that settlement.');
+    } finally { setSettling(null); }
+  };
 
   return (
     <Shell me={me} gymName={gymName} current="/sessions">
@@ -168,6 +218,8 @@ export default function Sessions() {
 
       <Awaiting sessions={awaiting} loading={sessions === null} onMark={mark} />
       <Payroll lines={lines} />
+      <Settle owed={owed} settling={settling} onSettle={settle} />
+      <Settled runs={settlements} />
       <Marked sessions={settled} onClear={(id) => clearOutcome(supabase, id).then(refresh)} />
     </Shell>
   );
@@ -235,6 +287,78 @@ function Payroll({ lines }: { lines: ReturnType<typeof payrollByTrainer> }) {
   return (
     <Section title="Payroll by trainer" sub="Priced from confirmed sessions at the rate snapshotted when each was marked.">
       <DataTable rows={lines} columns={cols} rowKey={(l) => l.trainerId} empty="No sessions in this period." />
+    </Section>
+  );
+}
+
+/* ── settling: handing the money over, exactly once ────────────────────────── */
+
+function Settle({ owed, settling, onSettle }: {
+  owed: { trainerId: string; name: string | null; rows: PtSession[]; unmarked: number; cents: number; blocker: string | null }[];
+  settling: string | null;
+  onSettle: (t: any) => void;
+}) {
+  return (
+    <Section
+      title="Outstanding"
+      sub="What each trainer is owed for work not yet paid for. Settling stamps those exact sessions, so nothing here can be paid a second time."
+    >
+      {owed.length === 0 ? (
+        <p style={{ margin: '12px 14px', fontSize: 13, color: 'var(--ink3)' }}>
+          Nothing outstanding. Every marked session in this window has been settled.
+        </p>
+      ) : owed.map((t) => (
+        <div key={t.trainerId} style={{
+          display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap',
+          padding: '12px 14px', borderTop: '1px solid var(--ring)',
+        }}>
+          <div style={{ flex: 1, minWidth: 180 }}>
+            <div style={{ fontSize: 13.5, fontWeight: 500 }}>{t.name ?? 'Trainer'}</div>
+            <div style={{ fontSize: 12.5, color: 'var(--ink3)', marginTop: 2 }}>
+              {t.blocker
+                ? t.blocker
+                : `${t.rows.length} session${t.rows.length === 1 ? '' : 's'} unpaid`}
+            </div>
+          </div>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 15, minWidth: 100, textAlign: 'right' }}>
+            {t.blocker ? <span className="dash">—</span> : money(t.cents)}
+          </div>
+          <button
+            disabled={!!t.blocker || settling === t.trainerId}
+            onClick={() => onSettle(t)}
+            style={{
+              background: t.blocker ? 'var(--surface2)' : 'var(--brand)',
+              color: t.blocker ? 'var(--ink3)' : 'var(--brand-ink)',
+              border: 'none', borderRadius: 6, padding: '8px 14px', fontSize: 13,
+              fontWeight: 600, cursor: t.blocker ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap',
+            }}
+          >
+            {settling === t.trainerId ? 'Recording…' : 'Mark as paid'}
+          </button>
+        </div>
+      ))}
+    </Section>
+  );
+}
+
+/* ── what has already been paid ────────────────────────────────────────────── */
+
+function Settled({ runs }: { runs: Settlement[] | null }) {
+  if (runs === null) return null;
+  const cols: Column<Settlement>[] = [
+    { key: 'when', header: 'Paid', value: (r) => r.settledAt,
+      render: (r) => new Date(r.settledAt).toLocaleDateString() },
+    { key: 'period', header: 'Covering', value: (r) => r.periodFrom,
+      render: (r) => `${r.periodFrom} → ${r.periodTo}` },
+    { key: 'n', header: 'Sessions', value: (r) => r.sessionsCount, numeric: true },
+    { key: 'amount', header: 'Amount', value: (r) => r.amountCents, numeric: true,
+      // Snapshotted at the time, never recomputed — a later fee change must not
+      // rewrite what was actually handed over.
+      render: (r) => money(r.amountCents) },
+  ];
+  return (
+    <Section title="Already paid" sub="Amounts as they were when the money went out, not as today's rates would price them.">
+      <DataTable rows={runs} columns={cols} rowKey={(r) => r.id} empty="No payroll has been settled yet." />
     </Section>
   );
 }
