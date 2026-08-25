@@ -8,6 +8,7 @@ import { summarise, money, type MembershipPlan, type Membership, type GymPayment
 import { weeklyOccurrences, summariseAttendance, weeklyAttendance, pct, type GymClass, type NewClass } from './gymSchedule';
 import { summariseClassRows, type ClassSummaryRow } from './classRates';
 import { STATUS_LABEL, STATUS_RANK, statusFromRisk, riskLabel } from './status';
+import { reconcile, reconcileNote } from './finReconcile';
 import { buildIcs } from './ics';
 import { serviceState, nextServiceDue, usableUnits, outOfServiceUnits, capacityFor, summariseRegister, needsAttention, type Equipment } from './gymEquipment';
 import { parseCsv, parseSheet, sniffDelimiter, mapColumns } from './csv';
@@ -781,6 +782,41 @@ ok(STATUS_RANK.idle > STATUS_RANK.on_track, 'idle sorts last so it cannot bury r
 const labels = Object.values(STATUS_LABEL);
 ok(new Set(labels).size === labels.length, 'no two levels share a label');
 ok(!labels.some((l) => /deliver/i.test(l)), 'nothing in the scale judges the person');
+}
+
+
+// ── reconciling a typed figure against a derived one ──
+{
+// Nothing recorded is not a disagreement — it is nothing to compare against.
+const none = reconcile(40000, null);
+ok(none.state === 'no_record', 'no records means nothing to check, not a mismatch');
+ok(none.delta === null && none.driftPct === null, 'no delta without both sides');
+
+const blank = reconcile(0, 34500);
+ok(blank.state === 'not_entered', 'records with nothing typed is its own state');
+
+ok(reconcile(34500, 34500).state === 'agrees', 'identical figures agree');
+ok(reconcile(34500, 34600).state === 'agrees', 'a 0.3% gap is rounding, not a discrepancy');
+ok(reconcile(40000, 34500).state === 'differs', 'a 16% gap is a real disagreement');
+
+const d = reconcile(40000, 34500);
+ok(d.delta === -5500, 'delta is derived minus typed, so a signed shortfall');
+ok(Math.abs((d.driftPct ?? 0) - 5500 / 34500) < 1e-9, 'drift is measured against the derived figure');
+
+// Tolerance is a fraction, so the same rule serves money and headcount.
+ok(reconcile(102, 100).state === 'agrees', '2 members off 100 is inside tolerance');
+ok(reconcile(120, 100).state === 'differs', '20 members off 100 is not');
+ok(reconcile(40000, 34500, 0.5).state === 'agrees', 'tolerance is caller-settable');
+
+// A derived zero is a real measurement and must not divide by itself.
+ok(reconcile(500, 0).state === 'differs', 'records showing nobody active contradicts a typed figure');
+ok(reconcile(0, 0).state === 'not_entered', 'nothing typed against a real zero is still "not entered"');
+
+// The note says something only when something needs doing.
+ok(reconcileNote(reconcile(34500, 34500), 'MRR') === null, 'agreement says nothing — no self-congratulation');
+ok((reconcileNote(reconcile(40000, 34500), 'MRR') ?? '').includes('less'), 'a shortfall is described as less');
+ok((reconcileNote(reconcile(30000, 34500), 'MRR') ?? '').includes('more'), 'a surplus is described as more');
+ok((reconcileNote(reconcile(40000, null), 'MRR') ?? '').includes('Nothing recorded'), 'no-record note explains why');
 }
 
 if (errors.length) { console.log('COVERAGE FAILURES:\n' + errors.join('\n')); process.exit(1); }

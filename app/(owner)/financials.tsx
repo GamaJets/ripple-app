@@ -21,9 +21,14 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Cta, Ghost, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Cta, Ghost, Notice, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { emptyFinances, hasFigures, reviewFinances, type FinInputs, type FinFlag } from '../../src/lib/financialAI';
+import { reconcile, reconcileNote } from '../../src/lib/finReconcile';
+import { fetchPlans, fetchMemberships, fetchPayments, summarise } from '../../src/lib/gymRecord';
+import { useTenant } from '../../src/ui/tenant';
+import { supabase } from '../../src/lib/supabase';
+import { reportError } from '../../src/lib/reportError';
 
 const KEY = 'repple.owner.financials';
 const money = (n: number) => 'AED ' + Math.round(n).toLocaleString();
@@ -43,10 +48,49 @@ export default function Financials() {
   const t = useTheme();
   const router = useRouter();
   const [connected] = useState(false);
+  const { tenant } = useTenant();
   const [fin, setFin] = useState<FinInputs>(emptyFinances);
   const [hydrated, setHydrated] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<Record<string, string>>({});
+
+  // What the records themselves say. MRR and the active-member count are both
+  // things the database already knows — memberships on priced plans give one,
+  // memberships with status 'active' give the other — so asking an owner to
+  // type them creates two sources for one number that nothing compares.
+  //
+  // The derived figures are NOT written over what was typed. An owner entering
+  // a different number is usually right about something the records do not
+  // hold: a corporate contract invoiced offline, a price that changed
+  // mid-month. Overwriting that would swap one wrong number for another and
+  // lose what the owner knows. The screen names both and lets them decide.
+  const [derivedMrr, setDerivedMrr] = useState<number | null>(null);
+  const [derivedMembers, setDerivedMembers] = useState<number | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      if (!tenant?.id) return;
+      try {
+        const [plans, memberships, payments] = await Promise.all([
+          fetchPlans(supabase, tenant.id),
+          fetchMemberships(supabase, tenant.id),
+          fetchPayments(supabase, tenant.id),
+        ]);
+        if (!live) return;
+        const sum = summarise(payments, memberships, plans);
+        // summarise returns null when no active membership sits on a priced
+        // plan. Passed straight through: "not known" must not become a zero
+        // that makes an owner doubt a figure they are right about.
+        setDerivedMrr(sum.mrrCents == null ? null : Math.round(sum.mrrCents / 100));
+        setDerivedMembers(memberships.length ? sum.activeMembers : null);
+      } catch (e) { reportError('financials.derived', e); }
+    })();
+    return () => { live = false; };
+  }, [tenant?.id]);
+
+  const mrrCheck = reconcile(fin.mrr, derivedMrr);
+  const memberCheck = reconcile(fin.members, derivedMembers);
 
   useEffect(() => {
     (async () => {
@@ -157,6 +201,25 @@ export default function Financials() {
                   placeholderTextColor={t.ink3}
                   style={input}
                 />
+                {/* What the records say, for the two fields Repple can work out
+                    for itself. Offered, never imposed — see finReconcile.ts. */}
+                {f.key === 'mrr' || f.key === 'members' ? (() => {
+                  const chk = f.key === 'mrr' ? mrrCheck : memberCheck;
+                  const val = f.key === 'mrr' ? derivedMrr : derivedMembers;
+                  const fmtv = (n: number) => (f.key === 'mrr' ? money(n) : n.toLocaleString());
+                  const note = reconcileNote(chk, f.label.toLowerCase(), fmtv);
+                  if (!note) return null;
+                  return (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: 6 }}>
+                      <Text style={{ ...ty.caption, color: chk.state === 'differs' ? t.s3 : t.ink3, flex: 1 }}>
+                        {note}
+                      </Text>
+                      {val != null ? (
+                        <Ghost label="Use it" onPress={() => setDraft((d) => ({ ...d, [f.key]: String(val) }))} />
+                      ) : null}
+                    </View>
+                  );
+                })() : null}
               </View>
             ))}
             <View style={{ height: sp.sm }} />
@@ -185,6 +248,21 @@ export default function Financials() {
               note={`Grade ${r.grade} · ${money(r.netProfit)} net profit on a ${r.marginPct.toFixed(0)}% margin`}
               arc={r.score / 100}
             />
+
+            {/* The score is built on what was typed. If the register disagrees,
+                say so here rather than only inside the edit form — this is the
+                screen somebody acts on. */}
+            {mrrCheck.state === 'differs' || memberCheck.state === 'differs' ? (
+              <Notice
+                tone={t.s3}
+                kicker="Worth a look"
+                title="Your figures and your records disagree"
+                note={[
+                  mrrCheck.state === 'differs' ? reconcileNote(mrrCheck, 'MRR', money) : null,
+                  memberCheck.state === 'differs' ? reconcileNote(memberCheck, 'member count', (n) => n.toLocaleString()) : null,
+                ].filter(Boolean).join(' ') + ' This score is worked out from what you entered, not from the register.'}
+              />
+            ) : null}
 
             <Rule />
 
