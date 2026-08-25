@@ -60,7 +60,7 @@ function Wheel({ items, index, onChange, t }: { items: string[]; index: number; 
         onMomentumScrollEnd={(e) => onChange(Math.max(0, Math.min(items.length - 1, Math.round(e.nativeEvent.contentOffset.y / ITEM_H))))}
         onContentSizeChange={place}
         contentContainerStyle={{ paddingVertical: ITEM_H * 2 }}
-      >
+       keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
         {items.map((it, i) => (
           <View key={i} style={{ height: ITEM_H, alignItems: 'center', justifyContent: 'center' }}>
             <Text style={{ ...(i === index ? value(21) : ty.body), color: i === index ? t.ink : t.ink3 }}>{it}</Text>
@@ -261,7 +261,7 @@ export default function Profile() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
 
         {/* ── header: who you are. No hero — a profile has no live metric ─── */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md, paddingBottom: sp.lg }}>
@@ -378,7 +378,7 @@ export default function Profile() {
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end' }}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setShowEdit(false)} />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, borderTopWidth: hairline, borderColor: t.ring, maxHeight: '90%', ...elevation.e2 }}>
-          <ScrollView contentContainerStyle={{ padding: G }} showsVerticalScrollIndicator={false}>
+          <ScrollView contentContainerStyle={{ padding: G }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sp.lg }}>
               <Text style={{ ...ty.title, color: t.ink }}>Edit profile</Text>
               <Pressable onPress={() => setShowEdit(false)} hitSlop={8}><Text style={{ ...ty.body, fontWeight: '600', color: t.brand }}>Close</Text></Pressable>

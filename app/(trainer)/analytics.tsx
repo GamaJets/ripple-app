@@ -7,7 +7,7 @@
 //
 // Also removed: a `months` array of hardcoded growth fractions (Feb 0.55 …
 // Jul 1) that was dead but still shipping in the bundle.
-import { View, Text, ScrollView, Pressable, ActivityIndicator, Modal, TextInput } from 'react-native';
+import { View, Text, ScrollView, Pressable, ActivityIndicator, Modal, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useState } from 'react';
 import { useRouter } from 'expo-router';
@@ -83,7 +83,7 @@ export default function TrainerAnalytics() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
 
         <View style={{ paddingTop: sp.md }}>
           <Text style={{ ...ty.micro, color: t.ink3 }}>Your coaching business</Text>
@@ -274,6 +274,7 @@ export default function TrainerAnalytics() {
 
       {/* ── goal editor ──────────────────────────────────────────────────── */}
       <Modal visible={goalOpen} transparent animationType="slide" onRequestClose={() => setGoalOpen(false)}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setGoalOpen(false)} />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30 }}>
           <Text style={{ ...ty.title, color: t.ink, marginBottom: sp.lg }}>Set your goals</Text>
@@ -287,6 +288,7 @@ export default function TrainerAnalytics() {
           <View style={{ height: sp.sm }} />
           <Ghost label="Cancel" onPress={() => setGoalOpen(false)} />
         </View>
+              </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );

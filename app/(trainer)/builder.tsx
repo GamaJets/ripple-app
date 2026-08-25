@@ -20,7 +20,7 @@
 // unless a human wrote one. (The exercise library below is kept: it is a
 // vocabulary of movement names, not invented client content.)
 import { useEffect, useState, useRef } from 'react';
-import { View, Text, Pressable, ScrollView, TextInput, Modal, Alert } from 'react-native';
+import { View, Text, Pressable, ScrollView, TextInput, Modal, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -182,7 +182,7 @@ export default function Builder() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ paddingTop: sp.md }}>
@@ -336,6 +336,7 @@ export default function Builder() {
 
       {/* ── exercise picker ──────────────────────────────────────────────── */}
       <Modal visible={pickerDay !== null} transparent animationType="slide" onRequestClose={() => setPickerDay(null)}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <Pressable style={scrim} onPress={() => setPickerDay(null)} />
         <View style={[sheet, { maxHeight: '82%' }]}>
           <Text style={{ ...ty.title, color: t.ink, marginBottom: sp.lg }}>Add exercise</Text>
@@ -344,7 +345,7 @@ export default function Builder() {
               style={[inp, { flex: 1 }]} />
             <Cta label="Add" onPress={() => { if (custom.trim() && pickerDay !== null) { addExercise(pickerDay, custom.trim(), ''); setPickerDay(null); } }} />
           </View>
-          <ScrollView showsVerticalScrollIndicator={false}>
+          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
             {LIB.map((x, i) => (
               <Pressable key={x.name} onPress={() => { if (pickerDay !== null) { addExercise(pickerDay, x.name, x.group); setPickerDay(null); } }}
                 style={{
@@ -357,6 +358,7 @@ export default function Builder() {
             ))}
           </ScrollView>
         </View>
+              </KeyboardAvoidingView>
       </Modal>
 
       {/* ── start-from-template picker ───────────────────────────────────── */}
@@ -367,7 +369,7 @@ export default function Builder() {
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>
             Loads into the builder for {client?.name ?? 'this client'} — tweak, then assign.
           </Text>
-          <ScrollView showsVerticalScrollIndicator={false}>
+          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
             {templates.length === 0 ? (
               <Text style={{ ...ty.label, color: t.ink3 }}>No templates saved yet.</Text>
             ) : null}
@@ -400,6 +402,7 @@ export default function Builder() {
 
       {/* ── save-as-template ─────────────────────────────────────────────── */}
       <Modal visible={saveOpen} transparent animationType="slide" onRequestClose={() => setSaveOpen(false)}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <Pressable style={scrim} onPress={() => setSaveOpen(false)} />
         <View style={sheet}>
           <Text style={{ ...ty.title, color: t.ink }}>Save as template</Text>
@@ -413,6 +416,7 @@ export default function Builder() {
           <View style={{ height: sp.sm }} />
           <Ghost label="Cancel" onPress={() => setSaveOpen(false)} />
         </View>
+              </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );

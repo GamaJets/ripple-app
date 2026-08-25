@@ -13,7 +13,7 @@
 // logged now — the app says it could not read the photo rather than making a
 // number up.
 import { useState, useEffect } from 'react';
-import { View, Text, Pressable, ScrollView, Modal, TextInput, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, Pressable, ScrollView, Modal, TextInput, Alert, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
 import { buildPlan, swapIndex, groceryData, DEPTS, DEPT_ICO, ALLERGENS, type PlannedMeal } from '../../src/lib/meals';
@@ -149,7 +149,7 @@ export default function Nutrition() {
   if (!hasBody) {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-        <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+        <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingTop: sp.md }}>
             <View style={{ flex: 1 }}>
               <Text style={{ ...ty.micro, color: t.ink3 }}>Nutrition</Text>
@@ -169,7 +169,7 @@ export default function Nutrition() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingTop: sp.md }}>
@@ -422,7 +422,7 @@ export default function Nutrition() {
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setRecipe(null)} />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, maxHeight: '82%', ...elevation.e2 }}>
           {recipe && (
-            <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 30 }}>
+            <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 30 }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
               <Text style={{ ...ty.micro, color: t.ink3 }}>{recipe.slot}</Text>
               <Text style={{ ...ty.title, color: t.ink, textTransform: 'capitalize', marginTop: 4 }}>{recipe.n}</Text>
               <Text style={{ ...ty.label, ...numeric, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>{Math.round(recipe.K * batch)} kcal · P{Math.round(recipe.P * batch)} / C{Math.round(recipe.C * batch)} / F{Math.round(recipe.F * batch)}{batch > 1 ? '  · ' + batch + ' servings' : ''}</Text>
@@ -498,7 +498,7 @@ export default function Nutrition() {
       <Modal visible={showGrocery} transparent animationType="slide" onRequestClose={() => setShowGrocery(false)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setShowGrocery(false)} />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, maxHeight: '82%', ...elevation.e2 }}>
-          <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 30 }}>
+          <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 30 }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
             <Text style={{ ...ty.title, color: t.ink }}>Grocery list</Text>
             <Text style={{ ...ty.label, color: t.ink3, marginTop: 4, marginBottom: sp.md }}>This week · {DIET_LABEL[diet]} · sorted by aisle</Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginBottom: sp.xl }}>
@@ -532,6 +532,7 @@ export default function Nutrition() {
 
       {/* ── barcode sheet ────────────────────────────────────────────────── */}
       <Modal visible={bcOpen} transparent animationType="slide" onRequestClose={() => setBcOpen(false)}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setBcOpen(false)} />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30, ...elevation.e2 }}>
           <Text style={{ ...ty.title, color: t.ink }}>Scan a barcode</Text>
@@ -546,6 +547,7 @@ export default function Nutrition() {
             <Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>Cancel</Text>
           </Pressable>
         </View>
+              </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );

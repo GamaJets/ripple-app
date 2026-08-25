@@ -679,7 +679,7 @@ export default function Train() {
             <Text style={{ ...ty.head, color: t.ink, textTransform: 'capitalize' }}>{monthLabel}</Text>
             <Ghost label="Close" onPress={() => setShowCal(false)} />
           </View>
-          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
             <View style={{ flexDirection: 'row', marginBottom: 6 }}>
               {WEEK.map((d) => <Text key={d} style={{ ...ty.micro, flex: 1, textAlign: 'center', color: t.ink3 }}>{d[0]}</Text>)}
             </View>
@@ -1137,6 +1137,7 @@ function EditEntrySheet({ t, entry, onClose, onSave }: {
 
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
       <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={onClose} />
       <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, borderTopWidth: hairline, borderColor: t.ring, maxHeight: '86%', ...elevation.e2 }}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: sp.lg }}>
@@ -1145,7 +1146,7 @@ function EditEntrySheet({ t, entry, onClose, onSave }: {
           <Pressable onPress={save} hitSlop={8}><Text style={{ ...ty.body, fontWeight: '600', color: t.brand }}>Save</Text></Pressable>
         </View>
         <Rule />
-        <ScrollView contentContainerStyle={{ padding: sp.lg, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
+        <ScrollView contentContainerStyle={{ padding: sp.lg, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
           <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 6 }}>EXERCISE</Text>
           <TextInput value={name} onChangeText={setName} style={inp} placeholder="Exercise" placeholderTextColor={t.ink3} />
 
@@ -1182,6 +1183,7 @@ function EditEntrySheet({ t, entry, onClose, onSave }: {
           </View>
         </ScrollView>
       </View>
+          </KeyboardAvoidingView>
     </Modal>
   );
 }

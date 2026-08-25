@@ -14,7 +14,7 @@
 // looked up: every scan produced the same invented protein bar. The button now
 // says nothing was logged and points at the real Open Food Facts lookup.
 import { useState } from 'react';
-import { View, Text, TextInput, Pressable, ScrollView, Alert, Modal, Image, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, Pressable, ScrollView, Alert, Modal, Image, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
@@ -144,7 +144,7 @@ export default function FoodLog() {
 
  return (
  <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
- <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+ <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
 
  <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
  <Ghost icon="back" onPress={() => router.back()} />
@@ -265,6 +265,7 @@ export default function FoodLog() {
 
  {/* ── photo → estimate sheet ───────────────────────────────────────── */}
  <Modal visible={photoUri != null} transparent animationType="slide" onRequestClose={() => setPhotoUri(null)}>
+   <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
  <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setPhotoUri(null)} />
  <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30, ...elevation.e2 }}>
  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sp.md }}>
@@ -311,6 +312,7 @@ export default function FoodLog() {
  </>
  )}
  </View>
+    </KeyboardAvoidingView>
  </Modal>
  </SafeAreaView>
  );

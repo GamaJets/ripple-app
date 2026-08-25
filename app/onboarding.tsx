@@ -100,7 +100,7 @@ export default function Onboarding() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
       <Stack.Screen options={{ headerShown: false }} />
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingTop: sp.xxl, paddingBottom: sp.xxl, flexGrow: 1 }} keyboardShouldPersistTaps="handled">
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingTop: sp.xxl, paddingBottom: sp.xxl, flexGrow: 1 }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
         {/* progress */}
         <View accessibilityRole="progressbar" accessibilityLabel={`Step ${step + 1} of ${totalSteps}`}
           style={{ height: 3, borderRadius: 2, backgroundColor: t.surface3, overflow: 'hidden', marginBottom: sp.xl }}>

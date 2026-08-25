@@ -43,7 +43,7 @@ export default function CoachChat() {
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
 
         {/* ── the conversation ───────────────────────────────────────────── */}
-        <ScrollView ref={scRef} contentContainerStyle={{ paddingHorizontal: G, paddingTop: sp.lg, paddingBottom: sp.sm }} onContentSizeChange={() => scRef.current?.scrollToEnd({ animated: true })}>
+        <ScrollView ref={scRef} contentContainerStyle={{ paddingHorizontal: G, paddingTop: sp.lg, paddingBottom: sp.sm }} onContentSizeChange={() => scRef.current?.scrollToEnd({ animated: true })} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
           {msgs.length === 0 ? (
             <View style={{ alignItems: 'center', paddingVertical: sp.huge }}>
               <Text style={{ ...ty.label, color: t.ink3 }}>No messages yet — say hi to {name.split(' ')[0]}.</Text>

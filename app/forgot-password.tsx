@@ -51,7 +51,7 @@ export default function ForgotPassword() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
       <Stack.Screen options={{ headerShown: false }} />
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingTop: sp.huge, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
+        <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingTop: sp.huge, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
           <Text style={{ ...ty.micro, color: t.ink3 }}>{appName}</Text>
           <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Reset your password</Text>
           <Text style={{ ...ty.body, color: t.ink3, marginTop: sp.md, marginBottom: sp.xl }}>

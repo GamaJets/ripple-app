@@ -8,7 +8,7 @@
 // became the screen's one <Notice>, and severity is a coloured dot beside ink
 // text rather than coloured text. Every route, hook and branch is unchanged.
 import { useState } from 'react';
-import { View, Text, Pressable, ScrollView, Modal, TextInput } from 'react-native';
+import { View, Text, Pressable, ScrollView, Modal, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -63,7 +63,7 @@ export default function Injuries() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top', 'bottom']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon="back" onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
@@ -110,9 +110,10 @@ export default function Injuries() {
       </ScrollView>
 
       <Modal visible={open} transparent animationType="slide" onRequestClose={() => setOpen(false)}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setOpen(false)} />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, borderTopWidth: hairline, borderColor: t.ring, padding: layout.gutter, paddingBottom: sp.xxl, maxHeight: '88%', ...elevation.e2 }}>
-          <ScrollView showsVerticalScrollIndicator={false}>
+          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
             <Text style={{ ...ty.title, color: t.ink, marginBottom: sp.lg }}>Disclose an injury</Text>
 
             <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Area</Text>
@@ -141,6 +142,7 @@ export default function Injuries() {
             </Pressable>
           </ScrollView>
         </View>
+              </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );

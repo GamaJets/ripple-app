@@ -10,7 +10,7 @@
 // invented and has since been blanked — a clip now says what it is and whether
 // it is recorded, and nothing it cannot know.
 import { useState } from 'react';
-import { View, Text, Pressable, ScrollView, Alert, Modal, TextInput, ActivityIndicator, Linking } from 'react-native';
+import { View, Text, Pressable, ScrollView, Alert, Modal, TextInput, ActivityIndicator, Linking, KeyboardAvoidingView, Platform } from 'react-native';
 import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
@@ -101,7 +101,7 @@ export default function TrainerVideos() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
 
         <View style={{ paddingTop: sp.md }}>
           <Text style={{ ...ty.micro, color: t.ink3 }}>Your clients see these</Text>
@@ -174,6 +174,7 @@ export default function TrainerVideos() {
 
       {/* ── add by link ──────────────────────────────────────────────────── */}
       <Modal visible={linkOpen} transparent animationType="slide" onRequestClose={() => setLinkOpen(false)}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setLinkOpen(false)} />
         <View style={sheet}>
           <Text style={{ ...ty.title, color: t.ink }}>Add a video by link</Text>
@@ -185,10 +186,12 @@ export default function TrainerVideos() {
           <View style={{ height: sp.sm }} />
           <Ghost label="Cancel" onPress={() => setLinkOpen(false)} />
         </View>
+              </KeyboardAvoidingView>
       </Modal>
 
       {/* ── name a recorded / picked clip ────────────────────────────────── */}
       <Modal visible={!!pendUri} transparent animationType="slide" onRequestClose={() => { if (!upBusy) setPendUri(null); }}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => { if (!upBusy) setPendUri(null); }} />
         <View style={sheet}>
           <Text style={{ ...ty.title, color: t.ink }}>Name this clip</Text>
@@ -203,6 +206,7 @@ export default function TrainerVideos() {
           <View style={{ height: sp.sm }} />
           <Ghost label="Cancel" onPress={() => { if (!upBusy) setPendUri(null); }} />
         </View>
+              </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );

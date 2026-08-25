@@ -130,7 +130,7 @@ export default function ResetPassword() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
       <Stack.Screen options={{ headerShown: false }} />
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingTop: sp.huge, paddingBottom: 40, flexGrow: 1 }} keyboardShouldPersistTaps="handled">
+        <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingTop: sp.huge, paddingBottom: 40, flexGrow: 1 }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
           <Text style={{ ...ty.micro, color: t.ink3 }}>{appName}</Text>
           <Text style={{ ...ty.title, color: t.ink, marginTop: 5, marginBottom: sp.md }}>
             {stage === 'done' ? 'Password updated' : 'Set a new password'}

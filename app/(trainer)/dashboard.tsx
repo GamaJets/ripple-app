@@ -296,7 +296,7 @@ export default function TrainerClients() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingTop: sp.md }}>
@@ -518,10 +518,11 @@ export default function TrainerClients() {
 
       {/* ── client detail ────────────────────────────────────────────────── */}
       <Modal visible={!!sel} transparent animationType="slide" onRequestClose={() => setSel(null)}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <Pressable style={SCRIM} onPress={() => setSel(null)} />
         <View style={sheet(t, { padding: 0, paddingBottom: 0, maxHeight: '86%' })}>
           {sel && (
-            <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 30 }} showsVerticalScrollIndicator={false}>
+            <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 30 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
               <Text style={{ ...ty.title, color: t.ink, textTransform: 'capitalize' }}>{sel.name}</Text>
               <Text style={{ ...ty.label, color: t.ink3, marginTop: 3, marginBottom: sp.xl }}>{sel.goal} · {sel.weightDelta > 0 ? '+' : ''}{sel.weightDelta} kg · {sel.adherence != null ? sel.adherence + '% adherence' : 'no check-ins yet'}</Text>
 
@@ -762,6 +763,7 @@ export default function TrainerClients() {
             </ScrollView>
           )}
         </View>
+              </KeyboardAvoidingView>
       </Modal>
 
       {/* ── add a client ─────────────────────────────────────────────────── */}
@@ -837,6 +839,7 @@ export default function TrainerClients() {
 
       {/* ── coach meal picker ────────────────────────────────────────────── */}
       <Modal visible={!!mealPick} transparent animationType="slide" onRequestClose={() => setMealPick(null)}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <Pressable style={SCRIM} onPress={() => setMealPick(null)} />
         <View style={sheet(t, { maxHeight: '80%' })}>
           {mealPick && sel ? (
@@ -844,7 +847,7 @@ export default function TrainerClients() {
               <Text style={{ ...ty.title, color: t.ink, textTransform: 'capitalize' }}>Pick a {mealPick.slot.toLowerCase()}</Text>
               <Text style={{ ...ty.label, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>For {sel.name.split(' ')[0]} · {sel.diet || 'meat'} plan · tap to assign</Text>
               <TextInput value={mealQuery} onChangeText={setMealQuery} placeholder="Search meals…" placeholderTextColor={t.ink3} style={{ ...field(t), marginBottom: sp.md }} />
-              <ScrollView showsVerticalScrollIndicator={false}>
+              <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
                 {searchMeals((sel.diet || 'meat') as any, mealPick.slot, mealQuery, 40, (sel.avoid ?? []) as any).map((m) => (
                   <Pressable key={m.idx} onPress={() => { setNutri(sel.id, { mealOverride: { ...(getNutri(sel.id)?.mealOverride ?? {}), [mealPick.pos]: m.idx } }); setMealPick(null); }}
                     style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: sp.md, borderBottomWidth: hairline, borderBottomColor: t.ring }}>
@@ -859,10 +862,12 @@ export default function TrainerClients() {
             </>
           ) : null}
         </View>
+              </KeyboardAvoidingView>
       </Modal>
 
       {/* ── AI check-in draft review ─────────────────────────────────────── */}
       <Modal visible={!!draftClient} transparent animationType="slide" onRequestClose={() => setDraftClient(null)}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <Pressable style={SCRIM} onPress={() => setDraftClient(null)} />
         <View style={sheet(t)}>
           {draftClient && (
@@ -889,6 +894,7 @@ export default function TrainerClients() {
             </>
           )}
         </View>
+              </KeyboardAvoidingView>
       </Modal>
 
       {/* ── bulk program assign ──────────────────────────────────────────── */}
@@ -897,7 +903,7 @@ export default function TrainerClients() {
         <View style={sheet(t, { maxHeight: '78%' })}>
           <Text style={{ ...ty.title, color: t.ink }}>Assign to {shownRoster.length} clients</Text>
           <Text style={{ ...ty.label, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>Pick a program template for everyone in this segment.</Text>
-          <ScrollView showsVerticalScrollIndicator={false}>
+          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
             {templates.map((tpl) => {
               const dc = tpl.program.days.length; const ec = tpl.program.days.reduce((a, d) => a + d.exercises.length, 0);
               return (

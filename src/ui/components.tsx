@@ -53,7 +53,7 @@ export function Screen({ title, subtitle, children }: { title: string; subtitle?
   const t = useTheme();
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-      <ScrollView contentContainerStyle={{ padding: layout.gutter }}>
+      <ScrollView contentContainerStyle={{ padding: layout.gutter }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
         <Text style={{ ...ty.title, color: t.ink, textTransform: 'capitalize' }}>{title}</Text>
         {subtitle ? <Text style={{ ...ty.label, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>{subtitle}</Text> : <View style={{ height: sp.md }} />}
         {children}
