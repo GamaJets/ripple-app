@@ -10,6 +10,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { supabase, loadMe, type Me } from '@/lib/supabase';
 import { Shell } from '@/components/Shell';
 import { DataTable, type Column } from '@/components/DataTable';
+import { fetchEquipment, capacityFor, type Equipment } from '@lib/gymEquipment';
 import {
   fetchClasses, createClass, createSeries, deleteClass,
   fetchRoster, setAttendance,
@@ -163,8 +164,24 @@ function AddClass({ tenantId, onChange }: { tenantId: string; onChange: () => vo
   const [room, setRoom] = useState('');
   const [instructor, setInstructor] = useState('');
   const [weeks, setWeeks] = useState('1');
+  const [needs, setNeeds] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+
+  // The register, read once. A class capped at 20 in a room holding 18 bikes is
+  // exactly what this data exists to prevent, and the moment to say so is while
+  // the number is still being typed — not after twenty people have booked.
+  const [kit, setKit] = useState<Equipment[] | null>(null);
+  useEffect(() => {
+    let live = true;
+    fetchEquipment(supabase, tenantId)
+      .then((rows) => { if (live) setKit(rows); })
+      .catch(() => { if (live) setKit([]); });
+    return () => { live = false; };
+  }, [tenantId]);
+
+  const cap = parseInt(capacity, 10) || 0;
+  const check = (kit && needs.trim() && cap > 0) ? capacityFor(kit, needs.trim(), cap) : null;
 
   const add = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -209,6 +226,7 @@ function AddClass({ tenantId, onChange }: { tenantId: string; onChange: () => vo
         <input value={capacity} onChange={(e) => setCapacity(e.target.value)} placeholder="Capacity" inputMode="numeric" style={{ ...field, width: 96 }} />
         <input value={room} onChange={(e) => setRoom(e.target.value)} placeholder="Room" style={{ ...field, width: 110 }} />
         <input value={instructor} onChange={(e) => setInstructor(e.target.value)} placeholder="Instructor" style={{ ...field, width: 130 }} />
+          <input value={needs} onChange={(e) => setNeeds(e.target.value)} placeholder="Equipment needed" style={{ ...field, width: 160 }} />
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--ink3)', fontSize: 12.5 }}>
           repeat
           <input value={weeks} onChange={(e) => setWeeks(e.target.value)} inputMode="numeric" style={{ ...field, width: 56 }} />
@@ -216,6 +234,16 @@ function AddClass({ tenantId, onChange }: { tenantId: string; onChange: () => vo
         </label>
         <button type="submit" disabled={busy} style={primaryBtn}>Add</button>
       </form>
+      {check ? (
+        <div style={{ padding: '0 14px 12px', fontSize: 12.5,
+                      color: check.supported === false ? '#f0c04e' : 'var(--ink3)' }}>
+          {check.supported === false
+            ? `${check.note} Adding it anyway is allowed — the register may simply be out of date, and a stale inventory should not stop a class reaching the timetable.`
+            : check.supported === null
+              ? check.note
+              : `${check.usable} available — enough for ${check.limit}.`}
+        </div>
+      ) : null}
       {msg ? <div style={{ padding: '0 14px 12px', color: 'var(--ink3)', fontSize: 12.5 }}>{msg}</div> : null}
     </section>
   );
