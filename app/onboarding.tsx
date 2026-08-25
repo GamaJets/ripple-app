@@ -13,7 +13,7 @@
 // nobody had entered, presented as the user's own, and written to their
 // profile verbatim if they just tapped Finish. Both fields now start empty and
 // are only saved when the user actually types a value.
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView, Image, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useRouter } from 'expo-router';
@@ -24,6 +24,8 @@ import type { Goal, Diet } from '../src/lib/types';
 import { Icon } from '../src/ui/Icon';
 import { Cta, Ghost } from '../src/ui/kit';
 import { sp, layout, radius, type as ty } from '../src/theme/scale';
+import { VARIANT } from '../src/lib/variant';
+import { useTenant } from '../src/ui/tenant';
 
 const GOALS: { id: Goal; label: string }[] = [
   { id: 'fatloss', label: 'Fat Loss' },
@@ -38,17 +40,49 @@ export default function Onboarding() {
   const t = useTheme();
   const router = useRouter();
   const cd = useClientData();
+  const { tenant, updateTenant } = useTenant();
   const [step, setStep] = useState(0);
-  const [role, setRole] = useState<'client' | 'trainer' | 'owner'>('client');
+  // Not a question any more: the app the user installed decides this, the same
+  // way it does on the sign-up screen. Asking again could only contradict it.
+  const role = VARIANT;
+  // Owner setup. The provisioning trigger gives every new tenant a placeholder
+  // name — "Tim's space" — which is nobody's gym.
+  const [gymName, setGymName] = useState('');
+  const [fee, setFee] = useState('');
+  const [saving, setSaving] = useState(false);
   // Empty, not pre-filled: these are the user's own numbers or they're nothing.
   const [weight, setWeight] = useState('');
   const [height, setHeight] = useState('');
   const [cmode, setCmode] = useState<'online' | 'inperson' | 'solo'>('online');
 
-  // Steps: 0 role. For client: 1 photo, 2 goal, 3 diet, 4 stats. Others finish at role.
-  const clientSteps = 5;
+  // Client: 0 photo, 1 goal, 2 diet, 3 stats. Owner: one step, naming the gym.
+  // Trainer: nothing to ask, so the screen redirects rather than showing a
+  // page whose only control is "continue".
+  const clientSteps = 4;
   const totalSteps = role === 'client' ? clientSteps : 1;
   const pct = Math.round(((step + 1) / totalSteps) * 100);
+
+  useEffect(() => {
+    if (role === 'trainer') router.replace('/(trainer)/dashboard');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [role]);
+
+  // A tenant already exists (the trigger makes one); this names it. The
+  // placeholder is offered as the field's placeholder, never as its value —
+  // tapping through must not write "Tim's space" as though it were chosen.
+  const saveGym = async () => {
+    const name = gymName.trim();
+    const f = parseFloat(fee);
+    const patch: { name?: string; sessionFee?: number } = {};
+    if (name) patch.name = name;
+    if (Number.isFinite(f) && f > 0) patch.sessionFee = Math.round(f);
+    if (!Object.keys(patch).length) { router.replace('/(owner)/dashboard'); return; }
+    setSaving(true);
+    const okWrite = await updateTenant(patch);
+    setSaving(false);
+    if (!okWrite) { Alert.alert('Could not save', 'Your gym details were not saved. You can set them later under Brand.'); }
+    router.replace('/(owner)/dashboard');
+  };
 
   const pickPhoto = async (fromCamera: boolean) => {
     const perm = fromCamera ? await ImagePicker.requestCameraPermissionsAsync() : await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -67,7 +101,8 @@ export default function Onboarding() {
   };
 
   const next = () => {
-    if (role !== 'client') { router.replace(role === 'trainer' ? '/(trainer)/dashboard' : '/(owner)/dashboard'); return; }
+    if (role === 'owner') { void saveGym(); return; }
+    if (role !== 'client') { router.replace('/(trainer)/dashboard'); return; }
     if (step >= clientSteps - 1) { finish(); return; }
     setStep(step + 1);
   };
@@ -107,18 +142,46 @@ export default function Onboarding() {
           <View style={{ height: 3, borderRadius: 2, backgroundColor: t.brand, width: `${pct}%` }} />
         </View>
 
-        {step === 0 && (
+        {role === 'owner' && step === 0 && (
           <View>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Step {step + 1} of {totalSteps}</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Welcome to Repple</Text>
-            <Text style={{ ...ty.body, color: t.ink3, marginTop: sp.sm, marginBottom: sp.xl }}>How will you use the app?</Text>
-            {([['client', 'me', 'I\'m training', 'Follow a program, meals & progress'], ['trainer', 'people', 'I\'m a coach', 'Manage clients & schedule'], ['owner', 'grid', 'I run the platform', 'Trainers, billing & white-label']] as const).map(([id, icon, title, sub]) => (
-              <Option key={id} on={role === id} onPress={() => setRole(id as any)} label={title} note={sub} icon={icon} mark="check" />
-            ))}
+            <Text style={{ ...ty.micro, color: t.ink3 }}>Step 1 of 1</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Name your gym</Text>
+            <Text style={{ ...ty.body, color: t.ink3, marginTop: sp.sm, marginBottom: sp.xl }}>
+              This is what your members and trainers will see. You can change it later under Brand.
+            </Text>
+
+            <Text style={lab}>Gym name</Text>
+            <TextInput
+              value={gymName}
+              onChangeText={setGymName}
+              placeholder={tenant?.name || 'e.g. Ironline Fitness'}
+              placeholderTextColor={t.ink3}
+              autoCapitalize="words"
+              returnKeyType="next"
+              style={inp}
+              accessibilityLabel="Gym name"
+            />
+
+            <Text style={{ ...lab, marginTop: sp.lg }}>What one delivered session pays (AED)</Text>
+            <TextInput
+              value={fee}
+              onChangeText={setFee}
+              placeholder="Optional — leave blank if it varies"
+              placeholderTextColor={t.ink3}
+              keyboardType="numeric"
+              returnKeyType="done"
+              onSubmitEditing={() => { void saveGym(); }}
+              style={inp}
+              accessibilityLabel="Session fee in dirhams"
+            />
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+              Payroll is counted against this. Left blank, the app shows a dash rather than
+              guessing at what you owe.
+            </Text>
           </View>
         )}
 
-        {role === 'client' && step === 1 && (
+        {role === 'client' && step === 0 && (
           <View style={{ alignItems: 'center' }}>
             <Text style={{ ...ty.micro, color: t.ink3, alignSelf: 'flex-start' }}>Step {step + 1} of {totalSteps}</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5, alignSelf: 'flex-start' }}>Add a photo</Text>
@@ -131,7 +194,7 @@ export default function Onboarding() {
           </View>
         )}
 
-        {role === 'client' && step === 2 && (
+        {role === 'client' && step === 1 && (
           <View>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Step {step + 1} of {totalSteps}</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>What's your goal?</Text>
@@ -142,7 +205,7 @@ export default function Onboarding() {
           </View>
         )}
 
-        {role === 'client' && step === 3 && (
+        {role === 'client' && step === 2 && (
           <View>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Step {step + 1} of {totalSteps}</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Diet preference</Text>
@@ -160,7 +223,7 @@ export default function Onboarding() {
           </View>
         )}
 
-        {role === 'client' && step === 4 && (
+        {role === 'client' && step === 3 && (
           <View>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Step {step + 1} of {totalSteps}</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Starting stats</Text>
@@ -181,7 +244,7 @@ export default function Onboarding() {
         <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.xl }}>
           {step > 0 ? <View style={{ flex: 1 }}><Ghost label="Back" onPress={back} /></View> : null}
           <View style={{ flex: 2 }}>
-            <Cta wide onPress={next} label={role !== 'client' ? 'Enter Portal' : step >= clientSteps - 1 ? 'Finish' : step === 1 ? 'Continue' : 'Continue'} />
+            <Cta wide onPress={next} label={role === 'owner' ? (saving ? 'Saving…' : 'Open Studio') : role !== 'client' ? 'Enter Portal' : step >= clientSteps - 1 ? 'Finish' : 'Continue'} />
           </View>
         </View>
       </ScrollView>
