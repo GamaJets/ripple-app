@@ -1,6 +1,7 @@
 // Repple icon set — clean line/solid icons built on react-native-svg (already a
 // dependency). Replaces emoji app-wide. Usage: <Icon name="home" size={22}
 // color={t.brand} />. `filled` swaps stroke for fill on icons that support it.
+import type { ColorValue } from 'react-native';
 import Svg, { Path, Circle, Rect, Polyline, Line } from 'react-native-svg';
 
 export type IconName =
@@ -13,7 +14,13 @@ export type IconName =
   | 'eye' | 'eye-off';
 
 export function Icon({ name, size = 22, color = '#fff', filled = false, strokeWidth = 2 }: {
-  name: IconName; size?: number; color?: string; filled?: boolean; strokeWidth?: number;
+  // ColorValue, not string: expo-router's tabBarIcon hands its render callback a
+  // ColorValue (string | OpaqueColorValue, the latter covering PlatformColor and
+  // DynamicColorIOS). Narrowing to string here would push a cast onto all 16 tab
+  // call sites to paper over a type that is genuinely wider than we declared.
+  // react-native-svg's stroke and fill take ColorValue too, so nothing downstream
+  // has to change.
+  name: IconName; size?: number; color?: ColorValue; filled?: boolean; strokeWidth?: number;
 }) {
   const common = { stroke: color, strokeWidth, fill: 'none', strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
   const S = (children: React.ReactNode) => <Svg width={size} height={size} viewBox="0 0 24 24">{children}</Svg>;

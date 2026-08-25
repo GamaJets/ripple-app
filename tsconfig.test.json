@@ -1,12 +1,26 @@
 {
   "compilerOptions": {
-    "module": "commonjs",
+    // node16 for both, which is TypeScript's model of how Node itself resolves.
+    // package.json declares no "type", so .ts here is CommonJS and tsc emits
+    // require() — exactly what `node .tmp/lib/*.js` needs, same as before.
+    //
+    // Was module:commonjs + moduleResolution:node. TypeScript 6 deprecates that
+    // resolver (it is node10) and errors on it, which broke `npm test` outright:
+    // the script is `tsc && node ...`, so a non-zero tsc means the tests never
+    // run at all. "ignoreDeprecations" would have silenced it and handed the
+    // same breakage to TypeScript 7, so this moves rather than defers.
+    //
+    // Not "bundler": that requires module preserve/es2015+, which does not emit
+    // the CommonJS this runs as. That mismatch is what made tsc exit 2 here once
+    // before, and the tests silently stopped running for it.
+    "module": "node16",
     "target": "ES2020",
-    // "bundler" resolution requires module preserve/es2015+; this config emits
-    // commonjs for plain `node` to run, so "node" is the matching resolver.
-    // (Previously "bundler", which made tsc exit 2 — and because the npm script
-    // is `tsc && node ...`, the tests never actually ran.)
-    "moduleResolution": "node",
+    "moduleResolution": "node16",
+    // Explicit, not ambient. These files run under plain `node`, so they need
+    // Node's globals (process, Buffer). Automatic @types discovery stopped
+    // supplying them under node16 resolution; naming the package states the
+    // dependency instead of relying on whatever happens to be in node_modules.
+    "types": ["node"],
     "esModuleInterop": true,
     "skipLibCheck": true,
     "strict": true,
