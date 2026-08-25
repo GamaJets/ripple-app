@@ -216,6 +216,16 @@ export default function CoachProfile() {
         <Rule />
 
         {/* ── money ──────────────────────────────────────────────────────── */}
+        {/* Account — the in-app route to sign out, export, and account deletion.
+            Repple Coach had none of the three before this. */}
+        <Section>
+          <SectionHead title="Account" />
+          <ListRow icon="settings" title="Settings" note="Who you are signed in as, your data, and deleting your account"
+            onPress={() => router.push('/(trainer)/settings')} />
+        </Section>
+
+        <Rule />
+
         <Section>
           <SectionHead title="Money" />
           <ListRow icon="search" title="User guide" note="What each tab does, any time"

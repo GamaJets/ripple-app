@@ -80,6 +80,8 @@ export default function OwnerOps() {
             onPress={() => router.push('/(owner)/equipment')} />
           <ListRow icon="clock" title="Deletion requests" note="Members who asked to be erased, and the 30-day clock"
             onPress={() => router.push('/(owner)/deletions')} />
+          <ListRow icon="settings" title="Settings" note="Who you are signed in as, your data, and deleting your account"
+            onPress={() => router.push('/(owner)/settings')} />
           <ListRow icon="search" title="User guide" note="What each tab does, any time"
             onPress={() => router.push('/guide')} />
         </Section>

@@ -49,6 +49,7 @@ export default function TrainerLayout() {
       <Tabs.Screen name="class-checkin" options={{ href: null, title: 'Class check-in' }} />
       <Tabs.Screen name="broadcast" options={{ href: null, title: 'Broadcast' }} />
       <Tabs.Screen name="broadcast-session" options={{ href: null, title: 'Broadcast a session' }} />
+      <Tabs.Screen name="settings" options={{ href: null, title: 'Settings' }} />
       <Tabs.Screen name="profile" options={{ title: 'Profile', tabBarIcon: ({ color }) => <Icon name="me" size={23} color={color} /> }} />
     </Tabs>
   );
