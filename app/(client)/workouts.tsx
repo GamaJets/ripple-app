@@ -6,7 +6,7 @@
 // only on the live metric and the primary action.
 // Guided session runner, cardio logging & month calendar preserved.
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { View, Text, TextInput, Pressable, ScrollView, Modal, Alert, Linking } from 'react-native';
+import { View, Text, TextInput, Pressable, ScrollView, Modal, Alert, Linking, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { tapLight } from '../../src/ui/haptics';
@@ -117,6 +117,7 @@ function MetricCols({ t, items }: { t: Theme; items: { label: string; value: str
 }
 
 export default function Train() {
+  const insets = useSafeAreaInsets();
   const t = useTheme();
   const router = useRouter();
   const cd = useClientData();
@@ -197,6 +198,13 @@ export default function Train() {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [customEx, setCustomEx] = useState<ProgramExercise[]>([]);
   const [addOpen, setAddOpen] = useState(false);
+  // Exercises the user took off today, by uid. Today only — the programme
+  // itself is not edited, so tomorrow's copy of the same lift still appears.
+  const [removedEx, setRemovedEx] = useState<string[]>([]);
+  // When set, the add sheet is editing this custom exercise rather than
+  // creating one. Same sheet, because renaming IS replacing for a lift the
+  // user typed themselves — it has no catalogue alternatives to swap to.
+  const [editingKey, setEditingKey] = useState<string | null>(null);
   const [cxName, setCxName] = useState(''); const [cxSets, setCxSets] = useState('3'); const [cxReps, setCxReps] = useState('10');
   const today0 = new Date();
   const monday0 = new Date(today0); monday0.setDate(today0.getDate() - jsToMon); monday0.setHours(0, 0, 0, 0);
@@ -247,7 +255,63 @@ export default function Train() {
   const orderedExercises = cd.focusAreas.length ? [...exercises].sort((a, b) => (cd.focusAreas.includes(b.group) ? 1 : 0) - (cd.focusAreas.includes(a.group) ? 1 : 0)) : exercises;
   const deload = deloadCheck(workoutLog);
   // Default: expand the first not-yet-finished exercise, collapse the rest (until the user taps).
-  const firstOpenId = (() => { for (const _e of [...orderedExercises, ...customEx]) { const _u = `${dayIdx}:${_e.key}`; if ((logged[_u] || []).length < _e.sets) return _u; } return null; })();
+  const isRemovedEx = (e: ProgramExercise) => removedEx.indexOf(`${dayIdx}:${e.key}`) >= 0;
+  const planEx = orderedExercises.filter((e) => !isRemovedEx(e));
+
+  const isCustomEx = (e: ProgramExercise) => e.key.indexOf('custom-') === 0;
+
+  /** Take an exercise off today. Confirmed, because any sets already logged
+   *  against it go with it. */
+  const removeExercise = (e: ProgramExercise) => {
+    const _u = uid(e);
+    const hasSets = (logged[_u] || []).length > 0;
+    Alert.alert(
+      'Remove ' + nameOf(e) + '?',
+      hasSets
+        ? 'It comes off today, and the sets you logged against it are discarded.'
+        : 'It comes off today only. The rest of your programme is unchanged.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Remove', style: 'destructive', onPress: () => {
+          if (isCustomEx(e)) setCustomEx((prev) => prev.filter((x) => x.key !== e.key));
+          else setRemovedEx((prev) => (prev.indexOf(_u) >= 0 ? prev : [...prev, _u]));
+          setLogged((prev) => { const n = { ...prev }; delete n[_u]; return n; });
+          tapLight();
+        } },
+      ],
+    );
+  };
+
+  /** Replace an exercise. A programme lift swaps to a catalogue alternative;
+   *  one the user typed has none, so it opens for editing instead. */
+  const replaceExercise = (e: ProgramExercise) => {
+    if (isCustomEx(e)) {
+      setEditingKey(e.key);
+      setCxName(e.name); setCxSets(String(e.sets)); setCxReps(String(e.reps));
+      setAddOpen(true);
+    } else setSwapFor(e);
+  };
+
+  /** Commit the add sheet. Only clears the draft once the exercise is really
+   *  on the list — an interrupted sheet keeps what was typed. */
+  const commitCx = () => {
+    const name = cxName.trim();
+    if (!name) return;
+    const sets = parseInt(cxSets, 10) || 3;
+    const reps = String(parseInt(cxReps, 10) || 10);
+    if (editingKey) {
+      // Same key, so sets already logged against it survive the rename.
+      setCustomEx((prev) => prev.map((x) => (x.key === editingKey ? { ...x, name, sets, reps } : x)));
+    } else {
+      const key = 'custom-' + Date.now();
+      setCustomEx((p) => [...p, { key, name, group: 'Added', sets, reps, alternatives: [] } as ProgramExercise]);
+      setExpanded((p) => ({ ...p, [dayIdx + ':' + key]: true }));
+    }
+    setAddOpen(false); setEditingKey(null);
+    setCxName(''); setCxSets('3'); setCxReps('10');
+    tapLight();
+  };
+  const firstOpenId = (() => { for (const _e of [...planEx, ...customEx]) { const _u = `${dayIdx}:${_e.key}`; if ((logged[_u] || []).length < _e.sets) return _u; } return null; })();
   // Presentation only: how much of today's plan is already logged, for the hero ring.
   const doneCount = exercises.filter((e) => (logged[uid(e)] || []).length >= e.sets).length;
   const heroNote = exercises.length === 0
@@ -269,7 +333,7 @@ export default function Train() {
   const saveManual = () => {
     const nowISO = new Date().toISOString();
     let pr = false;
-    const entries: WorkoutEntry[] = [...exercises, ...customEx].map((e) => {
+    const entries: WorkoutEntry[] = [...exercises.filter((e) => !isRemovedEx(e)), ...customEx].map((e) => {
       const s = logged[uid(e)] || [];
       if (!s.length) return null;
       const setPairs = s.map((x) => [parseInt(x.reps, 10) || 0, parseFloat(x.kg) || 0] as [number, number]);
@@ -287,7 +351,7 @@ export default function Train() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ paddingTop: sp.md }}>
@@ -366,7 +430,7 @@ export default function Train() {
                 </Notice>
               ) : null}
 
-              {[...orderedExercises, ...customEx].map((e, ei) => {
+              {[...planEx, ...customEx].map((e, ei) => {
                 const _id = uid(e);
                 if (isInjHidden(e)) {
                   const inj = injuryFlag(e.name, e.group, cd.injuries);
@@ -409,7 +473,7 @@ export default function Train() {
                           </View>
                           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{e.group} · {sets.length}/{e.sets} sets{!open && sug ? ' · ' + sug.weight + 'kg' : ''}</Text>
                         </View>
-                        {isCustom ? <Pressable accessibilityLabel="Remove exercise" onPress={() => { setCustomEx((prev) => prev.filter((x) => x.key !== e.key)); setLogged((prev) => { const n = { ...prev }; delete n[_id]; return n; }); }} hitSlop={8} style={{ padding: 4 }}><Icon name="minus" size={16} color={t.ink3} /></Pressable> : null}
+                        <Pressable accessibilityRole="button" accessibilityLabel={'Remove ' + nameOf(e)} onPress={() => removeExercise(e)} hitSlop={8} style={{ padding: 4 }}><Icon name="minus" size={16} color={t.ink3} /></Pressable>
                         <View style={{ transform: [{ rotate: open ? '90deg' : '0deg' }] }}><Icon name="chevron" size={16} color={t.ink3} /></View>
                       </Pressable>
                       {sets.length > 0 ? (
@@ -448,7 +512,7 @@ export default function Train() {
                               </View>
                             ) : <View style={{ flex: 1 }} />}
                             {!isCustom ? <Pressable accessibilityLabel="Watch exercise demo" accessibilityRole="button" onPress={() => setVideoFor(nameOf(e))} style={{ width: 38, height: 38, backgroundColor: t.surface2, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' }}><Icon name="video" size={15} color={t.ink2} /></Pressable> : null}
-                            {!isCustom ? <Pressable accessibilityLabel="Swap exercise" accessibilityRole="button" onPress={() => setSwapFor(e)} style={{ width: 38, height: 38, backgroundColor: t.surface2, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' }}><Icon name="swap" size={15} color={flag ? t.s3 : t.ink2} /></Pressable> : null}
+                            <Pressable accessibilityRole="button" accessibilityLabel={isCustom ? 'Edit ' + nameOf(e) : 'Swap ' + nameOf(e)} onPress={() => replaceExercise(e)} style={{ width: 38, height: 38, backgroundColor: t.surface2, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' }}><Icon name={isCustom ? 'pencil' : 'swap'} size={15} color={flag ? t.s3 : t.ink2} /></Pressable>
                           </View>
                           <LogRow t={t} onLog={(reps, kg) => logSet(e, reps, kg)} />
                         </View>
@@ -468,7 +532,10 @@ export default function Train() {
 
               {exercises.length > 0 || customEx.length > 0 ? (
                 <View style={{ marginTop: sp.lg }}>
-                  <Ghost label="Add an exercise you did" icon="plus" onPress={() => { setCxName(''); setCxSets('3'); setCxReps('10'); setAddOpen(true); }} />
+                  <Ghost label="Add an exercise you did" icon="plus" onPress={() => { setEditingKey(null); setAddOpen(true); }} />
+                  {removedEx.filter((u) => u.indexOf(dayIdx + ':') === 0).length > 0 ? (
+                    <Ghost label={`Put back ${removedEx.filter((u) => u.indexOf(dayIdx + ':') === 0).length} removed`} icon="swap" onPress={() => { setRemovedEx((prev) => prev.filter((u) => u.indexOf(dayIdx + ':') !== 0)); tapLight(); }} />
+                  ) : null}
                 </View>
               ) : null}
 
@@ -612,7 +679,7 @@ export default function Train() {
             <Text style={{ ...ty.head, color: t.ink, textTransform: 'capitalize' }}>{monthLabel}</Text>
             <Ghost label="Close" onPress={() => setShowCal(false)} />
           </View>
-          <ScrollView showsVerticalScrollIndicator={false}>
+          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
             <View style={{ flexDirection: 'row', marginBottom: 6 }}>
               {WEEK.map((d) => <Text key={d} style={{ ...ty.micro, flex: 1, textAlign: 'center', color: t.ink3 }}>{d[0]}</Text>)}
             </View>
@@ -701,24 +768,29 @@ export default function Train() {
       </Modal>
 
       <Modal visible={session} animationType="slide" onRequestClose={() => setSession(false)}>
-        <SessionRunner t={t} exercises={orderedExercises.filter((e) => !isInjHidden(e))} focus={workout.focus} nameOf={nameOf} age={ageFromDob(cd.dob)} log={workoutLog} injuries={cd.injuries} onComplete={addWorkouts} onClose={() => setSession(false)} />
+        <SessionRunner t={t} exercises={planEx.filter((e) => !isInjHidden(e))} focus={workout.focus} nameOf={nameOf} age={ageFromDob(cd.dob)} log={workoutLog} injuries={cd.injuries} onComplete={addWorkouts} onClose={() => setSession(false)} />
       </Modal>
 
+      {/* KeyboardAvoidingView, or the keyboard sits on top of the very fields
+          this sheet exists to fill in — and every tap aimed at a covered field
+          lands on the backdrop and closes the sheet instead. */}
       <Modal visible={addOpen} transparent animationType="slide" onRequestClose={() => setAddOpen(false)}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setAddOpen(false)} />
-        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, ...elevation.e2 }}>
-          <Text style={{ ...ty.head, color: t.ink }}>Add an exercise</Text>
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>Log something you did that isn't in today's plan.</Text>
-          <TextInput value={cxName} onChangeText={setCxName} placeholder="Exercise name (e.g. Cable fly)" placeholderTextColor={t.ink3} style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 12, marginBottom: sp.md }} />
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: Math.max(insets.bottom, layout.gutter), ...elevation.e2 }}>
+          <Text style={{ ...ty.head, color: t.ink }}>{editingKey ? 'Edit exercise' : 'Add an exercise'}</Text>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>{editingKey ? 'Rename it, or change the sets and reps you are aiming for.' : "Log something you did that isn't in today's plan."}</Text>
+          <TextInput value={cxName} onChangeText={setCxName} autoFocus returnKeyType="done" onSubmitEditing={commitCx} blurOnSubmit={false} placeholder="Exercise name (e.g. Cable fly)" placeholderTextColor={t.ink3} style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 12, marginBottom: sp.md }} />
           <View style={{ flexDirection: 'row', gap: sp.md, marginBottom: sp.lg }}>
             <View style={{ flex: 1 }}><Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.xs }}>Target sets</Text><TextInput value={cxSets} onChangeText={setCxSets} keyboardType="numeric" placeholderTextColor={t.ink3} style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 }} /></View>
             <View style={{ flex: 1 }}><Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.xs }}>Target reps</Text><TextInput value={cxReps} onChangeText={setCxReps} keyboardType="numeric" placeholderTextColor={t.ink3} style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 }} /></View>
           </View>
-          <Pressable disabled={!cxName.trim()} onPress={() => { const key = 'custom-' + Date.now(); const ne = { key, name: cxName.trim(), group: 'Added', sets: parseInt(cxSets, 10) || 3, reps: String(parseInt(cxReps, 10) || 10), alternatives: [] } as ProgramExercise; setCustomEx((p) => [...p, ne]); setExpanded((p) => ({ ...p, [dayIdx + ':' + key]: true })); setAddOpen(false); tapLight(); }} style={{ backgroundColor: cxName.trim() ? t.brand : t.surface2, borderRadius: radius.sm, paddingVertical: 13, alignItems: 'center', marginBottom: sp.sm }}>
-            <Text style={{ ...ty.label, fontWeight: '600', color: cxName.trim() ? t.brandInk : t.ink3 }}>Add to today</Text>
+          <Pressable disabled={!cxName.trim()} onPress={commitCx} style={{ backgroundColor: cxName.trim() ? t.brand : t.surface2, borderRadius: radius.sm, paddingVertical: 13, alignItems: 'center', marginBottom: sp.sm }}>
+            <Text style={{ ...ty.label, fontWeight: '600', color: cxName.trim() ? t.brandInk : t.ink3 }}>{editingKey ? 'Save changes' : 'Add to today'}</Text>
           </Pressable>
-          <Pressable onPress={() => setAddOpen(false)} style={{ paddingVertical: sp.md, alignItems: 'center' }}><Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>Cancel</Text></Pressable>
+          <Pressable onPress={() => { setAddOpen(false); setEditingKey(null); }} style={{ paddingVertical: sp.md, alignItems: 'center' }}><Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>Cancel</Text></Pressable>
         </View>
+        </KeyboardAvoidingView>
       </Modal>
       <SessionHrSheet
         visible={!!hrEntry}
@@ -874,7 +946,7 @@ function SessionRunner({ t, exercises, focus, nameOf, age, log, injuries, onComp
     if (typeof w.today.heartRateAvg === 'number') strip.push({ label: 'Avg bpm', value: String(w.today.heartRateAvg) });
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-        <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40, paddingTop: topPad + 10 }}>
+        <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40, paddingTop: topPad + 10 }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
           <View style={{ alignItems: 'center', marginTop: sp.xl }}><Icon name="trophy" size={40} color={t.brand} /></View>
           <Text style={{ ...ty.title, color: t.ink, textAlign: 'center', marginTop: sp.md }}>Session complete</Text>
           <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: sp.xs, textTransform: 'capitalize' }}>{focus}</Text>
@@ -914,7 +986,7 @@ function SessionRunner({ t, exercises, focus, nameOf, age, log, injuries, onComp
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40, paddingTop: topPad + 4 }}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40, paddingTop: topPad + 4 }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sp.lg }}>
           <Text style={{ ...ty.micro, color: t.ink3 }}>Exercise {idx + 1} of {exercises.length}</Text>
           <Ghost label="End" onPress={onClose} />

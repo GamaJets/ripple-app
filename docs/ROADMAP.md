@@ -185,3 +185,17 @@ In practice:
 The tests in `src/lib/coverage.test.ts` exist mainly to hold this line, and are
 written so they fail when the rule is broken — verified by mutation, not by
 assumption.
+
+## TestFlight feedback — open
+
+Two reports from TestFlight, both feature requests rather than defects. Neither
+is scheduled yet; recording them so they are not lost.
+
+- **Build 24, 22 Aug 2026** — "Need to create a tutorial about the app once u
+  download it quickly takes u through the pages / features offered." A first-run
+  tour. Worth doing per variant, since the three apps open on different screens.
+- **Build 28, 25 Aug 2026** — "Sleep information should be able to come from
+  Apple health, whoop, or the other devices that connect to the app." The
+  wearable clients already authenticate against HealthKit, WHOOP and Oura for
+  heart rate and calories; sleep is a field they expose that Repple does not yet
+  read. Closest existing code: `src/lib/wearables/`.
