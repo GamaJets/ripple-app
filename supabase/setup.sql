@@ -2678,6 +2678,11 @@ create index if not exists idx_member_invites_email
   on public.member_invites (lower(email));
 
 -- ── access ─────────────────────────────────────────────────────────────────
+-- A blank email would match an anon caller's empty claim, so it must not
+-- be storable. Belt and braces with the nullif in mi_invitee_read below.
+alter table public.member_invites
+  add constraint member_invites_email_not_blank check (btrim(email) <> '');
+
 alter table public.member_invites enable row level security;
 
 -- The owner of THIS gym manages its invites: create, list, extend, revoke.
@@ -2696,7 +2701,10 @@ create policy mi_owner on public.member_invites for all
 -- through accept_member_invite, which validates before it writes.
 drop policy if exists mi_invitee_read on public.member_invites;
 create policy mi_invitee_read on public.member_invites for select
-  using (lower(email) = lower(coalesce(auth.jwt() ->> 'email', '')));
+  -- nullif, NOT coalesce(..., ''): an unauthenticated caller has no email
+  -- claim, so coalescing to '' would make an invite stored with a blank email
+  -- readable by anon. nullif makes that comparison null, which matches nothing.
+  using (lower(email) = lower(nullif(auth.jwt() ->> 'email', '')));
 
 -- ── redeeming ──────────────────────────────────────────────────────────────
 -- Accept the invite addressed to me: attach my profile to the gym's tenant and
@@ -2815,7 +2823,23 @@ begin
   return mem;
 end $$;
 
-grant execute on function public.accept_member_invite(uuid) to authenticated;
+-- The grant to authenticated is not enough on its own. Postgres grants EXECUTE
+-- to PUBLIC on every newly created function, and Supabase's default privileges
+-- on the public schema add an explicit `anon` grant on top of that — so a bare
+-- `grant ... to authenticated` leaves the function callable by a signed-out
+-- caller. Verified on the live database: immediately after this file first
+-- applied, has_function_privilege('anon', ..., 'EXECUTE') was TRUE and the acl
+-- read {=X/postgres,postgres=X/postgres,anon=X/postgres,authenticated=X/...}.
+-- Both grants have to come off before the grant back means anything. This is
+-- the same convention as 22-session-approvals.sql, 38-tenant-isolation.sql and
+-- the sweep in 40-function-grants.sql; its absence here was an omission.
+--
+-- accept_member_invite raises 'not signed in' when auth.uid() is null, so an
+-- anon caller could not have completed a redemption — but it would still have
+-- reached the body and the auth.users/profiles reads inside a SECURITY DEFINER
+-- context, which is not a surface to leave open.
+revoke execute on function public.accept_member_invite(uuid) from public, anon;
+grant  execute on function public.accept_member_invite(uuid) to authenticated;
 
 
 -- ─────────────────────────────────────────────────────────────────────────
@@ -3361,3 +3385,59 @@ create policy coach_clients_owner_r on coach_clients for select using (
 -- deliberate product decision without either author noticing. So it is left
 -- alone on purpose. If the demos-are-private reading is the one you want, the
 -- change belongs in 38 next to its own reasoning, not silently after it.
+
+-- ▶ function-grants.sql
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- No function in this schema is callable without signing in.
+--
+-- Postgres grants EXECUTE to PUBLIC on every function it creates. That default
+-- is what `anon` resolves through, and `anon` is the key compiled into the
+-- shipped mobile app — so every RPC was reachable by anyone who extracted it.
+-- Thirty-two SECURITY DEFINER functions had no revoke at all, and the three
+-- that did named `anon` rather than PUBLIC, which does nothing.
+--
+-- Two ways this kept coming back:
+--
+--   · A new function silently inherits the PUBLIC grant. Nobody has to make a
+--     mistake for the hole to exist; it is there unless someone removes it.
+--   · `drop function` takes the ACL with it, so recreating a function to fix
+--     something else quietly restores the default. That happened today: the
+--     class-attendance fix dropped and recreated its function, and the
+--     recreated one was anon-callable again until the revoke was re-applied.
+--
+-- So this is written as a loop over the catalogue rather than a list of names.
+-- A list would go stale the first time somebody adds a function, which is
+-- exactly how the schema arrived here.
+--
+-- Trigger functions are skipped: they return `trigger`, PostgREST does not
+-- expose them as RPCs, and they are invoked by the trigger rather than called.
+--
+-- Every function gets `authenticated`, which is strictly narrower than the
+-- PUBLIC grant it replaces. This is not the authorization — each function
+-- still carries its own tenant check, and that is what stops one gym reading
+-- another. This only ensures a caller has proved who they are first.
+--
+-- Nothing in the product needs anon RPC access. Every call site was checked:
+-- record_referral, the one that looks like a pre-auth candidate, records the
+-- SIGNED-IN user and runs after sign-up returns a session.
+--
+-- RE-RUN THIS after adding or recreating any function. It is idempotent.
+-- ─────────────────────────────────────────────────────────────────────────
+
+do $$
+declare r record;
+begin
+  for r in
+    select p.oid::regprocedure as sig
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public'
+      and p.prokind = 'f'
+      and pg_get_function_result(p.oid) <> 'trigger'
+  loop
+    execute format('revoke execute on function %s from public', r.sig);
+    execute format('revoke execute on function %s from anon', r.sig);
+    execute format('grant execute on function %s to authenticated', r.sig);
+  end loop;
+end $$;

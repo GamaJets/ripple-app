@@ -96,6 +96,11 @@ create index if not exists idx_member_invites_email
   on public.member_invites (lower(email));
 
 -- ── access ─────────────────────────────────────────────────────────────────
+-- A blank email would match an anon caller's empty claim, so it must not
+-- be storable. Belt and braces with the nullif in mi_invitee_read below.
+alter table public.member_invites
+  add constraint member_invites_email_not_blank check (btrim(email) <> '');
+
 alter table public.member_invites enable row level security;
 
 -- The owner of THIS gym manages its invites: create, list, extend, revoke.
@@ -114,7 +119,10 @@ create policy mi_owner on public.member_invites for all
 -- through accept_member_invite, which validates before it writes.
 drop policy if exists mi_invitee_read on public.member_invites;
 create policy mi_invitee_read on public.member_invites for select
-  using (lower(email) = lower(coalesce(auth.jwt() ->> 'email', '')));
+  -- nullif, NOT coalesce(..., ''): an unauthenticated caller has no email
+  -- claim, so coalescing to '' would make an invite stored with a blank email
+  -- readable by anon. nullif makes that comparison null, which matches nothing.
+  using (lower(email) = lower(nullif(auth.jwt() ->> 'email', '')));
 
 -- ── redeeming ──────────────────────────────────────────────────────────────
 -- Accept the invite addressed to me: attach my profile to the gym's tenant and
@@ -233,7 +241,23 @@ begin
   return mem;
 end $$;
 
-grant execute on function public.accept_member_invite(uuid) to authenticated;
+-- The grant to authenticated is not enough on its own. Postgres grants EXECUTE
+-- to PUBLIC on every newly created function, and Supabase's default privileges
+-- on the public schema add an explicit `anon` grant on top of that — so a bare
+-- `grant ... to authenticated` leaves the function callable by a signed-out
+-- caller. Verified on the live database: immediately after this file first
+-- applied, has_function_privilege('anon', ..., 'EXECUTE') was TRUE and the acl
+-- read {=X/postgres,postgres=X/postgres,anon=X/postgres,authenticated=X/...}.
+-- Both grants have to come off before the grant back means anything. This is
+-- the same convention as 22-session-approvals.sql, 38-tenant-isolation.sql and
+-- the sweep in 40-function-grants.sql; its absence here was an omission.
+--
+-- accept_member_invite raises 'not signed in' when auth.uid() is null, so an
+-- anon caller could not have completed a redemption — but it would still have
+-- reached the body and the auth.users/profiles reads inside a SECURITY DEFINER
+-- context, which is not a surface to leave open.
+revoke execute on function public.accept_member_invite(uuid) from public, anon;
+grant  execute on function public.accept_member_invite(uuid) to authenticated;
 
 
 -- ─────────────────────────────────────────────────────────────────────────
