@@ -16,6 +16,7 @@ import { useTheme, PasswordField } from '../src/ui/components';
 import { useAuth } from '../src/ui/auth';
 import { useBrand } from '../src/ui/brand';
 import { USE_SUPABASE } from '../src/lib/config';
+import { VARIANT, VARIANT_LABEL, VARIANT_TILE } from '../src/lib/variant';
 import { recordReferral, stashPendingReferral, flushPendingReferral } from '../src/lib/referrals';
 import { Rule, Card, Cta } from '../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../src/theme/scale';
@@ -30,6 +31,14 @@ function Ripple({ size, color }: { size: number; color: string }) {
   );
 }
 
+/** What this build signs you up as, said plainly, plus where to go if the
+ *  reader has the wrong one of the three apps. */
+const ROLE_NOTE: Record<typeof VARIANT, string> = {
+  client: 'Signing up to track your own training. Coaching clients instead? Get Repple Coach.',
+  trainer: 'Signing up as a coach — your clients use the Repple app, and gym owners use Repple Studio.',
+  owner: 'Signing up as a gym owner. Your coaches use Repple Coach and your members use Repple.',
+};
+
 export default function Welcome() {
   const t = useTheme();
   const router = useRouter();
@@ -37,7 +46,10 @@ export default function Welcome() {
   const { appName } = useBrand();
   const [mode, setMode] = useState<'in' | 'up'>('up');
   const [name, setName] = useState('');
-  const [role, setRole] = useState<'client' | 'trainer'>('client');
+  // Not state, and not a choice: the build decides. A trainer who signs up
+  // inside Repple Coach and picks "A client" would land in an app with no
+  // client routes at all.
+  const role = VARIANT;
   const [email, setEmail] = useState('');
   const [pw, setPw] = useState('');
   const [busy, setBusy] = useState(false);
@@ -87,8 +99,10 @@ export default function Welcome() {
 
           {/* ── the brand mark ──────────────────────────────────────────── */}
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
-            <View style={{ width: 46, height: 46, borderRadius: radius.md, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}>
-              <Ripple size={28} color={t.brandInk} />
+            {/* The tile the user just tapped on their home screen — teal for
+                Repple, indigo for Coach, amber for Studio. */}
+            <View style={{ width: 46, height: 46, borderRadius: radius.md, backgroundColor: VARIANT_TILE[VARIANT], alignItems: 'center', justifyContent: 'center' }}>
+              <Ripple size={28} color="#ffffff" />
             </View>
             <Text style={{ ...ty.title, color: t.ink }}>{appName}</Text>
           </View>
@@ -121,16 +135,11 @@ export default function Welcome() {
             </>
           ) : null}
           {mode === 'up' ? (
-            <View style={{ marginBottom: sp.md }}>
-              <Text style={lab}>I'm signing up as…</Text>
-              <View style={{ flexDirection: 'row', gap: sp.sm }}>
-                {([['client', 'A client', 'Track my own training'], ['trainer', 'A coach', 'Train & manage clients']] as const).map(([r, label, sub]) => (
-                  <Pressable key={r} onPress={() => setRole(r)} accessibilityRole="button" accessibilityLabel={label} style={{ flex: 1, paddingVertical: sp.md, paddingHorizontal: sp.md, borderRadius: radius.sm, backgroundColor: role === r ? t.brand : t.surface2 }}>
-                    <Text style={{ ...ty.body, fontWeight: role === r ? '600' : '500', color: role === r ? t.brandInk : t.ink }}>{label}</Text>
-                    <Text style={{ ...ty.caption, color: role === r ? t.brandInk : t.ink3, marginTop: 2, opacity: role === r ? 0.85 : 1 }}>{sub}</Text>
-                  </Pressable>
-                ))}
-              </View>
+            <View style={{ marginBottom: sp.md, flexDirection: 'row', alignItems: 'flex-start', gap: 8, paddingVertical: sp.sm }}>
+              <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.brand, marginTop: 7 }} />
+              <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }}>
+                {ROLE_NOTE[VARIANT]}
+              </Text>
             </View>
           ) : null}
           <Text style={lab}>Email</Text>

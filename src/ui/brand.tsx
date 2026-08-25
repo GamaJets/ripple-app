@@ -3,19 +3,22 @@
 // provider carries the tenant's app name. Persisted so it survives restarts.
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { VARIANT, VARIANT_LABEL } from '../lib/variant';
 
 interface BrandValue { appName: string; setAppName: (n: string) => void }
 
 const Ctx = createContext<BrandValue | null>(null);
 
 export function BrandProvider({ children }: { children: ReactNode }) {
-  const [appName, setAppNameState] = useState('Repple');
+  // Defaults to THIS app's name, not the family name. Repple Coach that
+  // introduces itself as "Repple" reads like the wrong download.
+  const [appName, setAppNameState] = useState(VARIANT_LABEL[VARIANT]);
   useEffect(() => { (async () => {
     try { const n = await AsyncStorage.getItem('repple.appName'); if (n) setAppNameState(n); } catch {}
   })(); }, []);
   const setAppName = (n: string) => {
     setAppNameState(n);
-    AsyncStorage.setItem('repple.appName', n.trim() || 'Repple').catch(() => {});
+    AsyncStorage.setItem('repple.appName', n.trim() || VARIANT_LABEL[VARIANT]).catch(() => {});
   };
   return <Ctx.Provider value={{ appName, setAppName }}>{children}</Ctx.Provider>;
 }

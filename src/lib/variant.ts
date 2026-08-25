@@ -44,6 +44,22 @@ export function groupAllowed(group: AppVariant): boolean {
   return VARIANT === group;
 }
 
+/**
+ * The tile colour behind this build's icon on the home screen, from
+ * app.config.ts. Kept in step with that table by hand — it is three constants,
+ * and importing a config file into the runtime bundle to avoid it would cost
+ * more than it saves.
+ *
+ * Used where the app has to identify ITSELF (the welcome mark), so the tile a
+ * user just tapped on their home screen is the tile that greets them. The rest
+ * of the UI stays on the shared brand accent.
+ */
+export const VARIANT_TILE: Record<AppVariant, string> = {
+  client: '#0d9488',
+  trainer: '#4338ca',
+  owner: '#b45309',
+};
+
 /** Human name for the current build, used in copy and the user guide. */
 export const VARIANT_LABEL: Record<AppVariant, string> = {
   client: 'Repple',
