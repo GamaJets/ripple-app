@@ -1991,3 +1991,500 @@ create policy class_bookings_owner_w on class_bookings
     select 1 from gym_classes gc
     where gc.id = class_bookings.class_id and is_owner_of(gc.tenant_id)
   ));
+
+-- ▶ drop-ins-and-passes.sql
+
+-- ── Drop-ins, guest passes and class packs ──────────────────────────────────
+--
+-- Phase 1, F16. A gym takes money from people who are not members: the walk-in
+-- who pays for one session, the friend a member brings, the ten-class pack sold
+-- at the desk. None of that fits `memberships`, which assumes a profile and a
+-- recurring plan, so it was going unrecorded — and every attendance and revenue
+-- figure was short by however much of it happens.
+--
+-- Additive only. Nothing here alters an existing table.
+
+-- ── what the gym sells at the desk ──────────────────────────────────────────
+create table if not exists gym_pass_types (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references tenants(id) on delete cascade,
+  name text not null,
+  -- drop_in: one visit, bought by anyone.
+  -- guest:   one visit, bought by (or gifted to) a member for someone else.
+  -- pack:    a block of visits used over time.
+  kind text not null default 'drop_in' check (kind in ('drop_in','guest','pack')),
+  price_cents integer not null check (price_cents >= 0),
+  currency text not null default 'AED',
+  -- How many visits one purchase is worth. A drop-in is 1; a pack is n.
+  uses integer not null default 1 check (uses >= 1),
+  -- Days from issue until it expires. Null means it does not expire, which is
+  -- a deliberate choice a gym makes, not a missing value.
+  valid_days integer check (valid_days is null or valid_days > 0),
+  active boolean not null default true,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_gym_pass_types_tenant on gym_pass_types(tenant_id, active);
+
+-- ── an issued pass ──────────────────────────────────────────────────────────
+create table if not exists gym_passes (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references tenants(id) on delete cascade,
+  -- A type may be retired while passes sold on it are still valid, so this
+  -- goes null rather than taking the pass with it.
+  pass_type_id uuid references gym_pass_types(id) on delete set null,
+  -- The holder is either a profile (a member, or a walk-in who made an account)
+  -- or just a name written at the desk. Requiring an account to sell someone a
+  -- day pass would mean the sale went unrecorded, which is how we got here.
+  holder_id uuid references profiles(id) on delete set null,
+  holder_name text,
+  -- Who brought them, when this is a guest pass. Useful on its own: guests of
+  -- members convert differently from cold walk-ins.
+  host_member_id uuid references profiles(id) on delete set null,
+  issued_on date not null default current_date,
+  expires_on date,
+  uses_total integer not null check (uses_total >= 1),
+  uses_spent integer not null default 0 check (uses_spent >= 0),
+  -- What was actually taken for it. Null means nobody recorded a price — not
+  -- that it was free. `gymPasses.passRevenueCents` returns null for that rather
+  -- than quietly counting it as zero.
+  paid_cents integer check (paid_cents is null or paid_cents >= 0),
+  currency text not null default 'AED',
+  note text,
+  created_at timestamptz not null default now(),
+  -- A pass with no holder at all cannot be checked in against anyone.
+  constraint gym_passes_holder_present
+    check (holder_id is not null or nullif(btrim(holder_name), '') is not null),
+  -- The database refuses to let a pass be spent past its own limit; the app
+  -- checks too, but the app is not the last line.
+  constraint gym_passes_not_overspent check (uses_spent <= uses_total)
+);
+create index if not exists idx_gym_passes_tenant on gym_passes(tenant_id, issued_on desc);
+create index if not exists idx_gym_passes_holder on gym_passes(holder_id) where holder_id is not null;
+
+-- ── each redemption, kept rather than just decremented ──────────────────────
+-- A counter tells you a pass was used; a row tells you when, by whom, and
+-- against which class. Only the second can be disputed and resolved.
+create table if not exists gym_pass_redemptions (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references tenants(id) on delete cascade,
+  pass_id uuid not null references gym_passes(id) on delete cascade,
+  class_id uuid references gym_classes(id) on delete set null,
+  redeemed_at timestamptz not null default now(),
+  -- The staff member who took it, not the person using it.
+  redeemed_by uuid references profiles(id) on delete set null
+);
+create index if not exists idx_gym_pass_redemptions_pass on gym_pass_redemptions(pass_id, redeemed_at desc);
+create index if not exists idx_gym_pass_redemptions_tenant on gym_pass_redemptions(tenant_id, redeemed_at desc);
+
+-- ── keep the counter and the rows honest ────────────────────────────────────
+-- uses_spent is a cache of count(redemptions). Letting the app maintain both
+-- independently guarantees they drift, so the trigger owns it.
+create or replace function gym_passes_sync_uses() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  update gym_passes p
+     set uses_spent = (select count(*) from gym_pass_redemptions r where r.pass_id = p.id)
+   where p.id = coalesce(new.pass_id, old.pass_id);
+  return coalesce(new, old);
+end $$;
+
+drop trigger if exists trg_gym_pass_redemptions_sync on gym_pass_redemptions;
+create trigger trg_gym_pass_redemptions_sync
+  after insert or delete on gym_pass_redemptions
+  for each row execute function gym_passes_sync_uses();
+
+-- A redemption inherits the pass's tenant, so the desk never has to supply it
+-- and can never supply the wrong one.
+create or replace function gym_pass_redemptions_fill_tenant() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if new.tenant_id is null then
+    select p.tenant_id into new.tenant_id from gym_passes p where p.id = new.pass_id;
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists trg_gym_pass_redemptions_tenant on gym_pass_redemptions;
+create trigger trg_gym_pass_redemptions_tenant
+  before insert on gym_pass_redemptions
+  for each row execute function gym_pass_redemptions_fill_tenant();
+
+-- ── row-level security ──────────────────────────────────────────────────────
+-- The helpers are SECURITY DEFINER, so a policy calling them does not re-enter
+-- the table it is protecting — the recursion that once made `profiles`
+-- unreadable for everyone (see 28-fix-profiles-recursion.sql).
+alter table gym_pass_types       enable row level security;
+alter table gym_passes           enable row level security;
+alter table gym_pass_redemptions enable row level security;
+
+drop policy if exists gym_pass_types_owner on gym_pass_types;
+create policy gym_pass_types_owner on gym_pass_types
+  for all using (is_owner_of(tenant_id)) with check (is_owner_of(tenant_id));
+
+drop policy if exists gym_passes_owner on gym_passes;
+create policy gym_passes_owner on gym_passes
+  for all using (is_owner_of(tenant_id)) with check (is_owner_of(tenant_id));
+
+drop policy if exists gym_pass_redemptions_owner on gym_pass_redemptions;
+create policy gym_pass_redemptions_owner on gym_pass_redemptions
+  for all using (is_owner_of(tenant_id)) with check (is_owner_of(tenant_id));
+
+-- What is on sale at the desk is not private, and the booking screens need it.
+drop policy if exists gym_pass_types_tenant_r on gym_pass_types;
+create policy gym_pass_types_tenant_r on gym_pass_types
+  for select using (tenant_id = my_tenant() and active);
+
+-- A holder reads their own passes and nobody else's. Note this is scoped to
+-- holder_id, so a desk-written walk-in (holder_name only) is visible to the
+-- gym alone — there is no account for it to leak to.
+drop policy if exists gym_passes_own_r on gym_passes;
+create policy gym_passes_own_r on gym_passes
+  for select using (holder_id = (select auth.uid()));
+
+drop policy if exists gym_pass_redemptions_own_r on gym_pass_redemptions;
+create policy gym_pass_redemptions_own_r on gym_pass_redemptions
+  for select using (
+    exists (select 1 from gym_passes p
+             where p.id = gym_pass_redemptions.pass_id
+               and p.holder_id = (select auth.uid()))
+  );
+
+-- Staff need to take a pass at the desk without being an owner. A trainer in
+-- the gym may record a redemption, but may not issue or price a pass.
+drop policy if exists gym_pass_redemptions_staff_w on gym_pass_redemptions;
+create policy gym_pass_redemptions_staff_w on gym_pass_redemptions
+  for insert with check (tenant_id = my_tenant() and my_role() in ('trainer','owner'));
+
+drop policy if exists gym_passes_staff_r on gym_passes;
+create policy gym_passes_staff_r on gym_passes
+  for select using (tenant_id = my_tenant() and my_role() in ('trainer','owner'));
+
+-- ▶ door-log.sql
+
+-- ── The door log ────────────────────────────────────────────────────────────
+--
+-- Phase 1. Attendance is currently only counted where a class was booked and
+-- ticked off. Every member who walks in, trains on the floor and leaves is
+-- invisible — which in most gyms is the majority of visits.
+--
+-- That under-count matters beyond the headline: retention is inferred from
+-- attendance pattern breaks, so a member who switched from classes to the
+-- floor currently looks like a member who stopped coming.
+--
+-- Additive only. Nothing here alters an existing table.
+
+create table if not exists gym_visits (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references tenants(id) on delete cascade,
+  -- Null for an anonymous head-count: a turnstile that counts bodies without
+  -- identifying them still tells the gym about capacity, even though it says
+  -- nothing about retention.
+  member_id uuid references profiles(id) on delete set null,
+  -- Set when the visit was paid for with a drop-in or guest pass, so the two
+  -- records reconcile instead of double counting the same person.
+  pass_id uuid references gym_passes(id) on delete set null,
+  -- Set when the visit was attendance at a booked class, so class attendance
+  -- and floor attendance can be told apart in the same table.
+  class_id uuid references gym_classes(id) on delete set null,
+  entered_at timestamptz not null default now(),
+  -- Null means either still inside or nobody recorded an exit. The two are
+  -- indistinguishable here on purpose — see gymVisits.averageDwellMinutes,
+  -- which refuses to average over visits with no exit rather than guessing.
+  exited_at timestamptz,
+  source text not null default 'desk'
+    check (source in ('desk','qr','door','app','manual')),
+  note text,
+  created_at timestamptz not null default now(),
+  -- A visit cannot end before it began. Clock skew on a door terminal is real,
+  -- and a negative dwell time poisons every average built on it.
+  constraint gym_visits_exit_after_entry
+    check (exited_at is null or exited_at >= entered_at)
+);
+
+create index if not exists idx_gym_visits_tenant on gym_visits(tenant_id, entered_at desc);
+create index if not exists idx_gym_visits_member on gym_visits(member_id, entered_at desc)
+  where member_id is not null;
+create index if not exists idx_gym_visits_open on gym_visits(tenant_id)
+  where exited_at is null;
+
+-- A visit paid for by a pass inherits that pass's tenant, so a terminal never
+-- has to supply it and can never supply the wrong one.
+create or replace function gym_visits_fill_tenant() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if new.tenant_id is null and new.pass_id is not null then
+    select p.tenant_id into new.tenant_id from gym_passes p where p.id = new.pass_id;
+  end if;
+  if new.tenant_id is null and new.class_id is not null then
+    select c.tenant_id into new.tenant_id from gym_classes c where c.id = new.class_id;
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists trg_gym_visits_tenant on gym_visits;
+create trigger trg_gym_visits_tenant
+  before insert on gym_visits
+  for each row execute function gym_visits_fill_tenant();
+
+-- ── row-level security ──────────────────────────────────────────────────────
+-- The helpers are SECURITY DEFINER, so a policy calling them does not re-enter
+-- the table it is protecting — the recursion that once made `profiles`
+-- unreadable for everyone (see 28-fix-profiles-recursion.sql).
+alter table gym_visits enable row level security;
+
+drop policy if exists gym_visits_owner on gym_visits;
+create policy gym_visits_owner on gym_visits
+  for all using (is_owner_of(tenant_id)) with check (is_owner_of(tenant_id));
+
+-- Staff work the door; they may record visits without being an owner.
+drop policy if exists gym_visits_staff_rw on gym_visits;
+create policy gym_visits_staff_rw on gym_visits
+  for select using (tenant_id = my_tenant() and my_role() in ('trainer','owner'));
+
+drop policy if exists gym_visits_staff_w on gym_visits;
+create policy gym_visits_staff_w on gym_visits
+  for insert with check (tenant_id = my_tenant() and my_role() in ('trainer','owner'));
+
+drop policy if exists gym_visits_staff_u on gym_visits;
+create policy gym_visits_staff_u on gym_visits
+  for update using (tenant_id = my_tenant() and my_role() in ('trainer','owner'))
+  with check (tenant_id = my_tenant() and my_role() in ('trainer','owner'));
+
+-- A member sees their own visit history and nobody else's. This is deliberately
+-- readable to them: "when did I actually come in" is their record too, and it
+-- is the evidence behind any retention conversation the gym starts.
+drop policy if exists gym_visits_own_r on gym_visits;
+create policy gym_visits_own_r on gym_visits
+  for select using (member_id = (select auth.uid()));
+
+-- ▶ session-outcomes.sql
+
+-- ── What actually happened in a PT session ──────────────────────────────────
+--
+-- Phase 1. Two problems with `sessions`, both of which reach the owner's
+-- payroll figure.
+--
+-- 1. It has no tenant. A gym cannot see the one-to-one sessions its own
+--    trainers deliver on its floor — the same class of gap that made
+--    `gym_classes` readable across gyms (see 30-classes-tenant-scope.sql),
+--    except here the data is missing rather than over-shared.
+--
+-- 2. `status` describes the slot, not the outcome: available, booked, blocked.
+--    There is nowhere to record that a booked session was actually delivered.
+--    So "delivered" has been inferred as "was booked and the clock has since
+--    passed" — which counts no-shows, un-cancelled slots and sessions the
+--    trainer never turned up to. That inference feeds payroll, so a gym pays
+--    for sessions that did not happen.
+--
+-- Additive only. `status` keeps its meaning; the new `outcome` column carries
+-- the delivery result and is null until somebody records one. Null is the
+-- honest state: not delivered, not cancelled — not yet known.
+
+alter table public.sessions add column if not exists tenant_id uuid references public.tenants(id) on delete cascade;
+
+alter table public.sessions add column if not exists outcome text
+  check (outcome is null or outcome in ('completed','no_show','cancelled','late_cancelled'));
+
+alter table public.sessions add column if not exists outcome_at timestamptz;
+alter table public.sessions add column if not exists outcome_by uuid references auth.users(id) on delete set null;
+
+-- The rate at the moment of delivery. Snapshotted so that changing a trainer's
+-- fee next month does not silently rewrite what last month cost.
+alter table public.sessions add column if not exists rate_cents integer
+  check (rate_cents is null or rate_cents >= 0);
+
+create index if not exists idx_sessions_tenant on public.sessions(tenant_id, starts_at desc);
+create index if not exists idx_sessions_unmarked on public.sessions(tenant_id, starts_at)
+  where outcome is null;
+
+-- ── backfill the tenant from the trainer who owns the slot ──────────────────
+update public.sessions s
+   set tenant_id = t.tenant_id
+  from public.trainers t
+ where t.id = s.trainer_id
+   and s.tenant_id is null;
+
+-- New rows inherit it, so no caller has to supply it and none can supply the
+-- wrong one.
+create or replace function public.sessions_fill_tenant() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if new.tenant_id is null then
+    select t.tenant_id into new.tenant_id from public.trainers t where t.id = new.trainer_id;
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists trg_sessions_fill_tenant on public.sessions;
+create trigger trg_sessions_fill_tenant
+  before insert on public.sessions
+  for each row execute function public.sessions_fill_tenant();
+
+-- Stamp who recorded the outcome and when, so a disputed payroll line has an
+-- author. Only on transition into an outcome, so an edit does not lose the
+-- original time.
+create or replace function public.sessions_stamp_outcome() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if new.outcome is distinct from old.outcome and new.outcome is not null then
+    new.outcome_at := coalesce(new.outcome_at, now());
+    new.outcome_by := coalesce(new.outcome_by, (select auth.uid()));
+  end if;
+  if new.outcome is null then
+    new.outcome_at := null;
+    new.outcome_by := null;
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists trg_sessions_stamp_outcome on public.sessions;
+create trigger trg_sessions_stamp_outcome
+  before update on public.sessions
+  for each row execute function public.sessions_stamp_outcome();
+
+-- ── row-level security ──────────────────────────────────────────────────────
+-- Existing policies (09-sessions-access.sql) already cover the trainer who owns
+-- the slot and the client who booked it. This adds the gym: an owner may read
+-- the sessions delivered on their floor, because that is what they are paying
+-- for, and may correct an outcome.
+--
+-- The helpers are SECURITY DEFINER, so a policy calling them does not re-enter
+-- the table it is protecting — the recursion that once made `profiles`
+-- unreadable for everyone (see 28-fix-profiles-recursion.sql).
+
+drop policy if exists sessions_gym_owner_r on public.sessions;
+create policy sessions_gym_owner_r on public.sessions
+  for select using (tenant_id is not null and is_owner_of(tenant_id));
+
+drop policy if exists sessions_gym_owner_u on public.sessions;
+create policy sessions_gym_owner_u on public.sessions
+  for update using (tenant_id is not null and is_owner_of(tenant_id))
+  with check (tenant_id is not null and is_owner_of(tenant_id));
+
+-- ▶ equipment-register.sql
+
+-- ── The equipment register ──────────────────────────────────────────────────
+--
+-- Phase 1. What the gym owns, what is out of action, and what is due a service.
+--
+-- The reason this is not just an inventory list: capacity. A class capacity of
+-- 14 is a claim about the room, and it stops being true the moment six of the
+-- rowers are broken. Studio already reports fill rate against stated capacity,
+-- so without this the gym is measuring itself against a number that quietly
+-- became fiction.
+--
+-- Additive only. Nothing here alters an existing table.
+
+create table if not exists gym_equipment (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references tenants(id) on delete cascade,
+  name text not null,
+  -- Loose on purpose. A gym's own words for its kit beat a taxonomy we impose,
+  -- and the capacity check matches on this string.
+  category text,
+  -- Asset tag, serial, or whatever is written on the sticker.
+  identifier text,
+  quantity integer not null default 1 check (quantity >= 0),
+  status text not null default 'in_service'
+    check (status in ('in_service', 'out_of_service', 'retired')),
+  purchased_on date,
+  -- Null means no service schedule — a decision the gym made, not a gap.
+  service_interval_days integer check (service_interval_days is null or service_interval_days > 0),
+  -- Null with an interval set means the schedule exists but nobody has recorded
+  -- a service. That is NOT the same as "serviced today", and
+  -- gymEquipment.serviceState reports it as its own state rather than
+  -- computing a due date from a date it does not have.
+  last_serviced_on date,
+  note text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_gym_equipment_tenant on gym_equipment(tenant_id, status);
+create index if not exists idx_gym_equipment_category on gym_equipment(tenant_id, category)
+  where status = 'in_service';
+create index if not exists idx_gym_equipment_service on gym_equipment(tenant_id, last_serviced_on)
+  where service_interval_days is not null;
+
+-- ── row-level security ──────────────────────────────────────────────────────
+-- The helpers are SECURITY DEFINER, so a policy calling them does not re-enter
+-- the table it is protecting — the recursion that once made `profiles`
+-- unreadable for everyone (see 28-fix-profiles-recursion.sql).
+alter table gym_equipment enable row level security;
+
+drop policy if exists gym_equipment_owner on gym_equipment;
+create policy gym_equipment_owner on gym_equipment
+  for all using (is_owner_of(tenant_id)) with check (is_owner_of(tenant_id));
+
+-- Trainers read the register and may take a machine out of action — they are
+-- the ones standing next to it when it breaks. They cannot add, price or
+-- retire kit, which is the owner's call.
+drop policy if exists gym_equipment_staff_r on gym_equipment;
+create policy gym_equipment_staff_r on gym_equipment
+  for select using (tenant_id = my_tenant() and my_role() in ('trainer', 'owner'));
+
+drop policy if exists gym_equipment_staff_u on gym_equipment;
+create policy gym_equipment_staff_u on gym_equipment
+  for update using (tenant_id = my_tenant() and my_role() in ('trainer', 'owner'))
+  with check (tenant_id = my_tenant() and my_role() in ('trainer', 'owner'));
+
+-- ▶ class-capacity-and-scope.sql
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- class_attendance_summary: add capacity, and scope it to the caller's gym.
+--
+-- TWO changes, one function.
+--
+-- 1. CAPACITY. The summary returned booked and attended but not capacity, so
+--    the owner's class screen could only ever compute attended/booked. It
+--    printed that under the label "fill", while gymSchedule.ts reserves fill
+--    for booked/capacity — the same class read 71% on the timetable and 80%
+--    on the analytics screen. gym_classes.capacity has been there all along;
+--    the summary simply never selected it. With it present the screen can
+--    show both rates and mean each honestly.
+--
+-- 2. TENANT SCOPE — a cross-tenant read. The function is SECURITY DEFINER, so
+--    it runs as its owner and RLS on gym_classes does not apply to it. Its own
+--    guard was:
+--
+--      gc.trainer_id = auth.uid()
+--      or exists (select 1 from profiles o
+--                  where o.id = auth.uid() and o.role = 'owner')
+--
+--    The second arm asks "is this caller AN owner", never "is this caller the
+--    owner of THIS gym". Any owner of any tenant could therefore read every
+--    other gym's class titles, trainer names, booking and attendance counts.
+--    Every RLS policy added in 30-classes-tenant-scope.sql already uses
+--    is_owner_of(tenant_id); this brings the function into line with them.
+--
+-- The return type changes, so the function has to be dropped rather than
+-- replaced. Both signatures are dropped because an older build may have left
+-- either behind.
+-- ─────────────────────────────────────────────────────────────────────────
+
+drop function if exists public.class_attendance_summary(timestamptz, timestamptz);
+
+create function public.class_attendance_summary(p_from timestamptz, p_to timestamptz)
+returns table(class_id uuid, title text, kind text, branch text, trainer_id uuid,
+              trainer_name text, starts_at timestamptz,
+              capacity integer, booked integer, attended integer)
+language sql
+security definer
+set search_path to 'public'
+as $function$
+  select gc.id, gc.title, gc.kind, gc.branch, gc.trainer_id,
+         coalesce(tp.full_name, 'Trainer') as trainer_name, gc.starts_at,
+         coalesce(gc.capacity, 0)::int as capacity,
+         count(cb.id) filter (where cb.status = 'booked')::int as booked,
+         count(cb.attended_at)::int as attended
+  from gym_classes gc
+  left join class_bookings cb on cb.class_id = gc.id
+  left join profiles tp on tp.id = gc.trainer_id
+  where gc.starts_at >= p_from and gc.starts_at < p_to
+    and ( gc.trainer_id = auth.uid()
+          -- the caller must own THIS class's gym, not merely be an owner
+          or is_owner_of(gc.tenant_id) )
+  group by gc.id, tp.full_name
+  order by gc.starts_at desc;
+$function$;
+
+grant execute on function public.class_attendance_summary(timestamptz, timestamptz) to authenticated;
