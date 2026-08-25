@@ -237,3 +237,47 @@ loss.
 **If a tool still points at the old path**, it is holding a cached absolute
 path — restart it rather than recreating the directory. Claude Code sessions
 started before the move need reopening at `~/repple-app`.
+
+## Two ways a security control can look real and do nothing
+
+Both found on 25 Aug 2026 while closing a set of cross-tenant leaks. They share
+a shape worth recognising, because reading the migration files will not reveal
+either one.
+
+**A policy on a table without RLS enabled is inert.** `tenants` and
+`exercise_videos` both carry policies written in `28-fix-profiles-recursion.sql`.
+Neither table had `enable row level security`, so Postgres never consulted
+them and Supabase's default grants applied in full. Reading the migrations,
+the tables look protected.
+
+*(As it turned out, RLS had been switched on for all four tables through the
+dashboard, so this was never live — but rebuilding from `setup.sql` would have
+reintroduced it, and nothing in the repo said so.)*
+
+**`revoke execute ... from anon` does nothing on its own.** Postgres grants
+EXECUTE to PUBLIC on every function it creates, and `anon` resolves through
+that grant. Revoking from `anon` leaves PUBLIC untouched. This was verified
+against the live database: after the revoke,
+`has_function_privilege('anon', oid, 'EXECUTE')` was still true. Two
+pre-existing revokes in parts 02 and 22 had the same flaw and had presumably
+never worked.
+
+    revoke execute on function f(...) from public, anon;
+    grant  execute on function f(...) to authenticated;
+
+**The lesson underneath both:** applying a security fix is not the same as it
+taking effect. Query the database afterwards and confirm the thing you
+intended is true — `apply_migration` returning `{"success": true}` only means
+the statements ran.
+
+Useful checks:
+
+    -- is RLS actually on?
+    select tablename, rowsecurity from pg_tables where schemaname = 'public';
+
+    -- can anon really not call this?
+    select proname,
+           has_function_privilege('anon', oid, 'EXECUTE') as anon,
+           has_function_privilege('authenticated', oid, 'EXECUTE') as authed
+    from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public';
