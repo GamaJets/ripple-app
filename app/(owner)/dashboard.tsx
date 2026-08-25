@@ -79,6 +79,7 @@ export default function OwnerOverview() {
         <View style={{ marginTop: sp.lg }}>
           <QuickRow items={[
             { icon: 'people', label: 'Trainers', onPress: () => router.push('/(owner)/trainers') },
+            { icon: 'me', label: 'Members', onPress: () => router.push('/(owner)/members') },
             { icon: 'palette', label: 'Brand', onPress: () => router.push('/(owner)/brand') },
             { icon: 'trending', label: 'Growth', onPress: () => router.push('/(owner)/growth') },
             { icon: 'wrench', label: 'Ops', onPress: () => router.push('/(owner)/ops') },

@@ -23,6 +23,7 @@ export default function OwnerLayout() {
       <Tabs.Screen name="brand" options={{ title: 'Brand', tabBarIcon: ({ color }) => <Icon name="palette" size={23} color={color} /> }} />
       <Tabs.Screen name="growth" options={{ title: 'Growth', tabBarIcon: ({ color }) => <Icon name="trending" size={23} color={color} /> }} />
       <Tabs.Screen name="ops" options={{ title: 'Ops', tabBarIcon: ({ color }) => <Icon name="wrench" size={23} color={color} /> }} />
+      <Tabs.Screen name="members" options={{ href: null, title: 'Members' }} />
       <Tabs.Screen name="equipment" options={{ href: null, title: 'Equipment' }} />
       <Tabs.Screen name="explore" options={{ href: null, title: 'Explore' }} />
       <Tabs.Screen name="feedback" options={{ href: null, title: 'Feedback' }} />
