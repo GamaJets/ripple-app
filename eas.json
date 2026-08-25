@@ -19,7 +19,8 @@
         "EXPO_PUBLIC_WHOOP_CLIENT_ID": "4b281c54-db5e-41fd-9e2c-7c70abc54932",
         "EXPO_PUBLIC_APP_VARIANT": "client"
       },
-      "channel": "development"
+      "channel": "development",
+      "node": "26.7.0"
     },
     "preview": {
       "distribution": "internal",
@@ -35,7 +36,8 @@
         "EXPO_PUBLIC_WHOOP_CLIENT_ID": "4b281c54-db5e-41fd-9e2c-7c70abc54932",
         "EXPO_PUBLIC_APP_VARIANT": "client"
       },
-      "channel": "preview"
+      "channel": "preview",
+      "node": "26.7.0"
     },
     "production": {
       "autoIncrement": true,
@@ -48,7 +50,8 @@
         "EXPO_PUBLIC_OURA_CLIENT_ID": "b13f6e4a-da3a-43ba-820b-ff1e43306747",
         "EXPO_PUBLIC_WHOOP_CLIENT_ID": "4b281c54-db5e-41fd-9e2c-7c70abc54932",
         "EXPO_PUBLIC_APP_VARIANT": "client"
-      }
+      },
+      "node": "26.7.0"
     },
     "production-coach": {
       "autoIncrement": true,
@@ -61,7 +64,8 @@
         "EXPO_PUBLIC_OURA_CLIENT_ID": "b13f6e4a-da3a-43ba-820b-ff1e43306747",
         "EXPO_PUBLIC_WHOOP_CLIENT_ID": "4b281c54-db5e-41fd-9e2c-7c70abc54932",
         "EXPO_PUBLIC_APP_VARIANT": "trainer"
-      }
+      },
+      "node": "26.7.0"
     },
     "preview-coach": {
       "distribution": "internal",
@@ -80,7 +84,8 @@
         "EXPO_PUBLIC_OURA_CLIENT_ID": "b13f6e4a-da3a-43ba-820b-ff1e43306747",
         "EXPO_PUBLIC_WHOOP_CLIENT_ID": "4b281c54-db5e-41fd-9e2c-7c70abc54932",
         "EXPO_PUBLIC_APP_VARIANT": "trainer"
-      }
+      },
+      "node": "26.7.0"
     },
     "production-owner": {
       "autoIncrement": true,
@@ -93,7 +98,8 @@
         "EXPO_PUBLIC_OURA_CLIENT_ID": "b13f6e4a-da3a-43ba-820b-ff1e43306747",
         "EXPO_PUBLIC_WHOOP_CLIENT_ID": "4b281c54-db5e-41fd-9e2c-7c70abc54932",
         "EXPO_PUBLIC_APP_VARIANT": "owner"
-      }
+      },
+      "node": "26.7.0"
     },
     "development-coach": {
       "developmentClient": true,
@@ -110,7 +116,8 @@
         "EXPO_PUBLIC_WHOOP_CLIENT_ID": "4b281c54-db5e-41fd-9e2c-7c70abc54932",
         "EXPO_PUBLIC_APP_VARIANT": "trainer"
       },
-      "channel": "development"
+      "channel": "development",
+      "node": "26.7.0"
     },
     "development-owner": {
       "developmentClient": true,
@@ -127,7 +134,8 @@
         "EXPO_PUBLIC_WHOOP_CLIENT_ID": "4b281c54-db5e-41fd-9e2c-7c70abc54932",
         "EXPO_PUBLIC_APP_VARIANT": "owner"
       },
-      "channel": "development"
+      "channel": "development",
+      "node": "26.7.0"
     }
   },
   "submit": {
