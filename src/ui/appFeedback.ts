@@ -3,6 +3,7 @@
 import Constants from 'expo-constants';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
+import { reportError } from '../lib/reportError';
 
 const APP_VERSION: string = ((Constants as any)?.expoConfig?.version) ?? ((Constants as any)?.manifest?.version) ?? '';
 
@@ -11,22 +12,29 @@ export interface FeedbackRow {
   category: string | null; body: string; appVersion: string | null; createdAt: string;
 }
 
-export async function submitAppFeedback(rating: number, category: string, body: string): Promise<boolean> {
-  if (!USE_SUPABASE) return true;
+export async function submitAppFeedback(rating: number, category: string, body: string): Promise<{ ok: boolean; reason?: string }> {
+  if (!USE_SUPABASE) return { ok: true };
   try {
     const { data: auth } = await supabase.auth.getUser();
     const uid = auth?.user?.id;
-    if (!uid) return false;
+    if (!uid) return { ok: false, reason: 'You are not signed in.' };
     let role: string | null = null; let tenant: string | null = null;
     try {
       const p = await supabase.from('profiles').select('role, tenant_id').eq('id', uid).single();
       if (p.data) { role = p.data.role ?? null; tenant = p.data.tenant_id ?? null; }
     } catch { /* optional */ }
     const { error } = await supabase.from('feedback').insert({
-      user_id: uid, role, tenant_id: tenant, rating, category, body: body.trim(), app_version: APP_VERSION,
+      user_id: uid, role, tenant_id: tenant,
+      // null, never 0 — see the note on this function.
+      rating: rating >= 1 && rating <= 5 ? rating : null,
+      category, body: body.trim(), app_version: APP_VERSION,
     });
-    return !error;
-  } catch { return false; }
+    // Report WHY. A bare false meant every failure was described to the user
+    // as a connection problem — including a rating of 0 being refused by a
+    // check constraint, which no amount of reconnecting fixes.
+    if (error) { reportError('feedback.submit', error); return { ok: false, reason: error.message }; }
+    return { ok: true };
+  } catch (e: any) { reportError('feedback.submit', e); return { ok: false, reason: e?.message }; }
 }
 
 export async function fetchAllFeedback(): Promise<FeedbackRow[]> {

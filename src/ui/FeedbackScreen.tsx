@@ -29,14 +29,23 @@ export default function FeedbackScreen({ audience }: { audience: string }) {
   const submit = async () => {
     if (!body.trim()) { Alert.alert('Add a note', 'Tell us what worked or what to improve.'); return; }
     setBusy(true);
-    const ok = await submitAppFeedback(rating || 0, cat, body);
+    const res = await submitAppFeedback(rating || 0, cat, body);
     setBusy(false);
-    if (ok) notifySuccess();
+    if (res.ok) notifySuccess();
     // The failure branch used to read "Saved - Thanks, your feedback was
     // recorded." It was not recorded: ok===false means no signed-in user, a
     // rejected insert, or a thrown error. The text was discarded and the screen
     // popped, so it never reached the owner's Feedback inbox.
-    if (!ok) { Alert.alert('Not sent', 'Your feedback could not be saved just now — check your connection and try again. Your text is still here.'); return; }
+    if (!res.ok) {
+      // Say what actually went wrong. This previously blamed the connection for
+      // every failure — a real user hit a rejected insert with perfect signal
+      // and was told to reconnect.
+      Alert.alert(
+        'Not sent',
+        (res.reason ? res.reason + '\n\n' : '') + 'Your text is still here, so you can try again.',
+      );
+      return;
+    }
     Alert.alert('Thank you', 'Your feedback went to the Repple team.', [{ text: 'Done', onPress: () => router.back() }]);
   };
 

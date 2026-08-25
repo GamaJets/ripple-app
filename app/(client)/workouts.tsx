@@ -8,6 +8,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView, Modal, Alert, Linking, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { tapLight } from '../../src/ui/haptics';
 import { Icon } from '../../src/ui/Icon';
@@ -131,6 +132,7 @@ export default function Train() {
   const [mode, setMode] = useState<'strength' | 'cardio' | 'hiit' | 'mobility'>('strength');
   const [swaps, setSwaps] = useState<Record<string, string>>({});
   const [logged, setLogged] = useState<Record<string, { reps: string; kg: string }[]>>({});
+
   const [cardioLog, setCardioLog] = useState<{ type: string; mins: number; dist: number; unit: string; kcal: number | null }[]>([]);
   const [nlw, setNlw] = useState('');
   const logWorkoutNL = () => {
@@ -211,6 +213,41 @@ export default function Train() {
   const dateFor = (i: number) => { const d = new Date(monday0); d.setDate(monday0.getDate() + i); return d; };
   const pad2 = (n: number) => String(n).padStart(2, '0');
   const dstr = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+
+  // Sets you have entered but not yet saved to the log.
+  //
+  // These used to live only in memory, so leaving the screen threw them away —
+  // a member reported exactly this: "it wipes out as u go back". Someone
+  // halfway through a session who checked a demo video, or was interrupted by a
+  // call, lost every set they had typed. The work happened; only the record of
+  // it did not, which is the worst way to lose data.
+  //
+  // Persisted per day, so yesterday's abandoned draft cannot reappear on top of
+  // today's session. Cleared when the workout is saved for real.
+  const draftKey = `repple.workoutDraft.${dstr(dateFor(dayIdx))}`;
+  const [draftLoaded, setDraftLoaded] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    setDraftLoaded(false);
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(draftKey);
+        if (!live) return;
+        setLogged(raw ? JSON.parse(raw) : {});
+      } catch { if (live) setLogged({}); }
+      finally { if (live) setDraftLoaded(true); }
+    })();
+    return () => { live = false; };
+  }, [draftKey]);
+
+  useEffect(() => {
+    // Only after the load has run, or the first render would immediately
+    // overwrite a stored draft with the empty object it starts from.
+    if (!draftLoaded) return;
+    if (Object.keys(logged).length === 0) AsyncStorage.removeItem(draftKey).catch(() => {});
+    else AsyncStorage.setItem(draftKey, JSON.stringify(logged)).catch(() => {});
+  }, [logged, draftKey, draftLoaded]);
   const workedDates = new Set(workoutLog.map((l) => dstr(new Date(l.t))));
   Object.keys(logged).forEach((k) => { if ((logged[k] || []).length) workedDates.add(dstr(dateFor(parseInt(k.split(':')[0], 10)))); });
   if (cardioLog.length) workedDates.add(dstr(today0));
