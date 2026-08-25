@@ -50,6 +50,7 @@ because the underlying tables did not exist.
 | **Door log** — visits that are not class bookings | `supabase/parts/32-door-log.sql`, `src/lib/gymVisits.ts` |
 | **Session outcomes and honest payroll** | `supabase/parts/33-session-outcomes.sql`, `src/lib/gymSessions.ts` |
 | Studio console — Door and Sessions screens | `studio-web/app/door`, `studio-web/app/sessions` |
+| **Equipment register** — and what it does to stated capacity | `supabase/parts/34-equipment-register.sql`, `src/lib/gymEquipment.ts` |
 
 Two bugs of the same family were found and fixed while building this phase,
 both worth remembering as the class to look for first:
@@ -72,9 +73,6 @@ both worth remembering as the class to look for first:
   owner can now mark an outcome, but the client-side approval loop that
   table was built for is still unwired.
 - **Trainer rota** — who is on the floor when, against class and PT load.
-- **Equipment register** — what the gym owns, servicing due, what is out of
-  action. Feeds capacity honestly: a class capacity of 14 is a lie if six
-  rowers are broken.
 - **CSV import** — members, plans and historical payments. Without this a gym
   starts from nothing and never gets a comparison year.
 
@@ -178,6 +176,11 @@ In practice:
 - An unmarked session is neither delivered nor cancelled — it is unknown.
   `gymSessions.payrollTotal` refuses to report a period settleable while any
   remain, and `settlementBlocker` says how many need marking.
+- An empty equipment register is not an empty gym. `gymEquipment.capacityFor`
+  returns `null` when nothing of a category is recorded, never `0` — which
+  would tell an owner their class cannot run on the strength of a form nobody
+  filled in. "Schedule set but never serviced" is its own state, distinct
+  from "no schedule".
 
 The tests in `src/lib/coverage.test.ts` exist mainly to hold this line, and are
 written so they fail when the rule is broken — verified by mutation, not by

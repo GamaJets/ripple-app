@@ -7,6 +7,7 @@ import { rowToEntry, entryToRow, PERSISTED_FIELDS } from './workoutRow';
 import { summarise, money, type MembershipPlan, type Membership, type GymPayment } from './gymRecord';
 import { weeklyOccurrences, summariseAttendance, pct, type GymClass, type NewClass } from './gymSchedule';
 import { buildIcs } from './ics';
+import { serviceState, nextServiceDue, usableUnits, outOfServiceUnits, capacityFor, summariseRegister, needsAttention, type Equipment } from './gymEquipment';
 import { parseCsv, parseSheet, sniffDelimiter, mapColumns } from './csv';
 import { parseMoneyCents, parseDate, detectDateOrder, previewMembers, previewPayments, describePreview, MEMBER_ALIASES } from './csvImport';
 import { payroll30For, payrollBlocker, type GymTrainer } from './gymTrainers';
@@ -589,6 +590,101 @@ ok(rollBlocked.sessions30 === 20, 'rollup still reports what the record shows to
 
   ok(describePreview(noName).includes('no name'), 'the summary explains a missing required column');
   ok(describePreview(memPrev).includes('2 of 6'), `the summary counts ready rows (got "${describePreview(memPrev)}")`);
+}
+
+// ── equipment register (F20) ──
+// Scoped: fixture names like `kit` and `cap` are common enough to collide.
+{
+const kit = (o: Partial<Equipment>): Equipment => ({
+  id: 'e', name: 'Rower', category: 'rower', identifier: null, quantity: 1,
+  status: 'in_service', purchasedOn: null, serviceIntervalDays: null,
+  lastServicedOn: null, note: null, ...o,
+});
+
+// Two different unknowns must stay distinguishable.
+ok(serviceState({ serviceIntervalDays: null, lastServicedOn: null }, '2026-08-25') === 'unscheduled',
+   'no interval means the gym chose no schedule');
+ok(serviceState({ serviceIntervalDays: 90, lastServicedOn: null }, '2026-08-25') === 'unrecorded',
+   'a schedule with no recorded service is its own state, not "serviced today"');
+ok(nextServiceDue({ serviceIntervalDays: 90, lastServicedOn: null }) === null,
+   'no due date is invented from a service that was never recorded');
+ok(nextServiceDue({ serviceIntervalDays: null, lastServicedOn: '2026-01-01' }) === null,
+   'no interval means no due date');
+ok(nextServiceDue({ serviceIntervalDays: 90, lastServicedOn: '2026-06-01' }) === '2026-08-30',
+   'a due date is issue + interval');
+
+ok(serviceState({ serviceIntervalDays: 90, lastServicedOn: '2026-06-01' }, '2026-08-31') === 'overdue',
+   'past its due date is overdue');
+ok(serviceState({ serviceIntervalDays: 90, lastServicedOn: '2026-06-01' }, '2026-08-25') === 'due',
+   'inside the grace window is due, so an engineer can be booked first');
+ok(serviceState({ serviceIntervalDays: 90, lastServicedOn: '2026-06-01' }, '2026-07-01') === 'ok',
+   'well before the date is fine');
+ok(serviceState({ serviceIntervalDays: 90, lastServicedOn: '2026-06-01' }, '2026-08-30') === 'due',
+   'the due date itself is not yet overdue');
+
+// Counting: retired kit is gone, not broken.
+const fleet = [
+  kit({ id: 'a', quantity: 6, status: 'in_service' }),
+  kit({ id: 'b', quantity: 4, status: 'out_of_service' }),
+  kit({ id: 'c', quantity: 2, status: 'retired' }),
+];
+ok(usableUnits(fleet) === 6, 'only in-service units are usable');
+ok(outOfServiceUnits(fleet) === 4, 'broken units are counted separately');
+
+// The capacity claim — the reason this module exists.
+const capOk = capacityFor([kit({ quantity: 14 })], 'rower', 14);
+ok(capOk.limit === 14 && capOk.supported === true, 'enough kit supports the stated capacity');
+ok(capOk.note === null, 'nothing to say when the claim holds');
+
+const capShort = capacityFor([
+  kit({ id: 'a', quantity: 8, status: 'in_service' }),
+  kit({ id: 'b', quantity: 6, status: 'out_of_service' }),
+], 'rower', 14);
+ok(capShort.limit === 8, `broken kit lowers the real limit (got ${capShort.limit})`);
+ok(capShort.supported === false, 'a capacity of 14 on 8 working rowers is not supported');
+ok((capShort.note ?? '').includes('6 of 14'), `the note names what is down (got ${capShort.note})`);
+
+// The important case: an empty register is not an empty gym.
+const capUnknown = capacityFor([], 'rower', 14);
+ok(capUnknown.limit === null, 'nothing registered gives null, never 0');
+ok(capUnknown.supported === null, 'unknown is not the same as unsupported');
+ok((capUnknown.note ?? '').includes('cannot be checked'), 'the note says it cannot be checked, not that the class cannot run');
+
+const capOther = capacityFor([kit({ category: 'treadmill', quantity: 20 })], 'rower', 14);
+ok(capOther.limit === null, 'kit of another category does not stand in for the one asked about');
+
+// Shared kit: half a unit each.
+const capShared = capacityFor([kit({ category: 'rig', quantity: 6 })], 'rig', 12, 0.5);
+ok(capShared.limit === 12 && capShared.supported === true, 'a rig two people share seats twice its count');
+ok(capacityFor([kit({ quantity: 5 })], 'rower', 4, 0).limit === null, 'zero units per attendee is refused, not divided by');
+
+// Category matching is forgiving about the gym's own words.
+ok(capacityFor([kit({ category: 'Rowers' })], 'rower', 1).limit === 1, 'case and plural differences still match');
+
+// Retired kit cannot prop up a capacity claim.
+ok(capacityFor([kit({ quantity: 20, status: 'retired' })], 'rower', 14).limit === null,
+   'a register holding only retired kit reads as nothing registered');
+
+// Summary and the maintenance queue.
+const today = '2026-08-25';
+const reg = [
+  kit({ id: '1', name: 'Rower 1', serviceIntervalDays: 90, lastServicedOn: '2026-01-01' }), // overdue
+  kit({ id: '2', name: 'Bike 1',  serviceIntervalDays: 90, lastServicedOn: '2026-06-01' }), // due
+  kit({ id: '3', name: 'Bench 1', serviceIntervalDays: 90, lastServicedOn: null }),         // unrecorded
+  kit({ id: '4', name: 'Mat 1' }),                                                          // unscheduled
+  kit({ id: '5', name: 'Old rower', status: 'retired', serviceIntervalDays: 90, lastServicedOn: '2020-01-01' }),
+];
+const sum = summariseRegister(reg, today);
+ok(sum.items === 4, 'retired kit is out of the register count');
+ok(sum.overdue === 1 && sum.due === 1 && sum.unrecorded === 1, 'each service state is counted separately');
+ok(sum.usableUnits === 4, 'usable units exclude the retired item');
+
+const queue = needsAttention(reg, today);
+ok(queue.length === 3, 'unscheduled kit is not "needing attention"');
+ok(queue[0].state === 'overdue' && queue[0].item.name === 'Rower 1', 'overdue sorts first');
+ok(queue[1].state === 'due', 'due sorts above unrecorded');
+ok(queue[2].state === 'unrecorded', 'never-recorded still surfaces rather than hiding');
+ok(!queue.some((q) => q.item.status === 'retired'), 'retired kit never appears in the queue');
 }
 
 if (errors.length) { console.log('COVERAGE FAILURES:\n' + errors.join('\n')); process.exit(1); }
