@@ -10,6 +10,7 @@ import { summariseClassRows, type ClassSummaryRow } from './classRates';
 import { STATUS_LABEL, STATUS_RANK, statusFromRisk, riskLabel } from './status';
 import { reconcile, reconcileNote } from './finReconcile';
 import { VARIANT_ACCENT, VARIANT_TILE, VARIANT_LABEL } from './variant';
+import { tipsFor, nextTip, markShown, isDue, tipToShow, EMPTY_TIP_STATE, type TipState } from './tips';
 import { buildIcs } from './ics';
 import { serviceState, nextServiceDue, usableUnits, outOfServiceUnits, capacityFor, summariseRegister, needsAttention, type Equipment } from './gymEquipment';
 import { parseCsv, parseSheet, sniffDelimiter, mapColumns } from './csv';
@@ -1004,6 +1005,55 @@ for (const v of variants) {
   ok(lum(VARIANT_ACCENT[v]) > lum(VARIANT_TILE[v]) - 1,
      `${v}: the UI accent is no darker than the icon plate`);
 }
+}
+
+
+// ── "did you know" rotation ──
+{
+const all = tipsFor('client');
+ok(all.length > 0, 'the client app has tips to show');
+ok(new Set(all.map((t) => t.id)).size === all.length, 'every tip id is unique');
+ok(all.every((t) => t.text.trim().length > 0 && t.tab.trim().length > 0), 'no blank tips');
+
+// A new user starts at the beginning rather than somewhere arbitrary.
+const first = nextTip('client', EMPTY_TIP_STATE);
+ok(first?.id === all[0].id, 'a new user gets the first tip, not a random one');
+
+// Walk a full rotation: everything is shown exactly once before anything repeats.
+let st: TipState = EMPTY_TIP_STATE;
+const order: string[] = [];
+for (let i = 0; i < all.length; i++) {
+  const t = nextTip('client', st)!;
+  order.push(t.id);
+  st = markShown(st, t, all.length, new Date(2026, 0, i + 1).toISOString());
+}
+ok(new Set(order).size === all.length, 'a full rotation shows every tip exactly once');
+
+// After the rotation it restarts from the one shown longest ago, not at random.
+ok(nextTip('client', st)?.id === order[0], 'the next rotation starts with the oldest tip');
+
+// seen[] must not grow without bound across years of use.
+ok(st.seen.length <= all.length, 'the seen list is capped at the number of tips');
+
+// Timing: the request was "once a session or once a few days", not every launch.
+const t0 = Date.parse('2026-08-25T08:00:00Z');
+const shown: TipState = { seen: [], lastShownAt: '2026-08-25T08:00:00Z' };
+ok(isDue(shown, t0 + 1 * 3600_000) === false, 'an hour later is too soon');
+ok(isDue(shown, t0 + 19 * 3600_000) === false, 'nineteen hours is still too soon');
+ok(isDue(shown, t0 + 21 * 3600_000) === true, 'past the window it is due again');
+ok(isDue(EMPTY_TIP_STATE, t0) === true, 'somebody who has never seen one is due');
+
+// A corrupted timestamp must not silence the feature forever.
+ok(isDue({ seen: [], lastShownAt: 'not a date' }, t0) === true, 'an unreadable timestamp counts as due');
+
+ok(tipToShow('client', shown, t0 + 3600_000) === null, 'too soon yields nothing at all');
+ok(tipToShow('client', shown, t0 + 21 * 3600_000) !== null, 'due yields a tip');
+
+// Every build has its own tips, drawn from its own guide.
+for (const v of ['client', 'trainer', 'owner'] as const) {
+  ok(tipsFor(v).length > 0, `${v} has tips of its own`);
+}
+ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a first tip');
 }
 
 if (errors.length) { console.log('COVERAGE FAILURES:\n' + errors.join('\n')); process.exit(1); }

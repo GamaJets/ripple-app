@@ -29,6 +29,7 @@ import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { importSources, withHr, useImportedIds, isLogged, fetchRecent } from '../../src/ui/watchImport';
 import { parseWorkoutText } from '../../src/lib/workoutParse';
 import { useExerciseVideos } from '../../src/ui/exerciseVideos';
+import { DidYouKnow } from '../../src/ui/DidYouKnow';
 import { injuryFlag, areaLabel, type Injury } from '../../src/lib/injuries';
 import { warmupSets, deloadCheck } from '../../src/lib/training';
 import { hrColor, hrZoneNo, zoneOf, zoneKey, emptyZoneSeconds, splatPoints, zoneSecondsTotal, type ZoneSeconds } from '../../src/lib/hr';
@@ -396,6 +397,13 @@ export default function Train() {
           <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Train</Text>
         </View>
 
+
+        {/* One tip, at most once every twenty hours. Renders nothing the rest
+            of the time — asked for as "once a workout session or once few
+            days", and a card that greets you every visit is an interruption. */}
+        <View style={{ marginTop: sp.lg }}>
+          <DidYouKnow />
+        </View>
         <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.lg }}>
           <View style={{ flex: 1 }}>
             <Ghost label="Month calendar" icon="calendar" onPress={() => { setSelCalDay(dstr(dateFor(dayIdx))); setShowCal(true); }} />
