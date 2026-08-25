@@ -6,6 +6,7 @@ import { View, Text, ScrollView, Pressable, StyleSheet, TextInput } from 'react-
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { paletteByKey, brandInkFor, DEFAULT_PALETTE, PALETTES, teal, type Theme, type PaletteMeta } from '../theme/tokens';
+import { VARIANT, VARIANT_ACCENT } from '../lib/variant';
 import { Icon } from './Icon';
 // `value` is aliased to `figure` so it can't shadow <Tile/>'s `value` prop.
 import { sp, layout, radius, hairline, type as ty, value as figure } from '../theme/scale';
@@ -35,7 +36,18 @@ export function AppThemeProvider({ children }: { children: ReactNode }) {
     else AsyncStorage.removeItem('repple.accent.v2').catch(() => {});
   };
   const base = paletteByKey(palette);
-  const theme: Theme = accent ? { ...base, brand: accent, brandInk: brandInkFor(accent) } : base;
+
+  // Each app is drawn in its own colour. Applied only to the DEFAULT palette:
+  // if somebody has deliberately chosen midnight or cream, that is their choice
+  // and this must not quietly override it. An explicit accent still wins over
+  // both, which is the white-label case a gym uses for its own branding.
+  const withVariant: Theme = palette === DEFAULT_PALETTE
+    ? { ...base, brand: VARIANT_ACCENT[VARIANT], brandInk: brandInkFor(VARIANT_ACCENT[VARIANT]) }
+    : base;
+
+  const theme: Theme = accent
+    ? { ...withVariant, brand: accent, brandInk: brandInkFor(accent) }
+    : withVariant;
   return <ThemeCtx.Provider value={{ palette, setPalette, accent, setAccent, palettes: PALETTES, theme }}>{children}</ThemeCtx.Provider>;
 }
 

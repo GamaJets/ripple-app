@@ -60,6 +60,28 @@ export const VARIANT_TILE: Record<AppVariant, string> = {
   owner: '#b45309',
 };
 
+/**
+ * The accent this build's interface is drawn in.
+ *
+ * NOT the same value as VARIANT_TILE, deliberately. The tile colours are
+ * plate colours behind a 60-point home-screen icon, where a deep saturated
+ * ground reads well. As a UI accent on a near-black background the trainer
+ * indigo (#4338ca) and the owner amber (#b45309) are too dark: button labels
+ * sit on them, small dots and 1px rules are drawn in them, and both fall below
+ * a comfortable contrast at that size.
+ *
+ * These are the same hues lifted a step, and they are the values the marketing
+ * site already uses for each app (--client / --coach / --studio in
+ * web/styles.css). So the app, its icon and its page on the website now agree
+ * about what colour each product is, which is what somebody means when they
+ * say the screens should match the logo.
+ */
+export const VARIANT_ACCENT: Record<AppVariant, string> = {
+  client: '#16b8a6',
+  trainer: '#7a70f0',
+  owner: '#e0912f',
+};
+
 /** Human name for the current build, used in copy and the user guide. */
 export const VARIANT_LABEL: Record<AppVariant, string> = {
   client: 'Repple',

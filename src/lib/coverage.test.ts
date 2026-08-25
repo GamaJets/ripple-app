@@ -9,6 +9,7 @@ import { weeklyOccurrences, summariseAttendance, weeklyAttendance, pct, type Gym
 import { summariseClassRows, type ClassSummaryRow } from './classRates';
 import { STATUS_LABEL, STATUS_RANK, statusFromRisk, riskLabel } from './status';
 import { reconcile, reconcileNote } from './finReconcile';
+import { VARIANT_ACCENT, VARIANT_TILE, VARIANT_LABEL } from './variant';
 import { buildIcs } from './ics';
 import { serviceState, nextServiceDue, usableUnits, outOfServiceUnits, capacityFor, summariseRegister, needsAttention, type Equipment } from './gymEquipment';
 import { parseCsv, parseSheet, sniffDelimiter, mapColumns } from './csv';
@@ -959,6 +960,50 @@ ok(summariseInvites([mi({ id: 'a' }), mi({ id: 'b' })], NOW3).acceptanceRate ===
    'nor has a gym whose first batch went out this morning and is all still pending');
 ok(summariseInvites([mi({ id: 'a' }), mi({ id: 'b' })], NOW3).pending === 2,
    'though those pending invites are still counted');
+}
+
+
+// ── each app is drawn in its own colour ──
+{
+const variants = ['client', 'trainer', 'owner'] as const;
+
+for (const v of variants) {
+  ok(/^#[0-9a-f]{6}$/i.test(VARIANT_ACCENT[v]), `${v} accent is a full hex value`);
+  ok(/^#[0-9a-f]{6}$/i.test(VARIANT_TILE[v]), `${v} tile is a full hex value`);
+}
+
+// The whole point: three apps, three colours. A duplicate would mean two
+// products look identical, which is what this change exists to fix.
+const accents = variants.map((v) => VARIANT_ACCENT[v]);
+ok(new Set(accents).size === 3, 'no two apps share an accent');
+ok(new Set(variants.map((v) => VARIANT_TILE[v])).size === 3, 'no two apps share an icon tile');
+ok(new Set(variants.map((v) => VARIANT_LABEL[v])).size === 3, 'no two apps share a name');
+
+// Accent and tile are deliberately different values — the tile is a plate
+// colour behind an icon, the accent is drawn on a near-black screen. They must
+// stay in the same hue family, though, or the app stops matching its own logo.
+const hue = (hex: string) => {
+  const n = parseInt(hex.slice(1), 16);
+  const r = (n >> 16) / 255, g = ((n >> 8) & 255) / 255, b = (n & 255) / 255;
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+  if (d === 0) return 0;
+  const h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return (h * 60 + 360) % 360;
+};
+for (const v of variants) {
+  const gap = Math.abs(hue(VARIANT_ACCENT[v]) - hue(VARIANT_TILE[v]));
+  ok(Math.min(gap, 360 - gap) < 30, `${v}: accent and icon are the same hue family (${gap.toFixed(0)}deg apart)`);
+}
+
+// Legibility: the accent carries button labels, so brand-ink must contrast.
+const lum = (hex: string) => {
+  const n = parseInt(hex.slice(1), 16);
+  return ((n >> 16) * 0.299 + ((n >> 8) & 255) * 0.587 + (n & 255) * 0.114);
+};
+for (const v of variants) {
+  ok(lum(VARIANT_ACCENT[v]) > lum(VARIANT_TILE[v]) - 1,
+     `${v}: the UI accent is no darker than the icon plate`);
+}
 }
 
 if (errors.length) { console.log('COVERAGE FAILURES:\n' + errors.join('\n')); process.exit(1); }
