@@ -3459,12 +3459,27 @@ end $$;
 -- keep, and Google Play is about to require a public page describing it.
 --
 -- WHY A TRUE DELETE IS POSSIBLE HERE. profiles.id references auth.users(id) on
--- delete cascade, and thirty tables cascade from profiles. Removing the auth
--- user therefore removes the person's data by construction rather than by a
--- hand-maintained list of DELETE statements that would drift the first time
--- somebody adds a table. Sixteen further columns are `on delete set null`:
--- those rows survive with the person detached, which is exactly right for
--- payments, invoices and attendance a gym must keep for tax and legal reasons.
+-- delete cascade, and 26 tables cascade directly from profiles — 39 once the
+-- cascade is followed all the way down. Removing the auth user therefore
+-- removes the person's data by construction rather than by a hand-maintained
+-- list of DELETE statements that would drift the first time somebody adds a
+-- table. Seventeen further columns across 13 tables are `on delete set null`:
+-- those rows survive with the person detached, which is right for payments,
+-- door-log visits and guest passes a gym must keep for tax and legal reasons.
+--
+-- INVOICES AND MEMBERSHIPS ARE NOT IN THAT SURVIVING SET. An earlier version
+-- of this comment said they were, and it was wrong: gym_invoices.member_id and
+-- memberships.member_id are both `not null references profiles(id) on delete
+-- cascade`, so deleting a member takes their invoices and memberships with
+-- them. Counted from the live catalogue, not from memory:
+--
+--   select confdeltype, count(*) from pg_constraint
+--   where contype='f' and confrelid='public.profiles'::regclass
+--   group by confdeltype;   -- c: 29 cols / 26 tables, n: 17 cols / 13 tables
+--
+-- That matters beyond tidiness. The public deletion page and the owner's
+-- confirmation dialog both tell people what survives, and a gym with a tax
+-- obligation to retain invoices needs to know this deletes them.
 --
 -- The cascade is the design. This file adds who may pull the trigger, a record
 -- that it happened, and a way for a gym to see what is waiting.
@@ -3576,9 +3591,10 @@ begin
   insert into deletion_log (tenant_id, subject_id, subject_label, requested_at, actioned_by)
   values (subj_tenant, p_subject, subj_name, subj_requested, auth.uid());
 
-  -- Cascades: thirty tables holding this person's own data go with it.
-  -- Sixteen columns are `on delete set null`, so payments, invoices, visits
-  -- and passes survive with the person detached.
+  -- Cascades: 26 tables directly, 39 following the chain down.
+  -- Seventeen columns are `on delete set null`, so payments, visits and
+  -- passes survive with the person detached. Invoices and memberships do
+  -- NOT — they cascade. See the header.
   delete from auth.users where id = p_subject;
 end $$;
 

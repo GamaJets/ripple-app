@@ -38,7 +38,7 @@
   <p>This page covers the three apps published by Washateria LLC — <strong>Repple</strong>, <strong>Repple Coach</strong> and <strong>Repple Studio</strong>. They share one account and one database. Deleting the account deletes it in all three; there is no way to leave one and keep another.</p>
 
   <div class="callout">
-    <p><strong>The short version.</strong> Ask in the app, or email us from the address on the account. Your account is removed from sign-in and the records that are yours go with it. A short list of gym business records survives with you detached from them — the row stays, the link to you is emptied, and it no longer names you. Requests are actioned within 30 days and can be withdrawn until they are.</p>
+    <p><strong>The short version.</strong> Ask in the app, or email us from the address on the account. Your account is removed from sign-in and the records that are yours go with it. A short list of gym business records survives with you detached from them — the row stays, the link to you is emptied, and it no longer names you. Requests are actioned within 30 days and can be withdrawn until they are. Nothing happens on a timer, though, so email as well as tapping the button.</p>
   </div>
 
   <h2>How to request deletion</h2>
@@ -72,12 +72,14 @@
     <li>Afterwards the account no longer exists at sign-in. The email address is free again — signing up with it creates a new, empty account, not your old one.</li>
   </ul>
 
+  <p><strong>How that 30 days actually runs.</strong> Nothing deletes you on a timer. Tapping the button records the request; a person then has to carry it out, and the database only lets your gym's owner do it. The Repple Studio screen that shows an owner the requests waiting on them is new and is not in every gym&rsquo;s build yet, so an in-app request can sit unseen — and if you are not a member of any gym, there is no owner to see it at all. So: <strong>email us as well as tapping the button</strong>. That request reaches us directly, does not depend on anyone else looking, and is the route we can hold to 30 days. If 30 days pass and you are still able to sign in, tell us and we will finish it.</p>
+
   <h2>What is deleted</h2>
-  <p>Deleting the account removes it from authentication. Thirty tables of your records hang off it and are removed with it:</p>
+  <p>Deleting the account removes it from authentication. Every table holding your records hangs off it — thirty-nine of them as the database stands today — and they go with it:</p>
   <ul>
     <li><strong>Your identity</strong> — name, email address, profile photo.</li>
     <li><strong>Training</strong> — workouts, logged sets, cardio and calorie entries, personal records.</li>
-    <li><strong>Body data</strong> — InBody scans, body measurements, progress photos.</li>
+    <li><strong>Body data</strong> — InBody scans and body measurements.</li>
     <li><strong>Check-ins, habit logs and food logs.</strong></li>
     <li><strong>Messages with a coach.</strong> The thread belongs to the member's account, so deleting a member account removes the thread from the coach's side too.</li>
     <li><strong>Coaching links and programmes</strong> — the link to your coach, and any programme assigned to you.</li>
@@ -86,6 +88,8 @@
     <li><strong>Push notification tokens</strong>, so notifications stop.</li>
     <li><strong>Connected-service tokens</strong> for WHOOP, Oura, Fitbit, Garmin and Spotify. Those connections end.</li>
   </ul>
+  <p><strong>Progress photos, specifically.</strong> There are none to delete, because we do not hold any. No part of Repple, Repple Coach or Repple Studio can take or upload one: the table and the private storage bucket built for the feature are both empty, and nothing writes to them. The one bucket the apps do write to holds coaches' exercise demonstration videos, which are not yours and are not personal data about you. We would rather say this than list photos as deleted, because that would be a promise about a file that does not exist. Two things follow, and we would rather you heard them now. If the feature ever ships, this page is corrected before it does. And deleting an account removes database rows, not stored files — nothing in the database reaches into file storage — so once there are images to remove, removing them is a separate job.</p>
+
   <p>Apple Health is a permission held on your iPhone, not data we store a key for. Deleting the account does not touch it. Revoke it in <strong>iOS Settings → Privacy &amp; Security → Health → Repple</strong>, or by removing the app. Anything imported from Health into your training log is deleted with the log.</p>
 
   <h2>What is kept</h2>
@@ -98,16 +102,19 @@
       <tr><td><strong>Payments a gym recorded</strong></td><td>Money actually received. Gyms must keep it for tax and accounting.</td></tr>
       <tr><td><strong>Door-log visits</strong></td><td>Attendance and capacity records the gym relies on and may be required to hold.</td></tr>
       <tr><td><strong>Guest passes issued or redeemed</strong></td><td>They were paid for and have to reconcile against takings.</td></tr>
+      <tr><td><strong>Training packages you bought</strong></td><td>A purchase record. Kept for the same accounting reasons as a payment, with your name removed.</td></tr>
       <tr><td><strong>Feedback you submitted</strong></td><td>Kept so it still counts, no longer attributed to you.</td></tr>
       <tr><td><strong>Crash and error reports</strong></td><td>Diagnostics we use to fix faults. They were never tied to your name.</td></tr>
     </tbody>
   </table>
   </div>
 
+  <p>Alongside these, a handful of administrative traces survive the same way &mdash; who wrote a gym announcement, who sent or accepted an invitation, which coach was named on a nutrition plan or an assigned programme. In every case the row stays and the pointer to your account is emptied, so it no longer names you.</p>
+
   <p>We apply no additional retention period on top of these. They are kept for as long as the gym's own accounting and legal obligations require, and are held under the same terms as everything else in <a href="/privacy">Privacy</a>.</p>
 
   <h2>Take a copy first</h2>
-  <p>The app will export everything it holds about you as a JSON file — <strong>Me → Settings → Your data → Export my data</strong>. Do it before you request deletion. Afterwards there is nothing left to export, and we cannot produce one for you.</p>
+  <p>The app will export the records held against your account as a JSON file — <strong>Me → Settings → Your data → Export my data</strong>. It covers your profile, workouts, food logs, measurements, InBody scans, check-ins, habit logs, coach messages, coach nutrition plans, assigned programmes, class bookings, referrals and feedback. It does not reach the gym-side records — membership, invoices, payments and door-log visits — so ask us if you want those too. Do it before you request deletion. Afterwards there is nothing left to export, and we cannot produce one for you.</p>
 
   <h2>Two things deletion does not do</h2>
   <ul>
