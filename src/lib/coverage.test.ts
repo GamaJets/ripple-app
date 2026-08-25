@@ -15,7 +15,7 @@ import { parseCsv, parseSheet, sniffDelimiter, mapColumns } from './csv';
 import { parseMoneyCents, parseDate, detectDateOrder, previewMembers, previewPayments, describePreview, MEMBER_ALIASES } from './csvImport';
 import { payroll30For, payrollBlocker, type GymTrainer } from './gymTrainers';
 import { gymRollup } from './ownerAnalytics';
-import { isDelivered, isAwaitingOutcome, isPayable, payrollByTrainer, payrollTotal, settlementBlocker, PAY_DELIVERED_ONLY, type PtSession } from './gymSessions';
+import { isDelivered, isAwaitingOutcome, isPayable, payrollByTrainer, payrollTotal, settlementBlocker, settleableSessions, settlementAmount, settleBlocker, PAY_DELIVERED_ONLY, type PtSession } from './gymSessions';
 import { dwellMinutes, averageDwellMinutes, uniqueMembers, summariseVisits, visitsByHour, peakHour, visitsPerDay, lastSeenDays, type Visit } from './gymVisits';
 import { remainingUses, isExpired, isRedeemable, expiryFor, passRevenueCents, summarisePasses, guestsByHost, passStatus, type GymPass } from './gymPasses';
 import { estimateDish, searchDishes, DISHES } from './restaurant';
@@ -374,7 +374,7 @@ const NOW = Date.parse('2026-08-25T12:00:00Z');
 const sess = (o: Partial<PtSession>): PtSession => ({
   id: 's', trainerId: 't1', trainerName: 'Marcus', clientId: 'c1', clientName: 'Elena',
   startsAt: '2026-08-20T09:00:00Z', durationMin: 60, status: 'booked',
-  outcome: 'completed', outcomeAt: null, rateCents: 5000, ...o,
+  outcome: 'completed', outcomeAt: null, rateCents: 5000, settlementId: null, ...o,
 });
 
 ok(isDelivered({ outcome: 'completed' }), 'completed is delivered');
@@ -817,6 +817,46 @@ ok(reconcileNote(reconcile(34500, 34500), 'MRR') === null, 'agreement says nothi
 ok((reconcileNote(reconcile(40000, 34500), 'MRR') ?? '').includes('less'), 'a shortfall is described as less');
 ok((reconcileNote(reconcile(30000, 34500), 'MRR') ?? '').includes('more'), 'a surplus is described as more');
 ok((reconcileNote(reconcile(40000, null), 'MRR') ?? '').includes('Nothing recorded'), 'no-record note explains why');
+}
+
+
+// ── settlement: the same session is never paid twice, and never dropped ──
+{
+const NOW2 = Date.parse('2026-08-25T12:00:00Z');
+const s2 = (o: Partial<PtSession>): PtSession => ({
+  id: 'x', trainerId: 't1', trainerName: 'Marcus', clientId: 'c1', clientName: 'Elena',
+  startsAt: '2026-08-20T09:00:00Z', durationMin: 60, status: 'booked',
+  outcome: 'completed', outcomeAt: null, rateCents: 5000, settlementId: null, ...o,
+});
+
+const fresh = s2({ id: 'a' });
+const alreadyPaid = s2({ id: 'b', settlementId: 'run-1' });
+const unmarked = s2({ id: 'c', outcome: null });
+const unpriced = s2({ id: 'd', rateCents: null });
+const noShow = s2({ id: 'e', outcome: 'no_show' });
+
+const pool = [fresh, alreadyPaid, unmarked, unpriced, noShow];
+const payable = settleableSessions(pool, PAY_DELIVERED_ONLY, NOW2);
+
+ok(payable.length === 1 && payable[0].id === 'a', 'only the unpaid, marked, priced, payable session settles');
+ok(!payable.some((x) => x.id === 'b'), 'a session already carrying a settlement is never paid again');
+ok(!payable.some((x) => x.id === 'c'), 'an unmarked session is not settled — nobody has said it happened');
+ok(!payable.some((x) => x.id === 'd'), 'a session with no rate cannot be paid for');
+ok(!payable.some((x) => x.id === 'e'), 'a no-show is not payable under a delivered-only policy');
+
+ok(settlementAmount(payable) === 5000, 'the amount is the sum of the rates snapshotted on the sessions');
+ok(settlementAmount([]) === 0, 'nothing outstanding settles to nothing');
+
+// The late-marking case, which is the whole reason settlement is per session.
+const lateMarked = s2({ id: 'f', settlementId: null, startsAt: '2026-08-18T09:00:00Z' });
+const secondRun = settleableSessions([alreadyPaid, lateMarked], PAY_DELIVERED_ONLY, NOW2);
+ok(secondRun.length === 1 && secondRun[0].id === 'f',
+   'a session marked after its period was settled joins the next run rather than being lost or double-paid');
+
+ok(settleBlocker(payable, 1) !== null, 'an unmarked session anywhere blocks settling');
+ok((settleBlocker(payable, 1) ?? '').includes('unfinished'), 'and says why');
+ok(settleBlocker([], 0) !== null, 'nothing to pay is a blocker, not a zero-value run');
+ok(settleBlocker(payable, 0) === null, 'a clean, fully marked position settles');
 }
 
 if (errors.length) { console.log('COVERAGE FAILURES:\n' + errors.join('\n')); process.exit(1); }

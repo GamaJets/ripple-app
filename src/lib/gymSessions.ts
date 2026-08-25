@@ -38,6 +38,10 @@ export interface PtSession {
   outcomeAt: string | null;
   /** The rate snapshotted at delivery, so a later fee change cannot rewrite it. */
   rateCents: number | null;
+  /** The payroll run that paid for this session. Null means still outstanding —
+   *  which is what keeps a late-marked session out of an already-settled period
+   *  and stops it being paid twice. */
+  settlementId: string | null;
 }
 
 /**
@@ -205,6 +209,68 @@ export function settlementBlocker(t: PayrollTotal): string | null {
   return null;
 }
 
+/* ── settlement ────────────────────────────────────────────────────────────── */
+
+export interface Settlement {
+  id: string;
+  trainerId: string;
+  periodFrom: string;
+  periodTo: string;
+  amountCents: number;
+  currency: string;
+  sessionsCount: number;
+  method: 'transfer' | 'cash' | 'payroll' | 'other';
+  note: string | null;
+  settledAt: string;
+}
+
+/**
+ * Which of a trainer's sessions a settlement would actually pay for.
+ *
+ * Deliberately NOT "everything in the date range". A session already carrying a
+ * settlement_id has been paid and must never be paid again; a session marked
+ * after its period was settled has no settlement_id and simply joins the next
+ * run. Paying by session rather than by period is what makes both of those come
+ * out right without anybody having to notice.
+ *
+ * Unmarked sessions are excluded because nobody has said whether they happened.
+ * They are the reason payrollTotal refuses to answer, and settling around them
+ * would quietly pay a period that is not finished.
+ */
+export function settleableSessions(
+  sessions: PtSession[],
+  policy: PayPolicy,
+  now: number = Date.now(),
+): PtSession[] {
+  return sessions.filter((s) =>
+    s.settlementId == null &&
+    s.outcome !== null &&
+    !isAwaitingOutcome(s, now) &&
+    isPayable(s, policy) &&
+    s.rateCents != null);
+}
+
+/** What settling those sessions would hand over. */
+export function settlementAmount(sessions: PtSession[]): number {
+  return sessions.reduce((a, s) => a + (s.rateCents ?? 0), 0);
+}
+
+/**
+ * Why a settlement cannot be recorded right now, or null when it can.
+ *
+ * Separate from settlementBlocker, which answers a different question: that one
+ * asks whether the *figure on screen* is safe to act on, this one asks whether
+ * there is anything to pay. A gym can be perfectly in order and still have
+ * nothing owed.
+ */
+export function settleBlocker(payable: PtSession[], unmarked: number): string | null {
+  if (unmarked > 0) {
+    return `${unmarked} session${unmarked === 1 ? '' : 's'} still need an outcome — settling now would pay for an unfinished period.`;
+  }
+  if (payable.length === 0) return 'Nothing outstanding for this trainer.';
+  return null;
+}
+
 /* ── reads ─────────────────────────────────────────────────────────────────── */
 
 export async function fetchSessions(
@@ -215,7 +281,7 @@ export async function fetchSessions(
 ): Promise<PtSession[]> {
   let q = sb
     .from('sessions')
-    .select('id, trainer_id, client_id, starts_at, duration_min, status, outcome, outcome_at, rate_cents, ' +
+    .select('id, trainer_id, client_id, starts_at, duration_min, status, outcome, outcome_at, rate_cents, settlement_id, ' +
             'trainers(full_name), clients(full_name)')
     .eq('tenant_id', tenantId)
     .gte('starts_at', sinceIso)
@@ -241,6 +307,7 @@ function rowToSession(r: any): PtSession {
     outcome: r.outcome ?? null,
     outcomeAt: r.outcome_at ?? null,
     rateCents: r.rate_cents ?? null,
+    settlementId: r.settlement_id ?? null,
   };
 }
 
@@ -270,6 +337,79 @@ export async function markOutcome(
   if (rateCents !== undefined) patch.rate_cents = rateCents;
   const { error } = await sb.from('sessions').update(patch).eq('id', sessionId);
   if (error) throw error;
+}
+
+/**
+ * Record that a trainer was paid, and stamp the sessions it covered.
+ *
+ * Two writes, in this order on purpose: the settlement row first, then the
+ * sessions pointing at it. If the second write fails the settlement exists with
+ * no sessions attached — visible, wrong, and fixable. The other order would
+ * leave sessions marked paid against a run that does not exist, which is money
+ * that silently vanishes from what the gym owes.
+ *
+ * `sessionIds` should come from settleableSessions(), which is what guarantees
+ * nothing already settled is included.
+ */
+export async function recordSettlement(
+  sb: Queryable,
+  tenantId: string,
+  run: {
+    trainerId: string;
+    periodFrom: string;
+    periodTo: string;
+    amountCents: number;
+    sessionIds: string[];
+    method?: 'transfer' | 'cash' | 'payroll' | 'other';
+    note?: string | null;
+    currency?: string;
+  },
+): Promise<string> {
+  const { data, error } = await sb.from('payroll_settlements').insert({
+    tenant_id: tenantId,
+    trainer_id: run.trainerId,
+    period_from: run.periodFrom,
+    period_to: run.periodTo,
+    amount_cents: run.amountCents,
+    sessions_count: run.sessionIds.length,
+    method: run.method ?? 'transfer',
+    note: run.note ?? null,
+    currency: run.currency ?? 'AED',
+  }).select('id').single();
+  if (error) throw error;
+
+  const id = (data as any)?.id as string;
+  if (run.sessionIds.length) {
+    const { error: e2 } = await sb.from('sessions')
+      .update({ settlement_id: id })
+      .in('id', run.sessionIds);
+    if (e2) throw e2;
+  }
+  return id;
+}
+
+export async function fetchSettlements(
+  sb: Queryable, tenantId: string, limit = 50,
+): Promise<Settlement[]> {
+  const { data, error } = await sb
+    .from('payroll_settlements')
+    .select('id, trainer_id, period_from, period_to, amount_cents, currency, sessions_count, method, note, settled_at')
+    .eq('tenant_id', tenantId)
+    .order('settled_at', { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return (data ?? []).map((r: any) => ({
+    id: r.id,
+    trainerId: r.trainer_id,
+    periodFrom: r.period_from,
+    periodTo: r.period_to,
+    amountCents: r.amount_cents ?? 0,
+    currency: r.currency ?? 'AED',
+    sessionsCount: r.sessions_count ?? 0,
+    method: r.method ?? 'transfer',
+    note: r.note ?? null,
+    settledAt: r.settled_at,
+  }));
 }
 
 /** Undo a wrongly recorded outcome, returning the session to "not yet known". */
