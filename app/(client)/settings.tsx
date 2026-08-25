@@ -12,20 +12,31 @@
 // 1.0.0 (app.json) — those numbers came from nowhere and sat directly above
 // <BuildInfo/>, which prints the true version. A false version defeats the
 // whole point of the Build section.
-import { useState } from 'react';
+//
+// The "Your data" section reports the CURRENT state of the account, not just the
+// action available on it. web/delete-account.html promises that a deletion
+// request "can be withdrawn until" it is actioned, and a screen that only ever
+// offers to REQUEST one cannot keep that promise. So `deletion_requested_at` is
+// read from the profile on mount and the section shows one of four things:
+// checking, no request, a pending request with the day it was made and a way to
+// take it back, or a plain admission that the read failed. That last state earns
+// its complexity — a failed read rendered as "no request" would tell somebody who
+// asked to be erased that they never asked, which is the one wrong answer here.
+import { useState, useEffect, useCallback } from 'react';
 import { View, Text, Pressable, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { BuildInfo } from '../../src/ui/BuildInfo';
 import type { Theme } from '../../src/theme/tokens';
-import { Rule, Section, SectionHead, ListRow, Ghost } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, ListRow, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { Icon } from '../../src/ui/Icon';
 import { useSettings } from '../../src/ui/settings';
 import { useAuth } from '../../src/ui/auth';
-import { exportMyData, requestAccountDeletion } from '../../src/lib/gdpr';
+import { exportMyData, requestAccountDeletion, withdrawAccountDeletion, fetchDeletionRequestedAt } from '../../src/lib/gdpr';
 import { shareTextFile } from '../../src/lib/exportShare';
+import { reportError } from '../../src/lib/reportError';
 
 function Toggle({ t, on, onPress }: { t: Theme; on: boolean; onPress: () => void }) {
   return (
@@ -47,6 +58,14 @@ function Row({ t, label, sub, right, first }: { t: Theme; label: string; sub?: s
   );
 }
 
+/** The day a request was made, as a date a member can read. Never "null". */
+function requestedDay(iso: string | null): string {
+  if (!iso) return fig(null);
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return fig(null);
+  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+}
+
 export default function Settings() {
   const t = useTheme();
   const router = useRouter();
@@ -54,6 +73,23 @@ export default function Settings() {
   const auth = useAuth();
   const [legal, setLegal] = useState<'privacy' | 'terms' | null>(null);
   const [dataBusy, setDataBusy] = useState(false);
+  // null = not read yet · 'failed' = the read itself failed · otherwise the
+  // answer, whose requestedAt is null when there is genuinely no request. Those
+  // three must never collapse into one another, so they are one value, not a
+  // boolean pair that can drift.
+  const [deletion, setDeletion] = useState<{ requestedAt: string | null } | 'failed' | null>(null);
+  const [withdrawBusy, setWithdrawBusy] = useState(false);
+  const pendingAt = deletion !== null && deletion !== 'failed' ? deletion.requestedAt : null;
+
+  // fetchDeletionRequestedAt throws on a failed read rather than reporting "no
+  // request" — see src/lib/gdpr.ts. Catching it here is what turns that into the
+  // visible 'failed' state instead of a silent all-clear.
+  const loadDeletion = useCallback(async () => {
+    try { setDeletion({ requestedAt: await fetchDeletionRequestedAt() }); }
+    catch (e) { reportError('settings.deletionStatus', e); setDeletion('failed'); }
+  }, []);
+  useEffect(() => { void loadDeletion(); }, [loadDeletion]);
+
   const exportData = async () => {
     if (dataBusy) return; setDataBusy(true);
     try { const json = await exportMyData(); await shareTextFile(json, 'repple-my-data.json', 'application/json', 'Export my data'); } finally { setDataBusy(false); }
@@ -61,7 +97,37 @@ export default function Settings() {
   const deleteAccount = () => {
     Alert.alert('Delete your account?', 'This requests permanent deletion of your account and all your data. This cannot be undone.', [
       { text: 'Keep my account', style: 'cancel' },
-      { text: 'Request deletion', style: 'destructive', onPress: async () => { const ok = await requestAccountDeletion(); Alert.alert(ok ? 'Deletion requested' : 'Request noted', ok ? 'Your account is scheduled for deletion and your data will be erased. You have been signed out.' : "We've recorded your request. If anything remains, contact support.", [{ text: 'OK', onPress: () => { try { auth.signOut(); } catch { /* ignore */ } } }]); } },
+      // The failure branch used to say "We've recorded your request", which was a
+      // claim the app could not stand behind — request_account_deletion() had
+      // just refused. It now says nothing was scheduled, and does NOT sign the
+      // person out, because being signed out of a retry is the last thing you
+      // want when the request did not land.
+      { text: 'Request deletion', style: 'destructive', onPress: async () => {
+        const ok = await requestAccountDeletion();
+        await loadDeletion();
+        if (!ok) { Alert.alert('Not requested', "We couldn't record your request just now, so nothing has been scheduled. Check your connection and try again, or email support@repplefitness.com from the address on your account."); return; }
+        Alert.alert('Deletion requested', 'Your account is scheduled for deletion and your data will be erased. You have been signed out.\n\nYou can withdraw the request from Settings until it is actioned — sign back in to do that.', [{ text: 'OK', onPress: () => { try { auth.signOut(); } catch { /* ignore */ } } }]);
+      } },
+    ]);
+  };
+  const withdrawDeletion = () => {
+    Alert.alert('Withdraw your deletion request?', 'Your account and everything in it will be kept. You can ask to be deleted again at any time.', [
+      { text: 'Leave it pending', style: 'cancel' },
+      { text: 'Withdraw request', onPress: async () => {
+        if (withdrawBusy) return; setWithdrawBusy(true);
+        try {
+          const ok = await withdrawAccountDeletion();
+          if (!ok) {
+            reportError('settings.withdrawDeletion', new Error('withdraw_account_deletion did not clear the request'));
+            Alert.alert('Not withdrawn', 'Your deletion request is still in place — nothing has changed. Check your connection and try again, or email support@repplefitness.com from the address on your account.');
+            return;
+          }
+          // Re-read rather than assume: what the screen shows next comes from the
+          // profile row, not from the fact that a call returned.
+          await loadDeletion();
+          Alert.alert('Request withdrawn', 'Your account will be kept and nothing has been deleted.');
+        } finally { setWithdrawBusy(false); }
+      } },
     ]);
   };
 
@@ -117,14 +183,47 @@ export default function Settings() {
             <Row t={t} first label={dataBusy ? 'Preparing export…' : 'Export my data'} sub="Download everything we store about you (JSON)"
               right={<Text style={{ ...ty.head, color: t.brand }}>{'⤓'}</Text>} />
           </Pressable>
-          <Pressable onPress={deleteAccount} accessibilityRole="button" accessibilityLabel="Delete my account">
-            <Row t={t} label="Delete my account" sub="Request permanent erasure of your account and data" right={
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
+          {deletion === null ? (
+            // Not read yet. Deliberately not pressable: requesting again would
+            // reset deletion_requested_at, restarting somebody's 30 days.
+            <Row t={t} label="Delete my account" sub="Checking whether you already have a request in…" right={<Icon name="chevron" size={15} color={t.ink3} />} />
+          ) : deletion === 'failed' ? (
+            <>
+              <Row t={t} label="Deletion status unknown" sub="We couldn't check whether you already have a request in. That's a read that failed, not an answer — it does not mean you have none." right={
+                <Pressable onPress={() => { void loadDeletion(); }} hitSlop={8} accessibilityRole="button" accessibilityLabel="Check your deletion status again"
+                  style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 7 }}>
+                  <Text style={{ ...ty.label, fontWeight: '600', color: t.ink2 }}>Try again</Text>
+                </Pressable>
+              } />
+              <Pressable onPress={deleteAccount} accessibilityRole="button" accessibilityLabel="Delete my account">
+                <Row t={t} label="Delete my account" sub="Request permanent erasure of your account and data" right={
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
+                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
+                    <Icon name="chevron" size={15} color={t.ink3} />
+                  </View>
+                } />
+              </Pressable>
+            </>
+          ) : pendingAt ? (
+            <>
+              <Row t={t} label="Deletion requested" sub={`Asked on ${requestedDay(pendingAt)} · your account and data are due to be erased`} right={
                 <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
-                <Icon name="chevron" size={15} color={t.ink3} />
-              </View>
-            } />
-          </Pressable>
+              } />
+              <Pressable onPress={withdrawDeletion} disabled={withdrawBusy} accessibilityRole="button" accessibilityLabel="Withdraw my deletion request">
+                <Row t={t} label={withdrawBusy ? 'Withdrawing…' : 'Withdraw my deletion request'} sub="Keep your account. You can withdraw until the deletion is actioned, and ask again at any time."
+                  right={<Icon name="chevron" size={15} color={t.ink3} />} />
+              </Pressable>
+            </>
+          ) : (
+            <Pressable onPress={deleteAccount} accessibilityRole="button" accessibilityLabel="Delete my account">
+              <Row t={t} label="Delete my account" sub="Request permanent erasure of your account and data" right={
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
+                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
+                  <Icon name="chevron" size={15} color={t.ink3} />
+                </View>
+              } />
+            </Pressable>
+          )}
         </Section>
 
         <Rule />
