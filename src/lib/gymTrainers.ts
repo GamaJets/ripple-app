@@ -17,8 +17,18 @@ export interface GymTrainer {
   name: string;
   /** Clients assigned to this trainer, counted from `clients`. */
   clients: number;
-  /** Sessions actually delivered in the last 30 days. */
+  /**
+   * Sessions booked in the last 30 days whose start time has passed.
+   *
+   * This is what the record shows took place, which is not the same as what
+   * was confirmed delivered — an un-cancelled slot and a no-show both land
+   * here. Use `delivered30` for anything that costs money.
+   */
   sessions30: number;
+  /** Sessions confirmed delivered — somebody recorded that they completed. */
+  delivered30: number;
+  /** Booked, finished, and nobody has recorded what happened yet. */
+  unmarked30: number;
   /** ISO date they joined, or null if the profile has no created_at. */
   since: string | null;
 }
@@ -56,14 +66,23 @@ export async function fetchGymTrainers(sb: Queryable, tenantId: string): Promise
   const since = new Date(Date.now() - 30 * DAY).toISOString();
   const { data: sess } = await sb
     .from('sessions')
-    .select('trainer_id')
+    .select('trainer_id, outcome')
     .in('trainer_id', ids)
     .eq('status', 'booked')
     .gte('starts_at', since)
     .lte('starts_at', new Date().toISOString());
   const sessionCount = new Map<string, number>();
+  const deliveredCount = new Map<string, number>();
+  const unmarkedCount = new Map<string, number>();
   (sess ?? []).forEach((s: any) => {
-    if (s.trainer_id) sessionCount.set(s.trainer_id, (sessionCount.get(s.trainer_id) ?? 0) + 1);
+    if (!s.trainer_id) return;
+    sessionCount.set(s.trainer_id, (sessionCount.get(s.trainer_id) ?? 0) + 1);
+    if (s.outcome === 'completed') {
+      deliveredCount.set(s.trainer_id, (deliveredCount.get(s.trainer_id) ?? 0) + 1);
+    } else if (s.outcome == null) {
+      // Null is "nobody has said yet", which is neither delivered nor cancelled.
+      unmarkedCount.set(s.trainer_id, (unmarkedCount.get(s.trainer_id) ?? 0) + 1);
+    }
   });
 
   return ids
@@ -72,15 +91,37 @@ export async function fetchGymTrainers(sb: Queryable, tenantId: string): Promise
       name: meta.get(id)?.name || 'Trainer',
       clients: clientCount.get(id) ?? 0,
       sessions30: sessionCount.get(id) ?? 0,
+      delivered30: deliveredCount.get(id) ?? 0,
+      unmarked30: unmarkedCount.get(id) ?? 0,
       since: meta.get(id)?.since ?? null,
     }))
     .sort((a, b) => b.clients - a.clients || a.name.localeCompare(b.name));
 }
 
-/** What 30 days of delivered sessions are worth, or null when the gym has not
- *  set a session fee. Never 0 — an unset fee is not a free gym. */
+/**
+ * What 30 days of *confirmed* sessions are worth.
+ *
+ * Null in two cases, both of which render as a dash rather than a figure:
+ *   - the gym has not set a session fee. An unset fee is not a free gym.
+ *   - sessions are still awaiting an outcome. Pricing those would mean paying
+ *     for no-shows and un-cancelled slots, which is what this used to do: it
+ *     counted every booking whose start time had passed.
+ *
+ * `payrollBlocker` says which, in words an owner can act on.
+ */
 export function payroll30For(trainers: GymTrainer[], sessionFee: number | null): number | null {
   if (sessionFee == null) return null;
-  const sessions = trainers.reduce((a, t) => a + t.sessions30, 0);
-  return Math.round(sessions * sessionFee);
+  if (trainers.some((t) => t.unmarked30 > 0)) return null;
+  const delivered = trainers.reduce((a, t) => a + t.delivered30, 0);
+  return Math.round(delivered * sessionFee);
+}
+
+/** Why payroll cannot be priced yet, or null when it can. */
+export function payrollBlocker(trainers: GymTrainer[], sessionFee: number | null): string | null {
+  const unmarked = trainers.reduce((a, t) => a + t.unmarked30, 0);
+  if (unmarked > 0) {
+    return `${unmarked} session${unmarked === 1 ? '' : 's'} still need an outcome recorded.`;
+  }
+  if (sessionFee == null) return 'No session fee set.';
+  return null;
 }

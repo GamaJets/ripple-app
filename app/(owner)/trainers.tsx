@@ -157,12 +157,20 @@ export default function OwnerTrainers() {
                 <Text style={{ ...ty.label, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>{h.reason}</Text>
                 <KpiRow items={[
                   { label: 'Clients', value: String(current.clients) },
-                  { label: 'Sessions · 30d', value: String(current.sessions30) },
+                  { label: 'Delivered · 30d', value: String(current.delivered30) },
                   { label: 'Health', value: String(h.score) },
                 ]} />
-                {tenant?.sessionFee != null ? (
+                {/* Value the confirmed work only. This used to multiply the fee
+                    by every booking whose start time had passed, which priced
+                    no-shows and slots nobody had cancelled. */}
+                {current.unmarked30 > 0 ? (
+                  <Notice
+                    kicker="Awaiting outcomes"
+                    title={`${current.unmarked30} session${current.unmarked30 === 1 ? '' : 's'} need marking before this can be valued.`}
+                  />
+                ) : tenant?.sessionFee != null ? (
                   <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: sp.lg }}>
-                    ${Math.round(current.sessions30 * tenant.sessionFee).toLocaleString()} at your ${tenant.sessionFee}/session fee
+                    ${Math.round(current.delivered30 * tenant.sessionFee).toLocaleString()} at your ${tenant.sessionFee}/session fee
                   </Text>
                 ) : (
                   <Notice kicker="No session fee" title="Set a session fee in Ops to value delivered sessions." />

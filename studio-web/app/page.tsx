@@ -11,7 +11,7 @@ import { supabase, loadMe, type Me } from '@/lib/supabase';
 import { Shell } from '@/components/Shell';
 import { DataTable, type Column } from '@/components/DataTable';
 import { PasswordField } from '@/components/PasswordField';
-import { fetchGymTrainers, payroll30For, type GymTrainer } from '@lib/gymTrainers';
+import { fetchGymTrainers, payrollBlocker, type GymTrainer } from '@lib/gymTrainers';
 import { gymRollup, trainerHealth, type GymRollup } from '@lib/ownerAnalytics';
 
 interface Gym { id: string; name: string | null; sessionFee: number | null }
@@ -66,7 +66,14 @@ export default function Overview() {
   const cols: Column<GymTrainer>[] = [
     { key: 'name', header: 'Trainer', value: (t) => t.name },
     { key: 'clients', header: 'Clients', value: (t) => t.clients, numeric: true },
-    { key: 'sessions30', header: 'Sessions 30d', value: (t) => t.sessions30, numeric: true },
+    { key: 'delivered30', header: 'Delivered', value: (t) => t.delivered30, numeric: true },
+    {
+      key: 'unmarked30', header: 'Unmarked', value: (t) => t.unmarked30, numeric: true,
+      render: (t) =>
+        t.unmarked30 === 0
+          ? <span className="dash">—</span>
+          : <span style={{ color: 'var(--warn)' }}>{t.unmarked30}</span>,
+    },
     {
       key: 'risk',
       header: 'Status',
@@ -126,8 +133,12 @@ export default function Overview() {
         <Kpi
           label="Session value 30d"
           value={roll?.payroll30 ?? null}
-          note={gym?.sessionFee == null ? 'no session fee set' : undefined}
+          // A dash with no explanation reads as a bug. Say which of the two
+          // reasons it is: no fee set, or work still awaiting an outcome.
+          note={trainers ? payrollBlocker(trainers, gym?.sessionFee ?? null) ?? undefined : undefined}
         />
+        <Kpi label="Awaiting an outcome" value={roll?.unmarked30 ?? null}
+             note={roll && roll.unmarked30 > 0 ? 'payroll cannot settle over these' : undefined} />
         <Kpi label="Trainers at risk" value={roll?.atRiskCount} />
       </div>
 

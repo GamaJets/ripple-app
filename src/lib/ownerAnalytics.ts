@@ -15,8 +15,15 @@ export interface TrainerLike {
   name: string;
   /** Clients assigned to this trainer. */
   clients: number;
-  /** Sessions delivered in the last 30 days. */
+  /**
+   * Sessions booked in the last 30 days whose start time has passed — what the
+   * record shows took place, which is not the same as confirmed delivered.
+   */
   sessions30: number;
+  /** Sessions confirmed delivered. Absent on callers that do not track it. */
+  delivered30?: number;
+  /** Booked, finished, and awaiting an outcome. Absent on older callers. */
+  unmarked30?: number;
   /** ISO timestamp they joined, or null. */
   since?: string | null;
 }
@@ -71,9 +78,17 @@ export function trainerHealth(tr: TrainerLike): Health {
 export interface GymRollup {
   trainers: number;
   clients: number;
-  /** Sessions delivered across the gym in the last 30 days. */
+  /** Sessions across the gym whose start time has passed, marked or not. */
   sessions30: number;
-  /** Worth of those sessions at the tenant's fee, or null when no fee is set. */
+  /** Sessions confirmed delivered across the gym. */
+  delivered30: number;
+  /** Sessions still awaiting an outcome. Payroll cannot settle over these. */
+  unmarked30: number;
+  /**
+   * Worth of the confirmed sessions at the tenant's fee. Null when no fee is
+   * set, and null while sessions are unmarked — pricing those would mean
+   * paying for no-shows and un-cancelled slots.
+   */
   payroll30: number | null;
   /** Trainers flagged watch/high/idle. */
   atRiskCount: number;
@@ -86,6 +101,8 @@ export interface GymRollup {
 export function gymRollup(trainers: TrainerLike[], sessionFee: number | null): GymRollup {
   const clients = trainers.reduce((a, t) => a + (t.clients || 0), 0);
   const sessions30 = trainers.reduce((a, t) => a + (t.sessions30 || 0), 0);
+  const delivered30 = trainers.reduce((a, t) => a + (t.delivered30 ?? 0), 0);
+  const unmarked30 = trainers.reduce((a, t) => a + (t.unmarked30 ?? 0), 0);
   let atRiskCount = 0, atRiskClients = 0;
   for (const t of trainers) {
     const h = trainerHealth(t);
@@ -96,7 +113,10 @@ export function gymRollup(trainers: TrainerLike[], sessionFee: number | null): G
     trainers: n,
     clients,
     sessions30,
-    payroll30: sessionFee == null ? null : Math.round(sessions30 * sessionFee),
+    delivered30,
+    unmarked30,
+    payroll30:
+      sessionFee == null || unmarked30 > 0 ? null : Math.round(delivered30 * sessionFee),
     atRiskCount,
     atRiskClients,
     avgClientsPerTrainer: n ? Math.round((clients / n) * 10) / 10 : 0,

@@ -7,6 +7,9 @@ import { rowToEntry, entryToRow, PERSISTED_FIELDS } from './workoutRow';
 import { summarise, money, type MembershipPlan, type Membership, type GymPayment } from './gymRecord';
 import { weeklyOccurrences, summariseAttendance, pct, type GymClass, type NewClass } from './gymSchedule';
 import { buildIcs } from './ics';
+import { payroll30For, payrollBlocker, type GymTrainer } from './gymTrainers';
+import { gymRollup } from './ownerAnalytics';
+import { isDelivered, isAwaitingOutcome, isPayable, payrollByTrainer, payrollTotal, settlementBlocker, PAY_DELIVERED_ONLY, type PtSession } from './gymSessions';
 import { dwellMinutes, averageDwellMinutes, uniqueMembers, summariseVisits, visitsByHour, peakHour, visitsPerDay, lastSeenDays, type Visit } from './gymVisits';
 import { remainingUses, isExpired, isRedeemable, expiryFor, passRevenueCents, summarisePasses, guestsByHost, passStatus, type GymPass } from './gymPasses';
 import { estimateDish, searchDishes, DISHES } from './restaurant';
@@ -357,6 +360,127 @@ const seen = lastSeenDays([
 ok(seen.length === 2, 'anonymous visits cannot be attributed to a member');
 ok(seen[0].memberId === 'm2' && seen[0].days === 15, `longest absent first (got ${seen[0]?.days})`);
 ok(seen[1].memberId === 'm1' && seen[1].days === 1, 'a member is measured from their most recent visit');
+
+// ── PT session outcomes and payroll (F17) ──
+// The rule under test: an unmarked session is not a delivered session and not a
+// free one. It is unknown, and payroll cannot be settled while any remain.
+const NOW = Date.parse('2026-08-25T12:00:00Z');
+const sess = (o: Partial<PtSession>): PtSession => ({
+  id: 's', trainerId: 't1', trainerName: 'Marcus', clientId: 'c1', clientName: 'Elena',
+  startsAt: '2026-08-20T09:00:00Z', durationMin: 60, status: 'booked',
+  outcome: 'completed', outcomeAt: null, rateCents: 5000, ...o,
+});
+
+ok(isDelivered({ outcome: 'completed' }), 'completed is delivered');
+ok(!isDelivered({ outcome: 'no_show' }), 'a no-show is not delivered');
+ok(!isDelivered({ outcome: null }), 'an unmarked session is not delivered');
+
+// Awaiting an outcome: booked, finished, unmarked.
+ok(isAwaitingOutcome(sess({ outcome: null }), NOW), 'a finished booked session with no outcome is awaiting one');
+ok(!isAwaitingOutcome(sess({ outcome: 'completed' }), NOW), 'a marked session is not awaiting anything');
+ok(!isAwaitingOutcome(sess({ outcome: null, status: 'available' }), NOW), 'an unbooked slot is not awaiting an outcome');
+ok(!isAwaitingOutcome(sess({ outcome: null, status: 'blocked' }), NOW), 'a blocked slot is not awaiting an outcome');
+ok(!isAwaitingOutcome(sess({ outcome: null, startsAt: '2026-08-26T09:00:00Z' }), NOW), 'a future session is not awaiting an outcome');
+// The boundary: still running is not yet finished.
+ok(!isAwaitingOutcome(sess({ outcome: null, startsAt: '2026-08-25T11:30:00Z', durationMin: 60 }), NOW), 'a session still running is not awaiting an outcome');
+ok(isAwaitingOutcome(sess({ outcome: null, startsAt: '2026-08-25T11:00:00Z', durationMin: 60 }), NOW), 'a session that ended exactly now is awaiting an outcome');
+
+// Pay policy is a stated gym decision, never assumed.
+ok(isPayable({ outcome: 'completed' }, PAY_DELIVERED_ONLY), 'delivered is always payable');
+ok(!isPayable({ outcome: 'no_show' }, PAY_DELIVERED_ONLY), 'no-shows unpaid under the conservative policy');
+ok(isPayable({ outcome: 'no_show' }, { payNoShows: true, payLateCancellations: false }), 'no-shows paid when the gym says so');
+ok(!isPayable({ outcome: 'cancelled' }, { payNoShows: true, payLateCancellations: true }), 'a plain cancellation is never payable');
+ok(isPayable({ outcome: 'late_cancelled' }, { payNoShows: false, payLateCancellations: true }), 'late cancellations follow their own policy');
+ok(!isPayable({ outcome: null }, { payNoShows: true, payLateCancellations: true }), 'an unmarked session is never payable, whatever the policy');
+
+// Payroll per trainer.
+const lines = payrollByTrainer([
+  sess({ id: '1', outcome: 'completed', rateCents: 5000 }),
+  sess({ id: '2', outcome: 'completed', rateCents: 5000 }),
+  sess({ id: '3', outcome: 'no_show', rateCents: 5000 }),
+  sess({ id: '4', outcome: 'cancelled', rateCents: 5000 }),
+  sess({ id: '5', outcome: null }),                                     // unmarked
+  sess({ id: '6', trainerId: 't2', trainerName: 'Priya', outcome: 'completed', rateCents: 4000 }),
+], PAY_DELIVERED_ONLY, null, NOW);
+
+ok(lines.length === 2, 'payroll groups by trainer');
+ok(lines[0].trainerId === 't1' && lines[0].delivered === 2, 'delivered counts only completed sessions');
+ok(lines[0].noShows === 1 && lines[0].cancelled === 1, 'outcomes are broken out');
+ok(lines[0].unmarked === 1, 'unmarked sessions are reported, not absorbed');
+ok(lines[0].cents === 10000, `pay covers delivered only (got ${lines[0].cents})`);
+ok(lines[1].cents === 4000, 'a second trainer is priced separately');
+
+// A no-show-paying gym gets a different number from the same sessions.
+const paid = payrollByTrainer([
+  sess({ id: '1', outcome: 'completed', rateCents: 5000 }),
+  sess({ id: '2', outcome: 'no_show', rateCents: 5000 }),
+], { payNoShows: true, payLateCancellations: false }, null, NOW);
+ok(paid[0].cents === 10000, 'paying no-shows changes the figure');
+
+// Rates: snapshot wins, fallback fills, and no rate at all gives null.
+const noRate = payrollByTrainer([sess({ outcome: 'completed', rateCents: null })], PAY_DELIVERED_ONLY, null, NOW);
+ok(noRate[0].cents === null, 'a payable session with no rate gives null, not 0');
+ok(noRate[0].payable === 1 && noRate[0].priced === 0, 'it is payable but unpriced, and says so');
+
+const fellBack = payrollByTrainer([sess({ outcome: 'completed', rateCents: null })], PAY_DELIVERED_ONLY, 4500, NOW);
+ok(fellBack[0].cents === 4500, 'the gym session fee prices a session with no snapshot');
+
+const snapshotWins = payrollByTrainer([sess({ outcome: 'completed', rateCents: 5000 })], PAY_DELIVERED_ONLY, 9999, NOW);
+ok(snapshotWins[0].cents === 5000, 'a snapshotted rate is not overwritten by a later fee');
+
+// Settlement: the whole point. Unmarked work blocks the run.
+const blocked = payrollTotal(lines);
+ok(blocked.cents === 14000, 'total sums the priced lines');
+ok(blocked.unmarked === 1, 'the total carries the unmarked count');
+ok(blocked.settleable === false, 'payroll cannot be settled while a session is unmarked');
+ok((settlementBlocker(blocked) ?? '').includes('1 session'), `blocker names the unmarked work (got ${settlementBlocker(blocked)})`);
+
+const clean = payrollTotal(payrollByTrainer([
+  sess({ id: '1', outcome: 'completed', rateCents: 5000 }),
+  sess({ id: '2', outcome: 'completed', rateCents: 5000 }),
+], PAY_DELIVERED_ONLY, null, NOW));
+ok(clean.settleable === true, 'a fully marked, fully priced period is settleable');
+ok(settlementBlocker(clean) === null, 'nothing blocks a clean period');
+
+const unpricedTotal = payrollTotal(payrollByTrainer([
+  sess({ id: '1', outcome: 'completed', rateCents: null }),
+], PAY_DELIVERED_ONLY, null, NOW));
+ok(unpricedTotal.settleable === false, 'an unpriced payable session blocks settlement');
+ok((settlementBlocker(unpricedTotal) ?? '').includes('rate'), 'blocker names the missing rate');
+
+ok(payrollTotal([]).settleable === false, 'an empty period is not settleable');
+ok(payrollTotal([]).cents === null, 'an empty period has null pay, not 0');
+
+// ── gym payroll must not price unconfirmed work ──
+// Regression guard: payroll used to be sessions30 * fee, where sessions30 was
+// "booked and the clock has passed" — so it paid for no-shows and slots nobody
+// cancelled. These assertions exist to stop that coming back.
+const tr = (o: Partial<GymTrainer>): GymTrainer => ({
+  id: 't1', name: 'Marcus', clients: 8, sessions30: 20, delivered30: 20, unmarked30: 0, since: null, ...o,
+});
+
+ok(payroll30For([tr({})], 50) === 1000, 'payroll prices confirmed sessions at the fee');
+ok(payroll30For([tr({})], null) === null, 'no session fee gives null, not 0');
+ok(payroll30For([tr({ delivered30: 18, unmarked30: 2 })], 50) === null, 'payroll refuses to price while sessions are unmarked');
+ok(payroll30For([tr({ sessions30: 20, delivered30: 12, unmarked30: 0 })], 50) === 600,
+   'payroll prices delivered, not everything whose clock has passed');
+
+ok((payrollBlocker([tr({ unmarked30: 3 })], 50) ?? '').includes('3 sessions'),
+   'the blocker names how many need marking');
+ok((payrollBlocker([tr({ unmarked30: 1 })], 50) ?? '').includes('1 session '),
+   'the blocker is singular for one session');
+ok(payrollBlocker([tr({})], null) === 'No session fee set.', 'an unset fee is named as the blocker');
+ok(payrollBlocker([tr({})], 50) === null, 'nothing blocks a clean, priced period');
+
+// The same rule has to hold in the rollup, which is a second place it is computed.
+const rollClean = gymRollup([tr({})], 50);
+ok(rollClean.payroll30 === 1000, 'rollup prices confirmed sessions');
+ok(rollClean.delivered30 === 20 && rollClean.unmarked30 === 0, 'rollup carries the breakdown');
+
+const rollBlocked = gymRollup([tr({ delivered30: 15, unmarked30: 5 })], 50);
+ok(rollBlocked.payroll30 === null, 'rollup payroll is null while sessions are unmarked');
+ok(rollBlocked.unmarked30 === 5, 'rollup reports how many are unmarked');
+ok(rollBlocked.sessions30 === 20, 'rollup still reports what the record shows took place');
 
 if (errors.length) { console.log('COVERAGE FAILURES:\n' + errors.join('\n')); process.exit(1); }
 console.log(`ALL COVERAGE TESTS PASSED (${checks} assertions)`);

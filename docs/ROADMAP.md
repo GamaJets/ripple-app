@@ -48,17 +48,29 @@ because the underlying tables did not exist.
 | Studio web console — overview, money, timetable | `studio-web/` |
 | **Drop-ins, guest passes and class packs** | `supabase/parts/31-drop-ins-and-passes.sql`, `src/lib/gymPasses.ts` |
 | **Door log** — visits that are not class bookings | `supabase/parts/32-door-log.sql`, `src/lib/gymVisits.ts` |
+| **Session outcomes and honest payroll** | `supabase/parts/33-session-outcomes.sql`, `src/lib/gymSessions.ts` |
+| Studio console — Door and Sessions screens | `studio-web/app/door`, `studio-web/app/sessions` |
 
-A cross-tenant read leak was found and fixed while building the timetable:
-`gym_classes` was readable by any signed-in user rather than scoped to the
-gym. Worth remembering as the class of bug to look for first.
+Two bugs of the same family were found and fixed while building this phase,
+both worth remembering as the class to look for first:
+
+- **`gym_classes` was readable across gyms** — scoped to any signed-in user
+  rather than to the tenant (fixed in `30-classes-tenant-scope.sql`).
+- **`sessions` had no tenant at all**, so a gym could not see the one-to-ones
+  delivered on its own floor. Worse, "delivered" was inferred as *booked, and
+  the clock has since passed* — which counted no-shows and slots nobody had
+  cancelled, and then multiplied them by the session fee. The gym was being
+  shown a payroll figure that included work that never happened
+  (`33-session-outcomes.sql`).
 
 ### Still to do
 
-- **PT session scheduling** — one-to-ones on the same timetable as classes,
-  so delivered-session counts and payroll draw from one place.
-- **Session approval** — schema exists (`22-session-approvals.sql`); the
-  owner-side review flow does not.
+- **PT session scheduling** — one-to-ones and classes on one timetable. The
+  outcome and payroll half is done; the booking half still lives in the
+  trainer's own calendar rather than the gym's.
+- **Session approval** — schema exists (`22-session-approvals.sql`) and the
+  owner can now mark an outcome, but the client-side approval loop that
+  table was built for is still unwired.
 - **Trainer rota** — who is on the floor when, against class and PT load.
 - **Equipment register** — what the gym owns, servicing due, what is out of
   action. Feeds capacity honestly: a class capacity of 14 is a lie if six
@@ -163,6 +175,9 @@ In practice:
   averages only over visits that recorded an exit, and says how many that was.
 - An unpriced pass is not a free pass. A deliberately free one is `0`, and the
   two are distinguishable.
+- An unmarked session is neither delivered nor cancelled — it is unknown.
+  `gymSessions.payrollTotal` refuses to report a period settleable while any
+  remain, and `settlementBlocker` says how many need marking.
 
 The tests in `src/lib/coverage.test.ts` exist mainly to hold this line, and are
 written so they fail when the rule is broken — verified by mutation, not by
