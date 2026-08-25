@@ -78,6 +78,24 @@ jobs:
         working-directory: studio-web
         run: npm ci
 
+      # Next prerenders every page at build time, including 'use client'
+      # ones, and lib/supabase.ts throws at import when the keys are absent —
+      # deliberately, so a missing key never becomes a mystery 401 at runtime.
+      # That guard fires in CI, where there are no keys and should not be any.
+      #
+      # These placeholders are not credentials and are not a way of smuggling
+      # one in. Effects do not run during prerender, so nothing here ever
+      # opens a connection; the values exist only to get past the import
+      # guard so the build can typecheck and render. The URL uses .invalid,
+      # the TLD RFC 2606 reserves as permanently unresolvable, so a mistake
+      # that did try to reach the network could never land on a real host.
+      #
+      # A real deploy sets real keys and is unaffected: nothing here is
+      # committed to the app, and a deploy that forgot them still fails at
+      # import exactly as before.
       - name: Build
         working-directory: studio-web
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://ci-placeholder.invalid
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder-not-a-real-key
         run: npm run build
