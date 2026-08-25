@@ -199,3 +199,27 @@ is scheduled yet; recording them so they are not lost.
   wearable clients already authenticate against HealthKit, WHOOP and Oura for
   heart rate and calories; sleep is a field they expose that Repple does not yet
   read. Closest existing code: `src/lib/wearables/`.
+
+## Correction: four roadmap items were already built
+
+The 100-item review list was assembled by surveying the three apps and the
+marketing site. `studio-web/` was surveyed less carefully, and four items were
+listed as gaps when the console already covered them. Recording it here so the
+same work is not commissioned twice.
+
+| Item | Claimed | Actually |
+|---|---|---|
+| R054 · desk check-in for walk-ins | "the desk has no way to record one" | Built. `studio-web/app/door` has "Check someone in" with an explicit anonymous/walk-in option, plus check-out. |
+| R055 · guest pass with host attribution | "unreachable from any screen" | Built. Same page issues passes and sets `hostMemberId` for guest types. |
+| R061 · members page | "no way to look a member up" | Substantially built. `/money` opens memberships, changes their status and records payments. What is missing is a member-centred *view*, not the admin itself. |
+| R064 · payroll page with settlement | "same flow as the app" | Substantially built. `/sessions` computes `payrollByTrainer`, `payrollTotal` and `settlementBlocker`, and marks outcomes. What is genuinely missing is recording that a settled payroll was *paid*. |
+
+Two of the four are wholly done; two are narrower than described. R065 (CSV
+import screen) and R072 (realtime) were checked at the same time and are
+genuinely absent.
+
+The lesson is not that the list was careless in general — most items were
+traced to a specific file or a missing table. It is that "no screen does this"
+is a claim about the whole codebase, and it was verified against only part of
+it. Anything still unstarted should be re-checked against `studio-web/` before
+work begins on it.
