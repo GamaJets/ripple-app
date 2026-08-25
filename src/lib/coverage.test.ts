@@ -19,6 +19,7 @@ import { isDelivered, isAwaitingOutcome, isPayable, payrollByTrainer, payrollTot
 import { dwellMinutes, averageDwellMinutes, uniqueMembers, summariseVisits, visitsByHour, peakHour, visitsPerDay, lastSeenDays, type Visit } from './gymVisits';
 import { remainingUses, isExpired, isRedeemable, expiryFor, passRevenueCents, summarisePasses, guestsByHost, passStatus, type GymPass } from './gymPasses';
 import { estimateDish, searchDishes, DISHES } from './restaurant';
+import { normaliseEmail, inviteState, isExpired as inviteExpired, isRedeemable as inviteRedeemable, expiryFor as inviteExpiryFor, daysUntilExpiry, inviteBlocker, screenInvites, summariseInvites, DEFAULT_VALID_DAYS, type MemberInvite } from './memberInvites';
 import type { TrainingSession } from './types';
 
 const errors: string[] = [];
@@ -857,6 +858,107 @@ ok(settleBlocker(payable, 1) !== null, 'an unmarked session anywhere blocks sett
 ok((settleBlocker(payable, 1) ?? '').includes('unfinished'), 'and says why');
 ok(settleBlocker([], 0) !== null, 'nothing to pay is a blocker, not a zero-value run');
 ok(settleBlocker(payable, 0) === null, 'a clean, fully marked position settles');
+}
+
+
+// ── member invites: the path from "person the gym knows" to "member" ──
+{
+const NOW3 = Date.parse('2026-08-25T12:00:00Z');
+const mi = (o: Partial<MemberInvite> = {}): MemberInvite => ({
+  id: 'i1', tenantId: 'gym-1', email: 'sam@fit.com', fullName: 'Sam Ali',
+  planId: null, planName: null, invitedBy: null, token: null,
+  status: 'pending', createdAt: '2026-08-01T00:00:00Z',
+  expiresAt: '2026-09-24T12:00:00Z', acceptedAt: null, acceptedBy: null, ...o,
+});
+
+// The address is compared case-insensitively, but `.` and `+` are significant
+// on real mail servers and must survive normalisation.
+ok(normaliseEmail('  Sam.Ali+gym@Example.COM ') === 'sam.ali+gym@example.com',
+   'address is trimmed and lowercased, dots and plus kept');
+ok(normaliseEmail('not an address') === null, 'a non-address is rejected, not guessed at');
+ok(normaliseEmail('sam@fit') === null, 'an address with no domain dot is rejected');
+ok(normaliseEmail('') === null && normaliseEmail(null) === null, 'blank is not an address');
+
+// Expiry. A missing expiry is a gap in the record, not a lapse.
+ok(inviteExpired(mi({ expiresAt: null }), NOW3) === false,
+   'no expiry recorded is not the same as expired');
+ok(inviteExpired(mi({ expiresAt: 'not a date' }), NOW3) === false,
+   'an unreadable expiry does not lock a real member out');
+ok(inviteExpired(mi({ expiresAt: '2026-08-01T00:00:00Z' }), NOW3) === true, 'a past expiry has passed');
+ok(inviteExpired(mi(), NOW3) === false, 'a future expiry has not');
+
+// Derived state: a decision somebody made outranks the clock.
+ok(inviteState(mi(), NOW3) === 'pending', 'open and in date reads as pending');
+ok(inviteState(mi({ expiresAt: '2026-08-01T00:00:00Z' }), NOW3) === 'expired',
+   'open and out of date reads as expired, though nothing wrote that down');
+ok(inviteState(mi({ status: 'accepted', expiresAt: '2026-08-01T00:00:00Z' }), NOW3) === 'accepted',
+   'an accepted invite does not become "expired" later — that would misdescribe it');
+ok(inviteState(mi({ status: 'revoked' }), NOW3) === 'revoked', 'a withdrawn invite stays withdrawn');
+
+ok(inviteRedeemable(mi(), NOW3) === true, 'a pending in-date invite can be accepted');
+ok(inviteRedeemable(mi({ expiresAt: '2026-08-01T00:00:00Z' }), NOW3) === false, 'a lapsed one cannot');
+ok(inviteRedeemable(mi({ status: 'accepted' }), NOW3) === false, 'nor one already accepted');
+
+// Days left. Null, never 0, when nobody recorded a deadline.
+ok(daysUntilExpiry(mi({ expiresAt: null }), NOW3) === null,
+   'no deadline recorded returns null — 0 would read as "expires today"');
+ok(daysUntilExpiry(mi({ expiresAt: 'nonsense' }), NOW3) === null, 'an unreadable deadline is not known');
+ok(daysUntilExpiry(mi(), NOW3) === 30, 'thirty days out is thirty days left');
+ok(daysUntilExpiry(mi({ expiresAt: '2026-08-25T21:00:00Z' }), NOW3) === 1,
+   'nine hours left rounds up to a day, not down to none');
+ok(daysUntilExpiry(mi({ expiresAt: '2026-08-01T00:00:00Z' }), NOW3) === 0,
+   'something already lapsed has no days left, not negative days');
+
+ok(inviteExpiryFor('2026-08-25T12:00:00Z', 30) === '2026-09-24T12:00:00.000Z', 'expiry is issue + days');
+ok(inviteExpiryFor('2026-08-25T12:00:00Z', null) === null, 'no window means no expiry date is invented');
+ok(inviteExpiryFor('whenever', 30) === null, 'an unreadable issue date yields no expiry');
+ok(DEFAULT_VALID_DAYS === 30, 'the default invite window is thirty days');
+
+// The blocker: a sentence, or null meaning go. Same shape as settleBlocker.
+ok((inviteBlocker('nope') ?? '').includes('email address'), 'a bad address is refused with a reason');
+ok(inviteBlocker('sam@fit.com') === null, 'a good address with nothing in the way goes');
+ok((inviteBlocker('sam@fit.com', ['SAM@FIT.COM']) ?? '').includes('already an invitation'),
+   'a second open invite to the same address is blocked, case-insensitively');
+ok((inviteBlocker('sam@fit.com', [], ['Sam@Fit.com']) ?? '').includes('already a member'),
+   'inviting an existing member is blocked and says so');
+ok(inviteBlocker('sam@fit.com', ['other@fit.com'], ['someone@fit.com']) === null,
+   'other people\'s invites and memberships are not in the way');
+
+// Bulk screening, which is what the CSV importer needs.
+const batch = [
+  { email: 'a@b.com', fullName: 'A' },
+  { email: 'A@B.com', fullName: 'A again' },
+  { email: 'bad', fullName: 'B' },
+  { email: 'c@d.com', fullName: 'C' },
+  { email: 'dup@fit.com', fullName: 'D' },
+];
+const screened = screenInvites(batch, ['dup@fit.com']);
+ok(screened.send.length === 2, 'only the usable, unique, not-already-invited rows are sent');
+ok(screened.send.map((r) => r.email).join(',') === 'a@b.com,c@d.com', 'and they are the right two');
+ok(screened.rejected.length === 3, 'every dropped row is reported, never silently trimmed');
+ok((screened.rejected.find((r) => r.row.email === 'A@B.com')?.reason ?? '').includes('more than once'),
+   'a repeat inside the same file is caught before the insert fails halfway through');
+ok(screened.rejected.some((r) => r.row.email === 'bad'), 'the unparseable address is among the rejects');
+ok(screenInvites([]).send.length === 0, 'an empty file screens to nothing rather than throwing');
+
+// Summary. The acceptance rate is the number the owner will read hardest.
+const invites = [
+  mi({ id: 'a' }),                                                    // pending
+  mi({ id: 'b', expiresAt: '2026-08-01T00:00:00Z' }),                 // expired
+  mi({ id: 'c', status: 'accepted', expiresAt: '2026-08-01T00:00:00Z' }),
+  mi({ id: 'd', status: 'revoked' }),
+];
+const sum = summariseInvites(invites, NOW3);
+ok(sum.total === 4 && sum.pending === 1 && sum.accepted === 1 && sum.revoked === 1 && sum.expired === 1,
+   'each invite lands in exactly one derived state');
+ok(Math.abs((sum.acceptanceRate ?? 0) - 1 / 3) < 1e-9,
+   'acceptance is measured against the settled invites — pending ones have not failed');
+ok(summariseInvites([], NOW3).acceptanceRate === null,
+   'a gym that has sent nothing has no acceptance rate, which is not 0%');
+ok(summariseInvites([mi({ id: 'a' }), mi({ id: 'b' })], NOW3).acceptanceRate === null,
+   'nor has a gym whose first batch went out this morning and is all still pending');
+ok(summariseInvites([mi({ id: 'a' }), mi({ id: 'b' })], NOW3).pending === 2,
+   'though those pending invites are still counted');
 }
 
 if (errors.length) { console.log('COVERAGE FAILURES:\n' + errors.join('\n')); process.exit(1); }
