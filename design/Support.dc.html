@@ -1,0 +1,143 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+  <style>
+    body { margin: 0; background: #0a1211; color: #e9f2f0;
+           font-family: 'Inter Tight', -apple-system, system-ui, sans-serif;
+           font-size: 17px; line-height: 1.6; -webkit-font-smoothing: antialiased; }
+    a { color: #16b8a6; text-decoration: none; }
+    a:hover { color: #3fd3c2; text-decoration: underline; text-underline-offset: 3px; }
+    .mono { font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-variant-numeric: tabular-nums; }
+  </style>
+</helmet>
+
+<div style="padding: 64px 64px 80px;">
+  <div style="max-width: 1000px;">
+
+    <div style="display: flex; align-items: center; gap: 10px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; font-weight: 500; letter-spacing: 0.16em; text-transform: uppercase; color: #67807b; margin-bottom: 22px;">
+      <span style="width: 22px; height: 1px; background: #16b8a6;"></span>
+      Support · updated 23 August 2026
+    </div>
+
+    <!-- The action first. Someone on this page is stuck; make the way out unmissable. -->
+    <div style="display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 360px); gap: 40px; align-items: start;">
+      <div>
+        <h1 style="margin: 0; font-family: 'Instrument Serif', Georgia, serif; font-weight: 400; font-size: 56px; line-height: 1.02; letter-spacing: -0.015em;">
+          Something not working?
+        </h1>
+        <p style="margin: 18px 0 0; font-size: 19px; line-height: 1.55; color: #a6bcb7; max-width: 54ch;">
+          Email us and a person reads it. Tell us what you were doing, what you expected, and what happened
+          instead — plus which of the three apps you were in. That is usually enough for us to find it.
+        </p>
+        <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-top: 28px;">
+          <a href="#" style="display: inline-flex; align-items: center; gap: 9px; padding: 13px 21px; border-radius: 9px; background: #16b8a6; color: #04211d; font-size: 15.5px; font-weight: 600;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M3 6.5h18v11H3z"></path><path d="m3 7 9 6 9-6"></path>
+            </svg>
+            support@repplefitness.com
+          </a>
+          <a href="#" style="display: inline-flex; align-items: center; gap: 9px; padding: 13px 21px; border-radius: 9px; border: 1px solid rgba(233,242,240,0.10); color: #e9f2f0; font-size: 15.5px; font-weight: 600;">
+            Report a problem
+          </a>
+        </div>
+      </div>
+
+      <div style="border: 1px solid rgba(233,242,240,0.10); border-radius: 13px; background: #0f1c1a; overflow: hidden;">
+        <div style="padding: 14px 16px; border-bottom: 1px solid rgba(233,242,240,0.10); background: #081210;">
+          <span class="mono" style="font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: #67807b;">What to expect</span>
+        </div>
+        <div style="display: flex; flex-direction: column;">
+          <sc-for list="{{expect}}" as="e" hint-placeholder-count="3">
+            <div style="display: grid; grid-template-columns: 1fr auto; gap: 14px; align-items: baseline; padding: 13px 16px; border-top: 1px solid rgba(233,242,240,0.06);">
+              <span style="font-size: 14.5px; color: #a6bcb7;">{{e.label}}</span>
+              <span class="mono" style="font-size: 13.5px; color: #e9f2f0; white-space: nowrap;">{{e.value}}</span>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+
+    <!-- Which app, since every answer below depends on it -->
+    <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 56px;">
+      <sc-for list="{{apps}}" as="app" hint-placeholder-count="3">
+        <div style="border: 1px solid rgba(233,242,240,0.10); border-radius: 13px; background: #0f1c1a; padding: 18px 20px 20px; position: relative;">
+          <span style="position: absolute; inset: 0 0 auto 0; height: 3px; background: {{app.tint}};"></span>
+          <span class="mono" style="display: block; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: {{app.tint}}; margin-top: 4px;">{{app.name}}</span>
+          <p style="margin: 10px 0 0; font-size: 15px; line-height: 1.5; color: #a6bcb7;">{{app.who}}</p>
+        </div>
+      </sc-for>
+    </div>
+    <p style="margin: 16px 0 0; font-size: 14.5px; color: #67807b; line-height: 1.55;">
+      All three use the same account — signing up in one means you can sign in to another with the same
+      email and password. You will see what your role allows.
+    </p>
+
+    <!-- The questions, grouped so they can be scanned rather than read -->
+    <sc-for list="{{groups}}" as="group" hint-placeholder-count="2">
+      <div style="margin-top: 52px;">
+        <h2 style="margin: 0 0 4px; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; color: #e9f2f0;">{{group.title}}</h2>
+        <div style="height: 1px; background: rgba(233,242,240,0.10); margin: 14px 0 0;"></div>
+        <sc-for list="{{group.items}}" as="qa" hint-placeholder-count="3">
+          <div style="display: grid; grid-template-columns: minmax(0, 300px) minmax(0, 1fr); gap: 40px; padding: 22px 0; border-bottom: 1px solid rgba(233,242,240,0.06);">
+            <h3 style="margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -0.018em; line-height: 1.35;">{{qa.q}}</h3>
+            <p style="margin: 0; font-size: 16px; line-height: 1.6; color: #a6bcb7;">{{qa.a}}</p>
+          </div>
+        </sc-for>
+      </div>
+    </sc-for>
+
+  </div>
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      expect: [
+        { label: 'A person replies', value: 'within 2 days' },
+        { label: 'Account or data removal', value: 'by email' },
+        { label: 'Deletion completed', value: 'within 30 days' },
+      ],
+      apps: [
+        { name: 'Repple',        who: 'You train at a gym or with a coach.',   tint: '#16b8a6' },
+        { name: 'Repple Coach',  who: 'You are a personal trainer with clients.', tint: '#7a70f0' },
+        { name: 'Repple Studio', who: 'You run or own a gym.',                 tint: '#e0912f' },
+      ],
+      groups: [
+        {
+          title: 'Health, watches and devices',
+          items: [
+            { q: 'Do I have to allow Apple Health?',
+              a: 'No — Repple works without it. Allowing it lets the app read your heart rate and calories during a session and import workouts you recorded on your watch, so you do not type them in twice. Change your mind any time in iOS Settings → Privacy & Security → Health → Repple.' },
+            { q: 'My Apple Watch workouts are not showing up.',
+              a: 'Open the Train tab. If Repple can see workouts on your watch that are not yet in your log, it will say so and offer to bring them in. If nothing appears, check Apple Health is connected under Watch & Devices, and that the workout saved to the Health app on your iPhone.' },
+            { q: 'Where is the heart-rate zone chart?',
+              a: 'Zones need live heart-rate samples taken during the session, which in practice means an Apple Watch. Devices that only report a whole-day average cannot produce a per-session breakdown, and Repple will not invent one from a daily figure — you get an explanation on screen instead of an empty chart.' },
+          ],
+        },
+        {
+          title: 'Your log and your account',
+          items: [
+            { q: 'I logged a workout wrong. Can I fix it?',
+              a: 'Yes. In the Train tab, find the entry under the day it was logged and tap the pencil beside it. You can change the exercise, the sets, the cardio figures and the calories.' },
+            { q: 'I did not get a password reset email.',
+              a: 'Ask for a new one at repplefitness.com/forgot-password and check your spam folder. Reset links can only be used once and do expire, so if you clicked an old one just request another. Still stuck after ten minutes, email us.' },
+            { q: 'How do I delete my account?',
+              a: 'In the app, go to Me → Settings and request account deletion, or email us from the address on the account. See Privacy for exactly what happens to your data and when.' },
+          ],
+        },
+      ],
+    };
+  }
+}
+</script>
+</body>
+</html>

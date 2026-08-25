@@ -1,0 +1,177 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+  <style>
+    body { margin: 0; background: #0a1211; color: #e9f2f0;
+           font-family: 'Inter Tight', -apple-system, system-ui, sans-serif;
+           font-size: 17px; line-height: 1.6; -webkit-font-smoothing: antialiased; }
+    a { color: #16b8a6; text-decoration: none; }
+    a:hover { color: #3fd3c2; text-decoration: underline; text-underline-offset: 3px; }
+    .mono { font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-variant-numeric: tabular-nums; }
+    input::placeholder { color: #4d635f; }
+  </style>
+</helmet>
+
+<div style="min-height: 860px; display: flex; flex-direction: column;">
+
+  <!-- site header, lifted from the live stylesheet: 66px, hairline rule -->
+  <div style="display: flex; align-items: center; justify-content: space-between; gap: 24px; height: 66px; padding: 0 64px; border-bottom: 1px solid rgba(233,242,240,0.10);">
+    <div style="display: flex; align-items: center; gap: 11px; font-weight: 600; font-size: 17px; letter-spacing: -0.02em;">
+      <span style="width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; background: linear-gradient(150deg, {{accent}}, #0b5c53); box-shadow: 0 1px 0 rgba(255,255,255,0.14) inset;">
+        <svg width="17" height="17" viewBox="0 0 100 100" aria-hidden="true">
+          <g fill="none" stroke="#04211d" stroke-width="8"><circle cx="50" cy="50" r="32" opacity=".45"></circle><circle cx="50" cy="50" r="20" opacity=".75"></circle></g>
+          <circle cx="50" cy="50" r="8.5" fill="#04211d"></circle>
+        </svg>
+      </span>
+      Repple
+    </div>
+    <div style="display: flex; align-items: center; gap: 4px; font-size: 14.5px; font-weight: 500; color: #a6bcb7;">
+      <span style="padding: 7px 11px;">Members</span>
+      <span style="padding: 7px 11px;">Coaches</span>
+      <span style="padding: 7px 11px;">Gyms</span>
+      <span style="padding: 7px 11px;">Support</span>
+    </div>
+  </div>
+
+  <!-- the page: form beside the answers people actually want before signing up -->
+  <div style="display: grid; grid-template-columns: minmax(0, 420px) minmax(0, 1fr); gap: 72px; padding: 64px 64px 72px; align-items: start;">
+
+    <div>
+      <div style="display: flex; align-items: center; gap: 10px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; font-weight: 500; letter-spacing: 0.16em; text-transform: uppercase; color: #67807b; margin-bottom: 22px;">
+        <span style="width: 22px; height: 1px; background: {{accent}};"></span>
+        Free to start
+      </div>
+
+      <h1 style="margin: 0; font-family: 'Instrument Serif', Georgia, serif; font-weight: 400; font-size: 52px; line-height: 1.04; letter-spacing: -0.015em;">
+        One account,<br>all three apps.
+      </h1>
+
+      <p style="margin: 18px 0 0; font-size: 17px; line-height: 1.55; color: #a6bcb7; max-width: 42ch;">
+        Sign up once. Sign in to whichever app matches what you do — your role decides what you see.
+      </p>
+
+      <div style="display: flex; flex-direction: column; gap: 14px; margin-top: 30px;">
+        <div>
+          <label style="display: block; font-size: 13.5px; color: #67807b; margin-bottom: 7px;">Full name</label>
+          <input type="text" placeholder="Your name" style="width: 100%; box-sizing: border-box; padding: 13px 14px; border-radius: 9px; font-size: 16px; background: #081210; color: #e9f2f0; border: 1px solid rgba(233,242,240,0.10); font-family: 'Inter Tight', system-ui, sans-serif;">
+        </div>
+        <div>
+          <label style="display: block; font-size: 13.5px; color: #67807b; margin-bottom: 7px;">Email</label>
+          <input type="text" placeholder="you@example.com" style="width: 100%; box-sizing: border-box; padding: 13px 14px; border-radius: 9px; font-size: 16px; background: #081210; color: #e9f2f0; border: 1px solid rgba(233,242,240,0.10); font-family: 'Inter Tight', system-ui, sans-serif;">
+        </div>
+        <div>
+          <label style="display: block; font-size: 13.5px; color: #67807b; margin-bottom: 7px;">Password</label>
+          <div style="position: relative;">
+            <input type="text" placeholder="At least 6 characters" style="width: 100%; box-sizing: border-box; padding: 13px 46px 13px 14px; border-radius: 9px; font-size: 16px; background: #081210; color: #e9f2f0; border: 1px solid rgba(233,242,240,0.10); font-family: 'Inter Tight', system-ui, sans-serif;">
+            <span style="position: absolute; right: 4px; top: 0; bottom: 0; width: 40px; display: grid; place-items: center; color: #67807b;">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M1.8 12S5.4 5.4 12 5.4 22.2 12 22.2 12 18.6 18.6 12 18.6 1.8 12 1.8 12Z"></path>
+                <circle cx="12" cy="12" r="3.2"></circle>
+              </svg>
+            </span>
+          </div>
+        </div>
+
+        <button style="width: 100%; margin-top: 6px; padding: 14px 22px; border-radius: 9px; border: none; background: {{accent}}; color: #04211d; font-family: 'Inter Tight', system-ui, sans-serif; font-size: 16px; font-weight: 600; cursor: pointer;">
+          Create account
+        </button>
+      </div>
+
+      <p style="margin: 22px 0 0; font-size: 14px; line-height: 1.5; color: #67807b;">
+        By creating an account you agree to our <a href="#">Terms</a> and <a href="#">Privacy Policy</a>.
+        Already have one? Sign in from the app.
+      </p>
+    </div>
+
+    <!-- the assurance rail: the three questions someone actually stalls on -->
+    <div style="display: flex; flex-direction: column; gap: 14px; padding-top: 8px;">
+
+      <div style="border: 1px solid rgba(233,242,240,0.10); border-radius: 13px; background: #0f1c1a; overflow: hidden;">
+        <div style="display: flex; align-items: center; gap: 9px; padding: 11px 15px; border-bottom: 1px solid rgba(233,242,240,0.10); background: #081210;">
+          <span style="width: 8px; height: 8px; border-radius: 50%; background: rgba(233,242,240,0.10);"></span>
+          <span style="width: 8px; height: 8px; border-radius: 50%; background: rgba(233,242,240,0.10);"></span>
+          <span style="width: 8px; height: 8px; border-radius: 50%; background: rgba(233,242,240,0.10);"></span>
+          <span class="mono" style="font-size: 11.5px; color: #67807b; letter-spacing: .06em; margin-left: 6px;">which app do I get?</span>
+        </div>
+        <div style="display: flex; flex-direction: column;">
+          <sc-for list="{{apps}}" as="app" hint-placeholder-count="3">
+            <div style="display: grid; grid-template-columns: 3px 1fr auto; gap: 14px; align-items: center; padding: 15px 16px 15px 0; border-top: 1px solid rgba(233,242,240,0.06);">
+              <span style="align-self: stretch; background: {{app.tint}};"></span>
+              <span>
+                <span style="display: block; font-weight: 600; font-size: 15.5px;">{{app.name}}</span>
+                <span style="display: block; font-size: 14px; color: #a6bcb7; line-height: 1.45; margin-top: 2px;">{{app.who}}</span>
+              </span>
+              <span class="mono" style="font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: #67807b; white-space: nowrap;">{{app.role}}</span>
+            </div>
+          </sc-for>
+        </div>
+        <div style="padding: 14px 16px; border-top: 1px solid rgba(233,242,240,0.10);">
+          <p style="margin: 0; font-size: 13.5px; color: #67807b; line-height: 1.5;">
+            You are not picking now. The same details sign you in to any of them, and your role decides what you see.
+          </p>
+        </div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+        <div style="border: 1px solid rgba(233,242,240,0.10); border-radius: 13px; background: #0f1c1a; padding: 18px 18px 20px;">
+          <span style="display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; background: rgba(22,184,166,0.12); color: {{accent}};">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 2.7l7.3 3v5.4c0 4.4-3 8.3-7.3 9.6-4.3-1.3-7.3-5.2-7.3-9.6V5.7Z"></path>
+            </svg>
+          </span>
+          <h3 style="margin: 14px 0 7px; font-size: 16.5px; font-weight: 600; letter-spacing: -0.015em;">Health data stays yours</h3>
+          <p style="margin: 0; font-size: 14px; line-height: 1.5; color: #a6bcb7;">
+            Never used for advertising, never sold. Apple Health access is optional and you can revoke it at any time.
+          </p>
+        </div>
+        <div style="border: 1px solid rgba(233,242,240,0.10); border-radius: 13px; background: #0f1c1a; padding: 18px 18px 20px;">
+          <span style="display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; background: rgba(22,184,166,0.12); color: {{accent}};">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M4 7h16M4 12h16M4 17h10"></path>
+            </svg>
+          </span>
+          <h3 style="margin: 14px 0 7px; font-size: 16.5px; font-weight: 600; letter-spacing: -0.015em;">Yours to take with you</h3>
+          <p style="margin: 0; font-size: 14px; line-height: 1.5; color: #a6bcb7;">
+            Ask and we export everything we hold for you. Close the account and it goes within 30 days.
+          </p>
+        </div>
+      </div>
+
+      <div style="border: 1px solid rgba(233,242,240,0.10); border-left: 3px solid {{accent}}; border-radius: 13px; background: #0f1c1a; padding: 18px 20px;">
+        <h3 style="margin: 0 0 7px; font-size: 16.5px; font-weight: 600; letter-spacing: -0.015em;">What does it cost?</h3>
+        <p style="margin: 0; font-size: 14.5px; line-height: 1.5; color: #a6bcb7;">
+          Creating an account is free. Pricing for gyms and coaches is not published yet — we would rather
+          set it against how gyms actually use Repple than guess in advance. <a href="#">Ask us</a> and we will
+          talk plainly about it.
+        </p>
+      </div>
+
+    </div>
+  </div>
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{"accent":{"editor":"color","default":"#16b8a6","options":["#16b8a6","#7a70f0","#e0912f"],"section":"Theme"}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const accent = this.props.accent ?? '#16b8a6';
+    return {
+      accent,
+      apps: [
+        { name: 'Repple',        who: 'You train at a gym or with a coach.', role: 'member',  tint: '#16b8a6' },
+        { name: 'Repple Coach',  who: 'You are a personal trainer with clients.', role: 'coach', tint: '#7a70f0' },
+        { name: 'Repple Studio', who: 'You run or own a gym.', role: 'owner', tint: '#e0912f' },
+      ],
+    };
+  }
+}
+</script>
+</body>
+</html>

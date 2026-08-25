@@ -1,0 +1,32 @@
+{
+  "artboards": [
+    { "file": "Main.dc.html",       "title": "Signup A — form + answers", "x": 0,    "y": 0,    "w": 1200, "h": 860 },
+    { "file": "SignupRole.dc.html", "title": "Signup B — role first",     "x": 1290, "y": 0,    "w": 1200, "h": 860 },
+    { "file": "Chooser.dc.html",    "title": "Home — which app is mine",  "x": 0,    "y": 1010, "w": 1200, "h": 800 },
+    { "file": "Support.dc.html",    "title": "Support — rebuilt to scan", "x": 1290, "y": 1010, "w": 1200, "h": 1220 }
+  ],
+  "annotations": [
+    {
+      "id": "signup-pair",
+      "x": 0,
+      "y": -190,
+      "w": 560,
+      "text": "SIGNUP — two directions, pick one.\n\nThis is the weakest page on the live site: a 460px form on a wide empty field, for a product that is three apps.\n\nA (left) keeps the single form and puts the three things people stall on beside it — which app do I get, is my health data safe, what does it cost.\n\nB (right) asks who you are first, so the form is shorter and the next step is unambiguous. Costs an extra decision before anything is typed. The role cards are clickable — try them."
+    },
+    {
+      "id": "home-chooser",
+      "x": 0,
+      "y": 1880,
+      "w": 520,
+      "text": "HOME — a gap, not a redesign.\n\nThe site describes each app well but never lets anyone compare them, so a visitor who is both a coach and a member has no way to work out what to install.\n\nThe dash is doing real work here: it means 'not this app's job', not 'feature missing' — same rule the product follows. Footnote says so."
+    },
+    {
+      "id": "support-scan",
+      "x": 1290,
+      "y": 2300,
+      "w": 520,
+      "text": "SUPPORT — same words, better order.\n\nNo copy invented: every answer is lifted from the live page. What changed is that someone stuck can act in one glance — the email is a button at the top, response times are stated, and the questions are grouped and scannable rather than a single column of prose.\n\nApp reviewers land here too."
+    }
+  ],
+  "launch": { "view": "canvas" }
+}

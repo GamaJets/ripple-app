@@ -30,49 +30,110 @@
   </div>
 </header>
 
-<main class="wrap page prose" style="max-width:460px">
-  <h1>Create an account</h1>
-  <p>One account works across all three apps — Repple for training, Repple Coach if you train
-     clients, Repple Studio if you run a gym.</p>
+<main class="wrap page">
+  <div class="signup-grid">
 
-  <form id="form" style="margin-top:22px">
-    <label class="fl" for="name">Full name</label>
-    <input id="name" type="text" autocomplete="name" required placeholder="Your name">
+    <div>
+      <div class="eyebrow">Free to start</div>
+      <h1 class="display" style="font-size:clamp(36px,4.8vw,52px)">One account,<br>all three apps.</h1>
+      <p class="lede" style="margin-top:16px;font-size:17px">
+        Sign up once. Sign in to whichever app matches what you do — your role decides what you see.
+      </p>
 
-    <label class="fl" for="email" style="margin-top:14px">Email</label>
-    <input id="email" type="email" autocomplete="email" required placeholder="you@example.com">
+      <form id="form" style="margin-top:28px">
+        <label class="fl" for="name">Full name</label>
+        <input id="name" type="text" autocomplete="name" required placeholder="Your name">
 
-    <label class="fl" for="pw" style="margin-top:14px">Password</label>
-    <div class="pw">
-      <input id="pw" type="password" autocomplete="new-password" required minlength="6" placeholder="At least 6 characters">
-      <button type="button" class="eye" data-for="pw" aria-label="Show password" aria-pressed="false"></button>
+        <label class="fl" for="email" style="margin-top:14px">Email</label>
+        <input id="email" type="email" autocomplete="email" required placeholder="you@example.com">
+
+        <label class="fl" for="pw" style="margin-top:14px">Password</label>
+        <div class="pw">
+          <input id="pw" type="password" autocomplete="new-password" required minlength="6" placeholder="At least 6 characters">
+          <button type="button" class="eye" data-for="pw" aria-label="Show password" aria-pressed="false"></button>
+        </div>
+
+        <button id="go" type="submit" class="contact" style="width:100%;margin-top:18px;border:none;font-size:16px;justify-content:center">
+          Create account
+        </button>
+      </form>
+
+      <p id="msg" role="status" aria-live="polite" style="margin-top:16px"></p>
+
+      <div id="done" hidden style="margin-top:20px">
+        <p>Account created. Open the app you want to use:</p>
+        <p style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px">
+          <a class="contact" href="repple://">Repple</a>
+          <a class="contact" href="repplecoach://" style="background:var(--coach);color:#0d0a26">Repple Coach</a>
+          <a class="contact" href="repplestudio://" style="background:var(--studio);color:#2a1704">Repple Studio</a>
+        </p>
+      </div>
+
+      <p class="tiny" style="margin-top:22px">
+        By creating an account you agree to our <a href="/terms">Terms</a> and
+        <a href="/privacy">Privacy&nbsp;Policy</a>. Already have one? Sign in from the app, or
+        <a href="/forgot-password">reset your password</a>.
+      </p>
     </div>
 
-    <button id="go" type="submit" class="contact" style="width:100%;margin-top:18px;border:none;font-size:16px">
-      Create account
-    </button>
-  </form>
+    <!-- the three things people actually stall on before signing up -->
+    <div class="assure">
+      <div class="surface">
+        <div class="surface-bar"><span class="ttl">which app do I get?</span></div>
+        <div class="rows">
+          <div class="row" style="grid-template-columns:3px 1fr auto;gap:14px;padding-left:0">
+            <span style="align-self:stretch;background:var(--client)"></span>
+            <span><span class="nm" style="display:block">Repple</span><span class="tiny" style="display:block;color:var(--ink2)">You train at a gym or with a coach.</span></span>
+            <span class="mt" style="font-size:11px;letter-spacing:.12em;text-transform:uppercase">member</span>
+          </div>
+          <div class="row" style="grid-template-columns:3px 1fr auto;gap:14px;padding-left:0">
+            <span style="align-self:stretch;background:var(--coach)"></span>
+            <span><span class="nm" style="display:block">Repple Coach</span><span class="tiny" style="display:block;color:var(--ink2)">You are a trainer with clients.</span></span>
+            <span class="mt" style="font-size:11px;letter-spacing:.12em;text-transform:uppercase">coach</span>
+          </div>
+          <div class="row" style="grid-template-columns:3px 1fr auto;gap:14px;padding-left:0">
+            <span style="align-self:stretch;background:var(--studio)"></span>
+            <span><span class="nm" style="display:block">Repple Studio</span><span class="tiny" style="display:block;color:var(--ink2)">You run or own a gym.</span></span>
+            <span class="mt" style="font-size:11px;letter-spacing:.12em;text-transform:uppercase">owner</span>
+          </div>
+        </div>
+        <div class="surface-body" style="border-top:1px solid var(--line)">
+          <p class="tiny" style="margin:0">
+            You are not picking now. The same details sign you in to any of them, and your role
+            decides what you see.
+          </p>
+        </div>
+      </div>
 
-  <p id="msg" role="status" aria-live="polite" style="margin-top:16px"></p>
+      <div class="pair">
+        <div class="card">
+          <span class="ico">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2.7l7.3 3v5.4c0 4.4-3 8.3-7.3 9.6-4.3-1.3-7.3-5.2-7.3-9.6V5.7Z"/></svg>
+          </span>
+          <h3>Health data stays yours</h3>
+          <p>Never used for advertising, never sold. Apple Health access is optional and you can
+             revoke it at any time.</p>
+        </div>
+        <div class="card">
+          <span class="ico">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h10"/></svg>
+          </span>
+          <h3>Yours to take with you</h3>
+          <p>Ask and we export everything we hold for you. Close the account and it goes within
+             30 days.</p>
+        </div>
+      </div>
 
-  <div id="done" hidden style="margin-top:20px">
-    <p>Account created. Open the app you want to use:</p>
-    <p style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px">
-      <a class="contact" href="repple://">Repple</a>
-      <a class="contact" href="repplecoach://" style="background:var(--coach)">Repple Coach</a>
-      <a class="contact" href="repplestudio://" style="background:var(--studio)">Repple Studio</a>
-    </p>
+      <div class="card" style="border-left:3px solid var(--accent)">
+        <h3 style="margin-top:0">What does it cost?</h3>
+        <p>Creating an account is free. Pricing for gyms and coaches is not published yet — we would
+           rather set it against how gyms actually use Repple than guess in advance.
+           <a href="mailto:support@repplefitness.com?subject=Repple%20pricing">Ask us</a> and we will
+           talk plainly about it.</p>
+      </div>
+    </div>
+
   </div>
-
-  <p style="font-size:15px;color:var(--ink3);margin-top:26px">
-    Already have one? Sign in from the app, or
-    <a href="/forgot-password">reset your password</a> if you have forgotten it.
-  </p>
-
-  <p style="font-size:14px;color:var(--ink3);margin-top:18px">
-    By creating an account you agree to our <a href="/terms">Terms</a> and
-    <a href="/privacy">Privacy&nbsp;Policy</a>.
-  </p>
 </main>
 
 <footer class="site">

@@ -1,0 +1,186 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+  <style>
+    body { margin: 0; background: #0a1211; color: #e9f2f0;
+           font-family: 'Inter Tight', -apple-system, system-ui, sans-serif;
+           font-size: 17px; line-height: 1.6; -webkit-font-smoothing: antialiased; }
+    a { color: #16b8a6; text-decoration: none; }
+    a:hover { color: #3fd3c2; text-decoration: underline; text-underline-offset: 3px; }
+    .mono { font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-variant-numeric: tabular-nums; }
+    input::placeholder { color: #4d635f; }
+  </style>
+</helmet>
+
+<div style="min-height: 860px; display: flex; flex-direction: column;">
+
+  <div style="display: flex; align-items: center; justify-content: space-between; gap: 24px; height: 66px; padding: 0 64px; border-bottom: 1px solid rgba(233,242,240,0.10);">
+    <div style="display: flex; align-items: center; gap: 11px; font-weight: 600; font-size: 17px; letter-spacing: -0.02em;">
+      <span style="width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; background: linear-gradient(150deg, {{tint}}, #0b5c53); box-shadow: 0 1px 0 rgba(255,255,255,0.14) inset;">
+        <svg width="17" height="17" viewBox="0 0 100 100" aria-hidden="true">
+          <g fill="none" stroke="#04211d" stroke-width="8"><circle cx="50" cy="50" r="32" opacity=".45"></circle><circle cx="50" cy="50" r="20" opacity=".75"></circle></g>
+          <circle cx="50" cy="50" r="8.5" fill="#04211d"></circle>
+        </svg>
+      </span>
+      Repple
+    </div>
+    <div style="display: flex; align-items: center; gap: 4px; font-size: 14.5px; font-weight: 500; color: #a6bcb7;">
+      <span style="padding: 7px 11px;">Members</span>
+      <span style="padding: 7px 11px;">Coaches</span>
+      <span style="padding: 7px 11px;">Gyms</span>
+      <span style="padding: 7px 11px;">Support</span>
+    </div>
+  </div>
+
+  <div style="display: flex; flex-direction: column; align-items: center; padding: 60px 64px 72px;">
+    <div style="width: 100%; max-width: 780px;">
+
+      <div style="display: flex; align-items: center; gap: 10px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; font-weight: 500; letter-spacing: 0.16em; text-transform: uppercase; color: #67807b; margin-bottom: 22px;">
+        <span style="width: 22px; height: 1px; background: {{tint}};"></span>
+        Step 1 of 2 · free to start
+      </div>
+
+      <h1 style="margin: 0; font-family: 'Instrument Serif', Georgia, serif; font-weight: 400; font-size: 54px; line-height: 1.04; letter-spacing: -0.015em;">
+        First — which of these<br>is <em style="font-style: italic; color: {{tint}};">you</em>?
+      </h1>
+
+      <p style="margin: 18px 0 0; font-size: 17.5px; line-height: 1.55; color: #a6bcb7; max-width: 56ch;">
+        One account covers all three apps, so this is not a decision you are stuck with. It just tells us
+        which one to open you in.
+      </p>
+
+      <!-- the choice: clickable, so the artboard can actually be judged -->
+      <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 34px;">
+        <sc-for list="{{roles}}" as="role" hint-placeholder-count="3">
+          <div onClick="{{role.pick}}" style="{{role.cardStyle}}">
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px;">
+              <span class="mono" style="font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: {{role.tint}};">{{role.app}}</span>
+              <sc-if value="{{role.on}}" hint-placeholder-val="{{true}}">
+                <span style="display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: {{role.tint}}; color: #04211d;">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"></path></svg>
+                </span>
+              </sc-if>
+            </div>
+            <h3 style="margin: 13px 0 8px; font-size: 20px; font-weight: 600; letter-spacing: -0.022em;">{{role.title}}</h3>
+            <p style="margin: 0; font-size: 14.5px; line-height: 1.5; color: #a6bcb7;">{{role.blurb}}</p>
+          </div>
+        </sc-for>
+      </div>
+
+      <!-- what happens next, stated before they commit -->
+      <div style="display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 380px); gap: 40px; margin-top: 44px; align-items: start;">
+
+        <div style="border: 1px solid rgba(233,242,240,0.10); border-left: 3px solid {{tint}}; border-radius: 13px; background: #0f1c1a; padding: 20px 22px;">
+          <span class="mono" style="font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: #67807b;">Next</span>
+          <h3 style="margin: 11px 0 8px; font-size: 18px; font-weight: 600; letter-spacing: -0.02em;">{{next.head}}</h3>
+          <p style="margin: 0 0 14px; font-size: 14.5px; line-height: 1.55; color: #a6bcb7;">{{next.body}}</p>
+          <div style="display: flex; flex-direction: column; gap: 9px;">
+            <sc-for list="{{next.steps}}" as="step" hint-placeholder-count="3">
+              <div style="display: grid; grid-template-columns: 18px 1fr; gap: 11px; align-items: start;">
+                <span class="mono" style="font-size: 12px; color: {{tint}}; line-height: 1.5;">{{step.n}}</span>
+                <span style="font-size: 14.5px; line-height: 1.5; color: #a6bcb7;">{{step.text}}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 14px;">
+          <div>
+            <label style="display: block; font-size: 13.5px; color: #67807b; margin-bottom: 7px;">Email</label>
+            <input type="text" placeholder="you@example.com" style="width: 100%; box-sizing: border-box; padding: 13px 14px; border-radius: 9px; font-size: 16px; background: #081210; color: #e9f2f0; border: 1px solid rgba(233,242,240,0.10); font-family: 'Inter Tight', system-ui, sans-serif;">
+          </div>
+          <button style="width: 100%; padding: 14px 22px; border-radius: 9px; border: none; background: {{tint}}; color: #04211d; font-family: 'Inter Tight', system-ui, sans-serif; font-size: 16px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 9px;">
+            {{next.cta}}
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6"></path></svg>
+          </button>
+          <p style="margin: 0; font-size: 13.5px; line-height: 1.5; color: #67807b;">
+            Name and password come next. Free to create, and your role can change later — the account does not.
+          </p>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{"start":{"editor":"enum","options":["member","coach","owner"],"default":"member","section":"State"}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { picked: null };
+  }
+
+  renderVals() {
+    const picked = this.state.picked ?? this.props.start ?? 'member';
+
+    const TINT = { member: '#16b8a6', coach: '#7a70f0', owner: '#e0912f' };
+    const tint = TINT[picked] ?? '#16b8a6';
+
+    const base =
+      'border-radius: 13px; padding: 18px 18px 20px; cursor: pointer; ' +
+      'background: #0f1c1a; transition: background .16s ease, border-color .16s ease;';
+
+    const roles = [
+      { id: 'member', app: 'Repple',        title: 'I train',       blurb: 'At a gym, with a coach, or on your own.' },
+      { id: 'coach',  app: 'Repple Coach',  title: 'I coach',       blurb: 'You have clients and programmes to run.' },
+      { id: 'owner',  app: 'Repple Studio', title: 'I run a gym',   blurb: 'Staff, members, timetable and the books.' },
+    ].map((r) => {
+      const on = r.id === picked;
+      return {
+        ...r,
+        on,
+        tint: TINT[r.id],
+        cardStyle: base + (on
+          ? ` border: 1px solid ${TINT[r.id]}; box-shadow: 0 0 0 1px ${TINT[r.id]} inset;`
+          : ' border: 1px solid rgba(233,242,240,0.10);'),
+        pick: () => this.setState({ picked: r.id }),
+      };
+    });
+
+    const NEXT = {
+      member: {
+        head: 'You will land in Repple',
+        body: 'The training record: every session, lift, meal and measurement in one history.',
+        cta: 'Continue as a member',
+        steps: [
+          { n: '01', text: 'Set a password and you are in.' },
+          { n: '02', text: 'Log a session, or import what your watch already recorded.' },
+          { n: '03', text: 'Accept a coaching link if a trainer sends you one.' },
+        ],
+      },
+      coach: {
+        head: 'You will land in Repple Coach',
+        body: 'Your book: clients, programmes, schedule and check-ins in one place.',
+        cta: 'Continue as a coach',
+        steps: [
+          { n: '01', text: 'Set a password and you are in.' },
+          { n: '02', text: 'Invite your first client, or join a gym that already uses Studio.' },
+          { n: '03', text: 'Write a programme once and assign it out.' },
+        ],
+      },
+      owner: {
+        head: 'You will land in Repple Studio',
+        body: 'The board: timetable, memberships, payments, staff and retention together.',
+        cta: 'Continue as a gym',
+        steps: [
+          { n: '01', text: 'Set a password and name your gym.' },
+          { n: '02', text: 'Bring your members and history in from a spreadsheet.' },
+          { n: '03', text: 'Add your trainers so their delivered sessions reach payroll.' },
+        ],
+      },
+    };
+
+    return { tint, roles, next: NEXT[picked] ?? NEXT.member };
+  }
+}
+</script>
+</body>
+</html>

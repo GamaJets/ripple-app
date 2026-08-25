@@ -1,0 +1,135 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+  <style>
+    body { margin: 0; background: #0a1211; color: #e9f2f0;
+           font-family: 'Inter Tight', -apple-system, system-ui, sans-serif;
+           font-size: 17px; line-height: 1.6; -webkit-font-smoothing: antialiased; }
+    a { color: #16b8a6; text-decoration: none; }
+    a:hover { color: #3fd3c2; text-decoration: underline; text-underline-offset: 3px; }
+    .mono { font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-variant-numeric: tabular-nums; }
+  </style>
+</helmet>
+
+<div style="padding: 84px 64px 88px;">
+
+  <div style="max-width: 60ch; margin-bottom: 40px;">
+    <div style="display: flex; align-items: center; gap: 10px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; font-weight: 500; letter-spacing: 0.16em; text-transform: uppercase; color: #67807b; margin-bottom: 22px;">
+      <span style="width: 22px; height: 1px; background: #16b8a6;"></span>
+      Which one is mine
+    </div>
+    <h2 style="margin: 0; font-size: 46px; line-height: 1.08; letter-spacing: -0.028em; font-weight: 600;">
+      Same record.<br><span style="font-family: 'Instrument Serif', Georgia, serif; font-weight: 400; font-style: italic;">Different job.</span>
+    </h2>
+    <p style="margin: 20px 0 0; font-size: 19px; line-height: 1.55; color: #a6bcb7;">
+      Install the one that matches what you do. If two of them describe you — a coach who also trains,
+      an owner who still takes clients — install both. It is one account either way.
+    </p>
+  </div>
+
+  <!-- the comparison. A dash means "not this app's job", never "missing". -->
+  <div style="border: 1px solid rgba(233,242,240,0.10); border-radius: 14px; overflow: hidden; background: #0f1c1a;">
+
+    <div style="display: grid; grid-template-columns: minmax(0, 1.6fr) repeat(3, minmax(0, 1fr));">
+      <div style="padding: 20px 22px; border-bottom: 1px solid rgba(233,242,240,0.10);"></div>
+      <sc-for list="{{apps}}" as="app" hint-placeholder-count="3">
+        <div style="padding: 20px 22px; border-bottom: 1px solid rgba(233,242,240,0.10); border-left: 1px solid rgba(233,242,240,0.06); position: relative;">
+          <span style="position: absolute; inset: 0 0 auto 0; height: 3px; background: {{app.tint}};"></span>
+          <span class="mono" style="display: block; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: {{app.tint}};">{{app.kicker}}</span>
+          <span style="display: block; font-size: 19px; font-weight: 600; letter-spacing: -0.022em; margin-top: 9px;">{{app.name}}</span>
+          <span style="display: block; font-size: 14px; line-height: 1.45; color: #a6bcb7; margin-top: 6px;">{{app.who}}</span>
+        </div>
+      </sc-for>
+    </div>
+
+    <sc-for list="{{rows}}" as="row" hint-placeholder-count="7">
+      <div style="display: grid; grid-template-columns: minmax(0, 1.6fr) repeat(3, minmax(0, 1fr)); border-top: 1px solid rgba(233,242,240,0.06);">
+        <div style="padding: 15px 22px;">
+          <span style="display: block; font-size: 15.5px; font-weight: 500;">{{row.label}}</span>
+          <span style="display: block; font-size: 13.5px; line-height: 1.45; color: #67807b; margin-top: 2px;">{{row.hint}}</span>
+        </div>
+        <sc-for list="{{row.cells}}" as="cell" hint-placeholder-count="3">
+          <div style="padding: 15px 22px; border-left: 1px solid rgba(233,242,240,0.06); display: flex; align-items: center;">
+            <sc-if value="{{cell.has}}" hint-placeholder-val="{{true}}">
+              <span style="display: inline-flex; align-items: center; gap: 8px;">
+                <span style="display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: {{cell.tint}}; color: #04211d; flex: none;">
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"></path></svg>
+                </span>
+                <span style="font-size: 13.5px; color: #a6bcb7; line-height: 1.4;">{{cell.note}}</span>
+              </span>
+            </sc-if>
+            <sc-if value="{{cell.none}}" hint-placeholder-val="{{false}}">
+              <span class="mono" style="font-size: 15px; color: #3d4f4c;">—</span>
+            </sc-if>
+          </div>
+        </sc-for>
+      </div>
+    </sc-for>
+
+    <div style="display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap; padding: 20px 22px; border-top: 1px solid rgba(233,242,240,0.10); background: #081210;">
+      <p style="margin: 0; font-size: 14px; color: #67807b; line-height: 1.5; max-width: 62ch;">
+        A dash means that app does not do that job — not that the feature is missing. Studio does not show a
+        member their own lifts because that is Repple's screen, and they are the same rows underneath.
+      </p>
+      <a href="#" style="display: inline-flex; align-items: center; gap: 9px; padding: 12px 20px; border-radius: 9px; background: #16b8a6; color: #04211d; font-size: 15px; font-weight: 600; white-space: nowrap;">
+        Create an account
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6"></path></svg>
+      </a>
+    </div>
+  </div>
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{}'>
+class Component extends DCLogic {
+  renderVals() {
+    const T = { client: '#16b8a6', coach: '#7a70f0', studio: '#e0912f' };
+
+    // has/none are explicit rather than inferred, so a dash is always a
+    // deliberate "not this app's job" instead of an absent value.
+    const row = (label, hint, a, b, c) => ({
+      label, hint,
+      cells: [
+        a ? { has: true, none: false, note: a, tint: T.client } : { has: false, none: true, note: '', tint: T.client },
+        b ? { has: true, none: false, note: b, tint: T.coach }  : { has: false, none: true, note: '', tint: T.coach },
+        c ? { has: true, none: false, note: c, tint: T.studio } : { has: false, none: true, note: '', tint: T.studio },
+      ],
+    });
+
+    return {
+      apps: [
+        { kicker: 'Repple',        name: 'For members', who: 'You train.',        tint: T.client },
+        { kicker: 'Repple Coach',  name: 'For coaches', who: 'You have clients.', tint: T.coach },
+        { kicker: 'Repple Studio', name: 'For gyms', who: 'You run the place.', tint: T.studio },
+      ],
+      rows: [
+        row('Log your own training', 'Sets, reps, load, cardio, effort.',
+            'Your full history', 'Your own sessions too', null),
+        row('Apple Health & watches', 'Import what you already recorded.',
+            'In and out', null, null),
+        row('Someone else’s training', 'Reading a person you work with.',
+            'Only if you link a coach', 'Every client who linked you', 'Attendance, not their lifts'),
+        row('Programmes', 'Written once, assigned out.',
+            'Receive them', 'Write and assign', null),
+        row('Timetable & classes', 'Bookings, capacity, attendance.',
+            'Book a place', 'Your own week', 'The whole gym’s'),
+        row('Memberships & payments', 'What is sold and what was taken.',
+            'Your own', null, 'Everyone’s'),
+        row('Staff & payroll', 'Delivered sessions, priced.',
+            null, 'What you delivered', 'What the gym owes'),
+        row('The business picture', 'Retention, revenue, capacity.',
+            null, null, 'On phone and on the web'),
+      ],
+    };
+  }
+}
+</script>
+</body>
+</html>
