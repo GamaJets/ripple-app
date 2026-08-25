@@ -172,3 +172,34 @@ the trainer-read RLS ran (it's `supabase/parts/19-trainer-read-access.sql`).
 - Everything the app writes is **best-effort and RLS-gated** — if a policy is
   missing the app falls back to demo data rather than crashing, so a partial
   setup degrades gracefully instead of breaking.
+
+## When the toolchain hangs (iCloud eviction)
+
+**Symptom.** `npx tsc --noEmit` or `npx tsx …` hangs indefinitely with no
+output. Nothing is wrong with the code.
+
+**Cause.** The repo lives on the iCloud-synced Desktop. When the disk fills,
+macOS evicts `node_modules` to the cloud — the files remain listed but their
+contents are gone (`ls -lO` shows `dataless`, and they read as empty). The
+toolchain then stalls trying to fault 30,000 files back over the network.
+
+Confirm it:
+
+    find node_modules -type f | head -1500 | xargs -I{} ls -lO "{}" | grep -c dataless
+    df -h /System/Volumes/Data
+
+**Run the tests without the toolchain.** Node 26 strips TypeScript natively, and
+`src/lib` has no `node_modules` dependencies — only the import specifiers need
+extensions:
+
+    SP=$(mktemp -d) && cp src/lib/*.ts "$SP"/ && cd "$SP"
+    perl -pi -e "s{(from\s+'\./[A-Za-z0-9_\-]+)'}{\$1.ts'}g" *.ts
+    node --experimental-strip-types coverage.test.ts
+    node --experimental-strip-types logic.test.ts
+
+This runs the real modules — only the import paths are rewritten — so a pass is
+a genuine pass. It does **not** replace `tsc`: it will not check types across
+the app or `studio-web`.
+
+**The durable fix** is the Phase 8 roadmap item: move the repo off the
+iCloud-synced Desktop, or turn off *Optimise Mac Storage* for it.

@@ -7,6 +7,8 @@ import { rowToEntry, entryToRow, PERSISTED_FIELDS } from './workoutRow';
 import { summarise, money, type MembershipPlan, type Membership, type GymPayment } from './gymRecord';
 import { weeklyOccurrences, summariseAttendance, pct, type GymClass, type NewClass } from './gymSchedule';
 import { buildIcs } from './ics';
+import { parseCsv, parseSheet, sniffDelimiter, mapColumns } from './csv';
+import { parseMoneyCents, parseDate, detectDateOrder, previewMembers, previewPayments, describePreview, MEMBER_ALIASES } from './csvImport';
 import { payroll30For, payrollBlocker, type GymTrainer } from './gymTrainers';
 import { gymRollup } from './ownerAnalytics';
 import { isDelivered, isAwaitingOutcome, isPayable, payrollByTrainer, payrollTotal, settlementBlocker, PAY_DELIVERED_ONLY, type PtSession } from './gymSessions';
@@ -481,6 +483,113 @@ const rollBlocked = gymRollup([tr({ delivered30: 15, unmarked30: 5 })], 50);
 ok(rollBlocked.payroll30 === null, 'rollup payroll is null while sessions are unmarked');
 ok(rollBlocked.unmarked30 === 5, 'rollup reports how many are unmarked');
 ok(rollBlocked.sessions30 === 20, 'rollup still reports what the record shows took place');
+
+// Scoped: this suite is one long module, and these fixture names
+// (mem, pay, q…) are common enough to collide with earlier blocks.
+{
+  // ── CSV reader (F22) ──
+  // The failure mode being guarded: a naive split(',') shifts every column after
+  // a quoted comma, and the import lands a phone number in the plan field.
+  const q = parseCsv('name,plan\n"Smith, Jr.",Full\n');
+  ok(q.length === 2, 'a trailing newline does not create a phantom row');
+  ok(q[1][0] === 'Smith, Jr.' && q[1][1] === 'Full', 'a comma inside quotes does not split the field');
+
+  ok(parseCsv('a,"b""c",d')[0][1] === 'b"c', 'a doubled quote inside quotes is one literal quote');
+  ok(parseCsv('a,"line\nbreak",c')[0][1] === 'line\nbreak', 'a newline inside quotes stays in the field');
+  ok(parseCsv('a,b\r\nc,d').length === 2 && parseCsv('a,b\r\nc,d')[1][0] === 'c', 'CRLF line endings parse');
+  ok(parseCsv('﻿name,plan\nAmy,Full')[0][0] === 'name', 'a UTF-8 BOM does not become part of the first header');
+  ok(parseCsv('a,b\nc,d')[1][1] === 'd', 'a final row without a trailing newline is kept');
+  ok(parseCsv('a,,c')[0].length === 3 && parseCsv('a,,c')[0][1] === '', 'an empty field is preserved, not collapsed');
+  ok(parseCsv('') .length === 0, 'empty input gives no rows');
+
+  ok(sniffDelimiter('a;b;c') === ';', 'semicolon files are detected');
+  ok(sniffDelimiter('a\tb\tc') === '\t', 'tab files are detected');
+  ok(sniffDelimiter('"Smith, Jr.";Full') === ';', 'a comma inside quotes does not vote for the comma');
+  ok(parseSheet('a;b\n1;2').rows[0][1] === '2', 'a semicolon sheet parses end to end');
+
+  const short = parseSheet('name,plan,email\nAmy,Full');
+  ok(short.rows[0].length === 3 && short.rows[0][2] === '', 'a short row is padded to the header width');
+  ok(parseSheet('name,plan\n\n\nAmy,Full').rows.length === 1, 'blank lines are discarded');
+
+  const mapped = mapColumns(['Full Name', 'E-Mail', 'Nickname'], MEMBER_ALIASES);
+  ok(mapped.index.name === 0 && mapped.index.email === 1, 'headers map through aliases and punctuation');
+  ok(mapped.unmatched.includes('Nickname'), 'an unrecognised column is reported, not silently dropped');
+
+  // ── money ──
+  ok((parseMoneyCents('£1,234.56') as any).value === 123456, 'money strips a currency symbol and thousands comma');
+  ok((parseMoneyCents('1.234,56') as any).value === 123456, 'European decimal comma is read correctly');
+  ok((parseMoneyCents('1,234') as any).value === 123400, 'a lone separator before three digits is thousands, not decimals');
+  ok((parseMoneyCents('1,23') as any).value === 123, 'a lone separator before two digits is a decimal point');
+  ok((parseMoneyCents('50') as any).value === 5000, 'a bare integer is whole units');
+  ok((parseMoneyCents('0') as any).value === 0, 'zero is a real amount');
+  ok((parseMoneyCents('7.5') as any).value === 750, 'one decimal place is padded, not truncated');
+  ok((parseMoneyCents('(50.00)') as any).value === -5000, 'accounting parentheses mean negative');
+  ok(parseMoneyCents('1.2345').ok === false, 'four decimal places are refused rather than rounded');
+  ok(parseMoneyCents('n/a').ok === false, 'non-numeric text is refused');
+  ok(parseMoneyCents('').ok === false, 'an empty amount is refused');
+
+  // ── dates: the decision this module exists for ──
+  ok((parseDate('2026-04-03') as any).value === '2026-04-03', 'ISO dates are unambiguous');
+  ok((parseDate('25/12/2026') as any).value === '2026-12-25', 'a day above 12 settles the order by itself');
+  ok((parseDate('12/25/2026') as any).value === '2026-12-25', 'a month-first file settles the same way');
+  ok(parseDate('03/04/2026').ok === false, 'an ambiguous date is REFUSED, not guessed');
+  ok((parseDate('03/04/2026', 'dmy') as any).value === '2026-04-03', 'told day-first, it reads day-first');
+  ok((parseDate('03/04/2026', 'mdy') as any).value === '2026-03-04', 'told month-first, it reads month-first');
+  ok(parseDate('31/02/2026', 'dmy').ok === false, '31 February is refused, not rolled into March');
+  ok(parseDate('13/13/2026').ok === false, 'two components above 12 cannot be a date');
+  ok((parseDate('01/02/26', 'dmy') as any).value === '2026-02-01', 'a two-digit year resolves to this century');
+
+  // One unambiguous row settles the whole file, so the gym is rarely asked.
+  ok(detectDateOrder(['03/04/2026', '25/12/2026']) === 'dmy', 'one day-above-12 row settles the file as day-first');
+  ok(detectDateOrder(['03/04/2026', '12/25/2026']) === 'mdy', 'one month-first row settles the file');
+  ok(detectDateOrder(['03/04/2026', '05/06/2026']) === 'ambiguous', 'a wholly ambiguous column stays ambiguous');
+  ok(detectDateOrder(['25/12/2026', '12/25/2026']) === 'ambiguous', 'a file mixing both conventions is refused');
+  ok(detectDateOrder(['2026-04-03']) === 'ymd', 'an ISO column is recognised');
+  ok(detectDateOrder([]) === 'unknown', 'nothing to go on is unknown, not a guess');
+
+  // ── member preview ──
+  const memPrev = previewMembers(
+    'Name,Email,Plan,Start Date,Status\n' +
+    'Amy Chen,amy@example.com,Full,25/12/2025,active\n' +   // settles the file as dmy
+    'Ben Ross,ben@example.com,Off-peak,03/04/2026,active\n' + // now readable with confidence
+    'Cal Diaz,not-an-email,Full,01/01/2026,active\n' +
+    ',nobody@example.com,Full,01/01/2026,active\n' +
+    'Dee Ellis,amy@example.com,Full,01/01/2026,active\n' +
+    'Eve Frost,eve@example.com,Full,01/01/2026,dunno\n'
+  );
+  ok(memPrev.dateOrder === 'dmy', 'the file settles its own date order from one row');
+  ok(memPrev.ready.length === 2, `only clean rows are ready (got ${memPrev.ready.length})`);
+  ok(memPrev.ready[1].startedOn === '2026-04-03', 'the ambiguous date is read using the settled order');
+  ok(memPrev.rejected.length === 4, 'every problem row is reported');
+  ok(memPrev.rejected.some((r) => r.line === 4 && r.errors.some((e) => e.includes('email'))), 'a bad email is caught with its line number');
+  ok(memPrev.rejected.some((r) => r.line === 5 && r.errors.includes('no name')), 'a missing name is caught');
+  ok(memPrev.rejected.some((r) => r.line === 6 && r.errors.some((e) => e.includes('duplicate of line 2'))), 'a duplicate email points at the first occurrence');
+  ok(memPrev.rejected.some((r) => r.line === 7 && r.errors.some((e) => e.includes('dunno'))), 'an unrecognised status is refused, not defaulted to active');
+
+  const noName = previewMembers('Email,Plan\namy@example.com,Full');
+  ok(noName.missingRequired.includes('name'), 'a file with no name column cannot be imported');
+  ok(noName.ready.length === 0, 'nothing is ready when a required column is missing');
+
+  const backwards = previewMembers('Name,Start Date,End Date\nAmy,2026-06-01,2026-01-01');
+  ok(backwards.rejected[0].errors.some((e) => e.includes('ends before')), 'a membership ending before it starts is caught');
+
+  // ── payment preview ──
+  const pay = previewPayments(
+    'Member,Email,Amount,Date,Method\n' +
+    'Amy Chen,amy@example.com,"£1,234.56",2026-01-15,Card\n' +
+    'Ben Ross,ben@example.com,69.00,2026-01-16,Bank Transfer\n' +
+    ',,50.00,2026-01-17,Cash\n' +
+    'Cal Diaz,cal@example.com,-20.00,2026-01-18,Card\n'
+  );
+  ok(pay.ready.length === 2, `payments with a payer and a good amount are ready (got ${pay.ready.length})`);
+  ok(pay.ready[0].amountCents === 123456, 'a quoted, symbol-prefixed amount survives the CSV and the parser');
+  ok(pay.ready[1].method === 'transfer', 'a method alias maps to the stored vocabulary');
+  ok(pay.rejected.some((r) => r.errors.some((e) => e.includes('cannot be attributed'))), 'a payment with no payer is refused');
+  ok(pay.rejected.some((r) => r.errors.some((e) => e.includes('negative'))), 'a refund is refused rather than imported as income');
+
+  ok(describePreview(noName).includes('no name'), 'the summary explains a missing required column');
+  ok(describePreview(memPrev).includes('2 of 6'), `the summary counts ready rows (got "${describePreview(memPrev)}")`);
+}
 
 if (errors.length) { console.log('COVERAGE FAILURES:\n' + errors.join('\n')); process.exit(1); }
 console.log(`ALL COVERAGE TESTS PASSED (${checks} assertions)`);
