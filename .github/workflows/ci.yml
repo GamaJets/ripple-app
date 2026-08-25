@@ -35,7 +35,7 @@ jobs:
           # 22 is the current LTS and what Expo SDK 54 supports. Local
           # development happens on 26; if the two ever disagree, this is the
           # version that decides, because it is the one nobody can skip.
-          node-version: '22'
+          node-version: '24'
           cache: npm
 
       # ci, not install: it installs exactly the lockfile and fails if
@@ -66,7 +66,7 @@ jobs:
 
       - uses: actions/setup-node@v5
         with:
-          node-version: '22'
+          node-version: '24'
           cache: npm
           cache-dependency-path: studio-web/package-lock.json
 
