@@ -28,6 +28,8 @@ import { normaliseEmail, inviteState, isExpired as inviteExpired, isRedeemable a
 import { weekStartOf, weekDays, shiftWeek, hoursSpanned, shiftHours, hourLabel, buildRota, coverage, shiftsByDay, rosterByTrainer, summariseRota, shiftFromHours, type Shift, type DemandBlock } from './gymRota';
 import { photoObjectPath, isOwnPhotoPath, sortOldestFirst, comparePair, daysApart, photosNote, missingFileCount, rowToPhoto, PHOTO_PATH_RE, type ProgressPhoto } from './progressPhotos';
 import type { TrainingSession } from './types';
+import { assessDrift, rankClients, sortByDrift, summariseDrift, compareDrift, DRIFT_RANK, DRIFT_LABEL, DEFAULT_WINDOWS, type ActivityEvent, type DriftInput } from './clientDrift';
+import { atRiskClient, noRecordOf } from './trainerMock';
 
 const errors: string[] = [];
 let checks = 0;
@@ -1681,6 +1683,113 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
     memberships: sliceReady([mem('r', 'R', 'cancelled', '2026-03-01'), mem('r', 'R', 'active', '2026-06-01')]),
   }, NOW);
   ok(rejoined.status === 'active', 'a member who rejoined reads as active, not as their old cancellation');
+}
+
+
+// ── client drift: the coach's book, ordered by who is breaking their own pattern ──
+{
+  // Local noon, so NOW - n*DAY always lands on a distinct local calendar day
+  // whatever the timezone or a DST shift does — the module buckets by local day.
+  const NOW = new Date(2026, 5, 15, 12, 0, 0).getTime();
+  const DAY_MS = 86_400_000;
+  const at = (n: number) => new Date(NOW - n * DAY_MS).toISOString();
+  const evs = (offsets: number[]): ActivityEvent[] => offsets.map((n) => ({ at: at(n), kind: 'workout' as const }));
+  const who = (clientId: string, offsets: number[], sinceDaysAgo: number | null): DriftInput =>
+    ({ clientId, events: evs(offsets), since: sinceDaysAgo == null ? null : at(sinceDaysAgo) });
+  const D = (i: DriftInput) => assessDrift(i, NOW, DEFAULT_WINDOWS);
+
+  const steady2 = who('steady2', [1, 4, 8, 11, 15, 18, 22, 25, 29, 32, 36, 39, 43, 46, 50, 53], 56);
+  const steady1 = who('steady1', [3, 10, 17, 24, 31, 38, 45, 52], 56);
+  const fell4to1 = who('fell4to1', [3, 10, 15, 16, 17, 18, 22, 23, 24, 25, 29, 30, 31, 32, 36, 37, 38, 39, 43, 44, 45, 46, 50, 51, 52, 53], 56);
+  const fell5to2 = who('fell5to2', [1, 2, 8, 9, 15, 16, 17, 18, 19, 22, 23, 24, 25, 26, 29, 30, 31, 32, 33, 36, 37, 38, 39, 40, 43, 44, 45, 46, 47, 50, 51, 52, 53, 54], 56);
+  const wentSilent = who('wentSilent', [15, 17, 19, 22, 24, 26, 29, 31, 33, 36, 38, 40, 43, 45, 47, 50, 52, 54], 56);
+  const noData = who('noData', [], 40);
+  const noDataNew = who('noDataNew', [], 5);
+  const joined42 = who('joined42', [3, 10, 15, 17, 19, 22, 24, 26, 29, 31, 33, 36, 38, 40], 42);
+  const tooNew = who('tooNew', [1, 3, 5, 8, 10, 12, 15, 17], 20);
+
+  // ── drift is a change, not a level ──
+  ok(D(steady2).baselinePerWeek === 2 && D(steady2).recentPerWeek === 2, 'two a week, every week, measures as two a week');
+  ok(D(steady2).status === 'on_track', 'a client who always trained twice a week is not drifting');
+  ok(D(steady1).status === 'on_track', 'a client who always trained once a week is not drifting either');
+  ok(D(fell4to1).baselinePerWeek === 4 && D(fell4to1).recentPerWeek === 1, 'four a week fell to one a week');
+  ok(D(fell4to1).status === 'at_risk', 'four a week down to one a week IS drifting');
+  ok(D(fell4to1).recentPerWeek === D(steady1).recentPerWeek && D(fell4to1).status !== D(steady1).status,
+    'same rate today, different verdict — the break is what is ranked, not the level');
+  ok(D(fell5to2).recentPerWeek! > D(steady1).recentPerWeek! && D(fell5to2).status === 'at_risk' && D(steady1).status === 'on_track',
+    'still twice as active as a steady client, and still the one drifting');
+  ok(D(steady2).drop === 0 && D(fell4to1).drop === 0.75, 'the drop is measured against their own baseline');
+
+  // ── a client with NO DATA AT ALL is never "fine" ──
+  ok(D(noData).unknown === true, 'no record at all cannot be assessed');
+  ok(D(noData).status === 'idle', 'no record at all is UNKNOWN, never on track');
+  ok(D(noData).status !== 'on_track', 'absence of evidence is not evidence of health');
+  ok(D(noData).status !== 'at_risk', 'and UNKNOWN is distinct from at-risk too — we do not know');
+  ok(DRIFT_LABEL[D(noData).status] === 'Unknown', 'and it prints as Unknown, not as a verdict about the person');
+  ok(D(noData).reason.includes('Nothing recorded') && D(noData).reason.includes('40 days'), 'the reason says what is missing and for how long');
+  ok(D(noData).kinds.length === 0, 'no check-ins, no logs, no visits, no sessions');
+
+  // The older boolean version of this idea, which returned FALSE for a client
+  // it had never seen a data point from. Pinned so it cannot regress.
+  ok(noRecordOf({ adherence: null, lastActive: 'no activity yet' }) === true, 'a client with nothing recorded is recognised as such');
+  ok(atRiskClient({ adherence: null, lastActive: 'no activity yet' }) === true,
+    'a client with NO record does not read as fine — absence of evidence is not evidence of health');
+  ok(atRiskClient({ adherence: 92, lastActive: '1d' }) === false, 'and a healthy, recently-active client still reads as fine');
+
+  // ── no invented figures ──
+  ok(D(noData).baselinePerWeek === null, 'a rate over an unobserved baseline is null, not 0');
+  ok(D(noData).drop === null, 'a client with no baseline has no drop, not a drop of 0');
+  ok(D(noData).lostPerWeek === null && D(noData).score === null, 'nothing derived from an empty set is reported as a number');
+  ok(D(noData).quietDays === null, 'never seen is not "seen 0 days ago"');
+  ok(D(noData).silentDays === 40, 'silence runs for as long as they have been on the book');
+  ok(summariseDrift(null) === null, 'not read yet is not "nobody is drifting"');
+  ok(summariseDrift([])!.drifting === 0 && summariseDrift([])!.total === 0, 'read and empty counts as zero of everything');
+
+  // ── UNKNOWN must not be sorted to the bottom as if it were fine ──
+  ok(DRIFT_RANK.idle === 1, 'unknown sorts second, under the measurably drifting');
+  ok(DRIFT_RANK.idle < DRIFT_RANK.on_track && DRIFT_RANK.idle < DRIFT_RANK.watch, 'and above both watch and on-track');
+  ok(STATUS_RANK.idle === 3 && DRIFT_RANK.idle !== STATUS_RANK.idle, 'deliberately unlike STATUS_RANK, which buries idle');
+  ok(DRIFT_LABEL.at_risk === STATUS_LABEL.at_risk && DRIFT_LABEL.watch === STATUS_LABEL.watch && DRIFT_LABEL.on_track === STATUS_LABEL.on_track,
+    'the three concern levels keep the product-wide words');
+
+  const book = rankClients([steady2, steady1, fell4to1, noData, wentSilent, tooNew, noDataNew], NOW, DEFAULT_WINDOWS);
+  const order = book.map((d) => d.clientId);
+  const posOf = (id: string) => order.indexOf(id);
+  ok(order[0] === 'wentSilent' && order[1] === 'fell4to1', 'the biggest break in a pattern leads the book');
+  ok(posOf('noData') < posOf('steady2') && posOf('noData') < posOf('steady1'),
+    'a client with no record at all sorts above a client holding their pattern');
+  ok(posOf('noData') !== order.length - 1, 'a client with no record at all is never last');
+  ok(posOf('noData') < posOf('noDataNew'), 'the longest silence leads the unknown band');
+  ok(posOf('wentSilent') < posOf('noData') && posOf('fell4to1') < posOf('noData'),
+    'but a measured break still outranks an unknown');
+  ok(posOf('tooNew') < posOf('steady2'), 'a client too new to judge is also not filed under fine');
+  ok(book.map((d) => DRIFT_RANK[d.status]).every((r, i, a) => i === 0 || a[i - 1] <= r), 'the book comes back in band order');
+  ok(summariseDrift(book)!.unknown === 3 && summariseDrift(book)!.drifting === 2 && summariseDrift(book)!.steady === 2,
+    'the band counts match the book');
+
+  // ── the baseline is clamped to the client's own record ──
+  ok(D(joined42).baselineSpanDays === 28, "the baseline stops where the client's record starts");
+  ok(D(joined42).baselinePerWeek === 3, 'and the rate is over the days they were actually on the book');
+  ok(D(joined42).status === 'at_risk', 'so a real fall is not diluted by a period they did not exist for');
+
+  // ── too little record is UNKNOWN, not a verdict ──
+  ok(D(tooNew).unknown === true && D(tooNew).status === 'idle', 'twenty days is not a pattern, however keen');
+  ok(D(tooNew).baselinePerWeek === null, 'no baseline is claimed from a first impression');
+  ok(D(tooNew).reason.includes('too little'), 'and it says so');
+
+  // ── going silent off a real pattern is measured, not guessed ──
+  ok(D(wentSilent).drop === 1 && D(wentSilent).recentPerWeek === 0, 'a client who stops has fallen the whole way');
+  ok(D(wentSilent).quietDays === 15, 'and we know exactly how long it has been');
+  ok(D(wentSilent).reason.includes('15 days') && D(wentSilent).reason.includes('3 days a week'), 'the reason carries both halves');
+
+  // ── housekeeping ──
+  const unsorted = [D(steady2), D(fell4to1), D(noData)];
+  const sorted = sortByDrift(unsorted);
+  ok(unsorted.map((d) => d.clientId).join(',') === 'steady2,fell4to1,noData', "sorting does not mutate the caller's array");
+  ok(sorted[0].clientId === 'fell4to1', 'and it does sort');
+  ok(compareDrift(D(noData), D(noData)) === 0, 'a client does not outrank themselves');
+  ok(D({ clientId: 'junk', events: [{ at: 'not-a-date', kind: 'workout' }], since: at(56) }).unknown === true,
+    'an unreadable timestamp is not a day of training');
 }
 
 if (errors.length) { console.log('COVERAGE FAILURES:\n' + errors.join('\n')); process.exit(1); }
