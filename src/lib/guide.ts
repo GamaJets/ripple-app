@@ -55,7 +55,7 @@ const CLIENT: GuideSection[] = [
     points: [
       'Add scan records an InBody result. Body fat and muscle on Home come from here.',
       'Measurements tracks the tape numbers between scans.',
-      'Progress photos stay on your account; add two and you can compare before and after.',
+      'Progress photos are held on the Scans screen while you are there — add two and you can compare before and after. They are not uploaded or stored, so they go when you leave the screen.',
     ],
   },
   {

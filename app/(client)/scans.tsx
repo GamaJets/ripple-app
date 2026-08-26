@@ -297,7 +297,12 @@ export default function Scans() {
 
         {/* ── progress photos ────────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Progress photos" note={photos.length > 0 ? `${photos.length} saved` : undefined} />
+          {/* Not "N saved". These live in component state — no bucket, no
+              AsyncStorage, no upload — so they are gone the moment this screen
+              unmounts. A member who reads "saved" may delete the original from
+              their camera roll, which is the one outcome this label must not
+              cause. */}
+          <SectionHead title="Progress photos" note={photos.length > 0 ? `${photos.length} on screen` : undefined} />
           <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.lg }}>
             <View style={{ flex: 1 }}><Ghost label="Upload" onPress={() => addPhoto(false)} /></View>
             <View style={{ flex: 1 }}><Ghost label="Photo" onPress={() => addPhoto(true)} /></View>
@@ -306,6 +311,8 @@ export default function Scans() {
           {photos.length === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>
               No photos yet — add one from your camera or library, then tap two to compare before → after.
+              They stay on this screen only: nothing is uploaded, and they are gone when you leave, so keep
+              the originals in your camera roll.
             </Text>
           ) : (
             <View>
