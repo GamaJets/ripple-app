@@ -1695,6 +1695,47 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
   ok(buildDossiers({ ...rec, memberships: sliceFailed('down') }, NOW) === null, 'and no dossiers either');
   ok((buildDossiers(rec, NOW) ?? [])[0].name === 'Sara Floor', 'dossiers come back sorted by name');
 
+  // ── absence is a question about somebody the gym still expects to see ──
+  //
+  // This flag used to consult only the door log. A frozen member — a pause the
+  // gym itself agreed — came back "gone quiet", and so did somebody who had
+  // cancelled and left. Both got chased.
+  const quietRec: MemberRecord = {
+    ...rec,
+    memberships: sliceReady([
+      mem('act', 'Active Person', 'active', '2025-01-01'),
+      mem('frz', 'Frozen Person', 'frozen', '2025-01-01'),
+      mem('can', 'Cancelled Person', 'cancelled', '2025-01-01'),
+      mem('exp', 'Expired Person', 'expired', '2025-01-01'),
+    ]),
+    // Nobody in this set has visited recently; the log is live because `floor`
+    // and `gone` above are still generating rows for the same gym.
+    visits: sliceReady([visit('vq', 'other', ago(2))]),
+  };
+  const live = { now: NOW, doorLogActive: true };
+  const rd = (id: string) => retentionRead(buildDossier(id, quietRec, NOW), live);
+
+  ok(rd('act').absentFromLiveDoorLog === true, 'an active member who has stopped coming in IS absent');
+  ok(rd('act').absenceUnknownBecause === null, 'and nothing excuses it, so the flag stands on its own');
+
+  ok(rd('frz').absentFromLiveDoorLog === false,
+     'a FROZEN member is not gone quiet — the gym agreed that pause and is reading its own decision back as a problem');
+  ok(rd('frz').absenceUnknownBecause === 'frozen', 'and the reason is named rather than left as a bare false');
+
+  ok(rd('can').absentFromLiveDoorLog === false,
+     'somebody who cancelled has left, and chasing a leaver is worse than noise');
+  ok(rd('can').absenceUnknownBecause === 'cancelled', 'named too, so a screen can tell it apart from "fine"');
+
+  // The one that must NOT be excused, and the reason the rule is a list rather
+  // than "has a live membership".
+  ok(rd('exp').absentFromLiveDoorLog === true,
+     'an EXPIRED membership nobody renewed is exactly who a retention view exists to surface');
+  ok(rd('exp').absenceUnknownBecause === null, 'so it is not excused as an agreed ending');
+
+  // No membership row at all is not evidence of anything.
+  ok(rd('nobody').absentFromLiveDoorLog === false, 'a member with no membership row cannot be judged absent');
+  ok(rd('nobody').absenceUnknownBecause === 'no-membership', 'and says so, rather than reading as present');
+
   const rejoined = buildDossier('r', {
     ...rec,
     memberships: sliceReady([mem('r', 'R', 'cancelled', '2026-03-01'), mem('r', 'R', 'active', '2026-06-01')]),

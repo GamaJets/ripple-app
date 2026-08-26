@@ -333,6 +333,9 @@ export function buildDossiers(rec: MemberRecord, now: number = Date.now()): Memb
 
 export type Trend = 'up' | 'steady' | 'down';
 
+/** Why a member is outside the absence question entirely. */
+export type AbsenceExclusion = 'frozen' | 'cancelled' | 'no-membership' | null;
+
 export interface RetentionRead {
   /** Half the window, in days — the span each side of the comparison covers. */
   halfDays: number;
@@ -363,6 +366,16 @@ export interface RetentionRead {
    * emptiness means nothing at all, so the flag stays false there.
    */
   absentFromLiveDoorLog: boolean;
+
+  /**
+   * Why absence could not be judged, when it could not. Null when the member
+   * is somebody the gym still expects to see, so the flag above stands on its
+   * own merits.
+   *
+   * A screen must not render "not absent" and "we did not look" identically —
+   * that is how a frozen member reads as a member who is fine.
+   */
+  absenceUnknownBecause: AbsenceExclusion;
 
   /** A sentence for the screen, or null when the record cannot support one. */
   note: string | null;
@@ -422,8 +435,31 @@ export function retentionRead(d: MemberDossier, opts: RetentionOptions): Retenti
     d.bookings != null && d.visits != null &&
     earlierClasses > 0 && recentClasses === 0 && recentVisits > 0;
 
+  // Absence is only evidence about somebody the gym still expects to see.
+  //
+  // This used to be `visits read && door log live && no recent visits`, with no
+  // reference to the membership at all — so a FROZEN member, who agreed a pause
+  // with the gym, was flagged as gone quiet, and so was somebody who had
+  // CANCELLED and already left. Both got chased. A freeze is the gym's own
+  // decision being read back to it as a problem, and chasing a leaver is worse
+  // than noise.
+  //
+  // 'expired' is deliberately NOT excluded: a lapsed membership nobody renewed
+  // is exactly the person a retention view exists to surface, and treating it
+  // as an agreed ending would hide the case that matters most.
+  //
+  // A null status means the roster was not read or the member holds no
+  // membership row. Neither is evidence that they are absent, so the flag stays
+  // false and `absenceUnknownBecause` says which.
+  const expected = d.status === 'active' || d.status === 'expired';
   const absentFromLiveDoorLog =
-    d.visits != null && opts.doorLogActive && recentVisits === 0;
+    d.visits != null && opts.doorLogActive && recentVisits === 0 && expected;
+
+  const absenceUnknownBecause: AbsenceExclusion =
+    d.status === 'frozen' ? 'frozen'
+      : d.status === 'cancelled' ? 'cancelled'
+      : d.status == null ? 'no-membership'
+      : null;
 
   return {
     halfDays,
@@ -433,6 +469,7 @@ export function retentionRead(d: MemberDossier, opts: RetentionOptions): Retenti
     door,
     stillTrainingOffTheTimetable,
     absentFromLiveDoorLog,
+    absenceUnknownBecause,
     note: noteFor({
       halfDays, recentClasses, earlierClasses, recentVisits, earlierVisits,
       bookingsRead: d.bookings != null, visitsRead: d.visits != null,
