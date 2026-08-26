@@ -265,10 +265,10 @@
       <div class="tile">
         <div class="cap">Assertions</div>
         <h3>A policy without RLS is inert</h3>
-        <p>Rules written for a table that never had row-level security switched on look like
-        protection in the migration and are never consulted. Four tables were in exactly that
-        state. The fix asserts that security is on before it writes a rule, and fails loudly if it
-        is not.</p>
+        <p>A rule written for a table that never had row-level security switched on looks like
+        protection in the migration and is never consulted. Four tables were missing it, two of
+        them carrying rules that had therefore done nothing since the day they were written. The
+        fix asserts that security is on before it writes a rule, and fails loudly if it is not.</p>
       </div>
       <div class="tile">
         <div class="cap">Keys</div>
