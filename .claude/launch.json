@@ -9,6 +9,15 @@
         "start"
       ],
       "port": 3000
+    },
+    {
+      "name": "studio-web",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "studio"
+      ],
+      "port": 3100
     }
   ]
 }
