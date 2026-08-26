@@ -1,0 +1,82 @@
+# Publish web/ to repplefitness.com on every push to main that touches it.
+#
+# WHY THIS EXISTS. The Cloudflare Pages project `repple` was created by direct
+# upload and has no git connection — `wrangler pages project list` reports
+# "Git Provider: No". So for as long as it has existed, committing a change to
+# web/ did nothing to the live site; somebody had to remember to run wrangler
+# by hand. On 26 Aug 2026 the live site was four pages and one stylesheet
+# behind main, and the gap was invisible because git looked perfectly healthy.
+#
+# A deploy that depends on somebody remembering is a deploy that silently stops
+# happening. This makes the push the deploy.
+#
+# SETUP — one secret, added by the repo owner, never by an agent:
+#   Settings → Secrets and variables → Actions → New repository secret
+#   Name:  CLOUDFLARE_API_TOKEN
+#   Value: a token from https://dash.cloudflare.com/profile/api-tokens
+#          using the "Edit Cloudflare Workers" template, or a custom token
+#          with Account → Cloudflare Pages → Edit.
+#
+# The account id below is not a credential — it identifies the account and is
+# useless without the token — so it is in the clear to keep setup to one step.
+#
+# Until that secret exists this job fails on every push. That is deliberate: a
+# deploy that quietly skips itself is the exact failure this file was written
+# to end. A red run tells you the site did not update.
+
+name: Deploy website
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'web/**'
+      - '.github/workflows/deploy-web.yml'
+  workflow_dispatch:
+
+# Never let two deploys race. The newer push wins; cancelling an in-flight
+# deploy is safe because Pages only swaps live traffic on success.
+concurrency:
+  group: deploy-web
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: web → repplefitness.com
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      # Cheap structural check before anything is published. It will not catch
+      # bad copy, but it catches the class of breakage that would take the
+      # App Store support and privacy URLs down with it — App Review checks
+      # both resolve, and all three apps are blocked if they do not.
+      - name: Check every page is present and parses
+        run: |
+          set -euo pipefail
+          for f in index support privacy terms signup delete-account \
+                   forgot-password reset-password client trainer studio; do
+            test -s "web/$f.html" || { echo "missing or empty: web/$f.html"; exit 1; }
+          done
+          test -s web/styles.css || { echo "missing: web/styles.css"; exit 1; }
+          python3 - <<'PY'
+          import re, glob, sys
+          bad = 0
+          for f in sorted(glob.glob('web/*.html')):
+              s = open(f).read()
+              for t in ('p','li','ul','div','section','tr','td','table','h1','h2','h3','svg','a','span'):
+                  o = len(re.findall(r'<%s[\s>]' % t, s))
+                  c = len(re.findall(r'</%s>' % t, s))
+                  if o != c:
+                      print(f'{f}: <{t}> {o} open, {c} close')
+                      bad += 1
+          sys.exit(1 if bad else 0)
+          PY
+
+      - name: Publish
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: f58b37be434c939bbd82249926cb892a
+          command: pages deploy web --project-name=repple --branch=main
