@@ -23,6 +23,10 @@ export const NAV: NavItem[] = [
   // question: Members answers "how is Sara doing?", this answers
   // "are we keeping people?".
   { href: '/retention', label: 'Retention', roles: ['owner'] },
+  // The same question at the other end of the funnel: Retention asks whether
+  // the gym keeps the people it has, this asks whether the people it gives
+  // passes to ever become people it has.
+  { href: '/passes', label: 'Passes', roles: ['owner'] },
   // Beside Members, and owner-only for the same reason /close is: it carries
   // every colleague's pay and delivery record on one screen. A trainer must not
   // be offered a link to their own performance file, still less to everyone

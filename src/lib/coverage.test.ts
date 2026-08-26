@@ -29,6 +29,7 @@ import { weekStartOf, weekDays, shiftWeek, hoursSpanned, shiftHours, hourLabel, 
 import { photoObjectPath, isOwnPhotoPath, sortOldestFirst, comparePair, daysApart, photosNote, missingFileCount, rowToPhoto, PHOTO_PATH_RE, type ProgressPhoto } from './progressPhotos';
 import { viewerMaySee, shareStateOf, shareLabel, sharedNote, sharedCount, sendBlocker, sentPhotos, sortNewestShared, missingSharedFiles, revokeCaveat, SHARED_URL_TTL_S, type ShareGrant, type CoachLink, type SharedPhoto } from './photoShare';
 import { monthlyHistory, monthKey, monthLabel, yearRows, peakVolume, intensity, bestMonth, trainedMonths, gaps, longestGap, monthsSinceLast, historySpan, stageOf, historyNote, lifetimeTotals, prTimeline, volumeArc, tonnes } from './longView';
+import { buildPassConversion, hostsOf, intervalOf, coversDate, daysBetween, dateOf, attributionSentence, suppressionSentence, CAUSAL_CAVEAT, MONEY_NOTE, type PassConversionRecord } from './passConversion';
 import type { TrainingSession } from './types';
 import { assessDrift, rankClients, sortByDrift, summariseDrift, compareDrift, DRIFT_RANK, DRIFT_LABEL, DEFAULT_WINDOWS, type ActivityEvent, type DriftInput } from './clientDrift';
 import { atRiskClient, noRecordOf } from './trainerMock';
@@ -41,6 +42,14 @@ import {
   type CloseRecord, type GymInvoice, type MonthWindow,
 } from './monthEnd';
 import { buildGymRetention, doorLogState, absenceBlocker, cohortFeasibility, monthOfDate, pointsPerMember, rateOf, suppressionNote, headline, pendingRetentionParts, MIN_COHORT_FOR_RATE, type RetentionRecord } from './gymRetention';
+import {
+  assessFollowUp, assessAllFollowUps, summariseFollowUps, loopHeadline,
+  surfaceOrder, quietenedCount, contactsFor, lastContactFor, contactBy, triedLine,
+  paceFor, paceOf, paceNote, landed,
+  CHANNEL_LABEL, OUTCOME_LABEL, WHY_NO_RATE, MIN_JUDGE_DAYS, DEFAULT_COOLDOWN_DAYS,
+  MAX_COOLDOWN_DAYS, MIN_COOLDOWN_DAYS,
+  type Contact, type FollowUpRead,
+} from './interventions';
 import {
   buildStaff, brokenStaffParts, loadingStaffParts, staffCompleteness, staffWarning,
   caveatOf, compareStaff, STAFF_RANK, STAFF_STATUS_LABEL, STAFF_PARTS, STAFF_COST,
@@ -2999,6 +3008,478 @@ function by2(v: ReturnType<typeof buildStaff>, id: string) {
   ok(gld.blocker !== null, 'but nobody can be called absent either — an unread log is not an empty gym');
   ok(pendingRetentionParts(stillReading).length === 4, 'and the page can say which four reads it is waiting on');
   ok(doorLogState(stillReading) === 'unread', 'a log that has not arrived is unread');
+}
+
+
+
+// ── the intervention loop (Phase 4 · surface, contact, record, measure) ─────
+//
+// Surfacing was already done and already honest. What did not exist was any
+// record that somebody had been contacted, so the same name came up every
+// Monday and nobody could say whether any of it helps.
+//
+// "Measure" is the hard half, and every assertion below is about a way of
+// answering it badly:
+//
+//   1. a logged call must not move a drift verdict;
+//   2. an intervention logged yesterday must refuse to report a verdict, on a
+//      window taken from the member's OWN rate;
+//   3. what is reported is a sequence, never a rate that reads as causal;
+//   4. a contacted member sinks; she never disappears;
+//   5. what was tried has to survive being read back.
+{
+  const INOW = Date.parse('2026-08-15T12:00:00Z');
+  const IDAY = 86_400_000;
+  const iAgo = (n: number) => new Date(INOW - n * IDAY).toISOString();
+  const iev = (n: number): ActivityEvent => ({ at: iAgo(n), kind: 'visit' });
+  /** Days-ago list → events. Distinct days, so each is one active day. */
+  const ievs = (days: number[]): ActivityEvent[] => days.map(iev);
+  const span = (from: number, to: number, keep: (d: number) => boolean): number[] => {
+    const out: number[] = [];
+    for (let d = from; d <= to; d++) if (keep(d)) out.push(d);
+    return out;
+  };
+
+  const ic = (id: string, memberId: string, daysAgo: number, over: Partial<Contact> = {}): Contact => ({
+    id, memberId, at: iAgo(daysAgo), channel: 'call',
+    byId: 'staff-1', byName: 'Dana', outcome: 'reached', note: 'Said the 6am is too early now',
+    ...over,
+  });
+
+  const imem = (id: string, status: Membership['status'] = 'active'): Membership => ({
+    id: `m-${id}`, memberId: id, memberName: id, planId: 'p1', planName: 'Gym',
+    startedOn: '2025-06-01', endsOn: null, status,
+  });
+
+  // ── 5 · what was tried, read back ──
+  const tried = ic('k1', 'sara', 3);
+  ok(triedLine(tried, INOW).startsWith(CHANNEL_LABEL.call), 'the line says which channel was used');
+  ok(triedLine(tried, INOW).includes('by Dana'), 'and who did it, so a second person does not repeat the call');
+  ok(triedLine(tried, INOW).includes('3 days ago'), 'and when');
+  ok(triedLine(tried, INOW).includes(OUTCOME_LABEL.reached.toLowerCase()), 'and what came of the contact itself');
+  ok(contactBy({ ...tried, byName: null }) === null,
+    'a staff member whose name was never written down comes back null — never the uuid dressed up as a name');
+  ok(landed('reached') === true && landed('bounced') === false && landed('left_message') === null,
+    'a message left on an answerphone reached the phone; whether it reached the person is exactly what nobody knows, and it is null rather than guessed either way');
+  ok(landed('unknown') === null, 'and an unfinished row asserts nothing about whether anybody was spoken to');
+
+  const many = [ic('k3', 'sara', 40), ic('k1', 'sara', 3), ic('k2', 'sara', 20), ic('k9', 'other', 1)];
+  ok(lastContactFor(many, 'sara')!.id === 'k1', 'the most recent contact is the most recent one');
+  ok(contactsFor(many, 'sara').length === 3 && contactsFor(many, 'sara')[2].id === 'k3', 'and the history is newest first');
+  const undated = ic('bad', 'sara', 0, { at: 'not a date' });
+  ok(lastContactFor([undated, ic('k1', 'sara', 9)], 'sara')!.id === 'k1',
+    'a row whose date will not parse must not silently become "the most recent contact"');
+
+  // ── 2 · the window comes from the member's own rate, not from a round number ──
+  ok(paceFor(4)!.judgeAfterDays === MIN_JUDGE_DAYS,
+    'somebody who trained four times a week is judged after the floor of a fortnight — three of their gaps is a weekend, and a weekend is not evidence');
+  ok(paceFor(1)!.judgeAfterDays === 21, 'a once-a-week member needs three weeks');
+  ok(paceFor(0.5)!.judgeAfterDays === 42,
+    'and a fortnightly member needs six — a fortnight of silence is her ordinary gap, and calling that "no effect" is how a gym gives up on somebody who had not gone anywhere');
+  ok(paceFor(0.5)!.judgeAfterDays! > paceFor(7)!.judgeAfterDays!,
+    'the quieter the pattern, the longer before anything can be said. The opposite ordering would be the bug');
+  ok(paceFor(null).judgeAfterDays === null && paceFor(null).basis === 'no-pattern',
+    'no baseline, no window — nothing about a member with no pattern is judgeable at all');
+  ok(paceFor(null).cooldownDays === DEFAULT_COOLDOWN_DAYS,
+    'but there is still a cooldown: "we know nothing about her" is not a licence to ring her daily');
+  ok(paceFor(4).cooldownDays === MIN_COOLDOWN_DAYS && paceFor(0.5).cooldownDays === MAX_COOLDOWN_DAYS,
+    'the gap before a second approach is paced the same way, floored at a week and capped at a month');
+  ok(paceOf(null).basis === 'no-pattern', 'a member with no drift verdict at all paces as no-pattern');
+  ok(paceNote(paceFor(0.5)).includes('42'), 'and the screen can say why the wait is as long as it is');
+
+  // A member who trained four days a week for six weeks, then stopped.
+  // Contact 30 days ago; her window is 14 days, so it has passed.
+  const REC_C = 30;
+  const baseDays = span(45, 86, (d) => (d - 45) % 7 < 4);   // 24 active days over 42
+  const recovered = ievs([...baseDays, 40, 17, 19, 21, 23, 25, 27, 29, 30]);
+  const fRec = assessFollowUp({ contact: ic('c1', 'ret', REC_C), events: recovered, readFromMs: INOW - 150 * IDAY }, INOW);
+  ok(fRec.baselinePerWeek === 4, 'her own settled rate before the drop, measured as it stood on the day of the call');
+  ok(fRec.beforePerWeek === 0.5, 'the state the gym was looking at when it decided to ring');
+  ok(fRec.afterPerWeek === 4, 'and what she actually did in the window afterwards');
+  ok(fRec.verdict === 'recovered' && fRec.backToBaseline === true, 'training picked back up to her own pattern');
+  ok(fRec.reason.includes('not proof it caused it'),
+    'and the sentence says in as many words that this is a sequence — she may have come back anyway, and the record cannot tell');
+  ok(!/\bworked\b/.test(fRec.reason), 'the word "worked" appears nowhere');
+
+  const fell = ievs([...baseDays, 40, 38, 36]);
+  const fFell = assessFollowUp({ contact: ic('c2', 'ret', REC_C), events: fell, readFromMs: INOW - 150 * IDAY }, INOW);
+  ok(fFell.beforePerWeek === 1.5 && fFell.afterPerWeek === 0, 'she was already down, and did nothing at all afterwards');
+  ok(fFell.verdict === 'kept-falling', 'which is a further fall, not a hold');
+
+  const heldEv = ievs([...baseDays, 40, 36, 25, 20]);
+  const fHeld = assessFollowUp({ contact: ic('c3', 'ret', REC_C), events: heldEv, readFromMs: INOW - 150 * IDAY }, INOW);
+  ok(fHeld.beforePerWeek === 1 && fHeld.afterPerWeek === 1 && fHeld.verdict === 'held',
+    'the same either side is "held" — neither a recovery nor a further fall');
+
+  // ── 2 (the one that bites) · an intervention logged yesterday ──
+  const yBase = span(16, 57, (d) => (d - 16) % 7 < 4);
+  const yesterday = assessFollowUp({ contact: ic('c4', 'ret', 1), events: ievs(yBase), readFromMs: INOW - 150 * IDAY }, INOW);
+  ok(yesterday.verdict === 'unknown' && yesterday.blocked === 'too-early',
+    'an intervention logged yesterday reports NO verdict — one day is not a measurement, and "no effect" would be a claim a gym acts on by giving up');
+  ok(yesterday.daysToWait === 13, 'it says how long is left instead');
+  ok(yesterday.afterPerWeek === null, 'and no rate is computed over a window that has not happened');
+
+  // The same elapsed time, two members, two answers — because the window is
+  // theirs and not the calendar's.
+  const wkBase = span(40, 81, (d) => (d - 40) % 7 === 0);       // 6 active days over 42 → 1.0/wk
+  const ftBase = span(40, 81, (d) => (d - 40) % 14 === 0);      // 3 active days over 42 → 0.5/wk
+  const weekly = assessFollowUp({ contact: ic('c5', 'wk', 25), events: ievs([...wkBase, 10, 5]), readFromMs: INOW - 150 * IDAY }, INOW);
+  const fortnightly = assessFollowUp({ contact: ic('c6', 'ft', 25), events: ievs([...ftBase, 10]), readFromMs: INOW - 150 * IDAY }, INOW);
+  ok(weekly.baselinePerWeek === 1 && fortnightly.baselinePerWeek === 0.5, 'two members, two rates');
+  ok(weekly.verdict !== 'unknown', 'twenty-five days is enough to say something about the once-a-week member');
+  ok(fortnightly.verdict === 'unknown' && fortnightly.blocked === 'too-early',
+    'and not enough to say anything about the fortnightly one, contacted on the very same day. A fixed window would have called her a failure while she was between her normal visits');
+  ok(fortnightly.daysToWait === 17, 'seventeen days still to run on her own clock');
+
+  // ── the four other ways it refuses, each a different fact ──
+  const noBase = assessFollowUp({ contact: ic('c7', 'nb', 30), events: ievs([70, 60]), readFromMs: INOW - 150 * IDAY }, INOW);
+  ok(noBase.blocked === 'no-baseline' && noBase.reason.includes('2 active days'),
+    'two visits is not a pattern, and the refusal names what was actually there rather than reporting a fall from a baseline she never had');
+  const silent = assessFollowUp({ contact: ic('c7b', 'nb', 30), events: [], readFromMs: INOW - 150 * IDAY }, INOW);
+  ok(silent.blocked === 'no-baseline' && silent.reason.includes('Not "no effect"'),
+    'and a member with nothing recorded before the contact is a member with no measurement — said in those words, because "no effect" is the reading a gym gives up on somebody for');
+
+  const old = assessFollowUp({ contact: ic('c8', 'ret', 140), events: recovered, readFromMs: INOW - 150 * IDAY }, INOW);
+  ok(old.blocked === 'outside-the-read',
+    'a contact older than the attendance the page read is not judged on a baseline built out of the query\'s own edge');
+  ok(old.reason.includes('read here'), 'and the sentence is about the read, not about the member');
+
+  const bad = assessFollowUp({ contact: undated, events: recovered }, INOW);
+  ok(bad.blocked === 'unreadable-date', 'a row with no readable date has no window to measure from');
+
+  // ── 3 · a second contact inside the window means neither gets the credit ──
+  const twice = [ic('t1', 'ret', 30), ic('t2', 'ret', 20)];
+  const both = assessAllFollowUps(twice, () => recovered, { now: INOW, readFromMs: INOW - 150 * IDAY });
+  const byId = new Map(both.map((f) => [f.contactId, f]));
+  ok(both.length === 2, 'both contacts are assessed');
+  ok(byId.get('t1')!.blocked === 'recontacted',
+    'the first cannot be judged: somebody rang again inside its window, so whatever followed followed both');
+  ok(byId.get('t2')!.verdict !== 'unknown', 'the second, whose own window has run clear, can be');
+
+  const withUndated = assessAllFollowUps([...twice, undated], () => recovered, { now: INOW, readFromMs: INOW - 150 * IDAY });
+  ok(withUndated.length === 3,
+    'a row nobody can date is still reported — it is work somebody did, and dropping it would under-count what the staff actually tried');
+
+  // ── 3 · counts of what followed, and NO rate ──
+  const tally = summariseFollowUps([fRec, fFell, fHeld, yesterday, noBase, old, bad, byId.get('t1')!])!;
+  ok(tally.total === 8 && tally.judged === 3, 'eight contacts, three of them old enough and backed by enough record to look at');
+  ok(tally.recovered === 1 && tally.held === 1 && tally.keptFalling === 1, 'counted by what followed each one');
+  ok(tally.tooEarly === 1 && tally.noBaseline === 1 && tally.outsideTheRead === 1 && tally.recontacted === 1 && tally.unreadable === 1,
+    'and the five refusals are kept apart rather than folded into one dash — "wait nine more days" and "older than this page reads" send a gym to different places');
+  ok(!('rate' in tally) && !('successRate' in tally) && !('worked' in tally),
+    'there is NO success rate on the tally. Everybody in it was contacted BECAUSE they were drifting, so there is no comparable group left alone for a percentage to be higher than — and the members furthest below their own average drift back toward it regardless');
+  ok(WHY_NO_RATE.includes('left alone'), 'and the page says that out loud rather than leaving a suspicious gap');
+  ok(summariseFollowUps(null) === null,
+    'null in, null out: "not read yet" is not "nothing has been tried", and a 0 there tells a gym its staff have done nothing');
+  ok(loopHeadline(summariseFollowUps([])) === null, 'nothing tried, nothing claimed');
+  ok(loopHeadline(summariseFollowUps([yesterday]))!.includes('not a result'),
+    'a loop whose every contact is too young says so, instead of printing three zeroes that read as three failures');
+
+  // ── 1 · a logged call is not a training session ──
+  //
+  // The structural guarantee is that `member_interventions` is not one of the
+  // four parts a RetentionRecord carries and nothing here builds an
+  // ActivityEvent from a Contact. These assertions pin the consequence.
+  const steady = span(0, 56, (d) => d % 2 === 0);
+  const drifting = span(15, 56, (d) => (d - 15) % 7 < 4);
+  const drA = assessDrift({ clientId: 'a', events: ievs(drifting), since: iAgo(200) }, INOW);
+  const drB = assessDrift({ clientId: 'b', events: ievs(drifting), since: iAgo(200) }, INOW);
+  const drC = assessDrift({ clientId: 'c', events: ievs(steady), since: iAgo(200) }, INOW);
+  ok(drA.status === 'at_risk' && drC.status === 'on_track', 'two drifting members and one holding her pattern');
+
+  const iRows = [
+    { memberId: 'a', name: 'A', drift: drA },
+    { memberId: 'b', name: 'B', drift: drB },
+    { memberId: 'c', name: 'C', drift: drC },
+  ];
+  const called = [ic('x1', 'b', 2)];
+  const surf = surfaceOrder(iRows, called, { now: INOW });
+  ok(surf.every((s) => iRows.includes(s.row)),
+    'surfacing hands back the very same row objects — the verdict is untouched, not recomputed with a call folded in');
+  ok(JSON.stringify(summariseDrift(surf.map((s) => s.row.drift))) === JSON.stringify(summariseDrift(iRows.map((r) => r.drift))),
+    'and the band counts are identical with and without the contact. If logging a call nudged a member toward healthy, the loop would feed the gym its own activity back as retention');
+
+  // The sharpest version: a member the record knows nothing about, rung five
+  // times. Five calls are five calls; they are not five days of training.
+  const ghostRec: RetentionRecord = {
+    memberships: sliceReady([imem('ghost')]),
+    visits: sliceReady<Visit>([]), bookings: sliceReady<MemberBooking>([]), sessions: sliceReady<PtSession>([]),
+  };
+  const ghostG = buildGymRetention(ghostRec, { now: INOW });
+  const fiveCalls = [0, 30, 60, 90, 120].map((d, i) => ic(`g${i}`, 'ghost', d));
+  const ghostSurf = surfaceOrder(ghostG.rows!, fiveCalls, { now: INOW });
+  ok(ghostG.rows![0].drift!.unknown === true, 'nothing recorded, so no pattern to judge');
+  ok(ghostSurf[0].row.drift!.unknown === true && ghostSurf[0].row.drift!.status === 'idle',
+    'and five logged calls leave her exactly as unknown as she was — a contact is not a sign of life');
+  ok(ghostSurf[0].contactCount === 5, 'though the loop knows perfectly well that five were made');
+  ok(assessFollowUp({ contact: fiveCalls[4], events: [] }, INOW).blocked === 'no-baseline',
+    'and none of them can be judged, because there is no pattern of hers to judge against');
+
+  // ── 4 · quieten, never hide ──
+  ok(surf.length === iRows.length, 'surfacing NEVER drops a row');
+  ok(surf.map((s) => s.row.memberId).sort().join() === 'a,b,c', 'everybody is still there');
+  ok(surf.map((s) => s.row.memberId).join() === 'a,b,c',
+    'the contacted member sinks below the drifting member nobody has tried — but stays above the steady one, because she is still drifting and the call did not change that');
+  const flipped = surfaceOrder([iRows[1], iRows[0], iRows[2]], called, { now: INOW });
+  ok(flipped.map((s) => s.row.memberId).join() === 'a,b,c',
+    'and she sinks within her band whichever order she arrived in');
+  const sB = surf.find((s) => s.row.memberId === 'b')!;
+  ok(sB.quietened === true && sB.quietForDays === paceFor(drB.baselinePerWeek).cooldownDays - 2,
+    'quietened, with the wait taken from her own rate rather than a flat fortnight');
+  ok(sB.label !== null && sB.label!.includes('Dana'),
+    'and greyed rather than gone, still carrying who called and when — a gym that stops seeing a member who is still leaving has swapped a nuisance for a blind spot');
+  ok(surf.find((s) => s.row.memberId === 'a')!.quietened === false, 'nobody has tried A, so A is not quietened');
+  ok(quietenedCount(surf) === 1, 'and the screen can say how many rows the order has moved');
+
+  const stale = surfaceOrder(iRows, [ic('x2', 'b', 90)], { now: INOW });
+  ok(stale.find((s) => s.row.memberId === 'b')!.quietened === false,
+    'a call ninety days ago quietens nobody — the cooldown is a pause, not an amnesty');
+  ok(stale.find((s) => s.row.memberId === 'b')!.label !== null,
+    'but it is still shown, because "we rang her in May and she is still going" is the case worth acting on');
+  const unreadable = surfaceOrder(iRows, [ic('x3', 'b', 0, { at: 'nonsense' })], { now: INOW });
+  ok(unreadable.find((s) => s.row.memberId === 'b')!.quietened === false,
+    'and a row nobody can date never pushes anybody down the list');
+}
+
+// ── pass conversion: used a pass, then joined ──
+// PASTE THE IMPORT LINE AT THE TOP OF src/lib/coverage.test.ts:
+//
+// import { buildPassConversion, hostsOf, intervalOf, coversDate, daysBetween, dateOf, attributionSentence, suppressionSentence, CAUSAL_CAVEAT, MONEY_NOTE, type PassConversionRecord } from './passConversion';
+//
+// ── and this block ABOVE the final `if (errors.length)` guard ──
+{
+  const PC_TODAY = '2026-08-26';
+  const pcPass = (
+    id: string,
+    kind: 'guest' | 'drop_in' | 'pack',
+    holderId: string | null,
+    holderName: string | null,
+    host: string | null,
+    issued: string,
+    expires: string | null,
+    spent: number,
+    paid: number | null,
+    currency = 'AED',
+  ): GymPass => ({
+    id, passTypeId: 't1', passTypeName: kind, kind, holderId, holderName,
+    hostMemberId: host, issuedOn: issued, expiresOn: expires,
+    usesTotal: kind === 'guest' && spent === 0 ? 3 : 1, usesSpent: spent,
+    paidCents: paid, currency, note: null,
+  });
+  const pcMem = (
+    id: string, memberId: string, name: string | null, plan: string | null,
+    from: string, to: string | null, status: Membership['status'],
+  ): Membership => ({
+    id, memberId, memberName: name, planId: plan,
+    planName: plan === 'pl1' ? 'Monthly' : plan === 'pl2' ? 'Annual' : null,
+    startedOn: from, endsOn: to, status,
+  });
+  const pcVisit = (id: string, memberId: string | null, passId: string | null, at: string): Visit => ({
+    id, memberId, memberName: null, passId, classId: null, enteredAt: at,
+    exitedAt: null, source: 'desk', note: null,
+  });
+
+  //  ann  two guest passes from hostA, joined 22 days after the first
+  //  ???  one guest pass from hostA to a walk-in with NO ACCOUNT
+  //  ben  a drop-in that ran out, never joined
+  //  cara a guest pass still live — undecided, not lost
+  //  dan  a drop-in while he was already a member
+  //  eve  a guest pass and a membership the SAME DAY
+  //  fin  a member who left in 2025, took a drop-in, and came back
+  const pcPasses: GymPass[] = [
+    pcPass('p1', 'guest', 'ann', 'Ann W', 'hostA', '2026-01-10', '2026-01-17', 1, 5000),
+    pcPass('p2', 'guest', null, 'walk-in', 'hostA', '2026-01-10', '2026-01-17', 1, 5000),
+    pcPass('p3', 'drop_in', 'ben', 'Ben', null, '2026-03-01', '2026-03-02', 1, 8000),
+    pcPass('p4', 'guest', 'cara', null, 'hostB', '2026-08-20', '2026-09-20', 0, null),
+    pcPass('p5', 'drop_in', 'dan', null, null, '2026-05-01', '2026-05-02', 1, 8000),
+    pcPass('p6', 'guest', 'eve', null, 'hostA', '2026-06-01', '2026-06-05', 1, 5000),
+    pcPass('p7', 'guest', 'ann', null, 'hostA', '2026-03-01', '2026-03-05', 1, null),
+    pcPass('p8', 'drop_in', 'fin', null, null, '2026-02-01', '2026-02-02', 1, 8000),
+  ];
+  const pcMems: Membership[] = [
+    pcMem('m1', 'ann', 'Ann Wright', 'pl1', '2026-02-01', null, 'active'),
+    pcMem('m2', 'dan', 'Dan', 'pl1', '2026-01-01', null, 'active'),
+    pcMem('m3', 'eve', 'Eve', 'pl2', '2026-06-01', null, 'active'),
+    pcMem('m4', 'zoe', 'Zoe', 'pl1', '2025-04-01', null, 'active'),
+    pcMem('m5', 'hostA', 'Sara Ali', 'pl1', '2025-01-01', null, 'active'),
+    pcMem('m6', 'hostB', 'Tom Reid', 'pl1', '2025-01-01', null, 'active'),
+    pcMem('m7', 'fin', 'Fin', 'pl1', '2025-01-01', '2025-06-01', 'cancelled'),
+    pcMem('m8', 'fin', 'Fin', 'pl1', '2026-03-01', null, 'active'),
+  ];
+  const pcPlans: MembershipPlan[] = [
+    { id: 'pl1', name: 'Monthly', priceCents: 20000, currency: 'AED', interval: 'month', active: true },
+    { id: 'pl2', name: 'Annual', priceCents: 120000, currency: 'AED', interval: 'year', active: true },
+  ];
+  const pcVisits: Visit[] = [
+    pcVisit('v1', 'ann', 'p1', '2026-01-12T10:00:00Z'),
+    pcVisit('v2', 'zoe', null, '2026-08-20T10:00:00Z'),
+  ];
+
+  const pcRec: PassConversionRecord = {
+    passes: sliceReady(pcPasses),
+    memberships: sliceReady(pcMems),
+    visits: sliceReady(pcVisits),
+    plans: sliceReady(pcPlans),
+  };
+  const pc = buildPassConversion(pcRec, { today: PC_TODAY });
+  const pcBy = new Map((pc.holders ?? []).map((h) => [h.holderId, h]));
+
+  // ── the counts a gym asked for ──
+  ok(pc.passes!.issued === 8 && pc.passes!.live === 1 && pc.passes!.usedUp === 7,
+    'pass counts come straight from summarisePasses — this module extends gymPasses rather than re-deciding what a live pass is');
+  ok(pc.redeemedPasses === 7, 'seven of the eight passes have had a visit taken off them');
+  ok(pc.redemptionVisits === 1,
+    'but the DOOR LOG only saw one of those redemptions — a desk can spend a pass without the terminal recording anybody, and quoting the door figure as "passes used" would undercount by six');
+
+  // ── TRAP 2: a walk-in with no account is unanswerable, not a failure ──
+  ok(pc.anonymousPasses === 1, 'one pass went to somebody with no account');
+  ok(pc.counts!.identified === 6,
+    'six HOLDERS, not eight passes — ann holds two and the anonymous pass belongs to nobody the record can name');
+  ok(pc.counts!.noMembership === 1,
+    'only ben is a miss; the anonymous pass is NOT counted as one, because whether that person joined is unanswerable rather than no');
+  ok(pc.counts!.decided === 4,
+    'four holders have decided. Folding the anonymous pass in would make it five and invent a failure out of a missing account');
+  ok(pc.attributionNote !== null && pc.attributionNote!.includes('1 of 8') && /UNANSWERABLE/.test(pc.attributionNote!),
+    'and the exclusion is stated on the page rather than done silently');
+  ok(attributionSentence(10, 0, null) === null, 'no anonymous passes, no warning to print');
+  ok(/Over half the passes/.test(attributionSentence(10, 6, null) ?? ''),
+    'a gym whose passes mostly go to walk-ins is told the figures describe a minority of what it handed out');
+
+  // ── TRAP 4: a pass that has not run out has not failed ──
+  ok(pcBy.get('cara')!.outcome === 'undecided' && pcBy.get('cara')!.hasLivePass,
+    'cara was given a pass six days ago and has not joined — undecided');
+  ok(pc.counts!.undecided === 1 && pc.counts!.decided === 4,
+    'and she is OUT of the denominator: counting her would make the gym’s most recent week of pass-giving look like its worst');
+  ok(pc.undecidedNote !== null && /asymmetry/.test(pc.undecidedNote!),
+    'the note also owns the asymmetry — a live pass whose holder already joined IS counted, so the figure moves as live passes run out');
+
+  // ── TRAP 3: no percentage over a handful, and the SAME floor as /retention ──
+  ok(pc.joinedAfterRate === null && pc.suppressed === 'too-few',
+    'three quarters of four holders is not 75% of anything an owner should act on');
+  ok(pc.floorNote.includes(String(MIN_COHORT_FOR_RATE)),
+    'and the floor is gymRetention’s constant, imported rather than re-picked, so the two screens cannot disagree about the same rule');
+  ok(/10 points|worth 10 points|worth 25 points/.test(suppressionSentence(pc) ?? ''),
+    'the row says what one person is worth instead of showing a bare dash');
+  const pcLoose = buildPassConversion(pcRec, { today: PC_TODAY, minGroup: 4 });
+  ok(pcLoose.joinedAfterRate === 0.75 && pcLoose.suppressed === null,
+    'lower the floor and the same rows carry a percentage — the suppression is the floor, not a missing number');
+
+  // ── TRAP 1: a sequence, never a cause ──
+  ok(!/convert/i.test(pc.headline ?? '') && /nothing here says the pass is why/.test(pc.headline ?? ''),
+    'the headline reports the order and the interval and refuses the arrow between them');
+  ok(/sequence, not a cause/.test(CAUSAL_CAVEAT) && !/conversion rate/i.test(CAUSAL_CAVEAT),
+    'and the caveat the screen must print is a constant, so it cannot drift into "conversion rate" in a later edit');
+
+  // ── who joined, when, and the holder as the unit ──
+  ok(pcBy.get('ann')!.outcome === 'joined-after' && pcBy.get('ann')!.daysToJoin === 22 && pcBy.get('ann')!.passes === 2,
+    'ann held two passes and joined once — counted once');
+  ok(pc.counts!.joinedAfter === 3,
+    'three people joined after a pass. Per-PASS counting would say four, which is how a gym with a few enthusiastic regulars talks itself into a rate it does not have');
+  ok(pcBy.get('eve')!.outcome === 'joined-after' && pcBy.get('eve')!.daysToJoin === 0,
+    'a walk-in who takes a pass and signs up the same afternoon is the most pass-shaped join a gym gets — it must not read as "already a member"');
+  ok(pcBy.get('dan')!.outcome === 'already-member',
+    'dan was on the books before his drop-in, so his membership cannot have followed it — outside the question in both directions');
+  ok(pcBy.get('fin')!.outcome === 'joined-after' && pcBy.get('fin')!.daysToJoin === 28,
+    'fin left in 2025 and came back through a drop-in — a membership that ENDED before the pass does not make him an existing member');
+  ok(coversDate(pcMems[6], '2026-02-01') === false && coversDate(pcMems[1], '2026-05-01') === true,
+    'coversDate reads the end date rather than the status');
+  ok(pcBy.get('ann')!.firstUsedOn === '2026-01-12' && pcBy.get('ben')!.firstUsedOn === null,
+    'when the pass was actually used comes from the door log, and is null rather than back-filled from the issue date');
+  ok(pcBy.get('cara')!.name === null && pcBy.get('ann')!.name === 'Ann Wright',
+    'a holder with no name recorded gets null — never the account id dressed up as a name');
+  ok(pc.holders![0].holderId === 'eve' && pc.holders![1].holderId === 'ann',
+    'joiners lead the list, quickest first');
+
+  // ── how long it took ──
+  ok(pc.interval!.n === 3 && pc.interval!.medianDays === 22 && pc.interval!.minDays === 0 && pc.interval!.maxDays === 28,
+    'the MEDIAN, with its n and its range beside it — one guest who joined two years later would drag a mean into meaninglessness');
+  ok(intervalOf([]) === null && intervalOf(pc.holders!.filter((h) => h.outcome !== 'joined-after')) === null,
+    'and no interval at all over nobody, rather than a confident 0 days');
+  ok(daysBetween('2026-01-10', '2026-02-01') === 22 && daysBetween('2026-02-01', '2026-01-10') === 0,
+    'day arithmetic is UTC and never negative');
+  ok(dateOf('2026-08-26T23:30:00+04:00') === '2026-08-26' && dateOf(null) === null,
+    'a plain date is taken from the string, not parsed and re-formatted into yesterday west of Greenwich');
+
+  // ── which members bring guests who join ──
+  const pcHostA = pc.hosts!.find((h) => h.hostMemberId === 'hostA')!;
+  const pcHostB = pc.hosts!.find((h) => h.hostMemberId === 'hostB')!;
+  ok(pc.hosts!.length === 2 && pc.hosts![0].hostMemberId === 'hostA', 'hosts are ranked by guests who joined');
+  ok(pcHostA.guests === 4 && pcHostA.identified === 2 && pcHostA.joined === 2 && pcHostA.anonymous === 1,
+    'sara issued four guest passes to two identifiable people, both of whom later joined — distinct GUESTS, not distinct passes');
+  ok(pcHostA.hostName === 'Sara Ali',
+    'the host is named from the roster; holderName on a guest pass is the GUEST’s name and would label every host with their visitor');
+  ok(pcHostB.guests === 1 && pcHostB.joined === 0 && pcHostB.undecided === 1,
+    'tom brought one guest whose pass is still live — nought joined, and that is not the same as a guest who declined');
+  ok(hostsOf(pcPasses.filter((p) => p.kind !== 'guest'), pc.holders!, pcMems).length === 0,
+    'drop-ins have no host, so they never appear in the guest table');
+
+  // ── the money: two figures that are never one ──
+  ok(pc.money!.passCents === 39000 && pc.money!.passesPriced === 6 && pc.money!.passesTotal === 8,
+    'pass income counts only the passes whose price somebody recorded, and says how many that was');
+  ok(pc.money!.followingMrrCents === 50000 && pc.money!.followingActive === 3,
+    'the memberships that followed are valued per month through gymRecord.summarise — a yearly plan is a twelfth here exactly as it is on /money');
+  ok(!('total' in (pc.money as unknown as Record<string, unknown>))
+    && !('combinedCents' in (pc.money as unknown as Record<string, unknown>)),
+    'and there is NO total field to tempt anyone: AED 390 already in the till plus AED 500 a month that has not been taken is not AED 890 of anything');
+  ok(/must not be added/.test(MONEY_NOTE), 'the page says so in words as well');
+  ok(pc.money!.mixedCurrency === false, 'one currency here');
+  const pcMixed = buildPassConversion(
+    { ...pcRec, passes: sliceReady([...pcPasses, pcPass('p9', 'drop_in', 'gus', null, null, '2026-04-01', '2026-04-02', 1, 3000, 'GBP')]) },
+    { today: PC_TODAY },
+  );
+  ok(pcMixed.money!.mixedCurrency === true,
+    'sell a pass in a second currency and the total is flagged as adding unlike things');
+
+  // ── a price nobody recorded is not a free pass ──
+  const pcUnpriced = buildPassConversion(
+    { ...pcRec, passes: sliceReady(pcPasses.map((p) => ({ ...p, paidCents: null }))) },
+    { today: PC_TODAY },
+  );
+  ok(pcUnpriced.money!.passCents === null && pcUnpriced.money!.passesPriced === 0,
+    'null, not 0 — a gym reading "pass income: 0.00" after a week of taking cash makes a worse decision than one reading a dash');
+
+  // ── three states, never two ──
+  const pcNoRoster: PassConversionRecord = { ...pcRec, memberships: sliceFailed('relation "memberships" does not exist') };
+  const pcNR = buildPassConversion(pcNoRoster, { today: PC_TODAY });
+  ok(pcNR.passes!.issued === 8 && pcNR.holders === null && pcNR.counts === null && pcNR.joinedAfterRate === null,
+    'a failed roster read leaves the pass counts standing and every conversion figure null — not a gym where no pass holder has ever joined');
+  ok(/unknown here — not none/.test(pcNR.headline ?? ''), 'and the headline says which');
+  ok(pcNR.warning !== null && /whether any pass holder ever joined/.test(pcNR.warning!),
+    'the banner names the missing ANSWER, not the missing query');
+
+  const pcNoPasses = buildPassConversion({ ...pcRec, passes: sliceFailed('boom') }, { today: PC_TODAY });
+  ok(pcNoPasses.passes === null && pcNoPasses.anonymousPasses === null && pcNoPasses.headline === null,
+    'with no passes there is no page, and nothing is claimed — a gym whose pass query failed has not issued nothing');
+
+  const pcNoDoor = buildPassConversion({ ...pcRec, visits: sliceFailed('down') }, { today: PC_TODAY });
+  ok(pcNoDoor.redemptionVisits === null && pcNoDoor.redeemedPasses === 7,
+    'an unread door log makes door-seen redemptions null rather than 0, while uses_spent still answers how many passes were used');
+  ok(pcNoDoor.holders!.every((h) => h.firstUsedOn === null), 'and no pass has a first-use date invented for it');
+
+  const pcNoPlans = buildPassConversion({ ...pcRec, plans: sliceFailed('down') }, { today: PC_TODAY });
+  ok(pcNoPlans.money!.followingMrrCents === null && pcNoPlans.money!.passCents === 39000,
+    'without the price book the memberships cannot be valued, but what the passes took is still known');
+
+  const pcLoading: PassConversionRecord = {
+    passes: sliceLoading(), memberships: sliceLoading(), visits: sliceLoading(), plans: sliceLoading(),
+  };
+  const pcLd = buildPassConversion(pcLoading, { today: PC_TODAY });
+  ok(pcLd.warning === null && pcLd.loading.length === 4 && pcLd.passes === null,
+    'still loading is not a failure and not an empty gym — four reads in flight, no figures claimed');
+
+  const pcEmpty = buildPassConversion({
+    passes: sliceReady<GymPass>([]), memberships: sliceReady(pcMems),
+    visits: sliceReady<Visit>([]), plans: sliceReady(pcPlans),
+  }, { today: PC_TODAY });
+  ok(pcEmpty.passes!.issued === 0 && pcEmpty.headline === null && pcEmpty.counts!.identified === 0,
+    'loaded and genuinely empty is its own third state: nought passes, and no headline pretending to a finding');
+  ok(pcEmpty.joinedAfterRate === null && pcEmpty.suppressed === 'no-denominator' && pcEmpty.attributionNote === null,
+    'a rate over nobody is nothing, not 0%');
+
+  // ── every holder is accounted for exactly once ──
+  ok(pc.counts!.alreadyMember + pc.counts!.joinedAfter + pc.counts!.undecided + pc.counts!.noMembership
+    === pc.counts!.identified,
+    'the four outcomes partition the identified holders — nobody is double-counted and nobody quietly disappears');
 }
 
 if (errors.length) { console.log('COVERAGE FAILURES:\n' + errors.join('\n')); process.exit(1); }
