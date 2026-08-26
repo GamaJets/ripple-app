@@ -255,8 +255,19 @@
       done.hidden = false;
     } else {
       msg.className = 'ok';
+      // The warning about a repeat signup is not padding. Supabase will not
+      // say whether an address already exists, so signing up a SECOND time
+      // with the same address looks identical to the first: it re-sends the
+      // confirmation and returns success. What it does NOT do is change the
+      // password — the original one still stands. Somebody whose first mail
+      // never arrived signs up again with a new password, and is then locked
+      // out by a password they typed thirty seconds ago. That has already
+      // happened to a real user on this site.
       msg.innerHTML = 'Check your email to confirm the address, then sign in from the app. '
-        + '<strong>It can take a few minutes, and it often lands in spam or junk.</strong>';
+        + '<strong>It can take a few minutes, and it often lands in spam or junk.</strong>'
+        + '<br><br>If you have signed up with this address before, keep using your '
+        + '<strong>original password</strong> — signing up again re-sends the email but does '
+        + 'not change the password you first chose.';
       resendWrap.hidden = false;
       resendWrap.dataset.email = $('email').value.trim();
     }
