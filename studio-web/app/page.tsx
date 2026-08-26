@@ -104,9 +104,16 @@ export default function Overview() {
       <Shell me={me} gymName={gym?.name ?? null} current="/">
         <h1>Not your console</h1>
         <p style={{ color: 'var(--ink2)', maxWidth: '60ch', marginTop: 10 }}>
-          Repple Studio on the web is for gym owners. Your account is{' '}
-          <strong>{me.role ?? 'without a role'}</strong>. If that is wrong, ask whoever runs the gym
-          to change it.
+          This screen is for gym owners. Your account is{' '}
+          <strong>{me.role ?? 'without a role'}</strong>.
+          {me.role === 'trainer' ? (
+            <>
+              {' '}The <a href="/door">Door</a> is yours though &mdash; checking people in and out is
+              staff work, and it is in your menu.
+            </>
+          ) : (
+            <> If that is wrong, ask whoever runs the gym to change it.</>
+          )}
         </p>
       </Shell>
     );

@@ -12,7 +12,12 @@ import { supabase } from '@/lib/supabase';
 export interface NavItem { href: string; label: string; roles: Array<'owner' | 'trainer'> }
 
 export const NAV: NavItem[] = [
-  { href: '/', label: 'Overview', roles: ['owner', 'trainer'] },
+  // Owner only, and it must stay in step with app/page.tsx, which rejects any
+  // non-owner outright. This said ['owner','trainer'] while the page said
+  // owner — so a trainer saw Overview in their own nav, clicked it, and was
+  // told "Not your console". A nav that offers what the page refuses is
+  // worse than one that offers nothing.
+  { href: '/', label: 'Overview', roles: ['owner'] },
   { href: '/members', label: 'Members', roles: ['owner'] },
   { href: '/timetable', label: 'Timetable', roles: ['owner'] },
   { href: '/sessions', label: 'Sessions', roles: ['owner'] },
