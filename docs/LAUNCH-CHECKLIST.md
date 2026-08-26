@@ -93,25 +93,42 @@ today. Once the build carrying `app/(owner)/deletions.tsx` is the one on the
 stores, that sentence is understating the product — reword it.
 
 The rest of that page is verified against the schema and should not be touched
-without re-checking: the cascade counts (26 tables directly, 39 transitively,
-17 set-null columns) came from `pg_constraint` on the live database, not from
-memory.
+without re-checking: the cascade counts came from `pg_constraint` on the live
+database, not from memory.
+
+**Those counts move whenever a table is added**, and they already have. On
+26 Aug they went from 26 direct / 39 transitive to **28 direct (32 columns),
+42 transitive, 13 set-null tables (17 columns)** — `gym_shifts` and
+`progress_photo_shares` landed that day. `web/delete-account.html` and
+`web/security.html` both publish them, so re-run this before launch and fix
+both pages if it has moved again:
+
+```sql
+with recursive casc as (
+  select c.conrelid as rel from pg_constraint c
+  where c.contype='f' and c.confdeltype='c' and c.confrelid='public.profiles'::regclass
+  union
+  select c.conrelid from pg_constraint c join casc on c.confrelid = casc.rel
+  where c.contype='f' and c.confdeltype='c')
+select
+  (select count(distinct conrelid) from pg_constraint
+    where contype='f' and confdeltype='c' and confrelid='public.profiles'::regclass) as direct_tables,
+  (select count(*) from (select distinct rel from casc) x)                           as transitive_tables,
+  (select count(*) from pg_constraint
+    where contype='f' and confdeltype='n' and confrelid='public.profiles'::regclass) as setnull_cols;
+```
 
 ---
 
-## 4. Automatic deploys still need one secret
+## 4. ~~Automatic deploys need a secret~~ — DONE 26 Aug 2026
 
-`.github/workflows/deploy-web.yml` publishes `web/` to Cloudflare Pages on every
-push to `main`. It fails until **CLOUDFLARE_API_TOKEN** exists as a repository
-secret. That failure is deliberate — a deploy that silently skips itself is the
-fault the workflow was written to end — but it means every push shows a red run
-until the secret is added.
+`CLOUDFLARE_API_TOKEN` is set and `.github/workflows/deploy-web.yml` publishes
+`web/` to repplefitness.com on every push to `main` that touches it. Verified by
+a real run, not by the secret existing.
 
-Until then, deploys are manual:
-
-```bash
-npx wrangler pages deploy web --project-name=repple --branch=main
-```
+Left here rather than deleted, because if deploys ever go quiet the first thing
+to check is whether that secret still exists — a rolled or expired token fails
+the job loudly, which is the design, but only if somebody reads the red run.
 
 ---
 
