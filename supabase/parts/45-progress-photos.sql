@@ -238,6 +238,8 @@ declare
   r record;
   v_status int;
   v_err text;
+  v_body text;
+  v_absent boolean;
   n int := 0;
 begin
   for r in
@@ -245,18 +247,41 @@ begin
      where purged_at is null and request_id is not null
      limit 500
   loop
-    select status_code, error_msg into v_status, v_err
+    select status_code, error_msg, content
+      into v_status, v_err, v_body
       from net._http_response where id = r.request_id;
 
-    if v_status in (200, 204, 404) then
+    -- Supabase Storage answers a DELETE for a MISSING object with HTTP 400
+    -- whose BODY carries the real story:
+    --
+    --   status_code 400
+    --   {"statusCode":"404","error":"not_found","message":"Object not found",
+    --    "code":"NoSuchKey"}
+    --
+    -- The check was `v_status in (200, 204, 404)`, so an already-absent file
+    -- was NEVER confirmed: it stayed pending, was re-sent on every drain, and
+    -- the queue could not empty. An infinite retry for a file already in the
+    -- state we wanted.
+    --
+    -- Found by queueing a correctly-shaped path for a file that does not
+    -- exist and reading net._http_response, rather than accepting that a
+    -- dispatched request meant a working one.
+    v_absent := v_body is not null
+                and (v_body like '%NoSuchKey%' or v_body like '%"statusCode":"404"%'
+                     or v_body like '%not_found%');
+
+    if v_status in (200, 204, 404) or (v_status = 400 and v_absent) then
       update public.photo_purge
          set purged_at = now(),
-             note = case when v_status = 404 then 'already absent' else 'deleted' end
+             note = case when v_status in (200, 204) then 'deleted' else 'already absent' end
        where path = r.path;
       n := n + 1;
     elsif v_status is not null then
       update public.photo_purge
-         set note = 'storage returned ' || v_status || coalesce(' — ' || v_err, '')
+      -- Keep the body. "storage returned 400" alone is what made this hard to
+      -- read: 400 covers both a missing file and a genuine refusal.
+         set note = 'storage returned ' || v_status
+                    || coalesce(' — ' || left(coalesce(v_body, v_err), 200), '')
        where path = r.path;
     elsif v_err is not null then
       update public.photo_purge set note = v_err where path = r.path;

@@ -32,7 +32,7 @@ import {
 } from '../../src/lib/clientDrift';
 import { useTenant } from '../../src/ui/tenant';
 import { reportError } from '../../src/lib/reportError';
-import { View, Text, Pressable, ScrollView, Modal, TextInput, Alert, KeyboardAvoidingView, Platform, ActivityIndicator, type ViewStyle, type TextStyle } from 'react-native';
+import { View, Text, Pressable, ScrollView, Modal, TextInput, Alert, Image, KeyboardAvoidingView, Platform, ActivityIndicator, type ViewStyle, type TextStyle } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { trialInfo } from '../../src/lib/trial';
@@ -63,6 +63,7 @@ import { useTrainerInvites } from '../../src/ui/trainerInvites';
 import { useClientTags } from '../../src/ui/clientTags';
 import { useProgramTemplates } from '../../src/ui/programTemplates';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
+import { fetchPhotosSharedWithMe, missingSharedFiles, SHARED_URL_TTL_S, type SharedPhoto } from '../../src/lib/photoShare';
 
 /* ── local presentation ───────────────────────────────────────────────────── */
 
@@ -309,6 +310,37 @@ export default function TrainerClients() {
         const { data } = await supabase.from('food_logs').select('name, kcal, via').eq('client_id', sel.id).order('logged_at', { ascending: false }).limit(6);
         if (!cancelled) setClientMeals((data || []).map((r: any) => ({ name: r.name, kcal: r.kcal, via: r.via })));
       } catch { if (!cancelled) setClientMeals([]); }
+    })();
+    return () => { cancelled = true; };
+  }, [sel]);
+  // ── progress photos this client SENT ────────────────────────────────────
+  // A coach sees a progress photo for exactly one reason: the client sent that
+  // photo. There is no roster-wide read and no "linked trainer" policy behind
+  // this — supabase/parts/47-share-progress-photo.sql grants the row and the
+  // file per photo, per coach, and only while the coaching link is live.
+  //
+  // `null` here is "not read yet, or the read failed", never "they have sent
+  // nothing". Those are different facts about another person's body and the
+  // sheet renders them differently.
+  const [shared, setShared] = useState<SharedPhoto[] | null>(null);
+  const [sharedErr, setSharedErr] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setShared(null);
+    setSharedErr(null);
+    if (!sel) return;
+    // A coach-created client (coach_clients) has no account and therefore no
+    // photos; its id is not a uuid, so asking would be a guaranteed error.
+    if (!sel.id.includes('-')) { setShared([]); return; }
+    const forClient = sel.id;
+    (async () => {
+      try {
+        const list = await fetchPhotosSharedWithMe(forClient);
+        if (!cancelled) { setShared(list); setSharedErr(null); }
+      } catch (e) {
+        reportError('trainer.sharedPhotos', e);
+        if (!cancelled) { setShared(null); setSharedErr('Could not load what they have sent you.'); }
+      }
     })();
     return () => { cancelled = true; };
   }, [sel]);
@@ -794,6 +826,55 @@ export default function TrainerClients() {
                   })()}
                 </View>
               ) : null}
+
+              {/* ── progress photos this client sent ─────────────────────────
+                  The ONLY route by which a progress photo reaches a coach. There
+                  is no roster-wide read behind this: each of these is a photo
+                  this person chose, one at a time, and each can be withdrawn.
+                  The three states below are deliberately unalike — "could not
+                  read the list" must never look like "they have sent nothing",
+                  because the second is a fact about them and the first is not. */}
+              <View style={{ marginBottom: sp.xl }}>
+                <SheetHead t={t} title={`Progress photos · sent by ${sel.name.split(' ')[0]}`} />
+                {sharedErr ? (
+                  <Text style={{ ...ty.label, color: t.warn }}>
+                    {sharedErr} That is not the same as them having sent none — the list could not be read, so this sheet cannot say either way.
+                  </Text>
+                ) : shared === null ? (
+                  <Text style={{ ...ty.label, color: t.ink3 }}>Loading what they have sent you…</Text>
+                ) : shared.length === 0 ? (
+                  <Text style={{ ...ty.label, color: t.ink3 }}>
+                    {sel.name.split(' ')[0]} has not sent you any progress photos. You see one only when they send that photo — there is nothing to turn on here, and being their coach does not show you the rest.
+                  </Text>
+                ) : (
+                  <View>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.md }}>
+                      {shared.map((p) => (
+                        <View key={p.id}>
+                          {p.url ? (
+                            <Image source={{ uri: p.url }} style={{ width: 104, height: 142, borderRadius: radius.md, backgroundColor: t.surface2 }} />
+                          ) : (
+                            // The grant is here and the file would not sign.
+                            // A gap, not a blank frame that reads as loading.
+                            <View style={{ width: 104, height: 142, borderRadius: radius.md, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center', paddingHorizontal: sp.sm }}>
+                              <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center' }}>Picture{'\n'}unavailable</Text>
+                            </View>
+                          )}
+                          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, textAlign: 'center' }}>{new Date(p.takenAt).toLocaleDateString()}</Text>
+                        </View>
+                      ))}
+                    </ScrollView>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                      {shared.length === 1 ? 'One photo' : shared.length + ' photos'}, sent by {sel.name.split(' ')[0]} — and only these. They can take any of them back whenever they like; once they do, it stops opening here within {Math.round(SHARED_URL_TTL_S / 60)} minutes.
+                    </Text>
+                    {(missingSharedFiles(shared) ?? 0) > 0 ? (
+                      <Text style={{ ...ty.caption, color: t.warn, marginTop: 4 }}>
+                        {missingSharedFiles(shared) === 1 ? 'One of these has no picture behind it any more.' : `${missingSharedFiles(shared)} of these have no picture behind them any more.`}
+                      </Text>
+                    ) : null}
+                  </View>
+                )}
+              </View>
 
               <View style={{ marginBottom: sp.xl }}>
                 <SheetHead t={t} title="Tags" />

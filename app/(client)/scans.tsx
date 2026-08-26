@@ -46,6 +46,7 @@ import { analyzeInBody, analyzePhysique, visionAvailable, lastVisionError, type 
 import { metricTrends, compositionInsights, METRIC_GROUPS, type ScanMetrics } from '../../src/lib/inbodyMetrics';
 import { focusToGroups, recommendedExercises } from '../../src/lib/focus';
 import { listProgressPhotos, uploadProgressPhoto, deleteProgressPhoto, comparePair, photosNote, missingFileCount, type ProgressPhoto } from '../../src/lib/progressPhotos';
+import { fetchMyCoach, fetchMyShares, sharePhoto, unsharePhoto, shareStateOf, shareLabel, sharedNote, sendBlocker, revokeCaveat, type ShareGrant, type CoachRef } from '../../src/lib/photoShare';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const ITEM_H = 42, VISIBLE = 5;
@@ -121,6 +122,16 @@ export default function Scans() {
   const [photos, setPhotos] = useState<ProgressPhoto[] | null>(null);
   const [photosErr, setPhotosErr] = useState<string | null>(null);
   const [photoBusy, setPhotoBusy] = useState(false);
+  // ── who can see these ──────────────────────────────────────────────────
+  // `shares === null` is "we have not been told", and it stays null when the
+  // read FAILS as well as before it starts. It must never fall to [] on an
+  // error: [] means "your coach can see none of these", which is the one
+  // reassurance this screen is not allowed to invent. Every badge below reads
+  // this through shareStateOf(), which renders unknown as an em-dash.
+  const [shares, setShares] = useState<ShareGrant[] | null>(null);
+  const [coach, setCoach] = useState<CoachRef | null>(null);
+  const [sharesErr, setSharesErr] = useState<string | null>(null);
+  const [shareBusy, setShareBusy] = useState(false);
   const [phys, setPhys] = useState<PhysiqueVision | null>(null);
   const [physBusy, setPhysBusy] = useState(false);
   const [physOpen, setPhysOpen] = useState(false);
@@ -218,6 +229,24 @@ export default function Scans() {
   }, []);
   useEffect(() => { loadPhotos(); }, [loadPhotos]);
 
+  /** Who your coach is, and exactly which photos they can open. Both together,
+   *  because the send control needs both and a half-answer would offer a Send
+   *  button the database then refuses. A failure leaves `shares` at null and
+   *  puts a sentence on screen — it never resolves to "none shared". */
+  const loadShares = useCallback(async () => {
+    try {
+      const [c, g] = await Promise.all([fetchMyCoach(), fetchMyShares()]);
+      setCoach(c);
+      setShares(g);
+      setSharesErr(null);
+    } catch (e) {
+      reportError('scans.photos.shares', e);
+      setShares(null);
+      setSharesErr('Could not check what your coach can see just now.');
+    }
+  }, []);
+  useEffect(() => { loadShares(); }, [loadShares]);
+
   /** Upload + record. Re-reads the list rather than guessing at it, so the
    *  screen only ever shows photos the server has confirmed it holds. */
   const savePhoto = async (uri: string): Promise<boolean> => {
@@ -271,7 +300,11 @@ export default function Scans() {
   };
 
   const removePhoto = (p: ProgressPhoto) => {
-    Alert.alert('Delete this photo?', 'The picture is deleted from storage and removed from your progress. This cannot be undone — your camera roll is not touched.', [
+    const sentToCoach = shareStateOf(p.id, shares) === 'sent';
+    Alert.alert('Delete this photo?', (sentToCoach
+        ? 'Your coach was sent this one — deleting it takes it back from them as well. '
+        : '')
+      + 'The picture is deleted from storage and removed from your progress. This cannot be undone — your camera roll is not touched.', [
       { text: 'Keep it', style: 'cancel' },
       { text: 'Delete', style: 'destructive', onPress: async () => {
         setPhotoBusy(true);
@@ -279,6 +312,11 @@ export default function Scans() {
           await deleteProgressPhoto(p);
           setCmp((c) => c.filter((x) => x !== p.id));
           await loadPhotos();
+          // The grant is removed by the database (the row cascades with the
+          // photo), but this screen must not go on drawing a "Sent to coach"
+          // badge for a photo that no longer exists. Re-read rather than
+          // assume what the cascade did.
+          await loadShares();
         } catch (e) {
           reportError('scans.photos.delete', e);
           // The file comes off storage BEFORE the row, so a failure here means
@@ -288,6 +326,73 @@ export default function Scans() {
         } finally { setPhotoBusy(false); }
       } },
     ]);
+  };
+
+  /** Send ONE photo. The confirmation says "this one photo, and only this one"
+   *  because that is the whole promise of the feature, and it is a promise the
+   *  database keeps: a later photo has no grant row and nothing writes one. */
+  const sendToCoach = (p: ProgressPhoto) => {
+    const blocked = sendBlocker(p, coach, shares);
+    if (blocked) { Alert.alert('Not sent', blocked); return; }
+    const c = coach!;
+    const who = c.name || 'your coach';
+    Alert.alert(`Send this photo to ${who}?`,
+      `They will be able to open this one photo, and only this one. Photos you add later are not sent. You can take it back whenever you like.`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Send', onPress: async () => {
+        setShareBusy(true);
+        try {
+          // The grant comes back FROM the server. Nothing here says "sent"
+          // on the strength of a request that was never confirmed.
+          const g = await sharePhoto(p.id, c.id);
+          setShares((s) => (s === null ? [g] : [g, ...s.filter((x) => x.photoId !== g.photoId)]));
+          Alert.alert('Sent', `${who} can now open this photo. It is listed under "Your coach can see" below until you take it back.`);
+        } catch (e) {
+          reportError('scans.photos.share', e);
+          Alert.alert('Not sent', `That photo was not sent, so ${who} still cannot see it. Nothing about your photos has changed. Try again in a moment.`);
+          await loadShares();
+        } finally { setShareBusy(false); }
+      } },
+    ]);
+  };
+
+  /** Take one back. Deleting the grant closes the row and the file together —
+   *  revokeCaveat() is the one thing it cannot reach, said out loud. */
+  const takeBackFromCoach = (p: ProgressPhoto) => {
+    const c = coach;
+    if (!c) return;
+    const who = c.name || 'your coach';
+    Alert.alert('Take this photo back?', `${who} will no longer be able to open it. ${revokeCaveat()}`, [
+      { text: 'Leave it', style: 'cancel' },
+      { text: 'Take it back', style: 'destructive', onPress: async () => {
+        setShareBusy(true);
+        try {
+          await unsharePhoto(p.id, c.id);
+          setShares((s) => (s === null ? null : s.filter((x) => x.photoId !== p.id)));
+        } catch (e) {
+          reportError('scans.photos.unshare', e);
+          Alert.alert('Still shared', `That photo was not withdrawn, so ${who} can still see it. Try again in a moment.`);
+          await loadShares();
+        } finally { setShareBusy(false); }
+      } },
+    ]);
+  };
+
+  /** Long press on a photo. One sheet, so "who can see this" and "delete this"
+   *  are the same gesture and neither can be missed. */
+  const photoActions = (p: ProgressPhoto) => {
+    const state = shareStateOf(p.id, shares);
+    const when = new Date(p.takenAt).toLocaleDateString();
+    const buttons: { text: string; style?: 'cancel' | 'destructive'; onPress?: () => void }[] = [];
+    if (state === 'sent') buttons.push({ text: 'Take back from coach', onPress: () => takeBackFromCoach(p) });
+    else if (state === 'private') buttons.push({ text: 'Send to coach', onPress: () => sendToCoach(p) });
+    buttons.push({ text: 'Delete photo', style: 'destructive', onPress: () => removePhoto(p) });
+    buttons.push({ text: 'Cancel', style: 'cancel' });
+    Alert.alert(`Photo from ${when}`,
+      state === 'sent' ? 'Your coach can open this one.'
+      : state === 'private' ? 'Only you can see this one.'
+      : 'We could not check whether your coach can see this one, so nothing is offered that depends on knowing.',
+      buttons);
   };
 
   const toggleCmp = (id: string) => setCmp((c) => (c.includes(id) ? c.filter((x) => x !== id) : c.length >= 2 ? [c[1], id] : [...c, id]));
@@ -396,6 +501,61 @@ export default function Scans() {
             <View style={{ flex: 1 }}><Cta label="AI check" wide disabled={photoBusy} onPress={() => physiqueCheck(false)} /></View>
           </View>
           {photoBusy ? <Text style={{ ...ty.caption, fontWeight: '500', color: t.ink2, marginBottom: sp.md }}>Saving to your account…</Text> : null}
+          {shareBusy ? <Text style={{ ...ty.caption, fontWeight: '500', color: t.ink2, marginBottom: sp.md }}>Updating what your coach can see…</Text> : null}
+
+          {/* ── who can see these ───────────────────────────────────────────
+              The standing answer, always on screen, never inferred. Four
+              distinct renders and not one of them is a guess:
+                · the read failed        — say so, and offer to try again
+                · the read has not landed — say that instead of "none"
+                · no coach linked        — there is nobody it could be shared with
+                · N sent                 — and exactly which ones, by date
+              "Could not check" and "none shared" look nothing alike on purpose:
+              one is reassurance, the other is the absence of it. */}
+          <View style={{ backgroundColor: t.surface2, borderRadius: radius.md, padding: sp.md, marginBottom: sp.lg }}>
+            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 4 }}>Your coach can see{sharedNote(shares) ? ' · ' + sharedNote(shares) : ''}</Text>
+            {sharesErr ? (
+              <View>
+                <Text style={{ ...ty.label, color: t.warn }}>
+                  {sharesErr} Nothing has changed either way — this screen just could not read the list, so it will not tell you these are private.
+                </Text>
+                <View style={{ alignSelf: 'flex-start', marginTop: sp.sm }}><Ghost label="Try again" onPress={loadShares} /></View>
+              </View>
+            ) : shares === null ? (
+              <Text style={{ ...ty.label, color: t.ink3 }}>Checking what your coach can see…</Text>
+            ) : !coach ? (
+              <Text style={{ ...ty.label, color: t.ink3 }}>
+                You have no coach linked, so none of these has been sent to anybody and there is nobody to send one to.
+              </Text>
+            ) : shares.length === 0 ? (
+              <Text style={{ ...ty.label, color: t.ink3 }}>
+                {fig(coach.name)} cannot see any of your photos. Press and hold one to send it — one photo at a time, and only the one you pick.
+              </Text>
+            ) : (
+              <View>
+                <Text style={{ ...ty.label, color: t.ink2, marginBottom: sp.sm }}>
+                  {fig(coach.name)} can open {shares.length === 1 ? 'this one' : `these ${shares.length}`}, and nothing else:
+                </Text>
+                {shares.map((g) => {
+                  const p = photos?.find((x) => x.id === g.photoId) ?? null;
+                  return (
+                    <View key={g.photoId} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 5 }}>
+                      {/* A grant whose photo is not in the loaded list is not
+                          silently dropped: the coach can still see it, so it is
+                          named by the date it was sent. */}
+                      <Text style={{ ...ty.label, color: t.ink }}>
+                        {p ? new Date(p.takenAt).toLocaleDateString() : 'A photo not in the list above'}
+                      </Text>
+                      <Pressable onPress={() => { if (p && !shareBusy) takeBackFromCoach(p); }} hitSlop={8} disabled={!p || shareBusy}>
+                        <Text style={{ ...ty.caption, fontWeight: '600', color: p ? t.brand : t.ink3 }}>Take back</Text>
+                      </Pressable>
+                    </View>
+                  );
+                })}
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{revokeCaveat()}</Text>
+              </View>
+            )}
+          </View>
 
           {photos === null ? (
             photosErr ? (
@@ -411,15 +571,16 @@ export default function Scans() {
           ) : photos.length === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>
               No photos yet — add one from your camera or library. They are saved privately to your account,
-              so they are here on any device you sign in to, and nobody else can see them, your coach included.
-              Tap two to compare before → after; press and hold one to delete it for good.
+              so they are here on any device you sign in to. Your coach cannot see any of them: the only way
+              they ever see one is if you send that one photo, and you can take it back afterwards.
+              Tap two to compare before → after; press and hold one for the options.
             </Text>
           ) : (
             <View>
               {(() => {
                 const sel = comparePair(photos, cmp);
                 if (!sel) return (
-                  <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>Tap two photos to compare before → after. Press and hold to delete one.</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>Tap two photos to compare before → after. Press and hold one to send it to your coach, or delete it.</Text>
                 );
                 const pair: [string, ProgressPhoto][] = [['Before', sel.before], ['After', sel.after]];
                 return (
@@ -448,9 +609,12 @@ export default function Scans() {
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.md }}>
                 {photos.map((p) => {
                   const selIdx = cmp.indexOf(p.id);
+                  const shState = shareStateOf(p.id, shares);
                   return (
-                    <Pressable key={p.id} onPress={() => toggleCmp(p.id)} onLongPress={() => removePhoto(p)} delayLongPress={400}
-                      accessibilityRole="button" accessibilityLabel={`Progress photo from ${new Date(p.takenAt).toLocaleDateString()}`} accessibilityHint="Tap to compare, press and hold to delete">
+                    <Pressable key={p.id} onPress={() => toggleCmp(p.id)} onLongPress={() => photoActions(p)} delayLongPress={400}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Progress photo from ${new Date(p.takenAt).toLocaleDateString()} · ${shState === 'sent' ? 'sent to your coach' : shState === 'private' ? 'only you can see it' : 'not known whether your coach can see it'}`}
+                      accessibilityHint="Tap to compare, press and hold to send it to your coach or delete it">
                       <View style={{ borderRadius: radius.md, borderWidth: selIdx >= 0 ? 2 : 0, borderColor: t.brand, overflow: 'hidden' }}>
                         {p.url ? (
                           <Image source={{ uri: p.url }} style={{ width: 110, height: 150, backgroundColor: t.surface2 }} />
@@ -463,6 +627,14 @@ export default function Scans() {
                           </View>
                         )}
                         {selIdx >= 0 ? <View style={{ position: 'absolute', top: 6, right: 6, width: 20, height: 20, borderRadius: radius.pill, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}><Text style={{ ...ty.caption, fontWeight: '600', color: t.brandInk }}>{selIdx + 1}</Text></View> : null}
+                        {/* Every photo carries its own answer to "can my coach
+                            see this?" — including the honest non-answer. The
+                            badge is on the picture, not in a list somewhere
+                            else, so the question is never open while you look
+                            at one. */}
+                        <View style={{ position: 'absolute', left: 0, right: 0, bottom: 0, paddingVertical: 3, backgroundColor: 'rgba(0,0,0,0.55)' }}>
+                          <Text style={{ ...ty.caption, fontWeight: '500', textAlign: 'center', color: shState === 'sent' ? t.brand : '#fff' }}>{shareLabel(shState)}</Text>
+                        </View>
                       </View>
                       <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, textAlign: 'center' }}>{new Date(p.takenAt).toLocaleDateString()}</Text>
                     </Pressable>

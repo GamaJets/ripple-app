@@ -1,0 +1,585 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Repple — security &amp; data</title>
+<meta name="description" content="How access is enforced in Repple: row-level rules per gym, exactly what a coach can and cannot see, why progress photos are deliberately closed to coaches, how deletion works, and where the data is held.">
+<meta property="og:title" content="Repple — security &amp; data">
+<meta property="og:description" content="Row-level rules per gym, what a coach can and cannot see, and what deletion actually removes.">
+<meta property="og:url" content="https://www.repplefitness.com/security">
+<link rel="stylesheet" href="styles.css?v=febfacb053">
+<link rel="icon" href="favicon.png">
+</head>
+<body>
+
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="/">
+      <span class="mark">
+        <svg width="17" height="17" viewBox="0 0 100 100" aria-hidden="true">
+          <g fill="none" stroke="#04211d" stroke-width="8"><circle cx="50" cy="50" r="32" opacity=".45"/><circle cx="50" cy="50" r="20" opacity=".75"/></g>
+          <circle cx="50" cy="50" r="8.5" fill="#04211d"/>
+        </svg>
+      </span>
+      Repple
+    </a>
+    <nav class="site">
+      <a href="/client">Members</a>
+      <a href="/trainer">Coaches</a>
+      <a href="/studio">Gyms</a>
+      <a href="/support" class="sm-hide">Support</a>
+      <a class="get" href="/download"><svg class="appicon" viewBox="0 0 1024 1024" aria-hidden="true" focusable="false"><defs><linearGradient id="nav-tile" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2dd4bf"/><stop offset="1" stop-color="#0d9488"/></linearGradient></defs><rect width="1024" height="1024" rx="220" fill="url(#nav-tile)"/><g stroke="#fff" fill="#fff"><circle cx="512" cy="512" r="330" stroke-width="20" fill="none" opacity=".34"/><circle cx="512" cy="512" r="220" stroke-width="26" fill="none" opacity=".60"/><circle cx="512" cy="512" r="115" stroke-width="32" fill="none" opacity=".90"/><circle cx="512" cy="512" r="52"/></g></svg>Get the app</a>
+      <a class="cta" href="/signup">Create account</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+<section class="hero">
+  <div class="wrap">
+    <div class="lead-in wide">
+      <div class="eyebrow">Security &amp; data</div>
+      <h1 class="display">Enforced at the<br><em>database</em>.</h1>
+      <p class="lede after">
+        Not by what a screen chooses to render. Every table in Repple carries row-level rules
+        keyed to the account asking and, where it matters, to the gym that account belongs to.
+        This page is the mechanism &mdash; who can read what, why a coach cannot see your progress
+        photos, and what deletion actually removes. The policy version of the same ground is in
+        <a href="/privacy">Privacy</a>.
+      </p>
+      <ul class="jump">
+        <li><a href="#who">Who can read what</a></li>
+        <li><a href="#photos">Progress photos</a></li>
+        <li><a href="#fence">How the fence holds</a></li>
+        <li><a href="#deletion">Deletion</a></li>
+        <li><a href="#held">Where it is held</a></li>
+        <li><a href="#limits">What this page does not claim</a></li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ── the rule ───────────────────────────────────────────────────────── -->
+<section class="band">
+  <div class="wrap">
+    <div class="split">
+      <div class="principle">
+        <p class="q">A screen that decides what to show you is a preference. A row your account cannot read is a fact.</p>
+        <p class="lede after-sm">
+          Hidden buttons and filtered lists are how most software describes its permissions. They
+          protect nothing: the request underneath them is still allowed, and anything that can
+          make that request &mdash; a rebuilt app, a copied key, a curl command &mdash; gets the
+          data anyway.
+        </p>
+      </div>
+      <div>
+        <ul class="ticks">
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>The rules live under the data, not over it.</strong> A read that a policy forbids returns nothing, whichever app asked and however the request was made.</span></li>
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>Your gym is the fence, and it is per gym.</strong> The test is not &ldquo;is this caller an owner&rdquo; but &ldquo;is this caller the owner of <em>this</em> gym&rdquo;. Those are different questions and only the second one is safe.</span></li>
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>One implementation per figure.</strong> The web console and the phone app call the same functions over the same rows through the same permissions, so a number cannot read one way at the desk and another way on a phone.</span></li>
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>Health data is never sold or shared for advertising.</strong> It is used to show you your training. There is no other purpose in the system for it to be used for.</span></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── who can read what ──────────────────────────────────────────────── -->
+<section class="band tint" id="who">
+  <div class="wrap">
+    <div class="lead-in wide">
+      <div class="eyebrow">Who can read what</div>
+      <h2 class="hd">Three parties,<br><span class="serif">and one of them is you.</span></h2>
+      <p class="lede">
+        Your gym and your coach are not the same audience and do not get the same access. A gym
+        needs what it takes to run the place. A coach needs what it takes to program for you. The
+        two lists are genuinely different, and neither of them is everything.
+      </p>
+    </div>
+    <div class="scroll">
+      <table class="data">
+        <thead>
+          <tr><th>What is recorded</th><th>You</th><th>Your coach, if you linked one</th><th>Your gym, if you are a member of one</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Sessions, sets, cardio</strong></td>
+            <td>Read and write</td>
+            <td>Read only</td>
+            <td>No</td>
+          </tr>
+          <tr>
+            <td><strong>Meals and food log</strong></td>
+            <td>Read and write</td>
+            <td>Read only</td>
+            <td>No</td>
+          </tr>
+          <tr>
+            <td><strong>Scans, measurements, check-ins, habits</strong></td>
+            <td>Read and write</td>
+            <td>Read only</td>
+            <td>No</td>
+          </tr>
+          <tr>
+            <td><strong>Progress photos</strong></td>
+            <td>Read and write</td>
+            <td><strong>No</strong> &mdash; deliberately, at both layers</td>
+            <td><strong>No</strong></td>
+          </tr>
+          <tr>
+            <td><strong>Messages with your coach</strong></td>
+            <td>Read and write your own</td>
+            <td>Read and write their own</td>
+            <td>No &mdash; an owner has no access to these</td>
+          </tr>
+          <tr>
+            <td><strong>Membership, payments, invoices</strong></td>
+            <td>Read your own</td>
+            <td>No</td>
+            <td>The owner, for the gym they own</td>
+          </tr>
+          <tr>
+            <td><strong>Door visits</strong></td>
+            <td>Read your own</td>
+            <td>No, not as your coach</td>
+            <td>The owner, and staff working the desk</td>
+          </tr>
+          <tr>
+            <td><strong>Class roster</strong></td>
+            <td>Your own bookings</td>
+            <td>The trainer taking that class</td>
+            <td>The owner of that class's gym</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="compare-note">
+      <p>
+        &ldquo;Read only&rdquo; is literal: a coach's access to your training record is a read
+        permission and not a write one, and it exists only while the coaching link does. End the
+        link and the access ends with it. A trainer who works the desk at your gym sees the door
+        log because that is a staff job, not because they are anybody's coach.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ── progress photos ────────────────────────────────────────────────── -->
+<section class="band" id="photos">
+  <div class="wrap">
+    <div class="split flip">
+      <div class="assure">
+        <div class="pair">
+          <div class="card">
+            <div class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></div>
+            <h3>A private bucket</h3>
+            <p>The store your photos go into is not public. Access is keyed to a folder named after your own account, and nothing else can write into it or read out of it.</p>
+          </div>
+          <div class="card">
+            <div class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v13"/><path d="M7 11l5 5 5-5"/><path d="M4 20h16"/></svg></div>
+            <h3>Links that expire</h3>
+            <p>A photo is fetched through a temporary signed link that you mint by asking for it. There is no permanent address that would keep working if it leaked.</p>
+          </div>
+        </div>
+        <div class="card">
+          <div class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3l18 18"/><path d="M10.6 5.1A9.9 9.9 0 0 1 12 5c5 0 9 4.5 9 7a11 11 0 0 1-2.2 3.4M6.5 6.6C4.2 8.1 3 10.3 3 12c0 2.5 4 7 9 7a9.6 9.6 0 0 0 3.9-.8"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg></div>
+          <h3>No coach access, and it was removed on purpose</h3>
+          <p>A read permission for the linked coach existed and has been taken out. It is not an oversight waiting to be corrected, and the reasoning is written into the schema so nobody re-adds it by copying the pattern from the tables either side of it.</p>
+        </div>
+      </div>
+
+      <div>
+        <div class="eyebrow">Progress photos</div>
+        <h2 class="hd">A photograph is not<br><span class="serif">another number.</span></h2>
+        <p class="lede after-sm">
+          Every other thing a coach can read about you is a figure you chose to record for them to
+          coach against. A progress photo is typically taken in underwear, alone, in a bathroom.
+          A coach seeing your body-fat percentage is the product working; a coach seeing that
+          photograph without you choosing it is a different act entirely.
+        </p>
+        <ul class="ticks">
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>There is no consent step yet.</strong> No per-photo sharing control, no indicator that anyone else can see them, no way to take it back. Access without those means people upload believing it is private and are wrong.</span></li>
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>Sharing has to be something you do.</strong> Not something that is quietly true because of who your coach is.</span></li>
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>It bought nothing.</strong> Nothing in the coach app displays a client's progress photos, so the permission granted access no screen was using &mdash; a standing exposure with no feature behind it.</span></li>
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>Latent access is worse than open access.</strong> The day somebody adds a coach-side viewer, the photos would have become visible with no review of consent, because the hard part already looked done.</span></li>
+        </ul>
+        <div class="callout">
+          <p>
+            When per-photo sharing is built, it needs three things together: a flag on the photo,
+            a read rule gated on that flag, and a matching rule on the file itself &mdash; because
+            the record and the image are granted separately. Until all three exist, the answer is
+            no at both layers.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── the fence ──────────────────────────────────────────────────────── -->
+<section class="band tint" id="fence">
+  <div class="wrap">
+    <div class="lead-in wide">
+      <div class="eyebrow">How the fence holds</div>
+      <h2 class="hd">Six things that stop it<br><span class="serif">being decorative.</span></h2>
+      <p class="lede">
+        A permission system is only as good as the ways around it. These are the ones that were
+        found by reviewing the whole schema rather than the feature being worked on, and each is
+        closed in a way that keeps closing as the system grows.
+      </p>
+    </div>
+    <div class="tiles">
+      <div class="tile">
+        <div class="cap">Scope</div>
+        <h3>This gym's owner, not an owner</h3>
+        <p>The eight-word difference that matters most. A rule testing only that the caller holds
+        the owner role opens every gym on the platform to any owner. Every rule tests ownership of
+        the specific gym the row belongs to.</p>
+      </div>
+      <div class="tile">
+        <div class="cap">Identity</div>
+        <h3>You cannot promote yourself</h3>
+        <p>Row-level rules cannot restrict which columns an update touches, so a rule letting you
+        edit your own profile also let you set your own role and move yourself into somebody
+        else's gym. A trigger refuses both. Joining a gym happens by invitation, and there is no
+        other path.</p>
+      </div>
+      <div class="tile">
+        <div class="cap">Grants</div>
+        <h3>Nothing is callable signed out</h3>
+        <p>Postgres grants execute on a new function to everyone by default, and recreating a
+        function to fix something else quietly restores that default. So the grants are re-applied
+        as a sweep over the catalogue rather than a list of names that would go stale the first
+        time somebody adds one.</p>
+      </div>
+      <div class="tile">
+        <div class="cap">Assertions</div>
+        <h3>A policy without RLS is inert</h3>
+        <p>Rules written for a table that never had row-level security switched on look like
+        protection in the migration and are never consulted. Four tables were in exactly that
+        state. The fix asserts that security is on before it writes a rule, and fails loudly if it
+        is not.</p>
+      </div>
+      <div class="tile">
+        <div class="cap">Keys</div>
+        <h3>The key inside the app opens nothing</h3>
+        <p>A public key is compiled into every shipped mobile app; that is how they are built, and
+        anyone can extract it. It is not a credential here. Every rule is written against the
+        signed-in account, so holding the key without an account gets you nothing.</p>
+      </div>
+      <div class="tile">
+        <div class="cap">Secrets</div>
+        <h3>Server keys are never in code</h3>
+        <p>The privileged key used for background work is read from a secret store at the moment
+        it is needed, not written into a function body where anything able to read the schema
+        could read it too.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── deletion ───────────────────────────────────────────────────────── -->
+<section class="band" id="deletion">
+  <div class="wrap">
+    <div class="lead-in wide">
+      <div class="eyebrow">Deletion</div>
+      <h2 class="hd">A delete button that only<br><span class="serif">sets a flag is a lie.</span></h2>
+      <p class="lede">
+        Deletion in Repple removes the account itself, and the account is what the rest of the
+        data hangs from &mdash; so it goes by construction rather than by a hand-maintained list
+        of statements that would drift the first time somebody added a table.
+      </p>
+    </div>
+
+    <figure class="chart">
+      <div class="chart-hd">
+        <div>
+          <span class="chart-k">Counted from the live catalogue</span>
+          <h3>What deleting an account reaches</h3>
+        </div>
+      </div>
+      <div class="chart-scroll">
+        <svg viewBox="0 0 740 214" width="740" height="214" role="img" aria-label="Horizontal bar chart of how far account deletion reaches in the database. 26 tables are deleted along with the person, across 29 columns. 13 tables keep their rows with the person detached from them, across 17 columns. Following the cascade all the way down, 39 tables are reached in total.">
+          <line class="cx-grid" x1="372.8" y1="34" x2="372.8" y2="176"/>
+          <line class="cx-grid" x1="485.6" y1="34" x2="485.6" y2="176"/>
+          <line class="cx-grid" x1="598.4" y1="34" x2="598.4" y2="176"/>
+          <line class="cx-grid" x1="711.2" y1="34" x2="711.2" y2="176"/>
+          <line class="cx-base" x1="260" y1="34" x2="260" y2="176"/>
+
+          <text class="cx-lab" x="250" y="56" text-anchor="end">Deleted with you</text>
+          <text class="cx-ax" x="250" y="72" text-anchor="end">29 columns</text>
+          <rect class="f-hi" x="260" y="40" width="293.3" height="26" rx="3"/>
+          <text class="cx-val" x="563.3" y="58">26 tables</text>
+
+          <text class="cx-lab" x="250" y="104" text-anchor="end">Kept, with you detached</text>
+          <text class="cx-ax" x="250" y="120" text-anchor="end">17 columns</text>
+          <rect class="f-lo" x="260" y="88" width="146.7" height="26" rx="3"/>
+          <text class="cx-val" x="416.7" y="106">13 tables</text>
+
+          <text class="cx-lab" x="250" y="152" text-anchor="end">Reached in total</text>
+          <text class="cx-ax" x="250" y="168" text-anchor="end">following the chain down</text>
+          <rect class="ch-c" x="260" y="136" width="440" height="26" rx="3"/>
+          <text class="cx-val" x="710" y="154" text-anchor="end">39 tables</text>
+
+          <line class="cx-base" x1="260" y1="176" x2="711.2" y2="176"/>
+          <g class="cx-ax">
+            <text x="260" y="196" text-anchor="middle">0</text>
+            <text x="372.8" y="196" text-anchor="middle">10</text>
+            <text x="485.6" y="196" text-anchor="middle">20</text>
+            <text x="598.4" y="196" text-anchor="middle">30</text>
+            <text x="711.2" y="196" text-anchor="middle">40</text>
+          </g>
+        </svg>
+      </div>
+      <figcaption class="chart-note">
+        <strong>The middle bar is the one to read carefully.</strong> Those rows survive with you
+        detached from them &mdash; payments taken, door visits and guest passes, which a gym has
+        tax and legal reasons to keep. Invoices and memberships are <em>not</em> in that set: they
+        point at the person and go when the person does. A gym with a retention obligation needs
+        to know that before it presses the button, so it is stated rather than assumed.
+      </figcaption>
+    </figure>
+
+    <ol class="steps after">
+      <li>
+        <span class="no">1</span>
+        <div>
+          <h3>You ask, in the app or by email</h3>
+          <p>Settings has the request; <a href="mailto:support@repplefitness.com">support@repplefitness.com</a> reaches a person if you would rather it went that way.</p>
+        </div>
+      </li>
+      <li>
+        <span class="no">2</span>
+        <div>
+          <h3>There is a window, and you can take it back</h3>
+          <p>Thirty days, and withdrawing is a real operation rather than a sentence on a page &mdash; there is a function that clears the request, because a grace period nothing can undo is not a grace period.</p>
+        </div>
+      </li>
+      <li>
+        <span class="no">3</span>
+        <div>
+          <h3>Your gym can see it, and only that</h3>
+          <p>A gym owner sees the pending requests for their own gym: who asked, when, and how long is left. Not a general window onto member records &mdash; just what is needed to act on it.</p>
+        </div>
+      </li>
+      <li>
+        <span class="no">4</span>
+        <div>
+          <h3>The record of the deletion is written first</h3>
+          <p>Afterwards the profile is gone and there is nothing left to read a name or a gym from. So the audit row goes in before the delete, which is what lets a gym show its own compliance record once the person no longer exists.</p>
+        </div>
+      </li>
+      <li>
+        <span class="no">5</span>
+        <div>
+          <h3>It can only be actioned for someone who asked</h3>
+          <p>A gym cannot use this to remove a member who has not requested it. That would be a deletion tool wearing a compliance label, and the function refuses it.</p>
+        </div>
+      </li>
+      <li>
+        <span class="no">6</span>
+        <div>
+          <h3>The files are chased separately, and confirmed</h3>
+          <p>Deleting a database row does not delete an image in object storage &mdash; there is no cascade between the two. So the file's location is recorded before the row is gone, a delete is sent for it, and it is marked done only on a reply that actually says the object is no longer there. Nothing is marked deleted because it asked nicely.</p>
+        </div>
+      </li>
+    </ol>
+    <p class="tiny after-sm">
+      <a href="/delete-account">Deleting your account</a> sets out the same ground for a member,
+      including what survives and how to ask.
+    </p>
+  </div>
+</section>
+
+<!-- ── where it is held ───────────────────────────────────────────────── -->
+<section class="band tint" id="held">
+  <div class="wrap">
+    <div class="lead-in">
+      <div class="eyebrow">Where it is held</div>
+      <h2 class="hd">One database,<br><span class="serif">one file store.</span></h2>
+    </div>
+    <div class="strip">
+      <div>
+        <div class="stat-n">Supabase</div>
+        <div class="lbl"><strong>Database, sign-in and files.</strong> Managed Postgres, which is where the row-level rules on this page live. It may be processed outside your country; where data leaves the UK or EEA it moves under the safeguards those rules require.</div>
+      </div>
+      <div>
+        <div class="stat-n">TLS</div>
+        <div class="lbl"><strong>Encrypted in transit and at rest.</strong> Both ends of it, for the database and for the file store.</div>
+      </div>
+      <div>
+        <div class="stat-n">Stripe</div>
+        <div class="lbl"><strong>Card details never reach us.</strong> Where a gym or trainer takes a payment, Stripe handles the card directly. We do not receive or store card numbers.</div>
+      </div>
+      <div>
+        <div class="stat-n">Export</div>
+        <div class="lbl"><strong>Yours to take out.</strong> Anyone with an account can export everything Repple holds about them from Settings, without asking a person for it. A gym can ask us to export everything held for the gym.</div>
+      </div>
+    </div>
+    <p class="tiny after-sm">
+      The full list of the services that process data on our behalf, and what each one is for, is
+      in <a href="/privacy">Privacy</a>.
+    </p>
+  </div>
+</section>
+
+<!-- ── limits ─────────────────────────────────────────────────────────── -->
+<section class="band" id="limits">
+  <div class="wrap">
+    <div class="lead-in wide">
+      <div class="eyebrow">Straight about limits</div>
+      <h2 class="hd">What this page<br><span class="serif">does not claim.</span></h2>
+      <p class="lede">
+        A security page is a place where confident language is cheap, so here is the boundary of
+        what is being asserted above.
+      </p>
+    </div>
+    <div class="tiles">
+      <div class="tile">
+        <div class="cap">Not claimed</div>
+        <h3>No certification, no audit report</h3>
+        <p>Nothing here is one, and none is cited. The review that produced most of what is on this
+        page was our own reading of the whole schema, not a third party's.</p>
+      </div>
+      <div class="tile">
+        <div class="cap">Not claimed</div>
+        <h3>No uptime figure</h3>
+        <p>Repple has not launched publicly, so there is no period long enough to quote an
+        availability number from. A figure without that behind it would be decoration.</p>
+      </div>
+      <div class="tile">
+        <div class="cap">Not claimed</div>
+        <h3>No promise of perfection</h3>
+        <p>Several of the protections described above exist because the same review found the
+        problems they fix. That is what a review is for. It is also a reason to say plainly that
+        the count of what has not been found yet is unknown, as it always is.</p>
+      </div>
+    </div>
+    <div class="callout">
+      <p>
+        If you find something wrong, tell us and it gets fixed:
+        <a href="mailto:support@repplefitness.com">support@repplefitness.com</a>. There is no
+        disclosure programme to enrol in and no form to fill out first.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ── FAQ ────────────────────────────────────────────────────────────── -->
+<section class="band tint">
+  <div class="wrap narrow">
+    <h2 class="hd">Straight answers</h2>
+    <div class="faq">
+      <details>
+        <summary>Can my gym read my training log?</summary>
+        <div class="a"><p>No. A gym sees the membership and attendance information it needs to run the place &mdash; what you are on, what you have paid, when you came in, which classes you booked. Your sessions, sets, meals, scans and photographs are not part of that, and there is no rule anywhere that would let an owner read them.</p></div>
+      </details>
+      <details>
+        <summary>Can my coach read my messages with a different coach?</summary>
+        <div class="a"><p>No. A message is readable by the two people in that conversation and nobody else &mdash; not another coach, and not the gym's owner.</p></div>
+      </details>
+      <details>
+        <summary>What happens to my coach's access when I end the link?</summary>
+        <div class="a"><p>It ends with it. Their read permission is written against the live coaching link, so it is not a copy of your data that they keep &mdash; it is a view that stops resolving.</p></div>
+      </details>
+      <details>
+        <summary>Could another gym see our records?</summary>
+        <div class="a"><p>Every rule is keyed to the specific gym a row belongs to, and being an owner somewhere is not the same as being the owner of your gym. That distinction is the single most common way a system like this leaks, and it is why every rule tests the second thing rather than the first.</p></div>
+      </details>
+      <details>
+        <summary>Will you ever let coaches see progress photos?</summary>
+        <div class="a"><p>Only behind a control you operate, per photo, that you can withdraw. Anything less is people uploading in the belief it is private and being wrong, which is the outcome the current answer exists to prevent. Until that control is built, the answer is no.</p></div>
+      </details>
+      <details>
+        <summary>Does deleting my account delete my gym's records of me?</summary>
+        <div class="a"><p>Partly, and the split matters. Your membership and your invoices go with you. Payments taken, door visits and passes stay as rows with you detached from them, because a gym has tax and legal reasons to keep the fact that money moved. <a href="/delete-account">Deleting your account</a> lists both sides.</p></div>
+      </details>
+      <details>
+        <summary>Do people at Repple look at my data?</summary>
+        <div class="a"><p>Not as a matter of routine. Support work occasionally needs somebody to look at an account to answer the question you asked, and that is the only reason it happens.</p></div>
+      </details>
+    </div>
+  </div>
+</section>
+
+<section class="close-cta">
+  <div class="wrap">
+    <h2 class="display">Ask us <em>anything</em> here.</h2>
+    <p class="lede" style="margin:22px auto 0;max-width:52ch">
+      Including the awkward questions. A due-diligence email gets a straight answer, and a
+      &ldquo;we have not built that&rdquo; where that is the truth.
+    </p>
+    <div class="btn-row">
+      <a class="btn primary" href="mailto:support@repplefitness.com?subject=Security%20and%20data">Email us</a>
+      <a class="btn" href="/privacy">Read the privacy policy</a>
+      <a class="btn" href="/delete-account">How deletion works</a>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="site">
+  <div class="wrap">
+    <div class="cols">
+      <div>
+        <a class="brand" href="/">
+          <span class="mark">
+            <svg width="17" height="17" viewBox="0 0 100 100" aria-hidden="true">
+              <g fill="none" stroke="#04211d" stroke-width="8"><circle cx="50" cy="50" r="32" opacity=".45"/><circle cx="50" cy="50" r="20" opacity=".75"/></g>
+              <circle cx="50" cy="50" r="8.5" fill="#04211d"/>
+            </svg>
+          </span>
+          Repple
+        </a>
+        <p class="tiny" style="margin-top:14px;max-width:34ch">
+          The operating record for gyms, the coaches who work in them, and the people they train.
+        </p>
+      </div>
+      <div>
+        <h5>Apps</h5>
+        <ul>
+          <li><a href="/client">Repple</a></li>
+          <li><a href="/trainer">Repple Coach</a></li>
+          <li><a href="/studio">Repple Studio</a></li>
+        </ul>
+      </div>
+      <div>
+        <h5>Getting started</h5>
+        <ul>
+          <li><a href="/how-it-works">How it works</a></li>
+          <li><a href="/pricing">Pricing</a></li>
+          <li><a href="/signup">Create account</a></li>
+          <li><a href="/forgot-password">Reset password</a></li>
+          <li><a href="/support" class="sm-hide">Support</a></li>
+        </ul>
+      </div>
+      <div>
+        <h5>Legal &amp; data</h5>
+        <ul>
+          <li><a href="/privacy">Privacy</a></li>
+          <li><a href="/terms">Terms</a></li>
+          <li><a href="/security">Security &amp; data</a></li>
+          <li><a href="mailto:support@repplefitness.com">Contact</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="base">
+      <span>© 2026 Repple · Operated by Washateria LLC</span>
+      <span><a href="mailto:support@repplefitness.com">support@repplefitness.com</a></span>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>

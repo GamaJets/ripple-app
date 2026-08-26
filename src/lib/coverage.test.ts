@@ -27,6 +27,7 @@ import { estimateDish, searchDishes, DISHES } from './restaurant';
 import { normaliseEmail, inviteState, isExpired as inviteExpired, isRedeemable as inviteRedeemable, expiryFor as inviteExpiryFor, daysUntilExpiry, inviteBlocker, screenInvites, summariseInvites, DEFAULT_VALID_DAYS, type MemberInvite } from './memberInvites';
 import { weekStartOf, weekDays, shiftWeek, hoursSpanned, shiftHours, hourLabel, buildRota, coverage, shiftsByDay, rosterByTrainer, summariseRota, shiftFromHours, type Shift, type DemandBlock } from './gymRota';
 import { photoObjectPath, isOwnPhotoPath, sortOldestFirst, comparePair, daysApart, photosNote, missingFileCount, rowToPhoto, PHOTO_PATH_RE, type ProgressPhoto } from './progressPhotos';
+import { viewerMaySee, shareStateOf, shareLabel, sharedNote, sharedCount, sendBlocker, sentPhotos, sortNewestShared, missingSharedFiles, revokeCaveat, SHARED_URL_TTL_S, type ShareGrant, type CoachLink, type SharedPhoto } from './photoShare';
 import type { TrainingSession } from './types';
 import { assessDrift, rankClients, sortByDrift, summariseDrift, compareDrift, DRIFT_RANK, DRIFT_LABEL, DEFAULT_WINDOWS, type ActivityEvent, type DriftInput } from './clientDrift';
 import { atRiskClient, noRecordOf } from './trainerMock';
@@ -1790,6 +1791,93 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
   ok(compareDrift(D(noData), D(noData)) === 0, 'a client does not outrank themselves');
   ok(D({ clientId: 'junk', events: [{ at: 'not-a-date', kind: 'workout' }], since: at(56) }).unknown === true,
     'an unreadable timestamp is not a day of training');
+}
+
+
+// ── sending ONE progress photo to your coach ──
+// The consent model, not the plumbing. 47-share-progress-photo.sql enforces all
+// of this in RLS; viewerMaySee() is the same rule in TypeScript and is what the
+// coach screen filters on, so breaking either shows up here.
+{
+  const COACH = 'coach-a', NEW_COACH = 'coach-b', ME = 'client-x', THEM = 'client-y';
+  const mine = { id: 'p1', clientId: ME };
+  const alsoMine = { id: 'p2', clientId: ME };
+  const theirs = { id: 'p9', clientId: THEM };
+  const grant = (photoId: string, clientId: string, coachId: string): ShareGrant =>
+    ({ photoId, clientId, coachId, sharedAt: '2026-08-01T00:00:00.000Z' });
+  const live: CoachLink[] = [{ clientId: ME, coachId: COACH, active: true }, { clientId: THEM, coachId: COACH, active: true }];
+  const ended: CoachLink[] = [{ clientId: ME, coachId: COACH, active: false }];
+  const sentP1 = [grant('p1', ME, COACH)];
+
+  // ── the default is closed ──
+  ok(viewerMaySee(COACH, mine, [], live) === false, 'a coach with no grant sees nothing, however linked');
+  ok(viewerMaySee(COACH, mine, sentP1, live) === true, 'a coach sees the one photo that was sent to them');
+  ok(viewerMaySee(COACH, theirs, sentP1, live) === false, 'and a grant is about ONE photo, not about a person');
+
+  // ── per photo, never per account ──
+  ok(viewerMaySee(COACH, alsoMine, sentP1, live) === false, 'sending one photo does not send the next one');
+
+  // ── revocable: the grant IS the access ──
+  ok(viewerMaySee(COACH, mine, [], live) === false, 'taking the photo back closes it again');
+
+  // ── access ends when the coaching relationship does ──
+  ok(viewerMaySee(COACH, mine, sentP1, ended) === false, 'a coach who is no longer the coach sees nothing, grant or no grant');
+  ok(viewerMaySee(COACH, mine, sentP1, []) === false, 'and no recorded link at all is not a live one');
+  ok(viewerMaySee(NEW_COACH, mine, sentP1, [{ clientId: ME, coachId: NEW_COACH, active: true }]) === false,
+    'a new coach inherits nothing that was sent to the last one');
+
+  // ── one member cannot read another member's shared photo ──
+  ok(viewerMaySee(THEM, mine, sentP1, live) === false, 'another client cannot see a photo that was sent to a coach');
+  ok(viewerMaySee(THEM, mine, [grant('p1', THEM, THEM)], [{ clientId: ME, coachId: THEM, active: true }]) === false,
+    "a grant naming the wrong sender cannot unlock another member's photo");
+  ok(viewerMaySee(ME, mine, [], []) === true, 'and you always see your own, shared or not');
+  ok(viewerMaySee('', mine, sentP1, live) === false, 'nobody signed in sees nothing');
+
+  // ── the client can always tell, and "we do not know" is an answer ──
+  ok(shareStateOf('p1', null) === 'unknown', 'before the grants are read, whether the coach can see it is UNKNOWN');
+  ok(shareStateOf('p1', []) === 'private', 'read and empty is private — a different fact from unknown');
+  ok(shareStateOf('p1', sentP1) === 'sent', 'and a grant reads as sent');
+  ok(shareLabel('unknown') === '—', 'unknown prints as an em-dash, never as the reassuring one');
+  ok(shareLabel('private') === 'Only you' && shareLabel('sent') === 'Sent to coach', 'the two known states say which');
+  ok(sharedCount(null) === null && sharedCount([]) === 0, 'not read is null; read and empty is zero');
+  ok(sharedNote(null) === null, 'no summary line at all until the read lands');
+  ok(sharedNote([]) === 'None sent', 'but "none sent" is stated, not left to be inferred from silence');
+  ok(sharedNote(sentP1) === '1 sent to your coach', 'and the count is the count');
+
+  // ── the send control refuses rather than lies ──
+  const coach = { id: COACH, name: 'Sam' };
+  const withFile = { id: 'p1', url: 'https://signed' };
+  const noFile = { id: 'p2', url: null };
+  ok(sendBlocker(withFile, coach, []) === null, 'a photo with a picture, and a linked coach, can be sent');
+  ok(sendBlocker(withFile, coach, null) !== null, 'nothing is offered while the share list is unknown');
+  ok(sendBlocker(withFile, null, null)!.includes('checking'),
+    'an unknown list speaks BEFORE "you have no coach" — a failed read has not earned that claim');
+  ok(sendBlocker(withFile, null, [])!.includes('coach linked'), 'once the list IS known, having no coach is said plainly');
+  ok(sendBlocker(withFile, coach, sentP1) !== null, 'a photo already sent is not sent again');
+  ok(sendBlocker(noFile, coach, []) !== null, 'and a row with no picture behind it is not sent as though it were one');
+
+  // ── what the client screen lists as visible to the coach ──
+  const shPh = (id: string): ProgressPhoto => ({ id, path: id + '.jpg', takenAt: '2026-01-01T00:00:00.000Z', url: 'u', weightKg: null, bodyFatPct: null });
+  const strip = [shPh('p1'), shPh('p2')];
+  ok(sentPhotos(null, sentP1) === null, 'no photo list, no answer');
+  ok(sentPhotos(strip, null) === null, 'no grant list, no answer — and never an empty one, which would read as "none"');
+  ok(sentPhotos(strip, [])!.length === 0, 'read and empty IS an empty answer, which is a different thing');
+  ok(sentPhotos(strip, sentP1)!.map((p) => p.id).join(',') === 'p1', 'and it lists exactly what was sent');
+
+  // ── the coach's strip ──
+  const sh = (id: string, sharedAt: string, url: string | null): SharedPhoto =>
+    ({ id, path: id + '.jpg', takenAt: '2026-01-01T00:00:00.000Z', sharedAt, url });
+  const inbox = [sh('a', '2026-01-01T00:00:00.000Z', 'u'), sh('c', '2026-03-01T00:00:00.000Z', 'u'), sh('b', '2026-02-01T00:00:00.000Z', null)];
+  const ordered = sortNewestShared(inbox);
+  ok(ordered.map((p) => p.id).join(',') === 'c,b,a', 'the coach sees the most recently sent first');
+  ok(inbox.map((p) => p.id).join(',') === 'a,c,b', "sorting does not mutate the caller's array");
+  ok(missingSharedFiles(null) === null, 'nothing loaded is not "none missing"');
+  ok(missingSharedFiles(ordered) === 1, 'and a grant whose file will not sign is counted, never hidden');
+
+  // ── the one thing revocation cannot reach, pinned to the TTL that bounds it ──
+  ok(SHARED_URL_TTL_S === 5 * 60, 'a coach URL lasts five minutes, so taking a photo back bites in minutes');
+  ok(SHARED_URL_TTL_S < 60 * 60, 'and far less than the hour a member gets for their own photos');
+  ok(revokeCaveat().includes('five minutes'), 'and the app says out loud how long an already-open link keeps working');
 }
 
 if (errors.length) { console.log('COVERAGE FAILURES:\n' + errors.join('\n')); process.exit(1); }
