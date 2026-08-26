@@ -50,11 +50,24 @@ export const WEB_ORIGIN = 'https://repplefitness.com';
  * that disagreed about how to get there is how one of them stayed broken
  * without anyone noticing.
  *
- * `.html` is included because the site is static files on Cloudflare Pages and
- * the extensionless form is a redirect — one hop that some in-app browsers
- * also handle badly. It is in the Supabase redirect allow-list via
- * `https://repplefitness.com/**`.
+ * No `.html`. An earlier version of this comment claimed the extensionless
+ * form was the redirect and the `.html` form was direct. That is inverted, and
+ * measuring it settles it — Cloudflare Pages answers:
+ *
+ *     GET /reset-password.html   308 → /reset-password
+ *     GET /reset-password        200
+ *
+ * so `.html` was buying the very hop it was written to avoid. It matters more
+ * here than a redirect usually does: Supabase returns the recovery tokens in
+ * the URL FRAGMENT, and carrying a fragment across a redirect is a browser
+ * convention rather than a rule. The webviews inside mail clients are exactly
+ * where conventions are not kept, and a dropped fragment looks to the person
+ * like a reset page that opened and did nothing.
+ *
+ * Both forms are in the Supabase redirect allow-list — probed against
+ * /auth/v1/verify, which echoed each back rather than falling through to the
+ * site URL — so this is safe to change. The website sends the same string.
  */
 export function resetPasswordUrl(): string {
-  return `${WEB_ORIGIN}/reset-password.html`;
+  return `${WEB_ORIGIN}/reset-password`;
 }
