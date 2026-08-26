@@ -107,43 +107,41 @@ header.site {
 }
 header.site .wrap {
   display: flex; align-items: center; justify-content: space-between;
-  gap: 24px; height: 66px;
+  gap: 24px; height: 78px;
 }
 .brand {
-  display: inline-flex; align-items: center; gap: 11px;
-  color: var(--ink); font-weight: 600; font-size: 17px;
+  display: inline-flex; align-items: center; gap: 13px;
+  color: var(--ink); font-weight: 600; font-size: 19.5px;
   letter-spacing: -0.02em; text-decoration: none; flex: none;
 }
 .brand:hover { text-decoration: none; }
 .mark {
-  width: 30px; height: 30px; border-radius: 8px; flex: none;
+  width: 38px; height: 38px; border-radius: 10px; flex: none;
   display: grid; place-items: center;
   background: linear-gradient(150deg, var(--accent), color-mix(in srgb, var(--accent) 55%, #000));
   box-shadow: 0 1px 0 rgba(255,255,255,0.14) inset;
 }
 nav.site { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
 nav.site a {
-  color: var(--ink2); font-size: 14.5px; font-weight: 500;
-  padding: 7px 11px; border-radius: 7px; white-space: nowrap;
+  color: var(--ink2); font-size: 15.5px; font-weight: 500;
+  padding: 9px 13px; border-radius: 8px; white-space: nowrap;
 }
 nav.site a:hover { color: var(--ink); background: var(--hair); text-decoration: none; }
 nav.site a[aria-current="page"] { color: var(--ink); background: var(--hair); }
 nav.site a.cta {
   background: var(--accent); color: var(--brand-ink); font-weight: 600;
-  padding: 8px 15px; margin-left: 6px;
+  padding: 10px 18px; margin-left: 8px; font-size: 15.5px;
 }
 nav.site a.cta:hover { filter: brightness(1.08); background: var(--accent); }
 /* On a phone the header must stay one row — a wrapped nav was eating a fifth
    of the viewport before any content appeared. Support drops out of the bar
    (it is in the footer of every page) and the labels lose their "For ". */
-/* On a phone the header must stay one row — a wrapped nav was eating a fifth
-   of the viewport before any content appeared. Support drops out of the bar
-   (it is in the footer of every page) and the labels lose their "For ". */
 @media (max-width: 760px) {
-  header.site .wrap { height: 58px; gap: 8px; flex-wrap: nowrap; }
+  header.site .wrap { height: 64px; gap: 8px; flex-wrap: nowrap; }
   nav.site { gap: 0; flex-wrap: nowrap; }
-  nav.site a { padding: 6px 8px; font-size: 14px; }
-  nav.site a.cta { padding: 8px 12px; margin-left: 4px; }
+  nav.site a { padding: 7px 9px; font-size: 14.5px; }
+  nav.site a.cta { padding: 9px 14px; margin-left: 4px; font-size: 14.5px; }
+  .mark { width: 32px; height: 32px; border-radius: 9px; }
   nav.site a.sm-hide { display: none; }
 }
 @media (max-width: 430px) {
@@ -742,5 +740,5 @@ table.data.vs td .job { display: block; color: var(--ink); font-weight: 500; fon
 /* Header button, so "get the app" is reachable from every page without
    scrolling to the bottom of anything. */
 nav.site a.get { display: inline-flex; align-items: center; gap: 7px; }
-nav.site a.get .appicon { width: 19px; height: 19px; border-radius: 5px; box-shadow: none; }
+nav.site a.get .appicon { width: 26px; height: 26px; border-radius: 7px; box-shadow: none; }
 @media (max-width: 720px) { nav.site a.get .appicon { display: none; } }
