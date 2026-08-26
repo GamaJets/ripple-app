@@ -42,6 +42,15 @@ export interface TrainingSession {
   durationMin: number;
   status: SessionStatus;
   released: boolean;      // re-offered after a cancellation
+  /** What actually happened, once somebody has said. `status` is the SLOT's
+   *  state and is not the delivery result: a session stays `booked` whether it
+   *  was completed, no-showed or cancelled. Null means unmarked — an unknown
+   *  outcome, which src/lib/gymSessions.ts is careful never to read as either a
+   *  yes or a no. The column has always been there; the phone app simply
+   *  dropped it on the floor, so every screen here inferred delivery from
+   *  "booked, and the clock has passed" — the exact inference that module was
+   *  written to end. */
+  outcome?: import('./gymSessions').SessionOutcome | null;
   /** When the client confirmed the session was delivered. From `session_approvals`,
    *  not from `sessions` — the note beside it is private to the client and their
    *  trainer, and RLS cannot hide a single column. */

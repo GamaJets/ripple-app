@@ -30,6 +30,7 @@ import { photoObjectPath, isOwnPhotoPath, sortOldestFirst, comparePair, daysApar
 import { viewerMaySee, shareStateOf, shareLabel, sharedNote, sharedCount, sendBlocker, sentPhotos, sortNewestShared, missingSharedFiles, revokeCaveat, SHARED_URL_TTL_S, type ShareGrant, type CoachLink, type SharedPhoto } from './photoShare';
 import type { TrainingSession } from './types';
 import { assessDrift, rankClients, sortByDrift, summariseDrift, compareDrift, DRIFT_RANK, DRIFT_LABEL, DEFAULT_WINDOWS, type ActivityEvent, type DriftInput } from './clientDrift';
+import { monthToDateRevenue, deliveredByClients, unmarkedNote, monthStart } from './coachRevenue';
 import { atRiskClient, noRecordOf } from './trainerMock';
 
 const errors: string[] = [];
@@ -1878,6 +1879,69 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
   ok(SHARED_URL_TTL_S === 5 * 60, 'a coach URL lasts five minutes, so taking a photo back bites in minutes');
   ok(SHARED_URL_TTL_S < 60 * 60, 'and far less than the hour a member gets for their own photos');
   ok(revokeCaveat().includes('five minutes'), 'and the app says out loud how long an already-open link keeps working');
+}
+
+// ── coachRevenue: a month is worth what was delivered, not what was booked ──
+{
+  // Mid-month so "this month" has a past in it. Local time, like the module.
+  const NOW = new Date(2026, 6, 20, 12, 0, 0).getTime();
+  const HOUR = 3600_000;
+  const at = (day: number, h = 9) => new Date(2026, 6, day, h, 0, 0).toISOString();
+  let seq = 0;
+  const sess = (over: Partial<TrainingSession>): TrainingSession => ({
+    id: 's' + (++seq), trainerId: 't1', clientId: 'c1',
+    startsAt: at(2), durationMin: 60, status: 'booked', released: false, ...over,
+  });
+
+  const FEE = 50;
+  const book = [
+    sess({ outcome: 'completed', clientId: 'c1' }),
+    sess({ outcome: 'completed', clientId: 'c2' }),
+    sess({ outcome: 'no_show', clientId: 'c1' }),
+    sess({ outcome: 'cancelled', clientId: 'c2' }),
+    sess({ outcome: 'late_cancelled', clientId: 'c2' }),
+    sess({ outcome: null, clientId: 'c3' }),            // ended, nobody said
+    sess({ outcome: null, clientId: 'c3', startsAt: at(20, 23) }), // still to come
+    sess({ outcome: 'completed', status: 'available', clientId: null }),
+    sess({ outcome: 'completed', startsAt: new Date(2026, 5, 28).toISOString() }), // last month
+  ];
+  const m = monthToDateRevenue(book, FEE, NOW);
+
+  ok(m.delivered === 2, 'only sessions marked completed count as delivered');
+  ok(m.notDelivered === 3, 'no-show, cancelled and late-cancelled are known outcomes, kept together');
+  ok(m.unmarked === 1, 'an ended session nobody has marked is unmarked — not delivered, not cancelled');
+  ok(m.revenue === 100, 'revenue is delivered sessions at the rate, never a headcount times four');
+  ok(m.delivered + m.notDelivered + m.unmarked === 6, 'a future slot and an open slot are neither');
+
+  // The two inferences this module exists to refuse.
+  ok(monthToDateRevenue(book.filter((x) => x.outcome !== 'completed'), FEE, NOW).revenue === 0,
+    'a month of nothing but no-shows and unmarked sessions is worth nothing, not worth its bookings');
+  ok(m.revenue !== (m.delivered + m.unmarked + m.notDelivered) * FEE,
+    'booked-and-past is not the delivered figure');
+
+  // No rate is not zero earnings.
+  ok(monthToDateRevenue(book, null, NOW).revenue === null, 'no rate set yields null, never $0');
+  ok(monthToDateRevenue(book, 0, NOW).revenue === null, 'and a rate of zero is treated as unset, not as free');
+  ok(monthToDateRevenue(book, null, NOW).delivered === 2, 'though the session count stands without a rate');
+
+  // A session under way is not yet owed and not yet late to be marked.
+  const running = [sess({ outcome: null, startsAt: new Date(NOW - 30 * 60_000).toISOString(), durationMin: 60 })];
+  ok(monthToDateRevenue(running, FEE, NOW).unmarked === 0, 'a session still in progress is not an unmarked one');
+  const justEnded = [sess({ outcome: null, startsAt: new Date(NOW - 2 * HOUR).toISOString(), durationMin: 60 })];
+  ok(monthToDateRevenue(justEnded, FEE, NOW).unmarked === 1, 'and it becomes one once its slot has ended');
+
+  ok(unmarkedNote(m).includes('1 more session has'), 'the unmarked tail is stated, not buried');
+  ok(unmarkedNote({ ...m, unmarked: 0 }) === '', 'and nothing is said when there is nothing to say');
+  ok(unmarkedNote({ ...m, unmarked: 3 }).includes('3 more sessions have'), 'plural reads correctly');
+
+  // Per-client, for "what is this set of clients worth".
+  ok(deliveredByClients(book, new Set(['c1']), FEE, NOW) === 50, 'one delivered session for c1');
+  ok(deliveredByClients(book, new Set(['c3']), FEE, NOW) === 0,
+    'a client whose only session is unmarked is worth 0 here — which is why the screen shows the count too');
+  ok(deliveredByClients(book, new Set(['c1', 'c2']), FEE, NOW) === 100, 'and both together');
+  ok(deliveredByClients(book, new Set(['c1']), null, NOW) === null, 'no rate, no figure');
+
+  ok(monthStart(NOW) === new Date(2026, 6, 1).getTime(), 'the month starts locally, matching streaks and drift');
 }
 
 if (errors.length) { console.log('COVERAGE FAILURES:\n' + errors.join('\n')); process.exit(1); }

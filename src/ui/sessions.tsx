@@ -28,6 +28,10 @@ interface SessionsValue {
 const rowToSession = (r: any): TrainingSession => ({
   id: String(r.id), trainerId: r.trainer_id, clientId: r.client_id,
   startsAt: r.starts_at, durationMin: r.duration_min, status: r.status, released: !!r.released,
+  // The select is `*`, so this has always been in `data` — it was simply not
+  // carried across, which left every consumer inferring delivery from the slot
+  // state. Undefined (not null) when the row predates the column.
+  outcome: r.outcome ?? null,
 });
 
 const Ctx = createContext<SessionsValue | null>(null);

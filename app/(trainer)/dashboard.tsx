@@ -51,6 +51,8 @@ import { areaLabel } from '../../src/lib/injuries';
 import { supabase } from '../../src/lib/supabase';
 import { askCoach } from '../../src/lib/coach';
 import { useRoster } from '../../src/ui/roster';
+import { useSessions } from '../../src/ui/sessions';
+import { monthToDateRevenue, unmarkedNote } from '../../src/lib/coachRevenue';
 import { useCoachFeedback } from '../../src/ui/feedback';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
 import { slotsFor, searchMeals, mealAt, type Slot } from '../../src/lib/meals';
@@ -202,6 +204,7 @@ export default function TrainerClients() {
   const [trial, setTrial] = useState<{ daysLeft: number; expired: boolean } | null>(null);
   useEffect(() => { trialInfo().then((ti) => setTrial({ daysLeft: ti.daysLeft, expired: ti.expired })); }, []);
   const { roster, addClient, removeClient, setClientMode } = useRoster();
+  const { sessions } = useSessions();
   const { tenant } = useTenant();
 
   // ── who is drifting ───────────────────────────────────────────────────────
@@ -345,7 +348,13 @@ export default function TrainerClients() {
     return () => { cancelled = true; };
   }, [sel]);
   const active = roster.length;
-  const revenue = active * sessionFee * 4;
+  // Was `active * sessionFee * 4` — a headcount times an assumed four sessions
+  // a month, labelled "Est. revenue". It is the fabrication the Analytics
+  // screen removed and this one kept, so the same coach could read $1,500/mo
+  // here and the truth there. It moved when the roster moved: adding a client
+  // who never booked raised it. Now it is delivered sessions at the coach's own
+  // rate, from the one definition in src/lib/coachRevenue.ts.
+  const month = monthToDateRevenue(sessions, sessionFee > 0 ? sessionFee : null);
   const unread = roster.reduce((a, c) => a + c.unread, 0);
   // The legacy signal, kept only for the render where the drift read has not
   // landed. It cannot see the client this whole feature is about: with
@@ -583,7 +592,9 @@ export default function TrainerClients() {
         <Section>
           <SectionHead title="This month" note="Analytics" onPress={() => router.push('/(trainer)/analytics')} />
           <KpiRow items={[
-            { label: 'Est. revenue', value: '$' + revenue.toLocaleString(), unit: '/mo' },
+            // Null when no rate is set: an em-dash, not "$0", which would read
+            // as a month's earnings rather than as a missing setting.
+            { label: 'Revenue', value: month.revenue == null ? fig(null) : '$' + month.revenue.toLocaleString(), unit: 'this mo' },
             { label: 'Unread', value: fig(unread) },
             // Null until the record has been read: an em-dash, never a zero
             // that would tell a coach nobody needs them this week.
@@ -591,8 +602,11 @@ export default function TrainerClients() {
           ]} />
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
             {active === 0
-              ? 'Revenue estimates once you have clients and a session rate.'
-              : `${active} client${active > 1 ? 's' : ''} × 4 sessions × $${sessionFee}.`}
+              ? 'Revenue appears once you have clients, a session rate, and sessions marked as delivered.'
+              : sessionFee <= 0
+              ? 'Set a session rate in your profile to see what this month is worth.'
+              : [`${month.delivered} session${month.delivered === 1 ? '' : 's'} marked delivered this month at $${sessionFee}.`,
+                 unmarkedNote(month)].filter(Boolean).join(' ')}
           </Text>
         </Section>
 
