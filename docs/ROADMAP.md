@@ -1,5 +1,8 @@
 # Roadmap
 
+> **Launch gate:** [LAUNCH-CHECKLIST.md](LAUNCH-CHECKLIST.md) lists what has to
+> be put back before the apps go public. Email confirmation is currently OFF.
+
 The plan for turning three apps and a database into the thing the marketing
 site claims: one operating record, read three ways.
 

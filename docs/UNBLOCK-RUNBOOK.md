@@ -1,5 +1,11 @@
 # Repple — "Unblock the real thing" runbook
 
+> **Before you launch, read [LAUNCH-CHECKLIST.md](LAUNCH-CHECKLIST.md).**
+> Several things are deliberately wrong right now because the apps are not out
+> yet — most importantly **email confirmation is switched OFF in Supabase**, so
+> anyone can register an address they do not own. None of it will announce
+> itself when it stops being acceptable.
+
 Goal: turn the app from demo/local data into a **real backend** where a trainer
 account and a client account are two separate logins that share data — the
 trainer sees the *actual* client on their roster with real name, goal, weight
