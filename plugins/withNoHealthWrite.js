@@ -1,3 +1,16 @@
+// DISABLED 26 Aug 2026 — no longer referenced from app.json.
+//
+// This removed NSHealthUpdateUsageDescription while the app only READ from
+// Apple Health. src/lib/wearables/appleHealthWrite.ts now writes completed
+// sessions back, so the declaration is required: iOS refuses a HealthKit
+// write-authorisation request when the usage string is absent.
+//
+// Kept rather than deleted because it is the record of why the key was gone,
+// and because it is what to re-enable if write-back is ever withdrawn. That
+// means adding it back to plugins AND removing healthUpdatePermission, the
+// infoPlist key, the privacy sentence and the guide line — all five move
+// together, which is exactly what was out of step before.
+
 // Remove the HealthKit *write* declaration from Info.plist.
 //
 // Repple only ever reads from Apple Health. src/lib/wearables/appleHealth.ts

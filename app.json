@@ -20,7 +20,8 @@
         "NSHealthShareUsageDescription": "Repple reads your heart rate and calories to log workouts.",
         "NSCameraUsageDescription": "Repple uses the camera to capture InBody scans and progress photos.",
         "NSPhotoLibraryUsageDescription": "Repple lets you upload InBody scans and progress photos.",
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSHealthUpdateUsageDescription": "Repple writes the workouts you log back to Apple Health, so your rings and history include training you did in the gym. Only sessions with a recorded length are written."
       }
     },
     "android": {
@@ -47,7 +48,8 @@
         "react-native-health",
         {
           "isClinicalDataEnabled": false,
-          "healthSharePermission": "Repple reads your heart rate, calories, steps and workouts to track your training."
+          "healthSharePermission": "Repple reads your heart rate, calories, steps and workouts to track your training.",
+          "healthUpdatePermission": "Repple writes the workouts you log back to Apple Health, so your rings and history include training you did in the gym. Only sessions with a recorded length are written."
         }
       ],
       [
@@ -56,8 +58,7 @@
           "color": "#16b8a6"
         }
       ],
-      "expo-web-browser",
-      "./plugins/withNoHealthWrite"
+      "expo-web-browser"
     ],
     "extra": {
       "router": {},
