@@ -2,7 +2,7 @@
   "name": "repple-app",
   "version": "0.1.0",
   "private": true,
-  "description": "Repple \u2014 white-label fitness platform (Expo + Supabase). Production scaffold.",
+  "description": "Repple — white-label fitness platform (Expo + Supabase). Production scaffold.",
   "main": "expo-router/entry",
   "scripts": {
     "start": "expo start",
@@ -24,6 +24,7 @@
     "expo-camera": "~57.0.4",
     "expo-constants": "~57.0.14",
     "expo-crypto": "~57.0.2",
+    "expo-dev-client": "~57.0.15",
     "expo-device": "~57.0.1",
     "expo-haptics": "~57.0.1",
     "expo-image-manipulator": "~57.0.13",
