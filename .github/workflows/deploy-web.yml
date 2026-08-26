@@ -74,6 +74,15 @@ jobs:
           sys.exit(1 if bad else 0)
           PY
 
+      # Give styles.css a URL that changes when its bytes do. Cloudflare caches
+      # the stylesheet for four hours and the HTML for zero, so without this a
+      # visitor pairs new markup with an old stylesheet. That is what made every
+      # chart on the site render solid black on 26 Aug 2026 — the chart classes
+      # existed only in the newer CSS, and an SVG fill with no rule falls back
+      # to black. Running it here means nobody has to remember to.
+      - name: Stamp the stylesheet
+        run: node scripts/stamp-css.mjs
+
       - name: Publish
         uses: cloudflare/wrangler-action@v3
         with:
