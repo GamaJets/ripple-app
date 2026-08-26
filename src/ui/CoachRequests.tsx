@@ -58,6 +58,29 @@ export function CoachRequests() {
       const uid = auth?.user?.id;
       if (!uid) return;
       if (accept) {
+        // link_coaching FIRST, and this ordering is the fix rather than a
+        // detail. Accepting used to write only coach_clients, which is a
+        // roster and nothing more. Every log a coach actually wants —
+        // workouts, measurements, check_ins, habit_logs — is gated by RLS on
+        // `clients.trainer_id = auth.uid()` (19-trainer-read-access.sql), and
+        // nothing here ever set that column. So the client appeared on the
+        // roster, the app said "is now on your roster", and the coach could
+        // read none of their logs. That is the "my coach cannot see my logs"
+        // report.
+        //
+        // link_coaching is SECURITY DEFINER, writes coaching_relationships AND
+        // clients.trainer_id, and since 38-tenant-isolation.sql it authorises
+        // when auth.uid() = p_coach — which is exactly this call.
+        const { error: linkErr } = await supabase.rpc('link_coaching', {
+          p_coach: uid, p_client: r.clientId, p_mode: r.mode,
+        });
+        if (linkErr) {
+          // Stop here. Writing the roster row after this failed is what
+          // produced a coach who could see a name and nothing behind it.
+          reportError('coachRequests.link', linkErr);
+          Alert.alert('Could not accept', `${r.name} was not added. ${linkErr.message}`);
+          setBusy(null); return;
+        }
         // coach_clients is keyed on the client's own id; name and mode are NOT NULL.
         const { error } = await supabase.from('coach_clients').upsert(
           { id: r.clientId, trainer_id: uid, name: r.name, mode: r.mode },

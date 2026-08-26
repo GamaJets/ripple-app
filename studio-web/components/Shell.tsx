@@ -12,13 +12,36 @@ import { supabase } from '@/lib/supabase';
 export interface NavItem { href: string; label: string; roles: Array<'owner' | 'trainer'> }
 
 export const NAV: NavItem[] = [
-  { href: '/', label: 'Overview', roles: ['owner', 'trainer'] },
+  // Owner only, and it must stay in step with app/page.tsx, which rejects any
+  // non-owner outright. This said ['owner','trainer'] while the page said
+  // owner — so a trainer saw Overview in their own nav, clicked it, and was
+  // told "Not your console". A nav that offers what the page refuses is
+  // worse than one that offers nothing.
+  { href: '/', label: 'Overview', roles: ['owner'] },
+  { href: '/members', label: 'Members', roles: ['owner'] },
+  // Beside Members because it is the same record asked as a gym-wide
+  // question: Members answers "how is Sara doing?", this answers
+  // "are we keeping people?".
+  { href: '/retention', label: 'Retention', roles: ['owner'] },
+  // Beside Members, and owner-only for the same reason /close is: it carries
+  // every colleague's pay and delivery record on one screen. A trainer must not
+  // be offered a link to their own performance file, still less to everyone
+  // else's — and the page refuses the role independently, so this nav entry and
+  // that check say the same thing rather than one covering for the other.
+  { href: '/staff', label: 'Staff', roles: ['owner'] },
   { href: '/timetable', label: 'Timetable', roles: ['owner'] },
   { href: '/sessions', label: 'Sessions', roles: ['owner'] },
   { href: '/money', label: 'Money', roles: ['owner'] },
+  // Owner only, like every other entry here bar Door, and for the strongest
+  // reason of any of them: the close carries every payment, every invoice and
+  // every trainer's pay for the month on one screen.
+  { href: '/close', label: 'Close', roles: ['owner'] },
   // Staff work the door, so this is the one operational screen a trainer sees.
   { href: '/door', label: 'Door', roles: ['owner', 'trainer'] },
   { href: '/import', label: 'Import', roles: ['owner'] },
+  // Beside Import deliberately: a gym that can be imported into and not
+  // exported out of is a gym that cannot leave.
+  { href: '/export', label: 'Export', roles: ['owner'] },
 ];
 
 export function Shell({

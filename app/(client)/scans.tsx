@@ -11,9 +11,21 @@
 // card spent on the thing you can act on, and the Georgia serif header is gone.
 //
 // Also removed: the three fake progress-photo frames labelled "Week 1 /
-// Progress / Now" that pretended to be photos the client had taken. With no
-// photos there is now an honest empty state.
-import { useState } from 'react';
+// Progress / Now" that pretended to be photos the client had taken.
+//
+// PROGRESS PHOTOS ARE NOW REAL. They used to live in `useState` — no upload,
+// no bucket, no row — so they were gone the moment this screen unmounted, and
+// the header could only honestly say "N on screen". Every photo now goes to
+// the private `photos` bucket under the member's own uid and gets a row in
+// `progress_photos`; the list is read back oldest-first with signed URLs. See
+// src/lib/progressPhotos.ts for the layout and the delete rules, and
+// supabase/parts/45-progress-photos.sql for the policies behind them.
+//
+// The label reads "N saved" now, and it is true. The three states it can be in
+// — not loaded, loaded and empty, loaded with photos — each render differently
+// on purpose: a screen that shows "no photos yet" while it is still asking is
+// telling somebody their history is gone.
+import { useState, useEffect, useCallback } from 'react';
 import { View, Text, Pressable, Image, TextInput, ScrollView, Modal, Alert, Linking, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
@@ -33,6 +45,8 @@ import { Icon } from '../../src/ui/Icon';
 import { analyzeInBody, analyzePhysique, visionAvailable, lastVisionError, type PhysiqueVision } from '../../src/lib/vision';
 import { metricTrends, compositionInsights, METRIC_GROUPS, type ScanMetrics } from '../../src/lib/inbodyMetrics';
 import { focusToGroups, recommendedExercises } from '../../src/lib/focus';
+import { listProgressPhotos, uploadProgressPhoto, deleteProgressPhoto, comparePair, photosNote, missingFileCount, type ProgressPhoto } from '../../src/lib/progressPhotos';
+import { fetchMyCoach, fetchMyShares, sharePhoto, unsharePhoto, shareStateOf, shareLabel, sharedNote, sendBlocker, revokeCaveat, type ShareGrant, type CoachRef } from '../../src/lib/photoShare';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const ITEM_H = 42, VISIBLE = 5;
@@ -103,11 +117,28 @@ export default function Scans() {
   const scans = cd.scans;
   const [img, setImg] = useState<string | null>(null);
   const [wt, setWt] = useState(''); const [bf, setBf] = useState(''); const [sm, setSm] = useState('');
-  const [photos, setPhotos] = useState<{ uri: string; at: string }[]>([]);
+  // `null` is "not asked yet, or the ask failed" — never "you have none".
+  // `[]` is "asked, and there are none". They render differently below.
+  const [photos, setPhotos] = useState<ProgressPhoto[] | null>(null);
+  const [photosErr, setPhotosErr] = useState<string | null>(null);
+  const [photoBusy, setPhotoBusy] = useState(false);
+  // ── who can see these ──────────────────────────────────────────────────
+  // `shares === null` is "we have not been told", and it stays null when the
+  // read FAILS as well as before it starts. It must never fall to [] on an
+  // error: [] means "your coach can see none of these", which is the one
+  // reassurance this screen is not allowed to invent. Every badge below reads
+  // this through shareStateOf(), which renders unknown as an em-dash.
+  const [shares, setShares] = useState<ShareGrant[] | null>(null);
+  const [coach, setCoach] = useState<CoachRef | null>(null);
+  const [sharesErr, setSharesErr] = useState<string | null>(null);
+  const [shareBusy, setShareBusy] = useState(false);
   const [phys, setPhys] = useState<PhysiqueVision | null>(null);
   const [physBusy, setPhysBusy] = useState(false);
   const [physOpen, setPhysOpen] = useState(false);
-  const [cmp, setCmp] = useState<number[]>([]);
+  // Selection is by photo id, not list index: the list is re-read from the
+  // server after every save and delete, and an index would quietly come to
+  // mean a different photo.
+  const [cmp, setCmp] = useState<string[]>([]);
   const [reading, setReading] = useState(false);
   const [ocrMsg, setOcrMsg] = useState<string | null>(null);
   const [mxOpen, setMxOpen] = useState<string | null>(null);
@@ -181,13 +212,77 @@ export default function Scans() {
       ? 'Your stats updated (weight ' + pw + '→' + w + 'kg, body fat ' + pf + '%→' + f + '%), so your daily targets adjusted: ' + sign(dK) + ' kcal (now ' + after.kcal + '), protein ' + sign(dP) + 'g (now ' + after.protein + 'g). Your meal plan regenerated to match.'
       : 'Added to your history and charts. Targets are essentially unchanged (' + after.kcal + ' kcal / ' + after.protein + 'g protein).');
   };
+  // ── progress photos ────────────────────────────────────────────────────
+  // A failed read leaves `photos` at null, NOT at []. Showing "no photos yet"
+  // to somebody whose photos merely failed to load is telling them their
+  // history is gone, and that is the one wrong answer this section can give.
+  const loadPhotos = useCallback(async () => {
+    try {
+      const list = await listProgressPhotos();
+      setPhotos(list);
+      setPhotosErr(null);
+    } catch (e) {
+      reportError('scans.photos.load', e);
+      setPhotos(null);
+      setPhotosErr('Could not load your photos just now.');
+    }
+  }, []);
+  useEffect(() => { loadPhotos(); }, [loadPhotos]);
+
+  /** Who your coach is, and exactly which photos they can open. Both together,
+   *  because the send control needs both and a half-answer would offer a Send
+   *  button the database then refuses. A failure leaves `shares` at null and
+   *  puts a sentence on screen — it never resolves to "none shared". */
+  const loadShares = useCallback(async () => {
+    try {
+      const [c, g] = await Promise.all([fetchMyCoach(), fetchMyShares()]);
+      setCoach(c);
+      setShares(g);
+      setSharesErr(null);
+    } catch (e) {
+      reportError('scans.photos.shares', e);
+      setShares(null);
+      setSharesErr('Could not check what your coach can see just now.');
+    }
+  }, []);
+  useEffect(() => { loadShares(); }, [loadShares]);
+
+  /** Upload + record. Re-reads the list rather than guessing at it, so the
+   *  screen only ever shows photos the server has confirmed it holds. */
+  const savePhoto = async (uri: string): Promise<boolean> => {
+    setPhotoBusy(true);
+    try {
+      // Normalise to JPEG before it goes up. The library can hand back HEIC or
+      // PNG, and the object is stored as image/jpeg with a .jpg key — calling a
+      // HEIC a JPEG is the kind of small lie that surfaces months later as a
+      // photo that will not render. Resizing also keeps the upload sane on a
+      // phone connection. If the conversion fails we send the original rather
+      // than lose the photo.
+      let out = uri;
+      try {
+        const mm = await ImageManipulator.manipulateAsync(uri, [{ resize: { width: 1512 } }], { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG });
+        if (mm.uri) out = mm.uri;
+      } catch (e) { reportError('scans.photos.convert', e); }
+      await uploadProgressPhoto(out);
+      setCmp([]);
+      await loadPhotos();
+      return true;
+    } catch (e) {
+      reportError('scans.photos.upload', e);
+      Alert.alert('Not saved', 'That photo could not be saved, so it is not in your progress yet. The original in your camera roll is untouched — try again in a moment.');
+      return false;
+    } finally { setPhotoBusy(false); }
+  };
+
   const physiqueCheck = async (fromCamera: boolean) => {
     const perm = fromCamera ? await ImagePicker.requestCameraPermissionsAsync() : await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!perm.granted) { Alert.alert('Permission needed', 'Allow ' + (fromCamera ? 'camera' : 'photo library') + ' access.'); return; }
     const res = fromCamera ? await ImagePicker.launchCameraAsync({ quality: 0.5, base64: true }) : await ImagePicker.launchImageLibraryAsync({ quality: 0.5, base64: true });
     if (res.canceled || !res.assets || !res.assets[0]) return;
     const asset = res.assets[0];
-    setPhotos((p) => [{ uri: asset.uri, at: new Date().toISOString() }, ...p]); setCmp([]);
+    // The photo you hand the AI is a progress photo. It is saved the same way
+    // as any other, and told the same truth about whether it worked.
+    await savePhoto(asset.uri);
     if (!visionAvailable() || !asset.base64) { Alert.alert('AI not on yet', 'Physique analysis turns on with the AI backend.'); return; }
     setPhys(null); setPhysOpen(true); setPhysBusy(true);
     let pb = asset.base64;
@@ -201,9 +296,106 @@ export default function Scans() {
     const perm = fromCamera ? await ImagePicker.requestCameraPermissionsAsync() : await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!perm.granted) { Alert.alert('Permission needed', 'Allow ' + (fromCamera ? 'camera' : 'photo library') + ' access to add a progress photo.'); return; }
     const res = fromCamera ? await ImagePicker.launchCameraAsync({ quality: 0.6 }) : await ImagePicker.launchImageLibraryAsync({ quality: 0.6 });
-    if (!res.canceled && res.assets && res.assets[0]) { setPhotos((p) => [{ uri: res.assets[0].uri, at: new Date().toISOString() }, ...p]); setCmp([]); }
+    if (!res.canceled && res.assets && res.assets[0]) await savePhoto(res.assets[0].uri);
   };
-  const toggleCmp = (i: number) => setCmp((c) => (c.includes(i) ? c.filter((x) => x !== i) : c.length >= 2 ? [c[1], i] : [...c, i]));
+
+  const removePhoto = (p: ProgressPhoto) => {
+    const sentToCoach = shareStateOf(p.id, shares) === 'sent';
+    Alert.alert('Delete this photo?', (sentToCoach
+        ? 'Your coach was sent this one — deleting it takes it back from them as well. '
+        : '')
+      + 'The picture is deleted from storage and removed from your progress. This cannot be undone — your camera roll is not touched.', [
+      { text: 'Keep it', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: async () => {
+        setPhotoBusy(true);
+        try {
+          await deleteProgressPhoto(p);
+          setCmp((c) => c.filter((x) => x !== p.id));
+          await loadPhotos();
+          // The grant is removed by the database (the row cascades with the
+          // photo), but this screen must not go on drawing a "Sent to coach"
+          // badge for a photo that no longer exists. Re-read rather than
+          // assume what the cascade did.
+          await loadShares();
+        } catch (e) {
+          reportError('scans.photos.delete', e);
+          // The file comes off storage BEFORE the row, so a failure here means
+          // nothing was removed. Say exactly that rather than "something went
+          // wrong" — the difference is whether the photo is still there.
+          Alert.alert('Still there', 'That photo could not be deleted, so nothing was removed. Try again in a moment.');
+        } finally { setPhotoBusy(false); }
+      } },
+    ]);
+  };
+
+  /** Send ONE photo. The confirmation says "this one photo, and only this one"
+   *  because that is the whole promise of the feature, and it is a promise the
+   *  database keeps: a later photo has no grant row and nothing writes one. */
+  const sendToCoach = (p: ProgressPhoto) => {
+    const blocked = sendBlocker(p, coach, shares);
+    if (blocked) { Alert.alert('Not sent', blocked); return; }
+    const c = coach!;
+    const who = c.name || 'your coach';
+    Alert.alert(`Send this photo to ${who}?`,
+      `They will be able to open this one photo, and only this one. Photos you add later are not sent. You can take it back whenever you like.`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Send', onPress: async () => {
+        setShareBusy(true);
+        try {
+          // The grant comes back FROM the server. Nothing here says "sent"
+          // on the strength of a request that was never confirmed.
+          const g = await sharePhoto(p.id, c.id);
+          setShares((s) => (s === null ? [g] : [g, ...s.filter((x) => x.photoId !== g.photoId)]));
+          Alert.alert('Sent', `${who} can now open this photo. It is listed under "Your coach can see" below until you take it back.`);
+        } catch (e) {
+          reportError('scans.photos.share', e);
+          Alert.alert('Not sent', `That photo was not sent, so ${who} still cannot see it. Nothing about your photos has changed. Try again in a moment.`);
+          await loadShares();
+        } finally { setShareBusy(false); }
+      } },
+    ]);
+  };
+
+  /** Take one back. Deleting the grant closes the row and the file together —
+   *  revokeCaveat() is the one thing it cannot reach, said out loud. */
+  const takeBackFromCoach = (p: ProgressPhoto) => {
+    const c = coach;
+    if (!c) return;
+    const who = c.name || 'your coach';
+    Alert.alert('Take this photo back?', `${who} will no longer be able to open it. ${revokeCaveat()}`, [
+      { text: 'Leave it', style: 'cancel' },
+      { text: 'Take it back', style: 'destructive', onPress: async () => {
+        setShareBusy(true);
+        try {
+          await unsharePhoto(p.id, c.id);
+          setShares((s) => (s === null ? null : s.filter((x) => x.photoId !== p.id)));
+        } catch (e) {
+          reportError('scans.photos.unshare', e);
+          Alert.alert('Still shared', `That photo was not withdrawn, so ${who} can still see it. Try again in a moment.`);
+          await loadShares();
+        } finally { setShareBusy(false); }
+      } },
+    ]);
+  };
+
+  /** Long press on a photo. One sheet, so "who can see this" and "delete this"
+   *  are the same gesture and neither can be missed. */
+  const photoActions = (p: ProgressPhoto) => {
+    const state = shareStateOf(p.id, shares);
+    const when = new Date(p.takenAt).toLocaleDateString();
+    const buttons: { text: string; style?: 'cancel' | 'destructive'; onPress?: () => void }[] = [];
+    if (state === 'sent') buttons.push({ text: 'Take back from coach', onPress: () => takeBackFromCoach(p) });
+    else if (state === 'private') buttons.push({ text: 'Send to coach', onPress: () => sendToCoach(p) });
+    buttons.push({ text: 'Delete photo', style: 'destructive', onPress: () => removePhoto(p) });
+    buttons.push({ text: 'Cancel', style: 'cancel' });
+    Alert.alert(`Photo from ${when}`,
+      state === 'sent' ? 'Your coach can open this one.'
+      : state === 'private' ? 'Only you can see this one.'
+      : 'We could not check whether your coach can see this one, so nothing is offered that depends on knowing.',
+      buttons);
+  };
+
+  const toggleCmp = (id: string) => setCmp((c) => (c.includes(id) ? c.filter((x) => x !== id) : c.length >= 2 ? [c[1], id] : [...c, id]));
 
   const chrono = [...scans].sort((a, b) => Date.parse(a.takenAt) - Date.parse(b.takenAt));
   const latest = chrono[chrono.length - 1];
@@ -297,55 +489,163 @@ export default function Scans() {
 
         {/* ── progress photos ────────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Progress photos" note={photos.length > 0 ? `${photos.length} saved` : undefined} />
+          {/* "N saved" is now the truth: every one of these is a file in the
+              private `photos` bucket and a row in `progress_photos`. The note
+              is deliberately absent while the list is still loading and while
+              it is genuinely empty — in both of those the body below says
+              which, and a note reading "0 saved" would collapse them into one. */}
+          <SectionHead title="Progress photos" note={photosNote(photos) ?? undefined} />
           <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.lg }}>
-            <View style={{ flex: 1 }}><Ghost label="Upload" onPress={() => addPhoto(false)} /></View>
-            <View style={{ flex: 1 }}><Ghost label="Photo" onPress={() => addPhoto(true)} /></View>
-            <View style={{ flex: 1 }}><Cta label="AI check" wide onPress={() => physiqueCheck(false)} /></View>
+            <View style={{ flex: 1 }}><Ghost label="Upload" onPress={() => { if (!photoBusy) addPhoto(false); }} /></View>
+            <View style={{ flex: 1 }}><Ghost label="Photo" onPress={() => { if (!photoBusy) addPhoto(true); }} /></View>
+            <View style={{ flex: 1 }}><Cta label="AI check" wide disabled={photoBusy} onPress={() => physiqueCheck(false)} /></View>
           </View>
-          {photos.length === 0 ? (
+          {photoBusy ? <Text style={{ ...ty.caption, fontWeight: '500', color: t.ink2, marginBottom: sp.md }}>Saving to your account…</Text> : null}
+          {shareBusy ? <Text style={{ ...ty.caption, fontWeight: '500', color: t.ink2, marginBottom: sp.md }}>Updating what your coach can see…</Text> : null}
+
+          {/* ── who can see these ───────────────────────────────────────────
+              The standing answer, always on screen, never inferred. Four
+              distinct renders and not one of them is a guess:
+                · the read failed        — say so, and offer to try again
+                · the read has not landed — say that instead of "none"
+                · no coach linked        — there is nobody it could be shared with
+                · N sent                 — and exactly which ones, by date
+              "Could not check" and "none shared" look nothing alike on purpose:
+              one is reassurance, the other is the absence of it. */}
+          <View style={{ backgroundColor: t.surface2, borderRadius: radius.md, padding: sp.md, marginBottom: sp.lg }}>
+            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 4 }}>Your coach can see{sharedNote(shares) ? ' · ' + sharedNote(shares) : ''}</Text>
+            {sharesErr ? (
+              <View>
+                <Text style={{ ...ty.label, color: t.warn }}>
+                  {sharesErr} Nothing has changed either way — this screen just could not read the list, so it will not tell you these are private.
+                </Text>
+                <View style={{ alignSelf: 'flex-start', marginTop: sp.sm }}><Ghost label="Try again" onPress={loadShares} /></View>
+              </View>
+            ) : shares === null ? (
+              <Text style={{ ...ty.label, color: t.ink3 }}>Checking what your coach can see…</Text>
+            ) : !coach ? (
+              <Text style={{ ...ty.label, color: t.ink3 }}>
+                You have no coach linked, so none of these has been sent to anybody and there is nobody to send one to.
+              </Text>
+            ) : shares.length === 0 ? (
+              <Text style={{ ...ty.label, color: t.ink3 }}>
+                {fig(coach.name)} cannot see any of your photos. Press and hold one to send it — one photo at a time, and only the one you pick.
+              </Text>
+            ) : (
+              <View>
+                <Text style={{ ...ty.label, color: t.ink2, marginBottom: sp.sm }}>
+                  {fig(coach.name)} can open {shares.length === 1 ? 'this one' : `these ${shares.length}`}, and nothing else:
+                </Text>
+                {shares.map((g) => {
+                  const p = photos?.find((x) => x.id === g.photoId) ?? null;
+                  return (
+                    <View key={g.photoId} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 5 }}>
+                      {/* A grant whose photo is not in the loaded list is not
+                          silently dropped: the coach can still see it, so it is
+                          named by the date it was sent. */}
+                      <Text style={{ ...ty.label, color: t.ink }}>
+                        {p ? new Date(p.takenAt).toLocaleDateString() : 'A photo not in the list above'}
+                      </Text>
+                      <Pressable onPress={() => { if (p && !shareBusy) takeBackFromCoach(p); }} hitSlop={8} disabled={!p || shareBusy}>
+                        <Text style={{ ...ty.caption, fontWeight: '600', color: p ? t.brand : t.ink3 }}>Take back</Text>
+                      </Pressable>
+                    </View>
+                  );
+                })}
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{revokeCaveat()}</Text>
+              </View>
+            )}
+          </View>
+
+          {photos === null ? (
+            photosErr ? (
+              <View>
+                <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
+                  {photosErr} Nothing has been deleted — this screen only failed to read the list, so it cannot tell you what is there.
+                </Text>
+                <View style={{ alignSelf: 'flex-start' }}><Ghost label="Try again" onPress={loadPhotos} /></View>
+              </View>
+            ) : (
+              <Text style={{ ...ty.label, color: t.ink3 }}>Loading your photos…</Text>
+            )
+          ) : photos.length === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>
-              No photos yet — add one from your camera or library, then tap two to compare before → after.
+              No photos yet — add one from your camera or library. They are saved privately to your account,
+              so they are here on any device you sign in to. Your coach cannot see any of them: the only way
+              they ever see one is if you send that one photo, and you can take it back afterwards.
+              Tap two to compare before → after; press and hold one for the options.
             </Text>
           ) : (
             <View>
-              {cmp.length === 2 ? (() => {
-                const a = photos[cmp[0]], b = photos[cmp[1]];
-                const older = Date.parse(a.at) <= Date.parse(b.at) ? a : b;
-                const newer = older === a ? b : a;
-                const days = Math.abs(Math.round((Date.parse(newer.at) - Date.parse(older.at)) / 86400000));
-                const pair: [string, { uri: string; at: string }][] = [['Before', older], ['After', newer]];
+              {(() => {
+                const sel = comparePair(photos, cmp);
+                if (!sel) return (
+                  <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>Tap two photos to compare before → after. Press and hold one to send it to your coach, or delete it.</Text>
+                );
+                const pair: [string, ProgressPhoto][] = [['Before', sel.before], ['After', sel.after]];
                 return (
                   <View style={{ marginBottom: sp.lg }}>
                     <View style={{ flexDirection: 'row', gap: sp.md }}>
                       {pair.map(([label, ph]) => (
                         <View key={label} style={{ flex: 1 }}>
-                          <Image source={{ uri: ph.uri }} style={{ width: '100%', height: 220, borderRadius: radius.md, backgroundColor: t.surface2 }} />
+                          {ph.url ? (
+                            <Image source={{ uri: ph.url }} style={{ width: '100%', height: 220, borderRadius: radius.md, backgroundColor: t.surface2 }} />
+                          ) : (
+                            <View style={{ width: '100%', height: 220, borderRadius: radius.md, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center', paddingHorizontal: sp.md }}>
+                              <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center' }}>Picture unavailable</Text>
+                            </View>
+                          )}
                           <Text style={{ ...ty.label, fontWeight: '500', color: t.ink, marginTop: 6 }}>{label}</Text>
-                          <Text style={{ ...ty.caption, color: t.ink3 }}>{new Date(ph.at).toLocaleDateString()}</Text>
+                          <Text style={{ ...ty.caption, color: t.ink3 }}>{new Date(ph.takenAt).toLocaleDateString()}</Text>
                         </View>
                       ))}
                     </View>
-                    <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.sm }}>{days === 0 ? 'Same day' : `${days} day${days === 1 ? '' : 's'} apart`}</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.sm }}>{sel.days === null ? '—' : sel.days === 0 ? 'Same day' : `${sel.days} day${sel.days === 1 ? '' : 's'} apart`}</Text>
                   </View>
                 );
-              })() : (
-                <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>Tap two photos to compare before → after.</Text>
-              )}
+              })()}
+              {/* Oldest first, left to right — the strip reads as time passing,
+                  which is the whole point of keeping them. */}
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.md }}>
-                {photos.map((p, i) => {
-                  const selIdx = cmp.indexOf(i);
+                {photos.map((p) => {
+                  const selIdx = cmp.indexOf(p.id);
+                  const shState = shareStateOf(p.id, shares);
                   return (
-                    <Pressable key={i} onPress={() => toggleCmp(i)}>
+                    <Pressable key={p.id} onPress={() => toggleCmp(p.id)} onLongPress={() => photoActions(p)} delayLongPress={400}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Progress photo from ${new Date(p.takenAt).toLocaleDateString()} · ${shState === 'sent' ? 'sent to your coach' : shState === 'private' ? 'only you can see it' : 'not known whether your coach can see it'}`}
+                      accessibilityHint="Tap to compare, press and hold to send it to your coach or delete it">
                       <View style={{ borderRadius: radius.md, borderWidth: selIdx >= 0 ? 2 : 0, borderColor: t.brand, overflow: 'hidden' }}>
-                        <Image source={{ uri: p.uri }} style={{ width: 110, height: 150, backgroundColor: t.surface2 }} />
+                        {p.url ? (
+                          <Image source={{ uri: p.url }} style={{ width: 110, height: 150, backgroundColor: t.surface2 }} />
+                        ) : (
+                          // The row is here and the file is not. Show the gap
+                          // rather than a blank frame that looks like a photo
+                          // still loading, or nothing at all.
+                          <View style={{ width: 110, height: 150, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center', paddingHorizontal: sp.sm }}>
+                            <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center' }}>Picture{'\n'}unavailable</Text>
+                          </View>
+                        )}
                         {selIdx >= 0 ? <View style={{ position: 'absolute', top: 6, right: 6, width: 20, height: 20, borderRadius: radius.pill, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}><Text style={{ ...ty.caption, fontWeight: '600', color: t.brandInk }}>{selIdx + 1}</Text></View> : null}
+                        {/* Every photo carries its own answer to "can my coach
+                            see this?" — including the honest non-answer. The
+                            badge is on the picture, not in a list somewhere
+                            else, so the question is never open while you look
+                            at one. */}
+                        <View style={{ position: 'absolute', left: 0, right: 0, bottom: 0, paddingVertical: 3, backgroundColor: 'rgba(0,0,0,0.55)' }}>
+                          <Text style={{ ...ty.caption, fontWeight: '500', textAlign: 'center', color: shState === 'sent' ? t.brand : '#fff' }}>{shareLabel(shState)}</Text>
+                        </View>
                       </View>
-                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, textAlign: 'center' }}>{new Date(p.at).toLocaleDateString()}</Text>
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, textAlign: 'center' }}>{new Date(p.takenAt).toLocaleDateString()}</Text>
                     </Pressable>
                   );
                 })}
               </ScrollView>
+              {(missingFileCount(photos) ?? 0) > 0 ? (
+                <Text style={{ ...ty.caption, color: t.warn, marginTop: sp.md }}>
+                  {missingFileCount(photos) === 1 ? 'One of these has no picture behind it any more.' : `${missingFileCount(photos)} of these have no picture behind them any more.`} Press and hold to clear it.
+                </Text>
+              ) : null}
             </View>
           )}
         </Section>

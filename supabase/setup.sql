@@ -3646,6 +3646,1301 @@ begin
      and deletion_requested_at is null;   -- the first ask is the one that counts
 end $$;
 
+-- ▶ trainer-rota.sql
+
+-- ── The trainer rota ────────────────────────────────────────────────────────
+--
+-- Phase 1. Who is on the gym floor when — and, the part that makes it worth
+-- building, whether that lines up with what the floor is actually doing.
+--
+-- A rota that is only a calendar adds nothing over the spreadsheet it replaces.
+-- The reason this table exists is that the gym already records demand: classes
+-- sit in `gym_classes` with a start and a duration, one-to-ones sit in
+-- `sessions`. Put the supply on the same timeline and two questions answer
+-- themselves — which hours have work booked and nobody rostered, and which
+-- hours have somebody rostered against nothing at all. Neither is answerable
+-- from a rota alone, and neither is answerable from the timetable alone.
+--
+-- ── Why concrete timestamps and not a weekly pattern ────────────────────────
+--
+-- `trainer_availability` (part 24) already holds the recurring pattern: dow +
+-- hour, the shape of a trainer's normal week. That is a different fact. A rota
+-- is what is happening in THIS week — the cover for someone off sick, the
+-- public holiday, the Saturday somebody swapped. Those are edits to a single
+-- occurrence, and a recurrence rule cannot carry them without growing an
+-- exceptions table that is these rows under another name. `gymSchedule
+-- .weeklyOccurrences` made the same call for classes, for the same reason.
+--
+-- Storing timestamptz rather than (date, time) is what makes the comparison
+-- sound: shifts, classes and sessions then live on one timeline and no part of
+-- the app has to reconcile a wall clock against a timezone to ask whether an
+-- hour was covered.
+--
+-- Additive only. Nothing here alters an existing table.
+
+create table if not exists gym_shifts (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references tenants(id) on delete cascade,
+  -- `trainers`, not `profiles`: a shift belongs to somebody who works here. A
+  -- trainer leaving takes their future shifts with them, which is right — a
+  -- rota row for a person who is gone is not history, it is a hole nobody has
+  -- noticed yet.
+  trainer_id uuid not null references trainers(id) on delete cascade,
+  starts_at timestamptz not null,
+  ends_at timestamptz not null,
+  -- A zero-length or reversed shift is always a typo, and it would silently
+  -- cover no hours at all while looking like cover on the screen.
+  constraint gym_shifts_span check (ends_at > starts_at),
+  -- What they are on for. Loose enough to be useful, closed enough that the
+  -- rota can be read at a glance. 'floor' is the default because that is what
+  -- the roadmap item asks about — who is out there if a member needs someone.
+  role text not null default 'floor'
+    check (role in ('floor', 'classes', 'pt', 'desk', 'admin')),
+  -- A pulled shift is kept rather than deleted. "Somebody was rostered and
+  -- dropped out" and "nobody was ever rostered" produce the same hole in the
+  -- cover, but they are different problems and the owner needs to tell them
+  -- apart. gymRota counts neither as cover.
+  status text not null default 'scheduled'
+    check (status in ('scheduled', 'cancelled')),
+  note text,
+  created_at timestamptz not null default now()
+);
+
+-- The rota is always read as a week of one gym, and written as one trainer's
+-- run of shifts. Both directions get an index.
+create index if not exists idx_gym_shifts_tenant on gym_shifts(tenant_id, starts_at);
+create index if not exists idx_gym_shifts_trainer on gym_shifts(trainer_id, starts_at);
+
+-- NOT ENFORCED, deliberately: two overlapping shifts for one trainer. The
+-- exclusion constraint that would catch it needs btree_gist, which this schema
+-- does not install, and an overlap is a rota mistake rather than a corruption —
+-- it is visible on the week view as the same name twice in one row.
+
+-- ── row-level security ──────────────────────────────────────────────────────
+-- Enabled before any policy is written. A policy on a table without RLS on is
+-- inert — Postgres never consults it and Supabase's default grants to anon and
+-- authenticated apply in full, which is exactly how four tables ended up
+-- world-writable until 38-tenant-isolation.sql.
+--
+-- The helpers are SECURITY DEFINER, so a policy calling them does not re-enter
+-- the table it is protecting (see 28-fix-profiles-recursion.sql).
+alter table gym_shifts enable row level security;
+
+-- The rota is the owner's instrument: they write it, and `is_owner_of` scopes
+-- them to THIS gym rather than merely to being an owner somewhere.
+drop policy if exists gym_shifts_owner on gym_shifts;
+create policy gym_shifts_owner on gym_shifts
+  for all using (is_owner_of(tenant_id)) with check (is_owner_of(tenant_id));
+
+-- Trainers read it. A rota nobody rostered on it can see is a rota that gets
+-- re-typed into WhatsApp, which is how it stops being true. Read only: when
+-- their own shift changes it is because the gym moved it, and a trainer who
+-- could edit the rota could quietly uncover the floor.
+drop policy if exists gym_shifts_staff_r on gym_shifts;
+create policy gym_shifts_staff_r on gym_shifts
+  for select using (tenant_id = my_tenant() and my_role() in ('trainer', 'owner'));
+
+-- No functions are added here, so nothing needs the revoke-from-PUBLIC
+-- treatment that 40-function-grants.sql applies. If one is ever added to this
+-- file, re-run that part: Postgres grants EXECUTE to PUBLIC by default and
+-- `anon` resolves through it.
+
+-- ▶ gym-pt-schedule.sql
+
+-- ── One-to-ones on the gym's own timetable ──────────────────────────────────
+--
+-- Phase 1, the half that was still open. The gym's board (studio-web
+-- /timetable) showed classes only, so at 18:00 an owner saw three classes and
+-- had no way to know that four trainers were also on the floor with clients,
+-- or that the studio was holding a class and a one-to-one at the same hour.
+-- The booking half of PT lived in the trainer's private calendar; only the
+-- outcome and payroll half (33, 36) had ever reached the gym.
+--
+-- ── WHY `sessions` AND NOT A NEW TABLE ──────────────────────────────────────
+--
+-- A one-to-one already IS a row in `sessions`: trainer, client, starts_at,
+-- duration_min, and the slot's status — plus, since 33-session-outcomes.sql,
+-- its tenant, its delivery outcome, the rate snapshotted at delivery, and (36)
+-- the payroll run that paid for it.
+--
+-- The booking and the outcome are the same appointment. A parallel
+-- `pt_bookings` table would fork them: payroll prices `sessions`
+-- (src/lib/gymSessions.ts), so anything scheduled into a second table is
+-- either invisible to payroll, or has to be copied into `sessions` as well —
+-- two rows for one hour, which is how a gym ends up paying twice, or not at
+-- all. It would also duplicate the tenant backfill, the fill-tenant trigger,
+-- the outcome stamping and six RLS policies, and then have to keep all of it
+-- in step with the original by hand.
+--
+-- So this part adds only what a *gym-owned* timetable needs and `sessions`
+-- does not already have: where in the building the hour happens, and the right
+-- for the gym — not only the trainer — to put a slot on the board and take one
+-- off again.
+
+-- ── where on the floor ──────────────────────────────────────────────────────
+-- gym_classes has carried `room` since 02-domain-schema.sql. Without the same
+-- column here, the single most useful question a merged board can answer —
+-- "is the studio double-booked at six?" — cannot be asked at all, because half
+-- the things in the room are not on the board.
+alter table public.sessions add column if not exists room text;
+
+-- The timetable reads a week at a time, per gym. idx_sessions_tenant
+-- (33-session-outcomes.sql) is (tenant_id, starts_at desc) and Postgres scans
+-- it backwards for an ascending window, so no second index is added here.
+
+
+-- ── the gym may schedule, not only observe ──────────────────────────────────
+--
+-- 33-session-outcomes.sql gave the owner SELECT and UPDATE: they could read
+-- the record and correct an outcome that was wrong. There was no INSERT and no
+-- DELETE, so an owner could not put a one-to-one on their own timetable at
+-- all. The slot had to be created by the trainer, in the trainer's calendar —
+-- which is precisely the split this part exists to close.
+--
+-- WHY THE CHECK REACHES THE TENANT THROUGH `trainers` rather than testing
+-- sessions.tenant_id directly, for two independent reasons:
+--
+--   * trg_sessions_fill_tenant copies tenant_id FROM the named trainer. So a
+--     `is_owner_of(tenant_id)` check would be testing a value derived from the
+--     row being written: name another gym's trainer and tenant_id becomes that
+--     gym's, and the check would be asked about the wrong gym. Asking
+--     "is this trainer mine?" cannot be steered that way.
+--   * it does not depend on when the BEFORE INSERT trigger runs relative to
+--     the WITH CHECK, which is a detail no policy should rest on.
+--
+-- The inline join is safe to write: `trainers` has trainers_owner_r
+-- (23-trainer-directory.sql), so an owner can read the row the join needs, and
+-- is_owner_of() has been SECURITY DEFINER since 28-fix-profiles-recursion.sql
+-- so it does not re-enter RLS on profiles.
+drop policy if exists sessions_gym_owner_i on public.sessions;
+create policy sessions_gym_owner_i on public.sessions
+  for insert with check (
+    exists (select 1 from public.trainers tr
+             where tr.id = sessions.trainer_id and is_owner_of(tr.tenant_id)));
+
+-- Taking a slot back off the board. Scoped to the gym that owns it; the
+-- protection for slots that have become part of the record is the trigger
+-- below, not this policy, for the reason given there.
+drop policy if exists sessions_gym_owner_d on public.sessions;
+create policy sessions_gym_owner_d on public.sessions
+  for delete using (tenant_id is not null and is_owner_of(tenant_id));
+
+
+-- ── a session that has been marked or paid is a record, not a plan ──────────
+--
+-- Deleting one destroys the evidence behind a payroll line. The settlement row
+-- survives with its amount and its sessions_count, but the sessions it covered
+-- are gone, so the run can never be reconciled against the work again — and
+-- settleableSessions() only ever knew a session was already paid because the
+-- row carried a settlement_id.
+--
+-- Both the owner's new DELETE right above and the trainer's existing
+-- sessions_trainer policy (09-sessions-access.sql, FOR ALL — which has always
+-- included DELETE) could do it today.
+--
+-- WHY A TRIGGER RATHER THAN A NARROWER POLICY: RLS filters rows out silently.
+-- A policy of `using (... and outcome is null)` would make the delete affect
+-- zero rows and return no error, so a caller that checked only `.error` — the
+-- house pattern — would report "removed" for a session that is still there.
+-- Raising says no out loud, and says which of the two reasons it was.
+--
+-- WHY THE current_user TEST, exactly as in 38-tenant-isolation.sql: a
+-- SECURITY DEFINER function runs as its owner, an app request runs as
+-- `authenticated` or `anon`. action_account_deletion() (41) deletes auth.users
+-- and relies on the cascade reaching sessions; that path must not start
+-- raising because a trainer once had a session settled. Erasure stays
+-- unblocked; the app cannot quietly rewrite payroll history.
+-- NOT security definer, and that is the whole point.
+--
+-- `current_user` inside a SECURITY DEFINER function reports the function's
+-- OWNER, not the caller. This was written as definer, which made current_user
+-- always 'postgres', so the guard below could never be true and the trigger
+-- silently protected nothing — a control that looks real and does nothing,
+-- which is the exact class of fault recorded at the end of the runbook.
+--
+-- Verified against the live database rather than reasoned about:
+--   set local role authenticated;
+--   select current_user, _probe_invoker(), _probe_definer();
+--   -> authenticated | authenticated | postgres
+--
+-- As an invoker function it needs no elevated rights: it only reads OLD and
+-- raises. The guard still lets action_account_deletion()'s cascade through,
+-- because that runs as postgres and so fails the in ('authenticated','anon')
+-- test — which is the behaviour that was wanted.
+create or replace function public.sessions_block_delete_of_record() returns trigger
+language plpgsql set search_path = public as $$
+begin
+  if current_user in ('authenticated', 'anon') then
+    if old.settlement_id is not null then
+      raise exception 'That session has already been paid. Reverse the settlement before removing it.'
+        using errcode = '42501';
+    end if;
+    if old.outcome is not null then
+      raise exception 'That session has an outcome recorded and is part of the pay record. Undo the outcome first if it should not have one.'
+        using errcode = '42501';
+    end if;
+  end if;
+  return old;
+end $$;
+
+drop trigger if exists trg_sessions_block_delete_of_record on public.sessions;
+create trigger trg_sessions_block_delete_of_record
+  before delete on public.sessions
+  for each row execute function public.sessions_block_delete_of_record();
+
+-- ▶ progress-photos.sql
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- Progress photos — make them real, and make deleting them real too.
+--
+-- WHAT WAS THERE. `progress_photos` has existed since 01-schema.sql with RLS
+-- enabled and, in this repo, zero policies — so a fresh project got a table
+-- nobody could write to. Live, two policies had been added by hand and never
+-- written down (the same drift that produced parts 23–25). The `photos` bucket
+-- existed, private, with NO policies on storage.objects at all: the only
+-- bucket-scoped policies live were `exvid_obj_insert/read/delete` for
+-- `exercise-videos`. Nothing could put a byte in `photos` or read one out.
+-- Meanwhile app/(client)/scans.tsx held photos in useState and told the member
+-- how many were "on screen", because saying "saved" would have been a lie.
+--
+-- This file is the storage side of making that label true.
+--
+-- ── THE THING THAT MAKES THIS HARD ───────────────────────────────────────
+--
+-- `progress_photos.client_id` cascades from `clients`, so account deletion
+-- removes the ROWS. It does not remove the FILES. There is no cascade from a
+-- database table into object storage, and Supabase now blocks the obvious
+-- workaround outright: `storage.objects` carries a BEFORE DELETE trigger,
+-- `protect_objects_delete`, whose function raises
+--
+--   'Direct deletion from storage tables is not allowed. Use the Storage API
+--    instead.'  HINT: 'This prevents accidental data loss from orphaned objects.'
+--
+-- unless `storage.allow_delete_query` is set. Read that hint carefully: it is
+-- Supabase confirming that deleting the metadata row leaves the bytes behind.
+-- So a trigger that deletes from storage.objects would either fail outright or,
+-- if forced, produce exactly the orphan it looks like it is preventing.
+--
+-- The only thing that removes the bytes is a DELETE against the Storage HTTP
+-- API. That needs a credential, and at the moment of account deletion the
+-- person is not the one holding it — an owner actions the deletion, possibly
+-- 30 days after the member last opened the app.
+--
+-- ── THE SOLUTION, IN TWO HALVES ──────────────────────────────────────────
+--
+-- 1. REMEMBER. An AFTER DELETE trigger on `progress_photos` copies the storage
+--    path into `photo_purge` before the row is gone for good. This fires for a
+--    single-photo delete AND for the account-deletion cascade. Without it the
+--    paths are simply unknowable afterwards — the row that held the path is
+--    the thing that was deleted. Everything else depends on this step.
+--
+-- 2. PURGE. `purge_photo_file()` issues a DELETE to the Storage API over
+--    pg_net, authenticating with the project's service_role key read from
+--    Vault at call time — the pattern already used by `notify_on_message()` in
+--    26-message-notifications.sql, for the same reason (a key in a function
+--    body is readable by anything that can read pg_proc).
+--
+--    pg_net is asynchronous: the call queues the request and a background
+--    worker sends it, so nothing blocks the delete or the cascade. The reply
+--    lands in `net._http_response`, and `confirm_photo_purges()` reads it back
+--    and stamps `purged_at` ONLY on a response that actually says the object
+--    is gone. Nothing in here marks a file deleted because it asked nicely.
+--
+-- OPERATOR STEP, AND WHAT HAPPENS WITHOUT IT.  This needs one Vault secret:
+--
+--     name:  storage_service_key
+--     value: the project's service_role key
+--            (Dashboard ▸ Project Settings ▸ API ▸ service_role)
+--     put it in: Dashboard ▸ Project Settings ▸ Vault
+--
+-- Until that exists, every delete still lands in `photo_purge`, `purged_at`
+-- stays null and `note` reads 'no storage_service_key in Vault'. That is the
+-- honest failure: the work is recorded and visibly outstanding, rather than
+-- silently skipped. After creating the secret, run
+--
+--     select public.purge_progress_photo_files();
+--
+-- once and the backlog drains. It is safe to run at any time; it only ever
+-- touches paths whose database row is already deleted.
+--
+-- To see what is outstanding (SQL editor / service role — photo_purge has RLS
+-- on and no policies, so no end user can read it):
+--
+--     select path, subject_id, queued_at, attempts, note
+--       from public.photo_purge where purged_at is null order by queued_at;
+--
+-- ── WHY THE TRIGGER FUNCTION IS NOT `SECURITY DEFINER`-WITH-A-`current_user`-
+--    GUARD.  It is security definer (it must write photo_purge past RLS and
+--    call pg_net), but it tests nothing about who the caller is. Inside a
+--    definer function `current_user` is the function's OWNER, not the caller,
+--    so a `current_user` guard in here would never fire and would read like
+--    protection while providing none. The authorisation that matters is on the
+--    DELETE that fires this trigger, and it is RLS, above.
+-- ─────────────────────────────────────────────────────────────────────────
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 1 · Storage policies for the `photos` bucket
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- Own-folder access, keyed on the first path segment, exactly as the
+-- exercise-videos policies do. The difference is READ: `exercise-videos` is a
+-- public bucket and `exvid_obj_read` is bucket-wide. `photos` is PRIVATE, and
+-- read here is own-folder too — a progress photo is read through a signed URL
+-- minted by its owner, never a public URL.
+--
+-- RLS on storage.objects is enabled by Supabase itself. Asserting it rather
+-- than assuming it, because a policy on a table with RLS off is inert and
+-- would look like a working restriction.
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'storage' and c.relname = 'objects' and c.relrowsecurity
+  ) then
+    raise exception 'storage.objects does not have RLS enabled — the policies below would be inert.';
+  end if;
+end $$;
+
+drop policy if exists photos_obj_insert on storage.objects;
+create policy photos_obj_insert on storage.objects for insert to authenticated
+  with check (
+    bucket_id = 'photos'
+    and (storage.foldername(name))[1] = (select auth.uid())::text
+  );
+
+drop policy if exists photos_obj_read on storage.objects;
+create policy photos_obj_read on storage.objects for select to authenticated
+  using (
+    bucket_id = 'photos'
+    and (storage.foldername(name))[1] = (select auth.uid())::text
+  );
+
+drop policy if exists photos_obj_delete on storage.objects;
+create policy photos_obj_delete on storage.objects for delete to authenticated
+  using (
+    bucket_id = 'photos'
+    and (storage.foldername(name))[1] = (select auth.uid())::text
+  );
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 2 · Row policies on progress_photos
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- RLS was enabled in 01-schema.sql, which runs first. Re-declaring the owner
+-- policy here puts it in the repo, where it was missing.
+--
+-- `for all` with no `with check` means the USING expression is also the check,
+-- so a member cannot insert a row naming somebody else as its subject.
+
+drop policy if exists progress_photos_owner on public.progress_photos;
+create policy progress_photos_owner on public.progress_photos for all
+  using (client_id = (select auth.uid()))
+  with check (client_id = (select auth.uid()));
+
+-- ── COACH ACCESS: deliberately none. ─────────────────────────────────────
+--
+-- Live carried a `progress_photos_trainer_read` policy — a SELECT for the
+-- linked trainer, mirroring scans_trainer_read from 19-trainer-read-access.sql.
+-- It is dropped here on purpose, and this is the reasoning, so that nobody
+-- re-adds it by pattern-matching on the other tables:
+--
+--   · A progress photo is not a weight number. It is typically taken in
+--     underwear, alone, in a bathroom. A coach seeing a client's body-fat
+--     percentage is the product working; a coach seeing that photo without the
+--     client choosing it is a different act entirely.
+--   · There is no consent step. The app has no per-photo sharing control, no
+--     indicator that anyone else can see them, and no way to take it back. A
+--     read policy would mean people upload believing it is private and are
+--     wrong. Sharing has to be something you DO, not something that is true by
+--     default because of who your coach is.
+--   · It buys nothing today. Nothing in the coach app renders client progress
+--     photos, so the policy granted access no screen used — a standing
+--     exposure with no feature behind it.
+--   · It was latent, which is worse than open. The row also carries
+--     `image_path`. The day somebody adds a coach-side signed-URL helper, the
+--     photos become visible with no review of consent, because the "hard part"
+--     already looked done.
+--
+-- When per-photo sharing ships, it wants a `shared_with_coach boolean not null
+-- default false` on this table, a SELECT policy gated on it, AND a matching
+-- storage.objects policy — the row and the file have to be granted separately,
+-- which is the whole shape of this file. Until then: no coach access at either
+-- layer, stated rather than inherited.
+
+drop policy if exists progress_photos_trainer_read on public.progress_photos;
+
+create index if not exists idx_progress_photos_client
+  on public.progress_photos (client_id, taken_at);
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 3 · The purge queue
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- Deliberately NOT a foreign key to anything. The point of this table is that
+-- it outlives the row, the client, the profile and the auth user — a reference
+-- would either block the cascade or null itself and lose the path, which is
+-- the one column that matters.
+
+create table if not exists public.photo_purge (
+  path            text primary key,
+  subject_id      uuid not null,
+  queued_at       timestamptz not null default now(),
+  attempts        int not null default 0,
+  last_attempt_at timestamptz,
+  request_id      bigint,            -- pg_net request; reply in net._http_response
+  purged_at       timestamptz,       -- set only from a response that confirms it
+  note            text
+);
+
+create index if not exists idx_photo_purge_pending
+  on public.photo_purge (queued_at) where purged_at is null;
+
+-- RLS on, and no policies. Nothing an end user does should read or write this
+-- directly; the functions below are security definer and reach it as their
+-- owner, and an operator reads it in the SQL editor. RLS is enabled BEFORE any
+-- policy exists, per the house rule — here there simply are none, which is the
+-- restriction.
+alter table public.photo_purge enable row level security;
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 4 · Purging
+-- ═════════════════════════════════════════════════════════════════════════
+
+-- Read back what pg_net actually got, and stamp purged_at only on an answer
+-- that means the object is no longer there. 200 = deleted. 404 = it was
+-- already gone, which is the same end state and is the normal case when the
+-- app deleted the file itself before deleting the row. Anything else is
+-- recorded and left pending for a retry.
+--
+-- net._http_response is pruned by pg_net after a few hours. A request whose
+-- reply has aged out simply stays pending and gets re-sent; a DELETE of an
+-- absent object is idempotent, so re-sending costs nothing.
+create or replace function public.confirm_photo_purges()
+returns int
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  r record;
+  v_status int;
+  v_err text;
+  v_body text;
+  v_absent boolean;
+  n int := 0;
+begin
+  for r in
+    select path, request_id from public.photo_purge
+     where purged_at is null and request_id is not null
+     limit 500
+  loop
+    select status_code, error_msg, content
+      into v_status, v_err, v_body
+      from net._http_response where id = r.request_id;
+
+    -- Supabase Storage answers a DELETE for a MISSING object with HTTP 400
+    -- whose BODY carries the real story:
+    --
+    --   status_code 400
+    --   {"statusCode":"404","error":"not_found","message":"Object not found",
+    --    "code":"NoSuchKey"}
+    --
+    -- The check was `v_status in (200, 204, 404)`, so an already-absent file
+    -- was NEVER confirmed: it stayed pending, was re-sent on every drain, and
+    -- the queue could not empty. An infinite retry for a file already in the
+    -- state we wanted.
+    --
+    -- Found by queueing a correctly-shaped path for a file that does not
+    -- exist and reading net._http_response, rather than accepting that a
+    -- dispatched request meant a working one.
+    v_absent := v_body is not null
+                and (v_body like '%NoSuchKey%' or v_body like '%"statusCode":"404"%'
+                     or v_body like '%not_found%');
+
+    if v_status in (200, 204, 404) or (v_status = 400 and v_absent) then
+      update public.photo_purge
+         set purged_at = now(),
+             note = case when v_status in (200, 204) then 'deleted' else 'already absent' end
+       where path = r.path;
+      n := n + 1;
+    elsif v_status is not null then
+      update public.photo_purge
+      -- Keep the body. "storage returned 400" alone is what made this hard to
+      -- read: 400 covers both a missing file and a genuine refusal.
+         set note = 'storage returned ' || v_status
+                    || coalesce(' — ' || left(coalesce(v_body, v_err), 200), '')
+       where path = r.path;
+    elsif v_err is not null then
+      update public.photo_purge set note = v_err where path = r.path;
+    end if;
+    -- v_status and v_err both null: the reply has not arrived or has aged out.
+    -- Leave it pending; the next drain re-sends.
+  end loop;
+  return n;
+end $$;
+
+revoke execute on function public.confirm_photo_purges() from public, anon;
+grant execute on function public.confirm_photo_purges() to authenticated;
+
+
+-- Send one DELETE to the Storage API for one queued path.
+--
+-- Callable by any signed-in user, and that is safe on purpose: it acts ONLY on
+-- a path already sitting in photo_purge with purged_at null — that is, a file
+-- whose database row is already deleted and which is already destined for
+-- removal. There is no argument shape that makes it touch anything else. It
+-- takes no caller identity into account because it is not making an
+-- authorisation decision; the decision was made when the row was deleted.
+create or replace function public.purge_photo_file(p_path text)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_key text;
+  v_req bigint;
+begin
+  if p_path is null or not exists (
+    select 1 from public.photo_purge where path = p_path and purged_at is null
+  ) then
+    return;
+  end if;
+
+  -- The path goes into a URL. Ours are '<uuid>/<millis>-<token>.jpg' and need
+  -- no escaping; anything else is refused rather than sent half-encoded, where
+  -- it could address a different object.
+  if p_path !~ '^[0-9a-fA-F-]{36}/[A-Za-z0-9._-]{1,120}$' then
+    update public.photo_purge
+       set note = 'path is not in the expected <uid>/<name> shape — not sent'
+     where path = p_path;
+    return;
+  end if;
+
+  select decrypted_secret into v_key
+    from vault.decrypted_secrets where name = 'storage_service_key' limit 1;
+
+  if v_key is null or v_key = '' then
+    update public.photo_purge
+       set note = 'no storage_service_key in Vault — file NOT deleted'
+     where path = p_path;
+    return;
+  end if;
+
+  select net.http_delete(
+    url     := 'https://phgfwzpkkwdysftlgkoq.supabase.co/storage/v1/object/photos/' || p_path,
+    headers := jsonb_build_object(
+      'Authorization', 'Bearer ' || v_key,
+      'apikey',        v_key)
+  ) into v_req;
+
+  update public.photo_purge
+     set request_id = v_req,
+         attempts = attempts + 1,
+         last_attempt_at = now(),
+         note = 'sent'
+   where path = p_path;
+end $$;
+
+revoke execute on function public.purge_photo_file(text) from public, anon;
+grant execute on function public.purge_photo_file(text) to authenticated;
+
+
+-- Confirm what is outstanding, then re-send everything still pending. The
+-- operator's entry point, and the retry. Bounded so it cannot become a
+-- thundering herd against our own storage.
+create or replace function public.purge_progress_photo_files()
+returns table (confirmed int, sent int)
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  r record;
+  n int := 0;
+begin
+  confirmed := public.confirm_photo_purges();
+  for r in
+    select path from public.photo_purge
+     where purged_at is null order by queued_at limit 200
+  loop
+    perform public.purge_photo_file(r.path);
+    n := n + 1;
+  end loop;
+  sent := n;
+  return next;
+end $$;
+
+revoke execute on function public.purge_progress_photo_files() from public, anon;
+grant execute on function public.purge_progress_photo_files() to authenticated;
+
+
+-- The app's way to hand back a file it uploaded but could not attach to a row,
+-- or could not delete itself. Own-folder only: the first path segment must be
+-- the caller's own uid, which is the same rule the storage policies enforce.
+-- Without this, a failed row insert after a successful upload would leave a
+-- file that nothing in the system knows the name of.
+create or replace function public.queue_photo_file_purge(p_path text)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_uid uuid := auth.uid();
+begin
+  if v_uid is null then
+    raise exception 'not signed in' using errcode = '42501';
+  end if;
+  if p_path is null or split_part(p_path, '/', 1) <> v_uid::text then
+    raise exception 'that is not your file' using errcode = '42501';
+  end if;
+
+  insert into public.photo_purge (path, subject_id, note)
+  values (p_path, v_uid, 'orphan handed back by the app')
+  on conflict (path) do nothing;
+
+  perform public.purge_photo_file(p_path);
+end $$;
+
+revoke execute on function public.queue_photo_file_purge(text) from public, anon;
+grant execute on function public.queue_photo_file_purge(text) to authenticated;
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 5 · The trigger — the half that cannot be added later
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- The queue INSERT is outside the exception block on purpose. A plpgsql
+-- EXCEPTION block is a savepoint: catching an error rolls back everything done
+-- inside it. Putting the insert in there would mean a failing pg_net call
+-- silently discarded the record of the file as well, which is precisely the
+-- outcome this whole file exists to prevent.
+--
+-- The send IS inside one, because nothing about object storage may block a
+-- person's deletion — least of all an account deletion cascade.
+
+create or replace function public.on_progress_photo_deleted()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+begin
+  if OLD.image_path is not null and OLD.image_path <> '' then
+    insert into public.photo_purge (path, subject_id)
+    values (OLD.image_path, OLD.client_id)
+    on conflict (path) do update set purged_at = null, note = 'requeued';
+
+    begin
+      perform public.purge_photo_file(OLD.image_path);
+    exception when others then
+      -- Recorded above; a later purge_progress_photo_files() re-sends it.
+      null;
+    end;
+  end if;
+  return OLD;
+end $$;
+
+drop trigger if exists on_progress_photo_delete on public.progress_photos;
+create trigger on_progress_photo_delete
+  after delete on public.progress_photos
+  for each row execute function public.on_progress_photo_deleted();
+
+-- ▶ session-duration.sql
+
+-- ── How long the session ran ────────────────────────────────────────────────
+--
+-- One column, `workouts.session_mins`, so that a training session can be
+-- written back to Apple Health.
+--
+-- ── Why the app needed a new fact ───────────────────────────────────────────
+--
+-- HealthKit will not accept a workout without a start AND an end. Repple knew
+-- the start of everything and the end of almost nothing: `cardio.mins` covers a
+-- run or a row, `zones` covers anything recorded against a live heart-rate
+-- source, and neither exists for the case that makes up most of this log — a
+-- strength session, which records reps and weight and no clock at all.
+--
+-- The tempting fix is to assume a length. It is also the one thing that must
+-- not happen here: a nominal 45 minutes would land in a person's permanent
+-- health record indistinguishable from a measurement, and every figure in this
+-- product has to trace to something real. Deriving it from how long the logging
+-- screen was open is worse, not better — people log on the walk home, so it
+-- would write "4 min" for a 50-minute session and it would look measured.
+--
+-- So the length is asked for. A number the person types is evidence from
+-- whoever was in the room, the same standing as the reps, the load and the RPE
+-- already stored beside it, and the same thing Apple's own Health app asks for
+-- when you add a workout by hand.
+--
+-- ── Why nullable, and why no default ────────────────────────────────────────
+--
+-- NULL is the honest state and has to stay reachable: it means nobody has said
+-- how long this session was. A session in that state cannot be written to
+-- Health, and the Watch & devices screen says exactly that rather than quietly
+-- skipping it. A DEFAULT of any kind would erase the distinction between "50
+-- minutes, stated" and "nobody knows", which is the whole point of the column.
+--
+-- The check refuses 0 and negatives for the same reason. A zero-minute workout
+-- is not a short workout; it is an unfinished form, and HealthKit would accept
+-- it as a real event with a zero duration.
+--
+-- ── Why it sits on `workouts` and not a new `sessions` table ────────────────
+--
+-- A session is already represented here: one session writes all of its
+-- exercises as rows sharing `performed_at` (see the comment on
+-- `WorkoutEntry.id` in src/lib/mockData.ts). The length is a fact about that
+-- group, so every row in the group carries the same value and the app writes
+-- them together in a single statement keyed on (user_id, performed_at). A
+-- separate table would add a join and a second source of truth for grouping
+-- that the timestamp already provides.
+--
+-- Additive only. Nothing here alters an existing column or policy; existing
+-- rows keep NULL, which reads back as "not known" rather than as a duration.
+
+alter table workouts add column if not exists session_mins int;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'workouts_session_mins_positive'
+  ) then
+    alter table workouts
+      add constraint workouts_session_mins_positive
+      check (session_mins is null or session_mins > 0);
+  end if;
+end $$;
+
+comment on column workouts.session_mins is
+  'Whole-session length in minutes. NULL = nobody has stated it; never defaulted. '
+  'Populated only from a measured source or from the person''s own entry.';
+
+-- ▶ share-progress-photo.sql
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- Sending a progress photo to your coach — the consent model.
+--
+-- 45-progress-photos.sql closed coach access at BOTH layers and wrote down
+-- why: a progress photo is typically taken in underwear, alone, in a bathroom,
+-- and a coach seeing one without the client choosing it is a different act from
+-- a coach seeing a body-fat percentage. It ended with the shape this file has
+-- to fill in:
+--
+--     "When per-photo sharing ships, it wants … a SELECT policy gated on it,
+--      AND a matching storage.objects policy — the row and the file have to be
+--      granted separately, which is the whole shape of this file."
+--
+-- This is that file. Nothing here widens the default: with no rows in
+-- `progress_photo_shares`, both policies below are false for every coach and
+-- every photo, and `progress_photos_owner` remains the only access that exists.
+--
+-- ── WHAT THIS IS NOT ─────────────────────────────────────────────────────
+--
+-- It is NOT a `shared_with_coach boolean` on `progress_photos`, which is what
+-- part 45 sketched. A boolean says "my coach may see this", and "my coach" is
+-- whoever holds that job today. Change coach and every photo you ever sent the
+-- last one is handed to the new one, silently, because the column never named
+-- anybody. Consent was given to a PERSON, so the grant records that person.
+--
+-- It is NOT a setting, a preference, or anything you can turn on. There is no
+-- row shape here that means "all of them" or "from now on". One row is one
+-- photo sent to one coach. Sharing today's photo cannot share tomorrow's,
+-- because tomorrow's photo does not have a row and nothing will write one for
+-- it. That is requirement 1 enforced by the data model rather than by care.
+--
+-- ── THE FOUR PROPERTIES, AND WHERE EACH ONE LIVES ────────────────────────
+--
+-- 1 · PER PHOTO.       primary key (photo_id, coach_id). See above.
+-- 2 · REVOCABLE.       Unsharing DELETES the grant row. Both policies read the
+--                      grant, so the row and the file go dark together, at the
+--                      same instant, from one delete. (The one honest caveat:
+--                      a signed URL already minted stays valid until it
+--                      expires. src/lib/photoShare.ts mints coach URLs with a
+--                      five-minute TTL for exactly this reason, and the app
+--                      says so rather than claiming instant erasure.)
+-- 3 · VISIBLE.         The client reads their own grants (policy `pps_client`)
+--                      and the Progress screen labels every photo with what it
+--                      finds. A grant that exists is a photo the coach can
+--                      open; there is no third state.
+-- 4 · ENDS WITH THE    Two mechanisms, deliberately:
+--     RELATIONSHIP.      (a) every grant is re-checked against a LIVE coaching
+--                            link on every read — `coaching_link_active()`;
+--                        (b) triggers DELETE the grants outright when the link
+--                            is ended or the client's trainer changes.
+--                      (a) alone would be enough for access. (b) exists so the
+--                      client's list in requirement 3 stops listing grants that
+--                      no longer grant anything. Re-hiring the same coach does
+--                      NOT bring the old grants back: the rows are gone, and
+--                      the client sends again if they still want to.
+--
+-- ── WHY "ACTIVE LINK" MEANS BOTH LINKS, NOT EITHER ───────────────────────
+--
+-- This project records a coach↔client link in TWO places. 06-account-
+-- provisioning.sql's `link_coaching()` writes both in one statement:
+--
+--     insert into coaching_relationships … status = 'active';
+--     update clients set trainer_id = p_coach where id = p_client;
+--
+-- and nothing in the repo un-links today — grep finds no writer of
+-- status='ended' and none of `trainer_id = null`. So the shape of the future
+-- unlink is unknown, and it may well write only one of the two.
+--
+-- `coaching_link_active()` therefore requires BOTH, with AND. Ending the
+-- relationship by EITHER mechanism ends photo access. The failure mode of AND
+-- is that a half-linked pair cannot share — visible immediately, and the app
+-- says "no coach linked" rather than lying. The failure mode of OR is that a
+-- coach who was let go keeps seeing the photos. For this feature those are not
+-- comparable, so this fails closed.
+--
+-- ── SECURITY DEFINER, AND THE BUG THAT IS NOT IN HERE ────────────────────
+--
+-- Four functions below are `security definer`. NONE of them tests
+-- `current_user`. Inside a definer function `current_user` is the function's
+-- OWNER, so a `current_user` guard never fires and reads as protection while
+-- providing none — that exact bug shipped in this project today.
+--
+-- What they use instead is `auth.uid()`, which is a different thing entirely:
+-- it reads the request's JWT claim out of a GUC, so it is the CALLER either
+-- way and is unaffected by SECURITY DEFINER. That is the only reason the
+-- predicates below can be definer at all.
+--
+-- The two trigger functions test no identity of any kind. They decide purely
+-- from OLD and NEW — "this link stopped being active", "this client's trainer
+-- changed" — which is a fact about the row, not a claim about who is speaking.
+-- ─────────────────────────────────────────────────────────────────────────
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 0 · Assertions — a policy on a table with RLS off is inert
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- Asserted rather than assumed, the same way 45 does. If any of these were
+-- false, everything below would LOOK like a restriction and be none.
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'storage' and c.relname = 'objects' and c.relrowsecurity
+  ) then
+    raise exception 'storage.objects does not have RLS enabled — photos_obj_read_shared would be inert.';
+  end if;
+
+  if not exists (
+    select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'public' and c.relname = 'progress_photos' and c.relrowsecurity
+  ) then
+    raise exception 'public.progress_photos does not have RLS enabled — progress_photos_shared_read would be inert.';
+  end if;
+
+  -- progress_photos must NOT force RLS on its owner. The object-level
+  -- predicate below resolves a storage object name back to its photo row as
+  -- the table owner; under FORCE ROW LEVEL SECURITY that lookup would return
+  -- nothing and a coach would get a row they can read with a file they cannot
+  -- — a broken image, which is exactly the split this file exists to prevent.
+  if exists (
+    select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'public' and c.relname = 'progress_photos' and c.relforcerowsecurity
+  ) then
+    raise exception 'public.progress_photos has FORCE ROW LEVEL SECURITY — progress_photo_object_shared_with_viewer() cannot resolve a path and shared files would 403 while shared rows read fine.';
+  end if;
+end $$;
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 1 · The grant
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- One row = one photo, sent to one coach, by its owner. There is no revoked_at
+-- and no soft delete: a grant that has been taken back is DELETED. A retained
+-- row filtered by `revoked_at is null` would put that predicate in every policy
+-- and every query on this table, and this feature is one forgotten predicate
+-- away from showing somebody's body to a person they took it back from. The
+-- audit trail is not worth that; `shared_at` on the live row is.
+--
+-- client_id is denormalised from progress_photos.client_id so the policies and
+-- the predicates never have to join back to a table whose own RLS is the thing
+-- being decided. It is kept honest by the WITH CHECK on `pps_client`, which
+-- refuses any insert whose photo is not actually the caller's.
+
+create table if not exists public.progress_photo_shares (
+  photo_id  uuid        not null references public.progress_photos(id) on delete cascade,
+  coach_id  uuid        not null references public.profiles(id)        on delete cascade,
+  client_id uuid        not null references public.profiles(id)        on delete cascade,
+  shared_at timestamptz not null default now(),
+  primary key (photo_id, coach_id)
+);
+
+-- The client's "what can my coach see" read, and the coach's "what did this
+-- client send me" read.
+create index if not exists idx_pps_client on public.progress_photo_shares (client_id, shared_at desc);
+create index if not exists idx_pps_coach  on public.progress_photo_shares (coach_id, client_id, shared_at desc);
+
+-- The object-level predicate resolves storage.objects.name back to a photo
+-- row. Without this that is a sequential scan of progress_photos for every
+-- object the storage policy is asked about.
+create index if not exists idx_progress_photos_image_path on public.progress_photos (image_path);
+
+-- RLS on BEFORE any policy exists. Between this statement and the two policies
+-- below the table is closed to everyone, which is the safe direction to be
+-- caught halfway through.
+alter table public.progress_photo_shares enable row level security;
+
+-- Supabase's default privileges hand new public tables to anon as well as
+-- authenticated. anon has no auth.uid() so every policy below is false for it
+-- anyway; taking the grant away too means that is true for two reasons.
+revoke all on public.progress_photo_shares from anon;
+grant select, insert, delete on public.progress_photo_shares to authenticated;
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 2 · Is the coaching relationship live?
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- The single definition of requirement 4, used by every policy in this file so
+-- that "the coach was let go" cannot mean one thing to the row and another to
+-- the file. BOTH links required — see the header.
+--
+-- Definer because it must answer for a (client, coach) pair from whichever of
+-- the two sides is asking, and `clients` and `coaching_relationships` each
+-- expose only one side to each party. The `auth.uid() in (…)` line is what
+-- stops that becoming an oracle: this answers only about a relationship the
+-- caller is themselves part of. That test is on auth.uid(), NOT current_user,
+-- which inside a definer function would be the owner and would always fail.
+
+create or replace function public.coaching_link_active(p_client uuid, p_coach uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  select
+    (select auth.uid()) in (p_client, p_coach)
+    and exists (
+      select 1 from public.coaching_relationships r
+       where r.client_id = p_client and r.coach_id = p_coach and r.status = 'active'
+    )
+    and exists (
+      select 1 from public.clients c
+       where c.id = p_client and c.trainer_id = p_coach
+    );
+$$;
+
+revoke execute on function public.coaching_link_active(uuid, uuid) from public, anon;
+grant execute on function public.coaching_link_active(uuid, uuid) to authenticated;
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 3 · The two predicates — one rule, expressed once
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- Requirement 5 says the row and the file grant separately, and that opening
+-- one without the other gives either a broken image or a file with no record
+-- of it. They are separate GRANTS below — two policies on two tables in two
+-- schemas — but they must never be able to disagree about WHO. So the file
+-- predicate is defined in terms of the row predicate: an object is readable
+-- if and only if the photo row that names it is readable. Not "the same
+-- condition, written twice"; literally the same function, called.
+
+-- Row-level: is this photo one the signed-in viewer was sent, by a client
+-- whose coach they still are?
+--
+-- Reads the grant table directly as the owner rather than through
+-- `pps_coach_read`. That is deliberate: it keeps the progress_photos policy
+-- from depending on the progress_photo_shares policy, which is how RLS
+-- recursion starts. Nothing here reads progress_photos, so nothing here can
+-- re-enter the policy that calls it.
+create or replace function public.progress_photo_shared_with_viewer(p_photo_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  select exists (
+    select 1 from public.progress_photo_shares s
+     where s.photo_id = p_photo_id
+       and s.coach_id = (select auth.uid())
+       and public.coaching_link_active(s.client_id, s.coach_id)
+  );
+$$;
+
+revoke execute on function public.progress_photo_shared_with_viewer(uuid) from public, anon;
+grant execute on function public.progress_photo_shared_with_viewer(uuid) to authenticated;
+
+
+-- Object-level: same question, asked with the storage key instead of the id,
+-- because a policy on storage.objects has the name and nothing else.
+create or replace function public.progress_photo_object_shared_with_viewer(p_name text)
+returns boolean
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  select exists (
+    select 1 from public.progress_photos p
+     where p.image_path = p_name
+       and public.progress_photo_shared_with_viewer(p.id)
+  );
+$$;
+
+revoke execute on function public.progress_photo_object_shared_with_viewer(text) from public, anon;
+grant execute on function public.progress_photo_object_shared_with_viewer(text) to authenticated;
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 4 · Policies on the grant table
+-- ═════════════════════════════════════════════════════════════════════════
+
+-- The client owns their grants: they can list them, create them and take them
+-- back. No UPDATE is granted at all — there is nothing about a grant to amend,
+-- and an updatable grant is a grant whose subject could be moved.
+--
+-- The WITH CHECK is where the honesty of this table is enforced:
+--   · client_id is the caller             — you cannot file a grant as someone else
+--   · the photo is the caller's own       — you cannot hand out another member's photo
+--   · the coach link is live              — you cannot send to a stranger
+--   · coach_id is not the caller          — a self-grant is meaningless, and would
+--                                           make your own row satisfy the coach policy
+--
+-- The `exists` on progress_photos is evaluated under that table's own RLS, so
+-- it passes only for a row `progress_photos_owner` already lets the caller see.
+-- Two independent reasons for the same answer.
+drop policy if exists pps_client on public.progress_photo_shares;
+create policy pps_client on public.progress_photo_shares for all to authenticated
+  using (client_id = (select auth.uid()))
+  with check (
+    client_id = (select auth.uid())
+    and coach_id <> (select auth.uid())
+    and exists (
+      select 1 from public.progress_photos p
+       where p.id = progress_photo_shares.photo_id
+         and p.client_id = (select auth.uid())
+    )
+    and public.coaching_link_active(progress_photo_shares.client_id, progress_photo_shares.coach_id)
+  );
+
+-- The coach may read grants addressed to them, and only while they are still
+-- the coach. SELECT only: a coach can neither create a grant nor delete one.
+-- Taking it back is the client's act alone, so there is no way for a coach to
+-- clear the record that they were given access.
+drop policy if exists pps_coach_read on public.progress_photo_shares;
+create policy pps_coach_read on public.progress_photo_shares for select to authenticated
+  using (
+    coach_id = (select auth.uid())
+    and public.coaching_link_active(progress_photo_shares.client_id, progress_photo_shares.coach_id)
+  );
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 5 · LAYER ONE — the row
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- Added ALONGSIDE `progress_photos_owner`, which is untouched. Permissive
+-- policies OR together, so the owner still reaches every one of their rows by
+-- the rule 45 wrote, and a coach reaches exactly the rows they were sent.
+--
+-- FOR SELECT and nothing else. A coach cannot edit or delete a photo they were
+-- shown; the sender remains the only person who can change or remove it.
+--
+-- This does grant the whole row, weight_kg and body_fat_pct included. Those two
+-- numbers are already visible to a linked coach through `scans_trainer_read`
+-- (19-trainer-read-access.sql), so nothing new is disclosed — but RLS grants
+-- rows, not columns, and it is worth having said so out loud.
+drop policy if exists progress_photos_shared_read on public.progress_photos;
+create policy progress_photos_shared_read on public.progress_photos for select to authenticated
+  using (public.progress_photo_shared_with_viewer(progress_photos.id));
+
+-- Still dropped, still on purpose. 45 removed the blanket
+-- `progress_photos_trainer_read`; the point of this file is that a coach reads
+-- photos because one was SENT, never because of who they are. Re-stated here
+-- so that applying 47 cannot be read as the moment it came back.
+drop policy if exists progress_photos_trainer_read on public.progress_photos;
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 6 · LAYER TWO — the file
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- Without this, a coach gets a row carrying `image_path` and a 403 on the
+-- bytes: a name for a photo they cannot see, which is worse than either
+-- answer. Without §5 and with only this, a coach could fetch bytes with no row
+-- to say whose they are or that they were ever given.
+--
+-- A SEPARATE policy rather than an edit to `photos_obj_read`: 45 owns that one,
+-- own-folder access is a different rule with a different reason, and permissive
+-- SELECT policies OR. Nobody loses their own folder if this is ever dropped,
+-- and dropping this is a complete, single-statement retreat.
+--
+-- The `bucket_id` test comes first so the predicate is not called for objects
+-- in `exercise-videos` or `scans`.
+drop policy if exists photos_obj_read_shared on storage.objects;
+create policy photos_obj_read_shared on storage.objects for select to authenticated
+  using (
+    bucket_id = 'photos'
+    and public.progress_photo_object_shared_with_viewer(name)
+  );
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 7 · Ending the relationship ends the grants
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- `coaching_link_active()` already means a former coach reads nothing, from
+-- the instant either link stops. These triggers are the second half: they
+-- remove the grant ROWS, so the client's "what can my coach see" list is not
+-- carrying entries that no longer mean anything. Requirement 3 says no ambient
+-- uncertainty, and a list of grants you have to know are dead is exactly that.
+--
+-- Definer, because the person ending the relationship is often the COACH, and
+-- a coach has no right to delete rows the client owns — `pps_client` is keyed
+-- on the client. The function tests NOTHING about who is calling: it reads OLD
+-- and NEW and nothing else. There is no `current_user` in here, and there must
+-- never be one — see the header.
+--
+-- Deliberately NOT granted to authenticated. It is reachable only as a trigger;
+-- a direct call would fail on TG_OP anyway, and least privilege beats symmetry
+-- with the house rule for a function nobody is meant to call.
+
+create or replace function public.revoke_photo_shares_on_unlink()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+begin
+  if TG_TABLE_NAME = 'clients' then
+    -- The client's trainer changed. Every outstanding grant was addressed to
+    -- the coach they had; none of them survives the change, and the incoming
+    -- coach starts with nothing. Photos are not part of the handover.
+    delete from public.progress_photo_shares where client_id = OLD.id;
+
+  elsif TG_OP = 'DELETE' then
+    delete from public.progress_photo_shares
+     where client_id = OLD.client_id and coach_id = OLD.coach_id;
+
+  elsif NEW.status <> 'active' then
+    -- 'ended', and also 'pending' — a relationship put back to pending is not
+    -- one that should still be showing somebody's body.
+    delete from public.progress_photo_shares
+     where client_id = NEW.client_id and coach_id = NEW.coach_id;
+  end if;
+  return null;
+end $$;
+
+revoke execute on function public.revoke_photo_shares_on_unlink() from public, anon, authenticated;
+
+drop trigger if exists on_coaching_unlink_revoke_photo_shares on public.coaching_relationships;
+create trigger on_coaching_unlink_revoke_photo_shares
+  after update or delete on public.coaching_relationships
+  for each row execute function public.revoke_photo_shares_on_unlink();
+
+drop trigger if exists on_trainer_change_revoke_photo_shares on public.clients;
+create trigger on_trainer_change_revoke_photo_shares
+  after update of trainer_id on public.clients
+  for each row when (NEW.trainer_id is distinct from OLD.trainer_id)
+  execute function public.revoke_photo_shares_on_unlink();
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 8 · The purge queue still owns deletion
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- Nothing above touches it, and that is checked rather than assumed.
+--
+-- `progress_photo_shares.photo_id … on delete cascade` means deleting a SHARED
+-- photo deletes its grants as part of the same statement. The order is the
+-- thing that matters: referential-integrity cascades run as the statement
+-- proceeds, and `on_progress_photo_delete` is an AFTER DELETE row trigger on
+-- progress_photos, so it fires for the photo row regardless of what the cascade
+-- did to the child. The path still reaches `photo_purge`, and the file is still
+-- purged — for a single delete and for the account-deletion cascade alike.
+--
+-- The share row is a GRANT, not a record of bytes, so unlike photo_purge it is
+-- right for it to die with the photo, the client and the coach. It carries no
+-- storage path and there is nothing about it that has to outlive anything.
+--
+-- The assertion below is the same class as §0: it fails loudly at apply time if
+-- a future edit ever removes the trigger this feature quietly depends on.
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_trigger
+    where tgrelid = 'public.progress_photos'::regclass
+      and tgname = 'on_progress_photo_delete'
+      and not tgisinternal
+  ) then
+    raise exception 'on_progress_photo_delete is missing from progress_photos — deleting a photo would leave its file in storage with nothing holding the path (see 45-progress-photos.sql).';
+  end if;
+end $$;
+
+-- ▶ photo-purge-schedule.sql
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- Actually drain the photo purge queue.
+--
+-- 45-progress-photos.sql built the queue and the sender; 47 made photos
+-- shareable. What neither did is RUN it. Until now the only thing that called
+-- purge_progress_photo_files() was a person typing it into the SQL editor.
+--
+-- That gap is not cosmetic. Deleting a progress photo removes the row
+-- immediately and records the file's path; the FILE goes only when the queue is
+-- drained. So without a schedule, a member deletes a photo of themselves, the
+-- app truthfully says it is gone from their account, and the image sits in
+-- storage indefinitely. web/delete-account.html promises the file is chased and
+-- confirmed. A promise nobody executes is the same class of fault as
+-- request_account_deletion() writing a timestamp that nothing ever read.
+--
+-- WHY A CRON JOB RATHER THAN DOING IT INLINE. The delete cannot remove the file
+-- itself: storage.objects carries Supabase's protect_objects_delete trigger,
+-- which refuses direct deletion and says to use the Storage API. That means an
+-- HTTP call, and an HTTP call inside the transaction that deletes a member's
+-- account would make erasure depend on the storage service answering. It must
+-- not: the row deletion has to succeed even when storage is down, with the file
+-- chased afterwards. pg_net posts asynchronously and the queue remembers.
+--
+-- EVERY FIVE MINUTES, not every minute. A purge is a DELETE against a file
+-- nobody can reach any more — the row is already gone and both the row policy
+-- and the storage policy read from it. Minutes of latency cost nothing, and the
+-- queue holds each path until storage confirms, so a missed run is picked up by
+-- the next one rather than losing the file forever.
+--
+-- The drain is idempotent by construction: purge_photo_file() returns
+-- immediately for any path already marked purged, and DELETE of an absent
+-- object is itself idempotent, which is why an already-absent file is a
+-- success rather than an error.
+-- ─────────────────────────────────────────────────────────────────────────
+
+create extension if not exists pg_cron;
+
+-- Unschedule first so re-running this file does not accumulate duplicate jobs
+-- each firing the same drain.
+do $$
+begin
+  if exists (select 1 from cron.job where jobname = 'purge-progress-photo-files') then
+    perform cron.unschedule('purge-progress-photo-files');
+  end if;
+end $$;
+
+select cron.schedule(
+  'purge-progress-photo-files',
+  '*/5 * * * *',
+  $cron$ select public.purge_progress_photo_files(); $cron$
+);
+
+-- The job runs as the table owner, so nothing here widens what a signed-in
+-- person can reach. purge_progress_photo_files is already revoked from public
+-- and anon by 45-progress-photos.sql.
+
 -- ▶ exercise-video-library.sql
 
 -- ── Exercise videos: a library that survives the phone it was recorded on ───

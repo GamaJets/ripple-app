@@ -34,7 +34,7 @@ import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale'
 import { Icon } from '../../src/ui/Icon';
 import { useSettings } from '../../src/ui/settings';
 import { useAuth } from '../../src/ui/auth';
-import { exportMyData, requestAccountDeletion, withdrawAccountDeletion, fetchDeletionRequestedAt } from '../../src/lib/gdpr';
+import { exportMyDataDetailed, requestAccountDeletion, withdrawAccountDeletion, fetchDeletionRequestedAt } from '../../src/lib/gdpr';
 import { shareTextFile } from '../../src/lib/exportShare';
 import { reportError } from '../../src/lib/reportError';
 
@@ -92,7 +92,21 @@ export default function Settings() {
 
   const exportData = async () => {
     if (dataBusy) return; setDataBusy(true);
-    try { const json = await exportMyData(); await shareTextFile(json, 'repple-my-data.json', 'application/json', 'Export my data'); } finally { setDataBusy(false); }
+    try {
+      const res = await exportMyDataDetailed();
+      await shareTextFile(res.json, 'repple-my-data.json', 'application/json', 'Export my data');
+      if (!res.complete) {
+        // A partial export handed over silently is the same failure one level
+        // up: somebody deletes their account believing they have a copy.
+        Alert.alert(
+          'That copy is incomplete',
+          `${res.failed.length} part${res.failed.length === 1 ? '' : 's'} of your record could not be read `
+          + `(${res.failed.map((f) => f.table).join(', ')}). The file has been saved and says so inside, `
+          + 'but do not treat it as a full copy, and do not delete your account on the strength of it. '
+          + 'Try again in a moment, or email support@repplefitness.com.',
+        );
+      }
+    } finally { setDataBusy(false); }
   };
   const deleteAccount = () => {
     Alert.alert('Delete your account?', 'This requests permanent deletion of your account and all your data. This cannot be undone.', [

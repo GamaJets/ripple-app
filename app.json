@@ -18,10 +18,10 @@
       "bundleIdentifier": "com.washateria.repple",
       "infoPlist": {
         "NSHealthShareUsageDescription": "Repple reads your heart rate and calories to log workouts.",
-        "NSHealthUpdateUsageDescription": "Repple writes completed workouts to Apple Health.",
         "NSCameraUsageDescription": "Repple uses the camera to capture InBody scans and progress photos.",
         "NSPhotoLibraryUsageDescription": "Repple lets you upload InBody scans and progress photos.",
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSHealthUpdateUsageDescription": "Repple writes the workouts you log back to Apple Health, so your rings and history include training you did in the gym. Only sessions with a recorded length are written."
       }
     },
     "android": {
@@ -50,7 +50,7 @@
         {
           "isClinicalDataEnabled": false,
           "healthSharePermission": "Repple reads your heart rate, calories, steps and workouts to track your training.",
-          "healthUpdatePermission": "Repple writes completed workouts to Apple Health."
+          "healthUpdatePermission": "Repple writes the workouts you log back to Apple Health, so your rings and history include training you did in the gym. Only sessions with a recorded length are written."
         }
       ],
       [

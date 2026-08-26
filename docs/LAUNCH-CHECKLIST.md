@@ -167,7 +167,7 @@ grep -q '"expo-video"' app.json && echo "plugin registered" || echo "PLUGIN MISS
 
 `exercise-videos` was created by hand in the dashboard and left **public**, so
 any clip was readable by anyone who ever saw its URL, whatever the table's
-policies said. `43-exercise-video-library.sql` declares it and flips it private;
+policies said. `49-exercise-video-library.sql` declares it and flips it private;
 playback mints a signed URL per viewer, and the signing call is itself subject
 to the read policy.
 

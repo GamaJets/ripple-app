@@ -26,9 +26,13 @@
 // screen renders one person's data as another's.
 import { useEffect, useState } from 'react';
 import { fetchAwaitingOutcome } from '../../src/lib/gymSessions';
+import {
+  assessDrift, fetchClientActivity, compareDrift, summariseDrift, bandTitle, bandNote,
+  DRIFT_LABEL, DEFAULT_WINDOWS, type Drift,
+} from '../../src/lib/clientDrift';
 import { useTenant } from '../../src/ui/tenant';
 import { reportError } from '../../src/lib/reportError';
-import { View, Text, Pressable, ScrollView, Modal, TextInput, Alert, KeyboardAvoidingView, Platform, ActivityIndicator, type ViewStyle, type TextStyle } from 'react-native';
+import { View, Text, Pressable, ScrollView, Modal, TextInput, Alert, Image, KeyboardAvoidingView, Platform, ActivityIndicator, type ViewStyle, type TextStyle } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { trialInfo } from '../../src/lib/trial';
@@ -59,6 +63,7 @@ import { useTrainerInvites } from '../../src/ui/trainerInvites';
 import { useClientTags } from '../../src/ui/clientTags';
 import { useProgramTemplates } from '../../src/ui/programTemplates';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
+import { fetchPhotosSharedWithMe, missingSharedFiles, SHARED_URL_TTL_S, type SharedPhoto } from '../../src/lib/photoShare';
 
 /* ── local presentation ───────────────────────────────────────────────────── */
 
@@ -93,6 +98,23 @@ function Chip({ t, label, on, onPress }: { t: Theme; label: string; on: boolean;
       <Text style={{ ...ty.label, fontWeight: '500', color: on ? t.brandInk : t.ink2 }}>{label}</Text>
     </Pressable>
   );
+}
+
+/**
+ * The mark beside a drift verdict.
+ *
+ * UNKNOWN gets its own colour rather than a dimmed version of either end. It is
+ * not a mild at-risk and it is not a quiet on-track; it is a different kind of
+ * thing, and a coach scanning the list has to be able to see that without
+ * reading the word.
+ */
+function driftTone(t: Theme, d: Drift): string {
+  switch (d.status) {
+    case 'at_risk': return t.crit;
+    case 'idle': return t.s5;
+    case 'watch': return t.warn;
+    default: return t.brand;
+  }
 }
 
 /** A client's initials — the roster's only ornament. */
@@ -202,6 +224,66 @@ export default function TrainerClients() {
   const [trial, setTrial] = useState<{ daysLeft: number; expired: boolean } | null>(null);
   useEffect(() => { trialInfo().then((ti) => setTrial({ daysLeft: ti.daysLeft, expired: ti.expired })); }, []);
   const { roster, addClient, removeClient, setClientMode } = useRoster();
+  const { tenant } = useTenant();
+
+  // ── who is drifting ───────────────────────────────────────────────────────
+  //
+  // The book used to arrive in whatever order the roster query returned, which
+  // is roughly alphabetical. With twenty-five clients that hides the three who
+  // need a call this week. This reads each client's own record and orders on
+  // the break in their own pattern — see src/lib/clientDrift.ts for what
+  // "drifting" means and why absence of data is its own answer.
+  //
+  // THREE renders, never two:
+  //   drift === null && !driftErr → not read yet. Claim nothing.
+  //   drift !== null              → read. An empty map is a real answer.
+  //   driftErr !== null           → the read failed. Say so, and say the list
+  //                                 is in its ordinary order — never let a
+  //                                 failed read look like "nobody is drifting".
+  const [drift, setDrift] = useState<Record<string, Drift> | null>(null);
+  const [driftErr, setDriftErr] = useState<string | null>(null);
+  const rosterKey = roster.map((c) => c.id).join(',');
+  useEffect(() => {
+    const ids = rosterKey ? rosterKey.split(',') : [];
+    let live = true;
+    setDriftErr(null);
+    if (!ids.length) { setDrift({}); return; }
+    setDrift(null);
+    (async () => {
+      try {
+        const events = await fetchClientActivity(supabase, ids, {
+          days: DEFAULT_WINDOWS.historyDays,
+          tenantId: tenant?.id ?? null,
+        });
+        if (!live) return;
+        const map: Record<string, Drift> = {};
+        // `since` is the client's join date, and passing it changes two things.
+        // A client added yesterday and a client silent for eight weeks both
+        // have no recent activity, so without it they were indistinguishable —
+        // both UNKNOWN, both told "nothing recorded in the last 56 days", which
+        // is a strange thing to say about somebody who joined on Tuesday. It
+        // also clamps the drift baseline to the period they were actually on
+        // the book, so a real fall is not diluted by weeks they did not exist
+        // for. It comes from coach_clients.created_at or the coaching
+        // relationship; null where genuinely unknown, never guessed.
+        const joinedOf: Record<string, string | null> = {};
+        for (const c of roster) joinedOf[c.id] = c.joinedAt ?? null;
+        for (const id of ids) {
+          map[id] = assessDrift({ clientId: id, events: events[id] ?? [], since: joinedOf[id] ?? null });
+        }
+        setDrift(map);
+      } catch (e: any) {
+        if (!live) return;
+        reportError('dashboard.clientDrift', e);
+        setDrift(null);
+        setDriftErr(e?.message || 'Could not read the training record.');
+      }
+    })();
+    return () => { live = false; };
+  }, [rosterKey, tenant?.id]);
+  const driftFor = (c: RosterClient): Drift | null => (drift ? drift[c.id] ?? null : null);
+  const bands = summariseDrift(drift ? roster.map((c) => drift[c.id]).filter((d): d is Drift => !!d) : null);
+
   const { sessionFee, name: coachName } = useCoachProfile();
   const { getFeedback, addFeedback } = useCoachFeedback();
   const { get: getNutri, setAdjust: setNutri, clear: clearNutri } = useCoachNutrition();
@@ -267,23 +349,92 @@ export default function TrainerClients() {
     })();
     return () => { cancelled = true; };
   }, [sel]);
+  // ── progress photos this client SENT ────────────────────────────────────
+  // A coach sees a progress photo for exactly one reason: the client sent that
+  // photo. There is no roster-wide read and no "linked trainer" policy behind
+  // this — supabase/parts/47-share-progress-photo.sql grants the row and the
+  // file per photo, per coach, and only while the coaching link is live.
+  //
+  // `null` here is "not read yet, or the read failed", never "they have sent
+  // nothing". Those are different facts about another person's body and the
+  // sheet renders them differently.
+  const [shared, setShared] = useState<SharedPhoto[] | null>(null);
+  const [sharedErr, setSharedErr] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setShared(null);
+    setSharedErr(null);
+    if (!sel) return;
+    // A coach-created client (coach_clients) has no account and therefore no
+    // photos; its id is not a uuid, so asking would be a guaranteed error.
+    if (!sel.id.includes('-')) { setShared([]); return; }
+    const forClient = sel.id;
+    (async () => {
+      try {
+        const list = await fetchPhotosSharedWithMe(forClient);
+        if (!cancelled) { setShared(list); setSharedErr(null); }
+      } catch (e) {
+        reportError('trainer.sharedPhotos', e);
+        if (!cancelled) { setShared(null); setSharedErr('Could not load what they have sent you.'); }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [sel]);
   const active = roster.length;
   const revenue = active * sessionFee * 4;
   const unread = roster.reduce((a, c) => a + c.unread, 0);
+  // The legacy signal, kept only for the render where the drift read has not
+  // landed. It cannot see the client this whole feature is about: with
+  // `adherence: null` and `lastActive: 'no activity yet'` both of its clauses
+  // are false, so a client nobody has heard from reads as not at risk.
   const atRisk = roster.filter(atRiskClient).length;
+  /** Drifting plus unknown — the number a coach actually has to act on. Null
+   *  until the read lands, so it renders as an em-dash rather than as zero. */
+  const toContact = bands ? bands.drifting + bands.unknown : null;
+  const driftNote = (): string => {
+    if (driftErr) return 'Could not work out who is drifting.';
+    if (!bands) return 'Working out who is drifting…';
+    const parts: string[] = [];
+    if (bands.drifting) parts.push(`${bands.drifting} drifting`);
+    if (bands.unknown) parts.push(`${bands.unknown} with nothing recorded`);
+    if (!parts.length && bands.watch) parts.push(`${bands.watch} slipping`);
+    return parts.length ? parts.join(' · ') : 'Everyone is holding their own pattern.';
+  };
   const AUTO_SEGS = [
     { key: 'all', label: 'All', n: roster.length },
-    { key: 'atrisk', label: 'At-risk', n: roster.filter(atRiskClient).length },
+    // The drift segments replace the old At-risk chip rather than sitting
+    // beside it: two rules for "who needs attention" on one screen is how the
+    // product ended up with two status scales in the first place. Before the
+    // read lands there is no honest count, so the old chip stands in.
+    ...(bands
+      ? [{ key: 'drifting', label: 'Drifting', n: bands.drifting },
+         { key: 'nodata', label: 'Nothing recorded', n: bands.unknown }]
+      : [{ key: 'atrisk', label: 'At-risk', n: atRisk }]),
     { key: 'online', label: 'Online', n: roster.filter((c) => c.mode === 'online').length },
     { key: 'inperson', label: 'In-person', n: roster.filter((c) => c.mode === 'inperson').length },
   ];
   const matchSeg = (c: RosterClient) =>
     seg === 'all' ? true
+    : seg === 'drifting' ? driftFor(c)?.status === 'at_risk'
+    : seg === 'nodata' ? driftFor(c)?.status === 'idle'
     : seg === 'atrisk' ? atRiskClient(c)
     : seg === 'online' ? c.mode === 'online'
     : seg === 'inperson' ? c.mode === 'inperson'
     : tagsFor(c.id).includes(seg);
-  const shownRoster = roster.filter(matchSeg);
+  // A drift segment cannot be honoured once the read is gone; fall back to the
+  // whole book rather than showing an empty list that reads as "none of these".
+  const segLive = !(!bands && (seg === 'drifting' || seg === 'nodata'));
+  const shownRoster = segLive ? roster.filter(matchSeg) : roster;
+  // The book, in drift order once it can be. Until then it keeps the order it
+  // came in — with a line above it saying that is what this is.
+  const driftRows: { c: RosterClient; d: Drift | null }[] = (() => {
+    const pairs = shownRoster.map((c) => ({ c, d: driftFor(c) }));
+    if (!drift) return pairs;
+    const assessed = pairs.filter((p) => p.d).sort((a, b) => compareDrift(a.d!, b.d!));
+    // Only reachable for the render between a roster change and the next read.
+    // They carry their own "not read yet" line rather than passing as fine.
+    return [...assessed, ...pairs.filter((p) => !p.d)];
+  })();
   // Awaits the insert and reports what actually happened. This used to be
   // fire-and-forget with both handlers empty, and the alert fired synchronously
   // regardless — so a client added by hand (a coach_clients row with no user
@@ -306,11 +457,22 @@ export default function TrainerClients() {
   };
   // Who needs proactive attention, and why — drives the suggested check-ins.
   const attnReason = (c: RosterClient): string | null => {
-    if (atRiskClient(c)) return (c.adherence != null && c.adherence < 80) ? 'Adherence ' + c.adherence + '% — below target' : 'Inactive ' + c.lastActive + ' — check in';
+    const d = driftFor(c);
+    // Drift speaks first where it can, because it is the only signal that sees
+    // a client with no record at all.
+    if (d && (d.status === 'at_risk' || d.status === 'idle')) return d.reason;
+    if (!d && atRiskClient(c)) return (c.adherence != null && c.adherence < 80) ? 'Adherence ' + c.adherence + '% — below target' : 'Inactive ' + c.lastActive + ' — check in';
     if (c.unread > 0) return c.unread + ' unread message' + (c.unread > 1 ? 's' : '');
     return null;
   };
-  const needsAttention = roster.filter((c) => attnReason(c)).sort((a, b) => (a.adherence ?? 999) - (b.adherence ?? 999));
+  const needsAttention = roster.filter((c) => attnReason(c)).sort((a, b) => {
+    const da = driftFor(a), db = driftFor(b);
+    if (da && db) return compareDrift(da, db);
+    // Before the read lands, order on the only figure the row carries — and a
+    // client who has never submitted a check-in is not a perfect score. This
+    // used to be `?? 999`, which sorted exactly those clients to the bottom.
+    return (a.adherence ?? -1) - (b.adherence ?? -1);
+  });
   // AI-draft a personalised check-in the coach reviews before sending.
   const draftNudge = async (client: RosterClient) => {
     setDraftClient(client); setDraftText(''); setDraftBusy(true);
@@ -446,10 +608,8 @@ export default function TrainerClients() {
         <Hero
           label="Active clients"
           figure={fig(active)}
-          note={active === 0
-            ? 'No clients yet — add or invite your first below.'
-            : atRisk > 0 ? `${atRisk} need a check-in` : 'Everyone is on track'}
-          tone={atRisk > 0 ? t.warn : t.brand}
+          note={active === 0 ? 'No clients yet — add or invite your first below.' : driftNote()}
+          tone={toContact == null ? t.ink3 : toContact > 0 ? t.warn : t.brand}
           onPress={() => router.push('/(trainer)/analytics')}
         />
 
@@ -461,7 +621,9 @@ export default function TrainerClients() {
           <KpiRow items={[
             { label: 'Est. revenue', value: '$' + revenue.toLocaleString(), unit: '/mo' },
             { label: 'Unread', value: fig(unread) },
-            { label: 'Needs check-in', value: fig(atRisk) },
+            // Null until the record has been read: an em-dash, never a zero
+            // that would tell a coach nobody needs them this week.
+            { label: 'To contact', value: fig(toContact) },
           ]} />
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
             {active === 0
@@ -510,7 +672,23 @@ export default function TrainerClients() {
 
         {/* ── the roster ─────────────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Your clients" note={atRisk > 0 ? `${atRisk} need a check-in` : undefined} />
+          <SectionHead title="Your clients" note={active > 0 ? driftNote() : undefined} />
+
+          {/* The read failed. Say so, say what it cost, and do NOT let the
+              ordinary order pass for the drift order. */}
+          {driftErr && active > 0 ? (
+            <Notice tone={t.crit} kicker="Order unavailable"
+              title="Could not read who is drifting"
+              note={driftErr + ' The list below is in its usual order, not by who needs a call.'} />
+          ) : null}
+
+          {/* Read, and the record is empty for everyone. Distinct from both of
+              the other two renders, and explicitly not an all-clear. */}
+          {bands && bands.total > 0 && bands.unknown === bands.total ? (
+            <Notice tone={t.s5} kicker="Nothing recorded"
+              title={`No record for ${bands.total === 1 ? 'this client' : 'any of your ' + bands.total + ' clients'}`}
+              note={`No check-ins, logged workouts, sessions or visits in the last ${DEFAULT_WINDOWS.historyDays} days. That is not the same as everyone being fine — it means there is nothing here to judge them on.`} />
+          ) : null}
 
           <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.lg }}>
             <View style={{ flex: 1 }}><Ghost label="Invite by email" onPress={() => { setInvEmail(''); setInvMode('online'); setInvOpen(true); }} /></View>
@@ -546,9 +724,36 @@ export default function TrainerClients() {
             </Text>
           ) : null}
 
-          {shownRoster.map((c, idx) => (
-            <Pressable key={c.id} onPress={() => setSel(c)}
-              style={{ paddingVertical: sp.lg, borderTopWidth: idx === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+          {/* Not read yet. The list is on screen and usable; it just is not
+              sorted by drift, and it says so rather than implying it is. */}
+          {!drift && !driftErr && shownRoster.length > 0 ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginBottom: sp.md }}>
+              <ActivityIndicator size="small" color={t.ink3} />
+              <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }}>
+                Reading check-ins, logs, sessions and visits — the order below is not by drift yet.
+              </Text>
+            </View>
+          ) : null}
+
+          {driftRows.map(({ c, d }, idx) => {
+            const prev = idx > 0 ? driftRows[idx - 1].d : null;
+            const opensBand = !!d && (!prev || prev.status !== d.status);
+            // Drift is stated on the row only where there is something to act
+            // on. "Holding their pattern" is said once, by the band heading.
+            const showDrift = !!d && d.status !== 'on_track';
+            return (
+            <View key={c.id}>
+              {opensBand ? (
+                <View style={{ marginTop: idx === 0 ? 0 : sp.xl, marginBottom: sp.sm }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: driftTone(t, d!) }} />
+                    <Text style={{ ...ty.micro, color: t.ink3 }}>{bandTitle(d!.status)}</Text>
+                  </View>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{bandNote(d!.status, DEFAULT_WINDOWS)}</Text>
+                </View>
+              ) : null}
+            <Pressable onPress={() => setSel(c)}
+              style={{ paddingVertical: sp.lg, borderTopWidth: idx === 0 || opensBand ? 0 : hairline, borderTopColor: t.ring }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
                 <Initials t={t} name={c.name} />
                 <View style={{ flex: 1 }}>
@@ -560,16 +765,30 @@ export default function TrainerClients() {
                     <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: c.weightDelta <= 0 ? t.brand : t.ink3 }} />
                     <Text style={{ ...ty.label, fontWeight: '500', ...numeric, color: t.ink }}>{c.weightDelta > 0 ? '+' : ''}{c.weightDelta} kg</Text>
                   </View>
-                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>Next: {c.next}</Text>
+                  {/* Days a week, against what this person's own weeks used to
+                      look like. An em-dash where there is no baseline — never
+                      a rate invented out of an empty window. */}
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, ...numeric }}>
+                    {d ? `${fig(d.recentPerWeek)} / wk · was ${fig(d.baselinePerWeek)}` : `Next: ${c.next}`}
+                  </Text>
                 </View>
               </View>
 
-              {(c.unread > 0 || atRiskClient(c) || (c.injuries && c.injuries.length)) ? (
+              {(c.unread > 0 || showDrift || (!d && atRiskClient(c)) || (c.injuries && c.injuries.length)) ? (
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.md, marginTop: sp.sm, marginLeft: 38 + sp.md }}>
-                  {atRiskClient(c) ? <Flag t={t} tone={t.warn} text="Needs a check-in" /> : null}
+                  {showDrift ? <Flag t={t} tone={driftTone(t, d!)} text={DRIFT_LABEL[d!.status]} /> : null}
+                  {!d && atRiskClient(c) ? <Flag t={t} tone={t.warn} text="Needs a check-in" /> : null}
                   {c.unread > 0 ? <Flag t={t} tone={t.brand} text={`${c.unread} unread`} /> : null}
                   {c.injuries && c.injuries.length ? <Flag t={t} tone={t.s3} text={c.injuries.some((x) => x.isNew) ? 'New injury' : 'Injury'} /> : null}
                 </View>
+              ) : null}
+
+              {showDrift ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 5, marginLeft: 38 + sp.md }}>{d!.reason}</Text>
+              ) : null}
+
+              {drift && !d ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 5, marginLeft: 38 + sp.md }}>Not read yet — no drift assessment for this client.</Text>
               ) : null}
 
               {tagsFor(c.id).length > 0 ? (
@@ -590,7 +809,9 @@ export default function TrainerClients() {
                 {c.adherence != null ? <Bar t={t} pct={c.adherence} good={c.adherence >= 85} /> : null}
               </View>
             </Pressable>
-          ))}
+            </View>
+            );
+          })}
         </Section>
 
       </ScrollView>
@@ -641,6 +862,55 @@ export default function TrainerClients() {
                   })()}
                 </View>
               ) : null}
+
+              {/* ── progress photos this client sent ─────────────────────────
+                  The ONLY route by which a progress photo reaches a coach. There
+                  is no roster-wide read behind this: each of these is a photo
+                  this person chose, one at a time, and each can be withdrawn.
+                  The three states below are deliberately unalike — "could not
+                  read the list" must never look like "they have sent nothing",
+                  because the second is a fact about them and the first is not. */}
+              <View style={{ marginBottom: sp.xl }}>
+                <SheetHead t={t} title={`Progress photos · sent by ${sel.name.split(' ')[0]}`} />
+                {sharedErr ? (
+                  <Text style={{ ...ty.label, color: t.warn }}>
+                    {sharedErr} That is not the same as them having sent none — the list could not be read, so this sheet cannot say either way.
+                  </Text>
+                ) : shared === null ? (
+                  <Text style={{ ...ty.label, color: t.ink3 }}>Loading what they have sent you…</Text>
+                ) : shared.length === 0 ? (
+                  <Text style={{ ...ty.label, color: t.ink3 }}>
+                    {sel.name.split(' ')[0]} has not sent you any progress photos. You see one only when they send that photo — there is nothing to turn on here, and being their coach does not show you the rest.
+                  </Text>
+                ) : (
+                  <View>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.md }}>
+                      {shared.map((p) => (
+                        <View key={p.id}>
+                          {p.url ? (
+                            <Image source={{ uri: p.url }} style={{ width: 104, height: 142, borderRadius: radius.md, backgroundColor: t.surface2 }} />
+                          ) : (
+                            // The grant is here and the file would not sign.
+                            // A gap, not a blank frame that reads as loading.
+                            <View style={{ width: 104, height: 142, borderRadius: radius.md, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center', paddingHorizontal: sp.sm }}>
+                              <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center' }}>Picture{'\n'}unavailable</Text>
+                            </View>
+                          )}
+                          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, textAlign: 'center' }}>{new Date(p.takenAt).toLocaleDateString()}</Text>
+                        </View>
+                      ))}
+                    </ScrollView>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                      {shared.length === 1 ? 'One photo' : shared.length + ' photos'}, sent by {sel.name.split(' ')[0]} — and only these. They can take any of them back whenever they like; once they do, it stops opening here within {Math.round(SHARED_URL_TTL_S / 60)} minutes.
+                    </Text>
+                    {(missingSharedFiles(shared) ?? 0) > 0 ? (
+                      <Text style={{ ...ty.caption, color: t.warn, marginTop: 4 }}>
+                        {missingSharedFiles(shared) === 1 ? 'One of these has no picture behind it any more.' : `${missingSharedFiles(shared)} of these have no picture behind them any more.`}
+                      </Text>
+                    ) : null}
+                  </View>
+                )}
+              </View>
 
               <View style={{ marginBottom: sp.xl }}>
                 <SheetHead t={t} title="Tags" />

@@ -11,6 +11,17 @@ export interface RosterClient {
    *  and could never be flagged at risk. */
   adherence: number | null; lastActive: string; next: string; unread: number;
   mode: 'online' | 'inperson';
+  /** When this client joined the coach's book, ISO. Null when unknown.
+   *
+   *  Load-bearing for src/lib/clientDrift.ts: without it, a client added
+   *  yesterday and a client silent for eight weeks are indistinguishable —
+   *  both have no recent activity, so both read UNKNOWN and the reason says
+   *  "nothing recorded in the last 56 days" about somebody who has only been
+   *  on the book for one. It also clamps the drift baseline to the period the
+   *  client actually existed for, so a real fall is not diluted by weeks they
+   *  were not there. coach_clients.created_at has always held this; the roster
+   *  selected it and then dropped it on the floor. */
+  joinedAt?: string | null;
   injuries?: { area: string; severity: string; note?: string; isNew?: boolean }[];
   metrics?: import('./inbodyMetrics').ScanMetrics;
   diet?: string;
@@ -20,9 +31,30 @@ export interface RosterClient {
 export const ROSTER: RosterClient[] = [];
 export interface ExVideo { id: string; name: string; group: string; dur: string; uploaded: boolean; url?: string; }
 
-// Shared "at-risk" definition so every trainer screen agrees (adherence low OR inactive 2+ days).
+// Shared "at-risk" definition so every trainer screen agrees (adherence low OR
+// inactive 2+ days, OR nothing recorded at all).
+//
+// THAT LAST CLAUSE IS A BUG FIX, and it is worth knowing why it was missing.
+// A client with no record has `adherence === null`, so the first clause is
+// false; and `lastActive` for them is the string 'no activity yet', from which
+// staleDays parses 0, so the second clause is false too. The function therefore
+// returned FALSE — "this client is fine" — for a client it had never seen a
+// single data point from. Absence of evidence read as evidence of health, on
+// the screen a coach uses to decide who to ring.
+//
+// It cannot express "unknown", being a boolean, so it now errs toward
+// surfacing: a client nothing is known about is returned as needing attention.
+// Over-flagging costs a coach one unnecessary look; under-flagging is how
+// somebody leaves without anyone noticing. src/lib/clientDrift.ts models this
+// properly with a distinct UNKNOWN band and is what the Clients screen ranks on
+// — this function remains for the screens that have not moved to it yet.
 export function staleDays(str: string): number { const m = /([0-9]+)d/.exec(str || ''); return m ? parseInt(m[1], 10) : 0; }
-export function atRiskClient(c: { adherence: number | null; lastActive: string }): boolean { return (c.adherence != null && c.adherence < 80) || staleDays(c.lastActive) >= 2; }
+export function noRecordOf(c: { adherence: number | null; lastActive: string }): boolean {
+  return c.adherence == null && !/[0-9]+d/.test(c.lastActive || '');
+}
+export function atRiskClient(c: { adherence: number | null; lastActive: string }): boolean {
+  return (c.adherence != null && c.adherence < 80) || staleDays(c.lastActive) >= 2 || noRecordOf(c);
+}
 // Built-in exercise library. Each ships with a real proper-form demo (opens
 // relevant videos so the row is never a dead end); a trainer replaces any of
 // these with their own recorded clip from the Videos screen.

@@ -1,0 +1,534 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Repple — how it works</title>
+<meta name="description" content="What actually happens when a gym signs up: the account, the Studio console in a browser, importing plans and payments from a spreadsheet, the timetable, the door log — and what each figure needs before it can appear.">
+<meta property="og:title" content="Repple — how it works">
+<meta property="og:description" content="The setup, in the order it happens, and what every figure needs before it can show you anything.">
+<meta property="og:url" content="https://www.repplefitness.com/how-it-works">
+<link rel="stylesheet" href="styles.css?v=febfacb053">
+<link rel="icon" href="favicon.png">
+</head>
+<body class="tone-studio">
+
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="/">
+      <span class="mark">
+        <svg width="17" height="17" viewBox="0 0 100 100" aria-hidden="true">
+          <g fill="none" stroke="#04211d" stroke-width="8"><circle cx="50" cy="50" r="32" opacity=".45"/><circle cx="50" cy="50" r="20" opacity=".75"/></g>
+          <circle cx="50" cy="50" r="8.5" fill="#04211d"/>
+        </svg>
+      </span>
+      Repple
+    </a>
+    <nav class="site">
+      <a href="/client">Members</a>
+      <a href="/trainer">Coaches</a>
+      <a href="/studio">Gyms</a>
+      <a href="/support" class="sm-hide">Support</a>
+      <a class="get" href="/download"><svg class="appicon" viewBox="0 0 1024 1024" aria-hidden="true" focusable="false"><defs><linearGradient id="nav-tile" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2dd4bf"/><stop offset="1" stop-color="#0d9488"/></linearGradient></defs><rect width="1024" height="1024" rx="220" fill="url(#nav-tile)"/><g stroke="#fff" fill="#fff"><circle cx="512" cy="512" r="330" stroke-width="20" fill="none" opacity=".34"/><circle cx="512" cy="512" r="220" stroke-width="26" fill="none" opacity=".60"/><circle cx="512" cy="512" r="115" stroke-width="32" fill="none" opacity=".90"/><circle cx="512" cy="512" r="52"/></g></svg>Get the app</a>
+      <a class="cta" href="/signup">Create account</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+<section class="hero">
+  <div class="wrap">
+    <div class="hero-grid">
+      <div>
+        <div class="eyebrow">Repple Studio · setting up</div>
+        <h1 class="display">The first week,<br>in <em>order</em>.</h1>
+        <p class="lede after">
+          Every screen in Studio reads rows somebody put there. So the useful question on day one
+          is not what the console can do &mdash; it is what has to exist before each figure stops
+          being a dash. This page is that sequence, with the dependencies said out loud.
+        </p>
+        <div class="btn-row">
+          <a class="btn primary" href="/signup">Create an account</a>
+          <a class="btn" href="#order">Start at step one</a>
+        </div>
+      </div>
+
+      <div class="surface">
+        <div class="surface-bar">
+          <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+          <span class="ttl">import — payments.csv</span>
+          <span class="sample">Illustrative</span>
+        </div>
+        <div class="surface-body">
+          <p class="tiny">Dry run. Nothing has been written to your gym.</p>
+        </div>
+        <div class="rows">
+          <div class="row"><span class="nm">Rows read</span><span class="mt">118</span><span class="pill ok">ready</span></div>
+          <div class="row"><span class="nm">Amount has four decimal places</span><span class="mt">line 41</span><span class="pill warn">handed back</span></div>
+          <div class="row"><span class="nm">No member name or email</span><span class="mt">line 63</span><span class="pill warn">handed back</span></div>
+          <div class="row"><span class="nm">Amount is negative</span><span class="mt">line 92</span><span class="pill crit">refunds not imported</span></div>
+          <div class="row"><span class="nm">Date order</span><span class="mt">day-month-year</span><span class="pill">read from the file</span></div>
+        </div>
+        <div class="surface-body">
+          <p class="tiny">118 of 121 rows ready · 3 need attention · ignoring 2 unrecognised columns</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── the order ──────────────────────────────────────────────────────── -->
+<section class="band" id="order">
+  <div class="wrap">
+    <div class="lead-in wide">
+      <div class="eyebrow">The sequence</div>
+      <h2 class="hd">Eight steps, and each one<br><span class="serif">turns something on.</span></h2>
+      <p class="lede">
+        Nothing here is a wizard you have to finish in one sitting. It is the order the parts
+        depend on each other in &mdash; do them out of order and the screens simply stay honest
+        about what they are missing.
+      </p>
+    </div>
+
+    <ol class="steps">
+      <li>
+        <span class="no">1</span>
+        <div>
+          <h3>Create one account, and get a gym with it</h3>
+          <p>Signing up makes you the owner of your own empty gym. Nobody grants it to you and there is nothing to apply for &mdash; the account and the gym are created together, and you are the only person in it. It starts out named after you, which is a placeholder rather than a decision; rename it before you invite anybody.</p>
+        </div>
+      </li>
+      <li>
+        <span class="no">2</span>
+        <div>
+          <h3>Open the console in a browser</h3>
+          <p>Studio is a phone app for the floor and a browser console for the desk, and they are not two products &mdash; both call the same functions over the same rows through the same permissions. The wide tables, the month reconciliations and the import are keyboard work, so start at the desk. Open a page your role does not cover and it says so plainly instead of showing you an empty screen to interpret.</p>
+        </div>
+      </li>
+      <li>
+        <span class="no">3</span>
+        <div>
+          <h3>Put the price book in</h3>
+          <p>What the gym sells: a name, a price, and whether it recurs monthly, yearly or is a one-off such as a day pass or a joining fee. Type them in on the Money screen, or paste your existing price list into Import. Prices are held as whole minor units &mdash; an integer number of fils or cents, never a decimal &mdash; because a float near a ledger is a rounding error in a spreadsheet and a dispute in a gym.</p>
+        </div>
+      </li>
+      <li>
+        <span class="no">4</span>
+        <div>
+          <h3>Bring the payments across</h3>
+          <p>Paste the spreadsheet and read the dry run before anything is written. A payment whose member cannot be matched is still recorded &mdash; unattributed, which is true &mdash; rather than dropped, which loses money the gym actually took. What it refuses, it hands back with the reason attached.</p>
+        </div>
+      </li>
+      <li>
+        <span class="no">5</span>
+        <div>
+          <h3>Invite your members; do not import them</h3>
+          <p>A membership has to point at a real account, and an account is something a person accepts. So members arrive as invitations addressed to an email, which they redeem in their own app. Run the member half of the import anyway: it validates and cleans the file &mdash; bad dates, unreadable amounts, duplicate addresses, statuses nobody recognises &mdash; and that is most of the work.</p>
+        </div>
+      </li>
+      <li>
+        <span class="no">6</span>
+        <div>
+          <h3>Invite your trainers</h3>
+          <p>The same shape: an invitation to an email address, accepted in the coach app, which attaches that trainer to your gym. From then on their clients, their rota and the sessions they deliver sit inside your gym's records rather than in a calendar you cannot see.</p>
+        </div>
+      </li>
+      <li>
+        <span class="no">7</span>
+        <div>
+          <h3>Put the week on the board</h3>
+          <p>Classes and weekly series, with the dates you skip. One-to-ones land on the same board rather than in a separate calendar, because two calendars cannot answer &ldquo;is the floor covered at six?&rdquo;. Record what each room and its equipment can take while you are there &mdash; a fill rate is a fraction, and without a capacity there is no denominator to divide by.</p>
+        </div>
+      </li>
+      <li>
+        <span class="no">8</span>
+        <div>
+          <h3>Start the door log, and start marking outcomes</h3>
+          <p>These are the two habits everything else rests on. The door records entries at the desk whether or not anything was booked; without it, a member who moved from the 6am class to the gym floor is indistinguishable from one who stopped coming. And somebody &mdash; the trainer in the coach app, or you in the console &mdash; has to say what happened to each one-to-one, because the alternative is inferring delivery from the clock and paying for no-shows.</p>
+        </div>
+      </li>
+    </ol>
+  </div>
+</section>
+
+<!-- ── what unlocks what ──────────────────────────────────────────────── -->
+<section class="band tint">
+  <div class="wrap">
+    <div class="lead-in wide">
+      <div class="eyebrow">Dependencies</div>
+      <h2 class="hd">Every figure names<br><span class="serif">what it is waiting for.</span></h2>
+      <p class="lede">
+        Studio will not estimate its way past a missing input. Where the record is thin you get a
+        dash and a sentence saying which record is thin &mdash; which is a smaller problem than a
+        confident number you cannot source.
+      </p>
+    </div>
+
+    <figure class="chart">
+      <div class="chart-hd">
+        <div>
+          <span class="chart-k">Setup</span>
+          <h3>What has to exist before each figure does</h3>
+        </div>
+      </div>
+      <div class="chart-scroll">
+        <svg viewBox="0 0 740 392" width="740" height="392" role="img" aria-label="A map of six dependencies in Repple Studio. A price book and the memberships on it produce recurring revenue. Payments recorded or imported produce money taken in the last thirty days. A capacity recorded against each class produces a class fill rate. Check-outs as well as check-ins produce an average time in the building. A session fee plus an outcome marked on every session produces a payroll total that can be called final. The door log running produces attendance that is not only bookings.">
+          <text class="cx-cap" x="16" y="30">YOU RECORD</text>
+          <text class="cx-cap" x="452" y="30">STUDIO CAN THEN SHOW</text>
+
+          <rect class="cx-box" x="16" y="52" width="272" height="40" rx="8"/>
+          <text class="cx-lab" x="30" y="77">A price book, and who is on it</text>
+          <line class="cx-flow" x1="296" y1="72" x2="438" y2="72"/>
+          <polygon class="cx-tip" points="438,68 450,72 438,76"/>
+          <rect class="cx-box" x="452" y="52" width="272" height="40" rx="8"/>
+          <text class="cx-lab" x="466" y="77">Recurring revenue</text>
+
+          <rect class="cx-box" x="16" y="106" width="272" height="40" rx="8"/>
+          <text class="cx-lab" x="30" y="131">Payments, typed in or imported</text>
+          <line class="cx-flow" x1="296" y1="126" x2="438" y2="126"/>
+          <polygon class="cx-tip" points="438,122 450,126 438,130"/>
+          <rect class="cx-box" x="452" y="106" width="272" height="40" rx="8"/>
+          <text class="cx-lab" x="466" y="131">Money taken, last 30 days</text>
+
+          <rect class="cx-box" x="16" y="160" width="272" height="40" rx="8"/>
+          <text class="cx-lab" x="30" y="185">A capacity against each class</text>
+          <line class="cx-flow" x1="296" y1="180" x2="438" y2="180"/>
+          <polygon class="cx-tip" points="438,176 450,180 438,184"/>
+          <rect class="cx-box" x="452" y="160" width="272" height="40" rx="8"/>
+          <text class="cx-lab" x="466" y="185">Class fill rate</text>
+
+          <rect class="cx-box" x="16" y="214" width="272" height="40" rx="8"/>
+          <text class="cx-lab" x="30" y="239">Check-outs, not just check-ins</text>
+          <line class="cx-flow" x1="296" y1="234" x2="438" y2="234"/>
+          <polygon class="cx-tip" points="438,230 450,234 438,238"/>
+          <rect class="cx-box" x="452" y="214" width="272" height="40" rx="8"/>
+          <text class="cx-lab" x="466" y="239">Average time in the building</text>
+
+          <rect class="cx-box" x="16" y="268" width="272" height="40" rx="8"/>
+          <text class="cx-lab" x="30" y="293">A session fee, and every outcome</text>
+          <line class="cx-flow" x1="296" y1="288" x2="438" y2="288"/>
+          <polygon class="cx-tip" points="438,284 450,288 438,292"/>
+          <rect class="cx-box" x="452" y="268" width="272" height="40" rx="8"/>
+          <text class="cx-lab" x="466" y="293">A payroll total that is final</text>
+
+          <rect class="cx-box" x="16" y="322" width="272" height="40" rx="8"/>
+          <text class="cx-lab" x="30" y="347">The door log running</text>
+          <line class="cx-flow" x1="296" y1="342" x2="438" y2="342"/>
+          <polygon class="cx-tip" points="438,338 450,342 438,346"/>
+          <rect class="cx-box" x="452" y="322" width="272" height="40" rx="8"/>
+          <text class="cx-lab" x="466" y="347">Attendance beyond bookings</text>
+
+          <line class="cx-base" x1="16" y1="378" x2="724" y2="378"/>
+        </svg>
+      </div>
+      <figcaption class="chart-note">
+        <strong>Nothing on the right is estimated from a partial left.</strong> The most common
+        surprise is the last row: a gym that counts only class bookings concludes that members are
+        leaving, when what actually happened is that they moved to the floor.
+      </figcaption>
+    </figure>
+
+    <div class="scroll">
+      <table class="data">
+        <thead>
+          <tr><th>Figure</th><th>What it needs</th><th>What you see until then</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Recurring revenue</strong></td>
+            <td>Active memberships sitting on a plan that has a price.</td>
+            <td>A dash, and which memberships have no priced plan behind them.</td>
+          </tr>
+          <tr>
+            <td><strong>Money taken</strong></td>
+            <td>Payments recorded at the desk or brought in from a spreadsheet.</td>
+            <td>A dash. An empty payment record is not the same fact as a month of nothing, and it is not drawn as one.</td>
+          </tr>
+          <tr>
+            <td><strong>Class fill</strong></td>
+            <td>A capacity recorded against the classes being measured.</td>
+            <td>A dash and &ldquo;no capacity recorded&rdquo;, rather than a percentage of an invented denominator.</td>
+          </tr>
+          <tr>
+            <td><strong>Average stay</strong></td>
+            <td>Exits logged as well as entries.</td>
+            <td>A dash. Entries alone give you a visit count, which is a different question.</td>
+          </tr>
+          <tr>
+            <td><strong>Payroll total</strong></td>
+            <td>A session fee set for the gym, and an outcome marked on every session in the period.</td>
+            <td>A figure that refuses to call itself final, and a count of how many sessions are still unmarked.</td>
+          </tr>
+          <tr>
+            <td><strong>Retention</strong></td>
+            <td>The door log running alongside the class bookings.</td>
+            <td>A reading taken from bookings only, with a note when the door log and the class record disagree.</td>
+          </tr>
+          <tr>
+            <td><strong>Cash position</strong></td>
+            <td>An accounting connection, which is not built.</td>
+            <td>A permanent dash with &ldquo;connect accounting&rdquo; under it. It is on the roadmap, not in the product.</td>
+          </tr>
+          <tr>
+            <td><strong>Lifetime value</strong></td>
+            <td>A measured membership lifespan, which needs time nobody has had yet.</td>
+            <td>Nothing. Studio does not print an invented multiplier and call it analysis.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="tiny after-sm">
+      A read that fails is also kept distinct from a record that is empty. Each department on the
+      overview is loaded on its own, so a door log that will not read shows a dash of its own
+      rather than blanking the revenue figure beside it.
+    </p>
+  </div>
+</section>
+
+<!-- ── the import ─────────────────────────────────────────────────────── -->
+<section class="band">
+  <div class="wrap">
+    <div class="split">
+      <div>
+        <div class="eyebrow">Bringing your history in</div>
+        <h2 class="hd">The refusals are<br><span class="serif">the feature.</span></h2>
+        <p class="lede after-sm">
+          An import that silently misreads 03/04/2026 does not fail loudly. It produces a year of
+          plausible, wrong history that nobody notices until a renewal date is missed. So the
+          importer never guesses at an ambiguous value &mdash; it hands the row back with a reason
+          and lets somebody decide.
+        </p>
+        <ul class="ticks">
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>It reads the whole date column first.</strong> One unambiguous value settles the file: if any row says 25/12, every 03/04 in it can be read with confidence and you are never asked. A file containing both 25/12 and 12/25 is internally inconsistent, and that is said rather than resolved.</span></li>
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>Four decimal places is not money.</strong> A price column carrying four decimals is a unit rate or an exchange rate. Rounding it silently turns a data-shape problem into a money problem, so it is handed back instead.</span></li>
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>A quarterly plan has nowhere truthful to go.</strong> Billing periods are monthly, yearly or one-off. Mapping a quarterly plan onto monthly divides your recurring revenue by three; onto yearly multiplies it by four. Those rows are refused so a person decides.</span></li>
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>A blank price is an unfinished row.</strong> Not a free plan. A deliberate zero is allowed, because a staff or complimentary membership is a real thing a gym sells at nothing on purpose &mdash; the distinction is between an absent cell and a typed 0.</span></li>
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>An unrecognised status is refused, not defaulted.</strong> A cancelled member imported as active gets chased for money. The same rule retires a plan rather than putting it back on sale.</span></li>
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>Columns it does not recognise are reported, never dropped.</strong> The summary counts them, so you find out on the preview screen rather than three months later when something you needed turns out never to have arrived.</span></li>
+        </ul>
+      </div>
+
+      <div class="assure">
+        <div class="pair">
+          <div class="card">
+            <div class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg></div>
+            <h3>Plans land in full</h3>
+            <p>A price book holds nothing but the gym and the plan itself &mdash; no reference to a person &mdash; so importing one is a plain write.</p>
+          </div>
+          <div class="card">
+            <div class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2v20M17 6H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div>
+            <h3>Payments are kept, matched or not</h3>
+            <p>A payment can be recorded with no member attached. Money the gym took is kept even when the name in the file matches nobody yet.</p>
+          </div>
+        </div>
+        <div class="pair">
+          <div class="card">
+            <div class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg></div>
+            <h3>Members are checked, not created</h3>
+            <p>A membership needs a real account behind it. The preview still runs, because validating the file is worth having before the invitations go out.</p>
+          </div>
+          <div class="card">
+            <div class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg></div>
+            <h3>Nothing writes until you press it</h3>
+            <p>The preview is a dry run in full. The one sentence this is built never to produce is &ldquo;12 plans imported&rdquo; when five of them silently failed.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── the console ────────────────────────────────────────────────────── -->
+<section class="band tint">
+  <div class="wrap">
+    <div class="lead-in wide">
+      <div class="eyebrow">Where the work happens</div>
+      <h2 class="hd">Seven pages, and the<br><span class="serif">first job on each.</span></h2>
+    </div>
+    <div class="scroll">
+      <table class="data">
+        <thead>
+          <tr><th>Console page</th><th>What you do there first</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><strong>Import</strong></td><td>Paste the price list, read the dry run, then do the same with the payments.</td></tr>
+          <tr><td><strong>Money</strong></td><td>Check the imported price book, open memberships against it, and record what comes in at the desk.</td></tr>
+          <tr><td><strong>Timetable</strong></td><td>Build the week &mdash; classes, weekly series and one-to-ones on one board &mdash; with a capacity recorded on each.</td></tr>
+          <tr><td><strong>Door</strong></td><td>Start checking people in and out, and sell or redeem a drop-in, a guest pass or a class pack.</td></tr>
+          <tr><td><strong>Sessions</strong></td><td>Clear anything sitting unmarked, then run payroll once nothing is outstanding.</td></tr>
+          <tr><td><strong>Members</strong></td><td>Open one person and see the whole of what the gym knows about them &mdash; membership, payments, visits, classes, one-to-ones and passes on one screen.</td></tr>
+          <tr><td><strong>Overview</strong></td><td>Nothing, at first. It is the last screen to become useful, because it reads back everything the other six record.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="tiny after-sm">
+      What each page does in full, and who is allowed to open it, is on the
+      <a href="/studio">Gyms</a> page &mdash; alongside the parts of Studio that are not built yet.
+    </p>
+  </div>
+</section>
+
+<!-- ── the other two apps ─────────────────────────────────────────────── -->
+<section class="band">
+  <div class="wrap">
+    <div class="lead-in wide">
+      <div class="eyebrow">The people in it</div>
+      <h2 class="hd">Your members and coaches<br><span class="serif">arrive by invitation.</span></h2>
+    </div>
+    <div class="tiles">
+      <div class="tile c-client">
+        <div class="cap">Members</div>
+        <h3>They get an app, not a portal</h3>
+        <p>An invitation goes to an email address and is redeemed in the member's own app, which
+        attaches them to your gym. Their training record belongs to their account rather than to
+        you &mdash; the gym half is the membership, the entry barcode, the class schedule and
+        booking a session.</p>
+        <ul>
+          <li>Works before they join and after they leave</li>
+          <li>You see membership and attendance, not their set-by-set log</li>
+        </ul>
+      </div>
+      <div class="tile c-coach">
+        <div class="cap">Coaches</div>
+        <h3>Same shape, different app</h3>
+        <p>An invitation to an email, accepted in Repple Coach, attaches that trainer to your gym.
+        Their roster, their availability and the sessions they deliver then sit inside your
+        records instead of a calendar you have to ask about.</p>
+        <ul>
+          <li>They mark outcomes; that is what makes payroll countable</li>
+          <li>They see their own clients and rota, not the business</li>
+        </ul>
+      </div>
+      <div class="tile c-studio">
+        <div class="cap">You</div>
+        <h3>Owner of one gym, not of gyms</h3>
+        <p>Your access is scoped to the gym you own rather than to the role of owner. Nobody can
+        move their own profile into your gym or promote themselves inside it &mdash; joining
+        happens by invitation, and the database refuses the alternative.</p>
+        <ul>
+          <li>Two locations are held as two separate gyms</li>
+          <li>The detail is on <a href="/security">Security &amp; data</a></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── FAQ ────────────────────────────────────────────────────────────── -->
+<section class="band tint">
+  <div class="wrap narrow">
+    <h2 class="hd">Straight answers</h2>
+    <p class="lede">
+      The questions that come up in the first fortnight.
+    </p>
+    <div class="faq">
+      <details>
+        <summary>How long does setting up take?</summary>
+        <div class="a"><p>That depends entirely on the state of your spreadsheet, so no honest number goes here. The parts that are quick are the ones under your control: the price book, the timetable and the account. The part that takes as long as it takes is getting your members to accept an invitation, because that is other people's time rather than yours.</p></div>
+      </details>
+      <details>
+        <summary>Do we have to import anything to start?</summary>
+        <div class="a"><p>No. You can start recording from today and let the history stay where it is. What you give up is the comparison &mdash; a gym with no imported past has no prior year to measure this one against until it has been running Repple for twelve months.</p></div>
+      </details>
+      <details>
+        <summary>What if the import gets something wrong?</summary>
+        <div class="a"><p>The preview is what stops that: it reports what it would do before it does anything, and only the final press writes. If a run does land badly, the rows are ordinary records in Money and can be corrected there. A partial run says in those words that it only partly landed, and names the lines that did not.</p></div>
+      </details>
+      <details>
+        <summary>Does every trainer have to use the coach app?</summary>
+        <div class="a"><p>Somebody has to record what happened to each one-to-one &mdash; the trainer in Repple Coach, or you in the console. There is no third option, because the alternative is inferring delivery from the clock, which is how a gym ends up paying for sessions nobody turned up to.</p></div>
+      </details>
+      <details>
+        <summary>Can we try it without moving the whole gym across?</summary>
+        <div class="a"><p>Yes, and it is the sensible order. Create the account, put the price book and one week of the timetable in, and run the door log for a fortnight. That is enough to see whether the attendance picture matches what you thought it was, and nothing is charged while you look.</p></div>
+      </details>
+      <details>
+        <summary>What does it cost to set up?</summary>
+        <div class="a"><p>Nothing, and nothing is charged for the software during the first release either. There is no price set yet at all &mdash; <a href="/pricing">Pricing</a> explains exactly where that stands and how to get a quote.</p></div>
+      </details>
+      <details>
+        <summary>Is the screen at the top of this page real data?</summary>
+        <div class="a"><p>No, and it says &ldquo;illustrative&rdquo; on it. Repple has not launched publicly, so there is no gym to draw from &mdash; and we would not publish one if there were. The line numbers and the counts are invented; the refusal reasons beside them are the ones the importer actually gives.</p></div>
+      </details>
+    </div>
+  </div>
+</section>
+
+<section class="close-cta">
+  <div class="wrap">
+    <h2 class="display">Step one is an <em>account</em>.</h2>
+    <p class="lede" style="margin:22px auto 0;max-width:52ch">
+      It creates your gym with it, and there is nothing to pay. Everything above can wait until
+      you have looked around the console.
+    </p>
+    <div class="btn-row">
+      <a class="btn primary" href="/signup">Create an account</a>
+      <a class="btn" href="/studio">What Studio does</a>
+      <a class="btn" href="/pricing">What it costs</a>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="site">
+  <div class="wrap">
+    <div class="cols">
+      <div>
+        <a class="brand" href="/">
+          <span class="mark">
+            <svg width="17" height="17" viewBox="0 0 100 100" aria-hidden="true">
+              <g fill="none" stroke="#04211d" stroke-width="8"><circle cx="50" cy="50" r="32" opacity=".45"/><circle cx="50" cy="50" r="20" opacity=".75"/></g>
+              <circle cx="50" cy="50" r="8.5" fill="#04211d"/>
+            </svg>
+          </span>
+          Repple
+        </a>
+        <p class="tiny" style="margin-top:14px;max-width:34ch">
+          The operating record for gyms, the coaches who work in them, and the people they train.
+        </p>
+      </div>
+      <div>
+        <h5>Apps</h5>
+        <ul>
+          <li><a href="/client">Repple</a></li>
+          <li><a href="/trainer">Repple Coach</a></li>
+          <li><a href="/studio">Repple Studio</a></li>
+        </ul>
+      </div>
+      <div>
+        <h5>Getting started</h5>
+        <ul>
+          <li><a href="/how-it-works">How it works</a></li>
+          <li><a href="/pricing">Pricing</a></li>
+          <li><a href="/signup">Create account</a></li>
+          <li><a href="/forgot-password">Reset password</a></li>
+          <li><a href="/support" class="sm-hide">Support</a></li>
+        </ul>
+      </div>
+      <div>
+        <h5>Legal &amp; data</h5>
+        <ul>
+          <li><a href="/privacy">Privacy</a></li>
+          <li><a href="/terms">Terms</a></li>
+          <li><a href="/security">Security &amp; data</a></li>
+          <li><a href="mailto:support@repplefitness.com">Contact</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="base">
+      <span>© 2026 Repple · Operated by Washateria LLC</span>
+      <span><a href="mailto:support@repplefitness.com">support@repplefitness.com</a></span>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>

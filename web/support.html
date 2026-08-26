@@ -4,8 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Support — Repple</title>
-<meta name="description" content="Get help with Repple, Repple Coach and Repple Studio.">
-<link rel="stylesheet" href="styles.css?v=3be6ff95c8">
+<meta name="description" content="Help with Repple, Repple Coach and Repple Studio — signing in, confirmation emails, Apple Health, connected devices, notifications, and getting your data out or deleted.">
+<meta property="og:title" content="Support — Repple">
+<meta property="og:description" content="Real answers for the things that actually go wrong: confirmation emails, Apple Health permissions, connected devices, and getting your data out.">
+<meta property="og:url" content="https://www.repplefitness.com/support">
+<link rel="stylesheet" href="styles.css?v=febfacb053">
 <link rel="icon" href="favicon.png">
 </head>
 <body>
@@ -25,122 +28,911 @@
       <a href="/client">Members</a>
       <a href="/trainer">Coaches</a>
       <a href="/studio">Gyms</a>
-      <a href="/support" class="sm-hide">Support</a>
+      <a href="/support" class="sm-hide" aria-current="page">Support</a>
       <a class="get" href="/download"><svg class="appicon" viewBox="0 0 1024 1024" aria-hidden="true" focusable="false"><defs><linearGradient id="nav-tile" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2dd4bf"/><stop offset="1" stop-color="#0d9488"/></linearGradient></defs><rect width="1024" height="1024" rx="220" fill="url(#nav-tile)"/><g stroke="#fff" fill="#fff"><circle cx="512" cy="512" r="330" stroke-width="20" fill="none" opacity=".34"/><circle cx="512" cy="512" r="220" stroke-width="26" fill="none" opacity=".60"/><circle cx="512" cy="512" r="115" stroke-width="32" fill="none" opacity=".90"/><circle cx="512" cy="512" r="52"/></g></svg>Get the app</a>
       <a class="cta" href="/signup">Create account</a>
     </nav>
   </div>
 </header>
 
-<main class="wrap page">
-  <div class="eyebrow">Support · updated 23 August 2026</div>
+<main>
 
-  <div class="sup-top">
-    <div>
-      <h1 class="display" style="font-size:clamp(38px,5.4vw,58px)">Something not working?</h1>
-      <p class="lede" style="margin-top:18px">
-        Email us and a person reads it. Tell us what you were doing, what you expected, and what
-        happened instead — plus which of the three apps you were in. That is usually enough for us
-        to find it.
+<!-- ── hero ───────────────────────────────────────────────────────────── -->
+<section class="hero">
+  <div class="wrap">
+    <div class="hero-grid">
+      <div>
+        <div class="eyebrow">Support · updated 26 August 2026</div>
+        <h1 class="display">Something not<br>working?</h1>
+        <p class="lede" style="margin-top:24px">
+          One address reaches a person: <strong>support@repplefitness.com</strong>. Below it are the
+          problems that actually come up — confirmation emails that never arrive, Apple Health
+          permissions, a coach who cannot see your training — written against what the apps do
+          rather than what a help centre usually says.
+        </p>
+        <div class="btn-row">
+          <a class="btn primary" href="mailto:support@repplefitness.com">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6.5h18v11H3z"/><path d="m3 7 9 6 9-6"/></svg>
+            support@repplefitness.com
+          </a>
+          <a class="btn" href="mailto:support@repplefitness.com?subject=Repple%20bug%20report">Report a problem</a>
+        </div>
+      </div>
+
+      <div class="surface">
+        <div class="surface-bar"><span class="dot"></span><span class="ttl">put this in the email</span></div>
+        <div class="rows">
+          <div class="row" style="grid-template-columns:1fr auto"><span class="nm" style="font-weight:400;color:var(--ink2)">Which app you were in</span><span class="mt">Repple · Coach · Studio</span></div>
+          <div class="row" style="grid-template-columns:1fr auto"><span class="nm" style="font-weight:400;color:var(--ink2)">The email on the account</span><span class="mt">exactly as typed</span></div>
+          <div class="row" style="grid-template-columns:1fr auto"><span class="nm" style="font-weight:400;color:var(--ink2)">Phone and OS version</span><span class="mt">iPhone 15 · iOS 18</span></div>
+          <div class="row" style="grid-template-columns:1fr auto"><span class="nm" style="font-weight:400;color:var(--ink2)">The screen you were on</span><span class="mt">Train, Me → Settings…</span></div>
+        </div>
+        <div class="surface-body" style="border-top:1px solid var(--line)">
+          <p class="tiny" style="margin:0">
+            Then what you did, what you expected, and what happened instead. A screenshot of the
+            error saves a round trip. Write from the address on the account where you can — it lets
+            us find you without asking.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <ul class="jump" style="margin-top:clamp(34px,5vw,52px)">
+      <li><a href="#apps">Which app</a></li>
+      <li><a href="#signing-in">Signing in</a></li>
+      <li><a href="#email">Emails that never arrive</a></li>
+      <li><a href="#health">Apple Health &amp; your watch</a></li>
+      <li><a href="#services">Connected services</a></li>
+      <li><a href="#notifications">Notifications</a></li>
+      <li><a href="#logging">Logging &amp; empty charts</a></li>
+      <li><a href="#coaching">Coaches, gyms &amp; classes</a></li>
+      <li><a href="#data">Your data</a></li>
+      <li><a href="#contact">Write to us</a></li>
+    </ul>
+  </div>
+</section>
+
+<!-- ── which app ──────────────────────────────────────────────────────── -->
+<section class="band" id="apps">
+  <div class="wrap">
+    <div class="lead-in wide">
+      <h2 class="hd">Start by knowing which app you are in</h2>
+      <p class="lede">
+        Repple ships as three separate apps built from one codebase. They look alike because they
+        share a design; they are not the same app, and half of all confusion starts here.
       </p>
-      <div class="btn-row" style="margin-top:26px">
-        <a class="btn primary" href="mailto:support@repplefitness.com">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6.5h18v11H3z"/><path d="m3 7 9 6 9-6"/></svg>
-          support@repplefitness.com
-        </a>
-        <a class="btn" href="mailto:support@repplefitness.com?subject=Repple%20bug%20report">Report a problem</a>
+    </div>
+
+    <div class="rails">
+      <div class="rail" style="--c:var(--client)">
+        <div class="who">Repple</div>
+        <h3>Members</h3>
+        <p>You train at a gym or with a coach. Five tabs: Home, Train, Meals, Progress, Me.</p>
+      </div>
+      <div class="rail" style="--c:var(--coach)">
+        <div class="who">Repple Coach</div>
+        <h3>Coaches</h3>
+        <p>You are a personal trainer with clients. Clients, Programs, Schedule, Videos, Analytics.</p>
+      </div>
+      <div class="rail" style="--c:var(--studio)">
+        <div class="who">Repple Studio</div>
+        <h3>Gyms</h3>
+        <p>You run or own a gym. Overview, Trainers, Brand, Growth, Ops.</p>
       </div>
     </div>
 
-    <div class="surface">
-      <div class="surface-bar"><span class="ttl">what to expect</span></div>
-      <div class="rows">
-        <div class="row" style="grid-template-columns:1fr auto"><span class="nm" style="font-weight:400;color:var(--ink2)">A person replies</span><span class="mt">within 2 days</span></div>
-        <div class="row" style="grid-template-columns:1fr auto"><span class="nm" style="font-weight:400;color:var(--ink2)">Account or data removal</span><span class="mt">by email</span></div>
-        <div class="row" style="grid-template-columns:1fr auto"><span class="nm" style="font-weight:400;color:var(--ink2)">Deletion completed</span><span class="mt">within 30 days</span></div>
+    <div class="qa-group">
+      <h2 id="apps-qa">Common to all three</h2>
+      <div class="bar"></div>
+
+      <div class="qa">
+        <h3>Do the three apps share one account?</h3>
+        <div>
+          <p>Yes. One email and password, one database behind them. What differs is what you are
+             shown, and that is decided by your <strong>role</strong>.</p>
+        </div>
+      </div>
+
+      <div class="qa">
+        <h3>How is my role decided?</h3>
+        <div>
+          <p>By the app you created the account in. Sign up inside Repple and you are a member; sign
+             up inside Repple Coach and you are a coach; sign up inside Repple Studio and you are a
+             gym owner. It is not a menu you pick from, because a coach who chose "member" would land
+             in an app with no coaching screens in it at all.</p>
+          <p>If you signed up in the wrong one, email us and say which you meant. Do not create a
+             second account on the same address to fix it — see
+             <a href="#signing-in">signing up twice</a> below for why that makes things worse.</p>
+        </div>
+      </div>
+
+      <div class="qa">
+        <h3>Do I need more than one of them?</h3>
+        <div>
+          <p>Only if you do more than one job. A member never needs Coach. A coach without a gym never
+             needs Studio. <a href="/download">All three are here</a> if you do need another.</p>
+        </div>
+      </div>
+
+      <div class="qa">
+        <h3>Where is the in-app guide?</h3>
+        <div>
+          <p>Every app has one, covering each of its five tabs and what you can do in them. It is the
+             same text as the tour shown on first sign-in, so you can look something up again without
+             having to remember it the first time.</p>
+        </div>
       </div>
     </div>
   </div>
+</section>
 
-  <div class="rails" style="margin-top:clamp(38px,5vw,56px)">
-    <div class="rail" style="--c:var(--client)">
-      <div class="who">Repple</div>
-      <p style="margin-top:10px">You train at a gym or with a coach.</p>
+<!-- ── signing in ─────────────────────────────────────────────────────── -->
+<section class="band tint" id="signing-in">
+  <div class="wrap">
+    <div class="lead-in wide">
+      <h2 class="hd">Signing in and confirming your email</h2>
+      <p class="lede">
+        Creating an account takes a name, an email and a password of at least six characters. Then
+        one step people do not expect: you have to confirm the address before you can sign in.
+      </p>
     </div>
-    <div class="rail" style="--c:var(--coach)">
-      <div class="who">Repple Coach</div>
-      <p style="margin-top:10px">You are a personal trainer with clients.</p>
-    </div>
-    <div class="rail" style="--c:var(--studio)">
-      <div class="who">Repple Studio</div>
-      <p style="margin-top:10px">You run or own a gym.</p>
+
+    <ol class="steps">
+      <li>
+        <span class="no">01</span>
+        <div>
+            <h3>Create the account</h3>
+            <p>In the app, or at <a href="/signup">repplefitness.com/signup</a>. Either works — it is
+               the same account either way.</p>
+        </div>
+      </li>
+      <li>
+        <span class="no">02</span>
+        <div>
+            <h3>Open the confirmation email and follow the link</h3>
+            <p>Until you do, signing in will fail. The app shows the error it gets back from the
+               sign-in service rather than rewriting it, so the wording may be terse — but an
+               unconfirmed address is the most common reason for it.</p>
+        </div>
+      </li>
+      <li>
+        <span class="no">03</span>
+        <div>
+            <h3>Land on the confirmation page</h3>
+            <p>The link brings you to a page on this site that tells you plainly which of three
+               things happened: confirmed, already confirmed, or the link has expired. If it has
+               expired, ask for a fresh one rather than clicking the old one again.</p>
+        </div>
+      </li>
+      <li>
+        <span class="no">04</span>
+        <div>
+            <h3>Sign in</h3>
+            <p>In the app, with the same email and password. The first sign-in also runs the short
+               tour of the tabs.</p>
+        </div>
+      </li>
+    </ol>
+
+    <div class="qa-group">
+      <h2>When it will not let you in</h2>
+      <div class="bar"></div>
+
+      <div class="qa">
+        <h3>I signed up twice with the same email. Which password works?</h3>
+        <div>
+          <p><strong>The first one.</strong> This is worth reading carefully, because it has already
+             locked someone out.</p>
+          <p>Signing up again with an address that already has an account looks exactly like signing
+             up for the first time — you get a success message and another confirmation email. That is
+             deliberate on the sign-in service's part: telling you an address is taken would let a
+             stranger test which emails have Repple accounts. But the second sign-up
+             <strong>does not change the password</strong>. Keep using the one you set the first time.
+             If you cannot remember it, <a href="/forgot-password">reset it</a> — that does work.</p>
+        </div>
+      </div>
+
+      <div class="qa">
+        <h3>"Continue with Apple" and "Continue with Google" do nothing.</h3>
+        <div>
+          <p>They are not connected yet, and the app says so when you tap one. Use the email and
+             password fields for now.</p>
+        </div>
+      </div>
+
+      <div class="qa">
+        <h3>I have forgotten my password.</h3>
+        <div>
+          <p>Ask for a reset link at <a href="/forgot-password">repplefitness.com/forgot-password</a>,
+             or from the same option inside the app. The link opens a page where you set the new
+             password, then hands you back to whichever app you use. Reset links can be used once and
+             they expire, so if you have clicked an old one, request another rather than reloading
+             it.</p>
+        </div>
+      </div>
+
+      <div class="qa">
+        <h3>I tried the demo and now my training has gone.</h3>
+        <div>
+          <p>The demo on the welcome screen is a walkthrough, not an account. Nothing you do in it is
+             saved anywhere, and nothing in it is yours — it exists so you can see the shape of the
+             app before committing an email address. Create a real account and start from an empty
+             log, which is what a new account is meant to look like.</p>
+        </div>
+      </div>
+
+      <div class="qa">
+        <h3>The app opens on a screen with nothing in it.</h3>
+        <div>
+          <p>That is a new account behaving correctly. Nothing is seeded with sample data, so records,
+             charts and targets stay blank until there is something behind them. Where a figure is
+             missing, the app says what it is waiting for: readiness wants a night of sleep, calorie
+             targets want a scan or a check-in, the record board wants a set.</p>
+        </div>
+      </div>
     </div>
   </div>
-  <p class="tiny" style="margin-top:16px;max-width:72ch">
-    All three use the same account — signing up in one means you can sign in to another with the
-    same email and password. You will see what your role allows.
-  </p>
+</section>
 
-  <div class="qa-group">
-    <h2>Health, watches and devices</h2>
-    <div class="bar"></div>
-    <div class="qa">
-      <h3>Do I have to allow Apple Health?</h3>
-      <p>No — Repple works without it. Allowing it lets the app read your heart rate and calories
-         during a session and import workouts you recorded on your watch, so you do not type them
-         in twice. Change your mind any time in <strong>iOS Settings → Privacy &amp; Security →
-         Health → Repple</strong>.</p>
+<!-- ── email deliverability ───────────────────────────────────────────── -->
+<section class="band" id="email">
+  <div class="wrap">
+    <div class="lead-in wide">
+      <h2 class="hd">When the email never arrives</h2>
+      <p class="lede">
+        Confirmation and password-reset emails are the single most common thing that goes wrong,
+        and it is usually not the sending that fails. Here is what to do, in order.
+      </p>
     </div>
-    <div class="qa">
-      <h3>My Apple Watch workouts are not showing up.</h3>
-      <p>Open the <strong>Train</strong> tab. If Repple can see workouts on your watch that are not
-         yet in your log, it will say so and offer to bring them in. If nothing appears, check Apple
-         Health is connected under <strong>Watch &amp; Devices</strong>, and that the workout saved
-         to the Health app on your iPhone.</p>
-    </div>
-    <div class="qa">
-      <h3>Where is the heart-rate zone chart?</h3>
-      <p>Zones need live heart-rate samples taken during the session, which in practice means an
-         Apple Watch. Devices that only report a whole-day average — WHOOP and Oura among them —
-         cannot produce a per-session breakdown, and Repple will not invent one from a daily figure.
-         You get an explanation on screen instead of an empty chart.</p>
+
+    <div class="split">
+      <div>
+        <ul class="ticks">
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>Give it a few minutes.</strong> It is normally quick, but not always instant. Do not request three more in the meantime — each new link invalidates the one before it, and it is easy to end up clicking a dead one.</span></li>
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>Check spam and junk.</strong> That is where it usually is. Marking it "not junk" helps the next one through.</span></li>
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>If it is a work address, assume quarantine.</strong> Corporate mail filters — Microsoft 365 in particular — accept the message, then hold it in a quarantine you are never shown. There is nothing in your inbox and nothing in your spam folder, because it never reached either. Ask your IT team to release it and to allow mail from <strong>repplefitness.com</strong>, or use a personal address instead.</span></li>
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>Check the address for a typo.</strong> A confirmation sent to an address with a missing letter cannot be recovered by waiting.</span></li>
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>Then ask for another.</strong> Confirmation emails can be re-sent from <a href="/signup">the sign-up page</a>; reset links from <a href="/forgot-password">forgot password</a>. Both are rate-limited, so if you are told to wait, wait.</span></li>
+        </ul>
+      </div>
+
+      <div class="surface">
+        <div class="surface-bar"><span class="dot"></span><span class="ttl">still nothing</span></div>
+        <div class="surface-body">
+          <p style="margin:0;font-size:15.5px;color:var(--ink2);line-height:1.6">
+            Email <a href="mailto:support@repplefitness.com?subject=Confirmation%20email%20not%20arriving">support@repplefitness.com</a>
+            from the address you signed up with and say which app you are trying to get into. We can
+            confirm an account by hand — it is not a dead end, and you do not need to make a second
+            account to get past it.
+          </p>
+          <p class="tiny" style="margin:16px 0 0">
+            Mail from us comes from <strong>repplefitness.com</strong>. We will never ask you for
+            your password, and no legitimate email from us contains one.
+          </p>
+        </div>
+      </div>
     </div>
   </div>
+</section>
 
-  <div class="qa-group">
-    <h2>Your log and your account</h2>
-    <div class="bar"></div>
-    <div class="qa">
-      <h3>I logged a workout wrong. Can I fix it?</h3>
-      <p>Yes. In the <strong>Train</strong> tab, find the entry under the day it was logged and tap
-         the pencil beside it. You can change the exercise, the sets, the cardio figures and the
-         calories.</p>
+<!-- ── apple health ───────────────────────────────────────────────────── -->
+<section class="band tint" id="health">
+  <div class="wrap">
+    <div class="lead-in wide">
+      <h2 class="hd">Apple Health and your watch</h2>
+      <p class="lede">
+        Health access is optional. Everything in Repple can be entered by hand, and the app is
+        built to work without a watch — what a watch adds is live heart rate during a session and
+        workouts you do not have to type in twice.
+      </p>
     </div>
-    <div class="qa">
-      <h3>I did not get a password reset email.</h3>
-      <p>Ask for a new one at <a href="/forgot-password">repplefitness.com/forgot-password</a> and
-         check your spam folder. Reset links can only be used once and do expire, so if you clicked
-         an old one just request another. Still stuck after ten minutes? Email
-         <a href="mailto:support@repplefitness.com">support@repplefitness.com</a>.</p>
+
+    <div class="qa-group">
+      <h2>Permissions</h2>
+      <div class="bar"></div>
+
+      <div class="qa">
+        <h3>Do I have to allow Apple Health?</h3>
+        <div>
+          <p>No. Repple works without it. If you do allow it, Repple asks to read five things and
+             nothing else:</p>
+          <ul>
+            <li>Heart rate</li>
+            <li>Resting heart rate</li>
+            <li>Active energy burned</li>
+            <li>Steps</li>
+            <li>Workouts</li>
+          </ul>
+          <p>You choose which of those to grant in the Health permission sheet, and the app carries on
+             with whatever you allow.</p>
+        </div>
+      </div>
+
+      <div class="qa">
+        <h3>How do I change my mind?</h3>
+        <div>
+          <p><span class="path">iOS Settings → Privacy &amp; Security → Health → Repple</span>. That
+             screen is the only real switch. Turning a device off inside Repple clears Repple's own
+             connection, but iOS gives no way for an app to hand a Health permission back — so if you
+             want the permission itself withdrawn, do it there.</p>
+        </div>
+      </div>
+
+      <div class="qa">
+        <h3>Where does Repple say it uses my Health data?</h3>
+        <div>
+          <p>In <a href="/privacy">Privacy</a>, in full. The short version: it is read only after you
+             grant permission, used only to show you your own training and recovery, never used for
+             advertising or marketing, never sold, and never shared with anyone other than a coach you
+             deliberately linked to your account.</p>
+        </div>
+      </div>
     </div>
-    <div class="qa">
-      <h3>How do I delete my account?</h3>
-      <p>In the app, go to <strong>Me → Settings</strong> and request account deletion, or email
-         <a href="mailto:support@repplefitness.com">support@repplefitness.com</a> from the address
-         on the account. See <a href="/privacy">Privacy</a> for exactly what happens to your data
-         and when.</p>
+
+    <div class="qa-group">
+      <h2>Workouts and figures</h2>
+      <div class="bar"></div>
+
+      <div class="qa">
+        <h3>My watch workouts are not showing up.</h3>
+        <div>
+          <p>They are not pulled in automatically — you ask for them. Open
+             <span class="path">Me → Watch &amp; Devices</span> and tap <strong>Find my workouts</strong>.
+             Choose how far back to look: 14 days, 30 days, 90 days or a year. Anything found that is
+             not already in your log can be imported one at a time or all at once, and anything already
+             logged is marked so you do not end up with it twice.</p>
+          <p>If the list comes back empty: check the workout actually saved into the Health app on
+             your iPhone, and that Apple Health still shows as connected on that screen.</p>
+        </div>
+      </div>
+
+      <div class="qa">
+        <h3>My heart rate and calories are blank.</h3>
+        <div>
+          <p>Heart rate and active energy come from the watch, so the watch has to be on your wrist
+             and worn during the session. Steps come from the iPhone and will usually be there
+             regardless. The screen updates on its own while a device is feeding it.</p>
+        </div>
+      </div>
+
+      <div class="qa">
+        <h3>Apple Health says it is unavailable.</h3>
+        <div>
+          <p>Two reasons, and the app names the one that applies. Apple Health is iPhone-only, so it
+             will never connect on anything else. And it needs the real Repple build from the App
+             Store — it cannot reach HealthKit from a development preview.</p>
+        </div>
+      </div>
     </div>
   </div>
+</section>
+
+<!-- ── connected services ─────────────────────────────────────────────── -->
+<section class="band" id="services">
+  <div class="wrap">
+    <div class="lead-in wide">
+      <h2 class="hd">Connected services</h2>
+      <p class="lede">
+        Everything below lives on one screen: <span class="path">Me → Watch &amp; Devices</span>,
+        except Spotify, which sits under <span class="path">Me → Music &amp; Playlists</span>.
+      </p>
+    </div>
+
+    <div class="scroll">
+      <table class="data">
+        <thead>
+          <tr><th>Service</th><th>What it brings in</th><th>How it connects</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Apple Watch</strong><br>via Apple Health</td>
+            <td>Heart rate, resting heart rate, active energy, steps and recorded workouts. The only source that can produce a per-session heart-rate zone breakdown.</td>
+            <td>Tap Connect and grant the Health permission. iPhone only. Revoke in iOS Settings, not in Repple.</td>
+          </tr>
+          <tr>
+            <td><strong>WHOOP</strong></td>
+            <td>Strain, recovery, heart rate and calories, plus workouts you can import into your log.</td>
+            <td>Tap Connect. WHOOP's own sign-in page opens in a browser sheet; approve it there and you are returned to the app.</td>
+          </tr>
+          <tr>
+            <td><strong>Oura Ring</strong></td>
+            <td>Readiness, HRV, sleep and resting heart rate.</td>
+            <td>Same — Oura's own sign-in page, then back to the app.</td>
+          </tr>
+          <tr>
+            <td><strong>Fitbit</strong></td>
+            <td>Steps, heart rate, sleep and calories.</td>
+            <td>Same — Fitbit's own sign-in page, then back to the app.</td>
+          </tr>
+          <tr>
+            <td><strong>Garmin</strong></td>
+            <td>Nothing yet.</td>
+            <td>Garmin's Health API is not self-serve — it needs an approved partnership, which is why the row stays unavailable and says so. A Garmin watch that already writes into Apple Health reaches Repple by that route in the meantime.</td>
+          </tr>
+          <tr>
+            <td><strong>Google&nbsp;Fit / Health&nbsp;Connect</strong></td>
+            <td>Nothing yet.</td>
+            <td>Android only, and not live in the current build. On anything other than Android the row tells you it is Android-only.</td>
+          </tr>
+          <tr>
+            <td><strong>Spotify</strong></td>
+            <td>Nothing about your training. It goes the other way: Repple builds a playlist to match the session.</td>
+            <td><span class="path">Me → Music &amp; Playlists</span>. Connect Spotify and the playlist can be created in your own Spotify account.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="qa-group">
+      <h2>Connecting, disconnecting, and what we hold</h2>
+      <div class="bar"></div>
+
+      <div class="qa">
+        <h3>Does Repple see my WHOOP or Oura password?</h3>
+        <div>
+          <p>No. Connecting opens that company's own sign-in page in a browser sheet. You sign in to
+             them, they hand back an authorisation code, and the exchange for a token happens on our
+             server rather than on your phone. Repple never sees the password, and the vendor's secret
+             never travels inside the app.</p>
+        </div>
+      </div>
+
+      <div class="qa">
+        <h3>How do I disconnect one?</h3>
+        <div>
+          <p>Tap the row again on <span class="path">Me → Watch &amp; Devices</span> — the button reads
+             <strong>Connected</strong> once it is. That deletes the stored token for that service.
+             Apple Health is the exception: there is no token to delete, so use
+             <span class="path">iOS Settings → Privacy &amp; Security → Health → Repple</span>.</p>
+        </div>
+      </div>
+
+      <div class="qa">
+        <h3>It says "not set up yet" when I tap Connect.</h3>
+        <div>
+          <p>That is the app missing its credentials for that vendor in the build you have, not
+             anything wrong with your account or with the service. Tell us which one and on which app
+             — it is fixed on our side, not yours.</p>
+        </div>
+      </div>
+
+      <div class="qa">
+        <h3>Which of these can my coach see?</h3>
+        <div>
+          <p>None of them directly. A coach you have linked to sees your training, and your nutrition
+             and check-ins where you use those together — not your device connections and not your
+             tokens. The full picture is in <a href="/privacy">Privacy</a>.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── notifications ──────────────────────────────────────────────────── -->
+<section class="band tint" id="notifications">
+  <div class="wrap">
+    <div class="lead-in wide">
+      <h2 class="hd">Notifications and reminders</h2>
+      <p class="lede">
+        Repple asks for notification permission when you sign in. There are two different things
+        behind that one prompt, and they fail in different ways.
+      </p>
+    </div>
+
+    <div class="tiles two">
+      <div class="tile">
+        <span class="cap">sent to you</span>
+        <h3>Notifications from other people</h3>
+        <p>These come from our server, so they arrive whether or not the app is open:</p>
+        <ul>
+          <li>A session booked, moved or cancelled — in both directions, coach and client</li>
+          <li>A personal-training slot opening up, if you were waiting on one</li>
+          <li>A message from your coach, and coach broadcasts</li>
+          <li>A gym offer or announcement, if your gym runs Repple Studio</li>
+        </ul>
+      </div>
+      <div class="tile">
+        <span class="cap">set by you</span>
+        <h3>Reminders you schedule</h3>
+        <p>These are scheduled by the app on the phone itself, under
+           <span class="path">Me → Reminders</span>:</p>
+        <ul>
+          <li>Hydration nudges — on or off, how often, and between which hours</li>
+          <li>Named reminders, such as a supplement, at a time you choose</li>
+          <li>A session or class reminder an hour before one you have booked</li>
+          <li>A nudge to keep a streak alive</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="qa-group">
+      <h2>When they are not arriving</h2>
+      <div class="bar"></div>
+
+      <div class="qa">
+        <h3>I am not getting anything at all.</h3>
+        <div>
+          <p>Check the permission first, in your phone's own settings —
+             <span class="path">iOS Settings → Notifications → Repple</span>, or the equivalent on
+             Android. That switch is the one that decides whether anything reaches you, and if it was
+             declined at sign-in it will not ask again.</p>
+        </div>
+      </div>
+
+      <div class="qa">
+        <h3>I set reminders and they stopped when I changed phone.</h3>
+        <div>
+          <p>Reminders are held on the device that scheduled them, not on your account. A new phone —
+             or a reinstall — starts with none. Open <span class="path">Me → Reminders</span> and set
+             them again.</p>
+        </div>
+      </div>
+
+      <div class="qa">
+        <h3>I want fewer of them.</h3>
+        <div>
+          <p>Turn hydration and named reminders off in <span class="path">Me → Reminders</span>. For
+             everything that comes from the server, the switch that always works is your phone's own
+             notification setting for the app. If you want a particular kind stopped and cannot find
+             the switch for it, tell us which one — that is a fair thing to ask for.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── logging ────────────────────────────────────────────────────────── -->
+<section class="band" id="logging">
+  <div class="wrap">
+    <div class="lead-in wide">
+      <h2 class="hd">Logging, fixing mistakes, and charts that stay empty</h2>
+      <p class="lede">
+        Almost every number in the app is read back out of something you entered. That is why an
+        empty chart is usually a missing input rather than a fault.
+      </p>
+    </div>
+
+    <div class="qa-group">
+      <h2>Your log</h2>
+      <div class="bar"></div>
+
+      <div class="qa">
+        <h3>I logged a workout wrong. Can I fix it?</h3>
+        <div>
+          <p>Yes. In the <strong>Train</strong> tab, find the entry under the day it was logged and tap
+             the pencil beside it. The edit sheet lets you change the exercise, the sets, the cardio
+             figures and the calories, without deleting the session and starting again.</p>
+        </div>
+      </div>
+
+      <div class="qa">
+        <h3>I logged the same workout twice.</h3>
+        <div>
+          <p>Delete one of them from the same edit sheet. If it came in through
+             <strong>Find my workouts</strong>, note that anything already in your log is marked as
+             imported and will not be offered again — so a duplicate usually means one copy was typed
+             in by hand and the other came from the watch.</p>
+        </div>
+      </div>
+
+      <div class="qa">
+        <h3>My calorie and macro targets are blank.</h3>
+        <div>
+          <p>They are scaled from your body, so they need something to scale from — a body-fat figure
+             from a scan, or a weight from a check-in. Add either and the targets appear. Marking the
+             day as training, standard or rest moves them.</p>
+        </div>
+      </div>
+
+      <div class="qa">
+        <h3>Readiness has nothing in it.</h3>
+        <div>
+          <p>Readiness needs a night of sleep logged before it can say anything, and it stays blank
+             rather than guessing at one. Sleep comes from a connected device that reports it.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="qa-group">
+      <h2>Heart-rate zones</h2>
+      <div class="bar"></div>
+
+      <div class="qa">
+        <h3>Where is my heart-rate zone chart?</h3>
+        <div>
+          <p>Zones need heart-rate samples taken <em>during</em> the session, which in practice means
+             an Apple Watch worn while you train. A device that only reports a whole-day average —
+             Oura and Fitbit among them — cannot produce a per-session breakdown.</p>
+          <p>Repple will not manufacture one from a daily figure. Accumulating time-in-zone against a
+             static day-average would put "42 minutes in Zone 2" on a session it never measured. So
+             you get an explanation on screen instead of a chart, which is the honest version of the
+             same answer.</p>
+        </div>
+      </div>
+
+      <div class="qa">
+        <h3>I use WHOOP. Do I get zones?</h3>
+        <div>
+          <p>Partly. WHOOP reports how long a workout spent in each zone, but not the underlying
+             samples — so you get the zone bars without the heart-rate line through them. That is the
+             whole of what WHOOP gives, drawn as what it is.</p>
+        </div>
+      </div>
+
+      <div class="qa">
+        <h3>The bpm on my live session is not moving.</h3>
+        <div>
+          <p>If the figure came from a connected device rather than a watch on your wrist, it is
+             today's average, and the session screen says so. It is shown because it is better than a
+             dash, and it is kept out of the zone calculation because it cannot support one.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── coaching ───────────────────────────────────────────────────────── -->
+<section class="band tint" id="coaching">
+  <div class="wrap">
+    <div class="lead-in wide">
+      <h2 class="hd">Coaches, gyms and classes</h2>
+      <p class="lede">
+        A coach seeing your training is not a setting — it is a link the two of you make, and it
+        only exists once you have accepted it.
+      </p>
+    </div>
+
+    <div class="qa-group">
+      <h2>Linking to a coach</h2>
+      <div class="bar"></div>
+
+      <div class="qa">
+        <h3>How does a coach get linked to me?</h3>
+        <div>
+          <p>Three ways, and they are not equivalent:</p>
+          <ul>
+            <li><strong>They invite you by email.</strong> The invitation appears in your app and you accept it. This is the one that grants them access to your training.</li>
+            <li><strong>You request them.</strong> <span class="path">Me → Find a Trainer</span> lists coaches who have opted into the directory; picking one sends them a real request, which they accept or decline.</li>
+            <li><strong>They add you by hand.</strong> This puts your name on their roster so they can keep track of you. There is no account attached to it, so there is nothing for them to read.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="qa">
+        <h3>My coach cannot see my logs.</h3>
+        <div>
+          <p>Work through these in order:</p>
+          <ul>
+            <li><strong>Was the invitation accepted?</strong> A sent invitation grants nothing. It has to be accepted in your app before anything is shared.</li>
+            <li><strong>Did it go to the address you sign in with?</strong> Invitations are matched on the email on your account. If your coach sent it to a different address of yours, you will never see it. Ask them to check the exact spelling.</li>
+            <li><strong>Did they add you by hand instead?</strong> A hand-added client is a name on a list. Ask them to send you an emailed invitation to the address you actually sign in with.</li>
+            <li><strong>Were you in the demo?</strong> Nothing done in the demo is saved, so there is genuinely nothing to see.</li>
+          </ul>
+          <p>If your coach accepted a request you sent through Find a Trainer and still cannot see
+             anything, ask them to send you an emailed invitation as well — and tell us, with both
+             email addresses, so we can look at the link itself.</p>
+        </div>
+      </div>
+
+      <div class="qa">
+        <h3>What can a coach see once we are linked?</h3>
+        <div>
+          <p>Your training, and your nutrition and check-ins where you use those features together.
+             Not your device connections, not your account settings, and not your progress photos &mdash;
+             a coach has no access to those at all. Their access is read-only and it ends when the link
+             does. The full account is in <a href="/privacy">Privacy</a>, and the row-by-row version is
+             in <a href="/security">Security &amp; data</a>.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="qa-group">
+      <h2>Gyms and classes</h2>
+      <div class="bar"></div>
+
+      <div class="qa">
+        <h3>My gym is not on Repple. Does the app still work?</h3>
+        <div>
+          <p>Yes — Train, Meals and Progress are yours, not your gym's, and they work regardless. What
+             needs the gym to be running Repple Studio is the membership side: the entry barcode, the
+             group-class schedule, and personal-training sessions booked through the app.</p>
+        </div>
+      </div>
+
+      <div class="qa">
+        <h3>A class or session I booked has vanished.</h3>
+        <div>
+          <p>Bookings can be cancelled from either side, and a cancellation sends a notification. If
+             you did not get one, check the notification permission first. If the booking is gone and
+             nobody cancelled it, tell us the date and the class or coach and we will look.</p>
+        </div>
+      </div>
+
+      <div class="qa">
+        <h3>My gym membership or invoices are wrong.</h3>
+        <div>
+          <p>Those records belong to the gym, who set and manage them. Ask them first. If something
+             looks broken rather than merely wrong, we would like to know.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── your data ──────────────────────────────────────────────────────── -->
+<section class="band" id="data">
+  <div class="wrap">
+    <div class="lead-in wide">
+      <h2 class="hd">Your data — taking it out, or having it erased</h2>
+      <p class="lede">
+        Both are buttons in the app rather than an email you have to compose, and both live in the
+        same place: <span class="path">Me → Settings → Your data</span>.
+      </p>
+    </div>
+
+    <div class="qa-group">
+      <h2>Export</h2>
+      <div class="bar"></div>
+
+      <div class="qa">
+        <h3>How do I get a copy of everything?</h3>
+        <div>
+          <p><span class="path">Me → Settings → Your data → Export my data</span>. It gathers what is
+             held against your account and hands you a JSON file through the normal share sheet, so you
+             can put it in Files, mail it to yourself, or drop it anywhere else. The same option is in
+             all three apps.</p>
+        </div>
+      </div>
+
+      <div class="qa">
+        <h3>What is in the export?</h3>
+        <div>
+          <p>Your profile, your client record, workouts, food logs, measurements, check-ins, habit
+             logs, scans, messages, coach nutrition plans, assigned programs, class bookings,
+             referrals and feedback.</p>
+          <p>What it does not include is anything the gym holds about you as a member — membership
+             records, invoices, payments, door-log visits. Those belong to the gym's own records. Ask
+             us and we will get them for you.</p>
+        </div>
+      </div>
+
+      <div class="qa">
+        <h3>Can I have it as a spreadsheet?</h3>
+        <div>
+          <p>Not today — the export is JSON. If a CSV would be more use to you, say so; it is a
+             reasonable request and worth knowing that people want it.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="qa-group">
+      <h2>Deletion</h2>
+      <div class="bar"></div>
+
+      <div class="qa">
+        <h3>How do I delete my account?</h3>
+        <div>
+          <p><span class="path">Me → Settings → Your data → Delete my account</span>, then confirm.
+             You are signed out straight away and the request is recorded against your account. Or
+             email <a href="mailto:support@repplefitness.com?subject=Delete%20my%20account">support@repplefitness.com</a>
+             from the address on the account — no reason needed.</p>
+          <p><a href="/delete-account">The full deletion page</a> sets out exactly what is erased,
+             what survives, and how long it takes.</p>
+        </div>
+      </div>
+
+      <div class="qa">
+        <h3>I have changed my mind.</h3>
+        <div>
+          <p>Sign back in and go to <span class="path">Me → Settings → Your data</span>. While a
+             request is outstanding, that screen shows the date you asked and offers
+             <strong>Withdraw my deletion request</strong>. You can ask again later.</p>
+        </div>
+      </div>
+
+      <div class="qa">
+        <h3>Does asking twice make it happen sooner?</h3>
+        <div>
+          <p>No, and it is written that way on purpose. A second request does not reset the clock,
+             because that would quietly restart somebody's thirty days. Withdrawing and then asking
+             again does start it over.</p>
+        </div>
+      </div>
+
+      <div class="qa">
+        <h3>Two things deletion does not do.</h3>
+        <div>
+          <p>It does not cancel a subscription bought through the App Store or Google Play — cancel
+             that in your Apple or Google account, or it keeps billing. And it does not remove records
+             we are legally required to keep, which in practice means payment records held for tax.</p>
+        </div>
+      </div>
+
+      <div class="qa">
+        <h3>How long does it take?</h3>
+        <div>
+          <p>Within 30 days, as set out in <a href="/privacy">Privacy</a>. Nothing happens on a timer
+             — a person carries it out — which is why we suggest emailing as well as tapping the
+             button, so it is in front of someone.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── contact ────────────────────────────────────────────────────────── -->
+<section class="close-cta" id="contact">
+  <div class="wrap">
+    <h2 class="display">Write to <em>us</em>.</h2>
+    <p class="lede" style="margin:22px auto 0;max-width:52ch">
+      Nothing here matching your problem is itself worth telling us about. A person reads the
+      inbox, and the pages you are on now are written from what people ask.
+    </p>
+    <div class="btn-row">
+      <a class="btn primary" href="mailto:support@repplefitness.com">support@repplefitness.com</a>
+      <a class="btn" href="/privacy">Privacy</a>
+      <a class="btn" href="/terms">Terms</a>
+      <a class="btn" href="/delete-account">Delete your account</a>
+    </div>
+  </div>
+</section>
+
 </main>
 
 <footer class="site">
   <div class="wrap">
-    <span>© 2026 Repple</span>
-    <span>
-      <a href="/support" class="sm-hide">Support</a> ·
-      <a href="/privacy">Privacy</a> ·
-      <a href="/terms">Terms</a>
-    </span>
+    <div class="cols">
+      <div>
+        <a class="brand" href="/">
+          <span class="mark">
+            <svg width="17" height="17" viewBox="0 0 100 100" aria-hidden="true">
+              <g fill="none" stroke="#04211d" stroke-width="8"><circle cx="50" cy="50" r="32" opacity=".45"/><circle cx="50" cy="50" r="20" opacity=".75"/></g>
+              <circle cx="50" cy="50" r="8.5" fill="#04211d"/>
+            </svg>
+          </span>
+          Repple
+        </a>
+        <p class="tiny" style="margin-top:14px;max-width:34ch">
+          The operating record for gyms, the coaches who work in them, and the people they train.
+        </p>
+      </div>
+      <div>
+        <h5>Apps</h5>
+        <ul>
+          <li><a href="/client">Repple</a></li>
+          <li><a href="/trainer">Repple Coach</a></li>
+          <li><a href="/studio">Repple Studio</a></li>
+        </ul>
+      </div>
+      <div>
+        <h5>Getting started</h5>
+        <ul>
+          <li><a href="/how-it-works">How it works</a></li>
+          <li><a href="/pricing">Pricing</a></li>
+          <li><a href="/signup">Create account</a></li>
+          <li><a href="/forgot-password">Reset password</a></li>
+          <li><a href="/delete-account">Delete account</a></li>
+        </ul>
+      </div>
+      <div>
+        <h5>Legal &amp; data</h5>
+        <ul>
+          <li><a href="/privacy">Privacy</a></li>
+          <li><a href="/terms">Terms</a></li>
+          <li><a href="/security">Security &amp; data</a></li>
+          <li><a href="mailto:support@repplefitness.com">Contact</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="base">
+      <span>© 2026 Repple · Operated by Washateria LLC</span>
+      <span><a href="mailto:support@repplefitness.com">support@repplefitness.com</a></span>
+    </div>
   </div>
 </footer>
 

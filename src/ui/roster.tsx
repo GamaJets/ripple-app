@@ -83,9 +83,19 @@ export function RosterProvider({ children }: { children: ReactNode }) {
           // fact — either way the coach's manual clients are missing from what
           // they are about to be shown.
           if (mcErr) partialFailure = true;
-          manual = (mc || []).map((r: any) => ({ id: r.id, name: r.name, goal: r.goal || 'General', weightDelta: 0, adherence: null, lastActive: 'added by you', next: '—', unread: 0, mode: (r.mode === 'inperson' ? 'inperson' : 'online') as 'online' | 'inperson' }));
+          manual = (mc || []).map((r: any) => ({ id: r.id, name: r.name, goal: r.goal || 'General', weightDelta: 0, adherence: null, lastActive: 'added by you', next: '—', unread: 0, mode: (r.mode === 'inperson' ? 'inperson' : 'online') as 'online' | 'inperson', joinedAt: r.created_at ?? null }));
         } catch { partialFailure = true; }
         const { data: cls, error } = await supabase.from('clients').select('id, goal, diet, meals_per_day, avoid, mode').eq('trainer_id', uid);
+        // When each linked client joined THIS coach's book. `clients` has no
+        // created_at of its own, and the account's own creation date is the
+        // wrong question anyway — somebody can have trained for a year before
+        // switching coach. coaching_relationships is when this book started.
+        const joined: Record<string, string> = {};
+        try {
+          const { data: rel } = await supabase
+            .from('coaching_relationships').select('client_id, created_at').eq('coach_id', uid);
+          (rel || []).forEach((r: any) => { if (r.created_at) joined[r.client_id] = r.created_at; });
+        } catch { /* a missing join date is null, never a guessed one */ }
         if (cancelled) return;
         // Split apart what used to be one branch. A refused read is 'error'
         // whatever else we managed to load; an empty table with the manual list
@@ -122,7 +132,7 @@ export function RosterProvider({ children }: { children: ReactNode }) {
             st[r.user_id].adh = Math.round((Math.max(1, Math.min(5, r.adherence)) / 5) * 100); } } });
         } catch { /* as above */ }
         const goalMap: Record<string, string> = { fatloss: 'Fat loss', tone: 'Tone', muscle: 'Build muscle' };
-        const real: RosterClient[] = cls.map((c: any) => { const sc = st[c.id]; return { id: c.id, name: names[c.id] || 'Client', goal: goalMap[c.goal] || 'General', weightDelta: sc.wDelta, adherence: sc.adh != null ? sc.adh : null, lastActive: sc.last ? ago(sc.last) : 'no activity yet', next: '—', unread: 0, mode: (c.mode === 'inperson' ? 'inperson' : 'online') as 'online' | 'inperson', metrics: sc.mx ?? undefined, diet: c.diet ?? undefined, mealsPerDay: c.meals_per_day ?? undefined, avoid: Array.isArray(c.avoid) ? c.avoid : undefined }; });
+        const real: RosterClient[] = cls.map((c: any) => { const sc = st[c.id]; return { id: c.id, name: names[c.id] || 'Client', goal: goalMap[c.goal] || 'General', weightDelta: sc.wDelta, adherence: sc.adh != null ? sc.adh : null, lastActive: sc.last ? ago(sc.last) : 'no activity yet', next: '—', unread: 0, mode: (c.mode === 'inperson' ? 'inperson' : 'online') as 'online' | 'inperson', metrics: sc.mx ?? undefined, diet: c.diet ?? undefined, mealsPerDay: c.meals_per_day ?? undefined, avoid: Array.isArray(c.avoid) ? c.avoid : undefined, joinedAt: joined[c.id] ?? null }; });
         if (!cancelled) { setRoster([...real, ...manual]); setStatus(partialFailure ? 'error' : 'ready'); }
       } catch { if (!cancelled) setStatus('error'); }
     })();
@@ -132,7 +142,7 @@ export function RosterProvider({ children }: { children: ReactNode }) {
     const n = name.trim();
     if (!n) return false;
     const localId = `c${SEQ++}`;
-    setRoster((p) => [...p, { id: localId, name: n, goal, weightDelta: 0, adherence: null, lastActive: 'just added', next: '—', unread: 0, mode }]);
+    setRoster((p) => [...p, { id: localId, name: n, goal, weightDelta: 0, adherence: null, lastActive: 'just added', next: '—', unread: 0, mode, joinedAt: new Date().toISOString() }]);
     // Durable: persist to coach_clients so the roster survives restarts/devices.
     if (!USE_SUPABASE || !uid) return false;
     try {

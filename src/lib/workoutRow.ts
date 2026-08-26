@@ -23,6 +23,9 @@ export interface WorkoutRow {
   cardio?: WorkoutEntry['cardio'] | null;
   kcal?: number | null;
   zones?: WorkoutEntry['zones'] | null;
+  /** Whole-session length in minutes, when the person typed one. See
+   *  `WorkoutEntry.sessionMins` — null means unknown, never zero. */
+  session_mins?: number | null;
 }
 
 export const rowToEntry = (r: WorkoutRow): WorkoutEntry => ({
@@ -34,6 +37,7 @@ export const rowToEntry = (r: WorkoutRow): WorkoutEntry => ({
   cardio: r.cardio ?? undefined,
   kcal: r.kcal ?? undefined,
   zones: r.zones ?? undefined,
+  sessionMins: r.session_mins ?? undefined,
 });
 
 export const entryToRow = (uid: string, e: WorkoutEntry): WorkoutRow => ({
@@ -45,9 +49,10 @@ export const entryToRow = (uid: string, e: WorkoutEntry): WorkoutRow => ({
   cardio: e.cardio ?? null,
   kcal: e.kcal ?? null,
   zones: e.zones ?? null,
+  session_mins: e.sessionMins ?? null,
 });
 
 /** Every field of an entry that is meant to survive a trip to the database.
  *  `id` is excluded: the server assigns it, so a new entry has none yet. */
 export const PERSISTED_FIELDS: (keyof WorkoutEntry)[] =
-  ['t', 'exercise', 'sets', 'feel', 'cardio', 'kcal', 'zones'];
+  ['t', 'exercise', 'sets', 'feel', 'cardio', 'kcal', 'zones', 'sessionMins'];

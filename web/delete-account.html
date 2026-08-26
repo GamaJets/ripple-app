@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Delete your account — Repple</title>
 <meta name="description" content="How to request deletion of your Repple, Repple Coach or Repple Studio account, what is deleted, what is kept, and how long it takes.">
-<link rel="stylesheet" href="styles.css?v=3be6ff95c8">
+<link rel="stylesheet" href="styles.css?v=febfacb053">
 <link rel="icon" href="favicon.png">
 </head>
 <body>
@@ -52,7 +52,7 @@
     <li>Under <strong>Your data</strong>, tap <strong>Delete my account</strong>.</li>
     <li>Confirm with <strong>Request deletion</strong>. You are signed out immediately.</li>
   </ul>
-  <p>That button is in the member app. <strong>Repple Coach</strong> and <strong>Repple Studio</strong> do not carry it yet, so coaches and gym owners should use email instead. It is the same account and the same outcome.</p>
+  <p>All three apps carry it. In <strong>Repple Coach</strong> it is Profile &rsaquo; Account &rsaquo; Settings, and in <strong>Repple Studio</strong> it is Ops &rsaquo; Settings. It is the same account and the same outcome whichever you use.</p>
 
   <h3>By email</h3>
   <ul>
@@ -81,7 +81,7 @@
   <ul>
     <li><strong>Your identity</strong> — name, email address, profile photo.</li>
     <li><strong>Training</strong> — workouts, logged sets, cardio and calorie entries, personal records.</li>
-    <li><strong>Body data</strong> — InBody scans and body measurements.</li>
+    <li><strong>Body data</strong> — InBody scans, body measurements and progress photos, including the image files themselves.</li>
     <li><strong>Check-ins, habit logs and food logs.</strong></li>
     <li><strong>Messages with a coach.</strong> The thread belongs to the member's account, so deleting a member account removes the thread from the coach's side too.</li>
     <li><strong>Coaching links and programmes</strong> — the link to your coach, and any programme assigned to you.</li>
@@ -90,7 +90,9 @@
     <li><strong>Push notification tokens</strong>, so notifications stop.</li>
     <li><strong>Connected-service tokens</strong> for WHOOP, Oura, Fitbit, Garmin and Spotify. Those connections end.</li>
   </ul>
-  <p><strong>Progress photos, specifically.</strong> There are none to delete, because we do not hold any. No part of Repple, Repple Coach or Repple Studio can take or upload one: the table and the private storage bucket built for the feature are both empty, and nothing writes to them. The one bucket the apps do write to holds coaches' exercise demonstration videos, which are not yours and are not personal data about you. We would rather say this than list photos as deleted, because that would be a promise about a file that does not exist. Two things follow, and we would rather you heard them now. If the feature ever ships, this page is corrected before it does. And deleting an account removes database rows, not stored files — nothing in the database reaches into file storage — so once there are images to remove, removing them is a separate job.</p>
+  <p><strong>Progress photos, specifically.</strong> Progress photos are now stored, so they are now deleted &mdash; and that took more than deleting a row. The photo record and the image file are two different things in two different places, and removing a database row does not remove a file. So every deletion, whether you remove one photo or the whole account, records the file&rsquo;s path the moment the row goes, and the file is then deleted against that record. Nothing is marked deleted until the storage service confirms it. A file we could not remove stays visibly outstanding rather than being quietly written off.</p>
+
+  <p>Nobody else can see them. Your coach cannot: progress photos are the one thing in Repple a coach has no read access to, deliberately and at both layers &mdash; the record and the file are locked separately. If sharing with a coach is ever offered it will be something you switch on for a specific photo, not something that is already true.</p>
 
   <p>Apple Health is a permission held on your iPhone, not data we store a key for. Deleting the account does not touch it. Revoke it in <strong>iOS Settings → Privacy &amp; Security → Health → Repple</strong>, or by removing the app. Anything imported from Health into your training log is deleted with the log.</p>
 
@@ -113,7 +115,7 @@
 
   <p>Alongside these, a handful of administrative traces survive the same way &mdash; who wrote a gym announcement, who sent or accepted an invitation, which coach was named on a nutrition plan or an assigned programme. In every case the row stays and the pointer to your account is emptied, so it no longer names you.</p>
 
-  <p>We apply no additional retention period on top of these. They are kept for as long as the gym's own accounting and legal obligations require, and are held under the same terms as everything else in <a href="/privacy">Privacy</a>.</p>
+  <p>We apply no additional retention period on top of these. They are kept for as long as the gym's own accounting and legal obligations require, and are held under the same terms as everything else in <a href="/privacy">Privacy</a>. <a href="/security">Security &amp; data</a> shows how far the deletion reaches through the database, and why the files in storage have to be chased separately from the rows.</p>
 
   <h2>Take a copy first</h2>
   <p>The app will export the records held against your account as a JSON file — <strong>Me → Settings → Your data → Export my data</strong>. It covers your profile, workouts, food logs, measurements, InBody scans, check-ins, habit logs, coach messages, coach nutrition plans, assigned programmes, class bookings, referrals and feedback. It does not reach the gym-side records — membership, invoices, payments and door-log visits — so ask us if you want those too. Do it before you request deletion. Afterwards there is nothing left to export, and we cannot produce one for you.</p>

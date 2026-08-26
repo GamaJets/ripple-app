@@ -13,7 +13,7 @@
 // and the trainer got an AsyncStorage-only entry while the screen said "Added".
 // The clip was on one phone and nowhere else, and nothing said so.
 //
-// Three things changed with 43-exercise-video-library.sql:
+// Three things changed with 49-exercise-video-library.sql:
 //
 //   · an exercise is now a catalogue row with a slug id, so `exercise_id` is
 //     answerable. A movement a trainer invents mints its own row on first use —

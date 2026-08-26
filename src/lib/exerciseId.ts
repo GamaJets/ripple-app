@@ -13,7 +13,7 @@
 // different movement, confidently and with no way to tell.
 //
 // The `exercises` table has been in the schema since the first migration, keyed
-// on a text slug, and held zero rows until 43-exercise-video-library.sql seeded
+// on a text slug, and held zero rows until 49-exercise-video-library.sql seeded
 // it. This module is the slug rule, and it is deliberately the only one: the
 // same function names a row in that table, resolves a program exercise to its
 // catalogue entry, and picks the video for it. If the rule lives in two places
@@ -31,7 +31,7 @@ export interface ExerciseRef {
  *
  * Lowercase; every run of non-alphanumeric characters becomes one hyphen; no
  * leading or trailing hyphen. Mirrored exactly by the seed in
- * supabase/parts/43-exercise-video-library.sql — the two must agree or a
+ * supabase/parts/49-exercise-video-library.sql — the two must agree or a
  * trainer's clip stops resolving.
  *
  *   'Back Squat'    → 'back-squat'

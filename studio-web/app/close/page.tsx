@@ -1,0 +1,763 @@
+'use client';
+
+// Close — is this month finished, and may I act on these numbers?
+//
+// Every other screen in this console reports. This one *refuses*. A gym owner
+// closing August is about to pay trainers, hand a figure to an accountant and
+// chase whoever has not paid, and the single most expensive thing this software
+// could do is show them a tidy total that quietly omitted the twelve sessions
+// nobody marked.
+//
+// So the shape is inverted from the rest of the console: the verdict is at the
+// top, the reasons the month is NOT closed come before any figure, and where
+// the record cannot answer, the screen says so instead of printing a zero.
+//
+// All the reasoning lives in src/lib/monthEnd.ts, which has no Supabase import
+// and is tested under plain node. What lives here is the reads — and the reads
+// are the dangerous part, because supabase-js RESOLVES on a database error. A
+// missing `.error` check on any query below would turn a broken month into an
+// empty one, which on this screen means a payroll run over nothing.
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { supabase, loadMe, type Me } from '@/lib/supabase';
+import { Shell } from '@/components/Shell';
+import { DataTable, type Column } from '@/components/DataTable';
+import { fetchMemberships, fetchPayments, money } from '@lib/gymRecord';
+import {
+  fetchSessions, isAwaitingOutcome, PAY_DELIVERED_ONLY,
+  type PtSession, type PayPolicy, type PayrollLine,
+} from '@lib/gymSessions';
+import { fetchPasses } from '@lib/gymPasses';
+import { sliceLoading, sliceReady, sliceFailed, type Slice } from '@lib/memberView';
+import {
+  monthWindow, recentMonths, monthKeyOf, buildClose, isOverdue, closeHeadline,
+  type CloseRecord, type MonthClose, type GymInvoice, type Line, type Blocker,
+} from '@lib/monthEnd';
+
+const EMPTY: CloseRecord = {
+  payments: sliceLoading(),
+  invoices: sliceLoading(),
+  sessions: sliceLoading(),
+  memberships: sliceLoading(),
+  passes: sliceLoading(),
+};
+
+/** How far back the picker offers. Thirteen so last year's same month is there. */
+const MONTHS_OFFERED = 13;
+
+export default function Close() {
+  const [me, setMe] = useState<Me | null | undefined>(undefined);
+  const [gymName, setGymName] = useState<string | null>(null);
+  const [sessionFee, setSessionFee] = useState<number | null>(null);
+  const [feeRead, setFeeRead] = useState<'ok' | 'failed'>('ok');
+
+  // The record is stored WITH the month it was read for, and used only when the
+  // two agree. Without that, switching from June to July renders one frame of
+  // June's invoices under a July heading — and a close screen that shows the
+  // wrong month's receivables, however briefly, is the exact failure this page
+  // exists to prevent. A mismatch reads as "not loaded yet", which is true.
+  const [loaded, setLoaded] = useState<{ key: string; rec: CloseRecord }>({ key: '', rec: EMPTY });
+
+  // Default to the month that has actually finished. Opening on the running
+  // month would greet an owner with a refusal about a month nobody claimed was
+  // over, and train them to skip the refusals.
+  const months = useMemo(() => recentMonths(MONTHS_OFFERED + 1), []);
+  const [key, setKey] = useState<string>(() => {
+    const all = recentMonths(2);
+    return all[1] ?? monthKeyOf();
+  });
+
+  // Whether a no-show is payable is a gym policy, not something this screen may
+  // assume. Same control, same default, same wording as /sessions — a close
+  // that priced no-shows differently from the payroll screen would be a second
+  // opinion about the same money.
+  const [policy, setPolicy] = useState<PayPolicy>(PAY_DELIVERED_ONLY);
+
+  const w = useMemo(() => monthWindow(key), [key]);
+
+  const load = useCallback(async (tenantId: string, mw: NonNullable<ReturnType<typeof monthWindow>>) => {
+    setLoaded({ key: '', rec: EMPTY });
+    // Five independent reads, deliberately not one Promise.all under a single
+    // catch. An invoice table that 500s must not take the payments down with
+    // it: the close is allowed to be partial, but only if it says which part
+    // failed and refuses to be called closed over it.
+    const [payments, invoices, sessions, memberships, passes] = await Promise.all([
+      slice(() => fetchPayments(supabase, tenantId, mw.fromIso)),
+      slice(() => fetchInvoices(tenantId, mw.lastDay)),
+      slice(() => fetchSessions(supabase, tenantId, mw.fromIso, mw.toIso)),
+      slice(() => fetchMemberships(supabase, tenantId)),
+      slice(() => fetchPasses(supabase, tenantId)),
+    ]);
+    setLoaded({ key: mw.key, rec: { payments, invoices, sessions, memberships, passes } });
+  }, []);
+
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      const who = await loadMe();
+      if (!live) return;
+      setMe(who);
+      if (!who?.tenantId) {
+        setLoaded({
+          key,
+          rec: {
+            payments: sliceReady([]), invoices: sliceReady([]), sessions: sliceReady([]),
+            memberships: sliceReady([]), passes: sliceReady([]),
+          },
+        });
+        return;
+      }
+      const { data: t, error: tErr } = await supabase
+        .from('tenants').select('name, session_fee').eq('id', who.tenantId).single();
+      if (!live) return;
+      // Checked, not assumed. A null session fee from a failed read would price
+      // every unrated session at nothing and quietly shrink payroll; the two
+      // are told apart so the screen can say "the fee could not be read".
+      setGymName(tErr ? null : t?.name ?? null);
+      setSessionFee(tErr ? null : t?.session_fee ?? null);
+      setFeeRead(tErr ? 'failed' : 'ok');
+      if (w) await load(who.tenantId, w);
+    })();
+    return () => { live = false; };
+  }, [load, w, key]);
+
+  // Only the record that was actually read for the month on screen. Anything
+  // else is EMPTY, which renders as "still reading" rather than as another
+  // month's figures.
+  const rec = loaded.key === key ? loaded.rec : EMPTY;
+
+  // The gym's currency as the record itself states it. Declared before the
+  // close, not after: the formatter below closes over it, and a `const` read
+  // before its own initialiser is a ReferenceError, not a fallback.
+  const currency = useMemo(() => currencyOf(rec), [rec]);
+
+  const close: MonthClose | null = useMemo(() => {
+    if (!w) return null;
+    return buildClose(rec, w, {
+      policy,
+      // The gym's fee is in major units; everything downstream is minor units.
+      fallbackRateCents: sessionFee == null ? null : Math.round(sessionFee * 100),
+      fmt: (c) => money(c, currency) ?? '—',
+    });
+  }, [rec, w, policy, sessionFee, currency]);
+
+  if (me === undefined) return <div style={{ padding: 40, color: 'var(--ink3)' }}>Loading…</div>;
+  if (me === null) return <div style={{ padding: 40 }}><a href="/">Sign in</a></div>;
+
+  if (me.role !== 'owner') {
+    return (
+      <Shell me={me} gymName={gymName} current="/close">
+        <h1>Not your console</h1>
+        <p style={{ color: 'var(--ink2)', marginTop: 10 }}>
+          A month-end close carries every payment and every payroll figure the
+          gym holds, so it is owner-only.
+        </p>
+      </Shell>
+    );
+  }
+
+  return (
+    <Shell me={me} gymName={gymName} current="/close">
+      <h1>Month-end close</h1>
+      <p style={{ color: 'var(--ink3)', marginTop: 6, fontSize: 13 }}>
+        What came in, what it was for, what is still owed, what does not
+        reconcile, and what is still unmarked and therefore blocking payroll.
+      </p>
+
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', margin: '16px 0 4px' }}>
+        <select value={key} onChange={(e) => setKey(e.target.value)} style={{ ...field, minWidth: 190 }}>
+          {months.map((m) => {
+            const mw = monthWindow(m);
+            return <option key={m} value={m}>{mw ? mw.label : m}</option>;
+          })}
+        </select>
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center', color: 'var(--ink2)', fontSize: 12.5 }}>
+          <input
+            type="checkbox"
+            checked={policy.payNoShows}
+            onChange={(e) => setPolicy((p) => ({ ...p, payNoShows: e.target.checked }))}
+          />
+          Pay no-shows
+        </label>
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center', color: 'var(--ink2)', fontSize: 12.5 }}>
+          <input
+            type="checkbox"
+            checked={policy.payLateCancellations}
+            onChange={(e) => setPolicy((p) => ({ ...p, payLateCancellations: e.target.checked }))}
+          />
+          Pay late cancellations
+        </label>
+      </div>
+
+      {!w || !close ? (
+        <Banner tone="crit">{key} is not a month this console can open.</Banner>
+      ) : (
+        <CloseView c={close} rec={rec} currency={currency} feeRead={feeRead} sessionFee={sessionFee} />
+      )}
+    </Shell>
+  );
+}
+
+/* ── the close itself ──────────────────────────────────────────────────────── */
+
+function CloseView({ c, rec, currency, feeRead, sessionFee }: {
+  c: MonthClose;
+  rec: CloseRecord;
+  currency: string;
+  feeRead: 'ok' | 'failed';
+  sessionFee: number | null;
+}) {
+  const m = (cents: number | null | undefined) => money(cents, currency);
+
+  return (
+    <>
+      <Verdict c={c} />
+
+      {c.warning ? <Banner tone="crit">{c.warning}</Banner> : null}
+      {feeRead === 'failed' ? (
+        <Banner tone="crit">
+          The gym&rsquo;s session fee could not be read, so any session without its
+          own snapshotted rate is left unpriced rather than valued at nothing.
+        </Banner>
+      ) : null}
+
+      <div
+        style={{
+          display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+          gap: 1, background: 'var(--ring)', border: '1px solid var(--ring)',
+          borderRadius: 8, overflow: 'hidden', margin: '20px 0 26px',
+        }}
+      >
+        <Kpi
+          label="Taken"
+          text={c.income ? m(c.income.takenCents) : null}
+          note={
+            !c.income ? stateNote(rec.payments, 'payments')
+              : c.income.currencies.length > 1 ? 'more than one currency — not summed'
+              : c.income.count === 0 ? 'nothing recorded this month'
+              : `${c.income.count} payment${c.income.count === 1 ? '' : 's'}`
+          }
+        />
+        <Kpi
+          label="Billed this month"
+          text={c.owed ? m(sumOrNull(c.owed.settledCents, c.owed.outstandingCents)) : null}
+          note={
+            !c.owed ? stateNote(rec.invoices, 'invoices')
+              : c.owed.issued === 0 ? 'no invoice issued'
+              : `${c.owed.issued} invoice${c.owed.issued === 1 ? '' : 's'}${c.owed.dropped ? `, ${c.owed.dropped} void or written off` : ''}`
+          }
+        />
+        <Kpi
+          label="Still owed"
+          text={c.arrears ? m(c.arrears.outstandingCents) : null}
+          note={
+            !c.arrears ? stateNote(rec.invoices, 'invoices')
+              : c.arrears.outstanding === 0 ? 'nothing outstanding'
+              : `${c.arrears.outstanding} open, ${c.arrears.overdue} past due`
+          }
+        />
+        <Kpi
+          label="Payroll"
+          text={c.payroll ? m(c.payroll.total.cents) : null}
+          note={
+            !c.payroll ? stateNote(rec.sessions, 'one-to-ones')
+              : c.payroll.total.unmarked > 0
+                ? `NOT final — ${c.payroll.total.unmarked} unmarked`
+                : c.payroll.total.payable === 0 ? 'no payable sessions'
+                : `${c.payroll.total.delivered} delivered`
+          }
+        />
+        <Kpi
+          label="Unmarked sessions"
+          text={c.payroll ? String(c.payroll.total.unmarked) : null}
+          note={!c.payroll ? stateNote(rec.sessions, 'one-to-ones') : 'finished, outcome never recorded'}
+        />
+      </div>
+
+      <Income c={c} rec={rec} currency={currency} />
+      <Owed c={c} rec={rec} currency={currency} />
+      <Reconciliation c={c} rec={rec} />
+      <Payroll c={c} rec={rec} currency={currency} sessionFee={sessionFee} />
+      <Passes c={c} rec={rec} currency={currency} />
+    </>
+  );
+}
+
+/**
+ * The verdict, and the reasons — in that order, before a single figure.
+ *
+ * A blocked month gets no tick, no amber, no "mostly closed". It gets the list
+ * of what is in the way, each line an action.
+ */
+function Verdict({ c }: { c: MonthClose }) {
+  const blocked = c.state === 'blocked';
+  return (
+    <section
+      style={{
+        border: '1px solid var(--ring)',
+        borderLeft: `3px solid ${blocked ? 'var(--crit)' : 'var(--brand)'}`,
+        borderRadius: 8, background: 'var(--surface)', padding: '14px 16px', marginTop: 18,
+      }}
+    >
+      <div className="micro">{blocked ? 'Not closed' : 'Can be closed'}</div>
+      <p style={{ margin: '7px 0 0', fontSize: 14.5, color: 'var(--ink)' }}>
+        {closeHeadline(c)}
+      </p>
+      {blocked ? (
+        <ol style={{ margin: '12px 0 0', paddingLeft: 20, color: 'var(--ink2)', fontSize: 13.5 }}>
+          {c.blockers.map((b: Blocker, i: number) => (
+            <li key={`${b.kind}-${i}`} style={{ marginBottom: 6 }}>{b.text}</li>
+          ))}
+        </ol>
+      ) : null}
+    </section>
+  );
+}
+
+/* ── what came in, and what it was for ─────────────────────────────────────── */
+
+function Income({ c, rec, currency }: { c: MonthClose; rec: CloseRecord; currency: string }) {
+  const cols: Column<Line>[] = [
+    { key: 'label', header: 'How it arrived', value: (l) => l.label },
+    { key: 'count', header: 'Payments', value: (l) => l.count, numeric: true },
+    { key: 'cents', header: 'Amount', value: (l) => l.cents, numeric: true,
+      render: (l) => money(l.cents, currency) },
+  ];
+
+  const purposeCols: Column<Line>[] = [
+    { key: 'label', header: 'What it was for', value: (l) => l.label },
+    { key: 'count', header: 'Payments', value: (l) => l.count, numeric: true },
+    { key: 'cents', header: 'Amount', value: (l) => l.cents, numeric: true,
+      render: (l) => money(l.cents, currency) },
+  ];
+
+  return (
+    <Section
+      title="What came in"
+      sub="Only payments somebody recorded. Nothing here is inferred from a membership price, and nothing is pro-rated."
+    >
+      <Part slice={rec.payments} what="the payments taken">
+        {c.income ? (
+          <DataTable
+            rows={c.income.byMethod} columns={cols} rowKey={(l) => l.key}
+            empty="No payment was recorded in this month. That is not the same as no income — it is the same as nobody having entered one."
+          />
+        ) : null}
+      </Part>
+
+      <div style={{ borderTop: '1px solid var(--ring)' }}>
+        <div style={{ padding: '11px 14px' }}>
+          <h3 style={{ fontSize: 13, margin: 0, color: 'var(--ink2)' }}>What it was for</h3>
+          <p style={{ margin: '4px 0 0', color: 'var(--ink3)', fontSize: 12 }}>
+            The payments table holds no category, so this is attribution rather
+            than accounting: whether the payer held a membership covering the
+            month. Nothing is guessed from the amount.
+          </p>
+        </div>
+        {rec.memberships.state === 'loading' || rec.payments.state === 'loading' ? <Loading /> : null}
+        {rec.memberships.state === 'failed' ? (
+          <Failed reason={rec.memberships.reason} what="the membership roster"
+                  cost="payments cannot be attributed, so this is unknown rather than unattributed" />
+        ) : null}
+        {c.purpose ? (
+          <DataTable
+            rows={c.purpose} columns={purposeCols} rowKey={(l) => l.key}
+            empty="Nothing to attribute — no payment was recorded in this month."
+          />
+        ) : null}
+        {c.income && c.income.unattributed > 0 ? (
+          <p style={{ margin: 0, padding: '0 14px 14px', color: 'var(--ink3)', fontSize: 12.5 }}>
+            {c.income.unattributed} payment{c.income.unattributed === 1 ? '' : 's'} carr
+            {c.income.unattributed === 1 ? 'ies' : 'y'} nobody&rsquo;s name —{' '}
+            {money(c.income.unattributedCents, currency)}. Counted in the total, and
+            named here because it cannot be chased, refunded or explained later.
+          </p>
+        ) : null}
+      </div>
+    </Section>
+  );
+}
+
+/* ── what is still owed ────────────────────────────────────────────────────── */
+
+function Owed({ c, rec, currency }: { c: MonthClose; rec: CloseRecord; currency: string }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const open = (rec.invoices.state === 'ready' ? rec.invoices.rows : [])
+    .filter((i) => i.status === 'open' || i.status === 'overdue')
+    .filter((i) => i.issuedOn <= c.window.lastDay);
+
+  const cols: Column<GymInvoice>[] = [
+    { key: 'member', header: 'Member', value: (i) => i.memberName },
+    { key: 'issued', header: 'Issued', value: (i) => i.issuedOn },
+    { key: 'due', header: 'Due', value: (i) => i.dueOn,
+      render: (i) => i.dueOn
+        ? <span style={{ color: isOverdue(i, today) ? 'var(--crit)' : undefined }}>{i.dueOn}</span>
+        : <span className="dash">no due date set</span> },
+    { key: 'amount', header: 'Amount', value: (i) => i.amountCents, numeric: true,
+      render: (i) => money(i.amountCents, i.currency) },
+    { key: 'status', header: 'Status', value: (i) => (isOverdue(i, today) ? 'overdue' : i.status),
+      render: (i) => isOverdue(i, today)
+        ? <span style={{ color: 'var(--crit)' }}>overdue</span>
+        : <span>{i.status}</span> },
+    { key: 'note', header: 'Note', value: (i) => i.note },
+  ];
+
+  return (
+    <Section
+      title="What is still owed"
+      sub="Every invoice issued on or before the month end that is still unpaid — including ones raised in earlier months, because those are still money the gym is owed at this close."
+    >
+      <Part slice={rec.invoices} what="the invoice register">
+        <>
+          {c.arrears ? (
+            <p style={{ margin: 0, padding: '12px 14px', color: 'var(--ink2)', fontSize: 13, borderBottom: '1px solid var(--ring)' }}>
+              {c.arrears.outstanding === 0
+                ? 'Nothing outstanding. Every invoice issued up to the end of this month is settled, void or written off.'
+                : <>
+                    {money(c.arrears.outstandingCents, currency) ?? '—'} across{' '}
+                    {c.arrears.outstanding} invoice{c.arrears.outstanding === 1 ? '' : 's'}, of which{' '}
+                    {c.arrears.overdue} {c.arrears.overdue === 1 ? 'is' : 'are'} past a due date the gym set.
+                    {c.arrears.dropped
+                      ? ` A further ${money(c.arrears.droppedCents, currency) ?? '—'} is void or written off and is counted in neither what was taken nor what is owed.`
+                      : null}
+                  </>}
+            </p>
+          ) : null}
+          <DataTable
+            rows={open} columns={cols} rowKey={(i) => i.id}
+            empty="No unpaid invoice stands against this month. If the gym does not invoice through Repple, that is what this looks like — there is no second record to check the takings against."
+          />
+        </>
+      </Part>
+    </Section>
+  );
+}
+
+/* ── what does not reconcile ───────────────────────────────────────────────── */
+
+function Reconciliation({ c, rec }: { c: MonthClose; rec: CloseRecord }) {
+  const bothRead = rec.payments.state === 'ready' && rec.invoices.state === 'ready';
+
+  return (
+    <Section
+      title="What does not reconcile"
+      sub="Money banked against money the invoice register says arrived, at the gym's own 2% tolerance — the same rule the financial-health screen uses, not a second one."
+    >
+      <div style={{ padding: '14px' }}>
+        {!bothRead ? (
+          <p style={{ margin: 0, color: 'var(--ink2)', fontSize: 13.5 }}>
+            {rec.payments.state === 'loading' || rec.invoices.state === 'loading'
+              ? 'Still reading both sides.'
+              : 'One side of the comparison could not be read, so no reconciliation is offered. A check run against a failed read looks like a finding, which is worse than no check.'}
+          </p>
+        ) : !c.check ? (
+          <p style={{ margin: 0, color: 'var(--ink2)', fontSize: 13.5 }}>
+            Nothing to reconcile: no payment was recorded in {c.window.label} and no
+            invoice in it is marked paid. Two silences, not an agreement.
+          </p>
+        ) : (
+          <>
+            <div className="micro">{RECON_LABEL[c.check.r.state]}</div>
+            <p style={{ margin: '7px 0 0', fontSize: 13.5, color: 'var(--ink2)' }}>
+              {c.check.note ?? 'The two sides agree inside the 2% tolerance. Nothing to explain.'}
+            </p>
+            {c.check.gapCents != null && c.check.r.state === 'differs' ? (
+              <p style={{ margin: '9px 0 0', fontSize: 12.5, color: 'var(--ink3)' }}>
+                The difference is {(c.check.r.driftPct! * 100).toFixed(1)}% of what the
+                register expected. It is shown, not absorbed: no figure on this page
+                has been adjusted to make the two agree.
+              </p>
+            ) : null}
+          </>
+        )}
+      </div>
+    </Section>
+  );
+}
+
+const RECON_LABEL: Record<string, string> = {
+  no_record: 'Nothing to check against',
+  not_entered: 'The register says money arrived that no payment shows',
+  agrees: 'Agrees',
+  differs: 'Does not reconcile',
+};
+
+/* ── what is unmarked, and therefore blocking payroll ──────────────────────── */
+
+function Payroll({ c, rec, currency, sessionFee }: {
+  c: MonthClose; rec: CloseRecord; currency: string; sessionFee: number | null;
+}) {
+  const unmarked = useMemo(
+    () => (rec.sessions.state === 'ready' ? rec.sessions.rows : [])
+      .filter((s) => inWindow(s.startsAt, c))
+      .filter((s) => isAwaitingOutcome(s)),
+    [rec.sessions, c],
+  );
+
+  const cols: Column<PayrollLine>[] = [
+    { key: 'trainer', header: 'Trainer', value: (l) => l.trainerName },
+    { key: 'delivered', header: 'Delivered', value: (l) => l.delivered, numeric: true },
+    { key: 'noShows', header: 'No-shows', value: (l) => l.noShows, numeric: true },
+    { key: 'cancelled', header: 'Cancelled', value: (l) => l.cancelled, numeric: true },
+    { key: 'unmarked', header: 'Unmarked', value: (l) => l.unmarked, numeric: true,
+      render: (l) => l.unmarked
+        ? <span style={{ color: 'var(--crit)' }}>{l.unmarked}</span>
+        : <span className="dash">0</span> },
+    { key: 'cents', header: 'Pay', value: (l) => l.cents, numeric: true,
+      render: (l) => l.cents == null
+        ? <span className="dash">no rate</span>
+        : <>{money(l.cents, currency)}</> },
+  ];
+
+  const sessionCols: Column<PtSession>[] = [
+    { key: 'when', header: 'Started', value: (s) => s.startsAt,
+      render: (s) => new Date(s.startsAt).toLocaleString() },
+    { key: 'trainer', header: 'Trainer', value: (s) => s.trainerName },
+    { key: 'client', header: 'Client', value: (s) => s.clientName },
+    { key: 'mins', header: 'Minutes', value: (s) => s.durationMin, numeric: true },
+    { key: 'rate', header: 'Rate held', value: (s) => s.rateCents, numeric: true,
+      render: (s) => s.rateCents == null
+        ? <span className="dash">not snapshotted</span>
+        : <>{money(s.rateCents, currency)}</> },
+  ];
+
+  return (
+    <Section
+      title="What is unmarked, and therefore blocking payroll"
+      sub="Payroll counts delivered sessions. A session nobody marked has an unknown outcome, is kept out of the total, and is listed here by name rather than footnoted under it."
+    >
+      <Part slice={rec.sessions} what="the one-to-ones">
+        <>
+          {c.payroll ? (
+            <p style={{
+              margin: 0, padding: '12px 14px', borderBottom: '1px solid var(--ring)',
+              color: c.payroll.blocker ? 'var(--ink2)' : 'var(--ink3)', fontSize: 13,
+            }}>
+              {c.payroll.blocker
+                ? <><strong>Not safe to settle.</strong> {c.payroll.blocker}</>
+                : <>Every session in {c.window.label} is marked and priced. {money(c.payroll.total.cents, currency) ?? '—'} across {c.payroll.total.payable} payable session{c.payroll.total.payable === 1 ? '' : 's'}.</>}
+              {sessionFee == null ? ' No standard session fee is set, so a session with no snapshotted rate stays unpriced rather than free.' : null}
+            </p>
+          ) : null}
+          <DataTable
+            rows={c.payroll?.lines ?? []} columns={cols} rowKey={(l) => l.trainerId}
+            empty="No one-to-one ran in this month. Nothing to pay, and nothing blocking."
+          />
+          {unmarked.length ? (
+            <div style={{ borderTop: '1px solid var(--ring)' }}>
+              <div style={{ padding: '11px 14px' }}>
+                <h3 style={{ fontSize: 13, margin: 0, color: 'var(--crit)' }}>
+                  {unmarked.length} session{unmarked.length === 1 ? '' : 's'} waiting on an outcome
+                </h3>
+                <p style={{ margin: '4px 0 0', color: 'var(--ink3)', fontSize: 12 }}>
+                  Mark {unmarked.length === 1 ? 'it' : 'them'} under Sessions. Until then
+                  the payroll figure above is short by exactly{' '}
+                  {unmarked.length === 1 ? 'this one' : `these ${unmarked.length}`}.
+                </p>
+              </div>
+              <DataTable
+                rows={unmarked} columns={sessionCols} rowKey={(s) => s.id}
+                empty="—"
+              />
+            </div>
+          ) : null}
+        </>
+      </Part>
+    </Section>
+  );
+}
+
+/* ── passes ────────────────────────────────────────────────────────────────── */
+
+function Passes({ c, rec, currency }: { c: MonthClose; rec: CloseRecord; currency: string }) {
+  return (
+    <Section
+      title="Passes sold"
+      sub="A separate record, shown beside the takings and deliberately not added into them."
+    >
+      <Part slice={rec.passes} what="passes sold">
+        <p style={{ margin: 0, padding: '14px', color: 'var(--ink2)', fontSize: 13.5 }}>
+          {!c.passes || c.passes.sold === 0
+            ? `No pass was issued in ${c.window.label}.`
+            : <>
+                {c.passes.sold} pass{c.passes.sold === 1 ? '' : 'es'} issued,{' '}
+                {c.passes.cents == null
+                  ? <>and not one carried a recorded price — so the amount is unknown, not nothing.</>
+                  : <>{money(c.passes.cents, currency)} recorded across {c.passes.priced} of them.</>}
+                {' '}Nothing links a pass row to a payment row, so this is not added to
+                what came in: summing them would double-count every pass paid for at
+                the desk, and ignoring it would drop the rest. Both records are shown
+                instead of one invented total.
+              </>}
+        </p>
+      </Part>
+    </Section>
+  );
+}
+
+/* ── reads ─────────────────────────────────────────────────────────────────── */
+
+/** Run one read into a slice, so a rejection becomes a stated failure rather
+ *  than an empty month. */
+async function slice<T>(run: () => Promise<T[]>): Promise<Slice<T>> {
+  try {
+    return sliceReady(await run());
+  } catch (e: any) {
+    return sliceFailed(e?.message ?? 'The read failed.');
+  }
+}
+
+/**
+ * Invoices issued on or before the end of the month being closed.
+ *
+ * Nothing had ever read `gym_invoices` — the status enum existed in
+ * gymRecord.ts and no query did. This is the first, and it goes back past the
+ * month on purpose: an invoice raised in June and unpaid in August is still
+ * money owed at the August close, and scoping the query to August would have
+ * reported that gym as owed nothing.
+ *
+ * `.error` is checked on both queries. supabase-js resolves on a database
+ * error, so without it a failed read arrives as `data: null`, falls through
+ * `?? []`, and this screen reports a gym that billed nothing and is owed
+ * nothing — while continuing to call the month reconciled.
+ */
+async function fetchInvoices(tenantId: string, upToDay: string): Promise<GymInvoice[]> {
+  const { data, error } = await supabase
+    .from('gym_invoices')
+    .select('id, member_id, amount_cents, currency, issued_on, due_on, status, note')
+    .eq('tenant_id', tenantId)
+    .lte('issued_on', upToDay)
+    .order('issued_on', { ascending: false });
+  if (error) throw error;
+
+  const rows = data ?? [];
+  if (!rows.length) return [];
+
+  const names = await namesFor(rows.map((r: any) => r.member_id));
+  return rows.map((r: any) => ({
+    id: r.id,
+    memberId: r.member_id,
+    memberName: names.get(r.member_id) ?? null,
+    amountCents: r.amount_cents ?? 0,
+    currency: r.currency ?? 'AED',
+    issuedOn: r.issued_on,
+    dueOn: r.due_on ?? null,
+    status: r.status ?? 'open',
+    note: r.note ?? null,
+  }));
+}
+
+/** Names from `profiles`, where they live. Throws on a failed read rather than
+ *  returning an empty map — an unnamed invoice list on a chase-the-money screen
+ *  is not a cosmetic problem. */
+async function namesFor(ids: (string | null | undefined)[]): Promise<Map<string, string>> {
+  const unique = [...new Set(ids.filter((x): x is string => !!x))];
+  if (!unique.length) return new Map();
+  const { data, error } = await supabase.from('profiles').select('id, full_name').in('id', unique);
+  if (error) throw error;
+  return new Map((data ?? [])
+    .map((p: any) => [p.id, (p.full_name || '').trim()] as [string, string])
+    .filter(([, n]) => !!n));
+}
+
+/* ── bits ──────────────────────────────────────────────────────────────────── */
+
+function inWindow(iso: string, c: MonthClose): boolean {
+  const t = Date.parse(iso);
+  return Number.isFinite(t) && t >= Date.parse(c.window.fromIso) && t < Date.parse(c.window.toIso);
+}
+
+/** Two figures that may each be null. Null unless at least one is known — and
+ *  a known one plus an unknown one is still not a total, so both must be
+ *  present or absent together. */
+function sumOrNull(a: number | null, b: number | null): number | null {
+  if (a == null && b == null) return null;
+  return (a ?? 0) + (b ?? 0);
+}
+
+/** The currency the record itself states, or AED when it states none. Only ever
+ *  used for rendering; no total is asserted across currencies anywhere. */
+function currencyOf(rec: CloseRecord): string {
+  if (rec.payments.state === 'ready' && rec.payments.rows.length) return rec.payments.rows[0].currency;
+  if (rec.invoices.state === 'ready' && rec.invoices.rows.length) return rec.invoices.rows[0].currency;
+  return 'AED';
+}
+
+/** The note under a KPI whose figure is missing — which of the three states it
+ *  is missing for. */
+function stateNote(s: Slice<unknown>, what: string): string {
+  return s.state === 'failed' ? `${what} not read` : `reading ${what}…`;
+}
+
+/**
+ * A section body that cannot lie about which of the three states it is in.
+ * Same shape as the Members screen: loading says loading, failed says what
+ * broke and what is therefore unknown, ready hands over to the table.
+ */
+function Part<T>({ slice, what, children }: {
+  slice: Slice<T>; what: string; children: React.ReactNode;
+}) {
+  return (
+    <>
+      {slice.state === 'loading' ? <Loading /> : null}
+      {slice.state === 'failed' ? <Failed reason={slice.reason} what={what} /> : null}
+      {slice.state === 'ready' ? children : null}
+    </>
+  );
+}
+
+function Failed({ reason, what, cost }: { reason: string; what: string; cost?: string }) {
+  return (
+    <div style={{
+      padding: '16px 14px', margin: '14px', borderRadius: 8,
+      border: '1px solid var(--ring)', borderLeft: '3px solid var(--crit)',
+      background: 'var(--surface2)', color: 'var(--ink2)', fontSize: 13,
+    }}>
+      Could not read {what}. This section is <strong>unknown</strong>, not empty
+      {cost ? <> — {cost}</> : null}. No month is closed over it.
+      <div className="mono" style={{ marginTop: 6, fontSize: 11.5, color: 'var(--ink3)' }}>{reason}</div>
+    </div>
+  );
+}
+
+const field = {
+  background: 'var(--surface2)', color: 'var(--ink)', border: '1px solid var(--ring)',
+  borderRadius: 6, padding: '8px 10px', fontSize: 13, fontFamily: 'var(--sans)', minWidth: 0,
+} as const;
+
+function Section({ title, sub, children }: { title: string; sub?: string; children: React.ReactNode }) {
+  return (
+    <section style={{ border: '1px solid var(--ring)', borderRadius: 8, background: 'var(--surface)', marginBottom: 22 }}>
+      <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--ring)' }}>
+        <h2>{title}</h2>
+        {sub ? <p style={{ margin: '4px 0 0', color: 'var(--ink3)', fontSize: 12.5 }}>{sub}</p> : null}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function Kpi({ label, text, note }: { label: string; text: string | null; note?: string }) {
+  return (
+    <div style={{ background: 'var(--surface)', padding: '14px 16px' }}>
+      <div className="micro">{label}</div>
+      <div className="mono" style={{ fontSize: 21, marginTop: 5, letterSpacing: '-0.02em', color: text == null ? 'var(--ink3)' : 'var(--ink)' }}>
+        {text ?? '—'}
+      </div>
+      {note ? <div style={{ fontSize: 11.5, color: 'var(--ink3)', marginTop: 3 }}>{note}</div> : null}
+    </div>
+  );
+}
+
+function Banner({ children, tone }: { children: React.ReactNode; tone?: 'crit' }) {
+  return (
+    <div style={{
+      margin: '14px 0', padding: '11px 14px', borderRadius: 8, background: 'var(--surface)',
+      border: '1px solid var(--ring)', borderLeft: `3px solid ${tone === 'crit' ? 'var(--crit)' : 'var(--brand)'}`,
+      color: 'var(--ink2)', fontSize: 13,
+    }}>{children}</div>
+  );
+}
+
+function Loading() {
+  return <div style={{ padding: '26px 20px', color: 'var(--ink3)' }}>Loading…</div>;
+}

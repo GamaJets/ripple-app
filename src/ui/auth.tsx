@@ -18,7 +18,7 @@ import {
   verifyRecoveryToken as sbVerifyRecoveryToken,
   updatePassword as sbUpdatePassword,
 } from '../lib/supabase';
-import { appLink } from '../lib/deepLink';
+import { resetPasswordUrl } from '../lib/deepLink';
 import { reportError } from '../lib/reportError';
 
 export type Role = 'owner' | 'trainer' | 'client';
@@ -30,7 +30,7 @@ export interface SignUpResult { needsConfirmation: boolean }
 // separate credential store. So a single reset-password flow covers everyone.
 // Built per app rather than written out, so a reset requested from Repple
 // Coach comes back to Repple Coach. See src/lib/deepLink.ts.
-const resetRedirectUrl = () => appLink('reset-password');
+const resetRedirectUrl = () => resetPasswordUrl();
 
 interface AuthValue {
   authed: boolean;
