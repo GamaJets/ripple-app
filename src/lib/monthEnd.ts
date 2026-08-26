@@ -415,7 +415,7 @@ function gapNote(
     case 'differs': {
       const d = r.delta as number;
       return `${fmt(r.typed)} was taken; invoices mark ${fmt(r.derived as number)} as paid. ${fmt(Math.abs(d))} ${
-        d > 0 ? 'the register expected has not arrived' : 'arrived that no invoice accounts for'
+        d > 0 ? 'that the register expected has not arrived' : 'arrived that no invoice accounts for'
       }. Name it before the month closes.`;
     }
     case 'agrees':

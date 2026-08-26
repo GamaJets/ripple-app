@@ -28,6 +28,7 @@ import { normaliseEmail, inviteState, isExpired as inviteExpired, isRedeemable a
 import { weekStartOf, weekDays, shiftWeek, hoursSpanned, shiftHours, hourLabel, buildRota, coverage, shiftsByDay, rosterByTrainer, summariseRota, shiftFromHours, type Shift, type DemandBlock } from './gymRota';
 import { photoObjectPath, isOwnPhotoPath, sortOldestFirst, comparePair, daysApart, photosNote, missingFileCount, rowToPhoto, PHOTO_PATH_RE, type ProgressPhoto } from './progressPhotos';
 import { viewerMaySee, shareStateOf, shareLabel, sharedNote, sharedCount, sendBlocker, sentPhotos, sortNewestShared, missingSharedFiles, revokeCaveat, SHARED_URL_TTL_S, type ShareGrant, type CoachLink, type SharedPhoto } from './photoShare';
+import { monthlyHistory, monthKey, monthLabel, yearRows, peakVolume, intensity, bestMonth, trainedMonths, gaps, longestGap, monthsSinceLast, historySpan, stageOf, historyNote, lifetimeTotals, prTimeline, volumeArc, tonnes } from './longView';
 import type { TrainingSession } from './types';
 import { assessDrift, rankClients, sortByDrift, summariseDrift, compareDrift, DRIFT_RANK, DRIFT_LABEL, DEFAULT_WINDOWS, type ActivityEvent, type DriftInput } from './clientDrift';
 import { atRiskClient, noRecordOf } from './trainerMock';
@@ -38,7 +39,6 @@ import {
   CLOSE_PARTS, CLOSE_LABEL, CLOSE_COST,
   type CloseRecord, type GymInvoice, type MonthWindow,
 } from './monthEnd';
-import { monthlyHistory, monthKey, monthLabel, yearRows, peakVolume, intensity, bestMonth, trainedMonths, gaps, longestGap, monthsSinceLast, historySpan, stageOf, historyNote, lifetimeTotals, prTimeline, volumeArc, tonnes } from './longView';
 
 const errors: string[] = [];
 let checks = 0;
@@ -1886,6 +1886,228 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
   ok(SHARED_URL_TTL_S === 5 * 60, 'a coach URL lasts five minutes, so taking a photo back bites in minutes');
   ok(SHARED_URL_TTL_S < 60 * 60, 'and far less than the hour a member gets for their own photos');
   ok(revokeCaveat().includes('five minutes'), 'and the app says out loud how long an already-open link keeps working');
+}
+
+// ── month-end close ────────────────────────────────────────────────────────
+//
+// The close is the one screen whose most valuable output is the word "no", so
+// most of what is pinned here is a refusal: a month with unmarked sessions must
+// not read as closed, a failed read must not become a zero, and no figure may
+// be estimated to fill a gap.
+{
+  // Mid-August 2026, local. June is therefore a finished month and August is not.
+  const NOW = new Date(2026, 7, 15, 12, 0, 0).getTime();
+  const JUNE = monthWindow('2026-06') as MonthWindow;
+  const AUG = monthWindow('2026-08') as MonthWindow;
+
+  // ── the window ──
+  ok(JUNE.label === 'June 2026', 'a month window is named in the gym\'s own words');
+  ok(JUNE.firstDay === '2026-06-01' && JUNE.lastDay === '2026-06-30', 'June ends on the 30th');
+  ok(monthWindow('2026-02')!.lastDay === '2026-02-28', 'February 2026 ends on the 28th');
+  ok(monthWindow('2028-02')!.lastDay === '2028-02-29', 'and February 2028 on the 29th — no month-length table to get wrong');
+  ok(monthWindow('2026-13') === null && monthWindow('June') === null, 'a key that is not a month opens nothing');
+  ok(monthKeyOf(new Date(2026, 5, 30, 23, 30)) === '2026-06',
+     'a late-evening moment belongs to the gym\'s own month, not to UTC\'s next one');
+  ok(recentMonths(3, NOW).join(',') === '2026-08,2026-07,2026-06', 'the picker walks back from the running month');
+  ok(monthEnded(JUNE, NOW) === true && monthEnded(AUG, NOW) === false, 'a month is over only once it is over');
+  ok(inMonth(new Date(2026, 5, 1, 0, 0, 0).toISOString(), JUNE) === true, 'the first instant of the month is in it');
+  ok(inMonth(new Date(2026, 6, 1, 0, 0, 0).toISOString(), JUNE) === false,
+     'and the first instant of the next month is NOT — the boundary is exclusive, so nothing is counted twice');
+  ok(inMonth(null, JUNE) === false && inMonth('not a date', JUNE) === false, 'an unparseable stamp is not silently in the month');
+  ok(dayInMonth('2026-06-30', JUNE) === true && dayInMonth('2026-07-01', JUNE) === false, 'plain dates land in the right month');
+
+  // ── narrowing a slice to a month keeps all three states ──
+  const junePay = (id: string, cents: number, opts: Partial<GymPayment> = {}): GymPayment => ({
+    id, memberId: 'm1', memberName: 'Sara', amountCents: cents, currency: 'AED',
+    method: 'card', takenAt: new Date(2026, 5, 10, 9, 0).toISOString(), note: null, ...opts,
+  });
+  const julyPay = junePay('late', 999, { takenAt: new Date(2026, 6, 2, 9, 0).toISOString() });
+
+  ok(sliceMonth(sliceLoading<GymPayment>(), JUNE, (p) => p.takenAt).state === 'loading',
+     'narrowing a slice that has not arrived leaves it not-arrived');
+  ok(sliceMonth(sliceFailed<GymPayment>('boom'), JUNE, (p) => p.takenAt).state === 'failed',
+     'and narrowing a FAILED read leaves it failed — it never becomes an empty month');
+  ok(rowsOf(sliceMonth(sliceReady([junePay('a', 100), julyPay]), JUNE, (p) => p.takenAt))!.length === 1,
+     'a ready slice is filtered to the month');
+
+  // ── what came in ──
+  ok(incomeOf([]).takenCents === null,
+     'a month with no payment recorded has UNKNOWN income, not zero — nobody entered anything');
+  ok(incomeOf([]).count === 0, 'and it says so as a count of nothing');
+  const mixed = incomeOf([junePay('a', 100), junePay('b', 200, { currency: 'GBP' })]);
+  ok(mixed.takenCents === null && mixed.currencies.join(',') === 'AED,GBP',
+     'dirhams plus pounds is not a sum, so no total is offered');
+  const inc = incomeOf([
+    junePay('a', 30000), junePay('b', 15000, { method: 'cash' }),
+    junePay('c', 5000, { method: 'cash', memberId: null, memberName: null }),
+  ]);
+  ok(inc.takenCents === 50000 && inc.count === 3, 'what came in is the sum of what was recorded');
+  ok(inc.byMethod[0].key === 'card' && inc.byMethod[0].cents === 30000,
+     'and it is broken down by how it arrived, largest first');
+  ok(inc.byMethod.find((l) => l.key === 'cash')!.cents === 20000, 'with the two cash payments added together');
+  ok(inc.unattributed === 1 && inc.unattributedCents === 5000,
+     'money with nobody\'s name on it is counted in the total and named separately, never hidden in it');
+
+  // ── what it was for ──
+  const mem = (memberId: string, startedOn: string, endsOn: string | null): Membership => ({
+    id: 'ms-' + memberId, memberId, memberName: memberId, planId: 'p1', planName: 'Standard',
+    startedOn, endsOn, status: 'active',
+  });
+  ok(purposeOf([junePay('a', 100)], null, JUNE) === null,
+     'with no roster read, no payment is attributed — every payer would otherwise look like a non-member');
+  const purpose = purposeOf(
+    [junePay('a', 30000), junePay('b', 20000, { memberId: 'm9', memberName: 'Walk-in' })],
+    [mem('m1', '2026-01-01', null)],
+    JUNE,
+  )!;
+  ok(purpose.find((l) => l.key === 'membership')!.cents === 30000, 'a payer holding a membership is attributed to it');
+  ok(purpose.find((l) => l.key === 'no_membership')!.cents === 20000, 'and one who does not is not quietly folded in');
+  ok(purposeOf([junePay('a', 100)], [mem('m1', '2026-01-01', '2026-06-20')], JUNE)![0].key === 'membership',
+     'a membership that ended mid-month was still a membership for the month being closed');
+  ok(purposeOf([junePay('a', 100)], [mem('m1', '2026-01-01', '2026-05-31')], JUNE)![0].key === 'no_membership',
+     'one that ended before it started was not');
+
+  // ── what is still owed ──
+  const inv = (id: string, cents: number, status: GymInvoice['status'], dueOn: string | null = null): GymInvoice => ({
+    id, memberId: 'm1', memberName: 'Sara', amountCents: cents, currency: 'AED',
+    issuedOn: '2026-06-01', dueOn, status, note: null,
+  });
+  const TODAY = '2026-08-15';
+  ok(isOverdue(inv('x', 1, 'open', '2026-08-14'), TODAY) === true, 'an open invoice past its due date is overdue');
+  ok(isOverdue(inv('x', 1, 'open', TODAY), TODAY) === false, 'an invoice due today is not late today');
+  ok(isOverdue(inv('x', 1, 'open', null), TODAY) === false,
+     'and one with no due date never is — the gym never said when it wanted the money');
+  ok(isOverdue(inv('x', 1, 'paid', '2020-01-01'), TODAY) === false, 'a paid invoice is not overdue whatever its date');
+
+  const empty = owedOf([], TODAY);
+  ok(empty.settledCents === null && empty.outstandingCents === null && empty.droppedCents === null,
+     'no invoices means unknown on every line, never a row of zeroes');
+  const owed = owedOf([
+    inv('i1', 50000, 'paid'), inv('i2', 20000, 'open', '2026-06-30'),
+    inv('i3', 10000, 'open', null), inv('i4', 90000, 'draft'), inv('i5', 7000, 'written_off'),
+  ], TODAY);
+  ok(owed.settledCents === 50000 && owed.settled === 1, 'what the register says arrived');
+  ok(owed.outstandingCents === 30000 && owed.outstanding === 2, 'what is still owed');
+  ok(owed.overdueCents === 20000 && owed.overdue === 1, 'and how much of it is late');
+  ok(owed.droppedCents === 7000, 'money written off is on its own line');
+  ok(owed.settledCents! + owed.outstandingCents! === 80000,
+     'the draft invoice is in neither — an invoice nobody sent is owed by nobody');
+
+  // ── what does not reconcile ──
+  const fmt = (c: number) => `AED ${(c / 100).toFixed(2)}`;
+  ok(moneyCheck(null, owed, fmt) === null, 'no reconciliation is offered against a payments read that failed');
+  ok(moneyCheck(inc, null, fmt) === null, 'nor against an invoice read that failed — a check over a failure looks like a finding');
+  ok(moneyCheck(incomeOf([]), owedOf([], TODAY), fmt) === null,
+     'two silences are not an agreement, so nothing is claimed');
+  const agrees = moneyCheck(incomeOf([junePay('a', 50000)]), owedOf([inv('i1', 50500, 'paid')], TODAY), fmt)!;
+  ok(agrees.r.state === 'agrees' && agrees.note === null,
+     'inside the gym\'s existing 2% tolerance the two sides agree and the screen stays quiet');
+  const differs = moneyCheck(incomeOf([junePay('a', 50000)]), owedOf([inv('i1', 60000, 'paid')], TODAY), fmt)!;
+  ok(differs.r.state === 'differs' && differs.gapCents === 10000, 'outside it, the gap is measured');
+  ok(differs.note!.includes('AED 100.00') && differs.note!.includes('has not arrived'),
+     'and NAMED in the sentence rather than absorbed into either figure');
+  const oneSided = moneyCheck(incomeOf([]), owedOf([inv('i1', 60000, 'paid')], TODAY), fmt)!;
+  ok(oneSided.r.state === 'not_entered' && oneSided.note!.includes('not one payment was recorded'),
+     'a register claiming money arrived that no payment shows is a gap, not a blank');
+
+  // ── the close, end to end ──
+  const sess = (id: string, outcome: PtSession['outcome'], rateCents: number | null = 20000): PtSession => ({
+    id, trainerId: 't1', trainerName: 'Alex', clientId: 'm1', clientName: 'Sara',
+    startsAt: new Date(2026, 5, 10, 9, 0).toISOString(), durationMin: 60,
+    status: 'booked', outcome, outcomeAt: outcome ? '2026-06-10T10:00:00.000Z' : null,
+    rateCents, settlementId: null,
+  });
+  const rec = (over: Partial<CloseRecord> = {}): CloseRecord => ({
+    payments: sliceReady([junePay('a', 30000), junePay('b', 20000)]),
+    invoices: sliceReady([inv('i1', 50000, 'paid')]),
+    sessions: sliceReady([sess('s1', 'completed'), sess('s2', 'completed')]),
+    memberships: sliceReady([mem('m1', '2026-01-01', null)]),
+    passes: sliceReady([]),
+    ...over,
+  });
+  const build = (r: CloseRecord, w: MonthWindow = JUNE) =>
+    buildClose(r, w, { policy: PAY_DELIVERED_ONLY, fallbackRateCents: null, now: NOW, fmt });
+
+  const clean = build(rec());
+  ok(clean.state === 'closeable' && clean.blockers.length === 0,
+     'a month whose sessions are all marked and whose money reconciles can be closed');
+  ok(clean.income!.takenCents === 50000 && clean.payroll!.total.cents === 40000, 'and it reports both figures');
+  ok(closeHeadline(clean).includes('reconciles'), 'the headline says the check actually ran');
+
+  // THE refusal. Payroll is computed from delivered sessions, so a month with
+  // an unmarked one is wrong by exactly that one and must not read as closed.
+  const unmarked = build(rec({ sessions: sliceReady([sess('s1', 'completed'), sess('s2', null)]) }));
+  ok(unmarked.state === 'blocked',
+     'a month with an unmarked session must NOT be presentable as closed');
+  const unmarkedBlock = unmarked.blockers.find((b) => b.kind === 'unmarked_sessions');
+  ok(!!unmarkedBlock, 'and the reason is named as unmarked sessions, not left as a footnote');
+  ok((unmarkedBlock?.text ?? '').startsWith('1 session'), 'the refusal says HOW MANY are unmarked');
+  ok(unmarked.payroll!.total.unmarked === 1 && unmarked.payroll!.total.cents === 20000,
+     'payroll is short by exactly the session nobody marked — 20000, not the 40000 a delivered month showed');
+  ok(!closeHeadline(unmarked).includes('can be closed'),
+     'and the headline never offers a close it is refusing');
+  const many = build(rec({ sessions: sliceReady([sess('s1', null), sess('s2', null), sess('s3', 'completed')]) }));
+  ok((many.blockers.find((b) => b.kind === 'unmarked_sessions')?.text ?? '').startsWith('2 sessions'),
+     'two unmarked are counted as two');
+
+  // A gym that does no personal training has nothing blocking its month, even
+  // though payrollTotal reports it as unsettleable.
+  const noPt = build(rec({ sessions: sliceReady([]) }));
+  ok(noPt.payroll!.total.settleable === false, 'payrollTotal calls an empty period unsettleable');
+  ok(noPt.blockers.every((b) => b.kind !== 'unmarked_sessions' && b.kind !== 'unpriced_sessions'),
+     'but a gym with no one-to-ones has nothing unmarked and nothing unpriced');
+  ok(noPt.state === 'closeable', 'so it can still close its month');
+
+  // A payable session nobody priced is missing from the total, not free.
+  const unpriced = build(rec({ sessions: sliceReady([sess('s1', 'completed', null)]) }));
+  ok(unpriced.payroll!.total.cents === null, 'an unpriced payable session leaves the pay figure unknown, not zero');
+  ok(!!unpriced.blockers.find((b) => b.kind === 'unpriced_sessions'), 'and that blocks the close too');
+
+  // A failed read is never a zero.
+  const brokenPay = build(rec({ payments: sliceFailed('connection reset') }));
+  ok(brokenPay.income === null,
+     'a month whose payments read failed has NO income figure — it is not a month with no income');
+  ok(brokenPay.check === null, 'and nothing is reconciled against it');
+  ok(!!brokenPay.blockers.find((b) => b.kind === 'read_failed'), 'the failed read itself blocks the close');
+  ok(brokenPay.warning!.includes('what came in is unknown, not zero'),
+     'and the banner names the half that failed and what the reader is therefore not seeing');
+  ok(brokenCloseParts(rec({ payments: sliceFailed('connection reset') }))[0].reason === 'connection reset',
+     'the broken part is reported by name, with the reason it broke');
+  ok(loadingCloseParts(rec({ invoices: sliceLoading() })).join(',') === 'invoices', 'so is the one still in flight');
+  ok(closeWarning(rec()) === null, 'a whole close carries no warning');
+  ok(CLOSE_PARTS.every((p) => !!CLOSE_LABEL[p] && !!CLOSE_COST[p]),
+     'every part of the close has a name and a stated cost when it cannot be read');
+
+  // A month still running cannot be closed, whatever its numbers say.
+  const running = build(rec({ sessions: sliceReady([]) }), AUG);
+  ok(!!running.blockers.find((b) => b.kind === 'month_running'),
+     'August cannot be closed in the middle of August');
+
+  // A named money gap stops the month.
+  const gap = build(rec({ invoices: sliceReady([inv('i1', 90000, 'paid')]) }));
+  ok(!!gap.blockers.find((b) => b.kind === 'money_gap'), 'a gap between money taken and money billed blocks the close');
+
+  // But having no invoice register at all is a stated limitation, not an error:
+  // a cash-only gym must still be able to close.
+  const cashOnly = build(rec({ invoices: sliceReady([]) }));
+  ok(cashOnly.check!.r.state === 'no_record', 'with no invoice marked paid there is nothing to check against');
+  ok(cashOnly.state === 'closeable', 'and a cash-only gym is not punished for it');
+  ok(closeHeadline(cashOnly).includes('not checked against a second source'),
+     'though the headline refuses to claim a reconciliation that never happened');
+
+  // Arrears reach back past the month; the reconciliation does not.
+  const old = { ...inv('old', 12000, 'open', '2026-05-30'), issuedOn: '2026-05-01' };
+  const withArrears = build(rec({ invoices: sliceReady([inv('i1', 50000, 'paid'), old]) }));
+  ok(withArrears.owed!.outstandingCents === null,
+     'an invoice raised in May is not part of what June billed');
+  ok(withArrears.arrears!.outstandingCents === 12000,
+     'but it IS still money the gym is owed at the June close');
+  ok(withArrears.state === 'closeable', 'and being owed money does not stop a month closing — it is a fact of it');
+
+  // Payroll is the shared rule, not a second one.
+  const pv = payrollOf([sess('s1', 'completed'), sess('s2', null)], PAY_DELIVERED_ONLY, null, NOW);
+  ok(pv.blocker !== null && pv.blocker!.includes('outcome'), 'the payroll panel uses settlementBlocker\'s own words');
+  ok(pv.lines[0].unmarked === 1 && pv.lines[0].delivered === 1, 'and payrollByTrainer\'s own counts');
 }
 
 

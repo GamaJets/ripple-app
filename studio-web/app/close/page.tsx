@@ -49,7 +49,13 @@ export default function Close() {
   const [gymName, setGymName] = useState<string | null>(null);
   const [sessionFee, setSessionFee] = useState<number | null>(null);
   const [feeRead, setFeeRead] = useState<'ok' | 'failed'>('ok');
-  const [rec, setRec] = useState<CloseRecord>(EMPTY);
+
+  // The record is stored WITH the month it was read for, and used only when the
+  // two agree. Without that, switching from June to July renders one frame of
+  // June's invoices under a July heading — and a close screen that shows the
+  // wrong month's receivables, however briefly, is the exact failure this page
+  // exists to prevent. A mismatch reads as "not loaded yet", which is true.
+  const [loaded, setLoaded] = useState<{ key: string; rec: CloseRecord }>({ key: '', rec: EMPTY });
 
   // Default to the month that has actually finished. Opening on the running
   // month would greet an owner with a refusal about a month nobody claimed was
@@ -68,20 +74,20 @@ export default function Close() {
 
   const w = useMemo(() => monthWindow(key), [key]);
 
-  const load = useCallback(async (tenantId: string, from: string, to: string, lastDay: string) => {
-    setRec(EMPTY);
+  const load = useCallback(async (tenantId: string, mw: NonNullable<ReturnType<typeof monthWindow>>) => {
+    setLoaded({ key: '', rec: EMPTY });
     // Five independent reads, deliberately not one Promise.all under a single
     // catch. An invoice table that 500s must not take the payments down with
     // it: the close is allowed to be partial, but only if it says which part
     // failed and refuses to be called closed over it.
     const [payments, invoices, sessions, memberships, passes] = await Promise.all([
-      slice(() => fetchPayments(supabase, tenantId, from)),
-      slice(() => fetchInvoices(tenantId, lastDay)),
-      slice(() => fetchSessions(supabase, tenantId, from, to)),
+      slice(() => fetchPayments(supabase, tenantId, mw.fromIso)),
+      slice(() => fetchInvoices(tenantId, mw.lastDay)),
+      slice(() => fetchSessions(supabase, tenantId, mw.fromIso, mw.toIso)),
       slice(() => fetchMemberships(supabase, tenantId)),
       slice(() => fetchPasses(supabase, tenantId)),
     ]);
-    setRec({ payments, invoices, sessions, memberships, passes });
+    setLoaded({ key: mw.key, rec: { payments, invoices, sessions, memberships, passes } });
   }, []);
 
   useEffect(() => {
@@ -91,9 +97,12 @@ export default function Close() {
       if (!live) return;
       setMe(who);
       if (!who?.tenantId) {
-        setRec({
-          payments: sliceReady([]), invoices: sliceReady([]), sessions: sliceReady([]),
-          memberships: sliceReady([]), passes: sliceReady([]),
+        setLoaded({
+          key,
+          rec: {
+            payments: sliceReady([]), invoices: sliceReady([]), sessions: sliceReady([]),
+            memberships: sliceReady([]), passes: sliceReady([]),
+          },
         });
         return;
       }
@@ -106,10 +115,15 @@ export default function Close() {
       setGymName(tErr ? null : t?.name ?? null);
       setSessionFee(tErr ? null : t?.session_fee ?? null);
       setFeeRead(tErr ? 'failed' : 'ok');
-      if (w) await load(who.tenantId, w.fromIso, w.toIso, w.lastDay);
+      if (w) await load(who.tenantId, w);
     })();
     return () => { live = false; };
-  }, [load, w]);
+  }, [load, w, key]);
+
+  // Only the record that was actually read for the month on screen. Anything
+  // else is EMPTY, which renders as "still reading" rather than as another
+  // month's figures.
+  const rec = loaded.key === key ? loaded.rec : EMPTY;
 
   // The gym's currency as the record itself states it. Declared before the
   // close, not after: the formatter below closes over it, and a `const` read

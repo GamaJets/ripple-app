@@ -330,6 +330,9 @@ export default function Home() {
               onPress={() => router.push('/(client)/calendar')} />
           ) : null}
 
+          <ListRow icon="clock" title="Your history" note="Every month you have trained, back to the start"
+            onPress={() => router.push('/(client)/history')} />
+
           <ListRow icon="trophy" title="Challenges" note="Track your progress against the goal"
             onPress={() => router.push('/(client)/challenges')} />
 
