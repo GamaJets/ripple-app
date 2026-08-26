@@ -27,7 +27,12 @@ const usd = (n: number) => '$' + Math.round(n).toLocaleString();
 export default function OwnerRevenue() {
   const t = useTheme();
   const router = useRouter();
-  const { trainers } = usePlatformTrainers();
+  // Every figure below is a roll-up of `trainers`, so until the roster read
+  // returns they are all roll-ups of an empty array. Rendered without this flag
+  // the screen opened on "Sessions delivered · 30 days · 0" and a value per
+  // client of a dash — a revenue console reporting no revenue, which is the one
+  // thing an owner would act on and the one thing it had not yet asked.
+  const { trainers, loading } = usePlatformTrainers();
   const { tenant } = useTenant();
   const roll = gymRollup(trainers as TrainerLike[], tenant?.sessionFee ?? null);
   const { series, labels, delta, months } = useSessionsHistory(roll.sessions30);
@@ -77,8 +82,10 @@ export default function OwnerRevenue() {
         {/* ── the hero ───────────────────────────────────────────────────── */}
         <Hero
           label="Sessions delivered · 30 days"
-          figure={fig(roll.sessions30)}
-          note={delta !== 0
+          figure={loading ? '—' : fig(roll.sessions30)}
+          note={loading
+            ? 'Reading your roster…'
+            : delta !== 0
             ? `${delta > 0 ? '+' : '−'}${Math.abs(delta)} vs last month${revenue30 != null ? ` · ${usd(revenue30)} at your fee` : ''}`
             : revenue30 != null
               ? `${usd(revenue30)} at your session fee`
@@ -92,8 +99,8 @@ export default function OwnerRevenue() {
           <SectionHead title="Unit economics" note="Per client" />
           <KpiRow items={[
             { label: 'Session fee', value: fee == null ? '—' : usd(fee), delta: fee == null ? 'not set' : 'per delivered session' },
-            { label: 'Value / client', value: valuePerClient == null ? '—' : usd(valuePerClient), delta: valuePerClient == null ? 'needs a session fee' : 'last 30 days' },
-            { label: 'Clients', value: fig(roll.clients), delta: `${roll.avgClientsPerTrainer} avg / trainer` },
+            { label: 'Value / client', value: loading || valuePerClient == null ? '—' : usd(valuePerClient), delta: loading ? 'not read yet' : valuePerClient == null ? 'needs a session fee' : 'last 30 days' },
+            { label: 'Clients', value: loading ? '—' : fig(roll.clients), delta: loading ? 'not read yet' : `${roll.avgClientsPerTrainer} avg / trainer` },
           ]} />
         </Section>
 
@@ -142,7 +149,9 @@ export default function OwnerRevenue() {
         {/* ── revenue by plan ────────────────────────────────────────────── */}
         <Section>
           <SectionHead title="Sessions by trainer" note={byTrainer.length > 0 ? `${trainerTotal} in 30d` : undefined} />
-          {byTrainer.length === 0 ? (
+          {loading ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>Reading your roster…</Text>
+          ) : byTrainer.length === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>No sessions delivered in the last 30 days.</Text>
           ) : byTrainer.map((p) => {
             const pct = Math.round((p.sessions / trainerTotal) * 100);
@@ -174,7 +183,9 @@ export default function OwnerRevenue() {
           ) : (<>
             <SectionHead title="Revenue at risk" note="Trainers" onPress={() => router.push('/(owner)/trainers')} />
             <Text style={{ ...ty.label, color: t.ink3 }}>
-              {roll.trainers === 0 ? 'No trainers on the platform yet.' : 'No trainers flagged watch or high risk.'}
+              {loading ? 'Reading your roster…'
+                : roll.trainers === 0 ? 'No trainers on the platform yet.'
+                : 'No trainers flagged watch or high risk.'}
             </Text>
           </>)}
         </Section>

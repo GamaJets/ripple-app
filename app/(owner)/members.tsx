@@ -57,6 +57,7 @@ export default function OwnerMembers() {
   const [plans, setPlans] = useState<MembershipPlan[]>([]);
   const [rows, setRows] = useState<Membership[] | null>(null);
   const [payments, setPayments] = useState<GymPayment[]>([]);
+  const [failed, setFailed] = useState(false);   // the register read itself failed
   const [q, setQ] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -64,6 +65,7 @@ export default function OwnerMembers() {
   const [addOpen, setAddOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [found, setFound] = useState<Candidate[] | null>(null);
+  const [searchFailed, setSearchFailed] = useState(false);   // the lookup errored, ≠ no matches
   const [picked, setPicked] = useState<Candidate | null>(null);
   const [planId, setPlanId] = useState<string | null>(null);
 
@@ -81,9 +83,18 @@ export default function OwnerMembers() {
         fetchPayments(supabase, tenant.id),
       ]);
       setPlans(p); setRows(m); setPayments(pay);
+      setFailed(false);
     } catch (e) {
       reportError('members.fetch', e);
-      setRows([]);
+      // NOT `setRows([])`. That flipped `loaded` true with nothing behind it,
+      // so a failed read rendered as "Nobody on the register yet" over KPIs of
+      // 0 active, 0 frozen, 0 payments logged — a gym owner told, in the
+      // screen's own confident voice, that they have no members and have taken
+      // no money. The three reads land together or not at all, so null here
+      // covers all three, and `failed` is what separates "we could not ask"
+      // from "we asked and the register is empty".
+      setRows(null);
+      setFailed(true);
     }
   }, [tenant?.id]);
 
@@ -107,19 +118,29 @@ export default function OwnerMembers() {
   const runSearch = async (text: string) => {
     setSearch(text);
     const needle = text.trim();
-    if (needle.length < 2 || !tenant?.id) { setFound(null); return; }
+    if (needle.length < 2 || !tenant?.id) { setFound(null); setSearchFailed(false); return; }
     try {
-      const { data } = await supabase
+      // supabase-js RESOLVES on a database error rather than rejecting, so
+      // `error` has to be read off the result — the catch below only ever
+      // covered the network dying. Without this an RLS refusal arrived as
+      // `data: null`, fell through `?? []`, and the sheet stated "Nobody
+      // matching, or everyone matching already holds an active membership."
+      // The owner is standing at the desk with the member in front of them;
+      // they conclude that person has no Repple account, and either turn them
+      // away or start an account they already have.
+      const { data, error } = await supabase
         .from('profiles')
         .select('id, full_name')
         .eq('tenant_id', tenant.id)
         .ilike('full_name', `%${needle}%`)
         .limit(12);
+      if (error) throw error;
       const held = new Set(list.filter((m) => m.status === 'active').map((m) => m.memberId));
       setFound((data ?? [])
         .map((r: any) => ({ id: String(r.id), name: String(r.full_name || 'Member') }))
         .filter((c: Candidate) => !held.has(c.id)));
-    } catch (e) { reportError('members.search', e); setFound([]); }
+      setSearchFailed(false);
+    } catch (e) { reportError('members.search', e); setFound(null); setSearchFailed(true); }
   };
 
   const commitMembership = async () => {
@@ -127,7 +148,7 @@ export default function OwnerMembers() {
     setBusy(true);
     try {
       await createMembership(supabase, tenant.id, { memberId: picked.id, planId, startedOn: today() });
-      setAddOpen(false); setPicked(null); setSearch(''); setFound(null); setPlanId(null);
+      setAddOpen(false); setPicked(null); setSearch(''); setFound(null); setSearchFailed(false); setPlanId(null);
       await load();
     } catch (e) {
       reportError('members.create', e);
@@ -187,7 +208,9 @@ export default function OwnerMembers() {
         <Hero
           label="Recurring revenue (monthly)"
           figure={money(sum.mrrCents) ?? '—'}
-          note={sum.mrrCents == null
+          note={failed
+            ? 'The register could not be read, so recurring revenue is not known. This is a failed read, not a gym with no members.'
+            : sum.mrrCents == null
             ? loaded && list.length === 0
               ? 'No memberships on the register yet.'
               : 'No active membership sits on a priced plan, so this is not known — which is not the same as nothing.'
@@ -220,7 +243,13 @@ export default function OwnerMembers() {
             />
           ) : null}
 
-          {!loaded ? (
+          {failed ? (
+            <Text style={{ ...ty.label, color: t.crit }}>
+              The register could not be read. Nobody has been removed and no membership has
+              lapsed — this screen simply has nothing to show you. Check your connection and try
+              again.
+            </Text>
+          ) : !loaded ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Loading…</Text>
           ) : list.length === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>
@@ -286,7 +315,7 @@ export default function OwnerMembers() {
         </Section>
 
         <View style={{ marginTop: sp.lg }}>
-          <Cta label="Open a membership" wide onPress={() => { setAddOpen(true); setSearch(''); setFound(null); setPicked(null); }} />
+          <Cta label="Open a membership" wide onPress={() => { setAddOpen(true); setSearch(''); setFound(null); setSearchFailed(false); setPicked(null); }} />
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm, textAlign: 'center' }}>
             For someone who already has a Repple account. Inviting a brand-new member is not built yet.
           </Text>
@@ -305,7 +334,7 @@ export default function OwnerMembers() {
 
             <Text style={lab}>Member</Text>
             {picked ? (
-              <Pressable onPress={() => { setPicked(null); setFound(null); setSearch(''); }}
+              <Pressable onPress={() => { setPicked(null); setFound(null); setSearchFailed(false); setSearch(''); }}
                 style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, backgroundColor: t.surface2, borderRadius: radius.sm, padding: sp.md }}>
                 <Icon name="check" size={16} color={t.brand} />
                 <Text style={{ ...ty.body, color: t.ink, flex: 1 }}>{picked.name}</Text>
@@ -316,7 +345,12 @@ export default function OwnerMembers() {
                 <TextInput value={search} onChangeText={runSearch} autoFocus
                   placeholder="Type at least two letters of their name"
                   placeholderTextColor={t.ink3} style={inp} accessibilityLabel="Search for a member" />
-                {found !== null ? (
+                {searchFailed ? (
+                  <Text style={{ ...ty.caption, color: t.crit, marginTop: sp.sm }}>
+                    The lookup failed, so this cannot tell you whether they have an account. Do
+                    not read it as “not found” — check your connection and type the name again.
+                  </Text>
+                ) : found !== null ? (
                   found.length === 0 ? (
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
                       Nobody matching, or everyone matching already holds an active membership.
@@ -338,7 +372,17 @@ export default function OwnerMembers() {
             )}
 
             <Text style={{ ...lab, marginTop: sp.lg }}>Plan</Text>
-            {plans.length === 0 ? (
+            {failed && plans.length === 0 ? (
+              // The price book rides on the same read as the register, so when
+              // that read failed there is no basis for "no plans set up yet" —
+              // an owner who has plans would be told they have none and open
+              // the membership unpriced, which is how a paying member ends up
+              // contributing nothing to MRR.
+              <Text style={{ ...ty.caption, color: t.crit }}>
+                Your plans could not be read, so none can be offered here. Opening a membership
+                now would leave it with no plan attached even if you have one.
+              </Text>
+            ) : plans.length === 0 ? (
               <Text style={{ ...ty.caption, color: t.ink3 }}>
                 No plans set up yet. The membership can still be opened without one — recurring
                 revenue will read as a dash until a priced plan is attached.

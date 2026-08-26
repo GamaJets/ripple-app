@@ -27,7 +27,12 @@ const DISCOUNTS = [10, 20, 30, 50];
 export default function OwnerGrowth() {
   const t = useTheme();
   const { promos, addPromo, toggleActive, removePromo } = usePromos();
-  const { trainers } = usePlatformTrainers();
+  // The roster read has to be waited on. Every count on this screen — new this
+  // month, idle, the whole funnel — is derived from `trainers`, so before it
+  // returns the hero read "+0 new trainers" over "No trainers yet" and the
+  // retention row reported 0% idle. An owner checking whether their growth push
+  // worked was shown a month with no signups by a query that had not finished.
+  const { trainers, loading } = usePlatformTrainers();
   const roll = gymRollup(trainers as TrainerLike[], null);
   const coh = cohorts(trainers as TrainerLike[]);
   const ca = clientAnalytics(trainers as TrainerLike[]);
@@ -92,8 +97,10 @@ export default function OwnerGrowth() {
         {/* ── the hero ───────────────────────────────────────────────────── */}
         <Hero
           label={`New trainers · ${now.toLocaleString(undefined, { month: 'short' })} ${now.getFullYear()}`}
-          figure={'+' + newThisMonth}
-          note={roll.trainers > 0
+          figure={loading ? '—' : '+' + newThisMonth}
+          note={loading
+            ? 'Reading your roster…'
+            : roll.trainers > 0
             ? `${roll.trainers} on the roster · ${roll.trainers - idle} delivering sessions`
             : 'No trainers yet — this fills in as they join your gym.'}
         />
@@ -104,9 +111,9 @@ export default function OwnerGrowth() {
         <Section>
           <SectionHead title="Retention" />
           <KpiRow items={[
-            { label: 'Idle', value: fig(idlePct), unit: '%', delta: `${idle} of ${roll.trainers}` },
-            { label: 'Sessions · 30d', value: fig(roll.sessions30), delta: `${roll.avgSessionsPerTrainer} avg / trainer` },
-            { label: 'Clients', value: fig(ca.total), delta: `${ca.avgPerTrainer} avg / trainer` },
+            { label: 'Idle', value: loading ? '—' : fig(idlePct), unit: loading ? undefined : '%', delta: loading ? 'not read yet' : `${idle} of ${roll.trainers}` },
+            { label: 'Sessions · 30d', value: loading ? '—' : fig(roll.sessions30), delta: loading ? 'not read yet' : `${roll.avgSessionsPerTrainer} avg / trainer` },
+            { label: 'Clients', value: loading ? '—' : fig(ca.total), delta: loading ? 'not read yet' : `${ca.avgPerTrainer} avg / trainer` },
           ]} />
         </Section>
 
@@ -116,9 +123,9 @@ export default function OwnerGrowth() {
         <Section>
           <SectionHead title="Platform clients" note="Across every trainer" />
           <KpiRow items={[
-            { label: 'Active clients', value: fig(ca.total) },
-            { label: 'Engaged', value: fig(ca.engagementPct), unit: '%' },
-            { label: 'Avg / trainer', value: fig(ca.avgPerTrainer) },
+            { label: 'Active clients', value: loading ? '—' : fig(ca.total) },
+            { label: 'Engaged', value: loading ? '—' : fig(ca.engagementPct), unit: loading ? undefined : '%' },
+            { label: 'Avg / trainer', value: loading ? '—' : fig(ca.avgPerTrainer) },
           ]} />
           <View style={{ marginTop: sp.xl }}>
             <DistBar segments={[
@@ -136,7 +143,8 @@ export default function OwnerGrowth() {
           </View>
           <View style={{ marginTop: sp.xl }}>
             <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.md }}>Clients by trainer</Text>
-            {ca.byTrainer.length === 0 ? <Text style={{ ...ty.label, color: t.ink3 }}>No clients on the roster yet.</Text> : null}
+            {loading ? <Text style={{ ...ty.label, color: t.ink3 }}>Reading your roster…</Text>
+              : ca.byTrainer.length === 0 ? <Text style={{ ...ty.label, color: t.ink3 }}>No clients on the roster yet.</Text> : null}
             {ca.byTrainer.map((bt) => (
               <Bar key={bt.id} label={bt.name} right={`${bt.clients} · ${bt.pct}%`} pct={bt.pct} />
             ))}
@@ -148,7 +156,8 @@ export default function OwnerGrowth() {
         {/* ── cohort retention ───────────────────────────────────────────── */}
         <Section>
           <SectionHead title="Cohort retention" note="By signup month" />
-          {coh.length === 0 ? <Text style={{ ...ty.label, color: t.ink3 }}>No signups to group yet.</Text> : null}
+          {loading ? <Text style={{ ...ty.label, color: t.ink3 }}>Reading your roster…</Text>
+            : coh.length === 0 ? <Text style={{ ...ty.label, color: t.ink3 }}>No signups to group yet.</Text> : null}
           {coh.map((c) => (
             <Bar key={c.label} label={c.label} right={`${c.pct}% · ${c.active}/${c.total}`} pct={c.pct} dim={c.pct < 60} />
           ))}
@@ -159,7 +168,9 @@ export default function OwnerGrowth() {
         {/* ── trainer acquisition funnel ─────────────────────────────────── */}
         <Section>
           <SectionHead title="Trainer acquisition funnel" note="From signup" />
-          {roll.trainers === 0 ? (
+          {loading ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>Reading your roster…</Text>
+          ) : roll.trainers === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>No trainers on the platform yet — the funnel fills in as they sign up.</Text>
           ) : funnel.map(([label, count, pct]) => (
             <Bar key={label} label={label} right={`${count} · ${pct}%`} pct={pct} />

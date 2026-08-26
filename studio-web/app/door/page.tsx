@@ -22,8 +22,30 @@ import {
   type GymPass, type PassType,
 } from '@lib/gymPasses';
 import { fetchMemberships, money, type Membership } from '@lib/gymRecord';
+import { isoDate } from '@lib/format';
 
 const DAY = 86400000;
+
+/**
+ * What a piece of state is when it is still null: a read in flight, or one that
+ * came back refused. Null itself is the answer "ok, this read returned".
+ *
+ * The two have to look different on screen. "Loading…" that never resolves and
+ * "No visits logged today" are both lies about a query that errored, and staff
+ * act on both of them — one by waiting, the other by telling the owner the gym
+ * was empty this morning.
+ */
+type Unread = 'loading' | 'failed' | null;
+
+/** The calendar day a visit belongs to, in the gym's own timezone. */
+const dayOf = (iso: string) => isoDate(new Date(iso));
+
+/** One settled read, as a line for the banner. Null when it came back fine. */
+function failure(res: PromiseSettledResult<unknown>, what: string): string | null {
+  if (res.status === 'fulfilled') return null;
+  const why = (res.reason as any)?.message;
+  return `Could not read ${what}${why ? `: ${why}` : '.'}`;
+}
 
 export default function Door() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
@@ -35,20 +57,36 @@ export default function Door() {
   const [err, setErr] = useState<string | null>(null);
 
   const load = useCallback(async (tenantId: string) => {
-    try {
-      const [v, p, t, m] = await Promise.all([
-        fetchVisits(supabase, tenantId, { sinceIso: new Date(Date.now() - 30 * DAY).toISOString() }),
-        fetchPasses(supabase, tenantId),
-        fetchPassTypes(supabase, tenantId),
-        fetchMemberships(supabase, tenantId),
-      ]);
-      setVisits(v); setPasses(p); setTypes(t); setMembers(m); setErr(null);
-    } catch (e: any) {
-      // Surfaced rather than swallowed: a door screen that silently fails to
-      // read is worse than one that says so, because staff will keep using it.
-      setErr(e?.message ?? 'Could not read the door log.');
-      setVisits([]); setPasses([]); setTypes([]); setMembers([]);
-    }
+    // allSettled, not all: one failing read must not take the others with it.
+    // Under Promise.all a refused gym_passes query also emptied the other three
+    // — the visits table said "No visits logged today" on a morning that had
+    // visits, and the check-in dropdown lost every member — so one broken query
+    // produced three wrong facts and the banner named none of them.
+    const [vRes, pRes, tRes, mRes] = await Promise.allSettled([
+      fetchVisits(supabase, tenantId, { sinceIso: new Date(Date.now() - 30 * DAY).toISOString() }),
+      fetchPasses(supabase, tenantId),
+      fetchPassTypes(supabase, tenantId),
+      fetchMemberships(supabase, tenantId),
+    ]);
+
+    // A read that failed is null, never []. [] is the gym saying it has none;
+    // null is nobody knowing. Staff act differently on the two.
+    setVisits(vRes.status === 'fulfilled' ? vRes.value : null);
+    setPasses(pRes.status === 'fulfilled' ? pRes.value : null);
+    setTypes(tRes.status === 'fulfilled' ? tRes.value : null);
+    setMembers(mRes.status === 'fulfilled' ? mRes.value : null);
+
+    // Surfaced rather than swallowed: a door screen that silently fails to read
+    // is worse than one that says so, because staff will keep using it. Each
+    // failure is named, because "could not read" without saying which query
+    // broke leaves the desk unable to tell the owner what is down.
+    const trouble = [
+      failure(vRes, 'the door log'),
+      failure(pRes, 'the passes'),
+      failure(tRes, 'the pass types'),
+      failure(mRes, 'the member list'),
+    ].filter((s): s is string => s !== null);
+    setErr(trouble.length === 0 ? null : trouble.join(' · '));
   }, []);
 
   useEffect(() => {
@@ -80,11 +118,32 @@ export default function Door() {
   const tenantId = me.tenantId!;
   const refresh = () => load(tenantId);
 
-  const today = new Date().toISOString().slice(0, 10);
-  const todays = (visits ?? []).filter((v) => v.enteredAt.slice(0, 10) === today);
-  const inside = (visits ?? []).filter((v) => !v.exitedAt);
+  // The gym's own calendar day, not UTC's. This product sells in AED, so the
+  // desk that reads this is four hours ahead of UTC and the UTC date does not
+  // turn over until 04:00 local: every 6am arrival was filed under yesterday,
+  // and "Visits today", "Members today" and "Busiest hour" each opened the
+  // morning already short. The same date decides a pass expiry, so a pass good
+  // "to the 3rd" was refused at the desk for the four hours either side of
+  // local midnight. One date, and every "today" below is compared against it.
+  const today = isoDate(new Date());
+  const todays = (visits ?? []).filter((v) => dayOf(v.enteredAt) === today);
+
+  // "Inside now" means today, the same thing the Overview tile means by "In the
+  // building". Over the 30-day window it meant "no exit recorded at any point
+  // in the last month" — and because the overnight sweep deliberately writes
+  // only a note and leaves exited_at null, every abandoned check-in stayed in
+  // that count forever. The tile crept upward all month and the two screens
+  // disagreed. Visits left open from earlier days are counted separately and
+  // said out loud: nobody is standing in the gym from Tuesday.
+  const inside = todays.filter((v) => !v.exitedAt);
+  const openBefore = (visits ?? []).filter((v) => !v.exitedAt && dayOf(v.enteredAt) !== today);
+
   const sum = visits ? summariseVisits(todays) : null;
   const pSum = passes ? summarisePasses(passes, today) : null;
+
+  // err is only ever set by a finished load, so a state still null once it is
+  // set is a read that was refused rather than one still in flight.
+  const unread = (rows: unknown[] | null): Unread => (rows !== null ? null : err ? 'failed' : 'loading');
 
   return (
     <Shell me={me} gymName={gymName} current="/door">
@@ -103,7 +162,11 @@ export default function Door() {
           borderRadius: 8, overflow: 'hidden', margin: '20px 0 26px',
         }}
       >
-        <Kpi label="Inside now" text={visits ? String(inside.length) : null} />
+        <Kpi
+          label="Inside now"
+          text={visits ? String(inside.length) : null}
+          note={openBefore.length > 0 ? `${openBefore.length} left open on an earlier day` : undefined}
+        />
         <Kpi label="Visits today" text={sum ? String(sum.visits) : null}
              note={sum && sum.anonymous > 0 ? `${sum.anonymous} not identified` : undefined} />
         <Kpi label="Members today" text={sum ? String(sum.uniqueMembers) : null} />
@@ -123,11 +186,15 @@ export default function Door() {
         />
       </div>
 
-      <CheckInBar members={members} passes={passes} tenantId={tenantId} onChange={refresh} />
-      <Inside inside={inside} onChange={refresh} />
-      <Today visits={todays} loading={visits === null} />
+      <CheckInBar
+        members={members} passes={passes} tenantId={tenantId}
+        membersUnread={unread(members)} onChange={refresh}
+      />
+      <Inside inside={inside} openBefore={openBefore.length} unread={unread(visits)} onChange={refresh} />
+      <Today visits={todays} unread={unread(visits)} />
       <Passes
         passes={passes} types={types} members={members} summary={pSum}
+        passesUnread={unread(passes)} typesUnread={unread(types)}
         tenantId={tenantId} today={today} me={me} onChange={refresh}
       />
     </Shell>
@@ -136,8 +203,9 @@ export default function Door() {
 
 /* ── check-in ──────────────────────────────────────────────────────────────── */
 
-function CheckInBar({ members, passes, tenantId, onChange }: {
-  members: Membership[] | null; passes: GymPass[] | null; tenantId: string; onChange: () => void;
+function CheckInBar({ members, passes, tenantId, membersUnread, onChange }: {
+  members: Membership[] | null; passes: GymPass[] | null; tenantId: string;
+  membersUnread: Unread; onChange: () => void;
 }) {
   const [memberId, setMemberId] = useState('');
   const [busy, setBusy] = useState(false);
@@ -172,6 +240,16 @@ function CheckInBar({ members, passes, tenantId, onChange }: {
           {busy ? 'Recording…' : 'Check in'}
         </button>
       </form>
+      {/* A dropdown holding nothing but "Anonymous" reads as a gym with no
+          members. Say which it is, or the desk checks a member in as a walk-in
+          and the visit never reaches their record. */}
+      {membersUnread ? (
+        <p style={{ margin: '0 14px 14px', fontSize: 12.5, color: 'var(--ink3)' }}>
+          {membersUnread === 'loading'
+            ? 'Still reading the member list — check in anonymously for now.'
+            : 'The member list did not come back, so only an anonymous visit can be recorded. The banner above says why.'}
+        </p>
+      ) : null}
       {msg ? <p style={{ margin: '0 14px 14px', fontSize: 12.5, color: 'var(--ink3)' }}>{msg}</p> : null}
     </Section>
   );
@@ -179,7 +257,25 @@ function CheckInBar({ members, passes, tenantId, onChange }: {
 
 /* ── who is inside ─────────────────────────────────────────────────────────── */
 
-function Inside({ inside, onChange }: { inside: Visit[]; onChange: () => void }) {
+function Inside({ inside, openBefore, unread, onChange }: {
+  inside: Visit[]; openBefore: number; unread: Unread; onChange: () => void;
+}) {
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const close = async (v: Visit) => {
+    setMsg(null);
+    try {
+      await checkOut(supabase, v.id);
+      onChange();
+    } catch (e: any) {
+      // checkOut throws on a refused update, and with no catch that rejection
+      // went nowhere: the row stayed exactly as it was and the screen said
+      // nothing, so the desk clicked again and read the gym as slow rather
+      // than as refusing. The reason is what tells staff to retry or escalate.
+      setMsg(e?.message ?? 'Could not check that visit out.');
+    }
+  };
+
   const cols: Column<Visit>[] = [
     { key: 'who', header: 'Who', value: (v) => v.memberName ?? 'zzz',
       render: (v) => v.memberName ?? <span className="dash">not identified</span> },
@@ -189,19 +285,30 @@ function Inside({ inside, onChange }: { inside: Visit[]; onChange: () => void })
       render: (v) => `${Math.max(0, Math.round((Date.now() - Date.parse(v.enteredAt)) / 60000))} min` },
     { key: 'out', header: '', value: () => 0, align: 'right',
       render: (v) => (
-        <button style={linkBtn} onClick={() => checkOut(supabase, v.id).then(onChange)}>Check out</button>
+        <button style={linkBtn} onClick={() => close(v)}>Check out</button>
       ) },
   ];
   return (
-    <Section title="Inside now" sub="Anyone still open in the log. A visit left open overnight is swept with a note, never a guessed exit time.">
-      <DataTable rows={inside} columns={cols} rowKey={(v) => v.id} empty="Nobody is checked in." />
+    <Section title="Inside now" sub="Anyone who came in today and has not been checked out. A visit left open overnight is swept with a note, never a guessed exit time.">
+      {msg ? <p style={{ margin: '14px', fontSize: 12.5, color: 'var(--ink3)' }}>{msg}</p> : null}
+      {openBefore > 0 ? (
+        <p style={{ margin: '14px', fontSize: 12.5, color: 'var(--ink3)' }}>
+          {openBefore === 1 ? '1 visit is' : `${openBefore} visits are`} still open from an earlier
+          day — check-ins nobody closed, not people standing in the gym, so they are said here and
+          counted nowhere. There is no Check out on them on purpose: closing one now would stamp
+          this minute as the exit and put a twenty-hour stay into the average.
+        </p>
+      ) : null}
+      {unread ? <Unresolved state={unread} what="the door log" /> : (
+        <DataTable rows={inside} columns={cols} rowKey={(v) => v.id} empty="Nobody is checked in." />
+      )}
     </Section>
   );
 }
 
 /* ── today ─────────────────────────────────────────────────────────────────── */
 
-function Today({ visits, loading }: { visits: Visit[]; loading: boolean }) {
+function Today({ visits, unread }: { visits: Visit[]; unread: Unread }) {
   const cols: Column<Visit>[] = [
     { key: 'who', header: 'Who', value: (v) => v.memberName ?? 'zzz',
       render: (v) => v.memberName ?? <span className="dash">not identified</span> },
@@ -220,8 +327,8 @@ function Today({ visits, loading }: { visits: Visit[]; loading: boolean }) {
     { key: 'via', header: 'Via', value: (v) => v.source },
   ];
   return (
-    <Section title="Today" sub="Every arrival logged since midnight.">
-      {loading ? <Loading /> : (
+    <Section title="Today" sub="Every arrival logged since local midnight — the gym's midnight, not UTC's.">
+      {unread ? <Unresolved state={unread} what="the door log" /> : (
         <DataTable rows={visits} columns={cols} rowKey={(v) => v.id} empty="No visits logged today." />
       )}
     </Section>
@@ -230,9 +337,10 @@ function Today({ visits, loading }: { visits: Visit[]; loading: boolean }) {
 
 /* ── passes ────────────────────────────────────────────────────────────────── */
 
-function Passes({ passes, types, members, summary, tenantId, today, me, onChange }: {
+function Passes({ passes, types, members, summary, passesUnread, typesUnread, tenantId, today, me, onChange }: {
   passes: GymPass[] | null; types: PassType[] | null; members: Membership[] | null;
   summary: ReturnType<typeof summarisePasses> | null;
+  passesUnread: Unread; typesUnread: Unread;
   tenantId: string; today: string; me: Me; onChange: () => void;
 }) {
   const [typeId, setTypeId] = useState('');
@@ -303,7 +411,16 @@ function Passes({ passes, types, members, summary, tenantId, today, me, onChange
           : undefined
       }
     >
-      {(types ?? []).length === 0 ? (
+      {types === null ? (
+        // Not the same sentence as "none yet": sending someone to Money to add
+        // pass types they already have, because the read broke, wastes the one
+        // person who could fix it.
+        <p style={{ padding: '0 14px 14px', margin: 0, color: 'var(--ink3)', fontSize: 12.5 }}>
+          {typesUnread === 'failed'
+            ? 'The pass types did not come back, so nothing can be sold from here yet. The banner above says why.'
+            : 'Still reading the pass types…'}
+        </p>
+      ) : types.length === 0 ? (
         <p style={{ padding: '0 14px 14px', margin: 0, color: 'var(--ink3)', fontSize: 12.5 }}>
           No pass types yet. Add them under Money before selling at the desk.
         </p>
@@ -343,7 +460,7 @@ function Passes({ passes, types, members, summary, tenantId, today, me, onChange
         </p>
       ) : null}
 
-      {passes === null ? <Loading /> : (
+      {passes === null ? <Unresolved state={passesUnread === 'failed' ? 'failed' : 'loading'} what="the passes" /> : (
         <DataTable rows={passes} columns={cols} rowKey={(p) => p.id} empty="No passes issued yet." />
       )}
     </Section>
@@ -406,6 +523,16 @@ function Banner({ children, tone }: { children: React.ReactNode; tone?: 'crit' }
   );
 }
 
-function Loading() {
-  return <div style={{ padding: '26px 20px', color: 'var(--ink3)' }}>Loading…</div>;
+/**
+ * What stands in for a table whose rows are not known.
+ *
+ * A refused read used to fall through to the table's own empty line, so "we
+ * could not ask" and "the gym has none" were the same sentence on screen.
+ */
+function Unresolved({ state, what }: { state: Exclude<Unread, null>; what: string }) {
+  return (
+    <div style={{ padding: '26px 20px', color: 'var(--ink3)' }}>
+      {state === 'loading' ? 'Loading…' : `Could not read ${what}. The banner above says why.`}
+    </div>
+  );
 }

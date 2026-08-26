@@ -139,6 +139,33 @@ export default function ImportPage() {
   }, [preview, kind]);
 
   /**
+   * The payment rows that will be written, each still carrying its line number.
+   *
+   * The same problem planRows solves, and it bites harder here. `preview.ready`
+   * has the rejected rows taken out of it, so a position in that array is not a
+   * line in the spreadsheet: it is short by however many rows above were
+   * refused. Every failure reported from a run over `ready` therefore named a
+   * line several rows too early — and the wording under a partial run tells the
+   * gym to fix those lines and paste only those back in. Following that
+   * instruction with the wrong numbers re-imports payments that already landed,
+   * duplicating money the gym took, while the rows that actually failed stay
+   * missing. Walking `preview.rows` keeps `r.line`, which is the number printed
+   * down the side of their sheet.
+   *
+   * The predicate is previewPayments' own — a row with no errors — and not the
+   * `value !== undefined` that previewPlans uses. Payments fill `value` in even
+   * for a refused row (an unreadable amount becomes 0, an unreadable date an
+   * empty string), so testing for its presence here would import exactly the
+   * rows the preview has just told the gym it is skipping.
+   */
+  const paymentRows = useMemo<{ line: number; payment: PaymentRow }[]>(() => {
+    if (!preview || kind !== 'payments' || preview.missingRequired.length) return [];
+    return (preview.rows as RowResult<PaymentRow>[])
+      .filter((r) => r.errors.length === 0)
+      .map((r) => ({ line: r.line, payment: r.value as PaymentRow }));
+  }, [preview, kind]);
+
+  /**
    * Plan names in the file that the gym already sells.
    *
    * previewPlans de-duplicates within the file; it cannot know what is already
@@ -177,24 +204,21 @@ export default function ImportPage() {
   }, [members]);
 
   const runImport = async () => {
-    if (!preview || !tenantId || kind !== 'payments') return;
-    const rows = preview.ready as PaymentRow[];
-    if (!rows.length) return;
+    if (!preview || !tenantId || kind !== 'payments' || !paymentRows.length) return;
     setBusy(true); setDone(null); setFailed([]);
     let ok = 0; const bad: { line: number; why: string }[] = [];
-    for (let i = 0; i < rows.length; i++) {
-      const r = rows[i];
+    for (const { line, payment } of paymentRows) {
       try {
         await recordPayment(supabase, tenantId, {
-          memberId: matchMember(r),
-          amountCents: r.amountCents,
-          method: r.method,
-          takenAt: new Date(r.takenOn + 'T12:00:00Z').toISOString(),
-          note: r.note,
+          memberId: matchMember(payment),
+          amountCents: payment.amountCents,
+          method: payment.method,
+          takenAt: new Date(payment.takenOn + 'T12:00:00Z').toISOString(),
+          note: payment.note,
         });
         ok++;
       } catch (e: any) {
-        bad.push({ line: i + 2, why: e?.message ?? 'write failed' });
+        bad.push({ line, why: e?.message ?? 'write failed' });
       }
     }
     setBusy(false);
@@ -410,11 +434,11 @@ export default function ImportPage() {
             </Section>
           ) : null}
 
-          {kind === 'payments' && preview.ready.length > 0 ? (
-            <Section title="Import" sub={`${preview.ready.length} payments will be recorded. This writes to your gym.`}>
+          {kind === 'payments' && paymentRows.length > 0 ? (
+            <Section title="Import" sub={`${paymentRows.length} payments will be recorded. This writes to your gym.`}>
               <div style={{ ...formRow, borderBottom: 'none' }}>
                 <button onClick={runImport} disabled={busy || !tenantId} style={primaryBtn}>
-                  {busy ? 'Importing…' : `Record ${preview.ready.length} payments`}
+                  {busy ? 'Importing…' : `Record ${paymentRows.length} payments`}
                 </button>
                 {!tenantId ? <span style={{ fontSize: 13, color: '#ef8080' }}>{NO_TENANT}</span> : null}
                 <Result done={done} />

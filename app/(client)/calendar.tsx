@@ -21,7 +21,7 @@ import { useClientData } from '../../src/ui/clientData';
 import type { TrainingSession } from '../../src/lib/types';
 import { sessionsRemaining, redeemSession, refundSession, reofferSlot } from '../../src/lib/connect';
 import { buildIcs, shareIcs } from '../../src/lib/exportShare';
-import { sendPush } from '../../src/ui/pushNotifications';
+import { sendPush, sendPushChecked } from '../../src/ui/pushNotifications';
 
 // NOTE: this screen used to filter and book against a hardcoded `CLIENT_ID = 'c1'`,
 // a leftover from the mock-data era. The real client id is the Supabase user id.
@@ -80,22 +80,70 @@ export default function Calendar() {
     setViewMonth(m); setViewYear(y);
   }
 
-  function book(s: TrainingSession) {
+  // One tap, three separate writes: the booking, the credit drawn off the pack,
+  // and the push that tells the coach. This used to fire all three and then
+  // assert all three had worked, in an alert that appeared before any of them
+  // could have answered. The two that can report back are now awaited, and the
+  // alert claims only what actually happened.
+  async function book(s: TrainingSession) {
+    const slot = `${DOW[new Date(s.startsAt).getDay()]} ${timeLabel(s.startsAt)}`;
+    const hadCredits = packLeft != null && packLeft > 0;
     bookSession(s.id, cd.id);
-    redeemSession(s.trainerId).then((r) => { if (r.ok) sessionsRemaining().then(setPackLeft).catch(() => {}); }).catch(() => {});
-    sendPush([s.trainerId], 'New booking', `A client booked ${DOW[new Date(s.startsAt).getDay()]} ${timeLabel(s.startsAt)}.`, { route: '/(trainer)/calendar' });
-    Alert.alert('Session booked ', `${DOW[new Date(s.startsAt).getDay()]} ${timeLabel(s.startsAt)} with ${coach.name} is confirmed.\n\nYour coach has been notified.`, [{ text: 'Great' }]);
+
+    // `redeemSession` declines rather than throws — no pack, an exhausted pack,
+    // or an update the server refused all come back as `ok:false`. Only the
+    // `ok` branch existed, so a client whose credit was never drawn watched the
+    // count sit unchanged and was told the session was confirmed regardless.
+    const redeem = await redeemSession(s.trainerId);
+    if (redeem.ok) setPackLeft(await sessionsRemaining());
+
+    // `sendPush` discards both outcomes, so a screen built on it can only ever
+    // claim success — which is why `sendPushChecked` exists. "Your coach has
+    // been notified" was printed either way, and a client whose coach never
+    // heard would turn up to the gym believing they were expected.
+    const push = await sendPushChecked([s.trainerId], 'New booking', `A client booked ${slot}.`, { route: '/(trainer)/calendar' });
+
+    const lines = [`${slot} with ${coach.name} is confirmed.`];
+    lines.push(push.ok
+      ? 'Your coach has been notified.'
+      : 'We couldn’t notify your coach — the booking is on their calendar, but message them if it’s soon.');
+    // Only worth raising to someone who was showing credits: for a client who
+    // pays per session there is no pack to draw from and nothing went wrong.
+    if (hadCredits && !redeem.ok) {
+      lines.push(`This wasn’t taken off your session pack${redeem.error ? ` (${redeem.error})` : ''} — check your package before you book again.`);
+    }
+    Alert.alert('Session booked', lines.join('\n\n'), [{ text: 'Great' }]);
   }
   function cancel(s: TrainingSession) {
     const late = Date.parse(s.startsAt) - Date.now() < 24 * 3600 * 1000;
-    const doCancel = () => {
+    const doCancel = async () => {
       // Offer the freed slot to the trainer's other clients (server-side lookup + push).
-      reofferSlot(s.id).then((ids) => { if (ids.length) sendPush(ids, 'A PT slot just opened', `${timeLabel(s.startsAt)} with ${coach.name} just opened up — first to book it gets it.`, { route: '/(client)/calendar' }); }).catch(() => {});
+      // Both halves used to be fired and forgotten, and the alert below then told
+      // the client the slot "was offered to your coach's other clients" whether
+      // anyone had been found or anyone had been reached. Three outcomes, not one:
+      // offered, nobody to offer it to, or we tried and could not.
+      const others = await reofferSlot(s.id);
+      const offered = others.length === 0
+        ? null
+        : (await sendPushChecked(others, 'A PT slot just opened', `${timeLabel(s.startsAt)} with ${coach.name} just opened up — first to book it gets it.`, { route: '/(client)/calendar' })).ok;
       releaseSession(s.id);
       // Late cancel (within 24h): the session is charged — keep the credit drawn. Otherwise refund it.
-      if (!late) refundSession(s.trainerId).then(() => { sessionsRemaining().then(setPackLeft).catch(() => {}); }).catch(() => {});
+      // `refundSession` returns `{ok:false}` when there is no pack to credit and
+      // when the server refused the update, and its answer was discarded — so
+      // "returned to your package" was printed either way, which is how a client
+      // comes to believe they are holding a credit they do not have.
+      const refund = late ? { ok: false } : await refundSession(s.trainerId);
+      setPackLeft(await sessionsRemaining());
       sendPush([s.trainerId], 'Session cancelled', `A client cancelled ${DOW[new Date(s.startsAt).getDay()]} ${timeLabel(s.startsAt)}. The slot re-opened.${late ? ' (Late cancel — charged.)' : ''}`, { route: '/(trainer)/calendar' });
-      Alert.alert('Cancelled', late ? `Cancelled within 24 hours — this session is charged from your package. The freed slot was offered to your coach's other clients.` : `Your ${timeLabel(s.startsAt)} session was cancelled and returned to your package. The freed slot was offered to your coach's other clients.`, [{ text: 'OK' }]);
+
+      const lines: string[] = [];
+      if (late) lines.push('Cancelled within 24 hours — this session is charged from your package.');
+      else if (refund.ok) lines.push(`Your ${timeLabel(s.startsAt)} session was cancelled and returned to your package.`);
+      else lines.push(`Your ${timeLabel(s.startsAt)} session was cancelled. Nothing was returned to a session pack — if you booked it with a pack credit, check your package before booking again.`);
+      lines.push(offered === true ? `The freed slot was offered to your coach's other clients.`
+        : offered === false ? `The slot is open again, but we couldn't tell your coach's other clients about it.`
+        : `The slot is open again on your coach's calendar.`);
+      Alert.alert('Cancelled', lines.join('\n\n'), [{ text: 'OK' }]);
     };
     if (late) Alert.alert('Within 24 hours', `This is inside 24 hours, so the session is charged from your package (and a $${fee} late fee may apply). The slot is offered to your coach's other clients. Continue?`, [{ text: 'Keep it', style: 'cancel' }, { text: 'Cancel anyway', style: 'destructive', onPress: doCancel }]);
     else Alert.alert('Cancel session?', 'This is more than 24h away, so no fee. The slot re-opens for others.', [{ text: 'Keep it', style: 'cancel' }, { text: 'Cancel', style: 'destructive', onPress: doCancel }]);

@@ -21,7 +21,13 @@ import { longestStreak, personalRecords } from '../../src/lib/streaks';
 export default function Achievements() {
   const t = useTheme();
   const router = useRouter();
-  const { log } = useWorkoutLog();
+  const { log, status: logStatus } = useWorkoutLog();
+  // Under 'error' the log is empty because it could not be read, so every
+  // threshold below evaluates false and all twelve badges render "Locked". That
+  // is not a display glitch — it revokes achievements the client has already
+  // earned, and tells someone with a year of training to log their first
+  // workout. `earned` therefore has to be able to say "unknown".
+  const logKnown = logStatus !== 'error';
 
   const totalWorkouts = log.length;
   const best = longestStreak(log);
@@ -61,10 +67,11 @@ export default function Achievements() {
         {/* ── the hero: how much of the set is unlocked ───────────────────── */}
         <Hero
           label="Unlocked"
-          figure={fig(earnedCount)}
+          figure={logKnown ? fig(earnedCount) : fig(null)}
           unit={`of ${badges.length}`}
-          arc={earnedCount / badges.length}
-          note={earnedCount === 0 ? 'Log a workout to unlock your first badge' : `${badges.length - earnedCount} left to earn`}
+          arc={logKnown ? earnedCount / badges.length : undefined}
+          note={!logKnown ? 'We couldn’t read your training log — badges you have earned are not shown below.'
+            : earnedCount === 0 ? 'Log a workout to unlock your first badge' : `${badges.length - earnedCount} left to earn`}
         />
 
         <Rule />
@@ -74,16 +81,18 @@ export default function Achievements() {
           {badges.map((b, bi) => (
             <View key={b.title}>
               {bi > 0 ? <Rule /> : null}
-              <View accessibilityLabel={`${b.title}, ${b.earned ? 'unlocked' : 'locked'}. ${b.desc}`}
+              <View accessibilityLabel={`${b.title}, ${!logKnown ? 'not known' : b.earned ? 'unlocked' : 'locked'}. ${b.desc}`}
                 style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
                 <View style={{ width: 34, height: 34, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                  <Icon name={b.earned ? 'check' : 'trophy'} size={16} color={b.earned ? t.brand : t.ink3} />
+                  <Icon name={logKnown && b.earned ? 'check' : 'trophy'} size={16} color={logKnown && b.earned ? t.brand : t.ink3} />
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={{ ...ty.body, fontWeight: '500', color: b.earned ? t.ink : t.ink2 }}>{b.title}</Text>
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{b.desc}</Text>
                 </View>
-                <Text style={{ ...ty.micro, color: t.ink3 }}>{b.earned ? 'Earned' : 'Locked'}</Text>
+                {/* "Locked" is a claim that this badge has not been earned. With
+                    nothing read we do not know, and a dash says so. */}
+                <Text style={{ ...ty.micro, color: t.ink3 }}>{!logKnown ? fig(null) : b.earned ? 'Earned' : 'Locked'}</Text>
               </View>
             </View>
           ))}

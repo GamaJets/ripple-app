@@ -20,11 +20,12 @@ import { groupSessions, sessionKey, sessionDuration, sessionActivity, sessionKca
 import { sliceLoading, sliceReady, sliceFailed, rowsOf, brokenParts, completeness, partialWarning, memberIds, buildDossier, buildDossiers, retentionRead, doorLogActive, attendanceCaveat, type MemberRecord, type MemberBooking } from './memberView';
 import { payroll30For, payrollBlocker, type GymTrainer } from './gymTrainers';
 import { gymRollup, trainerHealth } from './ownerAnalytics';
-import { isDelivered, isAwaitingOutcome, isPayable, payrollByTrainer, payrollTotal, settlementBlocker, settleableSessions, settlementAmount, settleBlocker, PAY_DELIVERED_ONLY, type PtSession } from './gymSessions';
+import { isDelivered, isAwaitingOutcome, isPayable, payrollByTrainer, payrollTotal, settlementBlocker, settleableSessions, settlementAmount, settleBlocker, sessionProfileIds, namesById, PAY_DELIVERED_ONLY, type PtSession } from './gymSessions';
 import { dwellMinutes, averageDwellMinutes, uniqueMembers, summariseVisits, visitsByHour, peakHour, visitsPerDay, lastSeenDays, type Visit } from './gymVisits';
 import { remainingUses, isExpired, isRedeemable, expiryFor, passRevenueCents, summarisePasses, guestsByHost, passStatus, type GymPass } from './gymPasses';
 import { estimateDish, searchDishes, DISHES } from './restaurant';
 import { normaliseEmail, inviteState, isExpired as inviteExpired, isRedeemable as inviteRedeemable, expiryFor as inviteExpiryFor, daysUntilExpiry, inviteBlocker, screenInvites, summariseInvites, DEFAULT_VALID_DAYS, type MemberInvite } from './memberInvites';
+import { exerciseSlug, sameExercise, findExercise, videoForExercise, type ExerciseRef } from './exerciseId';
 import { weekStartOf, weekDays, shiftWeek, hoursSpanned, shiftHours, hourLabel, buildRota, coverage, shiftsByDay, rosterByTrainer, summariseRota, shiftFromHours, type Shift, type DemandBlock } from './gymRota';
 import { photoObjectPath, isOwnPhotoPath, sortOldestFirst, comparePair, daysApart, photosNote, missingFileCount, rowToPhoto, PHOTO_PATH_RE, type ProgressPhoto } from './progressPhotos';
 import { viewerMaySee, shareStateOf, shareLabel, sharedNote, sharedCount, sendBlocker, sentPhotos, sortNewestShared, missingSharedFiles, revokeCaveat, SHARED_URL_TTL_S, type ShareGrant, type CoachLink, type SharedPhoto } from './photoShare';
@@ -893,6 +894,84 @@ ok(settleBlocker(payable, 1) !== null, 'an unmarked session anywhere blocks sett
 ok((settleBlocker(payable, 1) ?? '').includes('unfinished'), 'and says why');
 ok(settleBlocker([], 0) !== null, 'nothing to pay is a blocker, not a zero-value run');
 ok(settleBlocker(payable, 0) === null, 'a clean, fully marked position settles');
+}
+
+
+// ── session names come from profiles, not from an embed ──
+// The sessions read used to ask PostgREST for trainers(full_name) and
+// clients(full_name). Neither table has that column — both are keyed on
+// profiles.id — so the whole query was rejected and the screen showed an error
+// where the payroll board should have been. Names are now resolved in one pass
+// over profiles, and these are the two pure halves of that.
+{
+const rows = [
+  { trainer_id: 't1', client_id: 'c1' },
+  { trainer_id: 't1', client_id: 'c2' },   // same trainer again
+  { trainer_id: 't2', client_id: null },   // an unbooked slot has no client
+  { trainer_id: 't2', client_id: 'c1' },   // same client again
+];
+const ids = sessionProfileIds(rows);
+ok(ids.length === 4, `every distinct person is asked for exactly once (got ${ids.length})`);
+ok(ids.includes('t1') && ids.includes('t2') && ids.includes('c1') && ids.includes('c2'),
+   'trainers and clients are both looked up, since both are keyed on profiles.id');
+ok(!ids.includes(null as any) && !ids.includes(undefined as any),
+   'a slot with nobody booked contributes no id — an .in() on null matches nothing');
+ok(sessionProfileIds([]).length === 0, 'no rows means no lookup at all');
+
+const names = namesById([
+  { id: 't1', full_name: 'Marcus' },
+  { id: 'c1', full_name: '  Elena  ' },
+  { id: 'c2', full_name: '   ' },
+  { id: 't2', full_name: null },
+]);
+ok(names.get('t1') === 'Marcus', 'a name is carried across by id');
+ok(names.get('c1') === 'Elena', 'and trimmed');
+ok(!names.has('c2') && !names.has('t2'),
+   'a blank name is left out, so the screen shows its dash rather than an empty cell');
+}
+
+
+// ── an exercise is a thing, not a spelling ──
+// The video library used to match a clip to an exercise with a bidirectional
+// substring test, so asking for "Squat" returned whichever of Back/Front/Goblet
+// Squat sorted first — a demo of a different movement, shown as the right one.
+{
+ok(exerciseSlug('Back Squat') === 'back-squat', 'a name becomes a slug');
+ok(exerciseSlug('Push-up') === 'push-up', 'punctuation collapses to a single hyphen');
+ok(exerciseSlug('  Bent-Over   Row ') === 'bent-over-row', 'case and stray spacing do not make a new movement');
+ok(exerciseSlug('Bent-over Row') === exerciseSlug('Bent-Over Row'),
+   'the two spellings the app ships resolve to one exercise');
+ok(exerciseSlug('') === '' && exerciseSlug('   ') === '', 'an empty name has no id');
+
+ok(sameExercise('Push-up', 'push up'), 'the same movement, spelled differently');
+ok(!sameExercise('Back Squat', 'Front Squat'), 'two squats are not one squat');
+ok(!sameExercise('', ''), 'nothing is not the same movement as nothing');
+
+const cat: ExerciseRef[] = [
+  { id: 'back-squat', name: 'Back Squat', group: 'Legs' },
+  { id: 'bench-press', name: 'Bench Press', group: 'Chest' },
+];
+ok(findExercise('back squat', cat)?.id === 'back-squat', 'a name finds its catalogue row');
+ok(findExercise('Kettlebell Windmill', cat) === null,
+   'a movement the coach invented is absent, which is an answer rather than a failure');
+
+// Picking the clip. The substring rule is gone: a near-miss is the wrong lift.
+const vids = [
+  { exerciseId: 'back-squat', name: 'Back Squat', trainerId: 't1' },
+  { exerciseId: null, name: 'Front Squat', trainerId: 't1' },
+  { exerciseId: 'back-squat', name: 'Coach Marcus — squat cues', trainerId: 't2' },
+];
+ok(videoForExercise('Back Squat', vids)?.name === 'Back Squat', 'the clip linked by id wins');
+ok(videoForExercise('Front Squat', vids)?.name === 'Front Squat',
+   'a clip written before exercise_id existed still resolves, by name');
+ok(videoForExercise('Squat', vids) === null,
+   'a partial name matches nothing — the old substring rule would have returned Back Squat');
+ok(videoForExercise('Goblet Squat', vids) === null, 'a different squat is not this squat');
+ok(videoForExercise('', vids) === null, 'no exercise, no clip');
+ok(videoForExercise('Back Squat', vids, 't2')?.trainerId === 't2',
+   'a member sees their own coach demonstrating it, not a stranger');
+ok(videoForExercise('Back Squat', vids, 't9')?.trainerId === 't1',
+   'and still sees something when their own coach has not recorded one');
 }
 
 

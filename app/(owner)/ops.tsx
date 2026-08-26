@@ -22,6 +22,7 @@ import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale'
 import { useOwnerOps } from '../../src/ui/ownerOps';
 import { fetchAllFeedback, type FeedbackRow } from '../../src/ui/appFeedback';
 import { usePlatformTrainers } from '../../src/ui/trainers';
+import { reportError } from '../../src/lib/reportError';
 
 function ago(iso: string) {
   const h = Math.round((Date.now() - Date.parse(iso)) / 3600000);
@@ -40,7 +41,17 @@ export default function OwnerOps() {
   const { anns, addAnn, tickets, resolveTicket, activity, openTickets } = useOwnerOps();
   const [fbRows, setFbRows] = useState<FeedbackRow[]>([]);
   const [localResolved, setLocalResolved] = useState<Record<string, boolean>>({});
-  useEffect(() => { let c = false; (async () => { const d = await fetchAllFeedback(); if (!c) setFbRows(d); })(); return () => { c = true; }; }, []);
+  // The await is guarded: an unhandled rejection here left the support inbox on
+  // its initial [] with no record that anything had gone wrong, and the tab
+  // stated "No tickets." over a read that never returned.
+  useEffect(() => {
+    let c = false;
+    (async () => {
+      try { const d = await fetchAllFeedback(); if (!c) setFbRows(d); }
+      catch (e) { reportError('ownerOps.feedback', e); }
+    })();
+    return () => { c = true; };
+  }, []);
   const fbTickets = fbRows.map((r) => ({ id: 'fb' + r.id, subject: (r.category || 'Feedback') + (r.rating ? ' · ' + '★'.repeat(r.rating) : ''), from: (r.role || 'Client') + (r.appVersion ? ' · v' + r.appVersion : ''), body: r.body, resolved: !!localResolved['fb' + r.id] }));
   const allTickets = [...fbTickets, ...tickets];
   const resolveAny = (id: string) => { if (id.startsWith('fb')) setLocalResolved((p) => ({ ...p, [id]: true })); else resolveTicket(id); };

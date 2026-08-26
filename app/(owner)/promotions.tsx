@@ -41,8 +41,24 @@ export default function Promotions() {
   const pushToMembers = async (body: string): Promise<{ ok: boolean; queued: number; error?: string }> => {
     if (!USE_SUPABASE) return { ok: false, queued: 0, error: 'Not connected to the server.' };
     try {
-      const { data } = await supabase.rpc('all_member_ids');
-      const ids = Array.isArray(data) ? data.map((r: any) => r.user_id).filter(Boolean) : [];
+      // `error` is read, not just `data`. supabase-js resolves on a database
+      // error, so an RLS refusal or a missing function arrived here as
+      // `data: null`, collapsed to an empty id list, and came back out as "No
+      // members to push to yet." — the same false statement the note above
+      // describes, reached by a different route. The owner is told their gym
+      // has no members rather than that the call was refused, so they stop
+      // pushing offers instead of fixing the permission.
+      const { data, error } = await supabase.rpc('all_member_ids');
+      if (error) return { ok: false, queued: 0, error: error.message };
+      // all_member_ids() is `returns setof uuid` live, so PostgREST hands back
+      // a plain array of id strings. Reading .user_id off a string gave
+      // undefined for every member, filtered the list to nothing, and told the
+      // owner "No members to push to yet" every single time — a push that could
+      // never be sent, blamed on having no members. Both shapes are accepted
+      // because an earlier deployment of this function returned table(user_id).
+      const ids = Array.isArray(data)
+        ? data.map((r: any) => (typeof r === 'string' ? r : r?.user_id)).filter(Boolean)
+        : [];
       if (!ids.length) return { ok: false, queued: 0, error: 'No members to push to yet.' };
       const res = await sendPushChecked(ids, title.trim() || 'A new offer', body, { route: '/(client)/explore' });
       return { ok: res.ok, queued: ids.length, error: res.error };

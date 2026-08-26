@@ -4940,3 +4940,531 @@ select cron.schedule(
 -- The job runs as the table owner, so nothing here widens what a signed-in
 -- person can reach. purge_progress_photo_files is already revoked from public
 -- and anon by 45-progress-photos.sql.
+
+-- ▶ exercise-video-library.sql
+
+-- ── Exercise videos: a library that survives the phone it was recorded on ───
+--
+-- The trainer video library has never once written a row. `exercise_videos`
+-- declares `exercise_id text not null references exercises(id)` and `title text
+-- not null`; the app inserts `{trainer_id, name, muscle_group, url}` and
+-- supplies neither. Postgres refused every insert with 23502, supabase-js
+-- returned that as `{ data: null, error }` rather than throwing, and the catch
+-- in src/ui/exerciseVideos.ts fell through to an AsyncStorage-only entry. So a
+-- trainer recorded a clip, watched it appear in their library, and lost it on
+-- the next device — while the screen said "Added". The live table today holds
+-- zero rows and the bucket holds zero files, which is the proof: the remote
+-- path has never worked, and nothing here can lose data that was never stored.
+--
+-- Three things had to be true before this could be fixed rather than patched.
+--
+-- 1 · An exercise had to become a thing, not a spelling. `exercises` has been
+--     in the schema since 01 and has never held a single row; the app names an
+--     exercise with a free-text display string and joins video to exercise with
+--     a bidirectional substring match at render time, so "Squat" matches
+--     whichever of Back, Front or Goblet Squat happens to sort first. This
+--     seeds the catalogue from the three vocabularies the app already ships
+--     (the builder's picker, focus.ts, machines.ts), deduped on a slug, and
+--     lets a trainer's custom movement mint its own slug on demand. The
+--     NOT NULLs are then satisfiable rather than in the way, so they stay.
+--
+-- 2 · The bucket had to stop being public. `exercise-videos` was created by
+--     hand in the dashboard, written down nowhere, and marked public — so a
+--     clip of a named trainer demonstrating an exercise was readable by anyone
+--     who ever saw the URL, whatever the table's policies said. It is declared
+--     here and flipped to private; `video_path` (the column 01 defined and
+--     nothing ever wrote) becomes the durable handle, and the app signs a
+--     short-lived URL when someone is actually allowed to watch. `url` stays
+--     for the other case: a link to a video hosted somewhere else entirely.
+--
+-- 3 · Visibility had to be the trainer's decision. 38-tenant-isolation.sql
+--     opened SELECT to every authenticated user on the reasoning that "exercise
+--     demos are content, not customer data", and 39-owner-policy-scope.sql then
+--     declined to narrow it from a later file, saying the change "belongs in 38
+--     next to its own reasoning". This file argues with that paragraph directly,
+--     so here is the argument: it is true of a stock demo of a barbell row and
+--     false of a clip with a named coach in it, and the table cannot tell them
+--     apart because nobody ever asked. Now it asks. `visibility` carries the
+--     answer per clip — private, this trainer's clients, the whole gym, or
+--     genuinely public — plus an explicit grant list for "this person, this
+--     clip". A platform clip with no trainer behind it is public by default,
+--     which preserves 38's intent for exactly the content 38 was describing.
+-- ───────────────────────────────────────────────────────────────────────────
+
+-- ── 1 · The exercise catalogue ─────────────────────────────────────────────
+-- Slug rule, mirrored exactly by exerciseSlug() in src/lib/exerciseId.ts:
+-- lowercase, every run of non-alphanumerics becomes a single hyphen, trimmed.
+-- 'Back Squat' → 'back-squat', 'Push-up' → 'push-up'. It is what collapses
+-- 'Bent-over Row' and 'Bent-Over Row' into one row rather than two movements.
+
+insert into public.exercises (id, name, muscle_group, is_cardio) values
+  ('ab-crunch', 'Ab Crunch', 'Core', false),
+  ('air-bike', 'Air Bike', 'Full body', true),
+  ('assisted-pull-up', 'Assisted Pull-up', 'Back', false),
+  ('back-extension', 'Back Extension', 'Lower back', false),
+  ('back-squat', 'Back Squat', 'Legs', false),
+  ('barbell-curl', 'Barbell Curl', 'Arms', false),
+  ('bench-press', 'Bench Press', 'Chest', false),
+  ('bent-over-row', 'Bent-over Row', 'Back', false),
+  ('bicep-curl', 'Bicep Curl', 'Arms', false),
+  ('bulgarian-split-squat', 'Bulgarian Split Squat', 'Legs', false),
+  ('cable-crossover', 'Cable Crossover', 'Chest', false),
+  ('cable-crunch', 'Cable Crunch', 'Core', false),
+  ('cable-kickback', 'Cable Kickback', 'Glutes', false),
+  ('cable-machine', 'Cable Machine', 'Full body', false),
+  ('calf-raise', 'Calf Raise', 'Calves', false),
+  ('chest-press', 'Chest Press', 'Chest', false),
+  ('deadlift', 'Deadlift', 'Back', false),
+  ('elliptical', 'Elliptical', 'Full body', true),
+  ('face-pull', 'Face Pull', 'Shoulders', false),
+  ('front-squat', 'Front Squat', 'Legs', false),
+  ('glute-bridge', 'Glute Bridge', 'Glutes', false),
+  ('good-morning', 'Good Morning', 'Hamstrings', false),
+  ('hack-squat', 'Hack Squat', 'Legs', false),
+  ('hammer-curl', 'Hammer Curl', 'Arms', false),
+  ('hanging-leg-raise', 'Hanging Leg Raise', 'Core', false),
+  ('hip-abduction', 'Hip Abduction', 'Glutes', false),
+  ('hip-thrust', 'Hip Thrust', 'Glutes', false),
+  ('incline-dumbbell-press', 'Incline Dumbbell Press', 'Chest', false),
+  ('lat-pulldown', 'Lat Pulldown', 'Back', false),
+  ('lateral-raise', 'Lateral Raise', 'Shoulders', false),
+  ('leg-curl', 'Leg Curl', 'Hamstrings', false),
+  ('leg-extension', 'Leg Extension', 'Legs', false),
+  ('leg-press', 'Leg Press', 'Legs', false),
+  ('nordic-curl', 'Nordic Curl', 'Hamstrings', false),
+  ('overhead-press', 'Overhead Press', 'Shoulders', false),
+  ('overhead-tricep-extension', 'Overhead Tricep Extension', 'Arms', false),
+  ('pec-deck', 'Pec Deck', 'Chest', false),
+  ('plank', 'Plank', 'Core', false),
+  ('pull-up', 'Pull-up', 'Back', false),
+  ('push-up', 'Push-up', 'Chest', false),
+  ('rear-delt-fly', 'Rear Delt Fly', 'Shoulders', false),
+  ('romanian-deadlift', 'Romanian Deadlift', 'Hamstrings', false),
+  ('rowing-machine', 'Rowing Machine', 'Full body', true),
+  ('russian-twist', 'Russian Twist', 'Core', false),
+  ('seated-calf-raise', 'Seated Calf Raise', 'Calves', false),
+  ('seated-row', 'Seated Row', 'Back', false),
+  ('shoulder-press', 'Shoulder Press', 'Shoulders', false),
+  ('ski-erg', 'Ski Erg', 'Full body', true),
+  ('smith-machine', 'Smith Machine', 'Full body', false),
+  ('stair-climber', 'Stair Climber', 'Legs', true),
+  ('standing-calf-raise', 'Standing Calf Raise', 'Calves', false),
+  ('treadmill', 'Treadmill', 'Legs', true),
+  ('tricep-pushdown', 'Tricep Pushdown', 'Arms', false),
+  ('triceps-pushdown', 'Triceps Pushdown', 'Arms', false),
+  ('upright-bike', 'Upright Bike', 'Legs', true),
+  ('walking-lunge', 'Walking Lunge', 'Legs', false)
+on conflict (id) do nothing;
+
+-- The catalogue had no row-level security at all, which — per 38's own third
+-- section — means the policies it never had were not the problem: the anon key
+-- is compiled into the shipped app, so the table was world-writable. Reading is
+-- open to anyone signed in, because a catalogue is only useful if everyone
+-- resolves the same slug to the same movement. Writing is how a trainer's
+-- custom exercise gets a durable id, so it is open to staff and closed to
+-- clients. Nothing here can be deleted through the API.
+alter table public.exercises enable row level security;
+
+drop policy if exists exercises_read on public.exercises;
+create policy exercises_read on public.exercises for select
+  to authenticated using (true);
+
+drop policy if exists exercises_staff_w on public.exercises;
+create policy exercises_staff_w on public.exercises for insert
+  to authenticated with check (my_role() in ('trainer', 'owner'));
+
+-- ── 2 · Reconciling exercise_videos with what the app actually writes ──────
+-- name, muscle_group and url exist in the live database and in no SQL file in
+-- this repo — added by hand at some point and never written down. Declaring
+-- them here is what stops the next person reading 01-schema.sql and believing
+-- the table is something it is not. `title` and `exercise_id` keep their NOT
+-- NULL: section 1 is what makes them answerable.
+alter table public.exercise_videos add column if not exists name         text;
+alter table public.exercise_videos add column if not exists muscle_group text;
+alter table public.exercise_videos add column if not exists url          text;
+
+-- Who may watch this clip. Default 'clients': a coach who records a demo means
+-- it for the people they coach, and a default that silently published it to the
+-- platform would be the wrong way round to be wrong.
+alter table public.exercise_videos add column if not exists visibility text not null default 'clients';
+
+alter table public.exercise_videos drop constraint if exists exercise_videos_visibility_chk;
+alter table public.exercise_videos add constraint exercise_videos_visibility_chk
+  check (visibility in ('private', 'clients', 'gym', 'public'));
+
+create index if not exists idx_exercise_videos_exercise on public.exercise_videos(exercise_id);
+create index if not exists idx_exercise_videos_trainer  on public.exercise_videos(trainer_id);
+
+-- ── 3 · "Whoever the trainer gives permissions to" ─────────────────────────
+-- The four visibility levels answer the common cases; this answers the precise
+-- one. A row here is a named person the trainer handed one clip to, and it is
+-- additive only — it can widen who sees a private clip and can never narrow a
+-- public one.
+create table if not exists public.exercise_video_grants (
+  video_id   uuid not null references public.exercise_videos(id) on delete cascade,
+  client_id  uuid not null references public.profiles(id) on delete cascade,
+  granted_at timestamptz not null default now(),
+  primary key (video_id, client_id)
+);
+create index if not exists idx_exvid_grants_client on public.exercise_video_grants(client_id);
+
+alter table public.exercise_video_grants enable row level security;
+
+-- The trainer who owns the clip manages its grants. The join to exercise_videos
+-- is safe to write inline for the same reason 39 gives for its trainers join:
+-- exvid_trainer_rw already lets that trainer read the row this asks about.
+drop policy if exists exvid_grants_trainer_rw on public.exercise_video_grants;
+create policy exvid_grants_trainer_rw on public.exercise_video_grants for all
+  using (exists (select 1 from public.exercise_videos v
+                  where v.id = exercise_video_grants.video_id and v.trainer_id = (select auth.uid())))
+  with check (exists (select 1 from public.exercise_videos v
+                  where v.id = exercise_video_grants.video_id and v.trainer_id = (select auth.uid())));
+
+-- A person may see that they were given something.
+drop policy if exists exvid_grants_client_r on public.exercise_video_grants;
+create policy exvid_grants_client_r on public.exercise_video_grants for select
+  using (client_id = (select auth.uid()));
+
+-- ── 4 · The read rule ──────────────────────────────────────────────────────
+-- Replaces 38's `using (true)`. Each arm is one sentence of the product rule,
+-- in the order a person would say them.
+drop policy if exists exvid_read on public.exercise_videos;
+create policy exvid_read on public.exercise_videos for select to authenticated using (
+  -- the trainer's own clip, whatever it is set to
+  trainer_id = (select auth.uid())
+  -- a platform clip belonging to no trainer, which is what 38 meant by content
+  or (trainer_id is null and visibility in ('public', 'clients', 'gym'))
+  -- anything a trainer deliberately published
+  or visibility = 'public'
+  -- their own coach's clip, the ordinary case
+  or (visibility = 'clients' and exists (
+        select 1 from public.clients c
+         where c.id = (select auth.uid()) and c.trainer_id = exercise_videos.trainer_id))
+  -- shared with the whole gym: any member or staff of the tenant that trainer is in
+  or (visibility = 'gym' and exists (
+        select 1 from public.trainers tr
+         where tr.id = exercise_videos.trainer_id and tr.tenant_id = my_tenant()))
+  -- handed to this person by name, which can reach even a private clip
+  or exists (select 1 from public.exercise_video_grants g
+              where g.video_id = exercise_videos.id and g.client_id = (select auth.uid()))
+  -- the owner of the gym the trainer belongs to
+  or exists (select 1 from public.trainers tr
+              where tr.id = exercise_videos.trainer_id and is_owner_of(tr.tenant_id))
+);
+
+-- ── 5 · The bucket, and the file behind the row ────────────────────────────
+-- Declared here because it was not declared anywhere. Private: a signed URL is
+-- what carries permission to the player, so the table's rule above is the only
+-- way in rather than a suggestion sitting in front of a public URL.
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('exercise-videos', 'exercise-videos', false, 524288000,
+        array['video/mp4', 'video/quicktime', 'video/webm'])
+on conflict (id) do update
+  set public = false,
+      file_size_limit = excluded.file_size_limit,
+      allowed_mime_types = excluded.allowed_mime_types;
+
+-- Whether the caller may watch the file at this storage path.
+--
+-- Deliberately SECURITY INVOKER — the opposite of the usual advice in this
+-- schema, and for a reason worth stating. Running as the caller means the
+-- select inside it is filtered by exvid_read above, so the storage rule cannot
+-- drift away from the table rule: there is exactly one definition of who may
+-- watch a clip, and this asks it rather than restating it. There is no
+-- recursion hazard because exercise_videos' policy never reads storage.
+create or replace function public.can_watch_exercise_video(p_path text)
+returns boolean language sql stable security invoker set search_path to 'public'
+as $function$
+  select exists (select 1 from public.exercise_videos v where v.video_path = p_path);
+$function$;
+
+revoke execute on function public.can_watch_exercise_video(text) from public, anon;
+grant execute on function public.can_watch_exercise_video(text) to authenticated;
+
+-- A trainer owns the folder named after them; nobody writes into anyone else's.
+-- This is the convention the upload code already follows: `${uid}/${epoch}.mp4`.
+drop policy if exists exvid_object_w on storage.objects;
+create policy exvid_object_w on storage.objects for insert to authenticated
+  with check (bucket_id = 'exercise-videos'
+              and (storage.foldername(name))[1] = (select auth.uid())::text);
+
+drop policy if exists exvid_object_u on storage.objects;
+create policy exvid_object_u on storage.objects for update to authenticated
+  using (bucket_id = 'exercise-videos'
+         and (storage.foldername(name))[1] = (select auth.uid())::text);
+
+drop policy if exists exvid_object_d on storage.objects;
+create policy exvid_object_d on storage.objects for delete to authenticated
+  using (bucket_id = 'exercise-videos'
+         and (storage.foldername(name))[1] = (select auth.uid())::text);
+
+-- Reading is whatever the table said.
+drop policy if exists exvid_object_r on storage.objects;
+create policy exvid_object_r on storage.objects for select to authenticated
+  using (bucket_id = 'exercise-videos' and public.can_watch_exercise_video(name));
+
+-- ▶ interventions.sql
+
+-- ── The intervention loop ───────────────────────────────────────────────────
+--
+-- Phase 4. Retention already SURFACES who is drifting, in three places: the
+-- Studio retention roll-up, the Studio members screen and the coach's client
+-- book. All three read the same model — `assessDrift` in clientDrift.ts, a
+-- break in a person's OWN pattern rather than a level — so they name the same
+-- member. What none of them could do was close the loop.
+--
+-- There was nowhere to record that anybody was contacted. So the gym surfaced
+-- the same person every Monday, two staff rang them in the same week, and no
+-- one could ever say whether anything the gym does makes a difference. This
+-- table is the missing half.
+--
+-- Additive only. Nothing here alters an existing table.
+--
+-- ── WHAT THIS TABLE IS NOT, AND WHY THAT IS THE DESIGN ──────────────────────
+--
+-- 1. IT IS NOT ATTENDANCE. A phone call is not a training session. Nothing in
+--    this table is ever read as a sign of life: `activityFor` in gymRetention
+--    .ts builds its events from visits, ticked-off class bookings and delivered
+--    one-to-ones, and this table is deliberately not one of the four parts a
+--    `RetentionRecord` carries. If logging a call nudged a member's drift
+--    verdict toward healthy, the loop would report its own activity back to the
+--    gym as retention — the tool would get better at looking useful in exactly
+--    the moment it stopped being useful. src/lib/interventions.ts takes a
+--    finished `Drift` as INPUT and never contributes to one.
+--
+-- 2. IT IS NOT A SCOREBOARD. There is no `worked boolean` column, and there
+--    will not be one, because nobody at the desk can know. A member who came
+--    back may have come back anyway; a member who left may have left despite a
+--    good call. What the record can honestly carry is what was TRIED (below)
+--    and what FOLLOWED (computed, in interventions.ts, from the member's own
+--    attendance either side of the contact — a sequence, never a cause). The
+--    one column that comes close, `outcome`, is about the CONVERSATION — did
+--    anybody actually pick up — and is not about whether the member returned.
+--
+-- 3. IT IS NOT A REMINDER LIST. `at` is when the contact HAPPENED. A row for a
+--    call somebody intends to make on Thursday is a plan, and a plan recorded
+--    as a contact would start the measurement window on a day nothing occurred.
+--    The trigger below refuses a future `at` outright.
+--
+-- ── WHY `at` AND `created_at` ARE BOTH HERE ─────────────────────────────────
+--
+-- `at` is when the person was contacted; `created_at` is when somebody typed it
+-- in. They differ whenever a call is written up later, which is most of them.
+-- Every window in interventions.ts hangs off `at`, and keeping `created_at`
+-- separate means a backfilled fortnight of calls is visible as a backfill
+-- rather than looking like a fortnight of diligent same-day logging.
+--
+-- ── MEMBER ACCESS: DELIBERATELY NONE, AND THAT IS NOT SETTLED ───────────────
+--
+-- There is no member SELECT policy below. `gym_visits` has one, on the stated
+-- grounds that "when did I actually come in" is the member's record too — this
+-- is a different kind of row. These are staff notes ABOUT a person ("said the
+-- 6am is too early, offered the 7:15"), and a note the subject can read is a
+-- note that stops being written honestly, which would empty the one column
+-- that keeps a second caller from repeating the first one's call.
+--
+-- That is a product decision, not a legal one, and it should be flagged rather
+-- than quietly inherited: this is personal data about an identified person, so
+-- a subject access request covers it whatever the policy says. `src/lib/gdpr.ts`
+-- builds the member's own export and does NOT include this table. Somebody has
+-- to decide whether it should — this comment exists so that decision is made on
+-- purpose instead of by omission.
+
+create table if not exists member_interventions (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references tenants(id) on delete cascade,
+  -- Cascade, matching `memberships`: when a member's account is deleted the
+  -- notes somebody wrote about them go with it. An intervention row that
+  -- outlived its subject would be a retained note about a deleted person.
+  member_id uuid not null references profiles(id) on delete cascade,
+
+  -- When the contact happened. Not defaulted to now() on purpose: a value
+  -- somebody had to supply is a value somebody had to think about, and the
+  -- application sends the real time. See the trigger for the future guard.
+  at timestamptz not null,
+
+  -- HOW. Closed enough to count, loose enough to be true. 'other' exists so
+  -- nobody files a conversation in the car park under 'call'.
+  channel text not null
+    check (channel in ('call','text','email','whatsapp','app_message','in_person','other')),
+
+  -- WHO. `on delete set null` rather than cascade: a trainer leaving must not
+  -- erase the record that the call was made. `by_name` is denormalised for
+  -- exactly that moment — once the profile is gone, the id is a dead uuid and
+  -- the name written down at the time is the only thing left that answers
+  -- "has anybody already spoken to her?".
+  by_id uuid references profiles(id) on delete set null,
+  by_name text,
+
+  -- WHAT CAME OF THE CONTACT ITSELF — not of the member. 'reached' means a
+  -- human answered, nothing more. The default is 'unknown' rather than
+  -- 'reached' because a row nobody finished filling in must not assert that
+  -- somebody was spoken to.
+  --
+  -- 'bounced' earns its place: a dead number or a hard-bouncing address is a
+  -- finding about the gym's own records, and it is invisible if it is filed
+  -- under 'no_answer'.
+  outcome text not null default 'unknown'
+    check (outcome in ('reached','replied','no_answer','left_message','bounced','declined','unknown')),
+
+  -- WHAT WAS SAID. The whole reason two people do not make the same call.
+  note text,
+
+  created_at timestamptz not null default now()
+);
+
+-- The two directions this is read: one gym's recent interventions (the Studio
+-- panel, and the quietening pass over the surfaced list), and one member's
+-- history (the row detail, and every follow-up window, which walks a member's
+-- contacts in order to find where the next one truncates the last).
+create index if not exists idx_member_interventions_tenant
+  on member_interventions(tenant_id, at desc);
+create index if not exists idx_member_interventions_member
+  on member_interventions(member_id, at desc);
+
+-- NOT ENFORCED, deliberately: a uniqueness rule on (member_id, at). Two staff
+-- genuinely can contact the same member on the same day — that is the duplicate
+-- effort this table exists to make visible, and a constraint would hide it by
+-- refusing the second row. interventions.ts surfaces it instead: a second
+-- contact inside the first one's judgement window makes that window
+-- unjudgeable, and says so.
+
+
+-- ── the integrity trigger ───────────────────────────────────────────────────
+--
+-- NOT `security definer`, and that is the point rather than an oversight.
+--
+-- 38-tenant-isolation.sql's `guard_profile_identity` tests `current_user` to
+-- tell an app request ('authenticated'/'anon') from a definer function running
+-- as its owner. That test only works because the function is an ORDINARY one:
+-- inside a `security definer` function `current_user` is the function's OWNER,
+-- so the same guard would compare 'postgres' against 'authenticated', never
+-- fire, and read like protection while providing none. That bug shipped in this
+-- codebase, so it is written down where the next trigger gets copied from.
+--
+-- This function does not need to know who the caller is at all. Every rule
+-- below is about the ROW, and authorisation lives in the policies underneath.
+-- It stays an invoker function so that it cannot acquire a privilege it has no
+-- use for.
+create or replace function public.guard_member_intervention()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+  -- A contact cannot have happened in the future. A few minutes of slack for a
+  -- browser clock that is ahead of the database; beyond that it is a plan, a
+  -- typo, or a timezone bug, and all three would open a measurement window over
+  -- days that have not happened yet.
+  if new.at > now() + interval '5 minutes' then
+    raise exception 'An intervention is a record of a contact that happened, not one that is planned. "%" is in the future.', new.at
+      using errcode = '22007';
+  end if;
+
+  if TG_OP = 'UPDATE' then
+    -- `at` and `member_id` are the two columns every follow-up window hangs
+    -- off. Letting them move re-dates conclusions that were already drawn and
+    -- reported, silently. Correcting the note or the outcome is ordinary
+    -- write-up; moving the contact to a different person or a different week is
+    -- rewriting history, and the way to do that is to delete the row and log
+    -- the real one — which leaves the deletion where an owner can see it.
+    if new.member_id is distinct from old.member_id then
+      raise exception 'An intervention cannot be moved to a different member. Delete it and log the one that actually happened.'
+        using errcode = '42501';
+    end if;
+    if new.at is distinct from old.at then
+      raise exception 'When a contact happened is not editable — every "did it work?" window is measured from it. Delete it and log the one that actually happened.'
+        using errcode = '42501';
+    end if;
+    if new.tenant_id is distinct from old.tenant_id then
+      raise exception 'An intervention cannot be moved between gyms.'
+        using errcode = '42501';
+    end if;
+  end if;
+
+  return new;
+end $$;
+
+drop trigger if exists guard_member_intervention_t on public.member_interventions;
+create trigger guard_member_intervention_t
+  before insert or update on public.member_interventions
+  for each row execute function public.guard_member_intervention();
+
+
+-- ── row-level security ──────────────────────────────────────────────────────
+--
+-- Enabled BEFORE any policy is written. A policy on a table with RLS off is
+-- inert: Postgres never consults it and Supabase's default grants to anon and
+-- authenticated apply in full — the exact shape that left four tables
+-- world-writable until 38-tenant-isolation.sql. The anon key ships inside the
+-- mobile bundle, so "inert" here would mean these notes were public.
+--
+-- The helpers are SECURITY DEFINER, so a policy calling them does not re-enter
+-- the table it protects (28-fix-profiles-recursion.sql).
+alter table member_interventions enable row level security;
+
+-- The owner's table: they read the whole gym's loop and they are the only role
+-- that may correct or remove a row.
+--
+-- Note that this `for all` does NOT carry the `by_id = auth.uid()` check the
+-- trainer insert below does, and RLS takes the most permissive matching policy
+-- — so an owner may file a contact under another name. That is deliberate and
+-- narrow: the person at the desk on a Saturday often has no account of their
+-- own, and the owner writing up "Priya rang her" is the only way that call gets
+-- recorded at all. It is stated here so it is a decision rather than a gap
+-- somebody finds later.
+drop policy if exists member_interventions_owner on member_interventions;
+create policy member_interventions_owner on member_interventions
+  for all using (is_owner_of(tenant_id)) with check (is_owner_of(tenant_id));
+
+-- Trainers READ the whole gym's interventions. This is the point of the table:
+-- a trainer about to ring a client has to be able to see that the desk rang
+-- them on Tuesday. Scoped to their own gym via my_tenant(), never to "is a
+-- trainer somewhere" — the mistake 39-owner-policy-scope.sql exists to undo.
+drop policy if exists member_interventions_staff_r on member_interventions;
+create policy member_interventions_staff_r on member_interventions
+  for select using (tenant_id = my_tenant() and my_role() in ('trainer','owner'));
+
+-- Trainers LOG their own. `by_id = auth.uid()` is enforced in the check rather
+-- than trusted from the client: without it a trainer could file a call under a
+-- colleague's name, and "who has already tried" — the one thing that stops the
+-- second call — would be unreliable exactly where it matters.
+drop policy if exists member_interventions_staff_w on member_interventions;
+create policy member_interventions_staff_w on member_interventions
+  for insert with check (
+    tenant_id = my_tenant()
+    and my_role() in ('trainer','owner')
+    and by_id = (select auth.uid())
+  );
+
+-- Supabase's default privileges hand SELECT/INSERT/UPDATE/DELETE on every new
+-- public table to BOTH `anon` and `authenticated` — verified on this table in a
+-- rolled-back transaction, not assumed. RLS above is what actually stops an
+-- anonymous caller, and it does: none of the three policies can be satisfied
+-- without a signed-in profile. This revoke is belt and braces on top of it.
+--
+-- It is worth having because the anon key is compiled into the shipped mobile
+-- app, and because these rows are free-text staff notes about named people —
+-- the highest-consequence thing on this page to get wrong. Nothing in any of
+-- the three apps reads this table as `anon`.
+--
+-- Note that the sibling tables (gym_visits, memberships, …) do NOT carry this
+-- and rely on RLS alone. That is not an inconsistency to copy back over them
+-- blindly; it is one table taking a second lock because of what it holds.
+revoke all on table public.member_interventions from anon;
+
+-- No trainer UPDATE and no trainer DELETE, deliberately. A log its own author
+-- can rewrite or remove is not a record — the value of "somebody already called
+-- her on Tuesday" is that it cannot quietly stop being true. Owners can, and an
+-- owner editing their gym's own record is the accountable case.
+
+-- No member policy. See the header: this is a product decision with a subject
+-- access consequence that has not been settled.
+
+-- No functions are added here beyond the trigger function, which is reached by
+-- the trigger rather than called, so nothing needs the revoke-from-PUBLIC
+-- treatment 40-function-grants.sql applies. If a callable function is ever
+-- added to this file, re-run that part: Postgres grants EXECUTE to PUBLIC by
+-- default on every new function and `anon` resolves through PUBLIC, so
+-- `revoke ... from anon` alone accomplishes nothing — it must name PUBLIC and
+-- grant back to `authenticated` explicitly.

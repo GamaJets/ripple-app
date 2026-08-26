@@ -19,6 +19,7 @@ import { Rule, Section, SectionHead, Hero, Ghost } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { fetchAllFeedback, fetchAppErrors, type FeedbackRow, type AppErrorRow } from '../../src/ui/appFeedback';
 import { SkeletonList } from '../../src/ui/Skeleton';
+import { reportError } from '../../src/lib/reportError';
 
 const CAT_COLOR = (t: any, c: string | null) => c === 'Bug' ? t.crit : c === 'Praise' ? t.brand : c === 'Confusing' ? t.warn : t.ink3;
 
@@ -32,11 +33,21 @@ export default function OwnerFeedback() {
   const [refreshing, setRefreshing] = useState(false);
 
   const load = async () => {
-    const [data, errs] = await Promise.all([fetchAllFeedback(), fetchAppErrors(20)]);
-    setRows(data); setErrors(errs); setLoading(false);
+    // The awaits are wrapped because a rejection used to skip every line after
+    // it: `loading` stayed true forever on first paint, and on pull-to-refresh
+    // `refreshing` never cleared, leaving a spinner spinning over stale rows
+    // with nothing to say it had stopped trying.
+    try {
+      const [data, errs] = await Promise.all([fetchAllFeedback(), fetchAppErrors(20)]);
+      setRows(data); setErrors(errs);
+    } catch (e) {
+      reportError('ownerFeedback.load', e);
+    } finally {
+      setLoading(false);
+    }
   };
   useEffect(() => { let cancelled = false; (async () => { if (!cancelled) await load(); })(); return () => { cancelled = true; }; }, []);
-  const onRefresh = async () => { setRefreshing(true); await load(); setRefreshing(false); };
+  const onRefresh = async () => { setRefreshing(true); try { await load(); } finally { setRefreshing(false); } };
 
   const fmt = (iso: string) => { try { return new Date(iso).toLocaleDateString(); } catch { return ''; } };
   const avg = rows.filter((r) => r.rating).length ? (rows.reduce((a, r) => a + (r.rating || 0), 0) / rows.filter((r) => r.rating).length) : 0;

@@ -56,20 +56,41 @@ export default function Recovery() {
  //   1. Apple Watch / HealthKit — real HR samples, so a full coloured line
  //   2. WHOOP — no intraday samples exist in its API, but per-workout zone
  //      durations do, which still answers "how long was I in each zone"
- const [hr, setHr] = useState<{ samples: HrSample[]; source: 'apple' | null }>({ samples: [], source: null });
+ //
+ // `read` is why an empty `samples` is empty, and it exists because all three
+ // reasons used to land on the same line of copy. A failed HealthKit call, a
+ // day with nothing recorded yet, and a phone with no watch paired at all were
+ // written to state identically, and the chart told all three to "Connect a
+ // device in Watch & Devices" — so a client whose Apple Watch was connected and
+ // whose read had simply failed was told their watch was not connected, and
+ // went looking for a setting that was already switched on.
+ const [hr, setHr] = useState<{ samples: HrSample[]; source: 'apple' | null; read: 'loading' | 'ready' | 'error' | 'unavailable' }>(
+  { samples: [], source: null, read: 'loading' }
+ );
  useEffect(() => {
    let cancelled = false;
    (async () => {
      const apple = PROVIDERS.find((pv) => pv.meta.id === 'apple');
      const fetchHr = apple?.fetchHeartRateSeries;
-     if (fetchHr && apple && apple.isAvailable()) {
-       try {
-         const start = new Date(); start.setHours(0, 0, 0, 0);
-         const s = await fetchHr(start.toISOString(), new Date().toISOString());
-         if (!cancelled && s && s.length >= 2) { setHr({ samples: s, source: 'apple' }); return; }
-       } catch (e) { reportError('recovery.appleHrSeries', e); }
+     // No provider, or HealthKit not available on this device: the one case
+     // where "connect a device" is a true answer rather than a guess.
+     if (!fetchHr || !apple || !apple.isAvailable()) {
+       if (!cancelled) setHr({ samples: [], source: null, read: 'unavailable' });
+       return;
      }
-     if (!cancelled) setHr({ samples: [], source: null });
+     try {
+       const start = new Date(); start.setHours(0, 0, 0, 0);
+       const s = await fetchHr(start.toISOString(), new Date().toISOString());
+       if (cancelled) return;
+       // Fewer than two samples is a real answer — the watch is connected and
+       // has nothing to show for today yet — and it is not the same answer as
+       // the catch below.
+       if (s && s.length >= 2) setHr({ samples: s, source: 'apple', read: 'ready' });
+       else setHr({ samples: [], source: null, read: 'ready' });
+     } catch (e) {
+       reportError('recovery.appleHrSeries', e);
+       if (!cancelled) setHr({ samples: [], source: null, read: 'error' });
+     }
    })();
    return () => { cancelled = true; };
  }, [age]);
@@ -130,6 +151,12 @@ export default function Recovery() {
     subtitle={
       hrSource === 'apple' ? 'Today, from your Apple Watch'
       : hrSource === 'whoop' ? "Today's workouts, from WHOOP"
+      // Below here there is no data to plot, and the line has to say which of
+      // the four reasons it is. Only the last one is a thing the client can act
+      // on, and it used to be shown for all four.
+      : hr.read === 'loading' ? 'Reading today’s heart rate…'
+      : hr.read === 'error' ? 'We couldn’t read today’s heart rate — this is our end, not your watch.'
+      : hr.read === 'ready' ? 'Your Apple Watch is connected — no heart rate recorded today yet.'
       : 'Connect a device in Watch & Devices to see your zones'
     } />
   </Section>

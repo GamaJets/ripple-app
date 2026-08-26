@@ -23,23 +23,44 @@ const DAY = 86400000;
 export default function Money() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
   const [gymName, setGymName] = useState<string | null>(null);
-  const [plans, setPlans] = useState<MembershipPlan[] | null>(null);
-  const [members, setMembers] = useState<Membership[] | null>(null);
-  const [payments, setPayments] = useState<GymPayment[] | null>(null);
-  const [err, setErr] = useState<string | null>(null);
+  const [gymNameErr, setGymNameErr] = useState<string | null>(null);
 
+  // Three independent reads, each carrying its own error. null means "not read
+  // yet, or the read failed"; [] means "read, and the gym genuinely has none".
+  // They are different facts and nothing on this screen may render them the
+  // same way — the error strings are what tells the two apart.
+  const [plans, setPlans] = useState<MembershipPlan[] | null>(null);
+  const [plansErr, setPlansErr] = useState<string | null>(null);
+  const [members, setMembers] = useState<Membership[] | null>(null);
+  const [membersErr, setMembersErr] = useState<string | null>(null);
+  const [payments, setPayments] = useState<GymPayment[] | null>(null);
+  const [paymentsErr, setPaymentsErr] = useState<string | null>(null);
+
+  /**
+   * Read the price book, the memberships and the payments taken.
+   *
+   * allSettled, not all: one failing read must not take the others with it.
+   * Under a single catch over Promise.all, a price book that would not read
+   * also blanked the memberships and the payments to [] — and [] renders as
+   * "No payments recorded in the last 30 days", which an owner reads as a
+   * month with no income rather than as a query that never came back. A read
+   * that failed stays null, and every figure drawn from it shows a dash.
+   */
   const load = useCallback(async (tenantId: string) => {
-    try {
-      const [p, m, pay] = await Promise.all([
-        fetchPlans(supabase, tenantId),
-        fetchMemberships(supabase, tenantId),
-        fetchPayments(supabase, tenantId, new Date(Date.now() - 30 * DAY).toISOString()),
-      ]);
-      setPlans(p); setMembers(m); setPayments(pay); setErr(null);
-    } catch (e: any) {
-      setErr(e?.message ?? 'Could not read the gym record.');
-      setPlans([]); setMembers([]); setPayments([]);
-    }
+    const [pRes, mRes, payRes] = await Promise.allSettled([
+      fetchPlans(supabase, tenantId),
+      fetchMemberships(supabase, tenantId),
+      fetchPayments(supabase, tenantId, new Date(Date.now() - 30 * DAY).toISOString()),
+    ]);
+
+    if (pRes.status === 'fulfilled') { setPlans(pRes.value); setPlansErr(null); }
+    else { setPlans(null); setPlansErr(why(pRes.reason, 'Could not read the price book.')); }
+
+    if (mRes.status === 'fulfilled') { setMembers(mRes.value); setMembersErr(null); }
+    else { setMembers(null); setMembersErr(why(mRes.reason, 'Could not read the memberships.')); }
+
+    if (payRes.status === 'fulfilled') { setPayments(payRes.value); setPaymentsErr(null); }
+    else { setPayments(null); setPaymentsErr(why(payRes.reason, 'Could not read the payments.')); }
   }, []);
 
   useEffect(() => {
@@ -49,8 +70,18 @@ export default function Money() {
       if (!live) return;
       setMe(who);
       if (!who?.tenantId) { setPlans([]); setMembers([]); setPayments([]); return; }
-      const { data: t } = await supabase.from('tenants').select('name').eq('id', who.tenantId).single();
-      if (live) setGymName(t?.name ?? null);
+      // supabase-js resolves with { data, error } on a database error rather
+      // than rejecting, so the error has to be read off the result, not caught.
+      // Destructuring only `data` turned an RLS refusal into t === null, and
+      // the sidebar then printed "No gym linked" — a claim about the owner's
+      // account, when the account is demonstrably linked (this is the branch
+      // where tenantId exists) and all that failed was the name lookup.
+      const { data: t, error: tErr } = await supabase
+        .from('tenants').select('name').eq('id', who.tenantId).single();
+      if (live) {
+        setGymName(tErr ? null : ((t as any)?.name ?? null));
+        setGymNameErr(tErr ? (tErr.message || 'Could not read the gym name.') : null);
+      }
       await load(who.tenantId);
     })();
     return () => { live = false; };
@@ -72,6 +103,17 @@ export default function Money() {
   const sum = plans && members && payments ? summarise(payments, members, plans) : null;
   const refresh = () => load(tenantId);
 
+  // summarise needs all three reads, so any one of them failing leaves every
+  // figure above the tables unknown. Name the reads that did not arrive: a bare
+  // dash sitting over the note "nothing recorded yet" is how a failure starts
+  // being read as a confident zero.
+  const failed = [
+    paymentsErr ? 'the payments' : null,
+    membersErr ? 'the memberships' : null,
+    plansErr ? 'the price book' : null,
+  ].filter((s): s is string => s !== null);
+  const unread = failed.length ? `could not read ${failed.join(', ')}` : undefined;
+
   return (
     <Shell me={me} gymName={gymName} current="/money">
       <h1>Money</h1>
@@ -79,7 +121,13 @@ export default function Money() {
         What the gym sells, who holds a membership, and what has actually been paid.
       </p>
 
-      {err ? <Banner tone="crit">{err}</Banner> : null}
+      {gymNameErr ? (
+        <Banner tone="crit">
+          This account is linked to a gym, but the gym&rsquo;s name could not be read: {gymNameErr}.
+          The sidebar says &ldquo;No gym linked&rdquo; only because it has nothing to print — that
+          is this failed lookup, not a fact about the account.
+        </Banner>
+      ) : null}
 
       <div
         style={{
@@ -88,39 +136,48 @@ export default function Money() {
           borderRadius: 8, overflow: 'hidden', margin: '20px 0 26px',
         }}
       >
-        <Kpi label="Taken (30 days)" text={money(sum?.takenCents)} note={sum?.takenCents == null ? 'nothing recorded yet' : `${sum.payments} payments`} />
-        <Kpi label="Recurring / month" text={money(sum?.mrrCents)} note={sum?.mrrCents == null ? 'no priced membership' : undefined} />
-        <Kpi label="Active members" text={sum ? String(sum.activeMembers) : null} />
-        <Kpi label="Plans on sale" text={plans ? String(plans.filter((p) => p.active).length) : null} />
+        <Kpi label="Taken (30 days)" text={money(sum?.takenCents)} note={sum?.takenCents == null ? (unread ?? 'nothing recorded yet') : `${sum.payments} payments`} />
+        <Kpi label="Recurring / month" text={money(sum?.mrrCents)} note={sum?.mrrCents == null ? (unread ?? 'no priced membership') : undefined} />
+        <Kpi label="Active members" text={sum ? String(sum.activeMembers) : null} note={sum ? undefined : unread} />
+        <Kpi label="Plans on sale" text={plans ? String(plans.filter((p) => p.active).length) : null} note={plans ? undefined : (plansErr ? 'the price book could not be read' : undefined)} />
       </div>
 
-      <Plans plans={plans} tenantId={tenantId} onChange={refresh} />
-      <Members members={members} plans={plans} tenantId={tenantId} onChange={refresh} />
-      <Payments payments={payments} members={members} tenantId={tenantId} me={me} onChange={refresh} />
+      <Plans plans={plans} readErr={plansErr} tenantId={tenantId} onChange={refresh} />
+      <Members members={members} readErr={membersErr} plans={plans} tenantId={tenantId} onChange={refresh} />
+      <Payments payments={payments} readErr={paymentsErr} members={members} tenantId={tenantId} me={me} onChange={refresh} />
     </Shell>
   );
 }
 
 /* ── plans ─────────────────────────────────────────────────────────────────── */
 
-function Plans({ plans, tenantId, onChange }: {
-  plans: MembershipPlan[] | null; tenantId: string; onChange: () => void;
+function Plans({ plans, readErr, tenantId, onChange }: {
+  plans: MembershipPlan[] | null; readErr: string | null; tenantId: string; onChange: () => void;
 }) {
   const [name, setName] = useState('');
   const [price, setPrice] = useState('');
   const [interval, setInterval] = useState<PlanInterval>('month');
   const [busy, setBusy] = useState(false);
+  const [writeErr, setWriteErr] = useState<string | null>(null);
 
   const add = async (e: React.FormEvent) => {
     e.preventDefault();
     const major = parseFloat(price);
     if (!name.trim() || !isFinite(major)) return;
-    setBusy(true);
+    setBusy(true); setWriteErr(null);
     try {
       await createPlan(supabase, tenantId, {
         name: name.trim(), priceCents: Math.round(major * 100), interval,
       });
       setName(''); setPrice(''); onChange();
+    } catch (e: any) {
+      // createPlan throws on a PostgREST error. With a try/finally and no
+      // catch, the only visible effect of a refusal was the button coming back
+      // to life: the plan never appeared in the table below, which reads as a
+      // list that has not refreshed yet rather than as a write that did not
+      // happen. The typed name and price are deliberately left in the form —
+      // nothing was saved, so there is something to retry.
+      setWriteErr(`That plan was not saved: ${e?.message ?? 'the write was refused'}. Nothing has changed in the price book.`);
     } finally { setBusy(false); }
   };
 
@@ -132,7 +189,17 @@ function Plans({ plans, tenantId, onChange }: {
       render: (p) => (p.interval === 'once' ? 'one-off' : `per ${p.interval}`) },
     { key: 'active', header: '', value: (p) => (p.active ? 1 : 0), align: 'right',
       render: (p) => (
-        <button onClick={() => setPlanActive(supabase, p.id, !p.active).then(onChange)} style={linkBtn}>
+        // setPlanActive rejects on a PostgREST error, and a bare .then swallowed
+        // it: onChange never ran, so the row simply stayed as it was and the
+        // owner saw a button that looked unclicked. Say which plan did not move
+        // and which side of the price book it is still on.
+        <button
+          onClick={() => setPlanActive(supabase, p.id, !p.active)
+            .then(() => { setWriteErr(null); onChange(); })
+            .catch((e: any) => setWriteErr(
+              `Could not ${p.active ? 'retire' : 'reinstate'} ${p.name}: ${e?.message ?? 'the change was refused'}. It is still ${p.active ? 'on sale' : 'retired'}.`))}
+          style={linkBtn}
+        >
           {p.active ? 'Retire' : 'Reinstate'}
         </button>
       ) },
@@ -150,7 +217,16 @@ function Plans({ plans, tenantId, onChange }: {
         </select>
         <button type="submit" disabled={busy} style={primaryBtn}>Add plan</button>
       </form>
-      {plans === null ? <Loading /> : (
+      {writeErr ? <Banner tone="crit">{writeErr}</Banner> : null}
+      {plans === null ? (
+        readErr ? (
+          <Banner tone="crit">
+            The price book could not be read: {readErr}. This is not an empty price book — it is a
+            query that did not come back, so nothing here can be taken as a list of what the gym
+            sells. Reload the page.
+          </Banner>
+        ) : <Loading />
+      ) : (
         <DataTable rows={plans} columns={cols} rowKey={(p) => p.id}
           empty="No plans yet. A gym cannot record a membership until it has something to sell." />
       )}
@@ -160,18 +236,21 @@ function Plans({ plans, tenantId, onChange }: {
 
 /* ── memberships ───────────────────────────────────────────────────────────── */
 
-function Members({ members, plans, tenantId, onChange }: {
-  members: Membership[] | null; plans: MembershipPlan[] | null; tenantId: string; onChange: () => void;
+function Members({ members, readErr, plans, tenantId, onChange }: {
+  members: Membership[] | null; readErr: string | null;
+  plans: MembershipPlan[] | null; tenantId: string; onChange: () => void;
 }) {
   const [memberId, setMemberId] = useState('');
   const [planId, setPlanId] = useState('');
   const [busy, setBusy] = useState(false);
-  const [addErr, setAddErr] = useState<string | null>(null);
+  // Covers both writes in this section — adding a membership and changing one's
+  // status. Either failing has to be visible; neither may look like nothing.
+  const [writeErr, setWriteErr] = useState<string | null>(null);
 
   const add = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!memberId.trim()) return;
-    setBusy(true); setAddErr(null);
+    setBusy(true); setWriteErr(null);
     try {
       await createMembership(supabase, tenantId, {
         memberId: memberId.trim(),
@@ -180,7 +259,7 @@ function Members({ members, plans, tenantId, onChange }: {
       });
       setMemberId(''); onChange();
     } catch (e: any) {
-      setAddErr(e?.message ?? 'Could not add that membership.');
+      setWriteErr(e?.message ?? 'Could not add that membership.');
     } finally { setBusy(false); }
   };
 
@@ -193,9 +272,21 @@ function Members({ members, plans, tenantId, onChange }: {
       render: (m) => <span style={{ textTransform: 'capitalize' }}>{m.status}</span> },
     { key: 'act', header: '', value: () => '', align: 'right',
       render: (m) => (
+        // setMembershipStatus rejects on a PostgREST error, and a bare .then
+        // dropped it. The select is driven by m.status, so a refused change
+        // repainted the old value the moment the row re-rendered — the owner
+        // sees the dropdown flick back and has no way to know whether they
+        // misclicked or the database said no. Say which, and say what the
+        // membership still is.
         <select
           value={m.status}
-          onChange={(e) => setMembershipStatus(supabase, m.id, e.target.value as any).then(onChange)}
+          onChange={(e) => {
+            const next = e.target.value as any;
+            setMembershipStatus(supabase, m.id, next)
+              .then(() => { setWriteErr(null); onChange(); })
+              .catch((err: any) => setWriteErr(
+                `Could not set ${m.memberName || 'that membership'} to ${next}: ${err?.message ?? 'the change was refused'}. It is still ${m.status}.`));
+          }}
           style={{ ...field, padding: '4px 6px', fontSize: 12 }}
         >
           <option value="active">active</option>
@@ -212,15 +303,27 @@ function Members({ members, plans, tenantId, onChange }: {
         <input value={memberId} onChange={(e) => setMemberId(e.target.value)}
                placeholder="Member account id (uuid)" style={{ ...field, flex: 3, fontFamily: 'var(--mono)', fontSize: 12.5 }} />
         <select value={planId} onChange={(e) => setPlanId(e.target.value)} style={{ ...field, flex: 2 }}>
-          <option value="">No plan</option>
+          {/* A price book that would not read leaves this list with nothing in
+              it, which is indistinguishable from a gym that sells nothing. The
+              placeholder says which, so nobody sells a membership off-plan
+              believing there was no plan to put it on. */}
+          <option value="">{plans === null ? 'No plan — the price book could not be read' : 'No plan'}</option>
           {(plans ?? []).filter((p) => p.active).map((p) => (
             <option key={p.id} value={p.id}>{p.name}</option>
           ))}
         </select>
         <button type="submit" disabled={busy} style={primaryBtn}>Add membership</button>
       </form>
-      {addErr ? <Banner tone="crit">{addErr}</Banner> : null}
-      {members === null ? <Loading /> : (
+      {writeErr ? <Banner tone="crit">{writeErr}</Banner> : null}
+      {members === null ? (
+        readErr ? (
+          <Banner tone="crit">
+            The memberships could not be read: {readErr}. Nobody has been cancelled and nobody has
+            left — the list did not come back, which is why the member count above is a dash rather
+            than a zero. Reload the page.
+          </Banner>
+        ) : <Loading />
+      ) : (
         <DataTable rows={members} columns={cols} rowKey={(m) => m.id}
           empty="No memberships recorded. This is the row that makes retention and revenue measurable." />
       )}
@@ -230,20 +333,21 @@ function Members({ members, plans, tenantId, onChange }: {
 
 /* ── payments ──────────────────────────────────────────────────────────────── */
 
-function Payments({ payments, members, tenantId, me, onChange }: {
-  payments: GymPayment[] | null; members: Membership[] | null;
+function Payments({ payments, readErr, members, tenantId, me, onChange }: {
+  payments: GymPayment[] | null; readErr: string | null; members: Membership[] | null;
   tenantId: string; me: Me; onChange: () => void;
 }) {
   const [amount, setAmount] = useState('');
   const [memberId, setMemberId] = useState('');
   const [method, setMethod] = useState<PaymentMethod>('card');
   const [busy, setBusy] = useState(false);
+  const [writeErr, setWriteErr] = useState<string | null>(null);
 
   const add = async (e: React.FormEvent) => {
     e.preventDefault();
     const major = parseFloat(amount);
     if (!isFinite(major)) return;
-    setBusy(true);
+    setBusy(true); setWriteErr(null);
     try {
       await recordPayment(supabase, tenantId, {
         memberId: memberId || null,
@@ -252,6 +356,14 @@ function Payments({ payments, members, tenantId, me, onChange }: {
         recordedBy: me.id,
       });
       setAmount(''); onChange();
+    } catch (e: any) {
+      // recordPayment throws on a PostgREST error. With a try/finally and no
+      // catch, a refused write looked exactly like a successful one whose list
+      // had not refreshed yet — and this is money. An owner who believes a
+      // payment is recorded and finds it missing will chase a member who has
+      // already paid, or never chase one who has not. The amount stays in the
+      // box on purpose: nothing was written, so the row is still owed.
+      setWriteErr(`That payment was NOT recorded: ${e?.message ?? 'the write was refused'}. Nothing was saved — the money is not in the gym record and has to be entered again.`);
     } finally { setBusy(false); }
   };
 
@@ -274,7 +386,11 @@ function Payments({ payments, members, tenantId, me, onChange }: {
       <form onSubmit={add} style={formRow}>
         <input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="Amount" inputMode="decimal" style={{ ...field, flex: 1 }} />
         <select value={memberId} onChange={(e) => setMemberId(e.target.value)} style={{ ...field, flex: 2 }}>
-          <option value="">Unattributed</option>
+          {/* When the member list did not read, this dropdown holds nobody —
+              which looks like a gym with no members rather than a list that
+              failed. Unattributed is permanent once written, so the label says
+              why the names are missing before anyone accepts it. */}
+          <option value="">{members === null ? 'Unattributed — the member list could not be read' : 'Unattributed'}</option>
           {options.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
         </select>
         <select value={method} onChange={(e) => setMethod(e.target.value as PaymentMethod)} style={{ ...field, flex: 1 }}>
@@ -286,7 +402,16 @@ function Payments({ payments, members, tenantId, me, onChange }: {
         </select>
         <button type="submit" disabled={busy} style={primaryBtn}>Record</button>
       </form>
-      {payments === null ? <Loading /> : (
+      {writeErr ? <Banner tone="crit">{writeErr}</Banner> : null}
+      {payments === null ? (
+        readErr ? (
+          <Banner tone="crit">
+            The payments could not be read: {readErr}. This is not a month in which the gym took
+            nothing — it is a query that did not return, and the total above shows a dash for the
+            same reason. Reload before deciding anyone is behind on payment.
+          </Banner>
+        ) : <Loading />
+      ) : (
         <DataTable rows={payments} columns={cols} rowKey={(p) => p.id}
           empty="No payments recorded in the last 30 days." />
       )}
@@ -295,6 +420,14 @@ function Payments({ payments, members, tenantId, me, onChange }: {
 }
 
 /* ── bits ──────────────────────────────────────────────────────────────────── */
+
+/** Promise.allSettled hands the rejection back as `unknown`. Every fetch here
+ *  rejects with an Error, so this is its message — and a named fallback rather
+ *  than an empty banner, because a blank explanation of a failed read is only
+ *  marginally better than no banner at all. */
+function why(reason: unknown, fallback: string): string {
+  return (reason as any)?.message ?? fallback;
+}
 
 const field = {
   background: 'var(--surface2)', color: 'var(--ink)', border: '1px solid var(--ring)',

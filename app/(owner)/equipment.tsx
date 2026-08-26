@@ -67,6 +67,7 @@ export default function OwnerEquipment() {
   const { tenant } = useTenant();
 
   const [items, setItems] = useState<Equipment[] | null>(null);   // null = not loaded yet
+  const [failed, setFailed] = useState(false);                    // the register read itself failed
   const [busy, setBusy] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [name, setName] = useState('');
@@ -78,9 +79,18 @@ export default function OwnerEquipment() {
     if (!tenant?.id) return;
     try {
       setItems(await fetchEquipment(supabase, tenant.id));
+      setFailed(false);
     } catch (e) {
       reportError('equipment.fetch', e);
-      setItems([]);
+      // NOT `setItems([])`. An empty array here would have made a read that
+      // never came back render as the register the header comment promises it
+      // will not invent: "Nothing recorded yet", nothing needing attention,
+      // and every count sitting at a dash for the wrong reason. An owner
+      // checking whether anything is due a service would have been shown a
+      // clean board by a query that failed, and walked past a treadmill that
+      // was overdue. Null keeps it "not known" and `failed` says which.
+      setItems(null);
+      setFailed(true);
     }
   }, [tenant?.id]);
 
@@ -158,7 +168,9 @@ export default function OwnerEquipment() {
         <Hero
           label="Needing attention"
           figure={!loaded ? '—' : String(queue.length)}
-          note={!loaded
+          note={failed
+            ? 'The register could not be read, so nothing here is known — that is a failed read, not an all-clear.'
+            : !loaded
             ? 'Reading the register…'
             : list.length === 0
               ? 'Nothing on the register yet — add your kit and this becomes the maintenance list.'
@@ -176,7 +188,12 @@ export default function OwnerEquipment() {
             { label: 'Usable units', value: !loaded || list.length === 0 ? '—' : String(sum!.usableUnits) },
             { label: 'Out of service', value: !loaded || list.length === 0 ? '—' : String(sum!.downUnits) },
           ]} />
-          {loaded && list.length === 0 ? (
+          {failed ? (
+            <Text style={{ ...ty.caption, color: t.crit, marginTop: sp.md }}>
+              These are blank because the read failed, not because the register is empty. Check
+              your connection and pull the screen again before assuming nothing is due.
+            </Text>
+          ) : loaded && list.length === 0 ? (
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
               An empty register is not an empty gym. These stay blank until the kit is entered,
               rather than reporting a confident zero.
@@ -220,7 +237,12 @@ export default function OwnerEquipment() {
 
         <Section>
           <SectionHead title={loaded && list.length ? `All kit · ${list.length}` : 'All kit'} />
-          {!loaded ? (
+          {failed ? (
+            <Text style={{ ...ty.label, color: t.crit }}>
+              The register could not be read. This is not a list of your kit — it is nothing at
+              all. Check your connection and try again.
+            </Text>
+          ) : !loaded ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Loading…</Text>
           ) : list.length === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>

@@ -45,6 +45,49 @@ const DAY = 86400000;
 const iso = (msAgo: number) => new Date(Date.now() - msAgo).toISOString();
 const isoDate = (msAgo: number) => new Date(Date.now() - msAgo).toISOString().slice(0, 10);
 
+// Reading a whole table when PostgREST will not give you one.
+//
+// PostgREST caps EVERY response at the project's "Max rows" setting, which
+// Supabase ships at 1000. `.limit(50000)` does not lift that ceiling — it sets
+// a second, higher one, and the lower of the two wins. So every aggregate below
+// that read more rows than Max rows was computed from the first page and
+// returned as fact: no error, no flag, no truncation notice. A gym with 1200
+// logged workouts would have had its retention, its at-risk list and its visit
+// counts quietly computed from 1000 of them, and the number would have looked
+// entirely reasonable — which is exactly what makes it dangerous. It gets worse
+// as the gym grows, and it never announces itself.
+//
+// So we page with .range() until a short page comes back. `truncated` is the
+// honest escape hatch: if a metric would need more than `cap` rows we return
+// what we have AND say so, and every caller drops the metric rather than
+// publishing a figure it knows is partial. Omitting a number is a state the
+// portal already renders as a dash; a wrong number is not.
+//
+// One consequence to know about. Several reads below feed the full id list into
+// `.in('user_id', ids)`, and that list is now complete where it used to be
+// silently clipped at the ceiling. A few thousand uuids make a request URL long
+// enough that PostgREST will reject it — so a very large gym may now see one of
+// these metrics fail outright where before it quietly returned a wrong answer.
+// That is the trade being made on purpose, and it is the right way round: the
+// failure is caught, the metric is omitted, and the portal shows a dash. If a
+// gym ever reaches that size the fix is to aggregate in the database rather
+// than to widen the ceiling again.
+const PAGE = 1000;
+async function pageAll<T = any>(
+  build: (from: number, to: number) => any,
+  cap = 100000,
+): Promise<{ rows: T[]; error: any; truncated: boolean }> {
+  const rows: T[] = [];
+  for (let from = 0; from < cap; from += PAGE) {
+    const { data, error } = await build(from, from + PAGE - 1);
+    if (error) return { rows, error, truncated: false };
+    const batch = (data ?? []) as T[];
+    rows.push(...batch);
+    if (batch.length < PAGE) return { rows, error: null, truncated: false };
+  }
+  return { rows, error: null, truncated: true };
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
 
@@ -119,14 +162,18 @@ Deno.serve(async (req: Request) => {
   };
   const distinctCountVia = async (table: string, col: string, parent: string, build?: (q: any) => any): Promise<number | null> => {
     try {
-      let q: any = admin.from(table)
-        .select(`${col}, ${parent}!inner(tenant_id)`)
-        .eq(`${parent}.tenant_id`, tenantId)
-        .limit(50000);
-      if (build) q = build(q);
-      const { data, error } = await q;
-      if (error || !data) return null;
-      return new Set(data.map((r: any) => r[col]).filter(Boolean)).size;
+      const { rows, error, truncated } = await pageAll((from, to) => {
+        let q: any = admin.from(table)
+          .select(`${col}, ${parent}!inner(tenant_id)`)
+          .eq(`${parent}.tenant_id`, tenantId)
+          .range(from, to);
+        if (build) q = build(q);
+        return q;
+      });
+      // A distinct count off a truncated read is the worst kind of wrong: it is
+      // always an undercount, and it always looks plausible.
+      if (error || truncated) return null;
+      return new Set(rows.map((r: any) => r[col]).filter(Boolean)).size;
     } catch { return null; }
   };
 
@@ -138,7 +185,7 @@ Deno.serve(async (req: Request) => {
   // lookup omits the money metrics rather than exposing the platform's.
   const trainerIds: string[] = await (async () => {
     try {
-      const { data, error } = await admin.from('profiles').select('id').eq('tenant_id', tenantId).eq('role', 'trainer').limit(2000);
+      const { rows: data, error } = await pageAll((from, to) => admin.from('profiles').select('id').eq('tenant_id', tenantId).eq('role', 'trainer').range(from, to));
       if (error || !data) return [];
       return data.map((r: any) => r.id);
     } catch { return []; }
@@ -169,43 +216,87 @@ Deno.serve(async (req: Request) => {
   // from the trainer and kept current by a trigger, so filter it directly.
   set('ptSessions30', await count('sessions', 'tenant_id', (q) => q.eq('status', 'booked').gte('starts_at', iso(30 * DAY))));
 
-  // Class fill (attended / booked) over last 30d via the analytics RPC — totals + breakdowns.
+  // Class fill (attended / booked) over the last 30 days.
   //
-  // NOT FIXED HERE, and deliberately left as-is: class_attendance_summary gates
-  // on auth.uid(), which is NULL under the service role, so this call returns
-  // zero rows and classes30 / classFillPct / byBranch / byKind are always
-  // omitted from a service-role caller. 25-class-attendance.sql:62 already flags
-  // this. Worth knowing before anyone "fixes" it by relaxing that guard: the
-  // RPC's owner branch is `exists (… o.role = 'owner')` with no tenant test, so
-  // making it answer service-role calls would reintroduce the exact cross-gym
-  // leak this file just closed — every gym's timetable and fill rate. The right
-  // fix is to scope the RPC to the caller's tenant and pass the tenant in, not
-  // to widen it.
+  // Computed here from gym_classes + class_bookings rather than through the
+  // class_attendance_summary RPC. That RPC gates on
+  // `gc.trainer_id = auth.uid() or is_owner_of(gc.tenant_id)`, and auth.uid()
+  // is NULL under the service role — so it matched no row for any gym, ever.
+  // classes30, classFillPct, byBranch and byKind were never set, and the portal
+  // quietly fell back to SAMPLE data for class fill: an owner was shown
+  // invented attendance for their own timetable with nothing marking it as
+  // invented. An empty result and a refusal looked identical.
+  //
+  // The RPC is deliberately left exactly as it is. It works for the signed-in
+  // trainer and owner callers that can satisfy its guard, and widening it to
+  // answer service-role calls would reintroduce the cross-gym leak this file
+  // closed — its owner branch is `exists (… o.role = 'owner')` with no tenant
+  // test at all, so a widened version would hand every gym's timetable to any
+  // owner account. Nothing here relaxes a security-definer function.
+  //
+  // Instead this reads the tables directly under the same boundary every other
+  // query in this file uses. gym_classes carries its own tenant_id
+  // (30-classes-tenant-scope.sql), so shape (a) applies to it: the filter is
+  // explicit and by hand. class_bookings has no tenant of its own, so it takes
+  // shape (b): the `gym_classes!inner(...)` embed makes the join itself the
+  // filter, which means no id list in a query string and no size at which this
+  // stops holding. A booking on another gym's class cannot survive the join.
   try {
-    const { data: rows, error } = await admin.rpc('class_attendance_summary', { p_from: iso(30 * DAY), p_to: iso(0) });
-    if (!error && Array.isArray(rows) && rows.length) {
+    const [clsRes, bkRes] = await Promise.all([
+      pageAll((from, to) => admin.from('gym_classes')
+        .select('id, title, kind, branch')
+        .eq('tenant_id', tenantId)
+        .gte('starts_at', iso(30 * DAY))
+        .lt('starts_at', iso(0))
+        .range(from, to)),
+      pageAll((from, to) => admin.from('class_bookings')
+        .select('class_id, status, attended_at, gym_classes!inner(tenant_id, starts_at)')
+        .eq('gym_classes.tenant_id', tenantId)
+        .gte('gym_classes.starts_at', iso(30 * DAY))
+        .lt('gym_classes.starts_at', iso(0))
+        .range(from, to)),
+    ]);
+    // Both reads must succeed. A fill rate computed from classes we could read
+    // and bookings we could not is a number that looks precise and is wrong;
+    // leaving the metric out of `live` is the honest answer.
+    if (!clsRes.error && !bkRes.error && !clsRes.truncated && !bkRes.truncated && clsRes.rows.length) {
+      // Same definitions the RPC used, so the figure does not move when a
+      // caller switches between the two paths: booked counts bookings still in
+      // 'booked', attended counts anyone actually marked in, whatever their
+      // booking status now says.
+      const tally = new Map<string, { a: number; b: number }>();
+      for (const bk of bkRes.rows as any[]) {
+        const t = tally.get(bk.class_id) ?? { a: 0, b: 0 };
+        if (bk.status === 'booked') t.b++;
+        if (bk.attended_at) t.a++;
+        tally.set(bk.class_id, t);
+      }
       let att = 0, bkd = 0;
       const byBranch: Record<string, { a: number; b: number }> = {};
       const byKind: Record<string, { a: number; b: number }> = {};
-      for (const r of rows) {
-        const a = Number(r.attended || 0), b = Number(r.booked || 0);
-        att += a; bkd += b;
-        const br = (r.branch || '—'); (byBranch[br] ||= { a: 0, b: 0 }); byBranch[br].a += a; byBranch[br].b += b;
-        const kd = (r.kind || r.title || 'Class'); (byKind[kd] ||= { a: 0, b: 0 }); byKind[kd].a += a; byKind[kd].b += b;
+      for (const c of clsRes.rows as any[]) {
+        const t = tally.get(c.id) ?? { a: 0, b: 0 };
+        att += t.a; bkd += t.b;
+        const br = c.branch || '\u2014';
+        (byBranch[br] ||= { a: 0, b: 0 }); byBranch[br].a += t.a; byBranch[br].b += t.b;
+        const kd = c.kind || c.title || 'Class';
+        (byKind[kd] ||= { a: 0, b: 0 }); byKind[kd].a += t.a; byKind[kd].b += t.b;
       }
-      set('classes30', rows.length);
+      set('classes30', clsRes.rows.length);
+      // No bookings at all is "not known", not 0% — a gym that ran classes
+      // nobody booked has no fill rate to report.
       set('classFillPct', bkd > 0 ? Math.round((att / bkd) * 100) : null);
       const toBars = (m: Record<string, { a: number; b: number }>) =>
         Object.entries(m).map(([k, v]) => [k, v.b > 0 ? Math.round((v.a / v.b) * 100) : 0]).sort((x: any, y: any) => y[1] - x[1]);
       series.byBranch = toBars(byBranch);
       series.byKind = toBars(byKind);
     }
-  } catch { /* rpc absent → skip */ }
+  } catch { /* leave the metric unset rather than guessed */ }
 
   // New-member trend: client sign-ups per calendar month, last 12 months.
   try {
-    const { data } = await admin.from('profiles').select('created_at').eq('tenant_id', tenantId).eq('role', 'client').gte('created_at', iso(365 * DAY)).limit(50000);
-    if (Array.isArray(data) && data.length) {
+    const { rows: data, error, truncated } = await pageAll((from, to) => admin.from('profiles').select('created_at').eq('tenant_id', tenantId).eq('role', 'client').gte('created_at', iso(365 * DAY)).range(from, to));
+    if (!error && !truncated && data.length) {
       const now = new Date();
       const months: string[] = [];
       for (let i = 11; i >= 0; i--) { const d = new Date(now.getFullYear(), now.getMonth() - i, 1); months.push(d.toISOString().slice(0, 7)); }
@@ -227,8 +318,10 @@ Deno.serve(async (req: Request) => {
   // source for that number; (2) a trainer who has left the tenant takes their
   // invoices with them, because trainerIds is a snapshot of today's roster.
   try {
-    const { data: inv } = await admin.from('invoices').select('amount_due, status, created_at').in('trainer_id', trainerIds).gte('created_at', iso(30 * DAY)).limit(10000);
-    if (Array.isArray(inv) && inv.length) {
+    const { rows: inv, error: invErr, truncated: invCut } = await pageAll((from, to) => admin.from('invoices').select('amount_due, status, created_at').in('trainer_id', trainerIds).gte('created_at', iso(30 * DAY)).range(from, to));
+    // Revenue especially: a truncated read understates it, and an owner acts on
+    // a revenue figure. No number beats a low one presented as the real total.
+    if (!invErr && !invCut && inv.length) {
       const paid = inv.filter((r: any) => (r.status ?? 'paid') === 'paid');
       const cents = paid.reduce((a: number, r: any) => a + Number(r.amount_due || 0), 0); // Stripe stores cents
       if (cents > 0) set('revenue30', Math.round(cents / 100));
@@ -260,8 +353,8 @@ Deno.serve(async (req: Request) => {
       const ids = rm.map((r: any) => r.id);
       const visits: Record<string, number> = {}, lastAct: Record<string, number> = {};
       try {
-        const { data: w } = await admin.from('workouts').select('user_id, performed_at').in('user_id', ids);
-        (w || []).forEach((x: any) => { visits[x.user_id] = (visits[x.user_id] || 0) + 1; const t = Date.parse(x.performed_at); if (!lastAct[x.user_id] || t > lastAct[x.user_id]) lastAct[x.user_id] = t; });
+        const { rows: w } = await pageAll((from, to) => admin.from('workouts').select('user_id, performed_at').in('user_id', ids).range(from, to));
+        w.forEach((x: any) => { visits[x.user_id] = (visits[x.user_id] || 0) + 1; const t = Date.parse(x.performed_at); if (!lastAct[x.user_id] || t > lastAct[x.user_id]) lastAct[x.user_id] = t; });
       } catch { /* ignore */ }
       series.recentMembers = rm.map((r: any) => ({ name: r.full_name || 'Member', joined: String(r.created_at).slice(0, 10), visits: visits[r.id] || 0, active: lastAct[r.id] ? (Date.now() - lastAct[r.id] < 30 * DAY) : false }));
     }
@@ -275,7 +368,7 @@ Deno.serve(async (req: Request) => {
       // `clients` carries tenant_id (not null), so the headcount per trainer is
       // filtered directly — unscoped this was every trainer on the platform and
       // the size of their book.
-      try { const { data: cl } = await admin.from('clients').select('trainer_id').eq('tenant_id', tenantId); (cl || []).forEach((c: any) => { if (c.trainer_id) counts[c.trainer_id] = (counts[c.trainer_id] || 0) + 1; }); } catch { /* ignore */ }
+      try { const { rows: cl } = await pageAll((from, to) => admin.from('clients').select('trainer_id').eq('tenant_id', tenantId).range(from, to)); cl.forEach((c: any) => { if (c.trainer_id) counts[c.trainer_id] = (counts[c.trainer_id] || 0) + 1; }); } catch { /* ignore */ }
       series.trainersList = tr.map((t: any) => ({ name: t.full_name || 'Trainer', clients: counts[t.id] || 0 }));
     }
   } catch { /* ignore */ }
@@ -303,13 +396,13 @@ Deno.serve(async (req: Request) => {
   try {
     // Cohorts start from this gym's clients only; the workouts/check_ins reads
     // below are `.in(…, ids)` against that scoped list, so they inherit it.
-    const { data: cs } = await admin.from('profiles').select('id, created_at').eq('tenant_id', tenantId).eq('role', 'client').gte('created_at', iso(190 * DAY)).limit(2000);
-    if (Array.isArray(cs) && cs.length) {
+    const { rows: cs, error: csErr, truncated: csCut } = await pageAll((from, to) => admin.from('profiles').select('id, created_at').eq('tenant_id', tenantId).eq('role', 'client').gte('created_at', iso(190 * DAY)).range(from, to));
+    if (!csErr && !csCut && cs.length) {
       const ids = cs.map((c: any) => c.id);
       const act: Record<string, Set<string>> = {};
       const addAct = (id: string, ts: string) => { const mo = String(ts).slice(0, 7); (act[id] ||= new Set<string>()).add(mo); };
-      try { const { data: w } = await admin.from('workouts').select('user_id, performed_at').in('user_id', ids).limit(50000); (w || []).forEach((x: any) => addAct(x.user_id, x.performed_at)); } catch { /* ignore */ }
-      try { const { data: ci } = await admin.from('check_ins').select('user_id, at').in('user_id', ids).limit(50000); (ci || []).forEach((x: any) => addAct(x.user_id, x.at)); } catch { /* ignore */ }
+      try { const { rows: w } = await pageAll((from, to) => admin.from('workouts').select('user_id, performed_at').in('user_id', ids).range(from, to)); w.forEach((x: any) => addAct(x.user_id, x.performed_at)); } catch { /* ignore */ }
+      try { const { rows: ci } = await pageAll((from, to) => admin.from('check_ins').select('user_id, at').in('user_id', ids).range(from, to)); ci.forEach((x: any) => addAct(x.user_id, x.at)); } catch { /* ignore */ }
       const now = new Date();
       const cohMonths: string[] = [];
       for (let i = 5; i >= 0; i--) { const d = new Date(now.getFullYear(), now.getMonth() - i, 1); cohMonths.push(d.toISOString().slice(0, 7)); }
@@ -338,14 +431,17 @@ Deno.serve(async (req: Request) => {
     // Same shape as cohorts: scope the client list, and the `.in('user_id', cid)`
     // workout read that follows is scoped by construction. atRisk names people,
     // so this filter is what keeps another gym's lapsed members out of it.
-    const { data: allc } = await admin.from('profiles').select('id, full_name').eq('tenant_id', tenantId).eq('role', 'client').limit(1000);
-    if (Array.isArray(allc) && allc.length) {
+    // This one was .limit(1000) — sitting exactly on the default ceiling, so a
+    // gym with 1001 members silently dropped one and every band below was a
+    // percentage of the wrong denominator.
+    const { rows: allc, error: allcErr, truncated: allcCut } = await pageAll((from, to) => admin.from('profiles').select('id, full_name').eq('tenant_id', tenantId).eq('role', 'client').range(from, to));
+    if (!allcErr && !allcCut && allc.length) {
       const cid = allc.map((c: any) => c.id);
       const nameMap: Record<string, string> = {}; allc.forEach((c: any) => { nameMap[c.id] = c.full_name || 'Member'; });
       const visits: Record<string, number> = {}, last: Record<string, number> = {};
       try {
-        const { data: w } = await admin.from('workouts').select('user_id, performed_at').in('user_id', cid).limit(50000);
-        (w || []).forEach((x: any) => { const t = Date.parse(x.performed_at); if (isFinite(t)) { if (t >= Date.now() - 30 * DAY) visits[x.user_id] = (visits[x.user_id] || 0) + 1; if (!last[x.user_id] || t > last[x.user_id]) last[x.user_id] = t; } });
+        const { rows: w } = await pageAll((from, to) => admin.from('workouts').select('user_id, performed_at').in('user_id', cid).range(from, to));
+        w.forEach((x: any) => { const t = Date.parse(x.performed_at); if (isFinite(t)) { if (t >= Date.now() - 30 * DAY) visits[x.user_id] = (visits[x.user_id] || 0) + 1; if (!last[x.user_id] || t > last[x.user_id]) last[x.user_id] = t; } });
       } catch { /* ignore */ }
       let b12 = 0, b611 = 0, b25 = 0, b01 = 0;
       cid.forEach((id: string) => { const v = visits[id] || 0; if (v >= 12) b12++; else if (v >= 6) b611++; else if (v >= 2) b25++; else b01++; });

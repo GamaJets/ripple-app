@@ -29,7 +29,13 @@ function bestOf(e: WorkoutEntry): number { return (e.sets || []).reduce((m, s) =
 export default function Trends() {
   const t = useTheme();
   const router = useRouter();
-  const { log } = useWorkoutLog();
+  const { log, status: logStatus } = useWorkoutLog();
+  // Under 'error' the log is empty because it could not be read, so every
+  // tonnage below reduces to zero and gets printed with a thousands separator
+  // and a unit — the full costume of a measured figure. "Best week" is the
+  // sharpest of them: it is the maximum over the ten weeks that loaded, so a
+  // partial read quietly nominates the wrong week as the client's best ever.
+  const logKnown = logStatus !== 'error';
 
   // Weekly training volume (last 10 weeks, oldest → newest).
   const weeks = useMemo(() => {
@@ -90,9 +96,10 @@ export default function Trends() {
         {/* ── the hero: this week's tonnage ──────────────────────────────── */}
         <Hero
           label="Lifted this week"
-          figure={Math.round(thisWeek.vol).toLocaleString()}
-          unit="kg"
-          note={thisWeek.sessions
+          figure={logKnown ? Math.round(thisWeek.vol).toLocaleString() : fig(null)}
+          unit={logKnown ? 'kg' : undefined}
+          note={!logKnown ? 'We couldn’t read your training log — this is not a week with nothing in it.'
+            : thisWeek.sessions
             ? `${thisWeek.sessions} training day${thisWeek.sessions === 1 ? '' : 's'} since Monday`
             : 'No sessions logged this week yet.'}
         />
@@ -105,13 +112,17 @@ export default function Trends() {
           {anyVolume ? (
             <Spark data={weeks.map((w) => w.vol)} />
           ) : (
-            <Text style={{ ...ty.label, color: t.ink3 }}>No training volume logged yet — the trend charts as soon as you log a set.</Text>
+            <Text style={{ ...ty.label, color: t.ink3 }}>
+              {logKnown
+                ? 'No training volume logged yet — the trend charts as soon as you log a set.'
+                : 'We couldn’t read your training log, so there is nothing to chart here yet. Your history is intact.'}
+            </Text>
           )}
           <View style={{ height: sp.lg }} />
           <KpiRow items={[
-            { label: 'This week', value: Math.round(thisWeek.vol).toLocaleString(), unit: 'kg' },
-            { label: 'Training days', value: fig(thisWeek.sessions) },
-            { label: 'Best week', value: Math.round(bestWeek.vol).toLocaleString(), unit: 'kg', delta: anyVolume ? `w/c ${bestWeek.label}` : undefined },
+            { label: 'This week', value: logKnown ? Math.round(thisWeek.vol).toLocaleString() : fig(null), unit: logKnown ? 'kg' : undefined },
+            { label: 'Training days', value: logKnown ? fig(thisWeek.sessions) : fig(null) },
+            { label: 'Best week', value: logKnown ? Math.round(bestWeek.vol).toLocaleString() : fig(null), unit: logKnown ? 'kg' : undefined, delta: logKnown && anyVolume ? `w/c ${bestWeek.label}` : undefined },
           ]} />
         </Section>
 
@@ -121,7 +132,9 @@ export default function Trends() {
         <Section>
           <SectionHead title="Strength trend" note="Estimated 1-rep max" />
           {exercises.length === 0 ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>Log a few sets and your strength trend shows up here.</Text>
+            <Text style={{ ...ty.label, color: t.ink3 }}>
+              {logKnown ? 'Log a few sets and your strength trend shows up here.' : 'We couldn’t read your logged sets, so there is no strength trend to draw.'}
+            </Text>
           ) : (
             <>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingRight: G }}>

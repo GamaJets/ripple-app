@@ -39,23 +39,55 @@ export default function Sessions() {
   const [sessions, setSessions] = useState<PtSession[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
+  // "The gym has not set a session fee" and "we could not read the gym" both
+  // leave sessionFee null, and they are not the same problem: one is a setting
+  // the owner can go and fill in, the other is a read to retry. Without this
+  // string the page tells everybody to go and set a fee.
+  const [gymError, setGymError] = useState<string | null>(null);
+
   // Whether a no-show is payable is a gym policy, not a default we can assume.
   // It is a control on the page so the owner states it and can see what it does
   // to the number, rather than discovering it in a payslip.
   const [policy, setPolicy] = useState<PayPolicy>(PAY_DELIVERED_ONLY);
   const [settlements, setSettlements] = useState<Settlement[] | null>(null);
+  const [settlementsError, setSettlementsError] = useState<string | null>(null);
   const [settling, setSettling] = useState<string | null>(null);
 
+  /**
+   * The two reads this screen stands on: what happened on the floor, and what
+   * has already been handed over.
+   *
+   * Settled one at a time rather than under a single try/catch, and with no
+   * `.catch(() => [])` anywhere near either of them, because one read failing
+   * must never be reported as the other coming back empty. This is the rule the
+   * import screen states, and payroll is where breaking it costs money: the
+   * swallowed settlements failure put `[]` under "Already paid", which reads as
+   * "no trainer has ever been paid for anything", and the reasonable response
+   * to that is to pay them all again.
+   */
   const load = useCallback(async (tenantId: string) => {
-    try {
-      const [rows, runs] = await Promise.all([
-        fetchSessions(supabase, tenantId, new Date(Date.now() - 30 * DAY).toISOString()),
-        fetchSettlements(supabase, tenantId).catch(() => [] as Settlement[]),
-      ]);
-      setSessions(rows); setSettlements(runs); setErr(null);
-    } catch (e: any) {
-      setErr(e?.message ?? 'Could not read the session record.');
-      setSessions([]);
+    const [rows, runs] = await Promise.allSettled([
+      fetchSessions(supabase, tenantId, new Date(Date.now() - 30 * DAY).toISOString()),
+      fetchSettlements(supabase, tenantId),
+    ]);
+
+    if (rows.status === 'fulfilled') {
+      setSessions(rows.value);
+      setErr(null);
+    } else {
+      // Null, not []. Every table below is about to be asked what happened in
+      // this gym over the last month, and the honest answer is that we do not
+      // know — which is not the same answer as "nothing did".
+      setSessions(null);
+      setErr((rows.reason as any)?.message ?? 'Could not read the session record.');
+    }
+
+    if (runs.status === 'fulfilled') {
+      setSettlements(runs.value);
+      setSettlementsError(null);
+    } else {
+      setSettlements(null);
+      setSettlementsError((runs.reason as any)?.message ?? 'Could not read what has already been paid.');
     }
   }, []);
 
@@ -66,23 +98,39 @@ export default function Sessions() {
       if (!live) return;
       setMe(who);
       if (!who?.tenantId) { setSessions([]); return; }
-      const { data: t } = await supabase
+      // supabase-js resolves on a database error rather than rejecting, so the
+      // error has to be read off the result. Destructuring only `data` left a
+      // refused or RLS-blocked read looking exactly like a gym with no fee set:
+      // sessionFee null, every payroll figure a dash, and a blocker telling the
+      // owner "set a session fee" — sending him to check a setting that is
+      // probably already correct, for a read he was never told had failed.
+      const { data: t, error } = await supabase
         .from('tenants').select('name, session_fee').eq('id', who.tenantId).single();
-      if (live) { setGymName(t?.name ?? null); setSessionFee(t?.session_fee ?? null); }
+      if (live) {
+        setGymName(error ? null : (t?.name ?? null));
+        setSessionFee(error ? null : (t?.session_fee ?? null));
+        setGymError(error ? (error.message || 'Could not read your gym.') : null);
+      }
       await load(who.tenantId);
     })();
     return () => { live = false; };
   }, [load]);
 
-  const awaiting = useMemo(() => (sessions ?? []).filter((s) => isAwaitingOutcome(s)), [sessions]);
-  const settled = useMemo(() => (sessions ?? []).filter((s) => s.outcome !== null), [sessions]);
+  // Each of these stays null while `sessions` is null, rather than collapsing to
+  // an empty list. `sessions ?? []` was doing the same damage as the swallowed
+  // catch one level up: it handed every table below a confident, empty answer
+  // built out of a read that never returned.
+  const awaiting = useMemo(() => sessions && sessions.filter((s) => isAwaitingOutcome(s)), [sessions]);
+  const settled = useMemo(() => sessions && sessions.filter((s) => s.outcome !== null), [sessions]);
 
   const lines = useMemo(
     // The gym's session fee is in major units; payroll works in minor units.
-    () => payrollByTrainer(sessions ?? [], policy, sessionFee == null ? null : Math.round(sessionFee * 100)),
+    () => sessions && payrollByTrainer(sessions, policy, sessionFee == null ? null : Math.round(sessionFee * 100)),
     [sessions, policy, sessionFee],
   );
-  const total = useMemo(() => payrollTotal(lines), [lines]);
+  // Totalling nothing gives zeros, which is fine here only because every place
+  // that renders one of them checks `sessions` first and shows a dash instead.
+  const total = useMemo(() => payrollTotal(lines ?? []), [lines]);
 
   if (me === undefined) return <div style={{ padding: 40, color: 'var(--ink3)' }}>Loading…</div>;
   if (me === null) return <div style={{ padding: 40 }}><a href="/">Sign in</a></div>;
@@ -103,29 +151,69 @@ export default function Sessions() {
     try {
       // Snapshot the rate at the moment of marking, so changing the gym's fee
       // next month cannot rewrite what this session cost.
+      //
+      // The `undefined` matters. markOutcome leaves rate_cents alone when it
+      // gets undefined and writes null when it gets null — so when the gym read
+      // failed, sessionFee is null for a reason that has nothing to do with the
+      // gym's actual fee, and passing that null through would permanently stamp
+      // "no rate" onto a session that has one. A read we could not make is not
+      // a price of nothing; the only safe move is to leave the column untouched
+      // and let a later marking, made with the fee in hand, set it.
       await markOutcome(supabase, s.id, outcome,
-        s.rateCents ?? (sessionFee == null ? null : Math.round(sessionFee * 100)));
+        s.rateCents ?? (gymError ? undefined : sessionFee == null ? null : Math.round(sessionFee * 100)));
       refresh();
     } catch (e: any) {
       setErr(e?.message ?? 'Could not record that outcome.');
     }
   };
 
-  const blocker = settlementBlocker(total);
+  // clearOutcome throws on a PostgREST error, so `.then(refresh)` alone left a
+  // refused undo as an unhandled rejection: the row stayed marked, the button
+  // said nothing, and the owner pressed it again.
+  const undo = async (id: string) => {
+    try {
+      await clearOutcome(supabase, id);
+      refresh();
+    } catch (e: any) {
+      setErr(e?.message ?? 'Could not undo that outcome.');
+    }
+  };
+
+  // Why the figure above cannot be settled, in words the owner can act on.
+  //
+  // Two things settlementBlocker cannot know, because it sees only the sessions.
+  // With `sessions` null it would answer "No payable sessions in this period."
+  // about a period nobody has managed to read. And when payable sessions have no
+  // rate it says "set a session fee", which is the wrong errand if the fee is
+  // missing because the gym row could not be read rather than because nobody set
+  // one — so name the read failure instead, and leave the sessions unpriced
+  // rather than free.
+  const unread = sessions === null && err !== null;
+  const blocker =
+    sessions === null
+      ? null
+      : gymError && total.priced < total.payable
+        ? `Your gym could not be read, so there is no session fee to price the rest with: ${gymError}`
+        : settlementBlocker(total);
 
   // What each trainer is actually owed RIGHT NOW: marked, priced, payable and
   // not already settled. Derived from the sessions rather than from the payroll
   // line, because the line counts everything in the window while a settlement
   // must only ever cover what has not been paid.
+  //
+  // Null when the sessions could not be read: an empty "Outstanding" list says
+  // every trainer is square, which is the single most expensive wrong sentence
+  // on this page.
   const owed = useMemo(() => {
+    if (sessions === null) return null;
     const byTrainer = new Map<string, { name: string | null; rows: PtSession[]; unmarked: number }>();
-    for (const s of sessions ?? []) {
+    for (const s of sessions) {
       const e = byTrainer.get(s.trainerId)
         ?? { name: s.trainerName, rows: [] as PtSession[], unmarked: 0 };
       if (isAwaitingOutcome(s)) e.unmarked += 1;
       byTrainer.set(s.trainerId, e);
     }
-    for (const s of settleableSessions(sessions ?? [], policy)) {
+    for (const s of settleableSessions(sessions, policy)) {
       const e = byTrainer.get(s.trainerId);
       if (e) e.rows.push(s);
     }
@@ -138,7 +226,7 @@ export default function Sessions() {
       .filter((x) => x.rows.length > 0 || x.unmarked > 0);
   }, [sessions, policy]);
 
-  const settle = async (t: (typeof owed)[number]) => {
+  const settle = async (t: NonNullable<typeof owed>[number]) => {
     if (!me?.tenantId || t.blocker) return;
     const dates = t.rows.map((s) => s.startsAt.slice(0, 10)).sort();
     setSettling(t.trainerId);
@@ -165,6 +253,15 @@ export default function Sessions() {
 
       {err ? <Banner tone="crit">{err}</Banner> : null}
 
+      {gymError ? (
+        <Banner tone="crit">
+          <strong style={{ color: 'var(--ink)' }}>Your gym could not be read</strong>, so this page
+          does not know your session fee: {gymError}. Anything that needed the fee to price it is
+          shown as unpriced rather than as nothing owed. This is not the same as your gym having no
+          fee set, and setting one now would not fix it — reload the page.
+        </Banner>
+      ) : null}
+
       <div
         style={{
           display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
@@ -183,7 +280,9 @@ export default function Sessions() {
         <Kpi
           label="Payroll, 30 days"
           text={total.cents == null ? null : money(total.cents)}
-          note={blocker ?? 'ready to settle'}
+          // No note at all when the sessions are unknown: "ready to settle" on a
+          // period nobody could read is the worst of the available sentences.
+          note={sessions === null ? undefined : (blocker ?? 'ready to settle')}
         />
       </div>
 
@@ -216,19 +315,19 @@ export default function Sessions() {
         </div>
       </Section>
 
-      <Awaiting sessions={awaiting} loading={sessions === null} onMark={mark} />
-      <Payroll lines={lines} />
-      <Settle owed={owed} settling={settling} onSettle={settle} />
-      <Settled runs={settlements} />
-      <Marked sessions={settled} onClear={(id) => clearOutcome(supabase, id).then(refresh)} />
+      <Awaiting sessions={awaiting} unread={unread} onMark={mark} />
+      <Payroll lines={lines} unread={unread} />
+      <Settle owed={owed} unread={unread} settling={settling} onSettle={settle} />
+      <Settled runs={settlements} error={settlementsError} />
+      <Marked sessions={settled} unread={unread} onClear={undo} />
     </Shell>
   );
 }
 
 /* ── the queue that unblocks payroll ───────────────────────────────────────── */
 
-function Awaiting({ sessions, loading, onMark }: {
-  sessions: PtSession[]; loading: boolean;
+function Awaiting({ sessions, unread, onMark }: {
+  sessions: PtSession[] | null; unread: boolean;
   onMark: (s: PtSession, o: SessionOutcome) => void;
 }) {
   const cols: Column<PtSession>[] = [
@@ -255,7 +354,14 @@ function Awaiting({ sessions, loading, onMark }: {
       title="Awaiting an outcome"
       sub="Booked, finished, and nobody has said what happened. Payroll will not price these."
     >
-      {loading ? <Loading /> : (
+      {sessions === null ? (
+        // "Nothing waiting" is an all-clear, and this is the one table on the
+        // console whose job is to withhold an all-clear until somebody has
+        // actually marked every session.
+        unread
+          ? <Unread what="the session record could not be read, so nobody can say whether anything is waiting to be marked." />
+          : <Loading />
+      ) : (
         <DataTable
           rows={sessions} columns={cols} rowKey={(s) => s.id}
           empty="Nothing waiting — every finished session has an outcome."
@@ -267,8 +373,10 @@ function Awaiting({ sessions, loading, onMark }: {
 
 /* ── per-trainer payroll ───────────────────────────────────────────────────── */
 
-function Payroll({ lines }: { lines: ReturnType<typeof payrollByTrainer> }) {
-  const cols: Column<(typeof lines)[number]>[] = [
+function Payroll({ lines, unread }: {
+  lines: ReturnType<typeof payrollByTrainer> | null; unread: boolean;
+}) {
+  const cols: Column<NonNullable<typeof lines>[number]>[] = [
     { key: 'name', header: 'Trainer', value: (l) => l.trainerName ?? '',
       render: (l) => l.trainerName ?? <span className="dash">—</span> },
     { key: 'delivered', header: 'Delivered', value: (l) => l.delivered, numeric: true },
@@ -286,15 +394,24 @@ function Payroll({ lines }: { lines: ReturnType<typeof payrollByTrainer> }) {
   ];
   return (
     <Section title="Payroll by trainer" sub="Priced from confirmed sessions at the rate snapshotted when each was marked.">
-      <DataTable rows={lines} columns={cols} rowKey={(l) => l.trainerId} empty="No sessions in this period." />
+      {lines === null ? (
+        // "No sessions in this period" is a claim about the gym's month. A read
+        // that never returned has established nothing about the gym's month.
+        unread
+          ? <Unread what="the session record could not be read, so there is nothing here to price." />
+          : <Loading />
+      ) : (
+        <DataTable rows={lines} columns={cols} rowKey={(l) => l.trainerId} empty="No sessions in this period." />
+      )}
     </Section>
   );
 }
 
 /* ── settling: handing the money over, exactly once ────────────────────────── */
 
-function Settle({ owed, settling, onSettle }: {
-  owed: { trainerId: string; name: string | null; rows: PtSession[]; unmarked: number; cents: number; blocker: string | null }[];
+function Settle({ owed, unread, settling, onSettle }: {
+  owed: { trainerId: string; name: string | null; rows: PtSession[]; unmarked: number; cents: number; blocker: string | null }[] | null;
+  unread: boolean;
   settling: string | null;
   onSettle: (t: any) => void;
 }) {
@@ -303,7 +420,14 @@ function Settle({ owed, settling, onSettle }: {
       title="Outstanding"
       sub="What each trainer is owed for work not yet paid for. Settling stamps those exact sessions, so nothing here can be paid a second time."
     >
-      {owed.length === 0 ? (
+      {owed === null ? (
+        // "Nothing outstanding" is the most expensive wrong sentence on this
+        // page: it tells the owner every trainer is square, and he closes the
+        // tab. It has to be earned by a read that actually came back.
+        unread
+          ? <Unread what="the session record could not be read, so what each trainer is owed is not known. Nothing here is settled or unsettled until it can be." />
+          : <Loading />
+      ) : owed.length === 0 ? (
         <p style={{ margin: '12px 14px', fontSize: 13, color: 'var(--ink3)' }}>
           Nothing outstanding. Every marked session in this window has been settled.
         </p>
@@ -343,8 +467,14 @@ function Settle({ owed, settling, onSettle }: {
 
 /* ── what has already been paid ────────────────────────────────────────────── */
 
-function Settled({ runs }: { runs: Settlement[] | null }) {
-  if (runs === null) return null;
+function Settled({ runs, error }: { runs: Settlement[] | null; error: string | null }) {
+  // Not read yet: nothing to show and nothing to say, as before.
+  //
+  // Read and refused: say so here rather than anywhere else, because this is the
+  // only section on the page whose subject is the settlements read. Silence
+  // would be as bad as the old empty table — the owner would scroll past a
+  // missing section and take it for a gym that has never run payroll.
+  if (runs === null && error === null) return null;
   const cols: Column<Settlement>[] = [
     { key: 'when', header: 'Paid', value: (r) => r.settledAt,
       render: (r) => new Date(r.settledAt).toLocaleDateString() },
@@ -358,14 +488,27 @@ function Settled({ runs }: { runs: Settlement[] | null }) {
   ];
   return (
     <Section title="Already paid" sub="Amounts as they were when the money went out, not as today's rates would price them.">
-      <DataTable rows={runs} columns={cols} rowKey={(r) => r.id} empty="No payroll has been settled yet." />
+      {runs === null ? (
+        // The old code caught this failure and passed [], so the table said "No
+        // payroll has been settled yet." — an affirmative claim that no trainer
+        // has ever been paid, whose obvious remedy is to pay them all again.
+        <p style={{ margin: '12px 14px', fontSize: 13, color: 'var(--ink3)' }}>
+          Not shown: the record of what has already been paid could not be read — {error}. Treat
+          nothing below as settled or unsettled, and do not pay anybody a second time on the
+          strength of this page. Reload first.
+        </p>
+      ) : (
+        <DataTable rows={runs} columns={cols} rowKey={(r) => r.id} empty="No payroll has been settled yet." />
+      )}
     </Section>
   );
 }
 
 /* ── the marked history, so a mistake can be undone ────────────────────────── */
 
-function Marked({ sessions, onClear }: { sessions: PtSession[]; onClear: (id: string) => void }) {
+function Marked({ sessions, unread, onClear }: {
+  sessions: PtSession[] | null; unread: boolean; onClear: (id: string) => void;
+}) {
   const cols: Column<PtSession>[] = [
     { key: 'when', header: 'When', value: (s) => s.startsAt,
       render: (s) => new Date(s.startsAt).toLocaleDateString([], { day: 'numeric', month: 'short' }) },
@@ -381,7 +524,16 @@ function Marked({ sessions, onClear }: { sessions: PtSession[]; onClear: (id: st
   ];
   return (
     <Section title="Marked" sub="Undo returns a session to awaiting an outcome — it does not mark it cancelled.">
-      <DataTable rows={sessions} columns={cols} rowKey={(s) => s.id} empty="Nothing marked yet." />
+      {sessions === null ? (
+        // "Nothing marked yet" would read as a month of work nobody has touched,
+        // which is what the queue above is for — and the owner would go and mark
+        // sessions that are already marked.
+        unread
+          ? <Unread what="the session record could not be read, so nothing can be listed here to undo." />
+          : <Loading />
+      ) : (
+        <DataTable rows={sessions} columns={cols} rowKey={(s) => s.id} empty="Nothing marked yet." />
+      )}
     </Section>
   );
 }
@@ -443,4 +595,21 @@ function Banner({ children, tone }: { children: React.ReactNode; tone?: 'crit' }
 
 function Loading() {
   return <div style={{ padding: '26px 20px', color: 'var(--ink3)' }}>Loading…</div>;
+}
+
+/**
+ * What a section shows when the read behind it did not come back.
+ *
+ * Deliberately not the table's `empty` string. "There is nothing here" is a
+ * statement about the gym, and a failed read has established nothing about the
+ * gym — on a payroll screen that difference is an owner who reloads versus an
+ * owner who pays a month of sessions twice. The reason itself is on the banner
+ * at the top of the page, so it is not repeated four times down the column.
+ */
+function Unread({ what }: { what: string }) {
+  return (
+    <p style={{ margin: '12px 14px', fontSize: 13, color: 'var(--ink3)' }}>
+      Not shown: {what} The banner above says why.
+    </p>
+  );
 }

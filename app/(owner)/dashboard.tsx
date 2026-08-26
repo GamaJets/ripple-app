@@ -23,6 +23,7 @@ import { useSessionsHistory } from '../../src/ui/useMrrHistory';
 import { cohorts } from '../../src/lib/ownerAnalytics';
 import { ownerReportDoc, shareDoc } from '../../src/lib/exportShare';
 import { fetchFailedInvoices, money, type Invoice } from '../../src/lib/billing';
+import { reportError } from '../../src/lib/reportError';
 import { Linking } from 'react-native';
 
 // Labels come from the one settled scale now — see src/lib/status.ts for why
@@ -30,7 +31,13 @@ import { Linking } from 'react-native';
 
 export default function OwnerOverview() {
   const t = useTheme(); const router = useRouter();
-  const { trainers, sessions30, payroll30 } = usePlatformTrainers();
+  // `loading` is destructured because the provider exposes it for exactly one
+  // reason: until the roster read returns, every roll-up below is computed over
+  // an empty array. Ignoring it put "Sessions delivered · 30 days · 0" and "No
+  // trainers yet" on the console's biggest figure while the query was still in
+  // flight — an owner opening the app first thing was told their gym delivered
+  // nothing last month, in the same confident type used when it is true.
+  const { trainers, loading, sessions30, payroll30 } = usePlatformTrainers();
   const { tenant } = useTenant();
   const roll = gymRollup(trainers as TrainerLike[], tenant?.sessionFee ?? null);
   const { series, labels, delta, months } = useSessionsHistory(sessions30);
@@ -43,9 +50,24 @@ export default function OwnerOverview() {
   // Trainers sorted worst-health first so problems surface at the top.
   const ranked = [...(trainers as TrainerLike[])].map((tr) => ({ tr, h: trainerHealth(tr) })).sort((a, b) => a.h.score - b.h.score);
   const selHealth = sel ? trainerHealth(sel) : null;
-  const [dunning, setDunning] = useState<Invoice[]>([]);
-  useEffect(() => { let c = false; fetchFailedInvoices().then((r) => { if (!c) setDunning(r); }); return () => { c = true; }; }, []);
-  const dunningTotal = dunning.reduce((a, i) => a + (i.amount_due || 0), 0);
+  // Null until the read returns. The `.catch` is not decoration: without it a
+  // rejected read was an unhandled promise rejection and the state kept its
+  // initial `[]`, so "no failed payments" was indistinguishable from "we never
+  // found out" — and this is the callout an owner acts on to chase money.
+  const [dunning, setDunning] = useState<Invoice[] | null>(null);
+  // null is now returned by fetchFailedInvoices for a refused read as well as
+  // being the initial value, so the two need telling apart: the callout below
+  // renders only when there ARE unpaid invoices, which means a failed read drew
+  // nothing at all and the owner read that as "everyone has paid".
+  const [dunningFailed, setDunningFailed] = useState(false);
+  useEffect(() => {
+    let c = false;
+    fetchFailedInvoices()
+      .then((r) => { if (!c) { setDunning(r); setDunningFailed(r === null); } })
+      .catch((e) => { reportError('ownerDashboard.dunning', e); if (!c) { setDunning(null); setDunningFailed(true); } });
+    return () => { c = true; };
+  }, []);
+  const dunningTotal = (dunning ?? []).reduce((a, i) => a + (i.amount_due || 0), 0);
   const exportReport = async () => {
     const doc = ownerReportDoc({
       trainers: roll.trainers, clients: roll.clients, sessions30: roll.sessions30,
@@ -99,7 +121,13 @@ export default function OwnerOverview() {
             </Notice>
           ) : null}
 
-          {dunning.length > 0 ? (
+          {dunningFailed ? (
+            <Notice tone={t.warn} kicker="Failed payments"
+              title="Unpaid invoices could not be read"
+              note="This is not a statement that everybody has paid. Until it loads, nothing here tells you whether money is outstanding — check Stripe directly before you assume it is not." />
+          ) : null}
+
+          {dunning && dunning.length > 0 ? (
             <Notice tone={t.crit} kicker="Failed payments"
               title={`${money(dunningTotal)} in failed payments`}
               note={`${dunning.length} unpaid invoice${dunning.length > 1 ? 's' : ''} — retry or chase before they churn.`}>
@@ -119,7 +147,7 @@ export default function OwnerOverview() {
           ) : null}
         </View>
 
-        {roll.trainers === 0 ? (
+        {!loading && roll.trainers === 0 ? (
           <Card style={{ marginTop: sp.sm }}>
             <Text style={{ ...ty.label, color: t.ink2 }}>
               No trainers yet — clients, delivered sessions and trainer health fill in as they join your gym.
@@ -130,8 +158,10 @@ export default function OwnerOverview() {
         {/* ── the hero ───────────────────────────────────────────────────── */}
         <Hero
           label="Sessions delivered · 30 days"
-          figure={fig(roll.sessions30)}
-          note={delta !== 0
+          figure={loading ? '—' : fig(roll.sessions30)}
+          note={loading
+            ? 'Reading your roster…'
+            : delta !== 0
             ? `${delta > 0 ? '+' : '−'}${Math.abs(delta)} vs last month`
             : roll.payroll30 == null
               ? 'Set a session fee in Ops to value these'
@@ -145,9 +175,9 @@ export default function OwnerOverview() {
         <Section>
           <SectionHead title="Your gym" note="Trainers" onPress={() => router.push('/(owner)/trainers')} />
           <KpiRow items={[
-            { label: 'Trainers', value: fig(roll.trainers), delta: `${roll.avgSessionsPerTrainer} sessions avg` },
-            { label: 'Clients', value: fig(roll.clients), delta: `${roll.avgClientsPerTrainer} avg / trainer` },
-            { label: 'Payroll · 30d', value: roll.payroll30 == null ? '—' : '$' + roll.payroll30.toLocaleString(), delta: roll.payroll30 == null ? 'no session fee set' : 'at your session fee' },
+            { label: 'Trainers', value: loading ? '—' : fig(roll.trainers), delta: loading ? 'not read yet' : `${roll.avgSessionsPerTrainer} sessions avg` },
+            { label: 'Clients', value: loading ? '—' : fig(roll.clients), delta: loading ? 'not read yet' : `${roll.avgClientsPerTrainer} avg / trainer` },
+            { label: 'Payroll · 30d', value: loading || roll.payroll30 == null ? '—' : '$' + roll.payroll30.toLocaleString(), delta: loading ? 'not read yet' : roll.payroll30 == null ? 'no session fee set' : 'at your session fee' },
           ]} />
         </Section>
 
@@ -177,7 +207,9 @@ export default function OwnerOverview() {
         {/* ── trainer health board ───────────────────────────────────────── */}
         <Section>
           <SectionHead title="Trainer health" note="Worst first" />
-          {ranked.length === 0 ? (
+          {loading ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>Reading your roster…</Text>
+          ) : ranked.length === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>No trainers to score yet.</Text>
           ) : ranked.map(({ tr, h }, i) => (
             <Pressable key={tr.id} onPress={() => setSel(tr)}

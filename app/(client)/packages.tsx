@@ -21,13 +21,17 @@ import { fetchMyPurchases, type Purchase } from '../../src/lib/connect';
 export default function ClientPackages() {
   const t = useTheme();
   const router = useRouter();
-  const [rows, setRows] = useState<Purchase[]>([]);
+  // null is not []. [] is somebody who has bought nothing; null is a purchase
+  // history we could not read — and telling a paying customer they have no
+  // purchases is the one sentence here that must never be guessed.
+  const [rows, setRows] = useState<Purchase[] | null>(null);
+  const [failed, setFailed] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  const load = useCallback(async () => { setLoading(true); setRows(await fetchMyPurchases()); setLoading(false); }, []);
+  const load = useCallback(async () => { setLoading(true); const r = await fetchMyPurchases(); setRows(r); setFailed(r === null); setLoading(false); }, []);
   useEffect(() => { load(); }, [load]);
 
-  const activePacks = rows.filter((r) => r.sessions_total != null && r.status === 'paid');
+  const activePacks = (rows ?? []).filter((r) => r.sessions_total != null && r.status === 'paid');
   const remaining = activePacks.reduce((a, r) => a + Math.max(0, (r.sessions_total || 0) - r.sessions_used), 0);
   const G = layout.gutter;
 
@@ -54,7 +58,19 @@ export default function ClientPackages() {
 
             <Rule />
 
-            {rows.length === 0 ? (
+            {failed ? (
+              <View style={{ alignItems: 'center', paddingVertical: sp.huge }}>
+                <Icon name="trophy" size={30} color={t.ink3} />
+                <Text style={{ ...ty.head, color: t.ink, marginTop: sp.md }}>We couldn't load your purchases</Text>
+                <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: 4, maxWidth: 320 }}>
+                  This is our end, not a statement about what you have bought. Anything you have paid
+                  for is still yours — it just is not readable right now.
+                </Text>
+                <View style={{ marginTop: sp.lg }}>
+                  <Ghost label="Try again" onPress={load} />
+                </View>
+              </View>
+            ) : (rows ?? []).length === 0 ? (
               <View style={{ alignItems: 'center', paddingVertical: sp.huge }}>
                 <Icon name="trophy" size={30} color={t.ink3} />
                 <Text style={{ ...ty.head, color: t.ink, marginTop: sp.md }}>No purchases yet</Text>
@@ -65,8 +81,8 @@ export default function ClientPackages() {
               </View>
             ) : (
               <Section>
-                <SectionHead title="Your purchases" note={`${rows.length}`} />
-                {rows.map((r, i) => (
+                <SectionHead title="Your purchases" note={`${(rows ?? []).length}`} />
+                {(rows ?? []).map((r, i) => (
                   <View key={r.id}>
                     {i > 0 ? <Rule /> : null}
                     <View style={{ paddingVertical: sp.md }}>

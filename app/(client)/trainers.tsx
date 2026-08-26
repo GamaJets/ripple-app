@@ -45,12 +45,34 @@ export default function FindTrainer() {
   const cd = useClientData();
   const { received, acceptInvite, declineInvite } = useInvites();
   const [coaches, setCoaches] = useState<Coach[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Three answers where there were two. `coaches: []` meant both "no trainer has
+  // published a profile" and "we never got an answer from the server", and this
+  // screen asserted the first in both cases — a client read "No coaches listed
+  // yet" off a directory that was full, and concluded there was nobody on
+  // Repple to hire. `status` is what the empty state is now gated on.
+  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [attempt, setAttempt] = useState(0);
   const [sel, setSel] = useState<Coach | null>(null);
   const [sent, setSent] = useState<Record<string, boolean>>({});
+  // Set only when the pending-requests read itself failed. Absence of a request
+  // and an unreadable list of requests are different things: the first means
+  // "ask this coach", the second means "we don't know whether you already did".
+  const [pendingUnknown, setPendingUnknown] = useState(false);
 
   const acceptCoach = async (id: string, coachName: string | null, mode: string) => {
-    const m = await acceptInvite(id);
+    // "You are connected" used to be said whether or not the link was made. The
+    // accept RPC resolves on refusal rather than throwing, so a failed accept
+    // told the client they had a coach, switched their coaching mode, and left
+    // the coach with no client — and neither side had anything to look at that
+    // would explain it.
+    const { mode: m, ok } = await acceptInvite(id);
+    if (!ok) {
+      Alert.alert(
+        'Not connected yet',
+        'We could not link you to ' + (coachName || 'your coach') + '. Your invitation is still here — try accepting it again in a moment.',
+      );
+      return;
+    }
     cd.setCoachingMode(m);
     notifySuccess();
     Alert.alert('You are connected', (coachName || 'Your coach') + ' is now your ' + (m === 'inperson' ? 'in-person' : 'online') + ' coach. Their plan, feedback and messaging are now on your app.', [{ text: 'Great' }]);
@@ -59,22 +81,35 @@ export default function FindTrainer() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      if (!USE_SUPABASE) { setLoading(false); return; }
+      if (!USE_SUPABASE) { setStatus('ready'); return; }
+      setStatus('loading');
       try {
         const { data: auth } = await supabase.auth.getUser();
         const uid = auth?.user?.id ?? null;
 
-        const { data: rows } = await supabase
+        // supabase-js resolves; it does not throw. An RLS refusal or a dead
+        // connection arrives as `error` set and `data` null, so a query read for
+        // its `data` alone degrades into an empty directory that looks exactly
+        // like an honest one. Every read below now checks `error` first.
+        const { data: rows, error: rowsErr } = await supabase
           .from('trainers')
           .select('id, bio, tagline, specialties, session_fee')
           .eq('listed', true);
         if (cancelled) return;
+        if (rowsErr) throw rowsErr;
 
         const ids = (rows ?? []).map((r: any) => r.id).filter((id: string) => id !== uid);
-        if (ids.length === 0) { setCoaches([]); setLoading(false); return; }
+        if (ids.length === 0) { setCoaches([]); setStatus('ready'); return; }
 
-        const { data: profs } = await supabase.from('profiles').select('id, full_name').in('id', ids);
+        const { data: profs, error: profsErr } = await supabase.from('profiles').select('id, full_name').in('id', ids);
         if (cancelled) return;
+        // Names live in `profiles`, not in `trainers`, and a coach we cannot name
+        // is dropped below as an unfinished profile. So a failure here does not
+        // thin the directory, it empties it: every listing we just read
+        // successfully would vanish and the screen would report a working
+        // directory as "No coaches listed yet". Having listings we cannot put a
+        // name to is a failed load, and it is reported as one.
+        if (profsErr) throw profsErr;
         const nameById = new Map<string, string>((profs ?? []).map((p: any) => [p.id, p.full_name]));
 
         const list: Coach[] = (rows ?? [])
@@ -91,23 +126,33 @@ export default function FindTrainer() {
           .filter((c) => c.name.length > 0);
 
         // Also hide any trainer this client already has a pending request with.
+        // Worth its own branch rather than the outer catch: the directory we
+        // just loaded is real and useful on its own, so losing this read should
+        // caveat the request buttons, not throw away the list of coaches.
         if (uid) {
-          const { data: reqs } = await supabase
+          const { data: reqs, error: reqsErr } = await supabase
             .from('coach_requests')
             .select('trainer_id')
             .eq('client_id', uid)
             .eq('status', 'pending');
-          if (!cancelled && reqs) setSent(Object.fromEntries(reqs.map((r: any) => [r.trainer_id, true])));
+          if (cancelled) return;
+          if (reqsErr) {
+            reportError('findTrainer.pending', reqsErr);
+            setPendingUnknown(true);
+          } else {
+            setSent(Object.fromEntries((reqs ?? []).map((r: any) => [r.trainer_id, true])));
+            setPendingUnknown(false);
+          }
         }
 
-        if (!cancelled) setCoaches(list);
+        if (!cancelled) { setCoaches(list); setStatus('ready'); }
       } catch (e) {
         reportError('findTrainer.load', e);
+        if (!cancelled) setStatus('error');
       }
-      if (!cancelled) setLoading(false);
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [attempt]);
 
   const request = useCallback(async (coach: Coach, mode: Mode) => {
     setSel(null);
@@ -136,7 +181,12 @@ export default function FindTrainer() {
   }, []);
 
   const G = layout.gutter;
-  const initials = (n: string) => n.split(' ').map((x) => x[0]).join('');
+  // `n.split(' ').map((x) => x[0]).join('')` is the obvious version and it is
+  // the `String(null)` mistake in another costume: any run of two spaces yields
+  // an empty part, `''[0]` is undefined, and `join` spells that out — so
+  // "Sam  Rivera" was drawn on the avatar as "SundefinedR". Dropping the empty
+  // parts is the fix; a name that leaves nothing falls back to a dash.
+  const initials = (n: string) => n.split(/\s+/).filter(Boolean).map((x) => x[0].toUpperCase()).join('') || '—';
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
@@ -173,11 +223,24 @@ export default function FindTrainer() {
 
         {/* ── the directory ──────────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Coaches on Repple" note={!loading && coaches.length > 0 ? String(coaches.length) : undefined} />
+          <SectionHead title="Coaches on Repple" note={status === 'ready' && coaches.length > 0 ? String(coaches.length) : undefined} />
 
-          {loading ? (
+          {/* The read failed, so nothing below this line is a statement about who
+              is coaching on Repple. Naming the gap is the whole point: the old
+              screen turned this into "No coaches listed yet", which a client has
+              no way to tell apart from the truth. */}
+          {status === 'error' ? (
+            <Notice tone={t.warn} kicker="Directory" title="We couldn’t load the directory"
+              note="This is our end, not an empty directory. Until it loads we can't tell you who is coaching on Repple.">
+              <View style={{ marginTop: sp.lg }}>
+                <Cta label="Try again" wide onPress={() => setAttempt((n) => n + 1)} />
+              </View>
+            </Notice>
+          ) : null}
+
+          {status === 'loading' ? (
             <View style={{ paddingVertical: sp.huge, alignItems: 'center' }}><ActivityIndicator color={t.brand} /></View>
-          ) : coaches.length === 0 ? (
+          ) : status === 'error' ? null : coaches.length === 0 ? (
             <View style={{ alignItems: 'center', paddingVertical: sp.xl }}>
               <View style={{ width: 52, height: 52, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center', marginBottom: sp.md }}>
                 <Icon name="people" size={24} color={t.ink3} />
@@ -271,6 +334,16 @@ export default function FindTrainer() {
                 </View>
               ) : (<>
                 <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Start coaching</Text>
+                {/* Without the pending-requests read, the absence of a "Request
+                    pending" badge is not evidence that none is outstanding —
+                    it's evidence we couldn't look. Sending again is harmless
+                    (the insert is deduplicated), but the client should know
+                    they may be asking twice rather than for the first time. */}
+                {pendingUnknown ? (
+                  <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
+                    We couldn’t check your existing requests, so we can’t tell whether you’ve already asked {sel.name}. Sending again won’t create a second request.
+                  </Text>
+                ) : null}
                 {(['online', 'inperson'] as Mode[]).map((m) => (
                   <View key={m} style={{ marginBottom: 9 }}>
                     <Cta label={`Request ${m === 'inperson' ? 'in-person' : 'online'} coaching`} wide onPress={() => request(sel, m)} />

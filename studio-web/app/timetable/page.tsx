@@ -45,6 +45,9 @@ interface Board { classes: GymClass[]; slots: PtSlot[] }
 export default function Timetable() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
   const [gymName, setGymName] = useState<string | null>(null);
+  // Kept separate from `err`: load() clears that on a successful timetable
+  // read moments later, which would wipe this message off the screen.
+  const [gymNameErr, setGymNameErr] = useState<string | null>(null);
   const [raw, setRaw] = useState<Board | null>(null);
   const [openClass, setOpenClass] = useState<GymClass | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -84,8 +87,17 @@ export default function Timetable() {
       if (!live) return;
       setMe(who);
       if (!who?.tenantId) { setRaw({ classes: [], slots: [] }); return; }
-      const { data: t } = await supabase.from('tenants').select('name').eq('id', who.tenantId).single();
-      if (live) setGymName(t?.name ?? null);
+      // supabase-js resolves with { data, error } rather than rejecting, so a
+      // read that failed — or that RLS refused — arrives as t === null and is
+      // indistinguishable from a tenant row that genuinely is not there. Dropping
+      // the error leaves the sidebar saying "No gym linked", which the owner reads
+      // as a fact about their account: they go off to re-link a gym that was
+      // linked all along and never learn the read is what broke.
+      const { data: t, error: tErr } = await supabase.from('tenants').select('name').eq('id', who.tenantId).single();
+      if (live) {
+        setGymName(tErr ? null : (t?.name ?? null));
+        setGymNameErr(tErr ? (tErr.message ?? 'Could not read which gym this account is linked to.') : null);
+      }
       await load(who.tenantId);
     })();
     return () => { live = false; };
@@ -189,6 +201,12 @@ export default function Timetable() {
         </div>
       </div>
 
+      {gymNameErr ? (
+        <Banner tone="crit">
+          This account is linked to a gym, but its record could not be read — the name is missing
+          here, not unset: {gymNameErr}
+        </Banner>
+      ) : null}
       {err ? <Banner tone="crit">{err}</Banner> : null}
       {loadFail ? (
         <Banner tone="crit">
@@ -657,9 +675,18 @@ function Roster({ gymClass, onClose }: { gymClass: GymClass; onClose: () => void
 
   useEffect(() => { load(); }, [load]);
 
+  // setAttendance throws on a database error. Unreported, the tick simply did
+  // not move and the button still reads "Mark here" — so a member who attended
+  // is recorded absent, which corrupts the show-rate and the attendance history
+  // the gym pays trainers on.
   const toggle = async (r: RosterEntry) => {
-    await setAttendance(supabase, r.bookingId, !r.attendedAt);
-    load();
+    try {
+      await setAttendance(supabase, r.bookingId, !r.attendedAt);
+      setErr(null);
+      load();
+    } catch (e: any) {
+      setErr(e?.message ?? 'Could not save that check-in.');
+    }
   };
 
   return (

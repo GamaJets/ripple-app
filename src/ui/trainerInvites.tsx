@@ -3,10 +3,21 @@
 // accepts (accept_trainer_invite → attaches them to the owner tenant as a
 // trainer + trial) then completes their profile. Supabase-backed with a
 // defensive in-memory fallback so the UI never blanks or crashes.
+//
+// Same shape of bug as the coach→client invites, one level up. Accepting is what
+// attaches a trainer to an owner's tenant and starts their trial; it dismissed
+// the invitation permanently and then fired `accept_trainer_invite` with the
+// result discarded. A trainer whose RPC was refused lost the invitation for
+// good, was shown as onboarded, and belonged to no gym — and the owner's roster
+// never gained them. The dismiss now waits for the server.
+//
+// Both list reads swallowed their query too, so "no pending invitations" and
+// "we could not check" were the same empty screen.
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import type { LoadStatus } from './loadStatus';
 
 export interface TrainerInvite {
   id: string;
@@ -21,10 +32,19 @@ export interface TrainerInvite {
 interface TrainerInvitesValue {
   sent: TrainerInvite[];      // invites I (owner) have sent
   received: TrainerInvite[];  // pending invites addressed to my email
-  sendTrainerInvite: (email: string) => Promise<void>;
-  revokeTrainerInvite: (id: string) => void;
-  acceptTrainerInvite: (id: string) => Promise<void>;
-  declineTrainerInvite: (id: string) => void;
+  /** Whether the two lists are the server's answer. Under 'error' an empty
+   *  `received` means we could not check, not that nobody invited you. */
+  status: LoadStatus;
+  /** Resolves true only once the invitation is on the server. */
+  sendTrainerInvite: (email: string) => Promise<boolean>;
+  /** Resolves true only when the invitation was actually revoked server-side. */
+  revokeTrainerInvite: (id: string) => Promise<boolean>;
+  /** Resolves true only when the trainer is ACTUALLY attached to the tenant.
+   *  False means the invitation is still in `received` and they have no gym —
+   *  do not send them on to onboarding. */
+  acceptTrainerInvite: (id: string) => Promise<boolean>;
+  /** Resolves true when the decline was recorded. */
+  declineTrainerInvite: (id: string) => Promise<boolean>;
 }
 
 let SEQ = 600;
@@ -46,6 +66,7 @@ export function TrainerInvitesProvider({ children }: { children: ReactNode }) {
   const [uid, setUid] = useState<string | null>(null);
   const [myName, setMyName] = useState<string | null>(null);
   const [tenantId, setTenantId] = useState<string | null>(null);
+  const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
 
   const DISMISS_KEY = 'repple.trainerInvites.dismissed';
   const markDismissed = (id: string) => {
@@ -62,80 +83,101 @@ export function TrainerInvitesProvider({ children }: { children: ReactNode }) {
   const seedDemo = () => { setReceived([]); };
 
   useEffect(() => {
-    if (!USE_SUPABASE) { seedDemo(); return; }
+    if (!USE_SUPABASE) { seedDemo(); setStatus('ready'); return; }
     let cancelled = false;
     (async () => {
+      let failed = false;
       try {
-        const { data: auth } = await supabase.auth.getUser();
+        const { data: auth, error: authErr } = await supabase.auth.getUser();
+        if (cancelled) return;
+        if (authErr) { setStatus('error'); return; }
         const u = auth?.user;
-        if (!u || cancelled) { seedDemo(); return; }
+        // Signed out: nobody has been invited, which is knowable and true.
+        if (!u) { seedDemo(); setStatus('ready'); return; }
         setUid(u.id);
         try {
           const prof = await supabase.from('profiles').select('full_name, tenant_id').eq('id', u.id).single();
           if (!cancelled && prof.data) { setMyName(prof.data.full_name ?? null); setTenantId(prof.data.tenant_id ?? null); }
-        } catch { /* optional */ }
+        } catch { /* the owner's own name is cosmetic on the invite */ }
         try {
           const s = await supabase.from('trainer_invites').select('*').eq('owner_id', u.id).order('created_at', { ascending: false });
-          if (!cancelled && s.data) setSent(s.data.map(rowTo));
-        } catch { /* ignore */ }
+          if (s.error) failed = true;
+          else if (!cancelled && s.data) setSent(s.data.map(rowTo));
+        } catch { failed = true; }
         const email = u.email;
         if (email) {
           try {
             const r = await supabase.from('trainer_invites').select('*').ilike('email', email).eq('status', 'pending');
-            if (!cancelled) {
+            if (r.error) failed = true;
+            else if (!cancelled) {
               if (r.data && r.data.length) setReceived(r.data.map(rowTo));
               // no pending invites for a real account -> clean slate, no sample
             }
-          } catch { /* real account: never fall back to the sample invite */ }
+          } catch { failed = true; /* real account: never fall back to the sample invite */ }
         }
-      } catch { seedDemo(); }
+      } catch { failed = true; seedDemo(); }
+      if (!cancelled) setStatus(failed ? 'error' : 'ready');
     })();
     return () => { cancelled = true; };
   }, []);
 
   const sendTrainerInvite: TrainerInvitesValue['sendTrainerInvite'] = async (rawEmail) => {
     const e = (rawEmail || '').trim().toLowerCase();
-    if (!e) return;
+    if (!e) return false;
     const optimistic: TrainerInvite = {
       id: `local-${SEQ++}`, ownerId: uid ?? 'me', ownerName: myName,
       email: e, status: 'pending', createdAt: new Date().toISOString(),
     };
     setSent((p) => [optimistic, ...p.filter((i) => i.email.toLowerCase() !== e)]);
-    if (USE_SUPABASE && uid) {
-      try {
-        const { data } = await supabase
-          .from('trainer_invites')
-          .upsert({ owner_id: uid, owner_name: myName, tenant_id: tenantId, email: e, status: 'pending' }, { onConflict: 'owner_id,email' })
-          .select()
-          .single();
-        if (data) setSent((p) => [rowTo(data), ...p.filter((i) => i.id !== optimistic.id && i.email.toLowerCase() !== e)]);
-      } catch { /* keep optimistic */ }
-    }
+    if (!USE_SUPABASE || !uid) return false;
+    try {
+      const { data, error } = await supabase
+        .from('trainer_invites')
+        .upsert({ owner_id: uid, owner_name: myName, tenant_id: tenantId, email: e, status: 'pending' }, { onConflict: 'owner_id,email' })
+        .select()
+        .single();
+      if (error || !data) return false;
+      setSent((p) => [rowTo(data), ...p.filter((i) => i.id !== optimistic.id && i.email.toLowerCase() !== e)]);
+      return true;
+    } catch { return false; }
   };
 
-  const revokeTrainerInvite: TrainerInvitesValue['revokeTrainerInvite'] = (id) => {
+  const revokeTrainerInvite: TrainerInvitesValue['revokeTrainerInvite'] = async (id) => {
     setSent((p) => p.filter((i) => i.id !== id));
-    if (USE_SUPABASE && !id.startsWith('local-')) {
-      try { supabase.from('trainer_invites').update({ status: 'revoked' }).eq('id', id).then(() => {}, () => {}); } catch { /* ignore */ }
-    }
+    if (!USE_SUPABASE || id.startsWith('local-')) return true;
+    try {
+      const { error } = await supabase.from('trainer_invites').update({ status: 'revoked' }).eq('id', id);
+      return !error;
+    } catch { return false; }
   };
 
   const acceptTrainerInvite: TrainerInvitesValue['acceptTrainerInvite'] = async (id) => {
     const inv = received.find((i) => i.id === id);
     setReceived((p) => p.filter((i) => i.id !== id));
-    markDismissed(id);
-    if (USE_SUPABASE && inv && !inv.demo) {
-      try { await supabase.rpc('accept_trainer_invite', { p_invite: id }); } catch { /* ignore */ }
-    }
+    if (!USE_SUPABASE || !inv || inv.demo) { markDismissed(id); return false; }
+    let attached = false;
+    try {
+      // This RPC is what puts the trainer in the owner's tenant and starts
+      // their trial. Discarding its result meant a trainer could be dropped
+      // between the two accounts with the invitation already burned.
+      const { error } = await supabase.rpc('accept_trainer_invite', { p_invite: id });
+      attached = !error;
+    } catch { attached = false; }
+    if (attached) markDismissed(id);
+    else setReceived((p) => (p.some((i) => i.id === id) ? p : [inv, ...p]));
+    return attached;
   };
 
-  const declineTrainerInvite: TrainerInvitesValue['declineTrainerInvite'] = (id) => {
+  const declineTrainerInvite: TrainerInvitesValue['declineTrainerInvite'] = async (id) => {
     setReceived((p) => p.filter((i) => i.id !== id));
+    // Local-only by design (there is no decline RPC): the invitation is hidden
+    // on this account and nothing on the server needed to change.
     markDismissed(id);
+    return true;
   };
 
   return (
-    <Ctx.Provider value={{ sent, received, sendTrainerInvite, revokeTrainerInvite, acceptTrainerInvite, declineTrainerInvite }}>
+    <Ctx.Provider value={{ sent, received, status, sendTrainerInvite, revokeTrainerInvite, acceptTrainerInvite, declineTrainerInvite }}>
       {children}
     </Ctx.Provider>
   );
