@@ -101,11 +101,11 @@ wrong three separate times about what already exists.
 |---|---|
 | **Studio web: members** | **Built.** `studio-web/app/members` + `src/lib/memberView.ts`. Built around what class attendance alone cannot tell you: two members with identical class histories, one of whom moved to the gym floor and one of whom stopped. Only the door log separates them. |
 | **Coach: the book by who is drifting** | **Built.** `src/lib/clientDrift.ts` + the Clients screen. Ranks on the break in a person's own pattern, not on a level — a client who fell from 4 days a week to 1 outranks a steady 1-a-week client at the identical current rate. |
-| **Member: a history that reads well going back** | **In progress.** Eight screens already cover volume, progression, records, body trends, activity and reports — but **the longest window anywhere is 10 weeks**. Every one is a slice or a snapshot; a member who has trained for a year cannot see that year. |
+| **Member: a history that reads well going back** | **Built.** `app/(client)/history.tsx` + `src/lib/longView.ts`. The ceiling really was 10 weeks; this is months and years, with untrained months reporting null rather than 0 and breaks left visible instead of smoothed into a trend line. |
 | **Studio web: staff** | Open. |
 | **Studio web: retention** | Partly. `retentionRead` in `memberView.ts` does it per member; there is no gym-wide view. |
-| **Studio web: month-end close** | In progress. |
-| **Exports everywhere** | In progress for the gym side. The member side exists — `src/lib/gdpr.ts` exports 14 tables as JSON. |
+| **Studio web: month-end close** | **Built.** `studio-web/app/close` + `src/lib/monthEnd.ts`. Refuses to present a month as closed while sessions are unmarked, because payroll is wrong by exactly those. |
+| **Exports everywhere** | **Built both sides.** `src/lib/gymExport.ts` + `studio-web/app/export` for the gym, round-tripped through our own CSV importer. `src/lib/gdpr.ts` for the member — and it was silently capable of exporting an empty array for a table it could not read, which is fixed. |
 
 ---
 
