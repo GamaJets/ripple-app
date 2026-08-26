@@ -723,22 +723,41 @@ table.data.vs td .job { display: block; color: var(--ink); font-weight: 500; fon
 .getbar .role { font-size: 12.5px; color: var(--ink3); margin: 0 0 11px; }
 .getbar .stores { display: flex; flex-wrap: wrap; gap: 8px; }
 
-/* Store buttons. Deliberately text, not Apple's or Google's badge artwork —
-   those are trademarked assets with their own layout and clear-space rules,
-   and a hand-drawn imitation is worse than a plain honest button. */
-.store {
-  display: inline-flex; align-items: center; gap: 7px;
-  padding: 8px 13px; border-radius: 9px; border: var(--rule);
-  background: var(--panel2); color: var(--ink);
-  font-size: 13px; font-weight: 600; white-space: nowrap;
-}
-.store:hover { border-color: var(--accent); color: var(--ink); }
-.store svg { flex: none; }
-.store .lab { display: flex; flex-direction: column; line-height: 1.15; }
-.store .lab small { font-size: 9.5px; font-weight: 500; color: var(--ink3); letter-spacing: .02em; }
+/* Official store badges.
+   ────────────────────────────────────────────────────────────────────────
+   These are Apple's and Google's own artwork, downloaded unmodified from
+   their own endpoints and served from web/badges/ rather than hotlinked:
 
-/* Header button, so "get the app" is reachable from every page without
-   scrolling to the bottom of anything. */
+     app-store.svg        Download_on_the_App_Store_Badge_US-UK_RGB_blk
+     app-store-white.svg  Download_on_the_App_Store_Badge_US-UK_RGB_wht
+     google-play.png      en_badge_web_generic
+
+   Both are trademarked and both carry usage rules this stylesheet keeps to:
+   the artwork is never recoloured, stretched or overlaid, it never falls
+   below the 40px minimum height, and it keeps clear space of a quarter of
+   its own height on every side (the gap on .stores provides it).
+
+   Apple ships a black badge and a white one for exactly this reason — the
+   black is unreadable on our dark ground. The pair is swapped by colour
+   scheme rather than one being tinted, because tinting the artwork is the
+   thing the guidelines forbid.
+
+   Google ships one badge with its clear space already inside the file, so
+   it is set taller than Apple's to make the two read as the same size. The
+   figures below were measured on the rendered page, not guessed. */
+
+.store { display: inline-flex; align-items: center; }
+.store img { display: block; width: auto; }
+.store img.apple { height: 44px; }
+.store img.play  { height: 66px; margin: -11px; }   /* -11px trims its baked-in padding to a matching 44px */
+
+/* Apple's two variants. Only one is ever shown. */
+.store img.apple.on-dark  { display: none; }
+@media (prefers-color-scheme: dark) {
+  .store img.apple.on-light { display: none; }
+  .store img.apple.on-dark  { display: block; }
+}
+
 nav.site a.get { display: inline-flex; align-items: center; gap: 7px; }
 nav.site a.get .appicon { width: 26px; height: 26px; border-radius: 7px; box-shadow: none; }
 @media (max-width: 720px) { nav.site a.get .appicon { display: none; } }
