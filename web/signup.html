@@ -59,6 +59,13 @@
         </button>
       </form>
 
+  <div id="resendWrap" hidden style="margin-top:18px">
+    <p class="tiny" style="margin:0 0 9px">Nothing after a few minutes? Check spam and junk first &mdash; that is where it usually is.</p>
+    <button id="resendBtn" type="button" class="btn">Send it again</button>
+    <p id="resendMsg" class="tiny" style="margin:10px 0 0"></p>
+  </div>
+
+
       <p id="msg" role="status" aria-live="polite" style="margin-top:16px"></p>
 
       <div id="done" hidden style="margin-top:20px">
@@ -192,6 +199,28 @@
     });
   });
 
+  const resendWrap = document.getElementById('resendWrap');
+  const resendBtn = document.getElementById('resendBtn');
+  const resendMsg = document.getElementById('resendMsg');
+
+  resendBtn.addEventListener('click', async () => {
+    const email = resendWrap.dataset.email;
+    if (!email) return;
+    resendBtn.disabled = true; resendBtn.textContent = 'Sending…';
+    const { error } = await sb.auth.resend({
+      type: 'signup',
+      email,
+      options: { emailRedirectTo: location.origin + '/confirmed' },
+    });
+    resendBtn.disabled = false; resendBtn.textContent = 'Send it again';
+    // Supabase rate-limits resends. Show its own message rather than a generic
+    // one: "For security purposes, you can only request this after N seconds"
+    // is actionable, and "something went wrong" is not.
+    if (error) { resendMsg.className = 'bad'; resendMsg.textContent = error.message; return; }
+    resendMsg.className = 'ok';
+    resendMsg.textContent = 'Sent again. If it still does not arrive, email support@repplefitness.com and we will confirm you by hand.';
+  });
+
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     msg.className = ''; msg.textContent = '';
@@ -202,7 +231,14 @@
       password: $('pw').value,
       // The database trigger that creates the profile row reads full_name from
       // here, which is why the name is collected at signup rather than after.
-      options: { data: { full_name: $('name').value.trim() } },
+      options: {
+        data: { full_name: $('name').value.trim() },
+        // Without this the confirmation link falls back to the project's Site
+        // URL, which is the homepage — a page with no token handling and no
+        // acknowledgement, so somebody who clicked a valid link was left
+        // staring at marketing copy wondering whether it had worked.
+        emailRedirectTo: location.origin + '/confirmed',
+      },
     });
 
     go.disabled = false; go.textContent = 'Create account';
@@ -219,7 +255,10 @@
       done.hidden = false;
     } else {
       msg.className = 'ok';
-      msg.textContent = 'Check your email to confirm the address, then sign in from the app.';
+      msg.innerHTML = 'Check your email to confirm the address, then sign in from the app. '
+        + '<strong>It can take a few minutes, and it often lands in spam or junk.</strong>';
+      resendWrap.hidden = false;
+      resendWrap.dataset.email = $('email').value.trim();
     }
   });
 </script>

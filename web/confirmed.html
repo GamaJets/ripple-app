@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Email confirmed — Repple</title>
+<meta name="robots" content="noindex">
+<link rel="stylesheet" href="styles.css?v=3be6ff95c8">
+<link rel="icon" href="favicon.png">
+</head>
+<body>
+
+<!--
+  WHERE A CONFIRMATION LINK LANDS.
+
+  Before this page existed, signUp() was called with no emailRedirectTo, so the
+  link fell back to the project's Site URL — the marketing homepage, which has
+  no token handling and says nothing about accounts. Supabase's /auth/v1/verify
+  endpoint does confirm the address before redirecting, so the click worked;
+  the person just had no way to know it had. They were left on a sales page
+  wondering whether to try again.
+
+  This page says what happened, and distinguishes the three outcomes rather
+  than assuming success: confirmed, link already used or expired, and arrived
+  here with no token at all.
+-->
+
+<main>
+  <div class="wrap page" style="max-width:620px">
+    <p class="eyebrow">Repple</p>
+    <h1 class="display" id="head">Confirming your email…</h1>
+    <p class="lede" id="body">One moment.</p>
+
+    <div id="actions" hidden>
+      <p class="btn-row">
+        <a class="btn primary" href="/download">Get the app</a>
+        <a class="btn" href="/">Back to the site</a>
+      </p>
+    </div>
+
+    <div id="retry" hidden>
+      <p class="btn-row">
+        <a class="btn primary" href="/signup">Try signing up again</a>
+        <a class="btn" href="mailto:support@repplefitness.com?subject=Confirmation%20link">Email support</a>
+      </p>
+    </div>
+  </div>
+</main>
+
+<script type="module">
+  import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+  const head = document.getElementById('head');
+  const body = document.getElementById('body');
+  const actions = document.getElementById('actions');
+  const retry = document.getElementById('retry');
+
+  const say = (h, b, showRetry) => {
+    head.textContent = h;
+    body.innerHTML = b;
+    (showRetry ? retry : actions).hidden = false;
+  };
+
+  // Supabase writes the outcome one of two ways depending on the flow: an
+  // error in the hash, or tokens in the hash after a successful verify. It
+  // can also send token_hash in the query string for the newer PKCE flow.
+  const hash = new URLSearchParams(location.hash.replace(/^#/, ''));
+  const query = new URLSearchParams(location.search);
+
+  const err = hash.get('error') || query.get('error');
+  const errDesc = hash.get('error_description') || query.get('error_description');
+
+  if (err) {
+    // Almost always an expired or already-used link. Say which, because the
+    // remedy differs: expired needs a new email, already-used needs nothing.
+    const d = (errDesc || '').replace(/\+/g, ' ');
+    if (/expired/i.test(d)) {
+      say('That link has expired',
+          'Confirmation links do not last forever. Sign up again with the same address and we will send a fresh one &mdash; nothing you did is lost.', true);
+    } else if (/already|used/i.test(d)) {
+      say('Already confirmed',
+          'This address is confirmed and the link has been used. You can sign in from the app.', false);
+    } else {
+      say('That link did not work', d || 'The link could not be verified. Sign up again and we will send a new one.', true);
+    }
+  } else if (hash.get('access_token') || query.get('token_hash') || query.get('code')) {
+    say('Email confirmed',
+        'Your address is confirmed and your account is ready. Sign in from the app with the email and password you chose.', false);
+  } else {
+    // No token of any kind: somebody navigated here directly.
+    say('Nothing to confirm here',
+        'This page is where a confirmation link lands. If you are waiting on one, check your spam and junk folders &mdash; that is usually where it is. If it never arrives, email <a href="mailto:support@repplefitness.com">support@repplefitness.com</a> and we will confirm you by hand.', true);
+  }
+</script>
+
+</body>
+</html>
