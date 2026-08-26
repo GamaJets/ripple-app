@@ -3645,3 +3645,245 @@ begin
    where id = auth.uid()
      and deletion_requested_at is null;   -- the first ask is the one that counts
 end $$;
+
+-- ▶ trainer-rota.sql
+
+-- ── The trainer rota ────────────────────────────────────────────────────────
+--
+-- Phase 1. Who is on the gym floor when — and, the part that makes it worth
+-- building, whether that lines up with what the floor is actually doing.
+--
+-- A rota that is only a calendar adds nothing over the spreadsheet it replaces.
+-- The reason this table exists is that the gym already records demand: classes
+-- sit in `gym_classes` with a start and a duration, one-to-ones sit in
+-- `sessions`. Put the supply on the same timeline and two questions answer
+-- themselves — which hours have work booked and nobody rostered, and which
+-- hours have somebody rostered against nothing at all. Neither is answerable
+-- from a rota alone, and neither is answerable from the timetable alone.
+--
+-- ── Why concrete timestamps and not a weekly pattern ────────────────────────
+--
+-- `trainer_availability` (part 24) already holds the recurring pattern: dow +
+-- hour, the shape of a trainer's normal week. That is a different fact. A rota
+-- is what is happening in THIS week — the cover for someone off sick, the
+-- public holiday, the Saturday somebody swapped. Those are edits to a single
+-- occurrence, and a recurrence rule cannot carry them without growing an
+-- exceptions table that is these rows under another name. `gymSchedule
+-- .weeklyOccurrences` made the same call for classes, for the same reason.
+--
+-- Storing timestamptz rather than (date, time) is what makes the comparison
+-- sound: shifts, classes and sessions then live on one timeline and no part of
+-- the app has to reconcile a wall clock against a timezone to ask whether an
+-- hour was covered.
+--
+-- Additive only. Nothing here alters an existing table.
+
+create table if not exists gym_shifts (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references tenants(id) on delete cascade,
+  -- `trainers`, not `profiles`: a shift belongs to somebody who works here. A
+  -- trainer leaving takes their future shifts with them, which is right — a
+  -- rota row for a person who is gone is not history, it is a hole nobody has
+  -- noticed yet.
+  trainer_id uuid not null references trainers(id) on delete cascade,
+  starts_at timestamptz not null,
+  ends_at timestamptz not null,
+  -- A zero-length or reversed shift is always a typo, and it would silently
+  -- cover no hours at all while looking like cover on the screen.
+  constraint gym_shifts_span check (ends_at > starts_at),
+  -- What they are on for. Loose enough to be useful, closed enough that the
+  -- rota can be read at a glance. 'floor' is the default because that is what
+  -- the roadmap item asks about — who is out there if a member needs someone.
+  role text not null default 'floor'
+    check (role in ('floor', 'classes', 'pt', 'desk', 'admin')),
+  -- A pulled shift is kept rather than deleted. "Somebody was rostered and
+  -- dropped out" and "nobody was ever rostered" produce the same hole in the
+  -- cover, but they are different problems and the owner needs to tell them
+  -- apart. gymRota counts neither as cover.
+  status text not null default 'scheduled'
+    check (status in ('scheduled', 'cancelled')),
+  note text,
+  created_at timestamptz not null default now()
+);
+
+-- The rota is always read as a week of one gym, and written as one trainer's
+-- run of shifts. Both directions get an index.
+create index if not exists idx_gym_shifts_tenant on gym_shifts(tenant_id, starts_at);
+create index if not exists idx_gym_shifts_trainer on gym_shifts(trainer_id, starts_at);
+
+-- NOT ENFORCED, deliberately: two overlapping shifts for one trainer. The
+-- exclusion constraint that would catch it needs btree_gist, which this schema
+-- does not install, and an overlap is a rota mistake rather than a corruption —
+-- it is visible on the week view as the same name twice in one row.
+
+-- ── row-level security ──────────────────────────────────────────────────────
+-- Enabled before any policy is written. A policy on a table without RLS on is
+-- inert — Postgres never consults it and Supabase's default grants to anon and
+-- authenticated apply in full, which is exactly how four tables ended up
+-- world-writable until 38-tenant-isolation.sql.
+--
+-- The helpers are SECURITY DEFINER, so a policy calling them does not re-enter
+-- the table it is protecting (see 28-fix-profiles-recursion.sql).
+alter table gym_shifts enable row level security;
+
+-- The rota is the owner's instrument: they write it, and `is_owner_of` scopes
+-- them to THIS gym rather than merely to being an owner somewhere.
+drop policy if exists gym_shifts_owner on gym_shifts;
+create policy gym_shifts_owner on gym_shifts
+  for all using (is_owner_of(tenant_id)) with check (is_owner_of(tenant_id));
+
+-- Trainers read it. A rota nobody rostered on it can see is a rota that gets
+-- re-typed into WhatsApp, which is how it stops being true. Read only: when
+-- their own shift changes it is because the gym moved it, and a trainer who
+-- could edit the rota could quietly uncover the floor.
+drop policy if exists gym_shifts_staff_r on gym_shifts;
+create policy gym_shifts_staff_r on gym_shifts
+  for select using (tenant_id = my_tenant() and my_role() in ('trainer', 'owner'));
+
+-- No functions are added here, so nothing needs the revoke-from-PUBLIC
+-- treatment that 40-function-grants.sql applies. If one is ever added to this
+-- file, re-run that part: Postgres grants EXECUTE to PUBLIC by default and
+-- `anon` resolves through it.
+
+-- ▶ gym-pt-schedule.sql
+
+-- ── One-to-ones on the gym's own timetable ──────────────────────────────────
+--
+-- Phase 1, the half that was still open. The gym's board (studio-web
+-- /timetable) showed classes only, so at 18:00 an owner saw three classes and
+-- had no way to know that four trainers were also on the floor with clients,
+-- or that the studio was holding a class and a one-to-one at the same hour.
+-- The booking half of PT lived in the trainer's private calendar; only the
+-- outcome and payroll half (33, 36) had ever reached the gym.
+--
+-- ── WHY `sessions` AND NOT A NEW TABLE ──────────────────────────────────────
+--
+-- A one-to-one already IS a row in `sessions`: trainer, client, starts_at,
+-- duration_min, and the slot's status — plus, since 33-session-outcomes.sql,
+-- its tenant, its delivery outcome, the rate snapshotted at delivery, and (36)
+-- the payroll run that paid for it.
+--
+-- The booking and the outcome are the same appointment. A parallel
+-- `pt_bookings` table would fork them: payroll prices `sessions`
+-- (src/lib/gymSessions.ts), so anything scheduled into a second table is
+-- either invisible to payroll, or has to be copied into `sessions` as well —
+-- two rows for one hour, which is how a gym ends up paying twice, or not at
+-- all. It would also duplicate the tenant backfill, the fill-tenant trigger,
+-- the outcome stamping and six RLS policies, and then have to keep all of it
+-- in step with the original by hand.
+--
+-- So this part adds only what a *gym-owned* timetable needs and `sessions`
+-- does not already have: where in the building the hour happens, and the right
+-- for the gym — not only the trainer — to put a slot on the board and take one
+-- off again.
+
+-- ── where on the floor ──────────────────────────────────────────────────────
+-- gym_classes has carried `room` since 02-domain-schema.sql. Without the same
+-- column here, the single most useful question a merged board can answer —
+-- "is the studio double-booked at six?" — cannot be asked at all, because half
+-- the things in the room are not on the board.
+alter table public.sessions add column if not exists room text;
+
+-- The timetable reads a week at a time, per gym. idx_sessions_tenant
+-- (33-session-outcomes.sql) is (tenant_id, starts_at desc) and Postgres scans
+-- it backwards for an ascending window, so no second index is added here.
+
+
+-- ── the gym may schedule, not only observe ──────────────────────────────────
+--
+-- 33-session-outcomes.sql gave the owner SELECT and UPDATE: they could read
+-- the record and correct an outcome that was wrong. There was no INSERT and no
+-- DELETE, so an owner could not put a one-to-one on their own timetable at
+-- all. The slot had to be created by the trainer, in the trainer's calendar —
+-- which is precisely the split this part exists to close.
+--
+-- WHY THE CHECK REACHES THE TENANT THROUGH `trainers` rather than testing
+-- sessions.tenant_id directly, for two independent reasons:
+--
+--   * trg_sessions_fill_tenant copies tenant_id FROM the named trainer. So a
+--     `is_owner_of(tenant_id)` check would be testing a value derived from the
+--     row being written: name another gym's trainer and tenant_id becomes that
+--     gym's, and the check would be asked about the wrong gym. Asking
+--     "is this trainer mine?" cannot be steered that way.
+--   * it does not depend on when the BEFORE INSERT trigger runs relative to
+--     the WITH CHECK, which is a detail no policy should rest on.
+--
+-- The inline join is safe to write: `trainers` has trainers_owner_r
+-- (23-trainer-directory.sql), so an owner can read the row the join needs, and
+-- is_owner_of() has been SECURITY DEFINER since 28-fix-profiles-recursion.sql
+-- so it does not re-enter RLS on profiles.
+drop policy if exists sessions_gym_owner_i on public.sessions;
+create policy sessions_gym_owner_i on public.sessions
+  for insert with check (
+    exists (select 1 from public.trainers tr
+             where tr.id = sessions.trainer_id and is_owner_of(tr.tenant_id)));
+
+-- Taking a slot back off the board. Scoped to the gym that owns it; the
+-- protection for slots that have become part of the record is the trigger
+-- below, not this policy, for the reason given there.
+drop policy if exists sessions_gym_owner_d on public.sessions;
+create policy sessions_gym_owner_d on public.sessions
+  for delete using (tenant_id is not null and is_owner_of(tenant_id));
+
+
+-- ── a session that has been marked or paid is a record, not a plan ──────────
+--
+-- Deleting one destroys the evidence behind a payroll line. The settlement row
+-- survives with its amount and its sessions_count, but the sessions it covered
+-- are gone, so the run can never be reconciled against the work again — and
+-- settleableSessions() only ever knew a session was already paid because the
+-- row carried a settlement_id.
+--
+-- Both the owner's new DELETE right above and the trainer's existing
+-- sessions_trainer policy (09-sessions-access.sql, FOR ALL — which has always
+-- included DELETE) could do it today.
+--
+-- WHY A TRIGGER RATHER THAN A NARROWER POLICY: RLS filters rows out silently.
+-- A policy of `using (... and outcome is null)` would make the delete affect
+-- zero rows and return no error, so a caller that checked only `.error` — the
+-- house pattern — would report "removed" for a session that is still there.
+-- Raising says no out loud, and says which of the two reasons it was.
+--
+-- WHY THE current_user TEST, exactly as in 38-tenant-isolation.sql: a
+-- SECURITY DEFINER function runs as its owner, an app request runs as
+-- `authenticated` or `anon`. action_account_deletion() (41) deletes auth.users
+-- and relies on the cascade reaching sessions; that path must not start
+-- raising because a trainer once had a session settled. Erasure stays
+-- unblocked; the app cannot quietly rewrite payroll history.
+-- NOT security definer, and that is the whole point.
+--
+-- `current_user` inside a SECURITY DEFINER function reports the function's
+-- OWNER, not the caller. This was written as definer, which made current_user
+-- always 'postgres', so the guard below could never be true and the trigger
+-- silently protected nothing — a control that looks real and does nothing,
+-- which is the exact class of fault recorded at the end of the runbook.
+--
+-- Verified against the live database rather than reasoned about:
+--   set local role authenticated;
+--   select current_user, _probe_invoker(), _probe_definer();
+--   -> authenticated | authenticated | postgres
+--
+-- As an invoker function it needs no elevated rights: it only reads OLD and
+-- raises. The guard still lets action_account_deletion()'s cascade through,
+-- because that runs as postgres and so fails the in ('authenticated','anon')
+-- test — which is the behaviour that was wanted.
+create or replace function public.sessions_block_delete_of_record() returns trigger
+language plpgsql set search_path = public as $$
+begin
+  if current_user in ('authenticated', 'anon') then
+    if old.settlement_id is not null then
+      raise exception 'That session has already been paid. Reverse the settlement before removing it.'
+        using errcode = '42501';
+    end if;
+    if old.outcome is not null then
+      raise exception 'That session has an outcome recorded and is part of the pay record. Undo the outcome first if it should not have one.'
+        using errcode = '42501';
+    end if;
+  end if;
+  return old;
+end $$;
+
+drop trigger if exists trg_sessions_block_delete_of_record on public.sessions;
+create trigger trg_sessions_block_delete_of_record
+  before delete on public.sessions
+  for each row execute function public.sessions_block_delete_of_record();

@@ -15,6 +15,7 @@ import { buildIcs } from './ics';
 import { serviceState, nextServiceDue, usableUnits, outOfServiceUnits, capacityFor, summariseRegister, needsAttention, type Equipment } from './gymEquipment';
 import { parseCsv, parseSheet, sniffDelimiter, mapColumns } from './csv';
 import { parseMoneyCents, parseDate, detectDateOrder, previewMembers, previewPayments, previewPlans, describePreview, MEMBER_ALIASES } from './csvImport';
+import { classEntry, ptEntry, mergeTimetable, overlapping, entriesAt, floorAt, floorByHour, clashes, summariseBoard, slotBlocker, type PtSlot } from './gymPtSchedule';
 import { payroll30For, payrollBlocker, type GymTrainer } from './gymTrainers';
 import { gymRollup } from './ownerAnalytics';
 import { isDelivered, isAwaitingOutcome, isPayable, payrollByTrainer, payrollTotal, settlementBlocker, settleableSessions, settlementAmount, settleBlocker, PAY_DELIVERED_ONLY, type PtSession } from './gymSessions';
@@ -22,6 +23,7 @@ import { dwellMinutes, averageDwellMinutes, uniqueMembers, summariseVisits, visi
 import { remainingUses, isExpired, isRedeemable, expiryFor, passRevenueCents, summarisePasses, guestsByHost, passStatus, type GymPass } from './gymPasses';
 import { estimateDish, searchDishes, DISHES } from './restaurant';
 import { normaliseEmail, inviteState, isExpired as inviteExpired, isRedeemable as inviteRedeemable, expiryFor as inviteExpiryFor, daysUntilExpiry, inviteBlocker, screenInvites, summariseInvites, DEFAULT_VALID_DAYS, type MemberInvite } from './memberInvites';
+import { weekStartOf, weekDays, shiftWeek, hoursSpanned, shiftHours, hourLabel, buildRota, coverage, shiftsByDay, rosterByTrainer, summariseRota, shiftFromHours, type Shift, type DemandBlock } from './gymRota';
 import type { TrainingSession } from './types';
 
 const errors: string[] = [];
@@ -1109,6 +1111,268 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
   const noCols = previewPlans('something,else\na,b\n');
   ok(noCols.missingRequired.includes('name') && noCols.missingRequired.includes('price'),
      'a sheet with neither column says so');
+}
+
+// ── the trainer rota ────────────────────────────────────────────────────────
+// The point of this module is not the calendar, it is the disagreement between
+// the rota and the timetable. So most of what is checked here is the two
+// findings — an hour with work booked and nobody on, and an hour with somebody
+// on and nothing booked — plus the refusal to report either against a rota
+// nobody has filled in.
+//
+// Every instant is built with `new Date(y, m, d, h)` and converted to ISO, so
+// the wall-clock times below mean the same thing in whatever timezone this
+// runs, which is exactly what the module buckets by. 7 Sept 2026 is a Monday.
+{
+  const at = (day: number, h: number, min = 0) => new Date(2026, 8, day, h, min, 0, 0).toISOString();
+  const MON = '2026-09-07';
+  const days = weekDays(MON);
+
+  const shift = (id: string, trainerId: string, day: number, from: number, to: number,
+                 over: Partial<Shift> = {}): Shift => ({
+    id, trainerId, trainerName: trainerId, startsAt: at(day, from), endsAt: at(day, to),
+    role: 'floor', status: 'scheduled', note: null, ...over,
+  });
+  const cls = (day: number, h: number, durationMin = 60, trainerId: string | null = null): DemandBlock =>
+    ({ kind: 'class', label: 'HIIT', startsAt: at(day, h), durationMin, trainerId });
+  const pt = (day: number, h: number, durationMin = 60, trainerId: string | null = null): DemandBlock =>
+    ({ kind: 'pt', label: 'One-to-one', startsAt: at(day, h), durationMin, trainerId });
+
+  // The week the screen pages through.
+  ok(weekStartOf(new Date(2026, 8, 9)) === MON, 'midweek resolves to its Monday');
+  ok(weekStartOf(new Date(2026, 8, 7)) === MON, 'Monday is its own week start');
+  ok(weekStartOf(new Date(2026, 8, 13)) === MON, 'Sunday belongs to the week that began Monday');
+  ok(weekStartOf(new Date(2026, 8, 14)) === '2026-09-14', 'the next Monday opens the next week');
+  ok(days.length === 7 && days[0] === MON && days[6] === '2026-09-13', 'seven days, Monday to Sunday');
+  ok(shiftWeek(MON, -1) === '2026-08-31', 'paging back crosses the month');
+  ok(hourLabel(6) === '06:00' && hourLabel(18) === '18:00', 'hours read as a wall clock');
+
+  // A block occupies every hour it touches — a 17:30 class needs somebody on
+  // the floor at 17:00 and at 18:00.
+  const straddle = hoursSpanned(at(7, 17, 30), at(7, 18, 15));
+  ok(straddle.length === 2, 'a 17:30-18:15 block touches two hours');
+  ok(straddle[0].hour === 17 && straddle[1].hour === 18, 'and they are 17 and 18');
+  ok(hoursSpanned(at(7, 9), at(7, 9)).length === 0, 'a zero-length span covers nothing');
+  ok(hoursSpanned(at(7, 10), at(7, 9)).length === 0, 'a reversed span covers nothing');
+  ok(shiftHours({ startsAt: at(7, 6), endsAt: at(7, 14) }) === 8, 'a 06:00-14:00 shift is eight hours');
+  ok(shiftHours({ startsAt: at(7, 14), endsAt: at(7, 6) }) === null,
+     'an unreadable span is null hours, not zero');
+
+  // The grid holds only hours with something in them.
+  const grid = buildRota(days, [shift('s1', 't1', 7, 9, 11)], [cls(7, 18)]);
+  ok(grid.length === 3, 'three hours have something in them');
+  ok(grid[0].hour === 9 && grid[2].hour === 18, 'and they come out in time order');
+  ok(grid[2].classes === 1 && grid[2].rostered.length === 0, 'the 18:00 class has nobody on it');
+  ok(buildRota(['2026-09-14'], [shift('s1', 't1', 7, 9, 11)], []).length === 0,
+     'hours outside the asked-for days are dropped');
+
+  // THE RULE: an empty rota is not an uncovered gym.
+  const empty = coverage(days, [], [cls(7, 18)]);
+  ok(empty.uncovered === null, 'an empty rota reports no uncovered hours — it refuses the question');
+  ok(empty.idle === null, 'and no idle hours either');
+  ok(empty.rosteredHours === null, 'nothing rostered is null hours, not zero');
+  ok(empty.coverRate === null, 'and no cover rate');
+  ok(/No shifts/.test(empty.blocker ?? ''), 'it says why rather than showing a confident zero');
+  ok(empty.demandHours === 1, 'the class is still counted — it is a real row');
+
+  // The two findings the whole module exists for.
+  const mismatch = coverage(days, [shift('s1', 't1', 7, 9, 11)], [cls(7, 18)]);
+  ok(mismatch.uncovered!.length === 1, 'the 18:00 class with nobody on is one uncovered hour');
+  ok(mismatch.uncovered![0].hour === 18, 'and it is the 18:00 hour');
+  ok(/nobody rostered/.test(mismatch.uncovered![0].note), 'the gap says what is wrong');
+  ok(mismatch.idle!.length === 2, 'the two rostered hours with nothing booked are idle');
+  ok(mismatch.coverRate === 0, 'no demand hour was covered');
+
+  // Cover that actually lines up.
+  const aligned = coverage(days, [shift('s1', 't1', 7, 17, 19)], [cls(7, 18)]);
+  ok(aligned.uncovered!.length === 0, 'a shift spanning the class covers it');
+  ok(aligned.coverRate === 1, 'every demand hour covered');
+  ok(aligned.idle!.length === 1, 'the 17:00 hour of that shift is still idle');
+
+  // A pulled shift is not cover — and is not the same hole as never rostering.
+  const pulled = coverage(
+    days,
+    [shift('s1', 't1', 8, 9, 10), shift('s2', 't2', 7, 18, 19, { status: 'cancelled' })],
+    [cls(7, 18)],
+  );
+  ok(pulled.uncovered!.length === 1, 'a pulled shift does not cover its hour');
+  ok(pulled.uncovered![0].cancelled.includes('t2'), 'but the rota still knows who dropped out');
+  ok(/pulled/.test(pulled.uncovered![0].note), 'and says so, rather than "nobody rostered"');
+
+  // A class with an instructor who is not on the rota is a different problem.
+  const assigned = coverage(days, [shift('s1', 't1', 8, 9, 10)], [cls(7, 18, 60, 't2')]);
+  ok(assigned.uncovered![0].assigned.includes('t2'), 'the assigned trainer is carried onto the gap');
+  ok(/assigned/.test(assigned.uncovered![0].note), 'and the note distinguishes it');
+
+  // One-to-ones are demand too, not just classes.
+  const ptGap = coverage(days, [shift('s1', 't1', 8, 9, 10)], [pt(7, 18)]);
+  ok(ptGap.uncovered!.length === 1, 'a booked one-to-one with nobody rostered is uncovered');
+  ok(/one-to-one/.test(ptGap.uncovered![0].note), 'and the note names it');
+
+  // A week with no classes has no cover rate. That is not 0%.
+  const noDemand = coverage(days, [shift('s1', 't1', 7, 9, 11)], []);
+  ok(noDemand.demandHours === 0 && noDemand.coverRate === null, 'no demand means no cover rate');
+  ok(noDemand.idle!.length === 2, 'but two hours of paid floor time with nothing booked');
+
+  // The week, per trainer.
+  const roster = rosterByTrainer([
+    shift('a', 't1', 7, 9, 11), shift('b', 't2', 7, 6, 14), shift('c', 't1', 8, 9, 10),
+  ]);
+  ok(roster[0].trainerId === 't2' && roster[0].hours === 8, 'busiest trainer first');
+  ok(roster[1].hours === 3, 'and hours add across days');
+  const onlyPulled = rosterByTrainer([shift('a', 't1', 7, 9, 11, { status: 'cancelled' })]);
+  ok(onlyPulled[0].hours === null, 'a trainer whose only shift was pulled has null hours, not zero');
+  ok(onlyPulled[0].shifts.length === 1, 'the pulled shift is still on their week');
+
+  ok(summariseRota([]).hours === null, 'an empty rota has null hours');
+  const sum = summariseRota([shift('a', 't1', 7, 9, 11), shift('b', 't1', 8, 9, 10, { status: 'cancelled' })]);
+  ok(sum.shifts === 2 && sum.cancelled === 1, 'a pulled shift is still a shift on the rota');
+  ok(sum.trainers === 1 && sum.hours === 2, 'only live hours are counted');
+
+  const byDay = shiftsByDay(days, [shift('b', 't1', 7, 14, 18), shift('a', 't2', 7, 6, 14)]);
+  ok(byDay.length === 7, 'every day of the week comes back, including the empty ones');
+  ok(byDay[0].shifts.length === 2 && byDay[0].shifts[0].id === 'a', 'Monday sorted by start time');
+  ok(byDay[1].shifts.length === 0, 'Tuesday is empty, and says so by being empty');
+
+  // Building a shift from what the form collects.
+  ok(shiftFromHours('t1', MON, 6, 14)?.startsAt === at(7, 6), 'a 6-14 shift starts at 06:00 local');
+  ok(shiftFromHours('t1', MON, 6, 14)?.endsAt === at(7, 14), 'and ends at 14:00 local');
+  ok(shiftFromHours('t1', MON, 14, 14) === null, 'a zero-length shift is refused, not saved');
+  ok(shiftFromHours('t1', MON, 14, 6) === null, 'a backwards shift is refused');
+  ok(shiftFromHours('', MON, 6, 14) === null, 'a shift with no trainer is refused');
+  ok(shiftFromHours('t1', 'next tuesday', 6, 14) === null, 'a date that is not a date is refused');
+}
+
+
+// Scoped, like the CSV block above: this suite is one long module and `cls`,
+// `slot`, `both` are common enough names to collide with an earlier section.
+{
+  // ── one-to-ones on the gym's own timetable (Phase 1) ──
+  //
+  // The gap being closed: classes were on the gym's board and one-to-ones were
+  // in the trainer's private calendar, so "is the floor covered at six?" could
+  // not be asked at all. These assertions guard the merge, and — more
+  // importantly — guard the two ways a merged board could lie: by inventing a
+  // zero where the row cannot say, and by calling normal sharing a clash.
+  const cls = (o: Partial<GymClass>): GymClass => ({
+    id: 'c1', title: 'Spin', room: 'Studio 1', instructor: 'Marcus', trainerId: 'tr1',
+    startsAt: '2026-09-01T17:00:00Z', durationMin: 60, capacity: 20, booked: 12, attended: 0, ...o,
+  });
+  const slot = (o: Partial<PtSlot>): PtSlot => ({
+    id: 's1', trainerId: 'tr2', trainerName: 'Priya', clientId: 'cl1', clientName: 'Dana',
+    startsAt: '2026-09-01T17:00:00Z', durationMin: 60, room: 'Floor', status: 'booked',
+    outcome: null, settlementId: null, ...o,
+  });
+  const AT_1730 = Date.parse('2026-09-01T17:30:00Z');
+
+  // One board, in the order things happen — not classes then one-to-ones.
+  const ordered = mergeTimetable(
+    [cls({ id: 'c1', startsAt: '2026-09-01T18:00:00Z' })],
+    [slot({ id: 's1', startsAt: '2026-09-01T17:00:00Z' })],
+  );
+  ok(ordered.map((e) => e.key).join(',') === 'pt:s1,class:c1',
+     'the board is ordered by time, not by which table the row came from');
+
+  // gym_classes.id and sessions.id are separate id spaces and can collide.
+  const sameId = mergeTimetable([cls({ id: 'x' })], [slot({ id: 'x' })]);
+  ok(new Set(sameId.map((e) => e.key)).size === 2,
+     'a class and a session that share an id stay two rows on the board');
+
+  // Nothing renders 0 for something the row cannot report.
+  ok(ptEntry(slot({ status: 'blocked' })).booked === null, 'a held slot has no booked count, not 0');
+  ok(ptEntry(slot({ status: 'blocked' })).capacity === null, 'and no denominator either');
+  ok(ptEntry(slot({ status: 'available' })).booked === 0, 'an open slot genuinely has 0 booked');
+  ok(ptEntry(slot({ status: 'booked' })).capacity === 1, 'a one-to-one holds exactly one place');
+  ok(classEntry(cls({ capacity: 0 })).capacity === null,
+     'a class with no capacity recorded has no denominator, rather than a full room');
+
+  // Who is actually on the floor at 17:30.
+  const both = mergeTimetable([cls({})], [
+    slot({}),
+    slot({ id: 's2', trainerId: 'tr3', trainerName: 'Sam', status: 'available', clientId: null, clientName: null }),
+  ]);
+  const at = floorAt(both, AT_1730);
+  ok(at.classes === 1 && at.oneToOnes === 2, 'the floor at 17:30 counts both calendars');
+  ok(at.heads === 13, `heads = 12 in the class + 1 booked one-to-one + 0 in the open slot (got ${at.heads})`);
+  ok(at.staff.join(',') === 'Marcus,Priya,Sam', 'distinct staff on the floor, by name');
+
+  const emptyFloor = floorAt([], AT_1730);
+  ok(emptyFloor.heads === null, 'an empty floor has no headcount, not 0 people who failed to turn up');
+  ok(emptyFloor.classes === 0 && emptyFloor.oneToOnes === 0, 'but the counts of what is on are real zeros');
+
+  const anon = floorAt([classEntry(cls({ instructor: null, trainerId: null }))], AT_1730);
+  ok(anon.unstaffed === 1 && anon.staff.length === 0,
+     'a class with nobody named is counted as unstaffed, not staffed by nobody');
+
+  // Half-open, so a class ending as another begins does not read as two.
+  ok(entriesAt(both, Date.parse('2026-09-01T17:00:00Z')).length === 3, 'something starting at 17:00 is on at 17:00');
+  ok(entriesAt(both, Date.parse('2026-09-01T18:00:00Z')).length === 0, 'something ending at 18:00 is not');
+  ok(overlapping(classEntry(cls({})), ptEntry(slot({ startsAt: '2026-09-01T18:00:00Z' }))) === false,
+     'back-to-back is not overlapping');
+
+  // The hourly strip keeps its quiet hours, because a gap in cover is the answer.
+  const strip = floorByHour(both, Date.parse('2026-09-01T00:00:00Z'), 6, 22);
+  ok(strip.length === 17, 'every hour in the range comes back');
+  ok(strip[8].entries.length === 0, 'a quiet 14:00 is a row on the strip, not a hole in it');
+  ok(strip[11].entries.length === 3, 'and 17:00 carries all three');
+
+  // Clashes: the whole point of one board.
+  const dbl = mergeTimetable(
+    [cls({ trainerId: 'tr9', instructor: 'Nadia' })],
+    [slot({ trainerId: 'tr9', trainerName: 'Nadia', room: 'Floor' })],
+  );
+  const cl = clashes(dbl);
+  ok(cl.length === 1 && cl[0].reason === 'trainer',
+     'a trainer teaching a class and a one-to-one at the same hour is a clash');
+  ok(cl[0].what === 'Nadia', 'and the clash names them');
+
+  // A free-text instructor is a label, never an identity.
+  const twoSams = mergeTimetable(
+    [cls({ trainerId: null, instructor: 'Sam' })],
+    [slot({ trainerId: 'tr7', trainerName: 'Sam', room: 'Floor' })],
+  );
+  ok(clashes(twoSams).length === 0, 'two people called Sam are not one double-booked trainer');
+
+  // A room clash needs a class in it; `sessions` records no room capacity, so
+  // calling two one-to-ones on the main floor a clash would invent a limit.
+  const twoPt = mergeTimetable([], [
+    slot({ id: 'a', trainerId: 't1', trainerName: 'A', room: 'Main floor' }),
+    slot({ id: 'b', trainerId: 't2', trainerName: 'B', room: 'Main floor' }),
+  ]);
+  ok(clashes(twoPt).length === 0, 'two one-to-ones sharing the main floor is not a clash');
+  const ptInStudio = mergeTimetable(
+    [cls({ room: 'Studio 1' })],
+    [slot({ trainerId: 't5', trainerName: 'B', room: 'studio 1' })],
+  );
+  ok(clashes(ptInStudio).some((c) => c.reason === 'room'),
+     'but a one-to-one in a room a class has taken is, whatever the casing');
+
+  const backToBack = mergeTimetable([
+    cls({ id: 'c1', startsAt: '2026-09-01T17:00:00Z', room: 'Studio 1' }),
+    cls({ id: 'c2', startsAt: '2026-09-01T18:00:00Z', room: 'Studio 1' }),
+  ], []);
+  ok(clashes(backToBack).length === 0, 'a class ending as the next begins is not a double-booking');
+
+  // The KPI row above the board.
+  const s = summariseBoard(both);
+  ok(s.classes === 1 && s.oneToOnes === 2, 'the summary splits the two kinds');
+  ok(s.openSlots === 1, 'and counts the PT capacity nobody has taken');
+  ok(s.booked === 13, 'places booked spans both calendars');
+  ok(summariseBoard([]).booked === null, 'an empty board has no booked figure, not 0');
+
+  // A slot is refused rather than repaired: a duration typed as 0 is an
+  // unfinished form, and defaulting it to an hour puts time on the gym's
+  // timetable that nobody asked for.
+  ok(slotBlocker({ trainerId: '', startsAt: '2026-09-01T17:00:00Z', durationMin: 60 }) !== null,
+     'a slot with no trainer is refused');
+  ok(slotBlocker({ trainerId: 't1', startsAt: 'nonsense', durationMin: 60 }) !== null,
+     'a slot with no readable time is refused');
+  ok(slotBlocker({ trainerId: 't1', startsAt: '2026-09-01T17:00:00Z', durationMin: 0 }) !== null,
+     'a zero-minute slot is refused, not defaulted to an hour');
+  ok(slotBlocker({ trainerId: 't1', startsAt: '2026-09-01T17:00:00Z', durationMin: NaN }) !== null,
+     'a duration that did not parse is refused');
+  ok(slotBlocker({ trainerId: 't1', startsAt: '2026-09-01T17:00:00Z', durationMin: 60 }) === null,
+     'a complete slot is allowed through');
 }
 
 if (errors.length) { console.log('COVERAGE FAILURES:\n' + errors.join('\n')); process.exit(1); }

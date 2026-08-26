@@ -76,6 +76,8 @@ export default function OwnerOps() {
         {tab === 'announce' ? (
           <View>
             <Section>
+          <ListRow icon="calendar" title="Trainer rota" note="Who is on the floor when, against what is booked"
+            onPress={() => router.push('/(owner)/rota')} />
           <ListRow icon="wrench" title="Equipment register" note="What the gym owns, and what is due a service"
             onPress={() => router.push('/(owner)/equipment')} />
           <ListRow icon="clock" title="Deletion requests" note="Members who asked to be erased, and the 30-day clock"
