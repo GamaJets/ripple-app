@@ -234,11 +234,20 @@ export default function TrainerClients() {
         });
         if (!live) return;
         const map: Record<string, Drift> = {};
-        // No `since` to pass: the roster does not carry a join date, so a
-        // brand-new client and a long-silent one both read as UNKNOWN. The
-        // reason line says which window was looked at rather than claiming
-        // "never".
-        for (const id of ids) map[id] = assessDrift({ clientId: id, events: events[id] ?? [] });
+        // `since` is the client's join date, and passing it changes two things.
+        // A client added yesterday and a client silent for eight weeks both
+        // have no recent activity, so without it they were indistinguishable —
+        // both UNKNOWN, both told "nothing recorded in the last 56 days", which
+        // is a strange thing to say about somebody who joined on Tuesday. It
+        // also clamps the drift baseline to the period they were actually on
+        // the book, so a real fall is not diluted by weeks they did not exist
+        // for. It comes from coach_clients.created_at or the coaching
+        // relationship; null where genuinely unknown, never guessed.
+        const joinedOf: Record<string, string | null> = {};
+        for (const c of roster) joinedOf[c.id] = c.joinedAt ?? null;
+        for (const id of ids) {
+          map[id] = assessDrift({ clientId: id, events: events[id] ?? [], since: joinedOf[id] ?? null });
+        }
         setDrift(map);
       } catch (e: any) {
         if (!live) return;

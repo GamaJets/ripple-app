@@ -11,6 +11,17 @@ export interface RosterClient {
    *  and could never be flagged at risk. */
   adherence: number | null; lastActive: string; next: string; unread: number;
   mode: 'online' | 'inperson';
+  /** When this client joined the coach's book, ISO. Null when unknown.
+   *
+   *  Load-bearing for src/lib/clientDrift.ts: without it, a client added
+   *  yesterday and a client silent for eight weeks are indistinguishable —
+   *  both have no recent activity, so both read UNKNOWN and the reason says
+   *  "nothing recorded in the last 56 days" about somebody who has only been
+   *  on the book for one. It also clamps the drift baseline to the period the
+   *  client actually existed for, so a real fall is not diluted by weeks they
+   *  were not there. coach_clients.created_at has always held this; the roster
+   *  selected it and then dropped it on the floor. */
+  joinedAt?: string | null;
   injuries?: { area: string; severity: string; note?: string; isNew?: boolean }[];
   metrics?: import('./inbodyMetrics').ScanMetrics;
   diet?: string;
