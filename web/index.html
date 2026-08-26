@@ -58,11 +58,13 @@
         </div>
       </div>
 
-      <!-- an honest sketch of the Studio overview: real shapes, real empty states -->
-      <div class="surface" role="img" aria-label="Sketch of the Repple Studio overview: trainers, members, sessions and a session-value figure that reads as a dash because no session fee has been set.">
+      <!-- an honest sketch of the Studio overview: real shapes, real empty states.
+           Every figure in it is made up, and the badge in the title bar says so. -->
+      <div class="surface" role="img" aria-label="Sketch of the Repple Studio overview using invented sample figures, not a real gym: 6 trainers, 248 members, 412 sessions in 30 days, and a session-value figure that reads as a dash because no session fee has been set.">
         <div class="surface-bar">
           <span class="dot"></span><span class="dot"></span><span class="dot"></span>
           <span class="ttl">repple studio — overview</span>
+          <span class="sample">Sample data</span>
         </div>
         <div class="kpis">
           <div class="kpi"><div class="k">Trainers</div><div class="v">6</div></div>
@@ -90,6 +92,13 @@
           <div class="row"><span class="nm">Priya Raman</span><span class="mt">24 sessions</span><span class="pill ok">Healthy</span></div>
           <div class="row"><span class="nm">Dane Whitfield</span><span class="mt">9 sessions</span><span class="pill warn">Watch</span></div>
         </div>
+        <div class="surface-body" style="border-top:1px solid var(--line);padding-top:14px;padding-bottom:14px">
+          <p class="tiny" style="margin:0">
+            Invented names and invented figures, drawn to show the shape of the screen. Repple has
+            not launched publicly, so there is no customer&rsquo;s gym to draw here — and we would
+            not put one on a marketing page if there were.
+          </p>
+        </div>
       </div>
     </div>
   </div>
@@ -98,28 +107,28 @@
 <!-- ── the three apps ────────────────────────────────────────────────── -->
 <section class="band" id="three" style="padding-top:0">
   <div class="wrap">
-    <div style="max-width:60ch;margin-bottom:38px">
+    <div class="lead-in">
       <h2 class="hd">Three apps. <span class="serif">One truth.</span></h2>
-      <p class="lede" style="margin-top:18px">
+      <p class="lede">
         Splitting them apart means nobody wades through a screen built for someone else's job.
         Keeping one database underneath means nobody has to reconcile anything.
       </p>
     </div>
 
     <div class="rails">
-      <a class="rail" href="/client" style="--c:var(--client)">
+      <a class="rail c-client" href="/client">
         <div class="who">Repple</div>
         <h3>For the person training</h3>
         <p>Every session, lift, meal and measurement in one history that actually goes back — and a coach who can see it without being asked.</p>
         <span class="go">Explore Repple <svg class="arw" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6"/></svg></span>
       </a>
-      <a class="rail" href="/trainer" style="--c:var(--coach)">
+      <a class="rail c-coach" href="/trainer">
         <div class="who">Repple Coach</div>
         <h3>For the coach</h3>
         <p>Your whole book — clients, programmes, schedule, check-ins — in the place you already look, instead of four apps and a notes file.</p>
         <span class="go">Explore Coach <svg class="arw" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6"/></svg></span>
       </a>
-      <a class="rail" href="/studio" style="--c:var(--studio)">
+      <a class="rail c-studio" href="/studio">
         <div class="who">Repple Studio</div>
         <h3>For the gym</h3>
         <p>Timetable, memberships, payroll, retention and revenue on one board — so you can see which one is moving the others.</p>
@@ -129,13 +138,111 @@
   </div>
 </section>
 
+<!-- ── one row, three readings ───────────────────────────────────────── -->
+<section class="band tint" id="record">
+  <div class="wrap">
+    <div class="lead-in wide">
+      <div class="eyebrow">Why the split works</div>
+      <h2 class="hd">One row written once,<br><span class="serif">read three different ways.</span></h2>
+      <p class="lede">
+        A one-to-one session is a single row. It carries who trained, who coached, when it started
+        and what happened to it. Three apps read that row and none of them asks the same question
+        of it. Nothing is copied between them, so there is nothing to fall out of step.
+      </p>
+    </div>
+
+    <figure class="chart">
+      <div class="chart-hd">
+        <div>
+          <span class="chart-k">Data lineage</span>
+          <h3>What each app takes from the same session row</h3>
+        </div>
+        <span class="sample">Illustrative</span>
+      </div>
+      <div class="chart-scroll">
+        <svg viewBox="0 0 940 400" width="940" height="400" role="img" aria-label="Diagram. A single sessions row holds member, trainer, start time, outcome and the sets logged. Three arrows lead from it. Repple, for the member, reads the sets to give volume, personal records and streak. Repple Coach reads the member and the outcome to give sessions delivered and adherence against the assigned programme. Repple Studio reads the trainer, the start time and the outcome to give one payroll line and one attended place against the room's capacity.">
+          <rect class="cx-box" x="16" y="108" width="252" height="176" rx="10"/>
+          <text class="cx-cap" x="34" y="134">ONE ROW</text>
+          <text class="cx-hd" x="34" y="158">sessions</text>
+          <text class="cx-ax" x="34" y="184">member_id</text>
+          <text class="cx-ax" x="34" y="204">trainer_id</text>
+          <text class="cx-ax" x="34" y="224">starts_at   18:00</text>
+          <text class="cx-ax" x="34" y="244">outcome     delivered</text>
+          <text class="cx-ax" x="34" y="264">sets · load · reps</text>
+
+          <path class="cx-flow" d="M268 160 C 350 160, 344 68, 424 68"/>
+          <polygon class="cx-tip" points="430,68 420,63 420,73"/>
+          <path class="cx-flow" d="M268 190 L 424 190"/>
+          <polygon class="cx-tip" points="430,190 420,185 420,195"/>
+          <path class="cx-flow" d="M268 232 C 350 232, 344 312, 424 312"/>
+          <polygon class="cx-tip" points="430,312 420,307 420,317"/>
+
+          <g class="c-client">
+            <rect class="cx-box" x="436" y="16" width="500" height="104" rx="10"/>
+            <rect class="cx-tab" x="436" y="30" width="3" height="76" rx="1.5"/>
+            <text class="cx-cap" x="458" y="42">REPPLE · THE MEMBER</text>
+            <text class="cx-hd" x="458" y="66">Volume, personal records, streak</text>
+            <text class="cx-lab" x="458" y="88">Reads the sets. 2,447 kg shifted; a bench best of 92.5 kg.</text>
+            <text class="cx-sm" x="458" y="108">Their history. Nobody else&#8217;s screen shows it set by set.</text>
+          </g>
+
+          <g class="c-coach">
+            <rect class="cx-box" x="436" y="138" width="500" height="104" rx="10"/>
+            <rect class="cx-tab" x="436" y="152" width="3" height="76" rx="1.5"/>
+            <text class="cx-cap" x="458" y="164">REPPLE COACH · THE COACH</text>
+            <text class="cx-hd" x="458" y="188">Delivered, and whether the plan is being followed</text>
+            <text class="cx-lab" x="458" y="210">Reads the member and the outcome. One session delivered.</text>
+            <text class="cx-sm" x="458" y="230">Booked and delivered are different columns, so no-shows do not flatter it.</text>
+          </g>
+
+          <g class="c-studio">
+            <rect class="cx-box" x="436" y="260" width="500" height="104" rx="10"/>
+            <rect class="cx-tab" x="436" y="274" width="3" height="76" rx="1.5"/>
+            <text class="cx-cap" x="458" y="286">REPPLE STUDIO · THE OWNER</text>
+            <text class="cx-hd" x="458" y="310">One payroll line, one place against capacity</text>
+            <text class="cx-lab" x="458" y="332">Reads the trainer, the hour and the outcome. Never the sets.</text>
+            <text class="cx-sm" x="458" y="352">Priced only once somebody has recorded that it happened.</text>
+          </g>
+
+          <text class="cx-sm" x="16" y="390">One write. No export, no nightly sync, nothing to reconcile at month end.</text>
+        </svg>
+      </div>
+      <figcaption class="chart-note">
+        <strong>The same row, three questions.</strong> The member wants to know what they lifted.
+        The coach wants to know whether the work is being done. The owner wants to know what the
+        hour cost and whether the room was full. Splitting the apps means each of them gets a
+        screen built for their question; sharing the database means the three answers cannot
+        disagree. Figures shown are made up, because there is no live gym to draw from.
+      </figcaption>
+    </figure>
+
+    <div class="tiles after">
+      <div class="tile c-client">
+        <div class="cap">Repple</div>
+        <h3>Writes most of it</h3>
+        <p>Sets, reps, load, cardio, meals, scans, measurements. The member is the one holding the phone during the work, so they are the one who creates the rows.</p>
+      </div>
+      <div class="tile c-coach">
+        <div class="cap">Repple Coach</div>
+        <h3>Reads it, and writes the plan</h3>
+        <p>A coach writes programmes and marks what happened in a session. They read a client's log only where that client has linked them.</p>
+      </div>
+      <div class="tile c-studio">
+        <div class="cap">Repple Studio</div>
+        <h3>Reads the parts that cost money</h3>
+        <p>Attendance, delivered sessions, memberships, payments, door visits. Studio never opens a member's training log — that is not the gym's row to read.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
 <!-- ── which one is mine ─────────────────────────────────────────────── -->
 <section class="band">
   <div class="wrap">
-    <div style="max-width:58ch;margin-bottom:34px">
+    <div class="lead-in">
       <div class="eyebrow">Which one is mine</div>
       <h2 class="hd">Same record.<br><span class="serif">Different job.</span></h2>
-      <p class="lede" style="margin-top:18px">
+      <p class="lede">
         Install the one that matches what you do. If two of them describe you — a coach who also
         trains, an owner who still takes clients — install both. It is one account either way.
       </p>
@@ -146,9 +253,9 @@
         <thead>
           <tr>
             <th></th>
-            <th class="app" style="--c:var(--client)"><span class="kick">Repple</span><span class="nm">For members</span><span class="who">You train.</span></th>
-            <th class="app" style="--c:var(--coach)"><span class="kick">Repple Coach</span><span class="nm">For coaches</span><span class="who">You have clients.</span></th>
-            <th class="app" style="--c:var(--studio)"><span class="kick">Repple Studio</span><span class="nm">For gyms</span><span class="who">You run the place.</span></th>
+            <th class="app c-client"><span class="kick">Repple</span><span class="nm">For members</span><span class="who">You train.</span></th>
+            <th class="app c-coach"><span class="kick">Repple Coach</span><span class="nm">For coaches</span><span class="who">You have clients.</span></th>
+            <th class="app c-studio"><span class="kick">Repple Studio</span><span class="nm">For gyms</span><span class="who">You run the place.</span></th>
           </tr>
         </thead>
         <tbody>
@@ -159,6 +266,7 @@
           <tr><td><span class="lbl">Timetable &amp; classes</span><span class="hint">Bookings, capacity, attendance.</span></td><td class="yes"><span class="tick"></span>Book a place</td><td class="yes"><span class="tick"></span>Your own week</td><td class="yes"><span class="tick"></span>The whole gym&rsquo;s</td></tr>
           <tr><td><span class="lbl">Memberships &amp; payments</span><span class="hint">What is sold and what was taken.</span></td><td class="yes"><span class="tick"></span>Your own</td><td class="no">—</td><td class="yes"><span class="tick"></span>Everyone&rsquo;s</td></tr>
           <tr><td><span class="lbl">Staff &amp; payroll</span><span class="hint">Delivered sessions, priced.</span></td><td class="no">—</td><td class="yes"><span class="tick"></span>What you delivered</td><td class="yes"><span class="tick"></span>What the gym owes</td></tr>
+          <tr><td><span class="lbl">The door</span><span class="hint">Who is in the building right now.</span></td><td class="no">—</td><td class="yes"><span class="tick"></span>Working the desk</td><td class="yes"><span class="tick"></span>The whole log</td></tr>
           <tr><td><span class="lbl">The business picture</span><span class="hint">Retention, revenue, capacity.</span></td><td class="no">—</td><td class="no">—</td><td class="yes"><span class="tick"></span>On phone and on the web</td></tr>
         </tbody>
       </table>
@@ -174,13 +282,874 @@
   </div>
 </section>
 
+<!-- ── for the gym owner ─────────────────────────────────────────────── -->
+<section class="band tone-studio" id="for-gyms">
+  <div class="wrap">
+    <div class="lead-in wide">
+      <div class="eyebrow">Repple Studio · for the gym</div>
+      <h2 class="hd">Six screens that between them<br><span class="serif">run the place.</span></h2>
+      <p class="lede">
+        Studio is on the phone and on the web, and the web console is the one the front desk
+        actually wants — wide tables, a keyboard, and the jobs that take twenty rows at a time.
+        Both call the identical functions through the identical database rules, so there is no
+        second version of any figure.
+      </p>
+    </div>
+
+    <div class="tiles">
+      <div class="tile">
+        <div class="cap">Timetable</div>
+        <h3>The week, and who turned up</h3>
+        <p>Build a class once as a real repeating series rather than twelve copies. Take bookings against a stated capacity, then tick people off at the desk.</p>
+        <ul>
+          <li>Fill rate is bookings against capacity</li>
+          <li>Show rate is attendance against bookings</li>
+          <li>They are different questions and get different numbers</li>
+        </ul>
+      </div>
+      <div class="tile">
+        <div class="cap">Sessions</div>
+        <h3>One-to-ones, and their outcome</h3>
+        <p>Every session that has finished with nothing recorded sits at the top of the screen with the buttons that resolve it: delivered, no-show, cancelled, late cancel.</p>
+        <ul>
+          <li>Whether a no-show is payable is your policy, set on the page</li>
+          <li>Settlement stamps the sessions it covered</li>
+        </ul>
+      </div>
+      <div class="tile">
+        <div class="cap">Money</div>
+        <h3>Price book, memberships, payments</h3>
+        <p>What the gym sells, who is on which plan, and what has actually been taken — by card, cash, transfer or direct debit.</p>
+        <ul>
+          <li>Money is held as whole minor units, never as a float</li>
+          <li>One-off payments stay out of recurring revenue</li>
+        </ul>
+      </div>
+      <div class="tile">
+        <div class="cap">Door</div>
+        <h3>Who is in the building</h3>
+        <p>Check-ins at the desk, by QR, or from the app, plus the passes sold to people who are not members. The one operational screen a trainer can open as well as an owner.</p>
+        <ul>
+          <li>A visit with no exit is open, not zero minutes</li>
+          <li>Days since last seen, per member</li>
+        </ul>
+      </div>
+      <div class="tile">
+        <div class="cap">Import</div>
+        <h3>Your existing records, brought in</h3>
+        <p>Paste a spreadsheet of plans or payments. Everything is a dry run until you press the button, and every row it cannot read with confidence comes back refused, with the reason.</p>
+        <ul>
+          <li>It asks which way round your dates are written</li>
+          <li>It never guesses at an ambiguous value</li>
+        </ul>
+      </div>
+      <div class="tile">
+        <div class="cap">Equipment</div>
+        <h3>What the gym owns, and what is broken</h3>
+        <p>A register of kit, its service schedule and its status. Capacity is a claim about a room, and it stops being true the moment six of the rowers go out of service.</p>
+        <ul>
+          <li>&ldquo;No schedule&rdquo; and &ldquo;schedule set, never serviced&rdquo; stay separate</li>
+          <li>An empty register returns nothing, not zero</li>
+        </ul>
+      </div>
+    </div>
+
+    <figure class="chart after">
+      <div class="chart-hd">
+        <div>
+          <span class="chart-k">Timetable</span>
+          <h3>Where the week is actually full</h3>
+        </div>
+        <span class="sample">Illustrative</span>
+      </div>
+      <div class="chart-scroll">
+        <svg viewBox="0 0 940 390" width="940" height="390" role="img" aria-label="Heatmap of class fill by hour and weekday, as a percentage of stated capacity. The 18:00 row is the fullest all week — Monday 92, Tuesday 96, Wednesday 88, Thursday 94, Friday 76, falling to Saturday 44 and Sunday 39. The 6:00 row runs 62 to 78 on weekdays. The 14:00 row is the emptiest, 17 to 22 on the weekdays it runs at all. Saturday and Sunday peak mid-morning at 72 and 64. Dashes mark hours with no class on the timetable, including all of Tuesday and Thursday at 14:00 and the whole weekend at 12:00 and 20:00.">
+          <g class="cx-lab" text-anchor="middle">
+            <text x="118" y="32">Mon</text>
+            <text x="242" y="32">Tue</text>
+            <text x="366" y="32">Wed</text>
+            <text x="490" y="32">Thu</text>
+            <text x="614" y="32">Fri</text>
+            <text x="738" y="32">Sat</text>
+            <text x="862" y="32">Sun</text>
+          </g>
+          <g class="cx-ax" text-anchor="end">
+            <text x="52" y="64">06:00</text>
+            <text x="52" y="102">08:00</text>
+            <text x="52" y="140">10:00</text>
+            <text x="52" y="178">12:00</text>
+            <text x="52" y="216">14:00</text>
+            <text x="52" y="254">16:00</text>
+            <text x="52" y="292">18:00</text>
+            <text x="52" y="330">20:00</text>
+          </g>
+
+          <rect class="ch-a" x="62" y="44" width="112" height="30" rx="4"/>
+          <rect class="ch-b" x="186" y="44" width="112" height="30" rx="4"/>
+          <rect class="ch-b" x="310" y="44" width="112" height="30" rx="4"/>
+          <rect class="ch-b" x="434" y="44" width="112" height="30" rx="4"/>
+          <rect class="ch-b" x="558" y="44" width="112" height="30" rx="4"/>
+          <rect class="ch-c" x="682" y="44" width="112" height="30" rx="4"/>
+          <rect class="ch-x" x="806" y="44" width="112" height="30" rx="4"/>
+
+          <rect class="ch-b" x="62" y="82" width="112" height="30" rx="4"/>
+          <rect class="ch-c" x="186" y="82" width="112" height="30" rx="4"/>
+          <rect class="ch-b" x="310" y="82" width="112" height="30" rx="4"/>
+          <rect class="ch-b" x="434" y="82" width="112" height="30" rx="4"/>
+          <rect class="ch-c" x="558" y="82" width="112" height="30" rx="4"/>
+          <rect class="ch-b" x="682" y="82" width="112" height="30" rx="4"/>
+          <rect class="ch-b" x="806" y="82" width="112" height="30" rx="4"/>
+
+          <rect class="ch-c" x="62" y="120" width="112" height="30" rx="4"/>
+          <rect class="ch-c" x="186" y="120" width="112" height="30" rx="4"/>
+          <rect class="ch-c" x="310" y="120" width="112" height="30" rx="4"/>
+          <rect class="ch-c" x="434" y="120" width="112" height="30" rx="4"/>
+          <rect class="ch-c" x="558" y="120" width="112" height="30" rx="4"/>
+          <rect class="ch-b" x="682" y="120" width="112" height="30" rx="4"/>
+          <rect class="ch-b" x="806" y="120" width="112" height="30" rx="4"/>
+
+          <rect class="ch-b" x="62" y="158" width="112" height="30" rx="4"/>
+          <rect class="ch-b" x="186" y="158" width="112" height="30" rx="4"/>
+          <rect class="ch-b" x="310" y="158" width="112" height="30" rx="4"/>
+          <rect class="ch-b" x="434" y="158" width="112" height="30" rx="4"/>
+          <rect class="ch-c" x="558" y="158" width="112" height="30" rx="4"/>
+          <rect class="ch-x" x="682" y="158" width="112" height="30" rx="4"/>
+          <rect class="ch-x" x="806" y="158" width="112" height="30" rx="4"/>
+
+          <rect class="ch-d" x="62" y="196" width="112" height="30" rx="4"/>
+          <rect class="ch-x" x="186" y="196" width="112" height="30" rx="4"/>
+          <rect class="ch-d" x="310" y="196" width="112" height="30" rx="4"/>
+          <rect class="ch-x" x="434" y="196" width="112" height="30" rx="4"/>
+          <rect class="ch-d" x="558" y="196" width="112" height="30" rx="4"/>
+          <rect class="ch-c" x="682" y="196" width="112" height="30" rx="4"/>
+          <rect class="ch-c" x="806" y="196" width="112" height="30" rx="4"/>
+
+          <rect class="ch-c" x="62" y="234" width="112" height="30" rx="4"/>
+          <rect class="ch-b" x="186" y="234" width="112" height="30" rx="4"/>
+          <rect class="ch-c" x="310" y="234" width="112" height="30" rx="4"/>
+          <rect class="ch-c" x="434" y="234" width="112" height="30" rx="4"/>
+          <rect class="ch-c" x="558" y="234" width="112" height="30" rx="4"/>
+          <rect class="ch-c" x="682" y="234" width="112" height="30" rx="4"/>
+          <rect class="ch-c" x="806" y="234" width="112" height="30" rx="4"/>
+
+          <rect class="ch-a" x="62" y="272" width="112" height="30" rx="4"/>
+          <rect class="ch-a" x="186" y="272" width="112" height="30" rx="4"/>
+          <rect class="ch-a" x="310" y="272" width="112" height="30" rx="4"/>
+          <rect class="ch-a" x="434" y="272" width="112" height="30" rx="4"/>
+          <rect class="ch-a" x="558" y="272" width="112" height="30" rx="4"/>
+          <rect class="ch-c" x="682" y="272" width="112" height="30" rx="4"/>
+          <rect class="ch-c" x="806" y="272" width="112" height="30" rx="4"/>
+
+          <rect class="ch-b" x="62" y="310" width="112" height="30" rx="4"/>
+          <rect class="ch-b" x="186" y="310" width="112" height="30" rx="4"/>
+          <rect class="ch-b" x="310" y="310" width="112" height="30" rx="4"/>
+          <rect class="ch-b" x="434" y="310" width="112" height="30" rx="4"/>
+          <rect class="ch-c" x="558" y="310" width="112" height="30" rx="4"/>
+          <rect class="ch-x" x="682" y="310" width="112" height="30" rx="4"/>
+          <rect class="ch-x" x="806" y="310" width="112" height="30" rx="4"/>
+
+          <g class="cx-val" text-anchor="middle">
+            <text x="118" y="64">78%</text>
+            <text x="242" y="64">71%</text>
+            <text x="366" y="64">74%</text>
+            <text x="490" y="64">69%</text>
+            <text x="614" y="64">62%</text>
+            <text x="738" y="64">41%</text>
+            <text x="118" y="102">52%</text>
+            <text x="242" y="102">48%</text>
+            <text x="366" y="102">55%</text>
+            <text x="490" y="102">50%</text>
+            <text x="614" y="102">44%</text>
+            <text x="738" y="102">66%</text>
+            <text x="862" y="102">58%</text>
+            <text x="118" y="140">34%</text>
+            <text x="242" y="140">29%</text>
+            <text x="366" y="140">31%</text>
+            <text x="490" y="140">27%</text>
+            <text x="614" y="140">30%</text>
+            <text x="738" y="140">72%</text>
+            <text x="862" y="140">64%</text>
+            <text x="118" y="178">61%</text>
+            <text x="242" y="178">58%</text>
+            <text x="366" y="178">63%</text>
+            <text x="490" y="178">57%</text>
+            <text x="614" y="178">49%</text>
+            <text x="118" y="216">22%</text>
+            <text x="366" y="216">19%</text>
+            <text x="614" y="216">17%</text>
+            <text x="738" y="216">38%</text>
+            <text x="862" y="216">31%</text>
+            <text x="118" y="254">46%</text>
+            <text x="242" y="254">51%</text>
+            <text x="366" y="254">44%</text>
+            <text x="490" y="254">48%</text>
+            <text x="614" y="254">40%</text>
+            <text x="738" y="254">35%</text>
+            <text x="862" y="254">28%</text>
+            <text x="118" y="292">92%</text>
+            <text x="242" y="292">96%</text>
+            <text x="366" y="292">88%</text>
+            <text x="490" y="292">94%</text>
+            <text x="614" y="292">76%</text>
+            <text x="738" y="292">44%</text>
+            <text x="862" y="292">39%</text>
+            <text x="118" y="330">67%</text>
+            <text x="242" y="330">72%</text>
+            <text x="366" y="330">64%</text>
+            <text x="490" y="330">70%</text>
+            <text x="614" y="330">48%</text>
+          </g>
+          <g class="cx-ax" text-anchor="middle">
+            <text x="862" y="64">—</text>
+            <text x="738" y="178">—</text>
+            <text x="862" y="178">—</text>
+            <text x="242" y="216">—</text>
+            <text x="490" y="216">—</text>
+            <text x="738" y="330">—</text>
+            <text x="862" y="330">—</text>
+          </g>
+          <text class="cx-sm" x="16" y="372">Bookings held as a share of the room&#8217;s stated capacity. A dash is an hour with no class on the timetable — which is not the same as a class nobody booked.</text>
+        </svg>
+      </div>
+      <ul class="legend">
+        <li><span class="sw ch-a"></span>75% and over</li>
+        <li><span class="sw ch-b"></span>50–74%</li>
+        <li><span class="sw ch-c"></span>25–49%</li>
+        <li><span class="sw ch-d"></span>Under 25%</li>
+        <li><span class="sw s-book"></span>No class scheduled</li>
+      </ul>
+      <figcaption class="chart-note">
+        <strong>The useful reading is the 14:00 row, not the 18:00 one.</strong> Everybody already
+        knows the evening is full. What an owner cannot see from the front desk is that two hours
+        of coached time sit at under a quarter full on three weekdays, and that the weekend peak
+        is at 10:00 rather than the 06:00 the weekday timetable is built around. Both are decisions
+        about where to move a class. Figures here are invented to show the shape of the chart.
+      </figcaption>
+    </figure>
+
+    <figure class="chart">
+      <div class="chart-hd">
+        <div>
+          <span class="chart-k">Capacity · bookings · attendance</span>
+          <h3>Three numbers a single &ldquo;attendance&rdquo; figure hides</h3>
+        </div>
+        <span class="sample">Illustrative</span>
+      </div>
+      <div class="chart-scroll">
+        <svg viewBox="0 0 940 310" width="940" height="310" role="img" aria-label="Stacked bar chart of ten weeks of classes. Each bar is the room's total capacity for that week, split into places attended, places booked but not attended, and places never booked. Capacity rises from 264 to 288 places a week. Bookings rise from 171 to 238 and attendance from 149 to 214. Across the ten weeks 2,009 of 2,772 places were booked, a fill rate of 72 percent, and 1,749 of those bookings were attended, a show rate of 87 percent.">
+          <line class="cx-grid" x1="70" y1="44" x2="920" y2="44"/>
+          <line class="cx-grid" x1="70" y1="112.67" x2="920" y2="112.67"/>
+          <line class="cx-grid" x1="70" y1="181.33" x2="920" y2="181.33"/>
+          <line class="cx-base" x1="70" y1="250" x2="920" y2="250"/>
+          <g class="cx-ax" text-anchor="end">
+            <text x="60" y="48">300</text>
+            <text x="60" y="116.67">200</text>
+            <text x="60" y="185.33">100</text>
+            <text x="60" y="254">0</text>
+          </g>
+          <text class="cx-sm" x="16" y="24">places</text>
+
+          <g class="s-cover">
+            <rect x="85.5" y="68.72" width="54" height="63.86"/>
+            <rect x="170.5" y="68.72" width="54" height="56.31"/>
+            <rect x="255.5" y="68.72" width="54" height="67.29"/>
+            <rect x="340.5" y="60.48" width="54" height="53.56"/>
+            <rect x="425.5" y="60.48" width="54" height="48.75"/>
+            <rect x="510.5" y="60.48" width="54" height="59.05"/>
+            <rect x="595.5" y="52.24" width="54" height="50.81"/>
+            <rect x="680.5" y="52.24" width="54" height="42.57"/>
+            <rect x="765.5" y="52.24" width="54" height="45.52"/>
+            <rect x="850.5" y="52.24" width="54" height="34.86"/>
+          </g>
+          <g class="s-class">
+            <rect x="85.5" y="132.58" width="54" height="15.11"/>
+            <rect x="170.5" y="125.03" width="54" height="16.48"/>
+            <rect x="255.5" y="136.01" width="54" height="17.17"/>
+            <rect x="340.5" y="114.04" width="54" height="18.54"/>
+            <rect x="425.5" y="109.23" width="54" height="17.86"/>
+            <rect x="510.5" y="119.53" width="54" height="20.6"/>
+            <rect x="595.5" y="103.05" width="54" height="17.86"/>
+            <rect x="680.5" y="94.81" width="54" height="18.54"/>
+            <rect x="765.5" y="99.62" width="54" height="19.91"/>
+            <rect x="850.5" y="86.57" width="54" height="16.48"/>
+          </g>
+          <g class="s-att">
+            <rect x="85.5" y="147.69" width="54" height="102.31"/>
+            <rect x="170.5" y="141.51" width="54" height="108.49"/>
+            <rect x="255.5" y="153.18" width="54" height="96.82"/>
+            <rect x="340.5" y="132.58" width="54" height="117.42"/>
+            <rect x="425.5" y="127.09" width="54" height="122.91"/>
+            <rect x="510.5" y="140.13" width="54" height="109.87"/>
+            <rect x="595.5" y="120.91" width="54" height="129.09"/>
+            <rect x="680.5" y="113.35" width="54" height="136.65"/>
+            <rect x="765.5" y="119.53" width="54" height="130.47"/>
+            <rect x="850.5" y="103.05" width="54" height="146.95"/>
+          </g>
+
+          <g class="cx-ax" text-anchor="middle">
+            <text x="112.5" y="270">wk 1</text>
+            <text x="197.5" y="270">wk 2</text>
+            <text x="282.5" y="270">wk 3</text>
+            <text x="367.5" y="270">wk 4</text>
+            <text x="452.5" y="270">wk 5</text>
+            <text x="537.5" y="270">wk 6</text>
+            <text x="622.5" y="270">wk 7</text>
+            <text x="707.5" y="270">wk 8</text>
+            <text x="792.5" y="270">wk 9</text>
+            <text x="877.5" y="270">wk 10</text>
+          </g>
+          <text class="cx-sm" x="60" y="290" text-anchor="end">att / bkd</text>
+          <g class="cx-val" text-anchor="middle">
+            <text x="112.5" y="290">149/171</text>
+            <text x="197.5" y="290">158/182</text>
+            <text x="282.5" y="290">141/166</text>
+            <text x="367.5" y="290">171/198</text>
+            <text x="452.5" y="290">179/205</text>
+            <text x="537.5" y="290">160/190</text>
+            <text x="622.5" y="290">188/214</text>
+            <text x="707.5" y="290">199/226</text>
+            <text x="792.5" y="290">190/219</text>
+            <text x="877.5" y="290">214/238</text>
+          </g>
+        </svg>
+      </div>
+      <ul class="legend">
+        <li><span class="sw s-att"></span>Attended <span class="n">1,749</span></li>
+        <li><span class="sw s-class"></span>Booked, did not attend <span class="n">260</span></li>
+        <li><span class="sw s-cover"></span>Never booked <span class="n">763</span></li>
+      </ul>
+      <figcaption class="chart-note">
+        <strong>Fill 72%, show 87% — and they need fixing in opposite directions.</strong> The pale
+        band at the top is unsold room: a marketing and timetabling problem. The middle band is
+        people who booked and did not come: a coaching and reminder problem. A gym reporting one
+        blended &ldquo;attendance&rdquo; figure cannot tell which of the two it has. Studio sums
+        the places first and divides once, so a small class cannot swing the result. Invented
+        figures, shown to make the bands legible.
+      </figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- ── payroll ───────────────────────────────────────────────────────── -->
+<section class="band tint tone-studio">
+  <div class="wrap">
+    <div class="split">
+      <div>
+        <div class="eyebrow">Payroll</div>
+        <h2 class="hd">It can only count<br><span class="serif">what was delivered.</span></h2>
+        <p class="lede">
+          The easy way to build this is to treat every booked slot whose clock has passed as a
+          session that happened. That counts no-shows, counts slots nobody cancelled, and then
+          pays for both. Repple will not do it.
+        </p>
+        <ul class="ticks">
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>Booked and delivered are different columns</strong> — a session is delivered when somebody records that it was, not when the hour passes.</span></li>
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>One unmarked session stops the total</strong> — the payroll figure goes to a dash and says how many are outstanding, rather than quietly under-reporting.</span></li>
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>Whether a no-show is payable is your policy</strong> — it is a control on the screen, so you state it and watch what it does to the number, instead of finding out in a payslip.</span></li>
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>There is somewhere to do the marking</strong> — the Sessions screen lists everything awaiting an outcome at the top, with the three buttons that clear it.</span></li>
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>Paying stamps the sessions it covered</strong> — so the same hour cannot be settled twice next month.</span></li>
+        </ul>
+      </div>
+
+      <div class="surface">
+        <div class="surface-bar">
+          <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+          <span class="ttl">repple studio — sessions</span>
+          <span class="sample">Sample data</span>
+        </div>
+        <div class="surface-body" style="padding-bottom:8px">
+          <p class="tiny" style="margin:0">
+            Awaiting an outcome — these sit at the top of the screen until somebody says what
+            happened to them.
+          </p>
+        </div>
+        <div class="rows">
+          <div class="row"><span class="nm">Tue 17:00 · one-to-one</span><span class="mt">2 days ago</span><span class="pill warn">Unmarked</span></div>
+          <div class="row"><span class="nm">Fri 09:30 · one-to-one</span><span class="mt">6 days ago</span><span class="pill warn">Unmarked</span></div>
+        </div>
+        <div class="kpis" style="border-top:1px solid var(--line)">
+          <div class="kpi"><div class="k">Delivered 30d</div><div class="v">121</div><div class="n">outcome recorded</div></div>
+          <div class="kpi"><div class="k">Payroll 30d</div><div class="v dash">—</div><div class="n">2 sessions still need an outcome recorded</div></div>
+        </div>
+      </div>
+    </div>
+
+    <figure class="chart after">
+      <div class="chart-hd">
+        <div>
+          <span class="chart-k">Last 30 days</span>
+          <h3>What actually happened to the booked hours</h3>
+        </div>
+        <span class="sample">Illustrative</span>
+      </div>
+      <div class="chart-scroll">
+        <svg viewBox="0 0 940 300" width="940" height="300" role="img" aria-label="Single stacked bar of 148 one-to-one sessions that finished in the last 30 days: 121 delivered, 9 no-shows, 16 cancellations of which 4 were late, and 2 with no outcome recorded. Below it, the 30-day payroll figure reads as a dash, with the reason: 2 sessions still need an outcome recorded.">
+          <text class="cx-hd" x="20" y="34">148 one-to-one sessions finished in the last 30 days</text>
+          <text class="cx-sm" x="907" y="34" text-anchor="end">2 unmarked</text>
+          <path class="cx-flow" d="M913 42 L 913 70"/>
+          <rect class="s-one" x="20" y="70" width="735.81" height="54" rx="3"/>
+          <rect class="f-mid" x="755.81" y="70" width="54.73" height="54"/>
+          <rect class="f-lo" x="810.54" y="70" width="97.3" height="54"/>
+          <rect class="s-book" x="907.84" y="70" width="12.16" height="54"/>
+
+          <g>
+            <rect class="s-one" x="20" y="152" width="12" height="12" rx="2"/>
+            <text class="cx-val" x="40" y="163">121</text>
+            <text class="cx-lab" x="20" y="186">Delivered</text>
+            <text class="cx-sm" x="20" y="204">Priced at the fee the gym set.</text>
+          </g>
+          <g>
+            <rect class="f-mid" x="260" y="152" width="12" height="12" rx="2"/>
+            <text class="cx-val" x="280" y="163">9</text>
+            <text class="cx-lab" x="260" y="186">No-show</text>
+            <text class="cx-sm" x="260" y="204">Payable or not, by your policy.</text>
+          </g>
+          <g>
+            <rect class="f-lo" x="500" y="152" width="12" height="12" rx="2"/>
+            <text class="cx-val" x="520" y="163">16</text>
+            <text class="cx-lab" x="500" y="186">Cancelled</text>
+            <text class="cx-sm" x="500" y="204">12 in time, 4 late.</text>
+          </g>
+          <g>
+            <rect class="s-book" x="740" y="152" width="12" height="12" rx="2"/>
+            <text class="cx-val" x="760" y="163">2</text>
+            <text class="cx-lab" x="740" y="186">No outcome recorded</text>
+            <text class="cx-sm" x="740" y="204">Nobody has said what happened.</text>
+          </g>
+
+          <rect class="cx-box" x="20" y="222" width="900" height="62" rx="8"/>
+          <text class="cx-cap" x="38" y="244">PAYROLL · 30 DAYS</text>
+          <text class="cx-val" x="38" y="270">—</text>
+          <text class="cx-lab" x="62" y="270">2 sessions still need an outcome recorded.</text>
+        </svg>
+      </div>
+      <figcaption class="chart-note">
+        <strong>Two rows out of a hundred and forty-eight hold the whole figure.</strong> That is
+        deliberate. A payroll total that silently ignores the sessions nobody marked is a total
+        somebody will pay against, and it will be wrong by exactly the sessions that were hardest
+        to remember. The bar also shows why booked hours are the wrong basis for paying anyone:
+        25 of the 148 are known not to have been delivered, and 2 more nobody can say. Invented
+        figures.
+      </figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- ── door log & member movement ────────────────────────────────────── -->
+<section class="band tone-studio">
+  <div class="wrap">
+    <div class="lead-in wide">
+      <div class="eyebrow">Attendance, properly counted</div>
+      <h2 class="hd">Most people who train at your gym<br><span class="serif">never book anything.</span></h2>
+      <p class="lede">
+        Counting attendance only where a class was booked and ticked off leaves out everyone who
+        walks in, trains on the floor and leaves. That under-count reaches further than the
+        headline: a member who moved from classes to the floor looks exactly like a member who
+        stopped coming. The door log is there so those two are different.
+      </p>
+    </div>
+
+    <div class="chart-two">
+      <figure class="chart">
+        <div class="chart-hd">
+          <div>
+            <span class="chart-k">Door log · one week</span>
+            <h3>Footfall by hour</h3>
+          </div>
+          <span class="sample">Illustrative</span>
+        </div>
+        <svg viewBox="0 0 500 280" width="500" height="280" role="img" aria-label="Bar chart of gym entries by hour across one week, 6am to 9pm. Values in order from 6am: 38, 52, 31, 22, 18, 16, 27, 24, 14, 19, 33, 47, 58, 51, 36, 17. The peak is 58 at 6pm. 7pm is the second busiest hour at 51 and has no class on the timetable. Markers below the axis show which hours have a class scheduled: 6am, 7am, midday, 5pm, 6pm and 8pm.">
+          <line class="cx-grid" x1="42" y1="30" x2="486" y2="30"/>
+          <line class="cx-grid" x1="42" y1="90" x2="486" y2="90"/>
+          <line class="cx-grid" x1="42" y1="150" x2="486" y2="150"/>
+          <line class="cx-base" x1="42" y1="210" x2="486" y2="210"/>
+          <g class="cx-ax" text-anchor="end">
+            <text x="36" y="34">60</text>
+            <text x="36" y="94">40</text>
+            <text x="36" y="154">20</text>
+            <text x="36" y="214">0</text>
+          </g>
+          <text class="cx-sm" x="8" y="16">entries</text>
+
+          <rect class="f-mid" x="45.875" y="96" width="20" height="114" rx="2"/>
+          <rect class="f-hi" x="73.625" y="54" width="20" height="156" rx="2"/>
+          <rect class="f-mid" x="101.375" y="117" width="20" height="93" rx="2"/>
+          <rect class="f-lo" x="129.125" y="144" width="20" height="66" rx="2"/>
+          <rect class="f-lo" x="156.875" y="156" width="20" height="54" rx="2"/>
+          <rect class="f-lo" x="184.625" y="162" width="20" height="48" rx="2"/>
+          <rect class="f-mid" x="212.375" y="129" width="20" height="81" rx="2"/>
+          <rect class="f-lo" x="240.125" y="138" width="20" height="72" rx="2"/>
+          <rect class="f-lo" x="267.875" y="168" width="20" height="42" rx="2"/>
+          <rect class="f-lo" x="295.625" y="153" width="20" height="57" rx="2"/>
+          <rect class="f-mid" x="323.375" y="111" width="20" height="99" rx="2"/>
+          <rect class="f-hi" x="351.125" y="69" width="20" height="141" rx="2"/>
+          <rect class="f-hi" x="378.875" y="36" width="20" height="174" rx="2"/>
+          <rect class="f-hi" x="406.625" y="57" width="20" height="153" rx="2"/>
+          <rect class="f-mid" x="434.375" y="102" width="20" height="108" rx="2"/>
+          <rect class="f-lo" x="462.125" y="159" width="20" height="51" rx="2"/>
+
+          <text class="cx-val" x="388.875" y="28" text-anchor="middle">58</text>
+          <text class="cx-val" x="416.625" y="49" text-anchor="middle">51</text>
+
+          <g class="cx-ax" text-anchor="middle">
+            <text x="55.875" y="226">06</text>
+            <text x="111.375" y="226">08</text>
+            <text x="166.875" y="226">10</text>
+            <text x="222.375" y="226">12</text>
+            <text x="277.875" y="226">14</text>
+            <text x="333.375" y="226">16</text>
+            <text x="388.875" y="226">18</text>
+            <text x="444.375" y="226">20</text>
+          </g>
+          <g class="cx-tab">
+            <rect x="50.875" y="232" width="10" height="4" rx="2"/>
+            <rect x="78.625" y="232" width="10" height="4" rx="2"/>
+            <rect x="217.375" y="232" width="10" height="4" rx="2"/>
+            <rect x="356.125" y="232" width="10" height="4" rx="2"/>
+            <rect x="383.875" y="232" width="10" height="4" rx="2"/>
+            <rect x="439.375" y="232" width="10" height="4" rx="2"/>
+          </g>
+          <rect class="cx-tab" x="42" y="252" width="10" height="4" rx="2"/>
+          <text class="cx-sm" x="58" y="258">hour with a class on the timetable</text>
+          <text class="cx-sm" x="42" y="274">19:00 is the second busiest hour of the week and has nothing scheduled in it.</text>
+        </svg>
+        <ul class="legend">
+          <li><span class="sw f-hi"></span>45 entries and over</li>
+          <li><span class="sw f-mid"></span>25–44</li>
+          <li><span class="sw f-lo"></span>Under 25</li>
+        </ul>
+        <figcaption class="chart-note">
+          <strong>The timetable and the door disagree, and the door is right.</strong> Every entry
+          is recorded at the desk, by QR or from the app, whether or not a class was booked. A
+          visit with no exit recorded is left open rather than counted as zero minutes, because a
+          gym reading &ldquo;average stay: four minutes&rdquo; will redesign its floor around a
+          rounding artefact. Invented figures.
+        </figcaption>
+      </figure>
+
+      <figure class="chart">
+        <div class="chart-hd">
+          <div>
+            <span class="chart-k">Membership · 12 months</span>
+            <h3>Joined, left, and the net of the two</h3>
+          </div>
+          <span class="sample">Illustrative</span>
+        </div>
+        <svg viewBox="0 0 500 280" width="500" height="280" role="img" aria-label="Bar chart of member movement over twelve months from September to August. Bars above the line are joiners, bars below are leavers, and a line traces the net. Joiners by month: 14, 17, 12, 9, 22, 19, 16, 13, 15, 11, 10, 18. Leavers: 9, 11, 13, 15, 8, 10, 12, 11, 9, 14, 13, 10. November, December, June and July are net negative; January is the strongest month at plus 14. Over the year 176 joined and 135 left, a net gain of 41.">
+          <line class="cx-grid" x1="42" y1="50" x2="486" y2="50"/>
+          <line class="cx-grid" x1="42" y1="100" x2="486" y2="100"/>
+          <line class="cx-grid" x1="42" y1="200" x2="486" y2="200"/>
+          <line class="cx-base" x1="42" y1="150" x2="486" y2="150"/>
+          <g class="cx-ax" text-anchor="end">
+            <text x="36" y="54">+20</text>
+            <text x="36" y="104">+10</text>
+            <text x="36" y="154">0</text>
+            <text x="36" y="204">&#8722;10</text>
+          </g>
+          <text class="cx-sm" x="8" y="16">members</text>
+
+          <g class="f-hi">
+            <rect x="54.33" y="80" width="20" height="70" rx="2"/>
+            <rect x="91" y="65" width="20" height="85" rx="2"/>
+            <rect x="127.67" y="90" width="20" height="60" rx="2"/>
+            <rect x="164.33" y="105" width="20" height="45" rx="2"/>
+            <rect x="201" y="40" width="20" height="110" rx="2"/>
+            <rect x="237.67" y="55" width="20" height="95" rx="2"/>
+            <rect x="274.33" y="70" width="20" height="80" rx="2"/>
+            <rect x="311" y="85" width="20" height="65" rx="2"/>
+            <rect x="347.67" y="75" width="20" height="75" rx="2"/>
+            <rect x="384.33" y="95" width="20" height="55" rx="2"/>
+            <rect x="421" y="100" width="20" height="50" rx="2"/>
+            <rect x="457.67" y="60" width="20" height="90" rx="2"/>
+          </g>
+          <g class="f-lo">
+            <rect x="54.33" y="150" width="20" height="45" rx="2"/>
+            <rect x="91" y="150" width="20" height="55" rx="2"/>
+            <rect x="127.67" y="150" width="20" height="65" rx="2"/>
+            <rect x="164.33" y="150" width="20" height="75" rx="2"/>
+            <rect x="201" y="150" width="20" height="40" rx="2"/>
+            <rect x="237.67" y="150" width="20" height="50" rx="2"/>
+            <rect x="274.33" y="150" width="20" height="60" rx="2"/>
+            <rect x="311" y="150" width="20" height="55" rx="2"/>
+            <rect x="347.67" y="150" width="20" height="45" rx="2"/>
+            <rect x="384.33" y="150" width="20" height="70" rx="2"/>
+            <rect x="421" y="150" width="20" height="65" rx="2"/>
+            <rect x="457.67" y="150" width="20" height="50" rx="2"/>
+          </g>
+
+          <polyline class="cx-flow" points="64.33,125 101,120 137.67,155 174.33,180 211,80 247.67,105 284.33,130 321,140 357.67,120 394.33,165 431,165 467.67,110"/>
+          <g class="cx-tip">
+            <circle cx="64.33" cy="125" r="2.6"/>
+            <circle cx="101" cy="120" r="2.6"/>
+            <circle cx="137.67" cy="155" r="2.6"/>
+            <circle cx="174.33" cy="180" r="2.6"/>
+            <circle cx="211" cy="80" r="2.6"/>
+            <circle cx="247.67" cy="105" r="2.6"/>
+            <circle cx="284.33" cy="130" r="2.6"/>
+            <circle cx="321" cy="140" r="2.6"/>
+            <circle cx="357.67" cy="120" r="2.6"/>
+            <circle cx="394.33" cy="165" r="2.6"/>
+            <circle cx="431" cy="165" r="2.6"/>
+            <circle cx="467.67" cy="110" r="2.6"/>
+          </g>
+
+          <g class="cx-ax" text-anchor="middle">
+            <text x="64.33" y="242">Sep</text>
+            <text x="174.33" y="242">Dec</text>
+            <text x="284.33" y="242">Mar</text>
+            <text x="394.33" y="242">Jun</text>
+            <text x="467.67" y="242">Aug</text>
+          </g>
+          <text class="cx-sm" x="42" y="266">176 joined · 135 left · net +41. The line is the net; four months of the twelve are below it.</text>
+        </svg>
+        <ul class="legend">
+          <li><span class="sw f-hi"></span>Joined <span class="n">176</span></li>
+          <li><span class="sw f-lo"></span>Left <span class="n">135</span></li>
+        </ul>
+        <figcaption class="chart-note">
+          <strong>An annual figure hides the four months that were losing.</strong> A gym reading
+          only &ldquo;net +41 this year&rdquo; never sees that November and December went backwards
+          before January carried the total. Studio keeps the movement month by month for exactly
+          that reason. Invented figures.
+        </figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<!-- ── import ────────────────────────────────────────────────────────── -->
+<section class="band tint tone-studio">
+  <div class="wrap">
+    <div class="lead-in wide">
+      <div class="eyebrow">Day one</div>
+      <h2 class="hd">A gym that cannot import its history<br><span class="serif">starts from nothing.</span></h2>
+      <p class="lede">
+        Everything Studio does — retention, payroll, the lot — is worthless against an empty
+        record. So the import is not an afterthought bolted on at the end; it is the first screen
+        that matters, and it is built to refuse rather than to guess.
+      </p>
+    </div>
+
+    <ol class="steps">
+      <li>
+        <span class="no">1</span>
+        <div>
+          <h3>Paste the file in</h3>
+          <p>A CSV, straight into the box. The importer recognises the usual column names — member, amount, date, method for payments; name, price, interval, currency for a price list — so most exports from whatever you are on now go in without being rewritten first.</p>
+        </div>
+      </li>
+      <li>
+        <span class="no">2</span>
+        <div>
+          <h3>Say which way round your dates are</h3>
+          <p>03/04/2026 is the fourth of March in one country and the third of April in another, and no amount of cleverness can tell which from the file. You pick day-month-year, month-day-year or year-month-day. Nothing about the choice is inferred.</p>
+        </div>
+      </li>
+      <li>
+        <span class="no">3</span>
+        <div>
+          <h3>Read the dry run</h3>
+          <p>The screen reports what it would do before it does anything. Rows it can read, rows it cannot, and — for a price list — which of the plans in your file the gym already sells, so an import cannot quietly create a second &ldquo;Monthly&rdquo; alongside the first.</p>
+        </div>
+      </li>
+      <li>
+        <span class="no">4</span>
+        <div>
+          <h3>Look at what it refused, and why</h3>
+          <p>Every refusal comes with its reason in plain words: a price column with four decimal places is a unit rate or an exchange rate, not money, so it is handed back rather than rounded. A year of plausible, wrong history is far worse than a hundred rows you have to fix.</p>
+        </div>
+      </li>
+      <li>
+        <span class="no">5</span>
+        <div>
+          <h3>Know what will not import</h3>
+          <p>Plans and payments import. Members are checked here but not created — a membership has to point at a real Repple account, and an account is something a person accepts, not something a spreadsheet conjures. Members come in by invitation.</p>
+        </div>
+      </li>
+      <li>
+        <span class="no">6</span>
+        <div>
+          <h3>Then press the button</h3>
+          <p>Only that last press writes to your gym, and it writes exactly what the dry run said it would. The one sentence this is built never to produce is &ldquo;12 plans imported&rdquo; when five of them silently failed.</p>
+        </div>
+      </li>
+    </ol>
+  </div>
+</section>
+
+<!-- ── for the coach ─────────────────────────────────────────────────── -->
+<section class="band tone-coach" id="for-coaches">
+  <div class="wrap">
+    <div class="lead-in wide">
+      <div class="eyebrow">Repple Coach · for the coach</div>
+      <h2 class="hd">The whole book, in the place<br><span class="serif">you already look.</span></h2>
+      <p class="lede">
+        A coach's job is spread across a scheduling app, a spreadsheet of programmes, a camera
+        roll of technique clips and a phone full of messages. Coach is five tabs that hold all of
+        it, sitting on the same rows the client's own app writes.
+      </p>
+    </div>
+
+    <div class="tiles">
+      <div class="tile">
+        <div class="cap">Clients</div>
+        <h3>Who needs you today</h3>
+        <p>Add someone by hand, or invite by email and they accept it in their own app. Filters split the roster by at-risk, online and in-person, and <strong>needs check-in</strong> surfaces the ones who have gone quiet.</p>
+      </div>
+      <div class="tile">
+        <div class="cap">Programs</div>
+        <h3>Written once, assigned out</h3>
+        <p>Start from a template or build a week from scratch, then assign it — it appears in that client's Train tab. Save anything you like as a template and use it again.</p>
+      </div>
+      <div class="tile">
+        <div class="cap">Schedule</div>
+        <h3>Your coaching week</h3>
+        <p>Book a client into a slot, or open a slot they can book themselves. Set the availability you offer every week once. Schedule group classes and check members in.</p>
+      </div>
+      <div class="tile">
+        <div class="cap">Videos</div>
+        <h3>Clips where they are needed</h3>
+        <p>Record, upload or paste a hosted link. Anything in your library plays against the matching exercise inside every client's session — not in a folder they have to go and find.</p>
+      </div>
+      <div class="tile">
+        <div class="cap">Analytics</div>
+        <h3>How the coaching is going</h3>
+        <p>Sessions delivered counts what you actually ran this month, not what was booked. Roster health splits your clients into on track, watch and at risk. Figures stay empty until there is real activity behind them.</p>
+      </div>
+      <div class="tile">
+        <div class="cap">And your own training</div>
+        <h3>Coaches train too</h3>
+        <p>Coach logs your own sessions alongside your clients' — the same log, the same records board. You do not need a second account to be a person who lifts.</p>
+      </div>
+    </div>
+
+    <div class="after">
+      <div class="split">
+        <div>
+          <h3 class="sub">What the shared record buys a coach</h3>
+          <ul class="ticks">
+            <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+              <span><strong>No chasing for what happened</strong> — the client logged the session in their own app as they did it. You are reading the same rows, not a summary they typed out afterwards.</span></li>
+            <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+              <span><strong>Access is granted by the client</strong> — a coach reads a person's training because that person linked them, and it stops when they unlink. It is not a side effect of working at their gym.</span></li>
+            <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+              <span><strong>Marking a session is one tap, and it is the tap that pays you</strong> — the same outcome that clears your schedule is the one the gym's payroll counts.</span></li>
+            <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+              <span><strong>You keep your book if you move</strong> — clients are linked to you, not to a gym's installation. Coach works for an independent coach with no gym behind them at all.</span></li>
+          </ul>
+          <div class="btn-row">
+            <a class="btn primary" href="/trainer">Repple Coach in full</a>
+          </div>
+        </div>
+
+        <div class="surface">
+          <div class="surface-bar">
+            <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+            <span class="ttl">coach — roster health</span>
+            <span class="sample">Sample data</span>
+          </div>
+          <div class="kpis">
+            <div class="kpi"><div class="k">Clients</div><div class="v">23</div></div>
+            <div class="kpi"><div class="k">Delivered 30d</div><div class="v">86</div><div class="n">marked, not booked</div></div>
+            <div class="kpi"><div class="k">Awaiting outcome</div><div class="v">2</div><div class="n">clear these to settle</div></div>
+          </div>
+          <div class="surface-body" style="border-top:1px solid var(--line)">
+            <p class="tiny" style="margin:0 0 14px">
+              Roster health is read off delivered sessions and client load — both of them counted
+              rows. A coach with clients and no delivered sessions is flagged, and the flag says
+              which of the two it is.
+            </p>
+            <div class="rows" style="border:1px solid var(--line);border-radius:9px">
+              <div class="row"><span class="nm">On track</span><span class="mt">17 clients</span><span class="pill ok">Healthy</span></div>
+              <div class="row"><span class="nm">Watch</span><span class="mt">4 clients</span><span class="pill warn">Few sessions this month</span></div>
+              <div class="row"><span class="nm">At risk</span><span class="mt">2 clients</span><span class="pill crit">Nothing in 30 days</span></div>
+            </div>
+            <p class="tiny" style="margin:14px 0 0">
+              Invented figures. A new account shows none of this until real sessions exist behind it.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── for the member ────────────────────────────────────────────────── -->
+<section class="band tone-client" id="for-members">
+  <div class="wrap">
+    <div class="lead-in wide">
+      <div class="eyebrow">Repple · for the person training</div>
+      <h2 class="hd">The record belongs to<br><span class="serif">the person doing the work.</span></h2>
+      <p class="lede">
+        Everything else on this page is downstream of one thing: somebody logging a set. Repple is
+        built so that logging it is worth doing — a history that goes back as far as you do, in a
+        form you can still read in two years, and yours to take away.
+      </p>
+    </div>
+
+    <div class="tiles">
+      <div class="tile">
+        <div class="cap">Home</div>
+        <h3>How recovered you are, and what is next</h3>
+        <p>Readiness needs a night of sleep logged before it shows anything, and stays blank until then. Weight, body fat and muscle come from your most recent scan, with the change since the one before.</p>
+      </div>
+      <div class="tile">
+        <div class="cap">Train</div>
+        <h3>Your programme, session by session</h3>
+        <p>Start workout walks you through it exercise by exercise, logging reps and weight as you go. Book a slot in your coach's open times. Cardio, HIIT and mobility sit alongside the main plan.</p>
+      </div>
+      <div class="tile">
+        <div class="cap">Meals</div>
+        <h3>Targets that come from your own body</h3>
+        <p>Photograph it, scan a barcode, or describe it in words. Mark the day training, standard or rest and the targets move with it. Targets need a weight and body fat to scale from, so they wait for a scan.</p>
+      </div>
+      <div class="tile">
+        <div class="cap">Progress</div>
+        <h3>The long view</h3>
+        <p>InBody scans, the tape measurements between them, and progress photos you can put side by side. Weight is one number and it is not the number.</p>
+      </div>
+      <div class="tile">
+        <div class="cap">Me</div>
+        <h3>Your account, your coach, your settings</h3>
+        <p>Connect a wearable to bring heart rate and sleep in automatically. Find a coach from the trainers who have opted in and send them a request. It is your account that holds all of it.</p>
+      </div>
+      <div class="tile">
+        <div class="cap">Explore</div>
+        <h3>Everything else, searchable</h3>
+        <p>Records, trends, habits, reminders, bookings, packs, milestone cards, injuries, the machine scanner — reachable from a searchable directory of every screen rather than buried in a menu.</p>
+      </div>
+    </div>
+
+    <div class="after">
+      <ul class="ticks">
+        <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+          <span><strong>It works with no gym and no coach</strong> — Repple is a complete training log on its own. The gym and the coach are things you can add, not things it needs.</span></li>
+        <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+          <span><strong>Apple Health goes both ways</strong> — workouts you already recorded come in; sessions you finish in Repple go back out, so the rings stay honest.</span></li>
+        <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+          <span><strong>Your gym sees attendance, not your lifts</strong> — Studio reads whether you came in and what you are paying for. It has no screen that shows a member's sets.</span></li>
+        <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+          <span><strong>You can take it all with you</strong> — export everything, and delete the account outright if you want to. Health data is used to show you your training and for nothing else.</span></li>
+      </ul>
+      <div class="btn-row">
+        <a class="btn primary" href="/client">Repple for members</a>
+      </div>
+    </div>
+  </div>
+</section>
+
 <!-- ── why one system ────────────────────────────────────────────────── -->
 <section class="band">
   <div class="wrap">
-    <div style="max-width:64ch">
+    <div class="lead-in wide">
       <div class="eyebrow">Why it has to be one system</div>
       <h2 class="hd">A gym is not a stack of<br>separate problems.</h2>
-      <p class="lede" style="margin-top:22px">
+      <p class="lede">
         Attendance is a coaching problem until it becomes a revenue problem. A trainer's schedule
         is a staffing problem until it becomes a churn problem. When those live in different
         tools, you find out in the wrong order — usually at the end of the month.
@@ -188,21 +1157,69 @@
     </div>
 
     <div class="flow">
-      <div class="node" style="--c:var(--client)">
+      <div class="node c-client">
         <div class="cap">Member logs</div>
         <h4>The work that happened</h4>
         <p>Sets, reps, load, effort, cardio, time in heart-rate zone. Imported from the watch or typed in by hand.</p>
       </div>
-      <div class="node" style="--c:var(--coach)">
+      <div class="node c-coach">
         <div class="cap">Coach sees</div>
         <h4>Who is drifting</h4>
         <p>Not a wall of numbers — the three clients whose pattern changed this week, and what changed.</p>
       </div>
-      <div class="node" style="--c:var(--studio)">
+      <div class="node c-studio">
         <div class="cap">Owner sees</div>
         <h4>What it costs and earns</h4>
         <p>Sessions delivered, classes filled, payroll owed, memberships lapsing. The same events, priced.</p>
       </div>
+    </div>
+
+    <div class="after">
+      <h3 class="sub">One Tuesday, followed all the way through</h3>
+      <ol class="steps after-sm">
+        <li>
+          <span class="no">1</span>
+          <div>
+            <h3>Monday — the class goes on the board</h3>
+            <p>Built once as a repeating series rather than twelve copies of the same hour. Its capacity is fourteen, and the equipment register is what says fourteen is still true.</p>
+          </div>
+        </li>
+        <li>
+          <span class="no">2</span>
+          <div>
+            <h3>Tuesday morning — members book</h3>
+            <p>Eleven places taken. That is a fill rate of 79%, which is a measured number, not the front desk's impression of a busy week.</p>
+          </div>
+        </li>
+        <li>
+          <span class="no">3</span>
+          <div>
+            <h3>18:00 — the desk ticks people off</h3>
+            <p>Nine of the eleven arrive. Fill is 79% and show is 82%, and they are two different questions with two different fixes. Collapsing them into one word is how a class reads 79% on one screen and 82% on another.</p>
+          </div>
+        </li>
+        <li>
+          <span class="no">4</span>
+          <div>
+            <h3>18:40 — two more people are in the building</h3>
+            <p>They did not book anything; they came in and trained on the floor. The door log has them, so their attendance is not lost and neither of them looks like a member who has stopped coming.</p>
+          </div>
+        </li>
+        <li>
+          <span class="no">5</span>
+          <div>
+            <h3>Wednesday — a one-to-one is still unmarked</h3>
+            <p>Tuesday's 17:00 finished and nobody recorded what happened to it. Until somebody does, the gym's payroll figure for the month is a dash with a reason attached, and the session sits at the top of the Sessions screen waiting.</p>
+          </div>
+        </li>
+        <li>
+          <span class="no">6</span>
+          <div>
+            <h3>Month end — nothing has to be reconciled</h3>
+            <p>Payroll counts sessions marked delivered, priced at the fee the gym set. Revenue counts payments actually recorded. Retention reads the same attendance the desk ticked off. Three answers, one set of rows, nothing exported between them.</p>
+          </div>
+        </li>
+      </ol>
     </div>
   </div>
 </section>
@@ -227,6 +1244,7 @@
         <div class="surface-bar">
           <span class="dot"></span><span class="dot"></span><span class="dot"></span>
           <span class="ttl">what a missing number looks like</span>
+          <span class="sample">Sample data</span>
         </div>
         <div class="kpis">
           <div class="kpi"><div class="k">Sessions 30d</div><div class="v">412</div><div class="n">from the log</div></div>
@@ -241,6 +1259,7 @@
             <div class="row" style="grid-template-columns:1fr auto"><span class="nm">Heart-rate zones</span><span class="mt">needs live samples</span></div>
             <div class="row" style="grid-template-columns:1fr auto"><span class="nm">Show rate</span><span class="mt">needs attendance marked</span></div>
             <div class="row" style="grid-template-columns:1fr auto"><span class="nm">Monthly recurring</span><span class="mt">needs plans priced</span></div>
+            <div class="row" style="grid-template-columns:1fr auto"><span class="nm">Class capacity</span><span class="mt">needs kit in the register</span></div>
           </div>
         </div>
       </div>
@@ -248,10 +1267,75 @@
   </div>
 </section>
 
+<!-- ── spreadsheets and WhatsApp ─────────────────────────────────────── -->
+<section class="band tint">
+  <div class="wrap">
+    <div class="lead-in wide">
+      <div class="eyebrow">What it replaces</div>
+      <h2 class="hd">A spreadsheet, a printout<br><span class="serif">and a group chat.</span></h2>
+      <p class="lede">
+        Most gyms are already running every one of these jobs. The question is not whether they get
+        done — it is whether doing them leaves a row behind that anything else can read. This is
+        the same list of jobs, done the usual way and done here.
+      </p>
+    </div>
+
+    <div class="scroll">
+      <table class="data vs">
+        <thead>
+          <tr><th>The job</th><th>Spreadsheet, printout, group chat</th><th>Repple</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="job">Taking a booking</span></td>
+            <td>A message in a chat, a name written on a printout, and a capacity nobody can check until the room fills up.</td>
+            <td>A place taken against a class with a stated capacity. Fill rate stops being an impression and becomes a number.</td>
+          </tr>
+          <tr>
+            <td><span class="job">Marking who turned up</span></td>
+            <td>Often not done at all. Attendance is remembered rather than recorded, and only for the classes somebody thought to count.</td>
+            <td>Ticked off at the desk, plus a door log for everyone who walked in without booking. It is the row a drifting member shows up in first.</td>
+          </tr>
+          <tr>
+            <td><span class="job">Paying a coach</span></td>
+            <td>Sessions counted back out of a diary at the end of the month, with a conversation about the ones nobody wrote down.</td>
+            <td>Counted from sessions marked delivered. Anything still unmarked stops the total and names itself, rather than being rounded into it.</td>
+          </tr>
+          <tr>
+            <td><span class="job">Spotting who is drifting</span></td>
+            <td>Somebody notices, or nobody does. Usually the cancellation is the first hard evidence.</td>
+            <td>Days since each member was last seen, read from the class register and the door log together.</td>
+          </tr>
+          <tr>
+            <td><span class="job">Knowing what a room holds</span></td>
+            <td>A number written on a laminated sheet some years ago, which nobody revisits when kit breaks.</td>
+            <td>Checked against the equipment register, so kit out of service changes the capacity the gym measures itself against.</td>
+          </tr>
+          <tr>
+            <td><span class="job">Finding last year's figures</span></td>
+            <td>A spreadsheet somebody has since renamed, on a laptop that belonged to a manager who left.</td>
+            <td>In the same record as this year, because it was imported at the start rather than typed forward a month at a time.</td>
+          </tr>
+          <tr>
+            <td><span class="job">A member's own training</span></td>
+            <td>In a different app entirely, or in a notebook. Not the gym's problem and not visible to the coach either.</td>
+            <td>Theirs in Repple, readable by a coach they chose to link, and never the gym's to read set by set.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="tiny after-sm">
+      No claim here is that gyms do this badly. It is that a job done without leaving a row behind
+      cannot be added up later, and every question worth asking about a gym is a question about
+      adding rows up.
+    </p>
+  </div>
+</section>
+
 <!-- ── shared foundations ────────────────────────────────────────────── -->
 <section class="band">
   <div class="wrap">
-    <div style="max-width:58ch;margin-bottom:36px">
+    <div class="lead-in">
       <div class="eyebrow">Underneath all three</div>
       <h2 class="hd">The parts you only notice<br><span class="serif">when they're missing.</span></h2>
     </div>
@@ -273,6 +1357,19 @@
         <div class="lbl"><strong style="color:var(--ink)">Ads, trackers, resale.</strong> Health data is used to show you your training. Nothing else.</div>
       </div>
     </div>
+
+    <div class="tiles two after">
+      <div class="tile">
+        <div class="cap">Money</div>
+        <h3>Held as whole minor units</h3>
+        <p>Every amount in the system is an integer number of cents or fils, never a decimal. Floats do not belong near a ledger: 0.1 plus 0.2 is a rounding error in a spreadsheet and a dispute in a gym.</p>
+      </div>
+      <div class="tile">
+        <div class="cap">Shared functions</div>
+        <h3>One implementation per figure</h3>
+        <p>The web console and the phone app call the same functions over the same rows through the same permissions. A number cannot read one way on the desk and another way on the owner's phone, because there is only one of it.</p>
+      </div>
+    </div>
   </div>
 </section>
 
@@ -286,16 +1383,36 @@
         <div class="a"><p>No. Install the one that matches what you do. A member never needs Coach; a coach without a gym never needs Studio. They share an account, so if your role changes you sign in to a different app with the same details.</p></div>
       </details>
       <details>
+        <summary>Is Studio an app or a website?</summary>
+        <div class="a"><p>Both, and they are not two products. The phone app is for looking; the web console is for working — wide tables, a keyboard, and the jobs that take twenty rows at a time, like clearing a month of unmarked sessions or pasting in a price list. Both call the identical functions over the identical rows, so no figure can differ between them.</p></div>
+      </details>
+      <details>
+        <summary>We already run on something else. Can we bring our records across?</summary>
+        <div class="a"><p>Plans and payments import from a CSV, and the import is a dry run until you press the button. It asks which way round your dates are written rather than guessing, and hands back any row it cannot read with confidence, with the reason. Members are checked but not created — a membership has to point at a real account, so members come in by invitation.</p></div>
+      </details>
+      <details>
+        <summary>What happens if a coach forgets to mark a session?</summary>
+        <div class="a"><p>The month's payroll figure becomes a dash and says how many sessions are outstanding. It does not quietly settle the rest and leave the forgotten ones out. Everything awaiting an outcome sits at the top of the Sessions screen with the buttons that clear it.</p></div>
+      </details>
+      <details>
+        <summary>Does a member have to book a class to be counted as attending?</summary>
+        <div class="a"><p>No. The door log records entries at the desk, by QR or from the app, whether or not anything was booked. That matters beyond the headline count: without it, a member who switched from classes to training on the floor is indistinguishable from a member who stopped coming.</p></div>
+      </details>
+      <details>
         <summary>Does it work without an Apple Watch?</summary>
         <div class="a"><p>Yes — everything can be entered by hand. What a watch adds is live heart rate during a session and automatic import of workouts you already recorded. One thing it uniquely enables is the heart-rate zone breakdown, which needs samples taken <em>during</em> the session; devices that only report a daily average can't produce it, and Repple won't fake one from a daily figure.</p></div>
       </details>
       <details>
         <summary>Who can see a member's data?</summary>
-        <div class="a"><p>The member, always. A coach they have deliberately linked to. And their gym, for the membership and attendance information needed to run the place — not private messages. Nobody else, and never for advertising. The full detail is in <a href="/privacy">Privacy</a>.</p></div>
+        <div class="a"><p>The member, always. A coach they have deliberately linked to. And their gym, for the membership and attendance information needed to run the place — not private messages, and not their training set by set. Nobody else, and never for advertising. The full detail is in <a href="/privacy">Privacy</a>.</p></div>
       </details>
       <details>
         <summary>Can a gym export its own data?</summary>
         <div class="a"><p>Yes. It is your operating record, not ours. Ask and we export everything we hold for your gym.</p></div>
+      </details>
+      <details>
+        <summary>Are the charts on this page real?</summary>
+        <div class="a"><p>No, and every one of them says so. Repple has not launched publicly, so there is no customer gym to draw from — and we would not publish one if there were. The figures are invented to show the shape of each chart and what it is for. Inside the product, a new account starts empty and fills only with what you record.</p></div>
       </details>
       <details>
         <summary>What does it cost?</summary>

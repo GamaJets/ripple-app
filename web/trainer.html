@@ -4,14 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Repple Coach — your whole book in one place</title>
-<meta name="description" content="Clients, programmes, schedule and check-ins in the place you already look. Repple Coach is the working record for personal trainers.">
+<meta name="description" content="Clients, programmes, schedule, videos and the numbers behind them, in the place you already look. Repple Coach is the working record for personal trainers.">
 <meta property="og:title" content="Repple Coach — your whole book in one place">
 <meta property="og:description" content="Every client, programme, session and check-in in one book — instead of four apps and a notes file.">
 <meta property="og:url" content="https://www.repplefitness.com/trainer">
 <link rel="stylesheet" href="styles.css">
 <link rel="icon" href="favicon.png">
 </head>
-<body style="--accent:var(--coach); --accent-soft:rgba(122,112,240,0.15); --brand-ink:#0d0a26">
+<body class="tone-coach">
 
 <header class="site">
   <div class="wrap">
@@ -42,92 +42,41 @@
       <div>
         <div class="eyebrow">Repple Coach · for the trainer</div>
         <h1 class="display">Your whole book,<br>in one <em>place</em>.</h1>
-        <p class="lede" style="margin-top:26px">
+        <p class="lede after-sm">
           Most coaches run on a spreadsheet, a calendar, a chat app and a memory. Repple Coach
-          puts the clients, the programmes, the schedule and the check-ins in one book — and
-          shows you the handful of people who need you this week, rather than all of them at once.
+          puts the clients, the programmes, the schedule and the sessions in one book — and puts
+          the handful of people who need you this week at the top of it, rather than all of them
+          at once.
         </p>
         <div class="btn-row">
           <a class="btn primary" href="/signup">Create an account</a>
-          <a class="btn" href="#book">How it works</a>
+          <a class="btn" href="#tabs">What the app does</a>
         </div>
       </div>
 
-      <div class="surface" role="img" aria-label="Sketch of the Repple Coach roster: clients with session counts, last-seen dates, and a status flag marking who is drifting.">
+      <div class="surface" role="img" aria-label="Sketch of the Repple Coach roster: eighteen active clients, three needing a check-in, twenty-three sessions run this month, and a client list sorted by who has gone quiet, showing each one's adherence and when they were last active.">
         <div class="surface-bar">
           <span class="dot"></span><span class="dot"></span><span class="dot"></span>
-          <span class="ttl">repple coach — your clients</span>
+          <span class="ttl">repple coach — clients</span>
+          <span class="sample">Illustrative</span>
         </div>
         <div class="kpis">
-          <div class="kpi"><div class="k">Active</div><div class="v">18</div></div>
-          <div class="kpi"><div class="k">Sessions 7d</div><div class="v">23</div></div>
-          <div class="kpi"><div class="k">Need a nudge</div><div class="v">3</div></div>
+          <div class="kpi"><div class="k">Active clients</div><div class="v">18</div></div>
+          <div class="kpi"><div class="k">Needs check-in</div><div class="v">3</div><div class="n">gone quiet</div></div>
+          <div class="kpi"><div class="k">Sessions this month</div><div class="v">23</div></div>
         </div>
-        <div class="rows" style="border-top:1px solid var(--line)">
-          <div class="row"><span class="nm">Elena Marsh</span><span class="mt">last seen 1d</span><span class="pill ok">On track</span></div>
-          <div class="row"><span class="nm">Tom Okafor</span><span class="mt">last seen 2d</span><span class="pill ok">On track</span></div>
-          <div class="row"><span class="nm">Rachel Dunne</span><span class="mt">last seen 11d</span><span class="pill warn">Watch</span></div>
-          <div class="row"><span class="nm">Sam Iqbal</span><span class="mt">last seen 19d</span><span class="pill crit">At risk</span></div>
-          <div class="row"><span class="nm">Jo Bennett</span><span class="mt">last seen 3d</span><span class="pill ok">On track</span></div>
-        </div>
-        <div class="surface-body" style="border-top:1px solid var(--line)">
-          <p class="tiny" style="margin:0">Sorted by who has gone quiet, not alphabetically.</p>
-        </div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<section class="band" id="book" style="padding-top:0">
-  <div class="wrap">
-    <div class="split">
-      <div>
-        <div class="eyebrow">The book</div>
-        <h2 class="hd">Every client, with the<br><span class="serif">context still attached.</span></h2>
-        <p class="lede" style="margin-top:20px">
-          Open a client and you get what they actually did — not what they told you they did.
-          Their logged sessions, their loads, their check-ins, their measurements, their nutrition
-          if they share it. The conversation starts from evidence.
-        </p>
-        <ul class="ticks">
-          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
-            <span><strong>Their real training history</strong> — the same log they keep, live, with no export step and no screenshots.</span></li>
-          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
-            <span><strong>Programmes you write</strong> — built once, assigned out, landing directly in the client's Train tab.</span></li>
-          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
-            <span><strong>Check-ins that surface drift</strong> — sleep, stress and soreness alongside the numbers, because the numbers rarely explain themselves.</span></li>
-          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
-            <span><strong>One message thread per client</strong> — kept with their record, not lost in a phone.</span></li>
-        </ul>
-      </div>
-
-      <div class="surface">
-        <div class="surface-bar">
-          <span class="dot"></span><span class="dot"></span><span class="dot"></span>
-          <span class="ttl">rachel dunne — last 8 weeks</span>
+        <div class="rows">
+          <div class="row"><span class="nm">Client A</span><span class="mt">active 4h ago · 100%</span><span class="pill ok">On track</span></div>
+          <div class="row"><span class="nm">Client B</span><span class="mt">active 1d ago · 80%</span><span class="pill ok">On track</span></div>
+          <div class="row"><span class="nm">Client C</span><span class="mt">active 3d ago · 60%</span><span class="pill warn">Needs a check-in</span></div>
+          <div class="row"><span class="nm">Client D</span><span class="mt">active 11d ago · 40%</span><span class="pill crit">Needs a check-in</span></div>
+          <div class="row"><span class="nm">Client E</span><span class="mt">no activity yet</span><span class="pill">no check-ins</span></div>
         </div>
         <div class="surface-body">
-          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px">
-            <span class="tiny" style="color:var(--ink2);font-weight:600">Sessions per week</span>
-            <span class="mono tiny" style="color:#f0c04e">trending down</span>
-          </div>
-          <div class="bars" aria-hidden="true">
-            <div class="b" style="height:88%"></div><div class="b" style="height:92%"></div>
-            <div class="b" style="height:80%"></div><div class="b" style="height:84%"></div>
-            <div class="b" style="height:58%"></div><div class="b" style="height:46%"></div>
-            <div class="b" style="height:30%"></div><div class="b mute" style="height:10%"></div>
-          </div>
-          <div class="axis"><span>8 wks ago</span><span>this week</span></div>
-        </div>
-        <div class="rows" style="border-top:1px solid var(--line)">
-          <div class="row" style="grid-template-columns:1fr auto"><span class="nm">Reported sleep</span><span class="mt">5.4 h avg · down</span></div>
-          <div class="row" style="grid-template-columns:1fr auto"><span class="nm">Reported stress</span><span class="mt">high, 3 weeks running</span></div>
-          <div class="row" style="grid-template-columns:1fr auto"><span class="nm">Body weight</span><span class="mt">unchanged</span></div>
-        </div>
-        <div class="surface-body" style="border-top:1px solid var(--line)">
-          <p class="tiny" style="margin:0">
-            The attendance drop is the symptom. The check-ins are the reason — and they are on the
-            same screen, so you can open the conversation knowing what to ask.
+          <p class="tiny">
+            Sorted by who needs you, not alphabetically. The percentage is plan adherence, taken
+            from their last weekly check-in. Names here are placeholders — a new account opens
+            with an empty roster and no sample clients in it.
           </p>
         </div>
       </div>
@@ -135,24 +84,300 @@
   </div>
 </section>
 
+<!-- ── the tabs ───────────────────────────────────────────────────────── -->
+<section class="band" id="tabs">
+  <div class="wrap">
+    <div class="lead-in wide">
+      <div class="eyebrow">The app</div>
+      <h2 class="hd">Six tabs, and the<br><span class="serif">jobs behind each one.</span></h2>
+      <p class="lede">
+        These are the tabs as they appear in the bar, described in the words the app's own guide
+        screen uses. A page that describes a different product to the one you install is only a
+        longer way of getting it wrong.
+      </p>
+    </div>
+    <div class="scroll">
+      <table class="data">
+        <thead>
+          <tr><th>Tab</th><th>What it is for</th><th>What you do there</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Clients</strong></td>
+            <td>Your roster, and who needs you today.</td>
+            <td>Add client enters someone by hand. Invite by email records an invitation they pick up when they sign in. Segments split the roster by at-risk, online, in-person and any tag you have made. Suggested check-ins surfaces the clients who have gone quiet.</td>
+          </tr>
+          <tr>
+            <td><strong>Programs</strong></td>
+            <td>Build a week of training and assign it.</td>
+            <td>Start from a template, or add training days and build from scratch. Assign to client pushes the programme into that client's Train tab. Save any programme you like as a template to reuse — and revert a client to their auto-generated plan whenever you want.</td>
+          </tr>
+          <tr>
+            <td><strong>Schedule</strong></td>
+            <td>Your coaching week.</td>
+            <td>Add a session books a client, or opens a slot they can book themselves. Weekly availability sets the times you offer and generates open slots four weeks ahead. Group classes schedules classes across your branches and checks members in.</td>
+          </tr>
+          <tr>
+            <td><strong>Videos</strong></td>
+            <td>The clips your clients see inside their programme.</td>
+            <td>Record a clip on the phone, upload one, or paste a hosted link. Each clip carries an exercise name, and it plays against that movement for every client who has it — in the session, not in a folder somewhere.</td>
+          </tr>
+          <tr>
+            <td><strong>Analytics</strong></td>
+            <td>How the coaching business is actually going.</td>
+            <td>Sessions run this month, valued at the rate on your profile. Roster health split into on track, watch and at risk. Your own revenue and client targets. Figures stay empty until there is real activity behind them.</td>
+          </tr>
+          <tr>
+            <td><strong>Profile</strong></td>
+            <td>How clients see you.</td>
+            <td>Photo, tagline, bio, specialties, what you offer and your session rate, with a live preview of the card a client reads. One switch lists you in Find a Trainer; it is off until you turn it on.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="tiny after-sm">
+      Mark sessions, Program templates, Leaderboard, Broadcast, Classes, Payments, Billing and
+      Settings sit behind those six and are all reachable from Explore, a searchable directory of
+      every screen in the app.
+    </p>
+  </div>
+</section>
+
+<!-- ── the roster ─────────────────────────────────────────────────────── -->
+<section class="band">
+  <div class="wrap">
+    <div class="split">
+      <div>
+        <div class="eyebrow">The roster</div>
+        <h2 class="hd">The clients who need you,<br><span class="serif">at the top of the list.</span></h2>
+        <p class="lede after-sm">
+          A roster sorted alphabetically tells you nothing. Repple Coach flags a client when their
+          adherence drops below 80 per cent, or when nothing at all has been logged for two days —
+          and it says which of the two it is, so you open the conversation knowing what to ask.
+        </p>
+        <ul class="ticks">
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>Adherence, from their own check-in</strong> — the weekly rating they gave, turned into a percentage. A client who has never checked in has no adherence at all, and is not quietly counted as perfect.</span></li>
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>Last active means last anything</strong> — a scan, a workout or a check-in. Whichever came most recently is what the row reports, in hours or days.</span></li>
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>Segments you make yourself</strong> — at-risk, online and in-person are built in; add your own tags and each becomes a filter, with a count.</span></li>
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>Act on a whole segment</strong> — message everyone in it, or assign one programme template to all of them, without opening eighteen records.</span></li>
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>Requests from people looking for a coach</strong> — if you have listed yourself, requests arrive as a card with accept and decline on it. Accepting is what adds them to the roster.</span></li>
+        </ul>
+      </div>
+
+      <div>
+        <figure class="chart">
+          <div class="chart-hd">
+            <div>
+              <span class="chart-k">Roster health</span>
+              <h3>Eighteen clients, four groups</h3>
+            </div>
+            <span class="sample">Illustrative</span>
+          </div>
+          <svg viewBox="0 0 560 226" width="560" height="226" role="img" aria-label="Stacked bar of roster health across eighteen clients: nine on track at eighty-five per cent adherence or better, four to watch between seventy and eighty-four, three at risk below seventy, and two who have never checked in and therefore sit in none of the three bands.">
+            <text class="cx-hd" x="0" y="16">Where the book sits today</text>
+            <text class="cx-sm" x="0" y="34">One bar, eighteen clients, split by adherence</text>
+            <rect class="f-hi" x="0" y="52" width="276" height="46" rx="4"/>
+            <rect class="f-mid" x="278" y="52" width="121" height="46" rx="4"/>
+            <rect class="f-lo" x="401" y="52" width="91" height="46" rx="4"/>
+            <rect class="s-book" x="494" y="52" width="62" height="46" rx="4"/>
+            <text class="cx-val" x="12" y="80">9</text>
+            <text class="cx-val" x="290" y="80">4</text>
+            <text class="cx-val" x="413" y="80">3</text>
+            <text class="cx-val" x="506" y="80">2</text>
+            <line class="cx-base" x1="0" y1="114" x2="560" y2="114"/>
+            <text class="cx-lab" x="0" y="138">On track</text>
+            <text class="cx-ax" x="560" y="138" text-anchor="end">85% adherence and above</text>
+            <text class="cx-lab" x="0" y="162">Watch</text>
+            <text class="cx-ax" x="560" y="162" text-anchor="end">70 to 84%</text>
+            <text class="cx-lab" x="0" y="186">At risk</text>
+            <text class="cx-ax" x="560" y="186" text-anchor="end">below 70%</text>
+            <text class="cx-lab" x="0" y="210">No check-ins yet</text>
+            <text class="cx-ax" x="560" y="210" text-anchor="end">in none of the three</text>
+          </svg>
+          <ul class="legend">
+            <li><span class="sw f-hi"></span>On track <span class="n">9</span></li>
+            <li><span class="sw f-mid"></span>Watch <span class="n">4</span></li>
+            <li><span class="sw f-lo"></span>At risk <span class="n">3</span></li>
+            <li><span class="sw s-book"></span>No check-ins <span class="n">2</span></li>
+          </ul>
+          <figcaption class="chart-note">
+            <strong>The fourth group is the honest one.</strong> A client who has never filed a
+            check-in has no adherence figure, so they are counted separately rather than being
+            averaged in as a hundred per cent. The bands are the app's; the numbers here are
+            invented for the picture.
+          </figcaption>
+        </figure>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── one client, in detail ──────────────────────────────────────────── -->
 <section class="band">
   <div class="wrap">
     <div class="split flip">
       <div>
-        <div class="eyebrow">The week</div>
-        <h2 class="hd">A schedule that knows<br>who is in front of you.</h2>
-        <p class="lede" style="margin-top:20px">
-          Sessions, classes and one-to-ones on a single timetable. Tap a booking and you are
-          already in that client's record — no hunting, no second app, no trying to remember
-          what you changed last time.
+        <div class="eyebrow">One client</div>
+        <h2 class="hd">The drop is the symptom.<br><span class="serif">The check-in is the reason.</span></h2>
+        <p class="lede after-sm">
+          Open a client and you get what they actually did, not what they told you they did. Their
+          logged sessions, their loads, their scans, their measurements, their meals if they share
+          them — and the notes and feedback you have already given them, on the same timeline.
         </p>
         <ul class="ticks">
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
-            <span><strong>Bookings and attendance</strong> — mark who showed, so show rate is a measured figure rather than an impression.</span></li>
+            <span><strong>Body composition, segment by segment</strong> — fat and lean mass, body water, protein and minerals, and lean mass in each arm, the trunk and each leg, read from their InBody scans.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
-            <span><strong>Works with the gym</strong> — if you coach inside a Repple Studio gym, your delivered sessions feed their rota and payroll automatically.</span></li>
+            <span><strong>Left–right imbalance, called out</strong> — when one side is a tenth behind the other, the screen names it and tells you to cue the weaker side, instead of leaving you to spot it in a column of numbers.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
-            <span><strong>Independent too</strong> — no gym required. Bring your own clients and Repple Coach is simply your book.</span></li>
+            <span><strong>Injuries they disclosed</strong> — held with the client, and the plan flags and swaps movements that load those areas until they mark it recovered. Guidance, not medical advice.</span></li>
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>Two kinds of note</strong> — feedback the client reads, and private notes only you can see. Both land on the same timeline, newest first, so the history of a relationship is one list.</span></li>
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>Their last six meals</strong> — with the calories and how each was logged, so a nutrition conversation starts from what was eaten rather than what was remembered.</span></li>
+        </ul>
+      </div>
+
+      <div>
+        <figure class="chart">
+          <div class="chart-hd">
+            <div>
+              <span class="chart-k">Client detail</span>
+              <h3>Sessions logged, twelve weeks</h3>
+            </div>
+            <span class="sample">Illustrative</span>
+          </div>
+          <svg viewBox="0 0 560 240" width="560" height="240" role="img" aria-label="Bar chart of one client's logged sessions per week over twelve weeks. It runs at two or three a week for the first seven weeks, then falls to one, one, nothing, one and nothing. Two of the last three weeks have no sessions at all.">
+            <line class="cx-base" x1="44" y1="180" x2="548" y2="180"/>
+            <line class="cx-grid" x1="44" y1="142.5" x2="548" y2="142.5"/>
+            <line class="cx-grid" x1="44" y1="105" x2="548" y2="105"/>
+            <line class="cx-grid" x1="44" y1="67.5" x2="548" y2="67.5"/>
+            <line class="cx-grid" x1="44" y1="30" x2="548" y2="30"/>
+            <text class="cx-ax" x="36" y="184" text-anchor="end">0</text>
+            <text class="cx-ax" x="36" y="146.5" text-anchor="end">1</text>
+            <text class="cx-ax" x="36" y="109" text-anchor="end">2</text>
+            <text class="cx-ax" x="36" y="71.5" text-anchor="end">3</text>
+            <text class="cx-ax" x="36" y="34" text-anchor="end">4</text>
+            <text class="cx-sm" x="0" y="16">sessions</text>
+            <g class="f-hi">
+              <rect x="51" y="67.5" width="26" height="112.5" rx="3"/>
+              <rect x="93" y="105" width="26" height="75" rx="3"/>
+              <rect x="135" y="67.5" width="26" height="112.5" rx="3"/>
+              <rect x="177" y="67.5" width="26" height="112.5" rx="3"/>
+              <rect x="219" y="105" width="26" height="75" rx="3"/>
+              <rect x="261" y="67.5" width="26" height="112.5" rx="3"/>
+              <rect x="303" y="105" width="26" height="75" rx="3"/>
+            </g>
+            <g class="f-lo">
+              <rect x="345" y="142.5" width="26" height="37.5" rx="3"/>
+              <rect x="387" y="142.5" width="26" height="37.5" rx="3"/>
+              <rect x="471" y="142.5" width="26" height="37.5" rx="3"/>
+            </g>
+            <text class="cx-ax" x="442" y="174" text-anchor="middle">0</text>
+            <text class="cx-ax" x="526" y="174" text-anchor="middle">0</text>
+            <text class="cx-ax" x="64" y="198" text-anchor="middle">wk 1</text>
+            <text class="cx-ax" x="190" y="198" text-anchor="middle">wk 4</text>
+            <text class="cx-ax" x="316" y="198" text-anchor="middle">wk 8</text>
+            <text class="cx-ax" x="526" y="198" text-anchor="middle">wk 12</text>
+            <rect class="cx-box" x="44" y="210" width="504" height="26" rx="6"/>
+            <text class="cx-lab" x="56" y="228">Check-in: sleep down, stress high three weeks running, weight unchanged</text>
+          </svg>
+          <figcaption class="chart-note">
+            Illustrative client. A week with nothing logged is drawn as a gap and labelled zero
+            rather than smoothed over — the fortnight somebody quietly stopped is the part worth
+            seeing, and it is what puts them at the top of your roster.
+          </figcaption>
+        </figure>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── programmes, videos, nutrition ──────────────────────────────────── -->
+<section class="band tint">
+  <div class="wrap">
+    <div class="lead-in">
+      <div class="eyebrow">Programmes</div>
+      <h2 class="hd">Write it once.<br><span class="serif">Assign it many times.</span></h2>
+      <p class="lede">
+        Rebuilding the same block in a new document for every client is the largest unpaid job in
+        coaching. The builder, the template library, the video library and the nutrition panel
+        exist to end it.
+      </p>
+    </div>
+    <div class="tiles">
+      <div class="tile">
+        <div class="cap">Build</div>
+        <h3>Days, exercises, sets and reps</h3>
+        <p>Add a training day, pick movements from the built-in list or type your own, set the
+        sessions and the rep range. It is a structure you edit, not a document you retype.</p>
+      </div>
+      <div class="tile">
+        <div class="cap">Assign</div>
+        <h3>Straight into their Train tab</h3>
+        <p>Assigning pushes the programme into the app the client already opens. No export, no
+        PDF, and no version of it that only you can see.</p>
+      </div>
+      <div class="tile">
+        <div class="cap">Reuse</div>
+        <h3>Save it as a template</h3>
+        <p>Any programme you like becomes a template, and a template can go to a whole segment at
+        once. The block you have refined over two years stops living in your head.</p>
+      </div>
+      <div class="tile">
+        <div class="cap">Revert</div>
+        <h3>Back to the auto plan</h3>
+        <p>Every client has an automatically built plan behind yours. One tap puts them back on
+        it, so trying something is not a decision you cannot undo.</p>
+      </div>
+      <div class="tile">
+        <div class="cap">Demonstrate</div>
+        <h3>Your clip, on the exercise</h3>
+        <p>Record on the phone, upload from the library, or paste a hosted link. Each clip carries
+        an exercise name and plays against that movement for every client who has it.</p>
+      </div>
+      <div class="tile">
+        <div class="cap">Adjust</div>
+        <h3>Nutrition without a second tool</h3>
+        <p>Shift a client's daily calories, protein, carbs and fat, assign specific meals to
+        specific slots, and leave a note. It applies to their Meals tab, where they already log.</p>
+      </div>
+    </div>
+    <p class="tiny after-sm">
+      A clip you remove from the library is removed for every client who could see it, and the app
+      says so before it does it. A clip that has no playable file yet is listed as not recorded
+      rather than shown as live.
+    </p>
+  </div>
+</section>
+
+<!-- ── the week ───────────────────────────────────────────────────────── -->
+<section class="band">
+  <div class="wrap">
+    <div class="split">
+      <div>
+        <div class="eyebrow">The week</div>
+        <h2 class="hd">A schedule that knows<br>who is in front of you.</h2>
+        <p class="lede after-sm">
+          One-to-ones and group classes on a single timetable, with the month in view and the day
+          you tapped underneath it. Tap a booking and you are already in that client's record.
+        </p>
+        <ul class="ticks">
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>Book them, or let them book you</strong> — add a session against a client, or open a slot they can take. Weekly availability generates those open slots four weeks ahead in one go.</span></li>
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>You cannot double-book yourself</strong> — a session that overlaps one you already have is refused, and the app names the session it clashes with.</span></li>
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>A cancellation re-offers the slot</strong> — cancel and every client can be told that time is free. Inside 24 hours the app reminds you your own late-cancel policy applies, and is clear that Repple does not charge it for you.</span></li>
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>Group classes across branches</strong> — title, type, room, capacity and a weekly repeat, then a check-in screen you tap as people arrive. Only a tapped name counts as present.</span></li>
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>Send the week to your own calendar</strong> — booked sessions export as a standard calendar file, so the phone you already check knows where you are meant to be.</span></li>
         </ul>
       </div>
 
@@ -160,68 +385,325 @@
         <div class="surface-bar">
           <span class="dot"></span><span class="dot"></span><span class="dot"></span>
           <span class="ttl">thursday</span>
+          <span class="sample">Illustrative</span>
         </div>
         <div class="rows">
-          <div class="row"><span class="nm">06:30 · Elena Marsh</span><span class="mt">1-to-1</span><span class="pill ok">attended</span></div>
-          <div class="row"><span class="nm">07:30 · Strength class</span><span class="mt">11 / 14</span><span class="pill ok">attended</span></div>
-          <div class="row"><span class="nm">12:00 · Tom Okafor</span><span class="mt">1-to-1</span><span class="pill ok">attended</span></div>
-          <div class="row"><span class="nm">17:00 · Sam Iqbal</span><span class="mt">1-to-1</span><span class="pill crit">no-show</span></div>
-          <div class="row"><span class="nm">18:00 · Conditioning</span><span class="mt">8 / 14</span><span class="pill warn">under-filled</span></div>
+          <div class="row"><span class="nm">06:30 · Client A</span><span class="mt">60 min</span><span class="pill ok">went ahead</span></div>
+          <div class="row"><span class="nm">07:30 · Strength class</span><span class="mt">11 of 14 checked in</span><span class="pill ok">checked in</span></div>
+          <div class="row"><span class="nm">12:00 · Client B</span><span class="mt">45 min</span><span class="pill ok">went ahead</span></div>
+          <div class="row"><span class="nm">17:00 · Client D</span><span class="mt">60 min</span><span class="pill crit">did not turn up</span></div>
+          <div class="row"><span class="nm">18:00 · Conditioning</span><span class="mt">8 of 14 checked in</span><span class="pill warn">under-filled</span></div>
+          <div class="row"><span class="nm">19:00 · Open slot</span><span class="mt">re-offered</span><span class="pill">bookable</span></div>
         </div>
-        <div class="kpis" style="border-top:1px solid var(--line)">
-          <div class="kpi"><div class="k">Delivered</div><div class="v">5</div></div>
-          <div class="kpi"><div class="k">Show rate</div><div class="v">89%</div><div class="n">measured</div></div>
-          <div class="kpi"><div class="k">Earned</div><div class="v dash">—</div><div class="n">no rate set</div></div>
+        <div class="kpis">
+          <div class="kpi"><div class="k">Marked</div><div class="v">3</div><div class="n">outcome recorded</div></div>
+          <div class="kpi"><div class="k">Waiting</div><div class="v">1</div><div class="n">nobody has said</div></div>
+          <div class="kpi"><div class="k">Worth</div><div class="v dash">—</div><div class="n">no rate on your profile</div></div>
+        </div>
+        <div class="surface-body">
+          <p class="tiny">
+            Worth is blank because no session rate has been set on this illustrative account —
+            Analytics asks you to set one rather than telling you the day was worth nothing.
+          </p>
         </div>
       </div>
     </div>
   </div>
 </section>
 
+<!-- ── marking sessions ───────────────────────────────────────────────── -->
 <section class="band">
   <div class="wrap">
-    <div style="max-width:60ch;margin-bottom:38px">
+    <div class="lead-in wide">
+      <div class="eyebrow">What happened</div>
+      <h2 class="hd">A session that finished<br><span class="serif">is not a session that ran.</span></h2>
+      <p class="lede">
+        The easy way to count sessions is to count the bookings whose start time has passed. It is
+        also how a gym ends up paying for no-shows, slots nobody cancelled and sessions the
+        trainer never turned up to. Repple asks you to say what happened instead — four answers,
+        one tap each — and treats an unmarked session as unknown rather than delivered.
+      </p>
+    </div>
+
+    <figure class="chart">
+      <div class="chart-hd">
+        <div>
+          <span class="chart-k">Twelve weeks</span>
+          <h3>Booked against marked as gone ahead</h3>
+        </div>
+        <span class="sample">Illustrative</span>
+      </div>
+      <div class="chart-scroll">
+        <svg viewBox="0 0 740 300" width="740" height="300" role="img" aria-label="Grouped bar chart comparing sessions booked with sessions marked as gone ahead across twelve weeks. Booked runs between seventeen and twenty-six a week, and the marked bar trails it by two or three every week. Across the twelve weeks 261 sessions were booked and 231 were marked as gone ahead.">
+          <line class="cx-base" x1="56" y1="232" x2="716" y2="232"/>
+          <line class="cx-grid" x1="56" y1="180" x2="716" y2="180"/>
+          <line class="cx-grid" x1="56" y1="128" x2="716" y2="128"/>
+          <line class="cx-grid" x1="56" y1="76" x2="716" y2="76"/>
+          <line class="cx-grid" x1="56" y1="24" x2="716" y2="24"/>
+          <text class="cx-ax" x="48" y="236" text-anchor="end">0</text>
+          <text class="cx-ax" x="48" y="184" text-anchor="end">7</text>
+          <text class="cx-ax" x="48" y="132" text-anchor="end">14</text>
+          <text class="cx-ax" x="48" y="80" text-anchor="end">21</text>
+          <text class="cx-ax" x="48" y="28" text-anchor="end">28</text>
+          <text class="cx-sm" x="0" y="16">sessions per week</text>
+          <g class="s-book">
+            <rect x="62" y="98" width="20" height="134" rx="2"/>
+            <rect x="117" y="83" width="20" height="149" rx="2"/>
+            <rect x="172" y="91" width="20" height="141" rx="2"/>
+            <rect x="227" y="69" width="20" height="163" rx="2"/>
+            <rect x="282" y="76" width="20" height="156" rx="2"/>
+            <rect x="337" y="106" width="20" height="126" rx="2"/>
+            <rect x="392" y="61" width="20" height="171" rx="2"/>
+            <rect x="447" y="54" width="20" height="178" rx="2"/>
+            <rect x="502" y="69" width="20" height="163" rx="2"/>
+            <rect x="557" y="46" width="20" height="186" rx="2"/>
+            <rect x="612" y="39" width="20" height="193" rx="2"/>
+            <rect x="667" y="54" width="20" height="178" rx="2"/>
+          </g>
+          <g class="s-att">
+            <rect x="85" y="113" width="20" height="119" rx="2"/>
+            <rect x="140" y="98" width="20" height="134" rx="2"/>
+            <rect x="195" y="106" width="20" height="126" rx="2"/>
+            <rect x="250" y="83" width="20" height="149" rx="2"/>
+            <rect x="305" y="91" width="20" height="141" rx="2"/>
+            <rect x="360" y="121" width="20" height="111" rx="2"/>
+            <rect x="415" y="76" width="20" height="156" rx="2"/>
+            <rect x="470" y="69" width="20" height="163" rx="2"/>
+            <rect x="525" y="91" width="20" height="141" rx="2"/>
+            <rect x="580" y="61" width="20" height="171" rx="2"/>
+            <rect x="635" y="54" width="20" height="178" rx="2"/>
+            <rect x="690" y="76" width="20" height="156" rx="2"/>
+          </g>
+          <g class="cx-ax">
+            <text x="83" y="252" text-anchor="middle">wk 1</text>
+            <text x="248" y="252" text-anchor="middle">wk 4</text>
+            <text x="413" y="252" text-anchor="middle">wk 7</text>
+            <text x="578" y="252" text-anchor="middle">wk 10</text>
+            <text x="688" y="252" text-anchor="middle">wk 12</text>
+          </g>
+          <rect class="cx-box" x="56" y="266" width="660" height="28" rx="6"/>
+          <text class="cx-lab" x="70" y="285">261 booked · 231 marked as gone ahead · 30 no-shows, cancellations and sessions nobody has marked</text>
+        </svg>
+      </div>
+      <ul class="legend">
+        <li><span class="sw s-book"></span>Booked <span class="n">261</span></li>
+        <li><span class="sw s-att"></span>Marked as gone ahead <span class="n">231</span></li>
+      </ul>
+      <figcaption class="chart-note">
+        <strong>The gap is the point.</strong> Counting the first bar is how a month gets paid
+        twice over; counting the second is what a gym will actually settle. The difference is a
+        number you can close in an afternoon rather than one you argue about at month end.
+      </figcaption>
+    </figure>
+
+    <ol class="steps after">
+      <li>
+        <span class="no">1</span>
+        <div>
+          <h3>The queue finds them for you</h3>
+          <p>A session counts as waiting when it was booked, its end time has passed, and nobody
+          has said what happened. The list reaches ninety days back — far enough to catch a
+          fortnight you forgot about.</p>
+        </div>
+      </li>
+      <li>
+        <span class="no">2</span>
+        <div>
+          <h3>Four answers, not two</h3>
+          <p>Went ahead, did not turn up, cancelled late, cancelled in time. The last two are
+          separated on purpose: one is usually paid and the other usually is not, and collapsing
+          them is how that argument starts.</p>
+        </div>
+      </li>
+      <li>
+        <span class="no">3</span>
+        <div>
+          <h3>A whole day at once, and undo on each</h3>
+          <p>Mark a day of sessions in one action when they all went the same way, and undo any of
+          them afterwards. Undo returns the session to waiting — it does not mark it cancelled.</p>
+        </div>
+      </li>
+      <li>
+        <span class="no">4</span>
+        <div>
+          <h3>The rate is stamped as you mark it</h3>
+          <p>Whatever the session was worth at that moment is saved with it, so a rate change next
+          quarter cannot rewrite what last month cost.</p>
+        </div>
+      </li>
+    </ol>
+  </div>
+</section>
+
+<!-- ── what it will not pretend ───────────────────────────────────────── -->
+<section class="band tint">
+  <div class="wrap">
+    <div class="lead-in wide">
+      <div class="eyebrow">Straight about limits</div>
+      <h2 class="hd">The things it says plainly<br><span class="serif">rather than quietly.</span></h2>
+      <p class="lede">
+        Most of these are the sentences a product would normally hide. They are on this page for
+        the same reason they are in the app: finding them out later is worse.
+      </p>
+    </div>
+    <div class="tiles">
+      <div class="tile">
+        <div class="cap">Invites</div>
+        <h3>Repple does not send the email</h3>
+        <p>Inviting a client records the invitation against their address. They are linked to you
+        the first time they sign in to Repple with it — so you still have to tell them. The app
+        says exactly that rather than reporting an email it never sent.</p>
+      </div>
+      <div class="tile">
+        <div class="cap">Hand-added clients</div>
+        <h3>They have no Train tab yet</h3>
+        <p>A client you typed in is on your roster and in your schedule, but a programme assigned
+        to them is saved on your device only and a message cannot reach them until they join. Bulk
+        actions report how many actually landed.</p>
+      </div>
+      <div class="tile">
+        <div class="cap">Messages</div>
+        <h3>Added to a thread, not confirmed read</h3>
+        <p>A broadcast reports how many client threads it was written to. Whether a push notice
+        arrives depends on their phone settings, so nothing here claims delivery it cannot see.</p>
+      </div>
+      <div class="tile">
+        <div class="cap">Money</div>
+        <h3>Your rate is your own arithmetic</h3>
+        <p>The revenue figure on Analytics, and the pay estimate on class check-in, are your rate
+        multiplied by what happened. Repple does not process those fees and says so on both screens.</p>
+      </div>
+      <div class="tile">
+        <div class="cap">Trends</div>
+        <h3>Two months before a line is drawn</h3>
+        <p>One real snapshot is recorded per month, and months with no snapshot stay empty rather
+        than being back-filled with today's number. A fresh install has no trend, and says so.</p>
+      </div>
+      <div class="tile">
+        <div class="cap">Targets</div>
+        <h3>Unset, not pre-filled</h3>
+        <p>Your revenue and client goals start empty, and your session rate starts at nothing.
+        No screen opens with a suggested figure that belongs to nobody.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── one account ────────────────────────────────────────────────────── -->
+<section class="band">
+  <div class="wrap">
+    <div class="split">
+      <div class="principle">
+        <div class="eyebrow">One account, whatever you are</div>
+        <p class="q">Coach at a gym on Tuesday,<br>train on your own on Thursday.</p>
+        <p class="lede after-sm">
+          The same login opens Repple Coach for your client book and Repple for your own training.
+          Your workouts are yours — a gym you coach at sees the sessions you deliver, not the
+          sessions you do, and never the messages between you and a client. If you leave, your
+          clients' records go with the clients, because they always belonged to them.
+        </p>
+        <div class="btn-row">
+          <a class="btn" href="/studio">See the gym's side <svg class="arw" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6"/></svg></a>
+          <a class="btn" href="/client">See the member's side</a>
+        </div>
+      </div>
+
+      <div class="assure">
+        <div class="pair">
+          <div class="card">
+            <div class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg></div>
+            <h3>Listed only if you say so</h3>
+            <p>The Find a Trainer switch is off until you turn it on. Turned on, members browsing for a coach see your name, tagline, bio, specialties and rate, and can send you a real request.</p>
+          </div>
+          <div class="card">
+            <div class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 018 0v3"/></svg></div>
+            <h3>Private stays private</h3>
+            <p>Access is enforced by row-level rules in the database, not by a setting on a screen. Another coach's roster is unreachable from your account, whatever the app asks for.</p>
+          </div>
+        </div>
+        <div class="pair">
+          <div class="card">
+            <div class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M8 11l4 4 4-4"/><path d="M4 17v3h16v-3"/></svg></div>
+            <h3>Export or erase</h3>
+            <p>Take everything Repple holds about you as a file, or ask for the account to be erased. Your clients are not deleted with you — they stay with the gym, and lose you as their coach.</p>
+          </div>
+          <div class="card">
+            <div class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></div>
+            <h3>Empty means empty</h3>
+            <p>Where a figure has nothing behind it the app shows a dash and names what is missing — an unset rate, an unmarked session, a client who has never checked in. Loading and empty never look the same.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── what it saves you ──────────────────────────────────────────────── -->
+<section class="band">
+  <div class="wrap">
+    <div class="lead-in">
       <div class="eyebrow">What it saves you</div>
       <h2 class="hd">The admin you stopped<br><span class="serif">counting as work.</span></h2>
-      <p class="lede" style="margin-top:18px">
-        Nobody became a coach to retype numbers. These are the jobs Repple Coach takes off the pile.
+      <p class="lede">
+        Nobody became a coach to retype numbers. These are the jobs the book takes off the pile.
       </p>
     </div>
     <div class="rails">
-      <div class="rail" style="--c:var(--accent)">
+      <div class="rail">
         <div class="who">Before</div>
         <h3>Chasing screenshots</h3>
         <p>Asking clients what they lifted, waiting, then transcribing it into your own sheet. Now: it is already there, because they logged it in the app you share.</p>
       </div>
-      <div class="rail" style="--c:var(--accent)">
+      <div class="rail">
         <div class="who">Before</div>
         <h3>Rewriting the same block</h3>
-        <p>Rebuilding a programme per client in a new document each time. Now: write it once, assign it out, adjust per person.</p>
+        <p>Rebuilding a programme per client in a new document each time. Now: write it once, save it as a template, assign it to a whole segment, adjust per person.</p>
       </div>
-      <div class="rail" style="--c:var(--accent)">
+      <div class="rail">
         <div class="who">Before</div>
         <h3>Noticing too late</h3>
-        <p>Realising in month three that someone stopped coming in week six. Now: they surface at the top of the list the week the pattern breaks.</p>
+        <p>Realising in month three that someone stopped coming in week six. Now: they surface at the top of the roster the week the pattern breaks.</p>
       </div>
     </div>
   </div>
 </section>
 
+<!-- ── FAQ ────────────────────────────────────────────────────────────── -->
 <section class="band">
-  <div class="wrap">
-    <div class="principle" style="max-width:70ch">
-      <div class="eyebrow" style="margin-bottom:18px">One account, whatever you are</div>
-      <p class="q">Coach at a gym on Tuesday,<br>train on your own on Thursday.</p>
-      <p class="lede" style="margin-top:22px;font-size:17px">
-        The same login opens Repple Coach for your client book and Repple for your own training.
-        Your workouts are yours — a gym you coach at sees the sessions you deliver, not the
-        sessions you do. And if you leave, your clients' records go with the clients, because
-        they always belonged to them.
-      </p>
-      <div class="btn-row" style="margin-top:26px">
-        <a class="btn" href="/studio">See the gym's side <svg class="arw" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6"/></svg></a>
-        <a class="btn" href="/client">See the member's side</a>
-      </div>
+  <div class="wrap narrow">
+    <h2 class="hd">Straight answers</h2>
+    <p class="lede">
+      The questions worth asking before you move a client book into something new.
+    </p>
+    <div class="faq">
+      <details>
+        <summary>Do I need to work at a gym?</summary>
+        <div class="a"><p>No. Bring your own clients and Repple Coach is simply your book — roster, programmes, schedule, videos and analytics all work without a gym anywhere near them. If you do coach inside a gym running Repple Studio, the outcomes you mark are what its payroll pays on, and the rest of your book stays yours.</p></div>
+      </details>
+      <details>
+        <summary>How do clients actually get connected to me?</summary>
+        <div class="a"><p>Three ways. You add them by hand; you record an invitation against their email and they link to you the first time they sign in to Repple with that address; or, if you have listed yourself in Find a Trainer, they send you a request you accept. Repple does not send the invitation email for you — the app says so, so you know to tell them yourself.</p></div>
+      </details>
+      <details>
+        <summary>What if a client never installs the app?</summary>
+        <div class="a"><p>They still sit on your roster and in your schedule, and you can keep notes and a programme against them. What does not work until they join is the part that needs their phone: a programme you assign is held on your device rather than in their Train tab, and messages cannot reach them. The app tells you that at the moment it happens rather than reporting a success it did not have.</p></div>
+      </details>
+      <details>
+        <summary>What can I see of a client's data?</summary>
+        <div class="a"><p>What they have shared by connecting to you: their training log, their check-ins, their scans and measurements, their meals if they share them. They can end the link whenever they like, and their record goes with them when they do — it was always theirs.</p></div>
+      </details>
+      <details>
+        <summary>Where do the numbers come from?</summary>
+        <div class="a"><p>Out of the log, the check-ins and the outcomes you record. Adherence is the rating the client filed. Last active is the most recent thing they logged. Sessions are the ones in your own schedule. Nothing is seeded with sample data, which is why a new account looks empty rather than impressive.</p></div>
+      </details>
+      <details>
+        <summary>Can I take payment from clients?</summary>
+        <div class="a"><p>You can sell a membership or a pack of sessions and be paid through Stripe, which handles the card details — Repple never sees them. Setting up payouts is a Stripe onboarding step inside the app, and until it is finished the screen says payouts are not live rather than showing you a balance.</p></div>
+      </details>
+      <details>
+        <summary>What does it cost?</summary>
+        <div class="a"><p>Pricing isn't published yet — the apps are in their first release and we would rather set it against how people actually use them than guess in advance. Creating an account costs nothing today. Email <a href="mailto:support@repplefitness.com">support@repplefitness.com</a> and we'll talk plainly about it.</p></div>
+      </details>
     </div>
   </div>
 </section>
@@ -229,7 +711,7 @@
 <section class="close-cta">
   <div class="wrap">
     <h2 class="display">Put the book <em>down</em>.</h2>
-    <p class="lede" style="margin:22px auto 0;max-width:50ch">
+    <p class="lede">
       Create an account, add one client, and see whether the week reads more clearly.
     </p>
     <div class="btn-row">
@@ -254,7 +736,7 @@
           </span>
           Repple
         </a>
-        <p class="tiny" style="margin-top:14px;max-width:34ch">
+        <p class="tiny">
           The operating record for gyms, the coaches who work in them, and the people they train.
         </p>
       </div>
