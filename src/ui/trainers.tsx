@@ -14,6 +14,12 @@
 // Every field traces to a row. Where there is nothing to count, the value is 0
 // because the query returned nothing — and `loading` is exposed so a screen can
 // tell "no trainers" apart from "not asked yet".
+//
+// "Not asked yet" was only two thirds of it. The catch below set `trainers` to
+// `[]` and `loading` to false, which is the same pair of values as a gym that
+// genuinely has no trainers on the books — so an owner whose read was refused
+// saw an empty roster, a payroll of nothing and zero sessions delivered, all
+// presented as this month's figures. `status` is the third state.
 import { createContext, useContext, useCallback, useEffect, useState, type ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
@@ -21,11 +27,16 @@ import { fetchGymTrainers, payroll30For, type GymTrainer } from '../lib/gymTrain
 export type { GymTrainer };
 import { reportError } from '../lib/reportError';
 import { useTenant } from './tenant';
+import type { LoadStatus } from './loadStatus';
 
 
 interface TrainersValue {
   trainers: GymTrainer[];
   loading: boolean;
+  /** Whether `trainers` (and therefore sessions30 and payroll30) is what the
+   *  database holds. Under 'error' those figures are zeroes we could not
+   *  confirm and must not be shown as the gym's numbers. */
+  status: LoadStatus;
   /** Sessions delivered across the gym in the last 30 days. */
   sessions30: number;
   /**
@@ -42,22 +53,27 @@ export function PlatformTrainersProvider({ children }: { children: ReactNode }) 
   const { tenant } = useTenant();
   const [trainers, setTrainers] = useState<GymTrainer[]>([]);
   const [loading, setLoading] = useState(true);
+  const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
   const [tick, setTick] = useState(0);
   const refresh = useCallback(() => setTick((t) => t + 1), []);
 
   useEffect(() => {
-    if (!USE_SUPABASE) { setLoading(false); return; }
-    if (!tenant) { setTrainers([]); setLoading(false); return; }
+    if (!USE_SUPABASE) { setLoading(false); setStatus('ready'); return; }
+    // No tenant at all is a real, knowable state — there is no gym whose
+    // trainers we are failing to read.
+    if (!tenant) { setTrainers([]); setLoading(false); setStatus('ready'); return; }
     let cancelled = false;
     (async () => {
       setLoading(true);
+      setStatus('loading');
       try {
         const rows = await fetchGymTrainers(supabase, tenant.id);
         if (cancelled) return;
         setTrainers(rows);
+        setStatus('ready');
       } catch (e) {
         reportError('gymTrainers.load', e);
-        if (!cancelled) setTrainers([]);
+        if (!cancelled) { setTrainers([]); setStatus('error'); }
       }
       if (!cancelled) setLoading(false);
     })();
@@ -68,7 +84,7 @@ export function PlatformTrainersProvider({ children }: { children: ReactNode }) 
   const payroll30 = payroll30For(trainers, tenant?.sessionFee ?? null);
 
   return (
-    <Ctx.Provider value={{ trainers, loading, sessions30, payroll30, refresh }}>{children}</Ctx.Provider>
+    <Ctx.Provider value={{ trainers, loading, status, sessions30, payroll30, refresh }}>{children}</Ctx.Provider>
   );
 }
 

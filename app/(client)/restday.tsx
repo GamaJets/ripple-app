@@ -21,7 +21,14 @@ import { weekStats } from '../../src/lib/streaks';
 export default function RestDay() {
   const t = useTheme();
   const router = useRouter();
-  const { log } = useWorkoutLog();
+  const { log, status: logStatus } = useWorkoutLog();
+  // Everything on this screen is inferred from the log, and an unread log infers
+  // beautifully: no sessions means no fatigue, so `deloadCheck` comes back clear,
+  // `restToday` comes back false, and the screen told a client who had trained
+  // six days straight that they were "well recovered" with "room to train". That
+  // is not a display bug — it is training advice manufactured out of a failed
+  // read, on the one screen whose whole job is to tell someone to stop.
+  const known = logStatus !== 'error';
 
   const info = useMemo(() => {
     const dl = deloadCheck(log);
@@ -34,9 +41,11 @@ export default function RestDay() {
   }, [log]);
 
   const { dl, wk, restToday } = info;
-  const tone = dl.due ? t.s3 : restToday ? t.warn : t.brand;
-  const headline = dl.due ? 'Time for a deload week' : restToday ? 'Take a rest day' : 'You are well recovered';
-  const body = dl.due
+  const tone = !known ? t.warn : dl.due ? t.s3 : restToday ? t.warn : t.brand;
+  const headline = !known ? 'We couldn’t read your training log' : dl.due ? 'Time for a deload week' : restToday ? 'Take a rest day' : 'You are well recovered';
+  const body = !known
+    ? 'This screen works entirely from what you have logged, and we could not read it. Nothing here is a judgement about your recovery — read it as blank, not as a green light to train.'
+    : dl.due
     ? dl.reason
     : restToday
     ? `You've trained ${wk.days} of the last 7 days. A rest day now protects your progress and lowers injury risk.`
@@ -69,11 +78,11 @@ export default function RestDay() {
         {/* ── the hero: how loaded this week already is ───────────────────── */}
         <Hero
           label="Trained this week"
-          figure={fig(wk.days)}
-          unit={wk.days === 1 ? 'day' : 'days'}
-          arc={wk.days / 7}
+          figure={known ? fig(wk.days) : fig(null)}
+          unit={known ? (wk.days === 1 ? 'day' : 'days') : undefined}
+          arc={known ? wk.days / 7 : undefined}
           tone={tone}
-          note={`${dl.hardWeeks} consecutive hard week${dl.hardWeeks === 1 ? '' : 's'} behind you`}
+          note={known ? `${dl.hardWeeks} consecutive hard week${dl.hardWeeks === 1 ? '' : 's'} behind you` : 'Nothing read — an empty ring here is not an empty week.'}
         />
 
         <Rule />
@@ -81,8 +90,10 @@ export default function RestDay() {
         <Section>
           <SectionHead title="Load" />
           <KpiRow items={[
-            { label: 'Hard weeks', value: fig(dl.hardWeeks) },
-            { label: 'Volume this week', value: (wk.volumeKg / 1000).toFixed(1), unit: 't' },
+            { label: 'Hard weeks', value: known ? fig(dl.hardWeeks) : fig(null) },
+            // `(0/1000).toFixed(1)` is "0.0" — a tonnage printed to one decimal
+            // place, which reads as measured rather than as absent.
+            { label: 'Volume this week', value: known ? (wk.volumeKg / 1000).toFixed(1) : fig(null), unit: known ? 't' : undefined },
           ]} />
         </Section>
 

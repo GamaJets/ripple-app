@@ -43,7 +43,7 @@ export default function Cards() {
   const t = useTheme();
   const router = useRouter();
   const c = useClientData();
-  const { log } = useWorkoutLog();
+  const { log, status: logStatus } = useWorkoutLog();
   const { appName } = useBrand();
   const [idx, setIdx] = useState(0);
 
@@ -55,9 +55,21 @@ export default function Cards() {
   const wDelta = w.length > 1 ? +(w[w.length - 1].v - w[0].v).toFixed(1) : 0;
   const hasProgress = w.length > 1;
 
+  // Under 'error' the log is empty because it could not be read, not because
+  // nothing was ever logged — so a streak of 0 and no PRs are unknowns here,
+  // not zeroes, and a card is the last place to guess. These cards get posted.
+  const logKnown = logStatus !== 'error';
+  const hasStreak = logKnown && (streak > 0 || best > 0);
+  const hasPr = logKnown && !!topPr;
+  const UNREAD = 'We couldn’t read your training log';
+
   const cards = [
-    { kicker: 'Streak', big: String(streak), unit: streak === 1 ? 'day' : 'days', sub: `Best ever: ${best} days`, available: true },
-    { kicker: 'Top Lift', big: topPr ? String(topPr.est1RM) : '—', unit: topPr ? 'kg' : '', sub: topPr ? `${topPr.exercise} · est 1RM` : 'Log a lift to unlock', available: !!topPr },
+    // `available: true` was hardcoded on this one card while the other two
+    // honoured the flag — so an unread log rendered "0 days · Best ever: 0 days"
+    // as a milestone with Share still enabled, and a client on a live 40-day
+    // streak was invited to publicly announce a streak of zero.
+    { kicker: 'Streak', big: hasStreak ? String(streak) : '—', unit: hasStreak ? (streak === 1 ? 'day' : 'days') : '', sub: hasStreak ? `Best ever: ${best} days` : logKnown ? 'Log a workout to start a streak' : UNREAD, available: hasStreak },
+    { kicker: 'Top Lift', big: hasPr ? String(topPr.est1RM) : '—', unit: hasPr ? 'kg' : '', sub: hasPr ? `${topPr.exercise} · est 1RM` : logKnown ? 'Log a lift to unlock' : UNREAD, available: hasPr },
     // No second weigh-in means no measured change — show the card locked rather
     // than a manufactured "+0 kg since you started".
     { kicker: 'Progress', big: hasProgress ? `${wDelta > 0 ? '+' : ''}${wDelta}` : '—', unit: hasProgress ? 'kg' : '', sub: hasProgress ? 'Since you started' : 'Weigh in twice to unlock', available: hasProgress },
@@ -101,7 +113,9 @@ export default function Cards() {
             <Cta label="Share this card" wide disabled={!card.available} onPress={shareCard} />
           </View>
           <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.md }}>
-            {card.available ? 'Tip: screenshot the card above to post the visual too.' : 'This card unlocks once there is something real to show.'}
+            {card.available ? 'Tip: screenshot the card above to post the visual too.'
+              : logKnown ? 'This card unlocks once there is something real to show.'
+              : 'Cards stay locked until we can read your log — nothing has been lost.'}
           </Text>
         </Section>
 

@@ -33,14 +33,22 @@ export async function fetchMyConnect(): Promise<ConnectStatus | null> {
   } catch { return null; }
 }
 
-/** Packages the signed-in trainer sells. */
-export async function fetchMyPackages(): Promise<TrainerPackage[]> {
+/**
+ * Packages the signed-in trainer sells.
+ *
+ * `[]` means they sell none. **`null` means we could not read them**, which the
+ * payments screen must not render as "no packages yet" — a trainer told that
+ * about their own price list will build it a second time, and their clients see
+ * duplicates of everything they already sell.
+ */
+export async function fetchMyPackages(): Promise<TrainerPackage[] | null> {
   try {
     const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id; if (!uid) return [];
-    const { data } = await supabase.from('trainer_packages').select('*').eq('trainer_id', uid).order('created_at', { ascending: false });
+    const uid = auth?.user?.id; if (!uid) return null;
+    const { data, error } = await supabase.from('trainer_packages').select('*').eq('trainer_id', uid).order('created_at', { ascending: false });
+    if (error) return null;
     return (data as TrainerPackage[]) ?? [];
-  } catch { return []; }
+  } catch { return null; }
 }
 
 export async function createPackage(p: { name: string; price_cents: number; sessions: number | null; currency?: string }): Promise<{ ok: boolean; error?: string }> {
@@ -52,8 +60,19 @@ export async function createPackage(p: { name: string; price_cents: number; sess
   } catch (e) { return { ok: false, error: (e as Error).message }; }
 }
 
-export async function deactivatePackage(id: string): Promise<void> {
-  try { await supabase.from('trainer_packages').update({ active: false }).eq('id', id); } catch { /* ignore */ }
+/**
+ * Stop selling a package. Returns whether it actually stopped.
+ *
+ * Returned void and swallowed the error, so the screen refreshed and said
+ * nothing either way — a trainer who "removed" a package that is still on sale
+ * keeps selling something they believe they withdrew, and finds out when
+ * somebody buys it.
+ */
+export async function deactivatePackage(id: string): Promise<boolean> {
+  try {
+    const { error } = await supabase.from('trainer_packages').update({ active: false }).eq('id', id);
+    return !error;
+  } catch { return false; }
 }
 
 /** Active packages a client can buy from a given trainer. */
@@ -74,14 +93,22 @@ export async function buyPackage(packageId: string): Promise<{ ok: boolean; erro
   } catch (e) { return { ok: false, error: (e as Error).message }; }
 }
 
-/** The signed-in client's purchases (session-pack balances). */
-export async function fetchMyPurchases(): Promise<Purchase[]> {
+/**
+ * The signed-in client's purchases (session-pack balances).
+ *
+ * `[]` means they have bought nothing. **`null` means we could not read it** —
+ * and the packages screen renders "No purchases yet" for an empty list, so a
+ * refused read told a paying customer their money bought nothing. That is the
+ * single worst sentence this app can show someone who has paid.
+ */
+export async function fetchMyPurchases(): Promise<Purchase[] | null> {
   try {
     const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id; if (!uid) return [];
-    const { data } = await supabase.from('client_purchases').select('*').eq('client_id', uid).order('created_at', { ascending: false });
+    const uid = auth?.user?.id; if (!uid) return null;
+    const { data, error } = await supabase.from('client_purchases').select('*').eq('client_id', uid).order('created_at', { ascending: false });
+    if (error) return null;
     return (data as Purchase[]) ?? [];
-  } catch { return []; }
+  } catch { return null; }
 }
 
 /** Sessions remaining across the client's active packs (optionally for one trainer). */

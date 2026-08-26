@@ -74,6 +74,13 @@ export default function TrainerSessions() {
   const { tenant } = useTenant();
 
   const [queue, setQueue] = useState<PtSession[] | null>(null);
+  // Separate from `queue === null`, which only means "not read yet". A refused
+  // or unreachable read used to land here as an empty queue, and an empty queue
+  // is the screen's good state — so the coach got a tick and "nothing is
+  // holding payroll up" at the exact moment the app had no idea what was
+  // outstanding. Payroll is then settled short, and nobody finds out until a
+  // trainer asks where their session went.
+  const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   // Marked in this sitting, so an accidental tap can be taken back without
   // hunting for the session again once it has left the queue.
@@ -81,6 +88,7 @@ export default function TrainerSessions() {
 
   const load = useCallback(async () => {
     if (!tenant?.id) return;
+    setFailed(false);
     try {
       // 90 days back: far enough to catch a forgotten fortnight, short enough
       // that the query stays cheap and the list stays readable.
@@ -88,7 +96,11 @@ export default function TrainerSessions() {
       setQueue(await fetchAwaitingOutcome(supabase, tenant.id, since));
     } catch (e) {
       reportError('sessions.awaiting', e);
-      setQueue([]);
+      // Leave the queue unknown rather than empty. [] here would be read as
+      // "nothing outstanding", which is a claim about the gym's payroll this
+      // screen is in no position to make.
+      setQueue(null);
+      setFailed(true);
     }
   }, [tenant?.id]);
 
@@ -119,7 +131,13 @@ export default function TrainerSessions() {
       setJustMarked((prev) => prev.filter((x) => x.s.id !== entry.s.id));
       setQueue((prev) => [entry.s, ...(prev ?? [])]);
       tapLight();
-    } catch (e) { reportError('sessions.undo', e); }
+    } catch (e) {
+      // The row keeps its outcome on the server, so saying nothing here leaves
+      // the coach believing they took back a "no show" they did not — and the
+      // gym pays, or does not pay, on the outcome that is still recorded.
+      reportError('sessions.undo', e);
+      Alert.alert('Not undone', `${entry.s.clientName ?? 'That session'} is still recorded as “${OUTCOMES.find((o) => o.id === entry.outcome)?.label ?? entry.outcome}”. Check your connection and tap undo again.`);
+    }
   };
 
   /** Mark a whole day the same way. Confirmed, because it is many writes. */
@@ -153,11 +171,13 @@ export default function TrainerSessions() {
         <Hero
           label="Waiting on an outcome"
           figure={fig(loaded ? rows.length : null)}
-          note={!loaded
-            ? 'Reading your sessions…'
-            : rows.length === 0
-              ? 'Nothing outstanding — payroll can be settled.'
-              : 'Payroll cannot be worked out until every one of these is marked.'}
+          note={failed
+            ? 'Could not be read — this is not a count of zero.'
+            : !loaded
+              ? 'Reading your sessions…'
+              : rows.length === 0
+                ? 'Nothing outstanding — payroll can be settled.'
+                : 'Payroll cannot be worked out until every one of these is marked.'}
         />
 
         <Rule />
@@ -172,7 +192,20 @@ export default function TrainerSessions() {
           </Section>
         ) : null}
 
-        {!loaded ? (
+        {failed ? (
+          <View style={{ alignItems: 'center', paddingVertical: sp.xl }}>
+            <Text style={{ ...ty.head, color: t.crit }}>Could not read your sessions</Text>
+            <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: sp.xs }}>
+              There may or may not be sessions waiting on an outcome — the app could not reach the
+              server to find out. Do not settle payroll on this screen until it loads.
+            </Text>
+            <Pressable onPress={() => void load()} hitSlop={8}
+              accessibilityRole="button" accessibilityLabel="Try reading your sessions again"
+              style={{ marginTop: sp.lg, borderWidth: hairline, borderColor: t.ring, borderRadius: radius.pill, paddingHorizontal: sp.lg, paddingVertical: sp.sm }}>
+              <Text style={{ ...ty.label, fontWeight: '600', color: t.ink2 }}>Try again</Text>
+            </Pressable>
+          </View>
+        ) : !loaded ? (
           <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.lg }}>Loading…</Text>
         ) : rows.length === 0 ? (
           <View style={{ alignItems: 'center', paddingVertical: sp.xl }}>

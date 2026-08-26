@@ -51,6 +51,18 @@ where created_at > '2026-08-26'
 order by created_at desc;
 ```
 
+**`email_confirmed_at` does not mean what it looks like here.** With the toggle
+off, Supabase stamps it at creation — so every account made during this window
+reads as confirmed whether or not anybody proved they own the address. Checked
+on 26 Aug 2026: the one account created since the toggle shows
+`email_confirmed_at` set, and that fact carries no information.
+
+So the column cannot be used to sort verified from unverified for this window.
+The `created_at` range above is the only signal, which is why the instruction is
+to recognise the accounts by name rather than to trust a flag. The two genuinely
+unconfirmed accounts in section 5 predate the toggle, which is precisely why
+they still read as unconfirmed.
+
 ---
 
 ## 2. Store links currently point at listings that do not exist
@@ -122,3 +134,45 @@ npx wrangler pages deploy web --project-name=repple --branch=main
 confirm them — their rows already carry the unconfirmed state, so they still
 cannot sign in. Either confirm them by hand or leave them; they may simply have
 abandoned signup months ago.
+
+---
+
+## 6. Exercise videos need a new binary, and will fail quietly without one
+
+Added 26 Aug 2026, when the exercise video library was made to actually work.
+
+`expo-video` is a **native** dependency. It is declared in `app.json`'s plugins
+and installed in `package.json`, which means:
+
+- **Expo Go can no longer run this app at all.** Development needs an EAS dev
+  build from here on.
+- Any store build produced *before* this change does not contain the video
+  player. On such a build the library screens still render, a trainer can still
+  record and upload, and the client still sees a clip listed — and nothing
+  plays. There is no error to read, because the code that would play it is not
+  in the binary.
+
+So the three listings must ship a build made **after** this commit, or the
+feature is present in the UI and absent in fact — which is the failure mode this
+whole checklist exists to catch.
+
+Verify before submitting, rather than assuming:
+
+```bash
+node -e "const p=require('./package.json');console.log('expo-video',p.dependencies['expo-video']||'MISSING')"
+grep -q '"expo-video"' app.json && echo "plugin registered" || echo "PLUGIN MISSING"
+```
+
+### The storage bucket is private now
+
+`exercise-videos` was created by hand in the dashboard and left **public**, so
+any clip was readable by anyone who ever saw its URL, whatever the table's
+policies said. `43-exercise-video-library.sql` declares it and flips it private;
+playback mints a signed URL per viewer, and the signing call is itself subject
+to the read policy.
+
+Nothing was lost in the flip — the bucket held zero files on the day it changed,
+because the insert path had never once succeeded. But it means **`getPublicUrl`
+no longer returns anything playable for this bucket**. If a future change starts
+returning public URLs again, it is not a convenience; it is the permission model
+being removed.

@@ -83,8 +83,27 @@ export default function Devices() {
      setWkBusy(false);
    }
  };
- const importOne = async (sm: WorkoutSample) => { if (alreadyLogged(sm)) return; addWorkouts([await withHr(sm)]); markImported([sm.id]); tapLight(); };
- const importAll = async () => { const fresh = (wk || []).filter((sm) => !alreadyLogged(sm)); if (!fresh.length) return; addWorkouts(await Promise.all(fresh.map(withHr))); markImported(fresh.map((sm) => sm.id)); tapLight(); };
+ // `addWorkouts` resolves false when the insert never reached the server, and
+ // its answer was being dropped on the floor. `markImported` is what flips the
+ // row to "In log" — permanently, and it is the only record that the workout was
+ // ever brought across — so marking it after a failed write retires the row for
+ // good: the session is still on the watch, it is not in the log, and the one
+ // control that would have fetched it again is gone from the screen.
+ const importOne = async (sm: WorkoutSample) => {
+  if (alreadyLogged(sm)) return;
+  const saved = await addWorkouts([await withHr(sm)]);
+  if (!saved) { Alert.alert('Import workouts', `${sm.activity} couldn't be added to your log. Check your connection and tap Import again.`); return; }
+  markImported([sm.id]);
+  tapLight();
+ };
+ const importAll = async () => {
+  const fresh = (wk || []).filter((sm) => !alreadyLogged(sm));
+  if (!fresh.length) return;
+  const saved = await addWorkouts(await Promise.all(fresh.map(withHr)));
+  if (!saved) { Alert.alert('Import workouts', `Those ${fresh.length} workout${fresh.length === 1 ? '' : 's'} couldn't be added to your log. Check your connection and tap Import all again.`); return; }
+  markImported(fresh.map((sm) => sm.id));
+  tapLight();
+ };
  // Auto-refresh whenever this screen opens (plus the 60s auto-sync in the store).
  // Only re-sync providers that are actually CONNECTED. This used to hit every
  // available provider, so opening this screen fired wearable-day for WHOOP, Oura,

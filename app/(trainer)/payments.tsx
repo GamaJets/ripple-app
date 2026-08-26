@@ -27,14 +27,18 @@ export default function TrainerPayments() {
   const t = useTheme();
   const router = useRouter();
   const [conn, setConn] = useState<ConnectStatus | null>(null);
-  const [pkgs, setPkgs] = useState<TrainerPackage[]>([]);
+  // null is not []. [] is a trainer who sells nothing; null is a price list we
+  // could not read, and telling someone they have no packages when they do is
+  // how a duplicate price list gets built.
+  const [pkgs, setPkgs] = useState<TrainerPackage[] | null>(null);
+  const [pkgErr, setPkgErr] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [name, setName] = useState('');
   const [price, setPrice] = useState('');
   const [sessions, setSessions] = useState('');
 
-  const load = useCallback(async () => { setLoading(true); const [c, p] = await Promise.all([fetchMyConnect(), fetchMyPackages()]); setConn(c); setPkgs(p); setLoading(false); }, []);
+  const load = useCallback(async () => { setLoading(true); const [c, p] = await Promise.all([fetchMyConnect(), fetchMyPackages()]); setConn(c); setPkgs(p); setPkgErr(p === null); setLoading(false); }, []);
   useEffect(() => { load(); }, [load]);
 
   const onboard = async () => { setBusy(true); const r = await startTrainerOnboarding(); setBusy(false); if (!r.ok) Alert.alert('Payouts setup', r.error || 'Could not start setup. Make sure Stripe Connect is enabled.'); };
@@ -51,7 +55,14 @@ export default function TrainerPayments() {
     setName(''); setPrice(''); setSessions(''); load();
   };
 
-  const remove = (id: string) => Alert.alert('Remove package?', 'Clients will no longer see it.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Remove', style: 'destructive', onPress: async () => { await deactivatePackage(id); load(); } }]);
+  const remove = (id: string) => Alert.alert('Remove package?', 'Clients will no longer see it.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Remove', style: 'destructive', onPress: async () => {
+    // deactivatePackage used to return void and swallow the error, so this
+    // refreshed and said nothing — a package the trainer believes is withdrawn
+    // stays on sale until a client buys it.
+    const ok = await deactivatePackage(id);
+    if (!ok) { Alert.alert('Not removed', 'That package is still on sale — the change did not save. Try again in a moment.'); return; }
+    load();
+  } }]);
 
   const active = conn?.charges_enabled;
   const G = layout.gutter;
@@ -103,11 +114,16 @@ export default function TrainerPayments() {
 
             {/* ── what clients can buy ───────────────────────────────────── */}
             <Section>
-              <SectionHead title="Your packages" note={pkgs.filter((p) => p.active).length ? String(pkgs.filter((p) => p.active).length) : undefined} />
-              {pkgs.filter((p) => p.active).length === 0 ? (
+              <SectionHead title="Your packages" note={(pkgs ?? []).filter((p) => p.active).length ? String((pkgs ?? []).filter((p) => p.active).length) : undefined} />
+              {pkgErr ? (
+                <Text style={{ ...ty.label, color: t.crit }}>
+                  Your packages could not be read, so this is not a list of what you sell. Do not add
+                  them again from here — reopen the screen once you have signal.
+                </Text>
+              ) : (pkgs ?? []).filter((p) => p.active).length === 0 ? (
                 <Text style={{ ...ty.label, color: t.ink3 }}>No packages yet. Add one below — a monthly membership or a pack of sessions.</Text>
               ) : null}
-              {pkgs.filter((p) => p.active).map((p, i) => (
+              {(pkgs ?? []).filter((p) => p.active).map((p, i) => (
                 <View key={p.id} style={{
                   flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md,
                   borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,

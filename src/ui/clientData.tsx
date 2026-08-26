@@ -3,6 +3,29 @@
 // diet, height, weight and body-fat are editable live and PERSISTED to the
 // device (AsyncStorage), so your own stats survive relaunch. Swap for Supabase
 // in the data migration.
+//
+// ── Three failures this provider could not report ──────────────────────────
+//
+// When USE_SUPABASE is on, the local cache is DELETED on launch (see the first
+// effect) and the server becomes the only copy of the client's profile. That
+// makes every silent failure here permanent rather than temporary:
+//
+//   · the profiles/clients reads land in `reportError` and then return, leaving
+//     name, goal, diet, allergens and injuries at their constructed defaults.
+//     A vegetarian with a nut allergy is shown, and fed meal plans, as a
+//     meat-eating client with no allergens — the defaults are plausible enough
+//     that nothing looks broken.
+//   · the scans read returns early on error, leaving `scans: []`. weightKg,
+//     bodyFatPct and muscleKg then go null and every screen says the client has
+//     never been measured. The charts show nothing to a client with a year of
+//     scans.
+//   · the debounced push back to the server is fire-and-forget:
+//     `.then(() => {}, () => {})` on both tables, with `error` never read. A
+//     profile edit the server refuses is kept on screen, is not in the cache
+//     (it was deleted at launch), and is gone at the next relaunch.
+//
+// `status`, `scansStatus` and `saveFailed` make each of those visible. The
+// values themselves are unchanged: nothing here starts guessing.
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { ScanMetrics } from '../lib/inbodyMetrics';
@@ -12,6 +35,7 @@ import type { Goal, Diet } from '../lib/types';
 import type { Allergen } from '../lib/meals';
 import type { Injury } from '../lib/injuries';
 import { reportError } from '../lib/reportError';
+import type { LoadStatus } from './loadStatus';
 
 export type CoachingMode = 'online' | 'inperson' | 'solo';
 export interface ScanRec { id: string; takenAt: string; weightKg: number; bodyFatPct: number; skeletalMuscleKg: number; source: string; image?: string; metrics?: ScanMetrics }
@@ -37,8 +61,27 @@ interface Value {
    *  client had been measured. */
   weightKg: number | null; bodyFatPct: number | null; muscleKg: number | null;
   setWeightKg: (v: number) => void; setBodyFat: (v: number) => void;
-  scans: ScanRec[]; addScan: (s: ScanRec) => void;
+  scans: ScanRec[];
+  /** Resolves true only once the scan row is on the server. False means the
+   *  scan is on this phone for this session and will be gone at relaunch — the
+   *  local cache is cleared on launch when the backend is on. */
+  addScan: (s: ScanRec) => Promise<boolean>;
   weightSeries: Series[]; bodyFatSeries: Series[]; muscleSeries: Series[];
+  /** Whether the signed-in user's profile AND scans were both read from the
+   *  server. Under 'error' the fields above are defaults and nulls that were
+   *  never confirmed — a screen must not present them as the client's answers. */
+  status: LoadStatus;
+  /** Whether `scans` is the server's answer specifically. Under 'error' an
+   *  empty `scans` (and the null weight/body-fat/muscle that follow from it)
+   *  means unknown, not "never measured". */
+  scansStatus: LoadStatus;
+  /** Whether the profile read succeeded — name, dob, height, goal, diet,
+   *  allergens, injuries, focus areas, meals per day. */
+  profileStatus: LoadStatus;
+  /** True when the last push of the profile to the server was refused or could
+   *  not be sent. The edit is on screen but not stored anywhere durable, and
+   *  the local cache is cleared on launch, so it will be lost. */
+  saveFailed: boolean;
 }
 const Ctx = createContext<Value | null>(null);
 const KEY = 'repple.profile';
@@ -69,6 +112,9 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
   const [hydrated, setHydrated] = useState(false);
   const [sbUid, setSbUid] = useState<string | null>(null);
   const [nameSynced, setNameSynced] = useState(false);
+  const [profileStatus, setProfileStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
+  const [scansStatus, setScansStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
+  const [saveFailed, setSaveFailed] = useState(false);
 
   // Load the user's saved profile on first mount.
   useEffect(() => { (async () => {
@@ -114,14 +160,20 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
     if (!USE_SUPABASE || !sbUid) return;
     let cancelled = false;
     setNameSynced(false);
+    setProfileStatus('loading');
     (async () => {
+      // Either read failing means the profile on screen is partly or wholly
+      // defaults. Tracked rather than swallowed, because the push effect below
+      // is about to publish whatever is on screen back to the server.
+      let failed = false;
       try {
         const { data, error } = await supabase.from('profiles').select('full_name, avatar').eq('id', sbUid).single();
-        if (!cancelled && !error) {
+        if (error) { reportError('clientData.hydrate.profiles', error); failed = true; }
+        else if (!cancelled) {
           if (typeof data?.full_name === 'string' && data.full_name.trim()) setName(data.full_name.trim());
           if (typeof data?.avatar === 'string' && data.avatar) setPhoto(data.avatar);
         }
-      } catch (e) { reportError('clientData.hydrate.profiles', e); }
+      } catch (e) { reportError('clientData.hydrate.profiles', e); failed = true; }
 
       // Read the rest of the profile back BEFORE the push effect below is allowed
       // to run. Without this the local state is still at its defaults (the local
@@ -133,6 +185,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
           .from('clients')
           .select('dob, height_cm, goal, diet, avoid, mode, injuries, focus_areas, manual_weight_kg, manual_body_fat_pct, manual_at, meals_per_day')
           .eq('id', sbUid).single();
+        if (cErr) { reportError('clientData.hydrate.clients', cErr); failed = true; }
         if (!cancelled && !cErr && c) {
           const r = c as any;
           if (typeof r.dob === 'string' && r.dob) setDob(r.dob);
@@ -148,9 +201,9 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
           if (typeof r.manual_at === 'string' && r.manual_at) setManualAt(r.manual_at);
           if (r.meals_per_day === 3 || r.meals_per_day === 4 || r.meals_per_day === 5) setMealsPerDay(r.meals_per_day);
         }
-      } catch (e) { reportError('clientData.hydrate.clients', e); }
+      } catch (e) { reportError('clientData.hydrate.clients', e); failed = true; }
 
-      if (!cancelled) setNameSynced(true);
+      if (!cancelled) { setProfileStatus(failed ? 'error' : 'ready'); setNameSynced(true); }
     })();
     return () => { cancelled = true; };
   }, [sbUid]);
@@ -165,21 +218,31 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!USE_SUPABASE || !sbUid || !hydrated || !nameSynced) return;
     const timer = setTimeout(() => {
-      try {
-        supabase.from('profiles').update({ full_name: name, avatar: photo }).eq('id', sbUid).then(() => {}, () => {});
-        supabase.from('clients').update({
-          dob: dob || null,
-          height_cm: heightCm,
-          goal, diet, avoid,
-          meals_per_day: mealsPerDay,
-          mode: coachingMode,
-          injuries,
-          focus_areas: focusAreas,
-          manual_weight_kg: manualWeight ?? null,
-          manual_body_fat_pct: manualBodyFat ?? null,
-          manual_at: manualAt || null,
-        }).eq('id', sbUid).then(() => {}, () => {});
-      } catch { /* ignore */ }
+      (async () => {
+        // Both results are now inspected. Refusing to look was what let a
+        // client's edited goal, diet or allergen list disappear at the next
+        // launch with the screen having said nothing.
+        try {
+          const [{ error: pErr }, { error: cErr }] = await Promise.all([
+            supabase.from('profiles').update({ full_name: name, avatar: photo }).eq('id', sbUid),
+            supabase.from('clients').update({
+              dob: dob || null,
+              height_cm: heightCm,
+              goal, diet, avoid,
+              meals_per_day: mealsPerDay,
+              mode: coachingMode,
+              injuries,
+              focus_areas: focusAreas,
+              manual_weight_kg: manualWeight ?? null,
+              manual_body_fat_pct: manualBodyFat ?? null,
+              manual_at: manualAt || null,
+            }).eq('id', sbUid),
+          ]);
+          if (pErr) reportError('clientData.push.profiles', pErr);
+          if (cErr) reportError('clientData.push.clients', cErr);
+          setSaveFailed(!!(pErr || cErr));
+        } catch (e) { reportError('clientData.push', e); setSaveFailed(true); }
+      })();
     }, 600);
     return () => clearTimeout(timer);
   }, [name, photo, dob, heightCm, goal, diet, avoid, mealsPerDay, coachingMode, injuries, focusAreas, manualWeight, manualBodyFat, manualAt, sbUid, hydrated, nameSynced]);
@@ -199,17 +262,26 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
       setSbUid(id);
       try {
         const { data, error } = await supabase.from('scans').select('*').eq('client_id', id).order('taken_at', { ascending: true });
-        if (error || cancelled) return;
+        if (cancelled) return;
+        // `if (error || cancelled) return;` left scans at [] and therefore
+        // weight, body fat and muscle at null — which every screen renders as
+        // "not measured yet". Say instead that we do not know.
+        if (error) { reportError('clientData.hydrate.scans', error); setScansStatus('error'); return; }
         // Only ever show the user's own real scans — never seed demo scans into a live account.
         setScans((data || []).map((r: any) => ({ id: r.id, takenAt: r.taken_at, weightKg: Number(r.weight_kg), bodyFatPct: Number(r.body_fat_pct), skeletalMuscleKg: r.skeletal_muscle_kg != null ? Number(r.skeletal_muscle_kg) : 0, source: r.source ?? '', metrics: r.metrics ?? undefined })));
-      } catch { /* stay on mock */ }
+        setScansStatus('ready');
+      } catch (e) { reportError('clientData.hydrate.scans', e); if (!cancelled) setScansStatus('error'); }
     };
     (async () => {
       try {
-        const { data: auth } = await supabase.auth.getUser();
+        const { data: auth, error: authErr } = await supabase.auth.getUser();
+        if (cancelled) return;
+        if (authErr) { reportError('clientData.hydrate.auth', authErr); setScansStatus('error'); setProfileStatus('error'); return; }
         const id = auth?.user?.id;
-        if (id && !cancelled) await loadForUser(id);
-      } catch { /* stay on mock */ }
+        // Signed out: there is no server-side profile or scan history to miss.
+        if (!id) { setScansStatus('ready'); setProfileStatus('ready'); return; }
+        if (!cancelled) await loadForUser(id);
+      } catch (e) { reportError('clientData.hydrate.auth', e); if (!cancelled) { setScansStatus('error'); setProfileStatus('error'); } }
     })();
     const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
       if (cancelled) return;
@@ -247,10 +319,43 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
     activity: 1.5, mealsPerDay, setMealsPerDay,
     weightKg, bodyFatPct, muscleKg: latest ? latest.skeletalMuscleKg : null,
     setWeightKg: (v) => { setManualWeight(v); setManualAt(new Date().toISOString()); }, setBodyFat: (v) => { setManualBodyFat(v); setManualAt(new Date().toISOString()); },
-    scans: sorted, addScan: (s) => { setScans((p) => [...p, s]); if (s.metrics && Object.values(s.metrics).some((v) => v != null)) { setScanMetrics((prev) => { const nm = { ...prev, [s.takenAt.slice(0, 10)]: s.metrics! }; AsyncStorage.setItem('repple.scanMetrics', JSON.stringify(nm)).catch(() => {}); return nm; }); } setManualWeight(null); setManualBodyFat(null); if (USE_SUPABASE && sbUid) { try { supabase.from('scans').insert({ client_id: sbUid, taken_at: String(s.takenAt).slice(0, 10), weight_kg: s.weightKg, body_fat_pct: s.bodyFatPct, skeletal_muscle_kg: s.skeletalMuscleKg, source: s.source }).select('id').single().then((res: any) => { const rid = res && res.data && res.data.id; if (rid && s.metrics && Object.values(s.metrics).some((v) => v != null)) { supabase.from('scans').update({ metrics: s.metrics }).eq('id', rid).then(() => {}, () => {}); } }, () => {}); } catch { /* ignore */ } } },
+    scans: sorted,
+    // A scan is the single most consequential thing a client records: it moves
+    // weight, body fat, muscle, every chart, and the macro targets they eat to.
+    // The insert used to be fire-and-forget — `.then(res => …, () => {})`, with
+    // `error` never read — so a refused write left the scan on screen, driving
+    // all of that, until the next launch dropped it. Now the caller is told.
+    addScan: async (s: ScanRec): Promise<boolean> => {
+      setScans((p) => [...p, s]);
+      if (s.metrics && Object.values(s.metrics).some((v) => v != null)) {
+        setScanMetrics((prev) => { const nm = { ...prev, [s.takenAt.slice(0, 10)]: s.metrics! }; AsyncStorage.setItem('repple.scanMetrics', JSON.stringify(nm)).catch(() => {}); return nm; });
+      }
+      setManualWeight(null); setManualBodyFat(null);
+      if (!USE_SUPABASE || !sbUid) return false;
+      try {
+        const { data, error } = await supabase.from('scans').insert({ client_id: sbUid, taken_at: String(s.takenAt).slice(0, 10), weight_kg: s.weightKg, body_fat_pct: s.bodyFatPct, skeletal_muscle_kg: s.skeletalMuscleKg, source: s.source }).select('id').single();
+        if (error || !data?.id) { reportError('clientData.addScan', error); return false; }
+        if (s.metrics && Object.values(s.metrics).some((v) => v != null)) {
+          // The composition breakdown is a second write against the row we just
+          // made. Losing it costs the InBody detail, not the scan, so the scan
+          // still counts as stored — but the failure is recorded rather than
+          // discarded.
+          const { error: mErr } = await supabase.from('scans').update({ metrics: s.metrics }).eq('id', data.id);
+          if (mErr) reportError('clientData.addScan.metrics', mErr);
+        }
+        return true;
+      } catch (e) { reportError('clientData.addScan', e); return false; }
+    },
     weightSeries: [...sorted.map((s) => ({ t: s.takenAt, v: s.weightKg })), ...(manualIsCurrent && manualWeight != null ? [{ t: manualAt as string, v: manualWeight }] : [])],
     bodyFatSeries: [...sorted.map((s) => ({ t: s.takenAt, v: s.bodyFatPct })), ...(manualIsCurrent && manualBodyFat != null ? [{ t: manualAt as string, v: manualBodyFat }] : [])],
     muscleSeries: sorted.map((s) => ({ t: s.takenAt, v: s.skeletalMuscleKg })),
+    profileStatus, scansStatus, saveFailed,
+    // The combined view: 'error' the moment either half failed, because a
+    // profile screen shows both at once and cannot honestly present half of it
+    // as the client's own data.
+    status: (profileStatus === 'error' || scansStatus === 'error')
+      ? 'error'
+      : ((profileStatus === 'loading' || scansStatus === 'loading') ? 'loading' : 'ready'),
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

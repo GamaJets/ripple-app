@@ -2,19 +2,46 @@
 // with capacity-safe RPCs). Starts empty — no classes until the gym creates them.
 // Booking rolls onto a waitlist when a class is full; cancelling frees a
 // seat (the backend promotes the next waitlister).
+//
+// ── The worst of these was `book` ──────────────────────────────────────────
+//
+// `const { data } = await supabase.rpc('book_class', …)` did not destructure
+// `error`, and supabase-js resolves rather than throwing. So when the RPC was
+// refused — class full and the waitlist closed, membership lapsed, no signal —
+// `data` came back null, the very next line read `data === 'waitlist' ? … :
+// 'booked'`, and the client was told they were BOOKED. They then turned up to a
+// class with no seat reserved for them. That one line is the whole reason this
+// file returns null on failure now: null was always in the declared return type,
+// nothing had ever returned it.
+//
+// The read had the ordinary version of the same problem: a failed select left
+// `classes` at [] while `ready` still flipped true, so the timetable told a gym
+// full of members that no classes were scheduled.
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import type { GymClass, ClassBookingStatus } from '../lib/classesMock';
+import type { LoadStatus } from './loadStatus';
 
 interface ClassesValue {
   classes: GymClass[];
   myStatus: Record<string, ClassBookingStatus>;
+  /** The seat you actually hold, or null when the booking did not reach the
+   *  server. Null is not "unknown" — it means DO NOT tell them they are in. */
   book: (id: string) => Promise<ClassBookingStatus | null>;
-  cancel: (id: string) => Promise<void>;
-  addClass: (c: Omit<GymClass, 'id' | 'booked'>) => Promise<void>;
+  /** Resolves true only when the seat was actually released. A cancel that was
+   *  refused leaves the member holding a seat they believe they gave up. */
+  cancel: (id: string) => Promise<boolean>;
+  /** Resolves true only when the class is on the timetable everyone else reads,
+   *  rather than on the creating device alone. */
+  addClass: (c: Omit<GymClass, 'id' | 'booked'>) => Promise<boolean>;
   refresh: () => void;
+  /** The initial load has settled — unchanged, screens branch on it to stop a
+   *  spinner. It says nothing about whether the load worked; `status` does. */
   ready: boolean;
+  /** Whether `classes` is the timetable the server holds. Under 'error' an
+   *  empty list means we could not read it, not that nothing is scheduled. */
+  status: LoadStatus;
 }
 
 const Ctx = createContext<ClassesValue | null>(null);
@@ -30,26 +57,38 @@ export function ClassesProvider({ children }: { children: React.ReactNode }) {
   const [myStatus, setMyStatus] = useState<Record<string, ClassBookingStatus>>({});
   const [uid, setUid] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
+  const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
 
   const load = useCallback(async () => {
-    if (!USE_SUPABASE) { setReady(true); return; }
+    if (!USE_SUPABASE) { setReady(true); setStatus('ready'); return; }
+    let failed = false;
     try {
-      const { data: auth } = await supabase.auth.getUser();
+      const { data: auth, error: authErr } = await supabase.auth.getUser();
+      if (authErr) failed = true;
       const id = auth?.user?.id ?? null;
       setUid(id);
       const nowIso = new Date(Date.now() - 3600_000).toISOString();
-      const { data: rows } = await supabase.from('gym_classes').select('*').gte('starts_at', nowIso).order('starts_at', { ascending: true });
-      if (rows && rows.length) {
+      const { data: rows, error } = await supabase.from('gym_classes').select('*').gte('starts_at', nowIso).order('starts_at', { ascending: true });
+      if (error) failed = true;
+      else if (rows) {
         const list = rows.map(rowToClass);
         // confirmed counts (security-definer aggregate over everyone's bookings)
-        try { const { data: counts } = await supabase.rpc('class_counts'); if (Array.isArray(counts)) { const cmap: Record<string, number> = {}; counts.forEach((c: any) => { cmap[String(c.class_id)] = c.booked; }); list.forEach((cl) => { cl.booked = cmap[cl.id] ?? 0; }); } } catch { /* ignore */ }
+        // A missing count only understates how full a class is; the class itself
+        // is still listed, so this stays best-effort.
+        try { const { data: counts } = await supabase.rpc('class_counts'); if (Array.isArray(counts)) { const cmap: Record<string, number> = {}; counts.forEach((c: any) => { cmap[String(c.class_id)] = c.booked; }); list.forEach((cl) => { cl.booked = cmap[cl.id] ?? 0; }); } } catch { /* counts only */ }
+        // Assign even when empty: an empty timetable that the server confirmed
+        // is a real answer, and leaving the previous list up would be staler.
         setClasses(list);
       }
       if (id) {
-        const { data: mine } = await supabase.from('class_bookings').select('class_id, status').eq('user_id', id);
-        if (Array.isArray(mine)) { const ms: Record<string, ClassBookingStatus> = {}; mine.forEach((b: any) => { ms[String(b.class_id)] = b.status; }); setMyStatus(ms); }
+        // Which seats I hold. Failing this and leaving myStatus empty makes
+        // every class I am already booked into render as bookable again.
+        const { data: mine, error: mineErr } = await supabase.from('class_bookings').select('class_id, status').eq('user_id', id);
+        if (mineErr) failed = true;
+        else if (Array.isArray(mine)) { const ms: Record<string, ClassBookingStatus> = {}; mine.forEach((b: any) => { ms[String(b.class_id)] = b.status; }); setMyStatus(ms); }
       }
-    } catch { /* stay on mock */ }
+    } catch { failed = true; }
+    setStatus(failed ? 'error' : 'ready');
     setReady(true);
   }, []);
 
@@ -62,8 +101,26 @@ export function ClassesProvider({ children }: { children: React.ReactNode }) {
     setMyStatus((p) => ({ ...p, [id]: optimistic }));
     if (!willWait) setClasses((p) => p.map((x) => (x.id === id ? { ...x, booked: x.booked + 1 } : x)));
     if (USE_SUPABASE && uid) {
-      try { const { data } = await supabase.rpc('book_class', { p_class: id }); const st = (data === 'waitlist' ? 'waitlist' : 'booked') as ClassBookingStatus; setMyStatus((p) => ({ ...p, [id]: st })); return st; } catch { /* keep optimistic */ }
+      try {
+        const { data, error } = await supabase.rpc('book_class', { p_class: id });
+        if (error) {
+          // Roll the optimistic seat back. Leaving it would show the member as
+          // booked into a class the server just refused them.
+          setMyStatus((p) => { const n = { ...p }; delete n[id]; return n; });
+          if (!willWait) setClasses((p) => p.map((x) => (x.id === id ? { ...x, booked: Math.max(0, x.booked - 1) } : x)));
+          return null;
+        }
+        const st = (data === 'waitlist' ? 'waitlist' : 'booked') as ClassBookingStatus;
+        setMyStatus((p) => ({ ...p, [id]: st }));
+        return st;
+      } catch {
+        setMyStatus((p) => { const n = { ...p }; delete n[id]; return n; });
+        if (!willWait) setClasses((p) => p.map((x) => (x.id === id ? { ...x, booked: Math.max(0, x.booked - 1) } : x)));
+        return null;
+      }
     }
+    // No backend to book against: the seat exists on this device only, so this
+    // is the demo/offline path rather than a confirmed reservation.
     return optimistic;
   };
 
@@ -71,21 +128,41 @@ export function ClassesProvider({ children }: { children: React.ReactNode }) {
     const was = myStatus[id];
     setMyStatus((p) => { const n = { ...p }; delete n[id]; return n; });
     if (was === 'booked') setClasses((p) => p.map((x) => (x.id === id ? { ...x, booked: Math.max(0, x.booked - 1) } : x)));
-    if (USE_SUPABASE && uid) { try { await supabase.rpc('cancel_class', { p_class: id }); } catch { /* ignore */ } }
+    // Put the seat back on screen if the server did not take the cancellation.
+    // A member who thinks they cancelled and did not is a no-show the gym
+    // charges them for.
+    const restore = () => {
+      if (!was) return;
+      setMyStatus((p) => ({ ...p, [id]: was }));
+      if (was === 'booked') setClasses((p) => p.map((x) => (x.id === id ? { ...x, booked: x.booked + 1 } : x)));
+    };
+    if (!USE_SUPABASE || !uid) return false;
+    try {
+      const { error } = await supabase.rpc('cancel_class', { p_class: id });
+      if (error) {
+        restore();
+        return false;
+      }
+      return true;
+    } catch {
+      restore();
+      return false;
+    }
   };
 
   const addClass: ClassesValue['addClass'] = async (c) => {
     const local: GymClass = { ...c, id: 'local-' + Date.now(), booked: 0 };
     setClasses((p) => [...p, local].sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt)));
-    if (USE_SUPABASE && uid) {
-      try {
-        const { data } = await supabase.from('gym_classes').insert({ trainer_id: uid, title: c.title, kind: c.kind, instructor: c.instructor, branch: c.branch, room: c.room, starts_at: c.startsAt, duration_min: c.durationMin, capacity: c.capacity }).select().single();
-        if (data) setClasses((p) => p.map((x) => (x.id === local.id ? rowToClass(data) : x)));
-      } catch { /* keep local */ }
-    }
+    if (!USE_SUPABASE || !uid) return false;
+    try {
+      const { data, error } = await supabase.from('gym_classes').insert({ trainer_id: uid, title: c.title, kind: c.kind, instructor: c.instructor, branch: c.branch, room: c.room, starts_at: c.startsAt, duration_min: c.durationMin, capacity: c.capacity }).select().single();
+      if (error || !data) return false;
+      setClasses((p) => p.map((x) => (x.id === local.id ? rowToClass(data) : x)));
+      return true;
+    } catch { return false; }
   };
 
-  return <Ctx.Provider value={{ classes, myStatus, book, cancel, addClass, refresh: load, ready }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ classes, myStatus, book, cancel, addClass, refresh: load, ready, status }}>{children}</Ctx.Provider>;
 }
 
 export function useClasses(): ClassesValue {

@@ -2,9 +2,19 @@
 // AI description, or search), counting toward the day's macros. Persists to
 // Supabase `food_logs` per client (hydrate today + optimistic) with a defensive
 // in-memory fallback that starts empty. Shared by the Meals tab and the Food Log screen.
+//
+// An empty food log is not a neutral fact here: the Meals tab reads `consumed`
+// straight into the day's macro rings and the "remaining" figures the client
+// eats against. When the hydrate below failed — a refused read, a dropped
+// connection in a gym basement — it returned early and left `entries` at `[]`,
+// so a client who had logged breakfast and lunch was shown their full day's
+// calories still remaining and told to eat them again. `status` is what lets the
+// Meals tab say "we couldn't load today's log" instead of "you have eaten
+// nothing".
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
+import type { LoadStatus } from './loadStatus';
 
 export type LogVia = 'search' | 'barcode' | 'photo' | 'manual';
 export interface FoodEntry { id: string; name: string; kcal: number; protein: number; carbs: number; fat: number; via: LogVia }
@@ -12,8 +22,16 @@ export interface FoodEntry { id: string; name: string; kcal: number; protein: nu
 interface FoodLogValue {
   entries: FoodEntry[];
   consumed: { kcal: number; protein: number; carbs: number; fat: number };
-  addFood: (f: Omit<FoodEntry, 'id'>) => void;
-  removeFood: (id: string) => void;
+  /** Whether today's log is what the server holds. Under 'error' `consumed`
+   *  is a floor, not a total — there may be entries we could not read, so
+   *  "remaining" is an overestimate and must not be presented as a target. */
+  status: LoadStatus;
+  /** Resolves true only once the entry is on the server. False means it counts
+   *  toward today's macros on this phone only and is gone on relaunch. */
+  addFood: (f: Omit<FoodEntry, 'id'>) => Promise<boolean>;
+  /** Resolves true only when the row was actually deleted. A refused delete
+   *  brings the food back — and its calories with it — after a relaunch. */
+  removeFood: (id: string) => Promise<boolean>;
 }
 
 let SEQ = 300;
@@ -36,44 +54,62 @@ const Ctx = createContext<FoodLogValue | null>(null);
 export function FoodLogProvider({ children }: { children: ReactNode }) {
   const [entries, setEntries] = useState<FoodEntry[]>(() => JSON.parse(JSON.stringify(SEED)));
   const [uid, setUid] = useState<string | null>(null);
+  const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
 
   useEffect(() => {
     if (!USE_SUPABASE) return;
     let cancelled = false;
     (async () => {
       try {
-        const { data: auth } = await supabase.auth.getUser();
-        const id = auth?.user?.id; if (!id || cancelled) return; setUid(id);
+        const { data: auth, error: authErr } = await supabase.auth.getUser();
+        if (cancelled) return;
+        if (authErr) { setStatus('error'); return; }
+        const id = auth?.user?.id;
+        if (!id) { setStatus('ready'); return; }
+        setUid(id);
         const { data, error } = await supabase.from('food_logs').select('*')
           .eq('client_id', id).gte('logged_at', startOfTodayISO()).order('logged_at', { ascending: true });
-        if (error || cancelled) return;
+        if (cancelled) return;
+        if (error) { setStatus('error'); return; }
         setEntries(data && data.length ? data.map(rowToEntry) : []);
-      } catch { /* leave the log empty rather than inventing entries */ }
+        setStatus('ready');
+      } catch { if (!cancelled) setStatus('error'); /* leave the log empty rather than inventing entries */ }
     })();
     return () => { cancelled = true; };
   }, []);
 
-  const addFood: FoodLogValue['addFood'] = (f) => {
+  const addFood: FoodLogValue['addFood'] = async (f) => {
     const entry: FoodEntry = { ...f, id: 'fl' + SEQ++ };
     setEntries((p) => [...p, entry]);
-    if (USE_SUPABASE && uid) {
-      try {
-        supabase.from('food_logs')
-          .insert({ client_id: uid, name: f.name, kcal: f.kcal, protein: f.protein, carbs: f.carbs, fat: f.fat, via: f.via })
-          .select().single()
-          .then(({ data }) => { if (data) setEntries((p) => p.map((x) => (x.id === entry.id ? rowToEntry(data) : x))); }, () => {});
-      } catch { /* keep optimistic */ }
-    }
+    if (!USE_SUPABASE || !uid) return false;
+    try {
+      // The old `.then(({ data }) => …, () => {})` never looked at `error`, so a
+      // refused insert and a successful one were the same event: either way the
+      // optimistic entry stayed on screen counting toward the day's macros.
+      const { data, error } = await supabase.from('food_logs')
+        .insert({ client_id: uid, name: f.name, kcal: f.kcal, protein: f.protein, carbs: f.carbs, fat: f.fat, via: f.via })
+        .select().single();
+      if (error || !data) return false;
+      setEntries((p) => p.map((x) => (x.id === entry.id ? rowToEntry(data) : x)));
+      return true;
+    } catch { return false; }
   };
 
-  const removeFood: FoodLogValue['removeFood'] = (id) => {
+  const removeFood: FoodLogValue['removeFood'] = async (id) => {
     setEntries((p) => p.filter((x) => x.id !== id));
-    if (USE_SUPABASE && !id.startsWith('fl')) { try { supabase.from('food_logs').delete().eq('id', id).then(() => {}, () => {}); } catch { /* ignore */ } }
+    // An 'fl' id is optimistic-only and never reached the server, so dropping it
+    // locally is the entire removal.
+    if (id.startsWith('fl')) return true;
+    if (!USE_SUPABASE) return false;
+    try {
+      const { error } = await supabase.from('food_logs').delete().eq('id', id);
+      return !error;
+    } catch { return false; }
   };
 
   const consumed = useMemo(() => entries.reduce((a, f) => ({ kcal: a.kcal + f.kcal, protein: a.protein + f.protein, carbs: a.carbs + f.carbs, fat: a.fat + f.fat }), { kcal: 0, protein: 0, carbs: 0, fat: 0 }), [entries]);
 
-  return <Ctx.Provider value={{ entries, consumed, addFood, removeFood }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ entries, consumed, status, addFood, removeFood }}>{children}</Ctx.Provider>;
 }
 
 export function useFoodLog(): FoodLogValue {

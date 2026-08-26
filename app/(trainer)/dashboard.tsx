@@ -141,12 +141,19 @@ const SHORTCUTS: [IconName, string, string][] = [
  * only when there is something to do, which is also exactly when payroll is
  * blocked, because payrollTotal() refuses to guess while any session is
  * unmarked.
+ *
+ * The count starts at null, not 0. Silence on this dashboard means "nothing is
+ * outstanding", so a read that was refused or never arrived must not be allowed
+ * to produce that silence — a coach who sees no card concludes payroll is clear
+ * and settles it, when the app simply never found out. Zero hides the card;
+ * unknown says so.
  */
 function UnmarkedSessions() {
   const t = useTheme();
   const router = useRouter();
   const { tenant } = useTenant();
-  const [n, setN] = useState(0);
+  const [n, setN] = useState<number | null>(null);
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     let live = true;
@@ -155,13 +162,28 @@ function UnmarkedSessions() {
       try {
         const since = new Date(Date.now() - 90 * 86400_000).toISOString();
         const rows = await fetchAwaitingOutcome(supabase, tenant.id, since);
-        if (live) setN(rows.length);
-      } catch (e) { reportError('dashboard.awaiting', e); }
+        if (live) { setN(rows.length); setFailed(false); }
+      } catch (e) {
+        reportError('dashboard.awaiting', e);
+        if (live) { setN(null); setFailed(true); }
+      }
     })();
     return () => { live = false; };
   }, [tenant?.id]);
 
-  if (n === 0) return null;
+  if (failed) {
+    return (
+      <Card onPress={() => router.push('/(trainer)/sessions')} tone={t.crit} style={{ marginBottom: sp.md }}>
+        <Text style={{ ...ty.body, fontWeight: '600', color: t.ink }}>
+          Could not check for unmarked sessions
+        </Text>
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
+          This is not the same as none outstanding. Open Mark sessions to try again before payroll.
+        </Text>
+      </Card>
+    );
+  }
+  if (n === null || n === 0) return null;
   return (
     <Card onPress={() => router.push('/(trainer)/sessions')} tone={t.s3} style={{ marginBottom: sp.md }}>
       <Text style={{ ...ty.body, fontWeight: '600', color: t.ink }}>
@@ -213,7 +235,13 @@ export default function TrainerClients() {
   const [invEmail, setInvEmail] = useState('');
   const [invMode, setInvMode] = useState<'online' | 'inperson'>('online');
   const [newEmail, setNewEmail] = useState('');
-  const [clientMeals, setClientMeals] = useState<{ name: string; kcal: number; via: string }[]>([]);
+  // null means "we have not been able to read this client's food log", which is
+  // a different sentence from "they have logged nothing". The distinction is
+  // load-bearing twice over: the Recent meals section is hidden when the array
+  // is empty, and genSummary() below hands the same value to the AI, which will
+  // happily write "you are not logging your meals" into a coaching summary the
+  // coach sends on. See the read below.
+  const [clientMeals, setClientMeals] = useState<{ name: string; kcal: number; via: string }[] | null>(null);
   const [aiSummary, setAiSummary] = useState('');
   const [aiBusy, setAiBusy] = useState(false);
   const [draftClient, setDraftClient] = useState<RosterClient | null>(null);
@@ -222,12 +250,20 @@ export default function TrainerClients() {
   useEffect(() => {
     let cancelled = false;
     setAiSummary('');
-    if (!sel) { setClientMeals([]); return; }
+    if (!sel) { setClientMeals(null); return; }
+    setClientMeals(null);
     (async () => {
       try {
-        const { data } = await supabase.from('food_logs').select('name, kcal, via').eq('client_id', sel.id).order('logged_at', { ascending: false }).limit(6);
-        if (!cancelled) setClientMeals((data || []).map((r: any) => ({ name: r.name, kcal: r.kcal, via: r.via })));
-      } catch { if (!cancelled) setClientMeals([]); }
+        // `error` was not destructured here. supabase-js resolves rather than
+        // throwing, so an RLS refusal or a dropped connection arrived as
+        // data === null, `data || []` turned that into an empty list, and the
+        // coach was shown a client who had logged no meals at all — then told
+        // the AI the same thing.
+        const { data, error } = await supabase.from('food_logs').select('name, kcal, via').eq('client_id', sel.id).order('logged_at', { ascending: false }).limit(6);
+        if (cancelled) return;
+        if (error || !data) { setClientMeals(null); return; }
+        setClientMeals(data.map((r: any) => ({ name: r.name, kcal: r.kcal, via: r.via })));
+      } catch { if (!cancelled) setClientMeals(null); }
     })();
     return () => { cancelled = true; };
   }, [sel]);
@@ -316,7 +352,7 @@ export default function TrainerClients() {
     setAiBusy(true); setAiSummary('');
     const m = client.metrics;
     const compStr = m ? [m.visceralFat != null ? 'visceral fat ' + m.visceralFat : '', m.inbodyScore != null ? 'InBody score ' + m.inbodyScore : '', m.leanMassKg != null ? 'lean mass ' + m.leanMassKg + 'kg' : '', m.fatMassKg != null ? 'fat mass ' + m.fatMassKg + 'kg' : '', (m.leanArmLKg != null && m.leanArmRKg != null && Math.abs(m.leanArmLKg - m.leanArmRKg) / Math.max(m.leanArmLKg, m.leanArmRKg) >= 0.1) ? 'arm imbalance' : '', (m.leanLegLKg != null && m.leanLegRKg != null && Math.abs(m.leanLegLKg - m.leanLegRKg) / Math.max(m.leanLegLKg, m.leanLegRKg) >= 0.1) ? 'leg imbalance' : ''].filter(Boolean).join(', ') : '';
-    const ctx = { name: client.name, goal: client.goal, adherence: client.adherence != null ? client.adherence + '%' : 'no check-ins yet', recentMeals: clientMeals.map((mm) => mm.name).join(', ') || 'no meals logged yet', composition: compStr || 'no InBody scan yet' };
+    const ctx = { name: client.name, goal: client.goal, adherence: client.adherence != null ? client.adherence + '%' : 'no check-ins yet', recentMeals: clientMeals === null ? 'their food log could not be read — do not comment on their food logging' : (clientMeals.map((mm) => mm.name).join(', ') || 'no meals logged yet'), composition: compStr || 'no InBody scan yet' };
     const reply = await askCoach([{ role: 'user', content: 'Write a concise 3-4 sentence weekly coaching summary for this client: what is going well, one concern to watch, and one focus for next week. Use their adherence, recent meals and InBody composition where available.' }], ctx);
     setAiBusy(false);
     setAiSummary(reply || 'Could not generate a summary right now — the AI backend may be unavailable.');
@@ -745,7 +781,14 @@ export default function TrainerClients() {
                 ) : null}
               </View>
 
-              {clientMeals.length > 0 ? (
+              {clientMeals === null ? (
+                <View style={{ marginBottom: sp.xl }}>
+                  <SheetHead t={t} title="Recent meals logged" />
+                  <Text style={{ ...ty.label, color: t.ink3 }}>
+                    Could not read {sel.name.split(' ')[0]}’s food log. This does not mean they have not been logging.
+                  </Text>
+                </View>
+              ) : clientMeals.length > 0 ? (
                 <View style={{ marginBottom: sp.xl }}>
                   <SheetHead t={t} title="Recent meals logged" />
                   {clientMeals.map((m, i) => (
@@ -848,9 +891,17 @@ export default function TrainerClients() {
           <Pressable style={SCRIM} onPress={() => setBcOpen(false)} />
           <View style={sheet(t)}>
             <Text style={{ ...ty.title, color: t.ink }}>Broadcast to all clients</Text>
-            <Text style={{ ...ty.label, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>Everyone on your roster sees this on their dashboard.</Text>
+            {/* This pins an announcement on this device. useAnnouncements is an
+                in-memory store with no Supabase table behind it — see the note
+                at the top of src/ui/announcements.tsx — so nothing here reaches
+                anybody else's phone. The modal used to promise "Everyone on your
+                roster sees this on their dashboard" and then confirm "Sent",
+                which is a coach believing they told forty clients about a
+                cancelled class. Broadcast writes real message rows; this does
+                not, and now says so. */}
+            <Text style={{ ...ty.label, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>Pins a note on your own dashboard. It is not delivered to your clients — use Broadcast for that.</Text>
             <TextInput value={bcText} onChangeText={setBcText} placeholder="Your announcement…" placeholderTextColor={t.ink3} multiline style={{ ...field(t, 90), marginBottom: sp.lg }} />
-            <Cta label="Send to all clients" wide onPress={() => { if (!bcText.trim()) { Alert.alert('Write something', 'Enter your announcement.'); return; } addAnnouncement(bcText); setBcOpen(false); Alert.alert('Sent', 'Your clients will see this on their dashboard.'); }} />
+            <Cta label="Pin on my dashboard" wide onPress={() => { if (!bcText.trim()) { Alert.alert('Write something', 'Enter your announcement.'); return; } addAnnouncement(bcText); setBcOpen(false); Alert.alert('Pinned', 'Kept on this device only — your clients have not been sent it. To reach them, use Broadcast, which writes to each client’s message thread.', [{ text: 'Open Broadcast', onPress: () => router.push('/(trainer)/broadcast') }, { text: 'Done', style: 'cancel' }]); }} />
           </View>
         </KeyboardAvoidingView>
       </Modal>

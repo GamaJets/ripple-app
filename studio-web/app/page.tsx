@@ -22,6 +22,9 @@ interface Gym { id: string; name: string | null; sessionFee: number | null }
 export default function Overview() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
   const [gym, setGym] = useState<Gym | null>(null);
+  // Kept apart from `error`: that one is cleared by a successful rollup read
+  // immediately afterwards, which would wipe this message off the screen.
+  const [gymErr, setGymErr] = useState<string | null>(null);
   const [trainers, setTrainers] = useState<GymTrainer[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -46,10 +49,16 @@ export default function Overview() {
       setMe(who);
       if (!who?.tenantId) { setTrainers([]); return; }
 
-      const { data: t } = await supabase
+      // supabase-js RESOLVES with { data, error } rather than throwing, so
+      // taking only `data` turns an RLS refusal into `t === null` — which used
+      // to render as a gym with no name and no session fee. Both are then
+      // stated as facts about the gym: the sidebar says no gym is linked, and
+      // the payroll note below says no fee is set. Neither is known to be true.
+      const { data: t, error: tErr } = await supabase
         .from('tenants').select('id, name, session_fee').eq('id', who.tenantId).single();
       if (!live) return;
-      setGym(t ? { id: t.id, name: t.name ?? null, sessionFee: t.session_fee ?? null } : null);
+      setGymErr(tErr ? (tErr.message || 'The gym record could not be read.') : null);
+      setGym(t && !tErr ? { id: t.id, name: t.name ?? null, sessionFee: t.session_fee ?? null } : null);
 
       try {
         const rows = await fetchGymTrainers(supabase, who.tenantId);
@@ -164,6 +173,13 @@ export default function Overview() {
         </Notice>
       ) : null}
 
+      {gymErr ? (
+        <Notice tone="crit">
+          Your gym record could not be read, so its name and session fee are missing here — not
+          unset. Anything below that depends on the fee is unpriced rather than free: {gymErr}
+        </Notice>
+      ) : null}
+
       {error ? <Notice tone="crit">{error}</Notice> : null}
 
 
@@ -213,9 +229,14 @@ export default function Overview() {
         <Kpi
           label="Session value 30d"
           value={roll?.payroll30 ?? null}
-          // A dash with no explanation reads as a bug. Say which of the two
-          // reasons it is: no fee set, or work still awaiting an outcome.
-          note={trainers ? payrollBlocker(trainers, gym?.sessionFee ?? null) ?? undefined : undefined}
+          // A dash with no explanation reads as a bug. Say which of the three
+          // reasons it is: the gym could not be read, no fee is set, or work is
+          // still awaiting an outcome. The first was previously reported as the
+          // second, which sends an owner to check a setting that is already
+          // correct.
+          note={gymErr ? 'gym record unread — fee unknown'
+                : trainers ? payrollBlocker(trainers, gym?.sessionFee ?? null) ?? undefined
+                : undefined}
         />
         <Kpi label="Awaiting an outcome" value={roll?.unmarked30 ?? null}
              note={roll && roll.unmarked30 > 0 ? 'payroll cannot settle over these' : undefined} />

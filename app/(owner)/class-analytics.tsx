@@ -20,6 +20,7 @@ import type { Theme } from '../../src/theme/tokens';
 import { Rule, Section, SectionHead, Hero, KpiRow, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { classSummary, summariseClassRows, type ClassSummaryRow } from '../../src/lib/classAttendance';
+import { reportError } from '../../src/lib/reportError';
 
 type Range = 'week' | 'month' | 'season';
 const RANGES: [Range, string, number][] = [['week', 'This week', 7], ['month', 'This month', 30], ['season', 'Season', 90]];
@@ -52,7 +53,14 @@ export default function OwnerClassAnalytics() {
   const t = useTheme();
   const router = useRouter();
   const [range, setRange] = useState<Range>('week');
-  const [rows, setRows] = useState<ClassSummaryRow[]>([]);
+  // Null until the read returns, never []. An empty array here is a claim —
+  // "no classes ran in this range" — and this screen made it on first paint and
+  // again on every range change, before the query it depends on had answered.
+  // An owner switching to "This week" saw "No classes in this range." and could
+  // reasonably conclude their timetable was empty and nobody had been checked
+  // in. Null says "not known yet"; [] stays reserved for a range that really
+  // held nothing.
+  const [rows, setRows] = useState<ClassSummaryRow[] | null>(null);
   // Empty, not 25. The hero renders a payroll total above the rate field, so a
   // default put a specific AED figure on screen - belonging to no pay
   // agreement - before the owner could see what it was multiplied by.
@@ -62,32 +70,42 @@ export default function OwnerClassAnalytics() {
     let on = true;
     const days = RANGES.find((r) => r[0] === range)?.[2] ?? 7;
     const { from, to } = rangeFrom(days);
-    classSummary(from, to).then((r) => { if (on) setRows(r); });
+    // Cleared first: without this the previous range's rows stayed on screen
+    // while the new range loaded, so a payroll total for the season sat under
+    // the heading "This week" — a number an owner might pay against.
+    setRows(null);
+    classSummary(from, to)
+      .then((r) => { if (on) setRows(r); })
+      // A bare .then left a rejection unhandled and the screen showing whatever
+      // it had. There is nothing to show after a failed read, so say so.
+      .catch((e) => { reportError('classAnalytics.summary', e); if (on) setRows(null); });
     return () => { on = false; };
   }, [range]);
 
   const rate$ = parseFloat(rate) || 0;
+  const loaded = rows !== null;
+  const list = rows ?? [];
   const totals = useMemo(() => {
     // Both rates come from one helper, so this screen and the timetable can no
     // longer disagree about what "fill" means. Each stays null when its
     // denominator was never recorded, and renders as — rather than 0%.
-    const r = summariseClassRows(rows);
+    const r = summariseClassRows(list);
     return {
       ...r,
       showPct: r.show == null ? null : Math.round(r.show * 100),
       fillPct: r.fill == null ? null : Math.round(r.fill * 100),
       payroll: Math.round(r.attended * rate$),
     };
-  }, [rows, rate$]);
+  }, [list, rate$]);
 
   const byGroup = (key: (r: ClassSummaryRow) => string) => {
     const m: Record<string, { attended: number; booked: number; classes: number }> = {};
-    for (const r of rows) { const k = key(r) || '—'; (m[k] ||= { attended: 0, booked: 0, classes: 0 }); m[k].attended += r.attended; m[k].booked += r.booked; m[k].classes += 1; }
+    for (const r of list) { const k = key(r) || '—'; (m[k] ||= { attended: 0, booked: 0, classes: 0 }); m[k].attended += r.attended; m[k].booked += r.booked; m[k].classes += 1; }
     return Object.entries(m).sort((a, b) => b[1].attended - a[1].attended);
   };
-  const byBranch = useMemo(() => byGroup((r) => r.branch), [rows]);
-  const byTrainer = useMemo(() => byGroup((r) => r.trainerName), [rows]);
-  const byKind = useMemo(() => byGroup((r) => r.kind || r.title), [rows]);
+  const byBranch = useMemo(() => byGroup((r) => r.branch), [list]);
+  const byTrainer = useMemo(() => byGroup((r) => r.trainerName), [list]);
+  const byKind = useMemo(() => byGroup((r) => r.kind || r.title), [list]);
   const maxBranch = Math.max(1, ...byBranch.map(([, v]) => v.attended));
   const maxKind = Math.max(1, ...byKind.map(([, v]) => v.attended));
   const G = layout.gutter;
@@ -124,7 +142,15 @@ export default function OwnerClassAnalytics() {
           ))}
         </View>
 
-        {rows.length === 0 ? (
+        {!loaded ? (
+          <Section>
+            <Text style={{ ...ty.head, color: t.ink }}>Reading the register…</Text>
+            <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
+              Attendance and payroll stay blank until this range has actually been read. If it
+              stays blank, that is a read that did not come back — not a range with no classes.
+            </Text>
+          </Section>
+        ) : list.length === 0 ? (
           <Section>
             <Text style={{ ...ty.head, color: t.ink }}>No classes in this range.</Text>
             <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
@@ -200,8 +226,8 @@ export default function OwnerClassAnalytics() {
 
           {/* ── the log the numbers came from ────────────────────────────── */}
           <Section>
-            <SectionHead title="Classes" note={`${rows.length} in range`} />
-            {rows.map((r, i) => (
+            <SectionHead title="Classes" note={`${list.length} in range`} />
+            {list.map((r, i) => (
               <View key={r.classId} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                 <View style={{ flex: 1 }}>
                   <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{r.title}</Text>

@@ -30,11 +30,15 @@ export default function TrainerBilling() {
   const t = useTheme();
   const router = useRouter();
   const [sub, setSub] = useState<Subscription | null>(null);
+  const [subErr, setSubErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const available = billingAvailable();
 
-  const load = useCallback(async () => { setLoading(true); setSub(await fetchMySubscription()); setLoading(false); }, []);
+  // fetchMySubscription used to answer null for both 'no plan' and 'could not
+  // read', so a failed read showed the subscribe screen to somebody already
+  // paying — and the obvious thing to do on that screen is pay again.
+  const load = useCallback(async () => { setLoading(true); const r = await fetchMySubscription(); setSub(r.sub); setSubErr(r.error); setLoading(false); }, []);
   useEffect(() => { load(); }, [load]);
 
   const subscribe = async (plan: string) => {
@@ -78,6 +82,15 @@ export default function TrainerBilling() {
 
         {loading ? (
           <ActivityIndicator color={t.brand} style={{ marginVertical: 30 }} />
+        ) : subErr ? (
+          <Section>
+            <SectionHead title="Current plan" />
+            <Text style={{ ...ty.label, color: t.crit }}>
+              We could not read your subscription, so nothing below tells you whether you have one.
+              If you are already subscribed you still are — do not subscribe again from this screen.
+            </Text>
+            <Text style={{ ...ty.caption, color: t.ink3, paddingTop: sp.xs }}>{subErr}</Text>
+          </Section>
         ) : sub && sub.status ? (
           <Section>
             <SectionHead title="Current plan" />

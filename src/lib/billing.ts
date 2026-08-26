@@ -44,22 +44,42 @@ export async function openBillingPortal(): Promise<{ ok: boolean; error?: string
   } catch (e) { return { ok: false, error: (e as Error).message }; }
 }
 
-/** The signed-in trainer's current subscription (or null). */
-export async function fetchMySubscription(): Promise<Subscription | null> {
+/**
+ * The signed-in trainer's current subscription.
+ *
+ * `{ sub: null }` means they have none; `{ error }` means we could not find
+ * out. The old signature collapsed both into `null`, so a failed read rendered
+ * the "no plan — subscribe" state at somebody who is already paying. The
+ * obvious response to that screen is to subscribe again.
+ */
+export async function fetchMySubscription(): Promise<{ sub: Subscription | null; error: string | null }> {
   try {
     const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id; if (!uid) return null;
-    const { data } = await supabase.from('subscriptions').select('*').eq('trainer_id', uid).maybeSingle();
-    return (data as Subscription) ?? null;
-  } catch { return null; }
+    const uid = auth?.user?.id; if (!uid) return { sub: null, error: 'Not signed in.' };
+    const { data, error } = await supabase.from('subscriptions').select('*').eq('trainer_id', uid).maybeSingle();
+    if (error) return { sub: null, error: error.message };
+    return { sub: (data as Subscription) ?? null, error: null };
+  } catch (e) { return { sub: null, error: (e as Error).message }; }
 }
 
-/** Owner dunning: invoices that failed / are unpaid, newest first. */
-export async function fetchFailedInvoices(): Promise<Invoice[]> {
+/**
+ * Owner dunning: invoices that failed or are unpaid, newest first.
+ *
+ * `[]` means nothing is outstanding. **`null` means we could not find out.**
+ *
+ * This is the worst place in the app to conflate the two. The owner dashboard
+ * renders the "Failed payments" callout only when this is non-empty, so a
+ * refused read did not show an error — the callout simply was not there. An
+ * owner sees a clean dashboard, concludes every payment went through, and
+ * chases nobody. The money is missing and the screen that exists to say so is
+ * the reason nobody looked.
+ */
+export async function fetchFailedInvoices(): Promise<Invoice[] | null> {
   try {
-    const { data } = await supabase.from('invoices').select('*').in('status', ['open', 'uncollectible']).order('created_at', { ascending: false });
+    const { data, error } = await supabase.from('invoices').select('*').in('status', ['open', 'uncollectible']).order('created_at', { ascending: false });
+    if (error) return null;
     return (data as Invoice[]) ?? [];
-  } catch { return []; }
+  } catch { return null; }
 }
 
 export const money = (cents: number | null, cur: string | null = 'usd'): string => {

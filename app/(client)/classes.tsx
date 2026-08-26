@@ -43,6 +43,13 @@ export default function Classes() {
 
   const onBook = async (c: GymClass) => {
     const st = await book(c.id);
+    // book() now returns null when the server refused the seat. That used to
+    // fall into the else below, so the client was told "Booked", got a local
+    // reminder an hour before, and turned up to a class with no seat.
+    if (st === null) {
+      Alert.alert('Not booked', `We could not get you into ${c.title}. Nothing has been reserved — try again in a moment.`);
+      return;
+    }
     if (st === 'waitlist') Alert.alert('Added to waitlist', `${c.title} is full — you're on the waitlist and we'll move you up if a spot opens.`);
     else {
       const when = new Date(Date.parse(c.startsAt) - 60 * 60 * 1000);

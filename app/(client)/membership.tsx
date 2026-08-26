@@ -31,8 +31,14 @@ export default function Membership() {
   const t = useTheme();
   const router = useRouter();
   const c = useClientData();
-  const { log } = useWorkoutLog();
+  const { log, status: logStatus } = useWorkoutLog();
   const { appName } = useBrand();
+  // Under 'error' the log is empty because it could not be read. This screen's
+  // one live number is "sessions logged this month", and a member who trained
+  // twelve times was shown a zero under it with "No sessions logged yet this
+  // month" spelled out underneath — a specific, checkable claim about their own
+  // month that the app was in no position to make.
+  const logKnown = logStatus !== 'error';
   const memberNo = memberNoFrom(c.name, c.id);
 
   const { visits, last } = useMemo(() => {
@@ -77,8 +83,9 @@ export default function Membership() {
         {/* ── the hero: the only live number this screen has ──────────────── */}
         <Hero
           label="Sessions logged this month"
-          figure={fig(visits)}
-          note={visits > 0 ? `Last logged ${last}` : 'No sessions logged yet this month'}
+          figure={logKnown ? fig(visits) : fig(null)}
+          note={!logKnown ? 'We couldn’t read your training log — this is not a month with nothing in it.'
+            : visits > 0 ? `Last logged ${last}` : 'No sessions logged yet this month'}
         />
 
         <Rule />

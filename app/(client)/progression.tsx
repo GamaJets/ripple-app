@@ -16,7 +16,7 @@ import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { suggestProgression, type ProgressAction } from '../../src/lib/progression';
-import { Rule, Section, SectionHead, KpiRow, Cta, Ghost, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, KpiRow, Notice, Cta, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 
 const META: Record<ProgressAction, { label: string; icon: string; color: (t: any) => string }> = {
@@ -29,7 +29,7 @@ const META: Record<ProgressAction, { label: string; icon: string; color: (t: any
 export default function Progression() {
   const t = useTheme();
   const router = useRouter();
-  const { log } = useWorkoutLog();
+  const { log, status: logStatus, reload } = useWorkoutLog();
   const tips = suggestProgression(log);
   const G = layout.gutter;
 
@@ -48,7 +48,32 @@ export default function Progression() {
 
         <Rule />
 
+        {/* This screen prescribes a load in kilograms, and every target is
+            anchored to the most recent set it can see. With the read failed
+            that anchor is either missing entirely — "log a few weighted sets",
+            said to someone who has logged hundreds — or it is whatever this
+            phone happened to be holding, which is not the same thing as the
+            last set the client actually did. Both need saying before anyone
+            loads a bar off the numbers below. */}
+        {logStatus === 'error' ? (
+          <Section>
+            <Notice tone={t.warn} kicker="Targets" title="We couldn’t read your training log"
+              note={tips.length
+                ? 'The targets below come from what this phone had before the read failed, so they may not include your last session. Check them against what you actually lifted.'
+                : 'Targets are worked out from your logged lifts, and we couldn’t read them. This is not a sign you haven’t lifted.'}>
+              <View style={{ marginTop: sp.lg }}>
+                <Cta label="Try again" wide onPress={reload} />
+              </View>
+            </Notice>
+          </Section>
+        ) : null}
+
         {tips.length === 0 ? (
+          logStatus === 'error' ? null : logStatus === 'loading' ? (
+            <Section>
+              <Text style={{ ...ty.body, color: t.ink3 }}>Working out your targets…</Text>
+            </Section>
+          ) : (
           <Section>
             <SectionHead title="No targets yet" />
             <Text style={{ ...ty.body, color: t.ink2 }}>Log a few weighted sets and your progression targets will appear here.</Text>
@@ -57,6 +82,7 @@ export default function Progression() {
               <Cta label="Log a workout" onPress={() => router.push('/(client)/workouts')} />
             </View>
           </Section>
+          )
         ) : (
           <Section>
             <SectionHead title="Aim for these next time" note={`${tips.length} lift${tips.length === 1 ? '' : 's'}`} />

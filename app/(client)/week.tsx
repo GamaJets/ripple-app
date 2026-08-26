@@ -10,7 +10,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Ghost } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Ghost, Notice } from '../../src/ui/kit';
 import { sp, layout, type as ty, value } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
@@ -23,8 +23,17 @@ export default function ThisWeek() {
   const t = useTheme();
   const router = useRouter();
   const c = useClientData();
-  const coachProgram = useAssignedPrograms().getProgram(c.id);
-  const { log } = useWorkoutLog();
+  const { getProgram, status: programStatus } = useAssignedPrograms();
+  const coachProgram = getProgram(c.id);
+  const { log, status: logStatus } = useWorkoutLog();
+  // Under 'error' a null from getProgram means "we could not find out", not
+  // "your coach has not assigned you one" — and which of the two it is decides
+  // what the client trains all week. The `??` below fell through to the generic
+  // auto program in both cases, and the header prints the "· coach plan" suffix
+  // only when `coachProgram` is set, so the substitution arrived looking exactly
+  // like a client who has no coach plan: a bespoke plan replaced by a generic
+  // one, with nothing on the screen to prompt a second look.
+  const programUnknown = programStatus === 'error' && coachProgram == null;
   const program = coachProgram ?? buildProgram(c.goal, c.bodyFatPct);
 
   const jsToMon = (new Date().getDay() + 6) % 7;
@@ -47,6 +56,23 @@ export default function ThisWeek() {
             <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>This week</Text>
           </View>
         </View>
+
+        {programUnknown ? (
+          <View style={{ marginTop: sp.lg }}>
+            <Notice tone={t.warn} kicker="This week" title="We couldn’t check for a coach plan"
+              note="The week below is Repple's automatic program. If your coach has assigned you one it takes over as soon as we can read it — open this screen again when you have signal." />
+          </View>
+        ) : null}
+
+        {/* The plan is right either way; what the log decides is which days are
+            marked done. Without it a client who trained Monday and Tuesday sees
+            an unmarked week and reads it as a week they let slip. */}
+        {logStatus === 'error' ? (
+          <View style={{ marginTop: sp.lg }}>
+            <Notice tone={t.warn} kicker="This week" title="We couldn’t read your training log"
+              note="Days you have already trained may not be marked below. Nothing has been lost — this screen just can't see it right now." />
+          </View>
+        ) : null}
 
         <Section>
           <SectionHead title="The plan" note={`${trainingDays} training day${trainingDays === 1 ? '' : 's'} a week`} />

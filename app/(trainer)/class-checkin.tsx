@@ -39,21 +39,52 @@ export default function ClassCheckin() {
   const title = String(params.title || 'Class');
   const branch = String(params.branch || '');
 
-  const [roster, setRoster] = useState<RosterMember[]>([]);
+  // Routed to without an id, `classId` falls back to 'demo' — and both
+  // classRoster and setAttendance refuse ids beginning 'demo'. The screen then
+  // rendered an empty roster under "No one has booked this class yet", which is
+  // a statement about a class, and offered ticks that went nowhere while the
+  // footnote promised "Check-ins are saved as you tap". Neither is a claim this
+  // screen can make when it was never told which class it is looking at.
+  const unlinked = !params.id || classId.startsWith('demo');
+
+  // null is not []. [] means nobody booked this class; null means the roster
+  // could not be read, and the two used to render the same sentence.
+  const [roster, setRoster] = useState<RosterMember[] | null>(null);
+  const [readFailed, setReadFailed] = useState(false);
+  const [saveFailed, setSaveFailed] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [rate, setRate] = useState(''); // per-attendee pay, in the trainer's own currency
 
-  useEffect(() => { let on = true; classRoster(classId).then((r) => { if (on) { setRoster(r); setLoading(false); } }); return () => { on = false; }; }, [classId]);
+  useEffect(() => {
+    let on = true;
+    // The rejection handler is not decoration: without it a thrown read would
+    // leave `loading` true forever, and "Loading roster…" is at least honest,
+    // where a silent unhandled rejection is not.
+    classRoster(classId).then(
+      (r) => { if (on) { setRoster(r); setReadFailed(r === null && !unlinked); setLoading(false); } },
+      () => { if (on) { setReadFailed(!unlinked); setLoading(false); } },
+    );
+    return () => { on = false; };
+  }, [classId]);
 
-  const present = useMemo(() => roster.filter((m) => m.attended).length, [roster]);
-  const booked = useMemo(() => roster.filter((m) => m.status === 'booked').length, [roster]);
+  const present = useMemo(() => (roster ?? []).filter((m) => m.attended).length, [roster]);
+  const booked = useMemo(() => (roster ?? []).filter((m) => m.status === 'booked').length, [roster]);
   const pay = Math.round((parseFloat(rate) || 0) * present);
 
-  const toggle = (m: RosterMember) => {
+  // The tick used to move before anything was written, and setAttendance
+  // swallowed every failure — so a refused check-in looked exactly like a saved
+  // one. Attendance is what the trainer is paid on: the row now moves only
+  // after the server agrees, and says so when it does not.
+  const toggle = async (m: RosterMember) => {
     const next = !m.attended;
-    setRoster((p) => p.map((x) => (x.userId === m.userId ? { ...x, attended: next } : x)));
     tapLight();
-    setAttendance(classId, m.userId, next);
+    const ok = await setAttendance(classId, m.userId, next);
+    if (!ok) {
+      setSaveFailed(`${m.name} is still marked ${m.attended ? 'present' : 'absent'} — that change did not save.`);
+      return;
+    }
+    setSaveFailed(null);
+    setRoster((p) => (p ?? []).map((x) => (x.userId === m.userId ? { ...x, attended: next } : x)));
   };
 
   const G = layout.gutter;
@@ -75,8 +106,8 @@ export default function ClassCheckin() {
           label="Checked in"
           figure={fig(present)}
           unit={'/ ' + booked}
-          note={booked === 0 ? 'No bookings on this class yet.' : present === booked ? 'Everyone booked is here.' : `${booked - present} still to arrive`}
-          arc={booked > 0 ? present / booked : undefined}
+          note={unlinked ? 'No class was passed to this screen — this is not a count.' : readFailed ? 'The roster could not be read — this is not a count of zero.' : booked === 0 ? 'No bookings on this class yet.' : present === booked ? 'Everyone booked is here.' : `${booked - present} still to arrive`}
+          arc={unlinked || readFailed || booked === 0 ? undefined : present / booked}
         />
 
         <Rule />
@@ -97,11 +128,26 @@ export default function ClassCheckin() {
 
         <Rule />
 
+        {saveFailed ? (
+          <Text style={{ ...ty.label, color: t.crit, paddingTop: sp.sm }}>{saveFailed}</Text>
+        ) : null}
+
         {/* ── the roster ─────────────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Members" note={roster.length ? String(roster.length) : undefined} />
-          {loading ? (
+          <SectionHead title="Members" note={roster?.length ? String(roster.length) : undefined} />
+          {unlinked ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>
+              This screen was opened without a class. Nothing can be read or checked in here — open a
+              class from your schedule and use its Check in button.
+            </Text>
+          ) : loading ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Loading roster…</Text>
+          ) : readFailed || roster === null ? (
+            <Text style={{ ...ty.label, color: t.crit }}>
+              This class's roster could not be read, so nobody can be checked in here yet. This is
+              not the same as an empty class — do not treat it as one. Leave the screen and open it
+              again once you have signal.
+            </Text>
           ) : roster.length === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>No one has booked this class yet — members appear here as they book.</Text>
           ) : (
@@ -127,7 +173,9 @@ export default function ClassCheckin() {
         <Rule />
 
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
-          Check-ins are saved as you tap. Your gym owner sees attendance per class for payroll and class analytics.
+          {unlinked
+            ? 'Nothing on this screen is being saved — it was not told which class it is checking in.'
+            : 'Check-ins are saved as you tap. Your gym owner sees attendance per class for payroll and class analytics.'}
         </Text>
 
       </ScrollView>

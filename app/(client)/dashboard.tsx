@@ -7,7 +7,7 @@
 // of four competing 20px numbers, hairline-separated sections instead of eleven
 // stacked bordered cards, and a card spent only on the thing you can act on.
 import { useState, useEffect, useCallback } from 'react';
-import { View, Text, ScrollView, Pressable } from 'react-native';
+import { View, Text, ScrollView, Pressable, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -42,8 +42,15 @@ export default function Home() {
   const t = useTheme();
   const router = useRouter();
   const c = useClientData();
-  const { log } = useWorkoutLog();
-  const coachProgram = useAssignedPrograms().getProgram(c.id);
+  const { log, status: logStatus } = useWorkoutLog();
+  const { getProgram, status: programStatus } = useAssignedPrograms();
+  const coachProgram = getProgram(c.id);
+  // Under 'error' an empty log means the history could not be read, not that
+  // there is none — so the streak, the week's session count and the PR count
+  // below are unknowns rather than zeroes. This is the first screen of the app,
+  // and "0 of 4 this week" over a broken streak is the first thing a client who
+  // trained four times would read about their own week.
+  const logKnown = logStatus !== 'error';
   const nutriAdjust = useCoachNutrition().get(c.id);
   const coachNotes = useCoachFeedback().getFeedback(c.id);
   const ann = useAnnouncements().latest;
@@ -70,6 +77,11 @@ export default function Home() {
   const solo = c.coachingMode === 'solo';
   const online = c.coachingMode === 'online';
   const inperson = c.coachingMode === 'inperson';
+  // Same `??` as This Week: a coached client whose assignment could not be read
+  // gets the generic auto program in its place, titled and laid out exactly like
+  // a plan their coach wrote. Nothing on the screen distinguished the two, so
+  // the client trains the wrong session and has no reason to look twice.
+  const programUnknown = !solo && programStatus === 'error' && coachProgram == null;
   const program = (solo ? null : coachProgram) ?? buildProgram(c.goal, c.bodyFatPct);
   const jsToMon = (new Date().getDay() + 6) % 7;
   const workout = program.days[jsToMon % program.days.length] || program.days[0] || { focus: 'Rest day', exercises: [] };
@@ -199,7 +211,15 @@ export default function Home() {
               <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.lg }}>
                 <View style={{ flex: 1 }}><Ghost label="Decline" onPress={() => declineCoachInvite(myInvites[0].id)} /></View>
                 <View style={{ flex: 2 }}>
-                  <Cta label="Accept" wide onPress={async () => { const iv = myInvites[0]; const m = await acceptCoachInvite(iv.id); c.setCoachingMode(m); }} />
+                  <Cta label="Accept" wide onPress={async () => {
+                    const iv = myInvites[0];
+                    // Only switch coaching mode once the server actually made
+                    // the link; a refused accept used to move the whole app
+                    // into coached mode with no coach behind it.
+                    const { mode, ok } = await acceptCoachInvite(iv.id);
+                    if (!ok) { Alert.alert('Not connected yet', 'We could not link you to that coach. The invitation is still here — try again in a moment.'); return; }
+                    c.setCoachingMode(mode);
+                  }} />
                 </View>
               </View>
             </Notice>
@@ -219,6 +239,16 @@ export default function Home() {
 
         <Rule />
 
+        {/* Said before the card, because the card is what the reader acts on. */}
+        {programUnknown ? (
+          <Notice tone={t.warn} kicker="Today" title="We couldn’t check for a coach plan"
+            note="Today's focus below comes from Repple's automatic program. If your coach has assigned you one it takes over as soon as we can read it." />
+        ) : null}
+        {!logKnown ? (
+          <Notice tone={t.warn} kicker="Today" title="We couldn’t read your training log"
+            note="Your streak and this week's sessions are shown as dashes because we can't see them — not because they're zero. Nothing has been lost." />
+        ) : null}
+
         {/* ── the one card: today's action ────────────────────────────────── */}
         <Section>
           {/* The header follows the card. When the adaptive call is "fuel up" or
@@ -226,11 +256,11 @@ export default function Home() {
               card underneath talk about two different things. */}
           <SectionHead
             title={today.route.includes('workouts') ? `Today · ${workout.focus}` : 'Today'}
-            note={`${wk.workouts} of ${goalDays} this week`}
+            note={logKnown ? `${wk.workouts} of ${goalDays} this week` : undefined}
           />
           <ActionCard
-            ring={goalDays ? wk.workouts / goalDays : 0}
-            ringLabel={String(streak)}
+            ring={logKnown && goalDays ? wk.workouts / goalDays : 0}
+            ringLabel={logKnown ? String(streak) : fig(null)}
             title={today.headline}
             note={today.tip}
             cta={today.cta}
@@ -308,11 +338,13 @@ export default function Home() {
         <Section>
           <SectionHead title="This week" note="All activity" onPress={() => router.push('/(client)/trends')} />
           <KpiRow items={[
-            { label: 'Sessions', value: fig(wk.workouts), unit: `/${goalDays}` },
-            { label: 'Lifted', value: Math.round(wk.volumeKg).toLocaleString(), unit: 'kg' },
-            { label: 'New PRs', value: fig(prs.length) },
+            { label: 'Sessions', value: logKnown ? fig(wk.workouts) : fig(null), unit: logKnown ? `/${goalDays}` : undefined },
+            // `(0).toLocaleString()` is the string "0" — a tonnage stated as
+            // measured, with no hint that nothing was measured.
+            { label: 'Lifted', value: logKnown ? Math.round(wk.volumeKg).toLocaleString() : fig(null), unit: logKnown ? 'kg' : undefined },
+            { label: 'New PRs', value: logKnown ? fig(prs.length) : fig(null) },
           ]} />
-          <WeekDots done={wk.days} />
+          <WeekDots done={logKnown ? wk.days : 0} />
         </Section>
 
         <Rule />

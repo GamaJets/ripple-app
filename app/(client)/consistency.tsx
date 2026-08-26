@@ -9,7 +9,7 @@ import { View, Text, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Hero, KpiRow, Ghost, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, KpiRow, Ghost, Notice, Cta, fig } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty } from '../../src/theme/scale';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { currentStreak, longestStreak, freezeBudget, currentStreakFrozen } from '../../src/lib/streaks';
@@ -20,7 +20,14 @@ const DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 export default function Consistency() {
   const t = useTheme();
   const router = useRouter();
-  const { log } = useWorkoutLog();
+  const { log, status: logStatus, reload } = useWorkoutLog();
+  // Under 'error' the log is empty because the read failed, not because nothing
+  // was ever logged — so every figure on this screen is unknown rather than
+  // zero. A broken streak is close to the worst thing this app can tell someone
+  // falsely: a client who has trained every day for a month, shown "Current
+  // streak 0 days" over twelve blank weeks, has no way to tell that the fault is
+  // ours, and every reason to conclude the month did not count.
+  const known = logStatus !== 'error';
 
   const pad = (n: number) => String(n).padStart(2, '0');
   const key = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -66,12 +73,27 @@ export default function Consistency() {
           </View>
         </View>
 
+        {/* Said before the hero, because everything below it is a dash until the
+            log loads and the reader needs to know why rather than guess. */}
+        {!known ? (
+          <View style={{ marginTop: sp.lg }}>
+            <Notice tone={t.warn} kicker="Consistency" title="We couldn’t read your training log"
+              note="Your streak and your history are intact — this screen just can't see them right now. The blank weeks below are ours, not yours.">
+              <View style={{ marginTop: sp.lg }}>
+                <Cta label="Try again" wide onPress={reload} />
+              </View>
+            </Notice>
+          </View>
+        ) : null}
+
         {/* ── the hero: the streak the heatmap is about ───────────────────── */}
         <Hero
           label="Current streak"
-          figure={fig(streak)}
-          unit={streak === 1 ? 'day' : 'days'}
-          note={freezes > 0
+          figure={known ? fig(streak) : fig(null)}
+          unit={known ? (streak === 1 ? 'day' : 'days') : undefined}
+          note={!known
+            ? 'Not a broken streak — an unread one.'
+            : freezes > 0
             ? `Best ${best} · ${freezes} freeze${freezes === 1 ? '' : 's'} in reserve`
             : `Best ${best} day${best === 1 ? '' : 's'} · no freezes yet`}
         />
@@ -80,10 +102,13 @@ export default function Consistency() {
 
         <Section>
           <SectionHead title="Totals" />
+          {/* Three all-time totals reduced from `log`. With nothing read, three
+              zeroes under the word "Totals" is a claim about the client's whole
+              training history, and it is the one thing we do not have. */}
           <KpiRow items={[
-            { label: 'Sessions', value: fig(totalSessions) },
-            { label: 'Days trained', value: fig(trainedDays) },
-            { label: 'Best streak', value: fig(best) },
+            { label: 'Sessions', value: known ? fig(totalSessions) : fig(null) },
+            { label: 'Days trained', value: known ? fig(trainedDays) : fig(null) },
+            { label: 'Best streak', value: known ? fig(best) : fig(null) },
           ]} />
         </Section>
 

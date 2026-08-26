@@ -135,7 +135,7 @@ export default function ScanMachine() {
     return undefined;
   };
 
-  const save = () => {
+  const save = async () => {
     if (!exercise.trim()) { Alert.alert('Name the exercise', 'Pick or type the machine/exercise first.'); return; }
     let entry;
     if (cardio) {
@@ -147,9 +147,19 @@ export default function ScanMachine() {
       if (!sets.length) { Alert.alert('Log a set first', 'Enter reps (and weight) and tap Add set.'); return; }
       entry = { t: new Date().toISOString(), exercise: exercise.trim(), sets: sets.map((s) => [s.reps, s.kg] as [number, number]), kcal: Math.round(sets.reduce((a, s) => a + s.reps * (s.kg || 0), 0) / 60) + sets.length * 8 };
     }
-    addWorkouts([entry]);
+    // `addWorkouts` resolves false only when the row never reached the server:
+    // the set lives in this session's memory and is gone at the next launch.
+    // The result was thrown away, so "saved to your workout log" was announced
+    // either way — with a button that opens that log — and a client walked away
+    // from the machine believing a set was recorded that nothing outside this
+    // screen had ever seen.
+    const saved = await addWorkouts([entry]);
     // Remember this machine's setup so the next scan of the same code auto-fills.
     if (rawCode) rememberMachine(rawCode, { name: exercise.trim(), group, cardio, unit });
+    if (!saved) {
+      Alert.alert('Not saved', exercise.trim() + ' could not be saved to your workout log — it is on this phone only and will not survive a restart. Check your connection, then log it again from Train.', [{ text: 'OK' }]);
+      return;
+    }
     Alert.alert('Logged', exercise.trim() + ' saved to your workout log.', [
       { text: 'View history', onPress: () => router.replace('/(client)/activity') },
       { text: 'Done', onPress: () => router.back() },

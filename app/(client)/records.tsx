@@ -13,13 +13,13 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { personalRecords } from '../../src/lib/streaks';
-import { Rule, Section, SectionHead, Hero, Ghost, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, Ghost, Notice, Cta, fig } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 
 export default function Records() {
  const t = useTheme();
  const router = useRouter();
- const { log } = useWorkoutLog();
+ const { log, status: logStatus, reload } = useWorkoutLog();
  const prs = [...personalRecords(log)].sort((a, b) => b.est1RM - a.est1RM);
  const top = prs[0];
  const dstr = (iso: string) => new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
@@ -38,7 +38,26 @@ export default function Records() {
    <Ghost icon="back" onPress={() => router.back()} />
   </View>
 
-  {prs.length === 0 ? (<>
+  {/* An empty PR board has three causes and only one of them is "you have not
+      set a PR yet". Saying that to a lifter whose log simply did not load
+      reports their whole board as gone, on the screen whose entire job is to
+      keep a record of it. */}
+  {prs.length === 0 && logStatus === 'error' ? (<>
+   <Rule />
+   <Section>
+    <Notice tone={t.warn} kicker="Records" title="We couldn’t read your training log"
+     note="Your records are safe — this screen can't see them right now. Nothing has been reset.">
+     <View style={{ marginTop: sp.lg }}>
+      <Cta label="Try again" wide onPress={reload} />
+     </View>
+    </Notice>
+   </Section>
+  </>) : prs.length === 0 && logStatus === 'loading' ? (<>
+   <Rule />
+   <Section>
+    <Text style={{ ...ty.body, color: t.ink3 }}>Loading your records…</Text>
+   </Section>
+  </>) : prs.length === 0 ? (<>
    <Rule />
    <Section>
     <SectionHead title="No records yet" />
