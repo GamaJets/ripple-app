@@ -97,13 +97,18 @@ Getting the data in is worth little if the three audiences cannot see it.
 Checked against the code on 26 Aug 2026, because this document has now been
 wrong three separate times about what already exists.
 
+**All seven are now built.** What each one refuses is as much the point as what
+it shows: a month cannot close while sessions are unmarked, a trainer with no
+confirmed delivery is not healthy, a cohort of three has no retention rate, and
+a gym with no door log is told nothing about who has lapsed.
+
 | Item | Status |
 |---|---|
 | **Studio web: members** | **Built.** `studio-web/app/members` + `src/lib/memberView.ts`. Built around what class attendance alone cannot tell you: two members with identical class histories, one of whom moved to the gym floor and one of whom stopped. Only the door log separates them. |
 | **Coach: the book by who is drifting** | **Built.** `src/lib/clientDrift.ts` + the Clients screen. Ranks on the break in a person's own pattern, not on a level — a client who fell from 4 days a week to 1 outranks a steady 1-a-week client at the identical current rate. |
 | **Member: a history that reads well going back** | **Built.** `app/(client)/history.tsx` + `src/lib/longView.ts`. The ceiling really was 10 weeks; this is months and years, with untrained months reporting null rather than 0 and breaks left visible instead of smoothed into a trend line. |
-| **Studio web: staff** | Open. |
-| **Studio web: retention** | Partly. `retentionRead` in `memberView.ts` does it per member; there is no gym-wide view. |
+| **Studio web: staff** | **Built.** `studio-web/app/staff` + `src/lib/staffView.ts`. Puts an evidence gate in front of `trainerHealth`, which scored on bookings whose clock had passed — so a trainer with twenty unmarked sessions came back green. |
+| **Studio web: retention** | **Built.** `studio-web/app/retention` + `src/lib/gymRetention.ts`. A roll-up of the per-member read, so the owner's headline and the coach's book cannot name different people. No rate over a cohort where one member moves it by more than ten points. |
 | **Studio web: month-end close** | **Built.** `studio-web/app/close` + `src/lib/monthEnd.ts`. Refuses to present a month as closed while sessions are unmarked, because payroll is wrong by exactly those. |
 | **Exports everywhere** | **Built both sides.** `src/lib/gymExport.ts` + `studio-web/app/export` for the gym, round-tripped through our own CSV importer. `src/lib/gdpr.ts` for the member — and it was silently capable of exporting an empty array for a table it could not read, which is fixed. |
 
