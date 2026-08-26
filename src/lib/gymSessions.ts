@@ -279,28 +279,68 @@ export async function fetchSessions(
   sinceIso: string,
   untilIso?: string,
 ): Promise<PtSession[]> {
+  // No embedded selects here, and both reasons matter.
+  //
+  // This used to ask for `trainers(full_name), clients(full_name)` and it
+  // failed on EVERY call with HTTP 300 / PGRST201. PostgREST could not decide
+  // which relationship to embed: `sessions` reaches `clients` both by
+  // sessions_client_id_fkey (many-to-one) and through session_waitlist
+  // (many-to-many), so the request was ambiguous and was rejected before the
+  // columns were even looked at.
+  //
+  // The columns were wrong too. Neither `trainers` nor `clients` has a
+  // full_name — trainers is (id, tenant_id, bio, tagline, offers, specialties,
+  // session_fee, listed) and names live on `profiles`. Verified against the
+  // live catalogue, not the migrations.
+  //
+  // The static build never caught it because effects do not run during
+  // prerender; it only failed for a signed-in person looking at payroll.
   let q = sb
     .from('sessions')
-    .select('id, trainer_id, client_id, starts_at, duration_min, status, outcome, outcome_at, rate_cents, settlement_id, ' +
-            'trainers(full_name), clients(full_name)')
+    .select('id, trainer_id, client_id, starts_at, duration_min, status, outcome, outcome_at, rate_cents, settlement_id')
     .eq('tenant_id', tenantId)
     .gte('starts_at', sinceIso)
     .order('starts_at', { ascending: false });
   if (untilIso) q = q.lte('starts_at', untilIso);
   const { data, error } = await q;
   if (error) throw error;
-  return (data ?? []).map(rowToSession);
+
+  const rows = data ?? [];
+  if (!rows.length) return [];
+
+  const names = await sessionNames(sb, [
+    ...rows.map((r: any) => r.trainer_id),
+    ...rows.map((r: any) => r.client_id),
+  ]);
+  return rows.map((r: any) => rowToSession(r, names));
 }
 
-function rowToSession(r: any): PtSession {
-  const tr = Array.isArray(r.trainers) ? r.trainers[0] : r.trainers;
-  const cl = Array.isArray(r.clients) ? r.clients[0] : r.clients;
+/**
+ * Resolve people's names from `profiles`, which is where they actually live.
+ *
+ * Checks `.error` and throws. The equivalent helper in gymRecord.ts does
+ * `const { data } = await ...` and swallows the failure, which turns a broken
+ * read into a screen where every person is unnamed and nothing says why. A
+ * payroll page that cannot name a trainer should say it is broken, not quietly
+ * pay "—".
+ */
+async function sessionNames(sb: Queryable, ids: (string | null | undefined)[]): Promise<Map<string, string>> {
+  const unique = [...new Set(ids.filter((x): x is string => !!x))];
+  if (!unique.length) return new Map();
+  const { data, error } = await sb.from('profiles').select('id, full_name').in('id', unique);
+  if (error) throw error;
+  return new Map((data ?? [])
+    .map((p: any) => [p.id, (p.full_name || '').trim()])
+    .filter(([, n]: any) => n));
+}
+
+function rowToSession(r: any, names: Map<string, string>): PtSession {
   return {
     id: r.id,
     trainerId: r.trainer_id,
-    trainerName: tr?.full_name ?? null,
+    trainerName: names.get(r.trainer_id) ?? null,
     clientId: r.client_id ?? null,
-    clientName: cl?.full_name ?? null,
+    clientName: r.client_id ? names.get(r.client_id) ?? null : null,
     startsAt: r.starts_at,
     durationMin: r.duration_min ?? 60,
     status: r.status,
