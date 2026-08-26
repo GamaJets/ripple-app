@@ -18,6 +18,18 @@
         "studio"
       ],
       "port": 3100
+    },
+    {
+      "name": "marketing-site",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "-y",
+        "serve",
+        "-l",
+        "4180",
+        "web"
+      ],
+      "port": 4180
     }
   ]
 }

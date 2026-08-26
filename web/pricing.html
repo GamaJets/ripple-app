@@ -8,8 +8,33 @@
 <meta property="og:title" content="Repple — pricing">
 <meta property="og:description" content="No number on this page, because there isn't one yet. Here is what is true instead, and how to get a quote.">
 <meta property="og:url" content="https://www.repplefitness.com/pricing">
-<link rel="stylesheet" href="styles.css?v=febfacb053">
+<link rel="stylesheet" href="styles.css?v=3a417a5124">
 <link rel="icon" href="favicon.png">
+<script>
+/* The phone header. Links collapse behind one button; without JavaScript they
+   simply stay in the bar and wrap, which is why the collapsed state is gated on
+   the js-nav class rather than being the default. */
+document.documentElement.classList.add('js-nav');
+addEventListener('DOMContentLoaded', function () {
+  var nav = document.querySelector('nav.site');
+  var btn = nav && nav.querySelector('.nav-toggle');
+  if (!btn) return;
+  function shut() {
+    nav.classList.remove('open');
+    btn.setAttribute('aria-expanded', 'false');
+    btn.setAttribute('aria-label', 'Open menu');
+  }
+  btn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    var open = nav.classList.toggle('open');
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    btn.setAttribute('aria-label', open ? 'Close menu' : 'Open menu');
+  });
+  document.addEventListener('click', function (e) { if (!nav.contains(e.target)) shut(); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') shut(); });
+  addEventListener('resize', shut);
+});
+</script>
 </head>
 <body>
 
@@ -25,12 +50,18 @@
       Repple
     </a>
     <nav class="site">
+      <div class="nav-links" id="site-menu">
       <a href="/client">Members</a>
       <a href="/trainer">Coaches</a>
       <a href="/studio">Gyms</a>
-      <a href="/support" class="sm-hide">Support</a>
+      <a href="/support">Support</a>
       <a class="get" href="/download"><svg class="appicon" viewBox="0 0 1024 1024" aria-hidden="true" focusable="false"><defs><linearGradient id="nav-tile" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2dd4bf"/><stop offset="1" stop-color="#0d9488"/></linearGradient></defs><rect width="1024" height="1024" rx="220" fill="url(#nav-tile)"/><g stroke="#fff" fill="#fff"><circle cx="512" cy="512" r="330" stroke-width="20" fill="none" opacity=".34"/><circle cx="512" cy="512" r="220" stroke-width="26" fill="none" opacity=".60"/><circle cx="512" cy="512" r="115" stroke-width="32" fill="none" opacity=".90"/><circle cx="512" cy="512" r="52"/></g></svg>Get the app</a>
+      </div>
       <a class="cta" href="/signup">Create account</a>
+      <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-menu" aria-label="Open menu">
+        <svg class="ico-open" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+        <svg class="ico-close" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
     </nav>
   </div>
 </header>
@@ -341,7 +372,7 @@
           <li><a href="/pricing">Pricing</a></li>
           <li><a href="/signup">Create account</a></li>
           <li><a href="/forgot-password">Reset password</a></li>
-          <li><a href="/support" class="sm-hide">Support</a></li>
+          <li><a href="/support">Support</a></li>
         </ul>
       </div>
       <div>

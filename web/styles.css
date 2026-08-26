@@ -122,6 +122,7 @@ header.site .wrap {
   box-shadow: 0 1px 0 rgba(255,255,255,0.14) inset;
 }
 nav.site { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.nav-links { display: flex; align-items: center; gap: 4px; }
 nav.site a {
   color: var(--ink2); font-size: 15.5px; font-weight: 500;
   padding: 9px 13px; border-radius: 8px; white-space: nowrap;
@@ -133,22 +134,56 @@ nav.site a.cta {
   padding: 10px 18px; margin-left: 8px; font-size: 15.5px;
 }
 nav.site a.cta:hover { filter: brightness(1.08); background: var(--accent); }
-/* On a phone the header must stay one row — a wrapped nav was eating a fifth
-   of the viewport before any content appeared. Support drops out of the bar
-   (it is in the footer of every page) and the labels lose their "For ". */
+
+/* The menu button exists only on phones, and only when JavaScript is there to
+   work it. Without JS the links stay in the bar and wrap onto a second row —
+   worse-looking, but reachable, which is the trade that matters. */
+.nav-toggle { display: none; }
+
+/* ── the phone header ───────────────────────────────────────────────────
+   Five links plus a call to action needed 368px of bar. A 375px phone has
+   335px of it after the gutters, so the wordmark was being crushed to nothing
+   and "Create account" hung 48px off the right edge of every page on the site.
+   The links move behind one button; the bar keeps the brand and the one action
+   the page is asking for. */
 @media (max-width: 760px) {
-  header.site .wrap { height: 64px; gap: 8px; flex-wrap: nowrap; }
-  nav.site { gap: 0; flex-wrap: nowrap; }
-  nav.site a { padding: 7px 9px; font-size: 14.5px; }
-  nav.site a.cta { padding: 9px 14px; margin-left: 4px; font-size: 14.5px; }
+  header.site .wrap { height: 64px; gap: 10px; flex-wrap: nowrap; }
   .mark { width: 32px; height: 32px; border-radius: 9px; }
-  nav.site a.sm-hide { display: none; }
+  .brand { font-size: 17.5px; gap: 10px; }
+  nav.site { gap: 6px; flex-wrap: nowrap; }
+  nav.site a.cta { padding: 9px 14px; margin-left: 0; font-size: 14.5px; }
+
+  html.js-nav .nav-toggle {
+    display: inline-grid; place-items: center;
+    width: 42px; height: 42px; flex: none;
+    background: none; border: var(--rule); border-radius: 10px;
+    color: var(--ink2); cursor: pointer; padding: 0;
+  }
+  html.js-nav .nav-toggle:hover { color: var(--ink); background: var(--hair); }
+  html.js-nav .nav-toggle .ico-close,
+  html.js-nav nav.site.open .nav-toggle .ico-open { display: none; }
+  html.js-nav nav.site.open .nav-toggle .ico-close { display: block; }
+  html.js-nav nav.site.open .nav-toggle { color: var(--ink); background: var(--hair); }
+
+  html.js-nav .nav-links {
+    display: none;
+    position: absolute; top: calc(100% + 8px); right: var(--gut); left: var(--gut);
+    flex-direction: column; align-items: stretch; gap: 2px;
+    background: var(--panel); border: var(--rule); border-radius: 14px;
+    padding: 8px; box-shadow: var(--shadow);
+  }
+  html.js-nav nav.site.open .nav-links { display: flex; }
+  /* 44px minimum, because this is a thumb target on glass. */
+  html.js-nav .nav-links a { padding: 13px 14px; font-size: 16px; }
 }
-@media (max-width: 430px) {
-  .brand { font-size: 0; gap: 0; }          /* keep the mark, drop the wordmark */
-  .mark { width: 27px; height: 27px; }
-  nav.site a { padding: 5px 6px; font-size: 13px; }
-  nav.site a.cta { padding: 7px 10px; font-size: 13px; }
+
+/* The wordmark used to be dropped below 430px, because the five nav links left
+   no room for it. They are behind the button now, so it stays: measured at
+   320px — the narrowest phone still in use — the bar needs 265 of 280px. */
+@media (max-width: 360px) {
+  .mark { width: 28px; height: 28px; }
+  .brand { font-size: 16.5px; gap: 8px; }
+  nav.site a.cta { padding: 9px 12px; font-size: 14px; }
 }
 
 /* ── type ──────────────────────────────────────────────────────────────── */
@@ -760,7 +795,6 @@ table.data.vs td .job { display: block; color: var(--ink); font-weight: 500; fon
 
 nav.site a.get { display: inline-flex; align-items: center; gap: 7px; }
 nav.site a.get .appicon { width: 26px; height: 26px; border-radius: 7px; box-shadow: none; }
-@media (max-width: 720px) { nav.site a.get .appicon { display: none; } }
 
 /* ══════════════════════════════════════════════════════════════════════════
    SUPPORT & LEGAL — appended block
@@ -797,7 +831,13 @@ nav.site a.get .appicon { width: 26px; height: 26px; border-radius: 7px; box-sha
 .path {
   font-family: var(--mono); font-size: .87em; color: var(--ink);
   background: var(--sunk); border: var(--rule); border-radius: 6px;
-  padding: 2px 7px; white-space: nowrap;
+  padding: 2px 7px;
+  /* These were nowrap, which is fine until "iOS Settings → Privacy & Security →
+     Health → Repple" meets a 335px column and pushes 91px of the support page
+     off the side. They wrap at the arrows now; box-decoration-break gives each
+     resulting line its own pill rather than one ragged box across both. */
+  white-space: normal; overflow-wrap: break-word;
+  -webkit-box-decoration-break: clone; box-decoration-break: clone;
 }
 
 /* ── lists inside a .qa answer ─────────────────────────────────────────── */
@@ -811,7 +851,11 @@ nav.site a.get .appicon { width: 26px; height: 26px; border-radius: 7px; box-sha
   display: grid; grid-template-columns: minmax(0, 210px) minmax(0, var(--measure));
   gap: clamp(30px, 5vw, 66px); align-items: start;
 }
-@media (max-width: 900px) { .legal { grid-template-columns: 1fr; } }
+/* minmax(0, …) not 1fr: a bare 1fr track is minmax(auto, 1fr), and an auto
+   minimum refuses to shrink below its content, so this column sat at 542px
+   inside a 335px page and took the privacy and terms pages 187px wide. */
+@media (max-width: 900px) { .legal { grid-template-columns: minmax(0, 1fr); } }
+.legal > * { min-width: 0; }
 
 .legal-nav { position: sticky; top: 96px; }
 .legal-nav .ttl {
