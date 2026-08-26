@@ -22,6 +22,10 @@ export const NAV: NavItem[] = [
   { href: '/timetable', label: 'Timetable', roles: ['owner'] },
   { href: '/sessions', label: 'Sessions', roles: ['owner'] },
   { href: '/money', label: 'Money', roles: ['owner'] },
+  // Owner only, like every other entry here bar Door, and for the strongest
+  // reason of any of them: the close carries every payment, every invoice and
+  // every trainer's pay for the month on one screen.
+  { href: '/close', label: 'Close', roles: ['owner'] },
   // Staff work the door, so this is the one operational screen a trainer sees.
   { href: '/door', label: 'Door', roles: ['owner', 'trainer'] },
   { href: '/import', label: 'Import', roles: ['owner'] },

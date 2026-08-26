@@ -31,6 +31,14 @@ import { viewerMaySee, shareStateOf, shareLabel, sharedNote, sharedCount, sendBl
 import type { TrainingSession } from './types';
 import { assessDrift, rankClients, sortByDrift, summariseDrift, compareDrift, DRIFT_RANK, DRIFT_LABEL, DEFAULT_WINDOWS, type ActivityEvent, type DriftInput } from './clientDrift';
 import { atRiskClient, noRecordOf } from './trainerMock';
+import {
+  monthWindow, monthKeyOf, recentMonths, monthEnded, inMonth, dayInMonth, sliceMonth,
+  isOverdue, incomeOf, purposeOf, owedOf, moneyCheck, payrollOf, buildClose,
+  brokenCloseParts, loadingCloseParts, closeWarning, closeHeadline,
+  CLOSE_PARTS, CLOSE_LABEL, CLOSE_COST,
+  type CloseRecord, type GymInvoice, type MonthWindow,
+} from './monthEnd';
+import { monthlyHistory, monthKey, monthLabel, yearRows, peakVolume, intensity, bestMonth, trainedMonths, gaps, longestGap, monthsSinceLast, historySpan, stageOf, historyNote, lifetimeTotals, prTimeline, volumeArc, tonnes } from './longView';
 
 const errors: string[] = [];
 let checks = 0;
@@ -1878,6 +1886,119 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
   ok(SHARED_URL_TTL_S === 5 * 60, 'a coach URL lasts five minutes, so taking a photo back bites in minutes');
   ok(SHARED_URL_TTL_S < 60 * 60, 'and far less than the hour a member gets for their own photos');
   ok(revokeCaveat().includes('five minutes'), 'and the app says out loud how long an already-open link keeps working');
+}
+
+
+// ── the long view: months and years, not weeks ──
+//
+// The screens that existed before this could show ten weeks. These assertions
+// are about the three things that go wrong when you widen that to a year:
+// inventing zeros for months nobody trained, smoothing a break into a trend,
+// and drawing a year-shaped frame around three weeks of history.
+{
+  const at = (d: string) => `${d}T10:00:00`;               // local, so month bucketing is TZ-stable
+  const NOW = Date.parse('2026-06-15T12:00:00');
+  const lv: WorkoutEntry[] = [
+    { t: at('2026-01-10'), exercise: 'Back Squat', sets: [[8, 50]], kcal: 300 },
+    { t: at('2026-01-24'), exercise: 'Back Squat', sets: [[8, 55]] },
+    { t: at('2026-02-14'), exercise: 'Back Squat', sets: [[8, 60]] },
+    // March and April: nothing. This is the gap the whole module is about.
+    { t: at('2026-05-06'), exercise: 'Back Squat', sets: [[8, 60]] },
+    { t: at('2026-05-20'), exercise: 'Back Squat', sets: [[8, 70]] },
+    { t: at('2026-06-02'), exercise: 'Back Squat', sets: [[5, 80]] },
+  ];
+  const cells = monthlyHistory(lv, NOW);
+
+  // ── the window is the member's own, not a round number of months ──
+  ok(cells.length === 6, 'the history runs first logged month → this month, and no further');
+  ok(cells[0].key === '2026-01' && cells[5].key === '2026-06', 'oldest first, ending on the current month');
+  ok(monthLabel(cells[0].key) === 'Jan 2026', 'a month key reads as a month');
+
+  // ── a month with no training is a month with NO DATA ──
+  const march = cells[2];
+  ok(march.key === '2026-03' && march.trained === false, 'March is present in the window and untrained');
+  ok(march.volumeKg === null, 'a month with no training reports NO volume — never 0 kg, which the app does not know');
+  ok(march.sessions === null && march.days === null, 'and no session count either: nothing was counted, so nothing is claimed');
+  ok(march.kcal === null && march.best1RM === null, 'every figure on an untrained month is null');
+  ok(intensity(march, peakVolume(cells)) === null, 'and it shades as nothing, not as the lightest possible month');
+
+  // ── a trained month reports what was actually lifted ──
+  ok(cells[0].trained === true && cells[0].volumeKg === 840, 'January volume is Σ reps × weight');
+  ok(cells[0].sessions === 2 && cells[0].days === 2, 'two sessions on two days');
+  ok(cells[0].kcal === 300 && cells[1].kcal === null, 'kcal sums where it exists and stays null where nothing carried one');
+  ok(cells[0].topLift === 'Back Squat', 'the month names the lift that carried it');
+  ok(peakVolume(cells) === 1040 && bestMonth(cells)!.key === '2026-05', 'the best month is the heaviest month');
+  ok(trainedMonths(cells).length === 4, 'four of the six months have training in them');
+
+  // ── a month of pure cardio has sessions but no tonnage ──
+  const cardio: WorkoutEntry[] = [{ t: at('2026-06-04'), exercise: 'Row', cardio: { mins: 30, dist: 6, unit: 'km' } }];
+  const cCell = monthlyHistory(cardio, NOW)[0];
+  ok(cCell.trained === true && cCell.sessions === 1, 'a cardio month is a trained month');
+  ok(cCell.volumeKg === null && cCell.best1RM === null, 'but it lifted nothing, which is unknown tonnage — not zero tonnage');
+  ok(lifetimeTotals(cardio)!.volumeKg === null, 'and the lifetime total says the same rather than totting up a zero');
+
+  // ── the break stays visible, and is never closed off early ──
+  const g = gaps(cells);
+  ok(g.length === 1 && g[0].months === 2, 'two months with nothing logged between February and May');
+  ok(g[0].afterKey === '2026-02' && g[0].returnKey === '2026-05', 'a gap names where it started and where they came back');
+  ok(longestGap(cells)!.months === 2, 'and the longest one is reported');
+  ok(monthsSinceLast(cells) === 0, 'the trailing silence is measured separately from the gaps');
+  const stopped = monthlyHistory(lv.slice(0, 3), NOW);
+  ok(gaps(stopped).length === 0, 'a member who simply stopped has no "gap" — nothing has closed it, and inventing an end would be a lie');
+  ok(monthsSinceLast(stopped) === 4, 'that open silence is four months, and it is stated as that instead');
+
+  // ── the shape of a year, with the months outside the history left absent ──
+  const rows = yearRows(cells);
+  ok(rows.length === 1 && rows[0].year === 2026 && rows[0].cells.length === 12, 'one row per calendar year, twelve slots');
+  ok(rows[0].cells[0] !== null && rows[0].cells[2]!.trained === false, 'January has data; March is a real, empty month');
+  ok(rows[0].cells[11] === null, 'December has not happened — it is absent from the year, not a month they failed to train');
+
+  // ── then versus now ──
+  const arc = volumeArc(cells)!;
+  ok(arc.fromKey === '2026-01' && arc.toKey === '2026-06', 'the arc spans the first month with tonnage to the last');
+  ok(arc.deltaKg === 400 - 840 && arc.pct === -52, 'and it reports a fall as honestly as a rise');
+  ok(arc.months === 6, 'six calendar months end to end');
+  ok(volumeArc(monthlyHistory(cardio, NOW)) === null, 'one month is a data point, not an arc');
+
+  // ── personal bests over TIME, not just the current best ──
+  const pr = prTimeline(lv);
+  ok(pr.length === 5, 'five improvements: the equalled 60 kg in May is not a new record');
+  ok(pr[0].prev === null, 'the first record on a lift beat nothing — prev is null, never 0');
+  ok(pr[1].prev === pr[0].est1RM, 'and every later one names what it beat');
+  ok(pr[0].at < pr[4].at && pr[4].est1RM === 93, 'oldest first, ending on the current best');
+
+  // ── a short history is not a failed long one ──
+  const fresh: WorkoutEntry[] = [
+    { t: day(3), exercise: 'Bench Press', sets: [[8, 40]] },
+    { t: day(1), exercise: 'Bench Press', sets: [[8, 42.5]] },
+  ];
+  const fCells = monthlyHistory(fresh);
+  ok(stageOf(historySpan(fresh)) === 'starting', 'three weeks in reads as "starting", and the screen skips the year grid');
+  ok(fCells.length <= 2, 'a member days old gets the months they have — not eleven blanks and one bar');
+  ok(fCells[0].key === monthKey(day(3)), 'the window opens on their first session, never twelve months before it');
+  ok(historyNote(fresh).startsWith('Day '), 'and it says how many days in, which is true and is not an apology');
+  ok(stageOf(historySpan(lv, NOW)) === 'building', 'five months in is "building"');
+  ok(historyNote(lv, NOW) === '4 months with training, back to Jan 2026.', 'the note counts only months actually trained');
+  ok(stageOf(historySpan([{ t: at('2025-01-05'), exercise: 'X', sets: [[5, 60]] }], NOW)) === 'long', 'past six months the long view earns its frame');
+
+  // ── nothing loaded, nothing claimed ──
+  ok(monthlyHistory([], NOW).length === 0, 'an empty log produces no months at all');
+  ok(historySpan([], NOW) === null && lifetimeTotals([]) === null, 'and no span and no totals — not a zeroed set of them');
+  ok(stageOf(null) === 'empty' && prTimeline([]).length === 0, 'empty is its own stage');
+  ok(yearRows([]).length === 0 && peakVolume([]) === null, 'no grid and no scale to draw one against');
+  ok(tonnes(null) === null && tonnes(2760) === 2.8, 'unknown kilos never become 0.0 tonnes');
+
+  // ── a corrupt row must not take the history down with it ──
+  const bad = monthlyHistory([{ t: 'not a date', exercise: 'X', sets: [[8, 50]] }, ...lv], NOW);
+  ok(bad.length === 6 && bad[0].key === '2026-01', 'an unparseable timestamp is skipped, not bucketed into some month');
+  ok(monthKey('not a date') === null, 'and it is refused at the door');
+
+  // ── the totals ──
+  const life = lifetimeTotals(lv)!;
+  ok(life.sessions === 6 && life.days === 6, 'six sessions across six days');
+  ok(life.volumeKg === 840 + 480 + 1040 + 400, 'lifetime tonnage is the sum of the months that have one');
+  ok(life.kcal === 300, 'and only the entries that actually carried calories');
+  ok(life.lifts === 1 && life.firstAt === at('2026-01-10'), 'one lift, first logged in January');
 }
 
 if (errors.length) { console.log('COVERAGE FAILURES:\n' + errors.join('\n')); process.exit(1); }
