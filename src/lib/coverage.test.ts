@@ -17,6 +17,7 @@ import { parseCsv, parseSheet, sniffDelimiter, mapColumns } from './csv';
 import { parseMoneyCents, parseDate, detectDateOrder, previewMembers, previewPayments, previewPlans, describePreview, MEMBER_ALIASES } from './csvImport';
 import { classEntry, ptEntry, mergeTimetable, overlapping, entriesAt, floorAt, floorByHour, clashes, summariseBoard, slotBlocker, type PtSlot } from './gymPtSchedule';
 import { groupSessions, sessionKey, sessionDuration, sessionActivity, sessionKcal, sessionDistanceMeters, planSession, planWrite, summariseResult, HK_WRITE_ACTIVITIES, type Ledger } from './wearables/appleHealthWrite';
+import { sliceLoading, sliceReady, sliceFailed, rowsOf, brokenParts, completeness, partialWarning, memberIds, buildDossier, buildDossiers, retentionRead, doorLogActive, attendanceCaveat, type MemberRecord, type MemberBooking } from './memberView';
 import { payroll30For, payrollBlocker, type GymTrainer } from './gymTrainers';
 import { gymRollup } from './ownerAnalytics';
 import { isDelivered, isAwaitingOutcome, isPayable, payrollByTrainer, payrollTotal, settlementBlocker, settleableSessions, settlementAmount, settleBlocker, PAY_DELIVERED_ONLY, type PtSession } from './gymSessions';
@@ -1554,6 +1555,132 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
      'a run that wrote nothing does not open with "Wrote"');
   ok(summariseResult({ state: 'denied', reason: 'Health is not allowing this.' }) === 'Health is not allowing this.',
      'a refusal is reported as the user’s decision, not as a failure of ours');
+}
+
+
+// ── the member view: two members the timetable cannot tell apart ────────────
+{
+  const NOW = Date.parse('2026-08-26T12:00:00Z');
+  const ago = (d: number) => new Date(NOW - d * 86_400_000).toISOString();
+
+  const mem = (memberId: string, memberName: string | null, status: Membership['status'], startedOn: string): Membership =>
+    ({ id: 'ms-' + memberId + '-' + startedOn, memberId, memberName, planId: 'p1', planName: 'Full', startedOn, endsOn: null, status });
+  const pay = (id: string, memberId: string, amountCents: number, takenAt: string): GymPayment =>
+    ({ id, memberId, memberName: null, amountCents, currency: 'AED', method: 'card', takenAt, note: null });
+  const visit = (id: string, memberId: string, enteredAt: string, classId: string | null = null): Visit =>
+    ({ id, memberId, memberName: null, passId: null, classId, enteredAt, exitedAt: null, source: 'door', note: null });
+  const book = (bookingId: string, memberId: string, startsAt: string, attended: boolean, status = 'booked'): MemberBooking =>
+    ({ bookingId, memberId, classId: 'c-' + bookingId, classTitle: 'Spin', startsAt, status, attendedAt: attended ? startsAt : null });
+  const sess = (id: string, clientId: string, startsAt: string, outcome: PtSession['outcome']): PtSession =>
+    ({ id, trainerId: 't1', trainerName: 'Coach', clientId, clientName: null, startsAt, durationMin: 60, status: 'booked', outcome, outcomeAt: null, rateCents: 20000, settlementId: null });
+  const pass = (id: string, holderId: string, total: number, spent: number): GymPass =>
+    ({ id, passTypeId: 'pt1', passTypeName: '10-pack', kind: 'pack', holderId, holderName: null, hostMemberId: null, issuedOn: '2026-08-01', expiresOn: null, usesTotal: total, usesSpent: spent, paidCents: null, currency: 'AED', note: null });
+
+  // FLOOR and GONE have byte-identical class histories. On the timetable they
+  // are the same member. In the door log they could not be less alike.
+  const classHistory = (id: string) => [
+    book(id + '-1', id, ago(40), true),
+    book(id + '-2', id, ago(35), true),
+    book(id + '-3', id, ago(30), true),
+  ];
+
+  const rec: MemberRecord = {
+    memberships: sliceReady([
+      mem('floor', 'Sara Floor', 'active', '2025-01-01'),
+      mem('gone', 'Tom Gone', 'active', '2025-01-01'),
+    ]),
+    payments: sliceReady([pay('pay1', 'floor', 15000, ago(20)), pay('pay2', 'floor', 15000, ago(50))]),
+    visits: sliceReady([
+      visit('v1', 'floor', ago(2)), visit('v2', 'floor', ago(5)), visit('v3', 'floor', ago(9)),
+      visit('v4', 'floor', ago(40), 'c-floor-1'),
+      visit('v5', 'gone', ago(40), 'c-gone-1'), visit('v6', 'gone', ago(35), 'c-gone-2'),
+    ]),
+    bookings: sliceReady([...classHistory('floor'), ...classHistory('gone')]),
+    sessions: sliceReady([
+      sess('s1', 'floor', ago(20), 'completed'),
+      sess('s2', 'floor', ago(10), null),
+      sess('s3', 'floor', ago(3), 'no_show'),
+    ]),
+    passes: sliceReady([pass('pass1', 'floor', 10, 4)]),
+    invites: sliceReady([] as MemberInvite[]),
+  };
+
+  const floor = buildDossier('floor', rec, NOW);
+  const gone = buildDossier('gone', rec, NOW);
+
+  ok(floor.attended === 3 && gone.attended === 3, 'both members attended the same three classes');
+  ok(floor.showRate === 1 && gone.showRate === 1, 'and both show a 100% class attendance rate');
+
+  const rFloor = retentionRead(floor, { now: NOW, doorLogActive: true });
+  const rGone = retentionRead(gone, { now: NOW, doorLogActive: true });
+  ok(rFloor.classes === 'down' && rGone.classes === 'down', 'the timetable says the same thing about both: down');
+  ok(rFloor.recent.classAttendances === 0 && rGone.recent.classAttendances === 0, 'neither has attended a class this half');
+
+  ok(rFloor.stillTrainingOffTheTimetable === true, 'the door log shows one of them still training');
+  ok(rGone.stillTrainingOffTheTimetable === false, 'and shows the other has stopped');
+  ok(rGone.absentFromLiveDoorLog === true, 'the one who stopped is absent from a live door log');
+  ok(rFloor.absentFromLiveDoorLog === false, 'the one still coming in is not');
+  ok(rFloor.door === 'up' && rGone.door === 'down', 'the two door trends point opposite ways');
+  ok((rFloor.note ?? '').includes('would read this member as lapsed'), 'and the screen is told why it matters');
+  ok((rGone.note ?? '').includes('Not through the door'), 'the absent member gets the absence stated');
+
+  const silent = retentionRead(gone, { now: NOW, doorLogActive: false });
+  ok(silent.absentFromLiveDoorLog === false, 'a silent door log cannot convict anybody of absence');
+  const blindRec: MemberRecord = { ...rec, visits: sliceReady([]) };
+  ok(doorLogActive(blindRec) === false, 'an empty door log is a fact about the gym');
+  ok((attendanceCaveat(blindRec) ?? '').includes('class bookings only'), 'and the page must say attendance is class-only');
+  ok(attendanceCaveat(rec) === null, 'a live door log needs no such caveat');
+
+  const brokenDoor: MemberRecord = { ...rec, visits: sliceFailed('500') };
+  const blind = retentionRead(buildDossier('floor', brokenDoor, NOW), { now: NOW, doorLogActive: false });
+  ok(blind.door === null, 'an unread door log has no trend');
+  ok(blind.stillTrainingOffTheTimetable === false, 'and supports no claim that they are still training');
+  ok(doorLogActive(brokenDoor) === null, 'unread is not "no door log"');
+  ok(attendanceCaveat(brokenDoor) === null, 'the failure banner says it, so the caveat does not double up');
+
+  ok(rowsOf(sliceLoading<number>()) === null, 'not loaded yet has no rows');
+  ok(rowsOf(sliceFailed<number>('boom')) === null, 'a failed read has no rows either');
+  ok((rowsOf(sliceReady<number>([])) ?? null)?.length === 0, 'loaded and empty has rows, and there are none');
+  ok(completeness(rec) === 'whole', 'every part read is a whole picture');
+  ok(completeness({ ...rec, passes: sliceLoading() }) === 'loading', 'one part in flight is still loading');
+  ok(completeness({ ...rec, passes: sliceLoading(), visits: sliceFailed('x') }) === 'broken', 'a definite failure outranks a pending read');
+  ok(partialWarning(rec) === null, 'a whole page carries no warning');
+  const warn = partialWarning({ ...rec, visits: sliceFailed('timeout'), passes: sliceFailed('timeout') }) ?? '';
+  ok(warn.includes('the door log') && warn.includes('passes'), 'the warning names every part that failed');
+  ok(warn.includes('missing from this page, not empty'), 'and refuses to let a failure read as an empty record');
+  ok(brokenParts({ ...rec, visits: sliceFailed('timeout') })[0].cost.includes('in the building'), 'it says what the reader is therefore not seeing');
+
+  ok(gone.paidCents === null, 'a member with no payment rows has paid an unknown amount, not 0');
+  ok(floor.paidCents === 30000, 'and a member with two has the sum of them');
+  ok(buildDossier('floor', { ...rec, payments: sliceFailed('nope') }, NOW).paidCents === null, 'an unread payments table is not 0.00 either');
+  const noClasses = buildDossier('floor', { ...rec, bookings: sliceReady([]) }, NOW);
+  ok(noClasses.booked === 0 && noClasses.showRate === null, 'nobody who booked nothing has a 0% attendance rate');
+  const halfShown = buildDossier('x', {
+    ...rec,
+    memberships: sliceReady([mem('x', 'X', 'active', '2025-01-01')]),
+    bookings: sliceReady([book('b1', 'x', ago(3), true), book('b2', 'x', ago(4), false), book('b3', 'x', ago(5), false, 'cancelled')]),
+  }, NOW);
+  ok(halfShown.booked === 2 && halfShown.attended === 1, 'a cancelled booking is not a place held');
+  ok(halfShown.showRate === 0.5, 'and the rate is over what was actually booked');
+
+  ok(floor.floorVisits === 3 && floor.classVisits === 1, 'floor visits and class visits are counted apart');
+  ok(floor.lastSeenDays === 2, 'last seen is measured from the door, not from a booking');
+  ok(buildDossier('nobody', rec, NOW).lastSeenDays === null, 'a member never seen has no number of days, not 0');
+
+  ok(floor.delivered === 1, 'only a session somebody marked completed is delivered');
+  ok(floor.noShows === 1 && floor.unmarked === 1, 'no-shows and unmarked sessions are reported separately');
+  ok(floor.passVisitsLeft === 6, 'and the pass shows what is still owed');
+
+  ok((memberIds(rec) ?? []).length === 2, 'the roster comes from the memberships, not from who happened to visit');
+  ok(memberIds({ ...rec, memberships: sliceFailed('down') }) === null, 'with no roster there is no member list, not an empty one');
+  ok(buildDossiers({ ...rec, memberships: sliceFailed('down') }, NOW) === null, 'and no dossiers either');
+  ok((buildDossiers(rec, NOW) ?? [])[0].name === 'Sara Floor', 'dossiers come back sorted by name');
+
+  const rejoined = buildDossier('r', {
+    ...rec,
+    memberships: sliceReady([mem('r', 'R', 'cancelled', '2026-03-01'), mem('r', 'R', 'active', '2026-06-01')]),
+  }, NOW);
+  ok(rejoined.status === 'active', 'a member who rejoined reads as active, not as their old cancellation');
 }
 
 if (errors.length) { console.log('COVERAGE FAILURES:\n' + errors.join('\n')); process.exit(1); }

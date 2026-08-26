@@ -13,6 +13,7 @@ export interface NavItem { href: string; label: string; roles: Array<'owner' | '
 
 export const NAV: NavItem[] = [
   { href: '/', label: 'Overview', roles: ['owner', 'trainer'] },
+  { href: '/members', label: 'Members', roles: ['owner'] },
   { href: '/timetable', label: 'Timetable', roles: ['owner'] },
   { href: '/sessions', label: 'Sessions', roles: ['owner'] },
   { href: '/money', label: 'Money', roles: ['owner'] },

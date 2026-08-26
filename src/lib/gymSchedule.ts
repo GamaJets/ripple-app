@@ -51,11 +51,19 @@ export async function fetchClasses(
   if (!rows.length) return [];
 
   // One query for every booking in the window rather than one per class.
+  //
+  // The `.error` check is not decoration. supabase-js RESOLVES on a database
+  // error, so without it a failed read arrives as `bookings === null`, falls
+  // through `?? []` below, and every class in the window reports 0 booked and
+  // 0 attended. That is a FALSE FIGURE, not a blank: a gym opens the timetable,
+  // sees an empty week, and concludes nobody is coming. The classes query above
+  // has always thrown; this one silently did not.
   const ids = rows.map((r: any) => r.id);
-  const { data: bookings } = await sb
+  const { data: bookings, error: bookingsError } = await sb
     .from('class_bookings')
     .select('class_id, status, attended_at')
     .in('class_id', ids);
+  if (bookingsError) throw bookingsError;
 
   const booked = new Map<string, number>();
   const attended = new Map<string, number>();
@@ -149,6 +157,12 @@ export async function fetchRoster(sb: Queryable, classId: string): Promise<Roste
   if (!rows.length) return [];
 
   const ids = [...new Set(rows.map((r: any) => r.user_id))];
+  // Deliberately NOT checked, unlike the bookings read in fetchClasses above,
+  // and the difference is worth stating so nobody makes these consistent in the
+  // wrong direction. A failed name lookup costs a LABEL: the roster still shows
+  // the right number of people and each renders unnamed. A failed count would
+  // cost a FIGURE — 0 booked reads as a fact about the class. Losing a name is
+  // visible to whoever is looking at it; losing a count is not.
   const { data: profs } = await sb.from('profiles').select('id, full_name').in('id', ids);
   const names = new Map((profs ?? []).map((p: any) => [p.id, (p.full_name || '').trim()]));
 
