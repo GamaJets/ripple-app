@@ -32,6 +32,7 @@ import { monthlyHistory, monthKey, monthLabel, yearRows, peakVolume, intensity, 
 import type { TrainingSession } from './types';
 import { assessDrift, rankClients, sortByDrift, summariseDrift, compareDrift, DRIFT_RANK, DRIFT_LABEL, DEFAULT_WINDOWS, type ActivityEvent, type DriftInput } from './clientDrift';
 import { atRiskClient, noRecordOf } from './trainerMock';
+import { csvCell, csvRow, toCsv, minorToDecimal, isoDatePart, slug, buildGymExport, exportBlocker, incompleteWarning, EXPORT_PARTS, EXPORT_FILE, type GymExportInput, type PassType } from './gymExport';
 import {
   monthWindow, monthKeyOf, recentMonths, monthEnded, inMonth, dayInMonth, sliceMonth,
   isOverdue, incomeOf, purposeOf, owedOf, moneyCheck, payrollOf, buildClose,
@@ -2221,6 +2222,236 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
   ok(life.volumeKg === 840 + 480 + 1040 + 400, 'lifetime tonnage is the sum of the months that have one');
   ok(life.kcal === 300, 'and only the entries that actually carried calories');
   ok(life.lifts === 1 && life.firstAt === at('2026-01-10'), 'one lift, first logged in January');
+}
+
+
+// ── the gym's own export (gymExport.ts) ──
+//
+// The sibling of gdpr.ts, one tenant up. Everything here is pointed at the two
+// ways an export lies: a failed read that becomes an empty file, and a value
+// that changes shape on the way out.
+{
+  const plansIn: MembershipPlan[] = [
+    { id: 'pl1', name: 'Monthly, full access', priceCents: 45000, currency: 'AED', interval: 'month', active: true },
+    { id: 'pl2', name: 'Day pass', priceCents: 5, currency: 'AED', interval: 'once', active: false },
+  ];
+  // Names chosen to break a naive writer: an inner quote, a comma, an
+  // apostrophe. A gym really does have these members.
+  const msIn: Membership[] = [
+    { id: 'ms1', memberId: 'u1', memberName: '"Bob" Smith', planId: 'pl1', planName: 'Monthly, full access', startedOn: '2026-01-05', endsOn: null, status: 'active' },
+    { id: 'ms2', memberId: 'u2', memberName: "O'Brien, Sean", planId: null, planName: null, startedOn: '2025-11-30', endsOn: '2026-11-29', status: 'frozen' },
+    { id: 'ms3', memberId: 'u1', memberName: '"Bob" Smith', planId: 'pl2', planName: 'Day pass', startedOn: '2024-02-02', endsOn: '2024-02-03', status: 'cancelled' },
+  ];
+  const payIn: GymPayment[] = [
+    { id: 'pay1', memberId: 'u1', memberName: '"Bob" Smith', amountCents: 45000, currency: 'AED', method: 'card', takenAt: '2026-08-02T09:14:00.000Z', note: 'Renewal; said "thanks"\nsecond line of the note' },
+    { id: 'pay2', memberId: 'u2', memberName: "O'Brien, Sean", amountCents: 5, currency: 'AED', method: 'cash', takenAt: '2026-07-01T00:00:00.000Z', note: null },
+    { id: 'pay3', memberId: null, memberName: null, amountCents: 1250, currency: 'AED', method: 'other', takenAt: '2026-06-01T00:00:00.000Z', note: 'walk-in, till float' },
+  ];
+  const clsIn: GymClass[] = [
+    { id: 'c1', title: 'Spin, 45min', room: 'Studio 2', instructor: null, trainerId: 't1', startsAt: '2026-08-01T06:00:00.000Z', durationMin: 45, capacity: 20, booked: 2, attended: 1 },
+  ];
+  const bkIn: MemberBooking[] = [
+    { bookingId: 'b1', memberId: 'u1', classId: 'c1', classTitle: 'Spin, 45min', startsAt: '2026-08-01T06:00:00.000Z', status: 'booked', attendedAt: '2026-08-01T06:03:00.000Z' },
+    { bookingId: 'b2', memberId: 'u2', classId: 'c1', classTitle: 'Spin, 45min', startsAt: '2026-08-01T06:00:00.000Z', status: 'booked', attendedAt: null },
+  ];
+  const sessIn: PtSession[] = [
+    { id: 's1', trainerId: 't1', trainerName: 'Dana', clientId: 'u1', clientName: '"Bob" Smith', startsAt: '2026-08-03T10:00:00.000Z', durationMin: 60, status: 'booked', outcome: 'completed', outcomeAt: '2026-08-03T11:00:00.000Z', rateCents: 20000, settlementId: null },
+    { id: 's2', trainerId: 't1', trainerName: 'Dana', clientId: 'u2', clientName: "O'Brien, Sean", startsAt: '2026-08-04T10:00:00.000Z', durationMin: 60, status: 'booked', outcome: null, outcomeAt: null, rateCents: null, settlementId: null },
+  ];
+  const ptIn: PassType[] = [
+    { id: 'pt1', name: 'Guest pass', kind: 'guest', priceCents: 0, currency: 'AED', uses: 1, validDays: null, active: true },
+  ];
+  const passIn: GymPass[] = [
+    { id: 'gp1', passTypeId: 'pt1', passTypeName: 'Guest pass', kind: 'guest', holderId: null, holderName: 'Walk-in', hostMemberId: 'u1', issuedOn: '2026-08-01', expiresOn: null, usesTotal: 1, usesSpent: 0, paidCents: null, currency: 'AED', note: null },
+  ];
+  const visIn: Visit[] = [
+    { id: 'v1', memberId: 'u1', memberName: '"Bob" Smith', passId: null, classId: 'c1', enteredAt: '2026-08-01T05:52:00.000Z', exitedAt: null, source: 'door', note: 'tailgated; spoke to them' },
+  ];
+  const invIn: MemberInvite[] = [
+    { id: 'iv1', tenantId: 'T', email: 'bob@example.com', fullName: '"Bob" Smith', planId: 'pl1', planName: 'Monthly, full access', invitedBy: 'o1', token: 'SECRET-JOIN-TOKEN', status: 'accepted', createdAt: '2025-12-20T00:00:00.000Z', expiresAt: '2026-01-19T00:00:00.000Z', acceptedAt: '2026-01-05T00:00:00.000Z', acceptedBy: 'u1' },
+  ];
+
+  const whole: GymExportInput = {
+    gymName: 'Iron House Dubai', tenantId: 'T', generatedAt: '2026-08-26T08:00:00.000Z',
+    from: '1970-01-01T00:00:00.000Z', to: '2100-01-01T00:00:00.000Z',
+    plans: sliceReady(plansIn), memberships: sliceReady(msIn), payments: sliceReady(payIn),
+    classes: sliceReady(clsIn), attendance: sliceReady(bkIn), sessions: sliceReady(sessIn),
+    passTypes: sliceReady(ptIn), passes: sliceReady(passIn), visits: sliceReady(visIn),
+    invites: sliceReady(invIn),
+  };
+
+  // ── escaping: the assertion the whole file stands on ──
+  // Get this wrong and every column after the offending one shifts, silently,
+  // for as long as the file exists.
+  ok(csvCell('"Bob" Smith') === '"""Bob"" Smith"', 'a quote inside a name is doubled AND the field is quoted');
+  ok(csvCell('Smith, Jr.') === '"Smith, Jr."', 'a comma inside a name is quoted');
+  ok(csvCell("O'Brien") === "O'Brien", 'an apostrophe needs no quoting and gains none');
+  ok(csvCell('line one\nline two') === '"line one\nline two"', 'a note with a line break is quoted, not truncated');
+  ok(csvCell('a\r\nb') === '"a\r\nb"', 'a CRLF inside a field is quoted whole');
+  ok(csvCell('Paid cash; owes 20') === '"Paid cash; owes 20"', 'a semicolon is quoted too — sniffDelimiter would vote for it otherwise');
+  ok(csvCell('a\tb') === '"a\tb"' && csvCell('a|b') === '"a|b"', 'tab and pipe are quoted for the same reason');
+  ok(csvCell(' Sara ') === '" Sara "', 'whitespace somebody typed is preserved by quoting, not trimmed away');
+  ok(csvCell(null) === '' && csvCell(undefined) === '', 'a null becomes empty — never "null"');
+  ok(csvCell(0) === '0', 'and a real zero still becomes zero: missing and none are different facts');
+  ok(csvCell(false) === 'no' && csvCell(true) === 'yes', 'booleans leave as words the CSV importer reads back');
+  ok(csvCell(NaN) === '' && csvCell(Infinity) === '', 'NaN is not a figure and is never laundered into a money column');
+  ok(csvRow(['a', null, 'b,c']) === 'a,,"b,c"', 'a row keeps its empty cell in place');
+
+  // ── and it survives the repo's own reader ──
+  const nasty = toCsv(['name', 'note'], [['"Bob" Smith', 'Paid cash; owes 20\nchase Monday'], ['Smith, Jr.', null]]);
+  const back = parseSheet(nasty);
+  ok(back.delimiter === ',', 'the header decides the delimiter, and a semicolon in the data does not get a vote');
+  ok(back.header.join('|') === 'name|note', 'the BOM does not become part of the first header name');
+  ok(back.rows.length === 2, 'a note containing a newline is one row, not two');
+  ok(back.rows[0][0] === '"Bob" Smith', 'the quotes come back exactly as they went in');
+  ok(back.rows[0][1] === 'Paid cash; owes 20\nchase Monday', 'and so does the line break');
+  ok(back.rows[1][0] === 'Smith, Jr.' && back.rows[1][1] === '', 'the comma name did not shift the column after it');
+
+  // ── money and dates leave as they are stored ──
+  ok(minorToDecimal(45000) === '450.00', 'minor units become an exact decimal');
+  ok(minorToDecimal(5) === '0.05', 'five fils is 0.05, not 5.00');
+  ok(minorToDecimal(0) === '0.00', 'a genuine zero is 0.00');
+  ok(minorToDecimal(-450) === '-4.50', 'a negative keeps its sign');
+  ok(minorToDecimal(123456789) === '1234567.89', 'and a large figure does not go near a float');
+  ok(minorToDecimal(null) === '', 'no recorded price is empty — a pass with no price is not a free pass');
+  ok(parseMoneyCents(minorToDecimal(45000)).ok && (parseMoneyCents(minorToDecimal(45000)) as any).value === 45000, 'the importer reads back the same integer');
+  ok((parseMoneyCents(minorToDecimal(5)) as any).value === 5, 'including the awkward sub-unit one');
+  ok(isoDatePart('2026-08-02T09:14:00.000Z') === '2026-08-02', 'the date-only column is the day part of the stored timestamp');
+  ok(isoDatePart(null) === '' && isoDatePart('not a date') === '', 'and anything unreadable is empty rather than guessed');
+
+  // ── a whole bundle ──
+  const wx = buildGymExport(whole);
+  ok(wx.complete === true, 'every part read means a complete bundle');
+  ok(exportBlocker(whole) === null, 'and nothing blocks the download');
+  ok(wx.missing.length === 0 && incompleteWarning(wx.missing) === null, 'a complete bundle carries no warning');
+  ok(wx.prefix === 'repple-export-iron-house-dubai-2026-08-26', 'the filename stem names the gym and the day');
+  ok(!wx.files.some((f) => f.name.includes('INCOMPLETE')), 'and no file claims to be incomplete');
+  ok(wx.files.filter((f) => f.name.endsWith('.csv')).length === EXPORT_PARTS.length, 'one CSV per part of the record');
+  ok(wx.files.length === EXPORT_PARTS.length + 2, 'plus the manifest and the README');
+  ok(wx.files.every((f) => f.name.startsWith(wx.prefix + '-')), 'every file carries the bundle stem, so a Downloads folder stays sortable');
+  ok(wx.manifest.complete === true && wx.manifest.warning === null, 'the manifest says so too');
+  ok(wx.manifest.parts.every((p) => p.status === 'exported'), 'and no part is marked unavailable');
+  ok(wx.files.find((f) => f.name.endsWith('README.txt'))!.text.startsWith('This bundle is complete'), 'the README opens by saying it is whole');
+
+  const fileFor = (b: typeof wx, base: string) => b.files.find((f) => f.name.endsWith(base));
+  const sheetFor = (b: typeof wx, base: string) => parseSheet(fileFor(b, base)!.text);
+
+  // ── members.csv round-trips through previewMembers ──
+  const membersCsv = fileFor(wx, 'members.csv')!.text;
+  const mp = previewMembers(membersCsv);
+  ok(mp.missingRequired.length === 0, 'the exporter writes the header previewMembers requires');
+  ok(mp.unmatchedColumns.join(',') === 'member_id', 'only the id column is unrecognised, and it is reported rather than dropped');
+  ok(mp.rows.length === 2 && mp.ready.length === 2, 'one row per member, both readable — the second membership for u1 did not become a second person');
+  ok(mp.rejected.length === 0, 'and nothing was refused');
+  // Optional chaining rather than `!` throughout: a mutation that breaks the
+  // escaping makes these rows unfindable, and the suite has to report the named
+  // assertion that caught it rather than dying on a TypeError.
+  const bob = mp.ready.find((m) => m.name === '"Bob" Smith') ?? null;
+  ok(bob !== null, 'the quoted name survived export and re-import intact');
+  ok(bob?.status === 'active' && bob?.plan === 'Monthly, full access', 'the live membership won over the older cancelled one');
+  ok(bob?.startedOn === '2026-01-05' && bob?.endsOn === null, 'an absent end date came back as null, not as a date');
+  ok(bob?.email === 'bob@example.com', 'and the address the gym recorded on the invite came with them');
+  const sean = mp.ready.find((m) => m.name === "O'Brien, Sean") ?? null;
+  ok(sean !== null, 'the comma name survived too');
+  ok(sean?.status === 'frozen', 'and did not shift the status column');
+  ok(sean?.plan === null && sean?.email === null, 'no plan and no invite stay null — not "" dressed up as a value');
+
+  // ── payments.csv round-trips through previewPayments ──
+  const payCsv = fileFor(wx, 'payments.csv')!.text;
+  const pp = previewPayments(payCsv);
+  ok(pp.missingRequired.length === 0, 'the exporter writes the amount and date columns previewPayments requires');
+  ok(pp.rows.length === 3 && pp.ready.length === 2, 'two attributed payments import; the unattributed one is refused');
+  ok(pp.ready[0].amountCents === 45000, 'the money came back as the same integer minor units');
+  ok(pp.ready[1].amountCents === 5, 'including the five-fils one');
+  ok(pp.ready[0].takenOn === '2026-08-02', 'the date column is readable where the raw timestamp would not have been');
+  ok(pp.ready[0].note === 'Renewal; said "thanks"\nsecond line of the note', 'a note with a semicolon, a quote AND a newline survived the whole trip');
+  ok(pp.ready[0].method === 'card' && pp.ready[1].method === 'cash', 'the method column did not shift');
+  ok(pp.rejected[0].errors.some((e) => e.includes('cannot be attributed')), 'and the unattributed payment is refused loudly rather than assigned to somebody');
+  ok(sheetFor(wx, 'payments.csv').rows[0][8] === '45000', 'the authoritative amount_cents column is the stored integer itself');
+
+  // ── plans.csv round-trips through previewPlans ──
+  const pl = previewPlans(fileFor(wx, 'plans.csv')!.text);
+  ok(pl.missingRequired.length === 0 && pl.ready.length === 2, 'both plans import');
+  ok(pl.ready[0].priceCents === 45000 && pl.ready[0].interval === 'month', 'price and billing period survive');
+  ok(pl.ready[0].name === 'Monthly, full access', 'and a comma in a plan name does not split it');
+  ok(pl.ready[1].priceCents === 5 && pl.ready[1].interval === 'once', 'the one-off day pass keeps both');
+  ok(pl.ready[0].active === true && pl.ready[1].active === false, 'a retired plan comes back retired, not back on sale');
+
+  // ── a null must never arrive as a zero ──
+  const passSheet = sheetFor(wx, 'passes.csv');
+  ok(passSheet.header.indexOf('paid_cents') > 0 && passSheet.rows[0][passSheet.header.indexOf('paid_cents')] === '', 'a pass with no recorded price exports empty, never 0');
+  ok(passSheet.rows[0][passSheet.header.indexOf('paid')] === '', 'and its decimal column is empty too');
+  ok(passSheet.rows[0][passSheet.header.indexOf('expires_on')] === '', 'a pass that does not expire has an empty expiry, not a date');
+  ok(!passSheet.header.includes('uses_left'), 'no clamped "uses left" column — a counter out of step is evidence, not something to hide');
+  const sessSheet = sheetFor(wx, 'sessions.csv');
+  ok(sessSheet.rows[1][sessSheet.header.indexOf('outcome')] === '', 'a session nobody has marked exports empty — it is not a no-show');
+  ok(sessSheet.rows[1][sessSheet.header.indexOf('rate_cents')] === '', 'and an unrecorded rate is not zero either');
+  ok(sessSheet.rows[0][sessSheet.header.indexOf('rate_cents')] === '20000', 'while a recorded rate is the exact stored integer');
+  const visSheet = sheetFor(wx, 'door-log.csv');
+  ok(visSheet.rows[0][visSheet.header.indexOf('exited_at')] === '', 'somebody still inside has an empty exit, not a zero-minute visit');
+  const attSheet = sheetFor(wx, 'attendance.csv');
+  ok(attSheet.rows[1][attSheet.header.indexOf('attended_at')] === '', 'and a booking nobody ticked off is empty, which is not the same as absent');
+
+  // ── the invite token is a live credential and does not leave ──
+  const invSheet = sheetFor(wx, 'invites.csv');
+  ok(!invSheet.header.includes('token'), 'the export carries no invite token column');
+  ok(!fileFor(wx, 'invites.csv')!.text.includes('SECRET-JOIN-TOKEN'), 'and the token itself appears nowhere in the file');
+
+  // ── a partial export must be unmistakable ──
+  const brokenDoor: GymExportInput = { ...whole, visits: sliceFailed('permission denied for table gym_visits') };
+  const bx = buildGymExport(brokenDoor);
+  ok(bx.complete === false, 'one failed read means the bundle is not complete');
+  ok(bx.prefix.endsWith('-INCOMPLETE'), 'the filename stem says so');
+  ok(bx.files.every((f) => f.name.includes('INCOMPLETE')), 'and EVERY file in the bundle carries it, so no single file can be mistaken for a whole record');
+  ok(!bx.files.some((f) => f.name.endsWith('door-log.csv')), 'the failed part produces NO CSV at all — an empty one would claim nobody came through the door');
+  ok(bx.files.filter((f) => f.name.endsWith('.csv')).length === EXPORT_PARTS.length - 1, 'exactly one CSV is absent');
+  const stub = bx.files.find((f) => f.placeholder)!;
+  ok(stub.name.endsWith('door-log-NOT-EXPORTED.txt'), 'a plainly-named stub stands where the file should have been');
+  ok(stub.text.includes('permission denied for table gym_visits'), 'and it carries the actual reason, not a shrug');
+  ok(stub.text.includes('came through the door and when'), 'said in terms of what the gym is missing, not which query failed');
+  ok(bx.manifest.complete === false && bx.manifest.warning!.includes('THIS EXPORT IS NOT YOUR WHOLE RECORD'), 'the manifest refuses to call it complete');
+  ok(bx.manifest.parts.find((p) => p.part === 'visits')!.status === 'unavailable', 'and names the part as unavailable rather than empty');
+  ok(bx.manifest.parts.find((p) => p.part === 'visits')!.rows === null, 'with a null row count, never 0');
+  const readme = bx.files.find((f) => f.name.endsWith('README.txt'))!;
+  ok(readme.text.startsWith('!'), 'the README opens with the warning rather than burying it');
+  ok(readme.text.includes('the door log') && readme.text.includes(stub.name), 'and points at the stub by name');
+
+  // ── loading is not the same as failed, and blocks the download ──
+  const stillReading: GymExportInput = { ...whole, payments: sliceLoading() };
+  ok(exportBlocker(stillReading) !== null, 'an export cannot be taken while a read is in flight');
+  ok(exportBlocker(stillReading)!.includes('payments'), 'and it says which one');
+  const lx = buildGymExport(stillReading);
+  ok(lx.complete === false, 'a bundle built anyway is still not complete');
+  ok(!lx.files.some((f) => f.name.endsWith('payments.csv')), 'and still refuses to write an empty payments.csv');
+  ok(lx.missing[0].reason.includes('still loading'), 'the reason distinguishes it from a read that failed');
+
+  // ── an empty gym is a different fact from a broken one ──
+  const emptyGym: GymExportInput = {
+    ...whole,
+    plans: sliceReady([]), memberships: sliceReady([]), payments: sliceReady([]),
+    classes: sliceReady([]), attendance: sliceReady([]), sessions: sliceReady([]),
+    passTypes: sliceReady([]), passes: sliceReady([]), visits: sliceReady([]), invites: sliceReady([]),
+  };
+  const ex = buildGymExport(emptyGym);
+  ok(ex.complete === true, 'a gym that has recorded nothing still gets a complete export');
+  ok(ex.files.filter((f) => f.name.endsWith('.csv')).length === EXPORT_PARTS.length, 'with every file present');
+  ok(parseSheet(fileFor(ex, 'payments.csv')!.text).rows.length === 0, 'header only, no rows');
+  ok(parseSheet(fileFor(ex, 'payments.csv')!.text).header.length > 0, 'and the header still names the columns, so the shape is knowable');
+
+  // ── an address the gym does not hold must not read as "no address" ──
+  const noInvites: GymExportInput = { ...whole, invites: sliceFailed('relation "member_invites" does not exist') };
+  const nx = buildGymExport(noInvites);
+  const nHeader = sheetFor(nx, 'members.csv').header;
+  ok(!nHeader.includes('email'), 'with the invites read gone the email COLUMN is dropped, because a blank one would read as "this member has no email"');
+  ok(nHeader.join(',') === 'name,plan,started,ends,status,member_id', 'and the rest of the roster is still there');
+  ok(previewMembers(fileFor(nx, 'members.csv')!.text).ready.length === 2, 'still re-importable without it — previewMembers only requires a name');
+  ok(nx.caveats.some((c) => c.includes('email')), 'and the bundle says out loud why the column is absent');
+
+  // ── the stem stays usable when the gym's own name did not read ──
+  const unnamed = buildGymExport({ ...whole, gymName: null });
+  ok(unnamed.prefix === 'repple-export-2026-08-26', 'no gym name means no gym name in the filename — not the word "null"');
+  ok(slug('Iron House, Dubai!') === 'iron-house-dubai' && slug(null) === '', 'the slug drops punctuation and refuses to invent one');
+  ok(EXPORT_FILE.visits === 'door-log.csv', 'the door log is named for what an owner calls it');
 }
 
 if (errors.length) { console.log('COVERAGE FAILURES:\n' + errors.join('\n')); process.exit(1); }

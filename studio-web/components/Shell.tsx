@@ -29,6 +29,9 @@ export const NAV: NavItem[] = [
   // Staff work the door, so this is the one operational screen a trainer sees.
   { href: '/door', label: 'Door', roles: ['owner', 'trainer'] },
   { href: '/import', label: 'Import', roles: ['owner'] },
+  // Beside Import deliberately: a gym that can be imported into and not
+  // exported out of is a gym that cannot leave.
+  { href: '/export', label: 'Export', roles: ['owner'] },
 ];
 
 export function Shell({
