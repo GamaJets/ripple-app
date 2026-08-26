@@ -14,6 +14,9 @@ interface WorkoutLogValue {
   addWorkouts: (entries: WorkoutEntry[]) => void;
   updateWorkout: (target: WorkoutEntry, next: Partial<WorkoutEntry>) => void;
   removeWorkout: (entry: WorkoutEntry) => void;
+  /** State how long a whole session ran, or clear it back to unknown.
+   *  Session-scoped: see the comment on the implementation. */
+  setSessionMins: (t: string, mins: number | null) => void;
 }
 
 const Ctx = createContext<WorkoutLogValue | null>(null);
@@ -80,11 +83,41 @@ export function WorkoutLogProvider({ children }: { children: React.ReactNode }) 
     if ('cardio' in next) patch.cardio = next.cardio ?? null;
     if ('kcal' in next) patch.kcal = next.kcal ?? null;
     if ('zones' in next) patch.zones = next.zones ?? null;
+    if ('sessionMins' in next) patch.session_mins = next.sessionMins ?? null;
     if (!Object.keys(patch).length) return;
     try {
       matchRow(supabase.from('workouts').update(patch), uid, target)
         .then(() => {}, (e: unknown) => reportError('workoutLog.update', e));
     } catch (e) { reportError('workoutLog.update', e); }
+  };
+  /**
+   * How long a session ran.
+   *
+   * Scoped to the session, not the row. One session writes all of its exercises
+   * with the same `performed_at` (see `WorkoutEntry.id`), so its length is a
+   * fact about the group: every row in it carries the same number and they are
+   * set together, in ONE statement matched on (user_id, performed_at), rather
+   * than eight round trips for an eight-exercise push day.
+   *
+   * `null` clears it back to unknown. That state has to stay reachable —
+   * "nobody has said how long this was" is a real answer and is what stops a
+   * session being written to Apple Health, so a mistyped 5 must be erasable
+   * rather than only correctable to another number.
+   *
+   * A non-positive or unparseable value is rejected, not coerced: 0 minutes is
+   * an unfinished form, and Health would take it as a real event lasting no
+   * time at all.
+   */
+  const setSessionMins = (t: string, mins: number | null) => {
+    const v = mins == null ? null : Math.round(mins);
+    if (v != null && (!Number.isFinite(v) || v <= 0)) return;
+    setLog((p) => p.map((e) => (e.t === t ? { ...e, sessionMins: v ?? undefined } : e)));
+    if (!USE_SUPABASE || !uid) return;
+    try {
+      supabase.from('workouts').update({ session_mins: v })
+        .eq('user_id', uid).eq('performed_at', t)
+        .then(() => {}, (e: unknown) => reportError('workoutLog.setSessionMins', e));
+    } catch (e) { reportError('workoutLog.setSessionMins', e); }
   };
   const removeWorkout = (entry: WorkoutEntry) => {
     setLog((p) => { const i = p.indexOf(entry); return i >= 0 ? [...p.slice(0, i), ...p.slice(i + 1)] : p.filter((e) => !(e.t === entry.t && e.exercise === entry.exercise)); });
@@ -96,7 +129,7 @@ export function WorkoutLogProvider({ children }: { children: React.ReactNode }) 
     }
   };
 
-  return <Ctx.Provider value={{ log, addWorkout, addWorkouts, updateWorkout, removeWorkout }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ log, addWorkout, addWorkouts, updateWorkout, removeWorkout, setSessionMins }}>{children}</Ctx.Provider>;
 }
 
 export function useWorkoutLog(): WorkoutLogValue {

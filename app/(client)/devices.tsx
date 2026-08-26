@@ -13,7 +13,7 @@
 // reads the day through the edge function, and WHOOP already feeds the workout
 // importer above it. The line described behaviour the code no longer has.
 import { useState, useCallback } from 'react';
-import { View, Text, Pressable, ScrollView, Alert, ActivityIndicator, Modal } from 'react-native';
+import { View, Text, Pressable, ScrollView, Alert, ActivityIndicator, Modal, TextInput } from 'react-native';
 import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
@@ -24,7 +24,14 @@ import { useWearables } from '../../src/ui/wearables';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { importSources, withHr, useImportedIds, isLogged, fetchRecent } from '../../src/ui/watchImport';
 import { tapLight } from '../../src/ui/haptics';
-import { Rule, Section, SectionHead, Hero, ListRow, Cta, Ghost } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, ListRow, Cta, Ghost, Notice, fig } from '../../src/ui/kit';
+import { requestHealthAuth, writeAuthStatus, type WriteAuth } from '../../src/lib/wearables/appleHealth';
+import {
+  planWrite, readLedger, writeSessions, summariseResult, writeUnavailableReason,
+  DURATION_SOURCE_LABEL,
+  type Ledger, type WriteResult,
+} from '../../src/lib/wearables/appleHealthWrite';
+import { reportError } from '../../src/lib/reportError';
 import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 
 type MetricKey = 'kcal' | 'hr' | 'steps' | 'source';
@@ -44,13 +51,20 @@ function wkDate(iso: string): string {
  const d = new Date(iso);
  return `${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()]} ${d.getDate()}/${d.getMonth() + 1}`;
 }
+/** "Mon 25/8 · 18:30" — a session needs its time of day, not just its date:
+ *  two sessions on one day are two different things to write. */
+function sessionWhen(iso: string): string {
+ const d = new Date(iso);
+ if (!isFinite(d.getTime())) return '—';
+ return `${wkDate(iso)} · ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
 
 export default function Devices() {
  const t = useTheme();
  const router = useRouter();
  const w = useWearables();
  const [detail, setDetail] = useState<MetricKey | null>(null);
- const { log, addWorkouts } = useWorkoutLog();
+ const { log, addWorkouts, setSessionMins } = useWorkoutLog();
  const apple = PROVIDERS.find((p) => p.meta.id === 'apple');
  const appleReady = !!apple && apple.isAvailable();
  // Import is no longer Apple-only: any connected provider that implements
@@ -85,6 +99,81 @@ export default function Devices() {
  };
  const importOne = async (sm: WorkoutSample) => { if (alreadyLogged(sm)) return; addWorkouts([await withHr(sm)]); markImported([sm.id]); tapLight(); };
  const importAll = async () => { const fresh = (wk || []).filter((sm) => !alreadyLogged(sm)); if (!fresh.length) return; addWorkouts(await Promise.all(fresh.map(withHr))); markImported(fresh.map((sm) => sm.id)); tapLight(); };
+
+ // ── Writing sessions BACK to Apple Health ─────────────────────────────────
+ //
+ // Off until asked, and it stays off. Nothing here runs on mount, on focus or
+ // on the 60s auto-sync: a workout in somebody's Health record is permanent,
+ // is theirs, and comes out again only by hand, one row at a time in Apple's
+ // own app. So the person presses the button or nothing happens.
+ //
+ // `hkLedger` doubles as the "have we looked yet" flag — null means we have not
+ // read the record of what is already in Health, which is a different thing
+ // from having read it and found nothing to write. The plan is derived rather
+ // than stored so that typing a session length below updates the lists
+ // immediately, without a second round trip.
+ const hkBlocked = writeUnavailableReason();
+ const [hkLedger, setHkLedger] = useState<Ledger | null>(null);
+ const [hkAuth, setHkAuth] = useState<WriteAuth | null>(null);
+ const [hkBusy, setHkBusy] = useState(false);
+ const [hkResult, setHkResult] = useState<WriteResult | null>(null);
+ const [minsDraft, setMinsDraft] = useState<Record<string, string>>({});
+ const hkPlan = hkLedger ? planWrite(log, hkLedger) : null;
+
+ const reviewHk = async () => {
+  setHkBusy(true);
+  try {
+   const [led, auth] = await Promise.all([readLedger(), writeAuthStatus()]);
+   setHkAuth(auth);
+   setHkLedger(led);
+  } catch (e: any) {
+   reportError('devices.reviewHk', e);
+   Alert.alert('Apple Health', e?.message || 'Could not check what is ready to write.');
+  } finally {
+   setHkBusy(false);
+  }
+ };
+
+ const writeHk = async () => {
+  setHkBusy(true);
+  setHkResult(null);
+  try {
+   // Anyone who connected before writing existed was never shown the workout
+   // toggle — the old request asked for no write permissions at all. Ask now;
+   // iOS stays silent for anything already decided.
+   let auth = await writeAuthStatus();
+   if (auth !== 'granted' && auth !== 'denied') {
+    try { await requestHealthAuth(); } catch (e) { reportError('devices.writeHk.auth', e); }
+    auth = await writeAuthStatus();
+   }
+   setHkAuth(auth);
+   const res = await writeSessions(log, auth);
+   setHkResult(res);
+   setHkLedger(await readLedger());
+   if (res.state === 'done' && res.written.length) tapLight();
+  } catch (e: any) {
+   reportError('devices.writeHk', e);
+   Alert.alert('Apple Health', e?.message || 'Could not write to Apple Health.');
+  } finally {
+   setHkBusy(false);
+  }
+ };
+
+ // The third source of a session length: the person types it. Refused rather
+ // than repaired if it is not a positive number — a blank field means "nobody
+ // has said", which keeps the session out of Health instead of inventing one.
+ const saveSessionMins = (sessionT: string, key: string) => {
+  const raw = (minsDraft[key] || '').trim();
+  const n = Number(raw);
+  if (!raw || !Number.isFinite(n) || n <= 0) {
+   Alert.alert('Session length', 'Enter how many minutes this session ran. There is no default: left blank, it stays out of Apple Health rather than going in with a made-up length.');
+   return;
+  }
+  setSessionMins(sessionT, Math.round(n));
+  setMinsDraft((prev) => ({ ...prev, [key]: '' }));
+  setHkResult(null);
+  tapLight();
+ };
  // Auto-refresh whenever this screen opens (plus the 60s auto-sync in the store).
  // Only re-sync providers that are actually CONNECTED. This used to hit every
  // available provider, so opening this screen fired wearable-day for WHOOP, Oura,
@@ -232,6 +321,140 @@ export default function Devices() {
     )}
    </Section>
   </>) : null}
+
+  {/* ── write sessions back to Apple Health ─────────────────────────── */}
+  <Rule />
+  <Section>
+   <SectionHead title="Write to Apple Health" note={hkAuth === 'granted' ? 'allowed' : undefined} />
+   <Text style={{ ...ty.label, color: t.ink2 }}>
+    Send the sessions you logged in Repple to the Health app, so a gym session sits beside everything your watch recorded. One workout per session: a push day with eight exercises goes in as one entry, not eight.
+   </Text>
+   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+    What goes in: the activity, when it started, how long it ran, and energy and distance only where those were actually recorded. Nothing is estimated, nothing is written until you tap the button, and each session is written once.
+   </Text>
+
+   {hkBlocked ? (
+    <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.lg }}>{hkBlocked}</Text>
+   ) : (<>
+    {hkAuth === 'denied' ? (
+     <View style={{ marginTop: sp.lg }}>
+      <Notice
+       kicker="Permission"
+       title="Health is not letting Repple add workouts"
+       note="You said no, and that stands — nothing has been written. To change it: Health ▸ Sharing ▸ Apps ▸ Repple ▸ turn on Workouts."
+      />
+     </View>
+    ) : null}
+
+    {hkPlan == null ? (
+     <View style={{ alignSelf: 'flex-start', marginTop: sp.lg }}>
+      {hkBusy
+       ? <ActivityIndicator color={t.brand} />
+       : <Cta label="See what's ready" onPress={reviewHk} />}
+     </View>
+    ) : hkPlan.writable.length === 0 && hkPlan.skipped.length === 0 ? (
+     <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.lg }}>
+      {hkPlan.alreadyWritten > 0
+       ? `Nothing new. All ${hkPlan.alreadyWritten} ${hkPlan.alreadyWritten === 1 ? 'session' : 'sessions'} in your log are already in Apple Health.`
+       : 'Your training log has no sessions yet, so there is nothing to write.'}
+     </Text>
+    ) : (<>
+
+     {/* Ready — every one of these has a length that came from somewhere real. */}
+     {hkPlan.writable.length ? (
+      <View style={{ marginTop: sp.lg }}>
+       <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>READY TO WRITE</Text>
+       {hkPlan.writable.map((p, i) => (
+        <View key={p.key} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+         <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{p.activityLabel}</Text>
+         <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>
+          {[sessionWhen(p.t), `${fig(Math.round(p.seconds / 60))} min`,
+            p.distanceMeters != null ? `${(p.distanceMeters / 1000).toFixed(2)} km` : null,
+            p.kcal != null ? `${p.kcal} kcal` : null,
+           ].filter(Boolean).join(' · ')}
+         </Text>
+         {/* A measured 47 minutes and a typed 45 must not look the same. */}
+         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+          Length: {DURATION_SOURCE_LABEL[p.durationSource]}
+          {p.activitySpecific ? '' : ' · goes in as “Other”, because this session mixes activities Health has no single name for'}
+         </Text>
+         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{p.exercises.join(' · ')}</Text>
+        </View>
+       ))}
+      </View>
+     ) : null}
+
+     {/* Blocked — stated plainly, with the one thing that would unblock it. */}
+     {hkPlan.skipped.length ? (
+      <View style={{ marginTop: sp.xl }}>
+       <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>NO LENGTH RECORDED — NOT WRITTEN</Text>
+       {hkPlan.skipped.map((sk, i) => (
+        <View key={sk.key} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+         <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{sk.exercises[0] || 'Session'}{sk.exercises.length > 1 ? ` +${sk.exercises.length - 1}` : ''}</Text>
+         <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{sessionWhen(sk.t)} · {fig(null)} min</Text>
+         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>{sk.reason}</Text>
+         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.md }}>
+          <TextInput
+           value={minsDraft[sk.key] ?? ''}
+           onChangeText={(v) => setMinsDraft((prev) => ({ ...prev, [sk.key]: v.replace(/[^0-9]/g, '') }))}
+           keyboardType="number-pad"
+           placeholder="—"
+           placeholderTextColor={t.ink3}
+           accessibilityLabel={`Minutes this session ran, ${sessionWhen(sk.t)}`}
+           style={{
+            width: 76, paddingHorizontal: sp.md, paddingVertical: 7, borderRadius: radius.sm,
+            backgroundColor: t.surface2, color: t.ink, ...ty.body, ...numeric,
+           }}
+          />
+          <Text style={{ ...ty.caption, color: t.ink3 }}>min</Text>
+          <Ghost label="Save length" onPress={() => saveSessionMins(sk.t, sk.key)} />
+         </View>
+        </View>
+       ))}
+      </View>
+     ) : null}
+
+     <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.xl }}>
+      {hkBusy ? <ActivityIndicator color={t.brand} /> : (<>
+       <Cta
+        label={hkPlan.writable.length
+         ? `Write ${hkPlan.writable.length} ${hkPlan.writable.length === 1 ? 'session' : 'sessions'}`
+         : 'Nothing to write'}
+        disabled={hkPlan.writable.length === 0}
+        onPress={writeHk}
+       />
+       <Ghost label="Refresh" onPress={reviewHk} />
+      </>)}
+     </View>
+     {hkPlan.alreadyWritten > 0 ? (
+      <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+       {hkPlan.alreadyWritten} {hkPlan.alreadyWritten === 1 ? 'session is' : 'sessions are'} already in Apple Health and will not be written again.
+      </Text>
+     ) : null}
+    </>)}
+
+    {/* What actually happened. A partial run never reads as a success. */}
+    {hkResult ? (
+     <View style={{ marginTop: sp.lg }}>
+      <Notice
+       tone={hkResult.state === 'done' && hkResult.failed.length === 0 ? undefined : t.warn}
+       kicker="Last write"
+       title={summariseResult(hkResult)}
+      >
+       {hkResult.state === 'done' && hkResult.failed.length ? (
+        <View style={{ marginTop: sp.sm }}>
+         {hkResult.failed.map((f) => (
+          <Text key={f.key} style={{ ...ty.caption, color: t.ink2, marginTop: 4 }}>
+           • {f.activityLabel}, {sessionWhen(f.t)} — {f.reason}
+          </Text>
+         ))}
+        </View>
+       ) : null}
+      </Notice>
+     </View>
+    ) : null}
+   </>)}
+  </Section>
 
   {/* ── available devices ───────────────────────────────────────────── */}
   <Rule />

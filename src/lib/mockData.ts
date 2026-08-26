@@ -43,6 +43,19 @@ export interface WorkoutEntry {
    *  from "no effort". */
   zones?: import('./hr').ZoneSeconds;
   kcal?: number;
+  /** How long the whole session ran, in minutes, when the person told us.
+   *
+   *  Optional on purpose, and NEVER defaulted. A strength session records reps
+   *  and weight but no clock, so its length is otherwise unknowable — and a
+   *  nominal "45 min" would be a fabricated figure sitting in a health record.
+   *  Where a heart-rate source or a cardio entry measured the time we use that
+   *  instead and leave this alone (see `sessionDuration` in
+   *  `wearables/appleHealthWrite.ts`); this field is the third source, the one
+   *  the person types. That is testimony from whoever was there — the same
+   *  standing as the reps and the RPE beside it — not a guess by the app.
+   *
+   *  Session-scoped, so every entry sharing a `t` carries the same number. */
+  sessionMins?: number;
 }
 
 export const MOCK_CLIENT: MockClient = {

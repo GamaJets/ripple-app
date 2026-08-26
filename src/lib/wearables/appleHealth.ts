@@ -59,19 +59,86 @@ function read(method: string, options: any): Promise<any> {
   });
 }
 
+/**
+ * The exact permission set Repple asks for.
+ *
+ * WRITE is `[Workout]` and nothing else — deliberately.
+ *
+ * Saving a completed session (see `appleHealthWrite.ts`) creates a single
+ * HKWorkout whose energy and distance are carried *inside* that object, not as
+ * separate ActiveEnergyBurned / Distance samples. So workout share access is the
+ * whole of what we need. Asking for ActiveEnergyBurned write as well would put a
+ * toggle in front of the user for a permission the app never exercises, which is
+ * how a permission sheet stops being believable.
+ *
+ * HealthKit never reveals READ denials — a declined read type simply returns
+ * nothing, indistinguishable from no data. WRITE is different: `getAuthStatus`
+ * reports it honestly, which is what lets `writeAuthStatus()` below treat a
+ * refusal as its own state rather than as a failure.
+ */
+function permissionSet(k: any) {
+  const P = k.Constants.Permissions;
+  return {
+    permissions: {
+      read: [P.HeartRate, P.RestingHeartRate, P.ActiveEnergyBurned, P.StepCount, P.Workout],
+      write: [P.Workout],
+    },
+  };
+}
+
 function requestAuth(): Promise<void> {
   return new Promise((resolve, reject) => {
     const k = hk();
     if (!k || !k.Constants) return reject(new Error('HealthKit is not available in this build.'));
     if (typeof k.initHealthKit !== 'function') return reject(new Error('The Apple Health module is not loaded in this build. A new build with the compatibility fix is needed.'));
-    const P = k.Constants.Permissions;
-    const permissions = {
-      permissions: {
-        read: [P.HeartRate, P.RestingHeartRate, P.ActiveEnergyBurned, P.StepCount, P.Workout],
-        write: [],
-      },
-    };
-    k.initHealthKit(permissions, (err: string) => (err ? reject(new Error(String(err))) : resolve()));
+    k.initHealthKit(permissionSet(k), (err: string) => (err ? reject(new Error(String(err))) : resolve()));
+  });
+}
+
+/**
+ * Ask again for the permission set.
+ *
+ * Anyone who connected Apple Health before writing existed was never shown the
+ * workout-write toggle, because the old request sent `write: []`. `initHealthKit`
+ * only prompts for types iOS has not yet decided on, so calling it again is
+ * silent for everything already granted and raises the sheet for the new one.
+ * Without this, an existing user could never reach the feature at all.
+ */
+export function requestHealthAuth(): Promise<void> {
+  return requestAuth();
+}
+
+/** iOS + a real build with the native module compiled in. */
+export function healthKitPresent(): boolean {
+  return nativePresent();
+}
+
+/** HealthKit's own status codes for share (write) access. */
+export type WriteAuth = 'granted' | 'denied' | 'undetermined' | 'unknown';
+
+/**
+ * Whether the user has allowed Repple to WRITE workouts.
+ *
+ * `unknown` is not a synonym for denied: it means the query itself did not
+ * answer (old module, unexpected shape), and the caller must not present it as a
+ * refusal the user made.
+ */
+export function writeAuthStatus(): Promise<WriteAuth> {
+  return new Promise((resolve) => {
+    const k = hk();
+    if (!nativePresent() || !k || !k.Constants || typeof k.getAuthStatus !== 'function') return resolve('unknown');
+    try {
+      k.getAuthStatus(permissionSet(k), (err: any, res: any) => {
+        if (err) return resolve('unknown');
+        const w = res?.permissions?.write;
+        if (!Array.isArray(w) || w.length === 0) return resolve('unknown');
+        // permissionSet asks to write exactly one type, so index 0 is Workout.
+        const code = Number(w[0]);
+        resolve(code === 2 ? 'granted' : code === 1 ? 'denied' : code === 0 ? 'undetermined' : 'unknown');
+      });
+    } catch {
+      resolve('unknown');
+    }
   });
 }
 

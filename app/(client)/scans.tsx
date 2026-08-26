@@ -11,9 +11,21 @@
 // card spent on the thing you can act on, and the Georgia serif header is gone.
 //
 // Also removed: the three fake progress-photo frames labelled "Week 1 /
-// Progress / Now" that pretended to be photos the client had taken. With no
-// photos there is now an honest empty state.
-import { useState } from 'react';
+// Progress / Now" that pretended to be photos the client had taken.
+//
+// PROGRESS PHOTOS ARE NOW REAL. They used to live in `useState` — no upload,
+// no bucket, no row — so they were gone the moment this screen unmounted, and
+// the header could only honestly say "N on screen". Every photo now goes to
+// the private `photos` bucket under the member's own uid and gets a row in
+// `progress_photos`; the list is read back oldest-first with signed URLs. See
+// src/lib/progressPhotos.ts for the layout and the delete rules, and
+// supabase/parts/45-progress-photos.sql for the policies behind them.
+//
+// The label reads "N saved" now, and it is true. The three states it can be in
+// — not loaded, loaded and empty, loaded with photos — each render differently
+// on purpose: a screen that shows "no photos yet" while it is still asking is
+// telling somebody their history is gone.
+import { useState, useEffect, useCallback } from 'react';
 import { View, Text, Pressable, Image, TextInput, ScrollView, Modal, Alert, Linking, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
@@ -33,6 +45,7 @@ import { Icon } from '../../src/ui/Icon';
 import { analyzeInBody, analyzePhysique, visionAvailable, lastVisionError, type PhysiqueVision } from '../../src/lib/vision';
 import { metricTrends, compositionInsights, METRIC_GROUPS, type ScanMetrics } from '../../src/lib/inbodyMetrics';
 import { focusToGroups, recommendedExercises } from '../../src/lib/focus';
+import { listProgressPhotos, uploadProgressPhoto, deleteProgressPhoto, comparePair, photosNote, missingFileCount, type ProgressPhoto } from '../../src/lib/progressPhotos';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const ITEM_H = 42, VISIBLE = 5;
@@ -103,11 +116,18 @@ export default function Scans() {
   const scans = cd.scans;
   const [img, setImg] = useState<string | null>(null);
   const [wt, setWt] = useState(''); const [bf, setBf] = useState(''); const [sm, setSm] = useState('');
-  const [photos, setPhotos] = useState<{ uri: string; at: string }[]>([]);
+  // `null` is "not asked yet, or the ask failed" — never "you have none".
+  // `[]` is "asked, and there are none". They render differently below.
+  const [photos, setPhotos] = useState<ProgressPhoto[] | null>(null);
+  const [photosErr, setPhotosErr] = useState<string | null>(null);
+  const [photoBusy, setPhotoBusy] = useState(false);
   const [phys, setPhys] = useState<PhysiqueVision | null>(null);
   const [physBusy, setPhysBusy] = useState(false);
   const [physOpen, setPhysOpen] = useState(false);
-  const [cmp, setCmp] = useState<number[]>([]);
+  // Selection is by photo id, not list index: the list is re-read from the
+  // server after every save and delete, and an index would quietly come to
+  // mean a different photo.
+  const [cmp, setCmp] = useState<string[]>([]);
   const [reading, setReading] = useState(false);
   const [ocrMsg, setOcrMsg] = useState<string | null>(null);
   const [mxOpen, setMxOpen] = useState<string | null>(null);
@@ -181,13 +201,59 @@ export default function Scans() {
       ? 'Your stats updated (weight ' + pw + '→' + w + 'kg, body fat ' + pf + '%→' + f + '%), so your daily targets adjusted: ' + sign(dK) + ' kcal (now ' + after.kcal + '), protein ' + sign(dP) + 'g (now ' + after.protein + 'g). Your meal plan regenerated to match.'
       : 'Added to your history and charts. Targets are essentially unchanged (' + after.kcal + ' kcal / ' + after.protein + 'g protein).');
   };
+  // ── progress photos ────────────────────────────────────────────────────
+  // A failed read leaves `photos` at null, NOT at []. Showing "no photos yet"
+  // to somebody whose photos merely failed to load is telling them their
+  // history is gone, and that is the one wrong answer this section can give.
+  const loadPhotos = useCallback(async () => {
+    try {
+      const list = await listProgressPhotos();
+      setPhotos(list);
+      setPhotosErr(null);
+    } catch (e) {
+      reportError('scans.photos.load', e);
+      setPhotos(null);
+      setPhotosErr('Could not load your photos just now.');
+    }
+  }, []);
+  useEffect(() => { loadPhotos(); }, [loadPhotos]);
+
+  /** Upload + record. Re-reads the list rather than guessing at it, so the
+   *  screen only ever shows photos the server has confirmed it holds. */
+  const savePhoto = async (uri: string): Promise<boolean> => {
+    setPhotoBusy(true);
+    try {
+      // Normalise to JPEG before it goes up. The library can hand back HEIC or
+      // PNG, and the object is stored as image/jpeg with a .jpg key — calling a
+      // HEIC a JPEG is the kind of small lie that surfaces months later as a
+      // photo that will not render. Resizing also keeps the upload sane on a
+      // phone connection. If the conversion fails we send the original rather
+      // than lose the photo.
+      let out = uri;
+      try {
+        const mm = await ImageManipulator.manipulateAsync(uri, [{ resize: { width: 1512 } }], { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG });
+        if (mm.uri) out = mm.uri;
+      } catch (e) { reportError('scans.photos.convert', e); }
+      await uploadProgressPhoto(out);
+      setCmp([]);
+      await loadPhotos();
+      return true;
+    } catch (e) {
+      reportError('scans.photos.upload', e);
+      Alert.alert('Not saved', 'That photo could not be saved, so it is not in your progress yet. The original in your camera roll is untouched — try again in a moment.');
+      return false;
+    } finally { setPhotoBusy(false); }
+  };
+
   const physiqueCheck = async (fromCamera: boolean) => {
     const perm = fromCamera ? await ImagePicker.requestCameraPermissionsAsync() : await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!perm.granted) { Alert.alert('Permission needed', 'Allow ' + (fromCamera ? 'camera' : 'photo library') + ' access.'); return; }
     const res = fromCamera ? await ImagePicker.launchCameraAsync({ quality: 0.5, base64: true }) : await ImagePicker.launchImageLibraryAsync({ quality: 0.5, base64: true });
     if (res.canceled || !res.assets || !res.assets[0]) return;
     const asset = res.assets[0];
-    setPhotos((p) => [{ uri: asset.uri, at: new Date().toISOString() }, ...p]); setCmp([]);
+    // The photo you hand the AI is a progress photo. It is saved the same way
+    // as any other, and told the same truth about whether it worked.
+    await savePhoto(asset.uri);
     if (!visionAvailable() || !asset.base64) { Alert.alert('AI not on yet', 'Physique analysis turns on with the AI backend.'); return; }
     setPhys(null); setPhysOpen(true); setPhysBusy(true);
     let pb = asset.base64;
@@ -201,9 +267,30 @@ export default function Scans() {
     const perm = fromCamera ? await ImagePicker.requestCameraPermissionsAsync() : await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!perm.granted) { Alert.alert('Permission needed', 'Allow ' + (fromCamera ? 'camera' : 'photo library') + ' access to add a progress photo.'); return; }
     const res = fromCamera ? await ImagePicker.launchCameraAsync({ quality: 0.6 }) : await ImagePicker.launchImageLibraryAsync({ quality: 0.6 });
-    if (!res.canceled && res.assets && res.assets[0]) { setPhotos((p) => [{ uri: res.assets[0].uri, at: new Date().toISOString() }, ...p]); setCmp([]); }
+    if (!res.canceled && res.assets && res.assets[0]) await savePhoto(res.assets[0].uri);
   };
-  const toggleCmp = (i: number) => setCmp((c) => (c.includes(i) ? c.filter((x) => x !== i) : c.length >= 2 ? [c[1], i] : [...c, i]));
+
+  const removePhoto = (p: ProgressPhoto) => {
+    Alert.alert('Delete this photo?', 'The picture is deleted from storage and removed from your progress. This cannot be undone — your camera roll is not touched.', [
+      { text: 'Keep it', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: async () => {
+        setPhotoBusy(true);
+        try {
+          await deleteProgressPhoto(p);
+          setCmp((c) => c.filter((x) => x !== p.id));
+          await loadPhotos();
+        } catch (e) {
+          reportError('scans.photos.delete', e);
+          // The file comes off storage BEFORE the row, so a failure here means
+          // nothing was removed. Say exactly that rather than "something went
+          // wrong" — the difference is whether the photo is still there.
+          Alert.alert('Still there', 'That photo could not be deleted, so nothing was removed. Try again in a moment.');
+        } finally { setPhotoBusy(false); }
+      } },
+    ]);
+  };
+
+  const toggleCmp = (id: string) => setCmp((c) => (c.includes(id) ? c.filter((x) => x !== id) : c.length >= 2 ? [c[1], id] : [...c, id]));
 
   const chrono = [...scans].sort((a, b) => Date.parse(a.takenAt) - Date.parse(b.takenAt));
   const latest = chrono[chrono.length - 1];
@@ -297,62 +384,96 @@ export default function Scans() {
 
         {/* ── progress photos ────────────────────────────────────────────── */}
         <Section>
-          {/* Not "N saved". These live in component state — no bucket, no
-              AsyncStorage, no upload — so they are gone the moment this screen
-              unmounts. A member who reads "saved" may delete the original from
-              their camera roll, which is the one outcome this label must not
-              cause. */}
-          <SectionHead title="Progress photos" note={photos.length > 0 ? `${photos.length} on screen` : undefined} />
+          {/* "N saved" is now the truth: every one of these is a file in the
+              private `photos` bucket and a row in `progress_photos`. The note
+              is deliberately absent while the list is still loading and while
+              it is genuinely empty — in both of those the body below says
+              which, and a note reading "0 saved" would collapse them into one. */}
+          <SectionHead title="Progress photos" note={photosNote(photos) ?? undefined} />
           <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.lg }}>
-            <View style={{ flex: 1 }}><Ghost label="Upload" onPress={() => addPhoto(false)} /></View>
-            <View style={{ flex: 1 }}><Ghost label="Photo" onPress={() => addPhoto(true)} /></View>
-            <View style={{ flex: 1 }}><Cta label="AI check" wide onPress={() => physiqueCheck(false)} /></View>
+            <View style={{ flex: 1 }}><Ghost label="Upload" onPress={() => { if (!photoBusy) addPhoto(false); }} /></View>
+            <View style={{ flex: 1 }}><Ghost label="Photo" onPress={() => { if (!photoBusy) addPhoto(true); }} /></View>
+            <View style={{ flex: 1 }}><Cta label="AI check" wide disabled={photoBusy} onPress={() => physiqueCheck(false)} /></View>
           </View>
-          {photos.length === 0 ? (
+          {photoBusy ? <Text style={{ ...ty.caption, fontWeight: '500', color: t.ink2, marginBottom: sp.md }}>Saving to your account…</Text> : null}
+
+          {photos === null ? (
+            photosErr ? (
+              <View>
+                <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
+                  {photosErr} Nothing has been deleted — this screen only failed to read the list, so it cannot tell you what is there.
+                </Text>
+                <View style={{ alignSelf: 'flex-start' }}><Ghost label="Try again" onPress={loadPhotos} /></View>
+              </View>
+            ) : (
+              <Text style={{ ...ty.label, color: t.ink3 }}>Loading your photos…</Text>
+            )
+          ) : photos.length === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>
-              No photos yet — add one from your camera or library, then tap two to compare before → after.
-              They stay on this screen only: nothing is uploaded, and they are gone when you leave, so keep
-              the originals in your camera roll.
+              No photos yet — add one from your camera or library. They are saved privately to your account,
+              so they are here on any device you sign in to, and nobody else can see them, your coach included.
+              Tap two to compare before → after; press and hold one to delete it for good.
             </Text>
           ) : (
             <View>
-              {cmp.length === 2 ? (() => {
-                const a = photos[cmp[0]], b = photos[cmp[1]];
-                const older = Date.parse(a.at) <= Date.parse(b.at) ? a : b;
-                const newer = older === a ? b : a;
-                const days = Math.abs(Math.round((Date.parse(newer.at) - Date.parse(older.at)) / 86400000));
-                const pair: [string, { uri: string; at: string }][] = [['Before', older], ['After', newer]];
+              {(() => {
+                const sel = comparePair(photos, cmp);
+                if (!sel) return (
+                  <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>Tap two photos to compare before → after. Press and hold to delete one.</Text>
+                );
+                const pair: [string, ProgressPhoto][] = [['Before', sel.before], ['After', sel.after]];
                 return (
                   <View style={{ marginBottom: sp.lg }}>
                     <View style={{ flexDirection: 'row', gap: sp.md }}>
                       {pair.map(([label, ph]) => (
                         <View key={label} style={{ flex: 1 }}>
-                          <Image source={{ uri: ph.uri }} style={{ width: '100%', height: 220, borderRadius: radius.md, backgroundColor: t.surface2 }} />
+                          {ph.url ? (
+                            <Image source={{ uri: ph.url }} style={{ width: '100%', height: 220, borderRadius: radius.md, backgroundColor: t.surface2 }} />
+                          ) : (
+                            <View style={{ width: '100%', height: 220, borderRadius: radius.md, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center', paddingHorizontal: sp.md }}>
+                              <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center' }}>Picture unavailable</Text>
+                            </View>
+                          )}
                           <Text style={{ ...ty.label, fontWeight: '500', color: t.ink, marginTop: 6 }}>{label}</Text>
-                          <Text style={{ ...ty.caption, color: t.ink3 }}>{new Date(ph.at).toLocaleDateString()}</Text>
+                          <Text style={{ ...ty.caption, color: t.ink3 }}>{new Date(ph.takenAt).toLocaleDateString()}</Text>
                         </View>
                       ))}
                     </View>
-                    <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.sm }}>{days === 0 ? 'Same day' : `${days} day${days === 1 ? '' : 's'} apart`}</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.sm }}>{sel.days === null ? '—' : sel.days === 0 ? 'Same day' : `${sel.days} day${sel.days === 1 ? '' : 's'} apart`}</Text>
                   </View>
                 );
-              })() : (
-                <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>Tap two photos to compare before → after.</Text>
-              )}
+              })()}
+              {/* Oldest first, left to right — the strip reads as time passing,
+                  which is the whole point of keeping them. */}
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.md }}>
-                {photos.map((p, i) => {
-                  const selIdx = cmp.indexOf(i);
+                {photos.map((p) => {
+                  const selIdx = cmp.indexOf(p.id);
                   return (
-                    <Pressable key={i} onPress={() => toggleCmp(i)}>
+                    <Pressable key={p.id} onPress={() => toggleCmp(p.id)} onLongPress={() => removePhoto(p)} delayLongPress={400}
+                      accessibilityRole="button" accessibilityLabel={`Progress photo from ${new Date(p.takenAt).toLocaleDateString()}`} accessibilityHint="Tap to compare, press and hold to delete">
                       <View style={{ borderRadius: radius.md, borderWidth: selIdx >= 0 ? 2 : 0, borderColor: t.brand, overflow: 'hidden' }}>
-                        <Image source={{ uri: p.uri }} style={{ width: 110, height: 150, backgroundColor: t.surface2 }} />
+                        {p.url ? (
+                          <Image source={{ uri: p.url }} style={{ width: 110, height: 150, backgroundColor: t.surface2 }} />
+                        ) : (
+                          // The row is here and the file is not. Show the gap
+                          // rather than a blank frame that looks like a photo
+                          // still loading, or nothing at all.
+                          <View style={{ width: 110, height: 150, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center', paddingHorizontal: sp.sm }}>
+                            <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center' }}>Picture{'\n'}unavailable</Text>
+                          </View>
+                        )}
                         {selIdx >= 0 ? <View style={{ position: 'absolute', top: 6, right: 6, width: 20, height: 20, borderRadius: radius.pill, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}><Text style={{ ...ty.caption, fontWeight: '600', color: t.brandInk }}>{selIdx + 1}</Text></View> : null}
                       </View>
-                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, textAlign: 'center' }}>{new Date(p.at).toLocaleDateString()}</Text>
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, textAlign: 'center' }}>{new Date(p.takenAt).toLocaleDateString()}</Text>
                     </Pressable>
                   );
                 })}
               </ScrollView>
+              {(missingFileCount(photos) ?? 0) > 0 ? (
+                <Text style={{ ...ty.caption, color: t.warn, marginTop: sp.md }}>
+                  {missingFileCount(photos) === 1 ? 'One of these has no picture behind it any more.' : `${missingFileCount(photos)} of these have no picture behind them any more.`} Press and hold to clear it.
+                </Text>
+              ) : null}
             </View>
           )}
         </Section>

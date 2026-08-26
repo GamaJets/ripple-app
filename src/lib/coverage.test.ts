@@ -16,6 +16,7 @@ import { serviceState, nextServiceDue, usableUnits, outOfServiceUnits, capacityF
 import { parseCsv, parseSheet, sniffDelimiter, mapColumns } from './csv';
 import { parseMoneyCents, parseDate, detectDateOrder, previewMembers, previewPayments, previewPlans, describePreview, MEMBER_ALIASES } from './csvImport';
 import { classEntry, ptEntry, mergeTimetable, overlapping, entriesAt, floorAt, floorByHour, clashes, summariseBoard, slotBlocker, type PtSlot } from './gymPtSchedule';
+import { groupSessions, sessionKey, sessionDuration, sessionActivity, sessionKcal, sessionDistanceMeters, planSession, planWrite, summariseResult, HK_WRITE_ACTIVITIES, type Ledger } from './wearables/appleHealthWrite';
 import { payroll30For, payrollBlocker, type GymTrainer } from './gymTrainers';
 import { gymRollup } from './ownerAnalytics';
 import { isDelivered, isAwaitingOutcome, isPayable, payrollByTrainer, payrollTotal, settlementBlocker, settleableSessions, settlementAmount, settleBlocker, PAY_DELIVERED_ONLY, type PtSession } from './gymSessions';
@@ -24,6 +25,7 @@ import { remainingUses, isExpired, isRedeemable, expiryFor, passRevenueCents, su
 import { estimateDish, searchDishes, DISHES } from './restaurant';
 import { normaliseEmail, inviteState, isExpired as inviteExpired, isRedeemable as inviteRedeemable, expiryFor as inviteExpiryFor, daysUntilExpiry, inviteBlocker, screenInvites, summariseInvites, DEFAULT_VALID_DAYS, type MemberInvite } from './memberInvites';
 import { weekStartOf, weekDays, shiftWeek, hoursSpanned, shiftHours, hourLabel, buildRota, coverage, shiftsByDay, rosterByTrainer, summariseRota, shiftFromHours, type Shift, type DemandBlock } from './gymRota';
+import { photoObjectPath, isOwnPhotoPath, sortOldestFirst, comparePair, daysApart, photosNote, missingFileCount, rowToPhoto, PHOTO_PATH_RE, type ProgressPhoto } from './progressPhotos';
 import type { TrainingSession } from './types';
 
 const errors: string[] = [];
@@ -1373,6 +1375,185 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
      'a duration that did not parse is refused');
   ok(slotBlocker({ trainerId: 't1', startsAt: '2026-09-01T17:00:00Z', durationMin: 60 }) === null,
      'a complete slot is allowed through');
+}
+
+// ── progress photos ──
+// The storage layout is load-bearing: `photos/<auth.uid()>/<file>`, because the
+// policies in supabase/parts/45-progress-photos.sql grant own-folder access on
+// `(storage.foldername(name))[1] = auth.uid()::text` and nothing else. A key
+// built any other way is refused by the database, not by this code, so these
+// pin the shape the two sides agreed on.
+{
+  const UID = 'fc0f5920-8063-47a8-92b0-94ea1d196cdd';
+  const OTHER = '11111111-2222-3333-4444-555555555555';
+  const p = photoObjectPath(UID, 1756000000000, 'abc123xy');
+  ok(p === UID + '/1756000000000-abc123xy.jpg', 'the object key is <uid>/<millis>-<token>.jpg');
+  ok(p.split('/')[0] === UID, 'the first path segment is the uid the storage policy reads');
+  ok(PHOTO_PATH_RE.test(p), 'a generated key matches the shape the server will purge');
+
+  ok(isOwnPhotoPath(p, UID) === true, 'my own key is mine');
+  ok(isOwnPhotoPath(p, OTHER) === false, 'somebody else\'s key is not mine');
+  ok(isOwnPhotoPath('../' + UID + '/x.jpg', UID) === false, 'a traversal prefix is not my folder');
+  ok(isOwnPhotoPath(UID + '/a b.jpg', UID) === false, 'a key needing URL escaping is refused');
+  ok(isOwnPhotoPath(UID + '.jpg', UID) === false, 'a key with no folder at all is refused');
+
+  const ph = (id: string, takenAt: string, url: string | null = 'u'): ProgressPhoto =>
+    ({ id, path: UID + '/' + id + '.jpg', takenAt, url, weightKg: null, bodyFatPct: null });
+  const mixed = [ph('c', '2026-03-01T00:00:00Z'), ph('a', '2026-01-01T00:00:00Z'), ph('b', '2026-02-01T00:00:00Z')];
+  ok(sortOldestFirst(mixed).map((x) => x.id).join('') === 'abc', 'a progress view reads oldest first');
+  ok(mixed.map((x) => x.id).join('') === 'cab', 'sorting does not mutate the caller\'s array');
+
+  // The pair is ordered by when the photos were TAKEN, not by tap order —
+  // tapping the newer one first must still label it "after".
+  const pair = comparePair(sortOldestFirst(mixed), ['c', 'a']);
+  ok(pair !== null && pair.before.id === 'a' && pair.after.id === 'c', 'before/after follows the dates, not the taps');
+  ok(pair !== null && pair.days === 59, 'and the gap is whole days apart');
+  ok(comparePair(mixed, ['a']) === null, 'one photo is not a comparison');
+  ok(comparePair(mixed, ['a', 'a']) === null, 'the same photo twice is not a comparison');
+  ok(comparePair(mixed, ['a', 'zz']) === null, 'a photo that is not there is not a comparison');
+  ok(daysApart('2026-01-01T00:00:00Z', 'nonsense') === null, 'an unreadable date has no gap, not zero');
+
+  // The label this whole feature exists to make honest. It used to read
+  // "N on screen" because nothing was stored.
+  ok(photosNote(null) === null, 'not loaded yet claims nothing');
+  ok(photosNote([]) === null, 'loaded and empty claims nothing either — the body says which');
+  ok(photosNote([ph('a', '2026-01-01T00:00:00Z')]) === '1 saved', 'one saved photo says saved');
+  ok(photosNote(mixed) === '3 saved', 'three saved photos say saved');
+
+  // "Not loaded" and "loaded, nothing missing" must not both be 0.
+  ok(missingFileCount(null) === null, 'nothing loaded is not zero missing');
+  ok(missingFileCount([ph('a', '2026-01-01T00:00:00Z')]) === 0, 'a signed photo is not missing');
+  ok(missingFileCount([ph('a', '2026-01-01T00:00:00Z', null)]) === 1, 'a row whose file would not sign counts as missing');
+
+  // No invented values: a scan-less photo carries nulls, not zeroes.
+  const row = rowToPhoto({ id: 'r1', client_id: UID, taken_at: '2026-01-01T00:00:00Z', image_path: UID + '/1-a.jpg', weight_kg: null, body_fat_pct: null }, null);
+  ok(row.weightKg === null && row.bodyFatPct === null, 'a photo with no measurements carries null, never 0');
+  ok(row.url === null, 'a photo that could not be signed has no url');
+}
+
+
+// ── writing sessions back to Apple Health ───────────────────────────────────
+// The only path in this app that PUTS something in a person's permanent health
+// record. A mistake here is not a wrong pixel: it is a row they have to find
+// and delete by hand in Apple's Health app.
+{
+  const T1 = '2026-08-20T18:00:00.000Z';
+  const T2 = '2026-08-21T07:30:00.000Z';
+  const lift = (t: string, name: string, extra: Partial<WorkoutEntry> = {}): WorkoutEntry =>
+    ({ t, exercise: name, sets: [[8, 60], [8, 62.5]] as [number, number][], ...extra });
+
+  const pushDay = ['Bench Press', 'Incline Press', 'Dip', 'Lateral Raise',
+                   'Overhead Press', 'Cable Fly', 'Triceps Pushdown', 'Skullcrusher']
+    .map((n) => lift(T1, n));
+  ok(groupSessions(pushDay).length === 1, 'eight exercises at one timestamp are ONE session, not eight');
+  ok(groupSessions(pushDay)[0].entries.length === 8, 'and that session keeps all eight exercises');
+  ok(groupSessions([...pushDay, lift(T2, 'Back Squat')]).length === 2, 'a second timestamp is a second session');
+
+  ok(sessionKey('2026-08-20T18:00:00.000Z') === sessionKey('2026-08-20T19:00:00+01:00'),
+     'the same instant spelled two ways is ONE idempotency key');
+  ok(sessionKey(T1) !== sessionKey(T2), 'different sessions get different keys');
+
+  ok(sessionDuration(pushDay) === null,
+     'a strength session with no HR and no stated length has NO duration — not a default');
+  ok(sessionDuration([]) === null, 'no entries means no duration');
+
+  const zoned = pushDay.map((e, i) => (i === 0 ? { ...e, zones: { z1: 300, z2: 600, z3: 900, z4: 300, z5: 60 } } : e));
+  const dz = sessionDuration(zoned)!;
+  ok(dz !== null && dz.source === 'zones' && dz.seconds === 2160,
+     'seconds measured from a heart-rate series are the session length');
+  const zonedTwice = zoned.map((e) => ({ ...e, zones: { z1: 300, z2: 600, z3: 900, z4: 300, z5: 60 } }));
+  ok(sessionDuration(zonedTwice)!.seconds === 2160,
+     'zone seconds are the largest measured span, never the sum across entries');
+
+  const cardioPair: WorkoutEntry[] = [
+    { t: T2, exercise: 'Rowing', cardio: { mins: 12, dist: 2.4, unit: 'km' } },
+    { t: T2, exercise: 'Rowing', cardio: { mins: 8, dist: 1.6, unit: 'km' } },
+  ];
+  const dc = sessionDuration(cardioPair)!;
+  ok(dc.source === 'cardio' && dc.seconds === 20 * 60,
+     'consecutive cardio blocks at one timestamp add up to the session length');
+
+  const stated = pushDay.map((e) => ({ ...e, sessionMins: 52 }));
+  const ds = sessionDuration(stated)!;
+  ok(ds.source === 'entered' && ds.seconds === 52 * 60,
+     'a length the person typed is real data and is used when nothing measured one');
+  ok(sessionDuration(pushDay.map((e) => ({ ...e, sessionMins: 0 }))) === null,
+     'a typed 0 is an unfinished form, not a zero-minute workout');
+  ok(sessionDuration(zoned.map((e) => ({ ...e, sessionMins: 999 })))!.source === 'zones',
+     'a measurement outranks a typed number when both exist');
+
+  ok(sessionActivity(pushDay).activity === 'TraditionalStrengthTraining',
+     'rows of [reps, kg] with no cardio are strength training');
+  ok(sessionActivity(cardioPair).activity === 'Rowing', 'a session of rows is Rowing');
+  const mixed = [...pushDay, { t: T1, exercise: 'Cycling', cardio: { mins: 20, dist: 8, unit: 'km' } }];
+  ok(sessionActivity(mixed).activity === 'Other' && sessionActivity(mixed).specific === false,
+     'lifting plus a bike finisher is NOT a cycling workout — it is Other, and says so');
+  ok(sessionActivity([{ t: T1, exercise: 'Underwater Basket Weaving' }]).activity === 'Other',
+     'an exercise Health has no name for falls back to the honest generic');
+
+  // The bridge files an unrecognised activity string as AMERICAN FOOTBALL
+  // rather than erroring, so every string this code can emit must be known.
+  for (const entries of [pushDay, cardioPair, mixed, [{ t: T1, exercise: 'Nonsense' }] as WorkoutEntry[]]) {
+    ok(HK_WRITE_ACTIVITIES.has(sessionActivity(entries).activity),
+       'every activity this code can produce must be one Apple Health defines');
+  }
+  ok(!HK_WRITE_ACTIVITIES.has('Circuit') && HK_WRITE_ACTIVITIES.has('Other'),
+     'the allowlist is the bridge dictionary, not the app vocabulary');
+
+  ok(sessionKcal(cardioPair.map((e) => ({ ...e, kcal: 120 }))) === 240,
+     'energy is the sum when every entry recorded some');
+  ok(sessionKcal([{ ...cardioPair[0], kcal: 120 }, cardioPair[1]]) === null,
+     'a session where only some entries recorded energy writes NO energy, not a partial total');
+  ok(sessionKcal(pushDay) === null, 'a session that recorded no energy writes none');
+
+  ok(sessionDistanceMeters([cardioPair[0]]) === 2400, 'one recorded distance converts to metres');
+  ok(sessionDistanceMeters(cardioPair) === null, 'two distances in one session are not summed into a fiction');
+  ok(sessionDistanceMeters([{ t: T2, exercise: 'Walk', cardio: { mins: 30, dist: 0, unit: 'km' } }]) === null,
+     'dist 0 is the importer saying "not reported" — never a measurement of standing still');
+  ok(sessionDistanceMeters([{ t: T2, exercise: 'Run', cardio: { mins: 30, dist: 5, unit: 'mi' } }]) === 8047,
+     'miles convert rather than being written as kilometres');
+
+  const blocked = planSession(groupSessions(pushDay)[0]) as any;
+  ok(blocked.code === 'no-duration', 'a session with no length is refused, with a code');
+  ok(/length/i.test(blocked.reason) && !/\b45\b|\bdefault/i.test(blocked.reason),
+     'and the refusal explains what is missing without offering a substitute');
+
+  const ready = planSession(groupSessions(stated)[0]) as any;
+  ok(ready.code === undefined && ready.activity === 'TraditionalStrengthTraining',
+     'the same session becomes writable once its length is stated');
+  ok(ready.startISO === new Date(T1).toISOString(), 'the workout starts when the session did');
+  ok(Date.parse(ready.endISO) - Date.parse(ready.startISO) === 52 * 60 * 1000,
+     'and ends exactly one stated duration later — no rounding into invented time');
+  ok(ready.kcal === null && ready.distanceMeters === null,
+     'nothing unrecorded is filled in on the way to Health');
+
+  const log2: WorkoutEntry[] = [...stated, ...cardioPair];
+  const fresh = planWrite(log2, {});
+  ok(fresh.writable.length === 2 && fresh.alreadyWritten === 0, 'two sessions, both writable, first time');
+  const led: Ledger = { [sessionKey(T1)]: { at: T1, uuid: 'u', activity: 'TraditionalStrengthTraining', seconds: 3120 } };
+  const again = planWrite(log2, led);
+  ok(again.writable.length === 1 && again.alreadyWritten === 1,
+     'a session already in Health is never offered a second time');
+  ok(again.writable[0].t === T2, 'and the one still to write is the other one');
+  ok(planWrite([...log2, lift(T1, 'Ninth Exercise', { sessionMins: 52 })], led).alreadyWritten === 1,
+     'adding an exercise to a written session does not make it a new one to write');
+
+  const partial = summariseResult({
+    state: 'done',
+    written: [1, 2, 3, 4, 5].map((n) => ({ key: 'k' + n, activityLabel: 'Rowing', t: T2, uuid: null })),
+    failed: [6, 7, 8, 9].map((n) => ({ key: 'k' + n, activityLabel: 'Rowing', t: T2, reason: 'HealthKit said no' })),
+    skipped: [], alreadyWritten: 0,
+  });
+  ok(partial.includes('5 of 9') && partial.includes('4 failed'),
+     'writing 5 of 9 says exactly that — the count attempted and the count that failed');
+  ok(summariseResult({ state: 'done', written: [{ key: 'k', activityLabel: 'Rowing', t: T2, uuid: null }], failed: [], skipped: [], alreadyWritten: 0 })
+       === 'Wrote 1 session to Apple Health.',
+     'a clean run says so plainly');
+  const noneWritten = summariseResult({ state: 'done', written: [], failed: [], skipped: [blocked], alreadyWritten: 0 });
+  ok(noneWritten.includes('no recorded length') && !/^Wrote/.test(noneWritten),
+     'a run that wrote nothing does not open with "Wrote"');
+  ok(summariseResult({ state: 'denied', reason: 'Health is not allowing this.' }) === 'Health is not allowing this.',
+     'a refusal is reported as the user’s decision, not as a failure of ours');
 }
 
 if (errors.length) { console.log('COVERAGE FAILURES:\n' + errors.join('\n')); process.exit(1); }

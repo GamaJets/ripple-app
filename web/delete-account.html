@@ -81,7 +81,7 @@
   <ul>
     <li><strong>Your identity</strong> — name, email address, profile photo.</li>
     <li><strong>Training</strong> — workouts, logged sets, cardio and calorie entries, personal records.</li>
-    <li><strong>Body data</strong> — InBody scans and body measurements.</li>
+    <li><strong>Body data</strong> — InBody scans, body measurements and progress photos, including the image files themselves.</li>
     <li><strong>Check-ins, habit logs and food logs.</strong></li>
     <li><strong>Messages with a coach.</strong> The thread belongs to the member's account, so deleting a member account removes the thread from the coach's side too.</li>
     <li><strong>Coaching links and programmes</strong> — the link to your coach, and any programme assigned to you.</li>
@@ -90,7 +90,9 @@
     <li><strong>Push notification tokens</strong>, so notifications stop.</li>
     <li><strong>Connected-service tokens</strong> for WHOOP, Oura, Fitbit, Garmin and Spotify. Those connections end.</li>
   </ul>
-  <p><strong>Progress photos, specifically.</strong> There are none to delete, because we do not hold any. No part of Repple, Repple Coach or Repple Studio can take or upload one: the table and the private storage bucket built for the feature are both empty, and nothing writes to them. The one bucket the apps do write to holds coaches' exercise demonstration videos, which are not yours and are not personal data about you. We would rather say this than list photos as deleted, because that would be a promise about a file that does not exist. Two things follow, and we would rather you heard them now. If the feature ever ships, this page is corrected before it does. And deleting an account removes database rows, not stored files — nothing in the database reaches into file storage — so once there are images to remove, removing them is a separate job.</p>
+  <p><strong>Progress photos, specifically.</strong> Progress photos are now stored, so they are now deleted &mdash; and that took more than deleting a row. The photo record and the image file are two different things in two different places, and removing a database row does not remove a file. So every deletion, whether you remove one photo or the whole account, records the file&rsquo;s path the moment the row goes, and the file is then deleted against that record. Nothing is marked deleted until the storage service confirms it. A file we could not remove stays visibly outstanding rather than being quietly written off.</p>
+
+  <p>Nobody else can see them. Your coach cannot: progress photos are the one thing in Repple a coach has no read access to, deliberately and at both layers &mdash; the record and the file are locked separately. If sharing with a coach is ever offered it will be something you switch on for a specific photo, not something that is already true.</p>
 
   <p>Apple Health is a permission held on your iPhone, not data we store a key for. Deleting the account does not touch it. Revoke it in <strong>iOS Settings → Privacy &amp; Security → Health → Repple</strong>, or by removing the app. Anything imported from Health into your training log is deleted with the log.</p>
 
