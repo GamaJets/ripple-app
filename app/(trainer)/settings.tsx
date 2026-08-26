@@ -38,7 +38,7 @@ import { sp, layout, hairline, type as ty } from '../../src/theme/scale';
 import { BuildInfo } from '../../src/ui/BuildInfo';
 import { useAuth } from '../../src/ui/auth';
 import { useTenant } from '../../src/ui/tenant';
-import { exportMyData, requestAccountDeletion, withdrawAccountDeletion, fetchDeletionRequestedAt } from '../../src/lib/gdpr';
+import { exportMyDataDetailed, requestAccountDeletion, withdrawAccountDeletion, fetchDeletionRequestedAt } from '../../src/lib/gdpr';
 import { shareTextFile } from '../../src/lib/exportShare';
 import { reportError } from '../../src/lib/reportError';
 
@@ -120,8 +120,20 @@ export default function TrainerSettings() {
     if (exporting) return;
     setExporting(true);
     try {
-      const json = await exportMyData();
+      const res = await exportMyDataDetailed();
+      const json = res.json;
       await shareTextFile(json, 'repple-coach-my-data.json', 'application/json', 'Export my data');
+      if (!res.complete) {
+        // A partial export handed over silently is the same failure one level
+        // up: somebody deletes their account believing they have a copy.
+        Alert.alert(
+          'That copy is incomplete',
+          `${res.failed.length} part${res.failed.length === 1 ? '' : 's'} of your record could not be read `
+          + `(${res.failed.map((f) => f.table).join(', ')}). The file has been saved and says so inside, `
+          + 'but do not treat it as a full copy, and do not delete your account on the strength of it. '
+          + 'Try again in a moment, or email support@repplefitness.com.',
+        );
+      }
     } catch (e) {
       reportError('trainerSettings.export', e);
       Alert.alert('Export failed', 'Nothing was exported. Check your connection and try again.');

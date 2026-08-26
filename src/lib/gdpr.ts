@@ -14,19 +14,89 @@ import { USE_SUPABASE } from './config';
 
 const TABLES = ['profiles', 'clients', 'workouts', 'food_logs', 'measurements', 'check_ins', 'habit_logs', 'scans', 'messages', 'coach_nutrition', 'assigned_programs', 'class_bookings', 'referrals', 'feedback'];
 
-export async function exportMyData(): Promise<string> {
+/**
+ * Everything this account holds, as JSON — and an honest statement of whether
+ * that is actually everything.
+ *
+ * THE BUG THIS REPLACES was the worst instance of a family that has bitten this
+ * codebase six times. It read each table with
+ *
+ *     const { data } = await supabase.from(tbl).select('*');
+ *     out[tbl] = data ?? [];
+ *
+ * and no `.error` check. supabase-js RESOLVES on a database error, so an RLS
+ * denial or a 500 arrived as `data: null`, fell through `?? []`, and was
+ * written into the file as an EMPTY ARRAY. The `catch` beside it only fired if
+ * the network died outright.
+ *
+ * So a member exported their data, opened a file that said `"workouts": []`,
+ * and reasonably concluded they had none. That is not a cosmetic failure here:
+ * web/delete-account.html tells people to take a copy FIRST and says plainly
+ * that afterwards there is nothing left to export. The export is the last
+ * record they will ever have of their own training, and it was capable of
+ * quietly claiming they had never trained.
+ *
+ * Now every table is checked, and a table that could not be read says so in
+ * the file itself rather than looking empty. The bundle carries a `complete`
+ * flag and a `failed` list so the caller — and the person reading the JSON
+ * years later — can tell a full record from a partial one.
+ */
+export interface ExportResult {
+  json: string;
+  /** True only when every table was read. */
+  complete: boolean;
+  /** Tables that could not be read, with the reason. Empty when complete. */
+  failed: { table: string; reason: string }[];
+}
+
+export async function exportMyDataDetailed(): Promise<ExportResult> {
   const out: Record<string, unknown> = { app: 'Repple', exportedAt: new Date().toISOString() };
-  if (!USE_SUPABASE) { out.note = 'Local/demo mode — no server-stored data.'; return JSON.stringify(out, null, 2); }
-  try {
-    const { data: auth } = await supabase.auth.getUser();
-    out.userId = auth?.user?.id ?? null;
-    out.email = auth?.user?.email ?? null;
-    for (const tbl of TABLES) {
-      try { const { data } = await supabase.from(tbl).select('*'); out[tbl] = data ?? []; }
-      catch { out[tbl] = 'unavailable'; }
+  if (!USE_SUPABASE) {
+    out.note = 'Local/demo mode — no server-stored data.';
+    out.complete = true;
+    return { json: JSON.stringify(out, null, 2), complete: true, failed: [] };
+  }
+
+  const failed: { table: string; reason: string }[] = [];
+
+  const { data: auth, error: authErr } = await supabase.auth.getUser();
+  if (authErr) failed.push({ table: 'account', reason: authErr.message });
+  out.userId = auth?.user?.id ?? null;
+  out.email = auth?.user?.email ?? null;
+
+  for (const tbl of TABLES) {
+    try {
+      const { data, error } = await supabase.from(tbl).select('*');
+      // The check that was missing. Without it a refusal becomes [].
+      if (error) throw error;
+      out[tbl] = data ?? [];
+    } catch (e: any) {
+      const reason = e?.message ? String(e.message) : 'could not be read';
+      failed.push({ table: tbl, reason });
+      // Never `[]`. An object cannot be mistaken for "you had none of these",
+      // and it survives into the file somebody opens in a year.
+      out[tbl] = { error: 'NOT EXPORTED — this table could not be read', reason };
     }
-  } catch { /* ignore */ }
-  return JSON.stringify(out, null, 2);
+  }
+
+  const complete = failed.length === 0;
+  out.complete = complete;
+  if (!complete) {
+    out.warning =
+      'THIS EXPORT IS INCOMPLETE. ' + failed.length + ' of ' + TABLES.length +
+      ' tables could not be read and are marked with an "error" object rather than data. ' +
+      'Do not treat this file as a full copy of your account, and do not delete your ' +
+      'account on the strength of it. Try again, or email support@repplefitness.com.';
+    out.notExported = failed;
+  }
+  return { json: JSON.stringify(out, null, 2), complete, failed };
+}
+
+/** Back-compatible wrapper: the JSON only. Prefer exportMyDataDetailed, which
+ *  can tell the caller the file is partial — a screen that cannot say so will
+ *  hand somebody an incomplete record and call it their data. */
+export async function exportMyData(): Promise<string> {
+  return (await exportMyDataDetailed()).json;
 }
 
 /** Flag the account for erasure. Returns true if the request was recorded. */
