@@ -685,3 +685,62 @@ table.data.vs { min-width: 660px; }
 table.data.vs th:first-child, table.data.vs td:first-child { width: 26%; }
 table.data.vs td + td { border-left: var(--hair); width: 37%; }
 table.data.vs td .job { display: block; color: var(--ink); font-weight: 500; font-size: 15px; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   GET THE APPS — icons and the download call to action.
+
+   The three app icons are inlined as SVG rather than linked as PNG: each is
+   under 700 bytes, they stay sharp at any size, and inlining keeps the page
+   to a single request. The source files are assets/repple-icon-*.svg.
+
+   ONE TRAP WORTH RECORDING. All three source files declare their gradient as
+   id="tile". Inlining them unchanged puts three elements with the same id on
+   one page, and every icon then resolves url(#tile) to whichever came first —
+   so Coach and Studio would both wear the client's teal. Each inlined copy
+   therefore carries its own id: tile-client, tile-coach, tile-studio.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.appicon {
+  width: 56px; height: 56px; border-radius: 13px; flex: none; display: block;
+  box-shadow: 0 6px 18px -8px rgba(0,0,0,.55);
+}
+.appicon.lg { width: 76px; height: 76px; border-radius: 18px; }
+.appicon.sm { width: 34px; height: 34px; border-radius: 8px; }
+
+/* The strip that sits directly under the hero. Three apps, each with its own
+   icon and its own two store links, before any explanation of anything. */
+.getbar {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: clamp(16px, 2.4vw, 26px);
+  padding: clamp(22px, 3vw, 30px);
+  border: var(--rule); border-radius: 16px;
+  background: var(--panel); box-shadow: var(--shadow);
+  margin: 6px 0 4px;
+}
+@media (max-width: 900px) { .getbar { grid-template-columns: 1fr; } }
+
+.getbar .app { display: flex; gap: 15px; align-items: flex-start; min-width: 0; }
+.getbar .who { min-width: 0; }
+.getbar h3 { font-size: 16.5px; margin: 1px 0 2px; letter-spacing: -0.015em; }
+.getbar .role { font-size: 12.5px; color: var(--ink3); margin: 0 0 11px; }
+.getbar .stores { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* Store buttons. Deliberately text, not Apple's or Google's badge artwork —
+   those are trademarked assets with their own layout and clear-space rules,
+   and a hand-drawn imitation is worse than a plain honest button. */
+.store {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 8px 13px; border-radius: 9px; border: var(--rule);
+  background: var(--panel2); color: var(--ink);
+  font-size: 13px; font-weight: 600; white-space: nowrap;
+}
+.store:hover { border-color: var(--accent); color: var(--ink); }
+.store svg { flex: none; }
+.store .lab { display: flex; flex-direction: column; line-height: 1.15; }
+.store .lab small { font-size: 9.5px; font-weight: 500; color: var(--ink3); letter-spacing: .02em; }
+
+/* Header button, so "get the app" is reachable from every page without
+   scrolling to the bottom of anything. */
+nav.site a.get { display: inline-flex; align-items: center; gap: 7px; }
+nav.site a.get .appicon { width: 19px; height: 19px; border-radius: 5px; box-shadow: none; }
+@media (max-width: 720px) { nav.site a.get .appicon { display: none; } }
