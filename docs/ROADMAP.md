@@ -128,11 +128,31 @@ a gym with no door log is told nothing about who has lapsed.
 Retention is where a gym's economics actually live, and it is a coaching
 problem before it is a revenue one.
 
-- Lapse risk per member, from attendance pattern breaks.
-- The intervention loop: surface, contact, record what was tried, measure.
-- Guest-pass conversion — `guestsByHost` in `gymPasses.ts` is the first piece.
-- Absence detection — `gymVisits.lastSeenDays` is the input; the membership
-  join (who is frozen, who cancelled) is still to do.
+**All four are built** (checked against the code on 26 Aug 2026).
+
+| Item | Where |
+|---|---|
+| Lapse risk per member | `src/lib/clientDrift.ts` — a break in the member's OWN pattern, not a threshold. No baseline means UNKNOWN, never healthy. |
+| The intervention loop | `supabase/parts/50-interventions.sql` + `src/lib/interventions.ts`. Judged on a window taken from the member's own rate, and deliberately produces NO success rate — everyone in the table was contacted because they were drifting, so there is no untouched group to compare against. |
+| Guest-pass conversion | `src/lib/passConversion.ts` + `studio-web/app/passes`. Passes to anonymous walk-ins are excluded from every denominator rather than counted as failures. |
+| Absence detection | `retentionRead` in `memberView.ts`. The membership join is done: absence is only claimed for a member the gym still expects to see, and `absenceUnknownBecause` names frozen and cancelled separately. |
+
+---
+
+## What is left, honestly
+
+Phases 1, 2 and 4 are done. Phase 3 needs Stripe keys. **Phase 5 should not be
+started yet, and the roadmap already says why**: "Only meaningful once phases
+1–4 have produced enough record to stand on", and "Seasonality — needs a full
+year before it says anything at all."
+
+There is no real gym on this. Revenue projection, class re-timing value and
+capacity modelling built against an empty database would be exactly the
+invented-figure problem the whole project has spent its time removing, one
+level up: a forecast with nothing behind it.
+
+The remaining work that changes anything is in `docs/LAUNCH-CHECKLIST.md`, and
+most of it needs a person rather than a commit.
 
 ---
 
