@@ -19,6 +19,10 @@ export const NAV: NavItem[] = [
   // worse than one that offers nothing.
   { href: '/', label: 'Overview', roles: ['owner'] },
   { href: '/members', label: 'Members', roles: ['owner'] },
+  // Beside Members because it is the same record asked as a gym-wide
+  // question: Members answers "how is Sara doing?", this answers
+  // "are we keeping people?".
+  { href: '/retention', label: 'Retention', roles: ['owner'] },
   // Beside Members, and owner-only for the same reason /close is: it carries
   // every colleague's pay and delivery record on one screen. A trainer must not
   // be offered a link to their own performance file, still less to everyone

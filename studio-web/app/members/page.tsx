@@ -131,8 +131,18 @@ export default function Members() {
   const reads = dossiers && rec.visits.state === 'ready' && rec.bookings.state === 'ready'
     ? dossiers.map((d) => ({ d, r: retentionRead(d, { doorLogActive: !!active }) }))
     : null;
-  const offTimetable = reads?.filter((x) => x.r.stillTrainingOffTheTimetable) ?? null;
-  const absent = reads?.filter((x) => x.r.absentFromLiveDoorLog) ?? null;
+  // Both of these are claims ABOUT THE DOOR LOG, so neither survives a door
+  // log that is not demonstrably live. retentionRead correctly returns false
+  // for everybody when it is silent or unread — which filters to an empty
+  // array, which renders as "0". And "0 members are training off the
+  // timetable" reads as a finding when the truth is that we cannot tell.
+  //
+  // A dash reads as a gap. A zero reads as an answer. Only one of those is
+  // honest here, and the gym-wide view at /retention gates the same two
+  // figures the same way.
+  const doorLive = active === true;
+  const offTimetable = doorLive ? (reads?.filter((x) => x.r.stillTrainingOffTheTimetable) ?? null) : null;
+  const absent = doorLive ? (reads?.filter((x) => x.r.absentFromLiveDoorLog) ?? null) : null;
 
   return (
     <Shell me={me} gymName={gymName} current="/members">
@@ -171,8 +181,9 @@ export default function Members() {
           label="Off the timetable"
           text={offTimetable ? String(offTimetable.length) : null}
           note={
-            offTimetable == null
-              ? 'needs the door log and the bookings'
+            active === false ? 'no door log, so nobody can be seen instead'
+              : active === null ? 'door log not read'
+              : offTimetable == null ? 'needs the door log and the bookings'
               : 'stopped booking, still coming in'
           }
         />
@@ -180,8 +191,9 @@ export default function Members() {
           label="Not through the door"
           text={absent ? String(absent.length) : null}
           note={
-            absent == null ? 'needs the door log'
-              : active === false ? 'no door log to judge by'
+            active === false ? 'no door log to judge by'
+              : active === null ? 'door log not read'
+              : absent == null ? 'needs the door log'
               : `in ${DEFAULT_WINDOW_DAYS} days`
           }
         />

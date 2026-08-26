@@ -40,6 +40,7 @@ import {
   CLOSE_PARTS, CLOSE_LABEL, CLOSE_COST,
   type CloseRecord, type GymInvoice, type MonthWindow,
 } from './monthEnd';
+import { buildGymRetention, doorLogState, absenceBlocker, cohortFeasibility, monthOfDate, pointsPerMember, rateOf, suppressionNote, headline, pendingRetentionParts, MIN_COHORT_FOR_RATE, type RetentionRecord } from './gymRetention';
 import {
   buildStaff, brokenStaffParts, loadingStaffParts, staffCompleteness, staffWarning,
   caveatOf, compareStaff, STAFF_RANK, STAFF_STATUS_LABEL, STAFF_PARTS, STAFF_COST,
@@ -2744,6 +2745,219 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
 /** Find one person in a staff view under test. */
 function by2(v: ReturnType<typeof buildStaff>, id: string) {
   return v.members!.find((m) => m.trainerId === id)!;
+}
+
+// ── gym-wide retention (Phase 2 · Studio web: retention) ──
+//
+// The per-member read already existed. What did not was any roll-up, and a
+// roll-up is where the two lies live: a roster convicted of absence because
+// nobody installed a door reader, and a percentage over four people.
+{
+  const RNOW = Date.parse('2026-08-15T12:00:00Z');
+  const RDAY = 86_400_000;
+  const rAgo = (n: number) => new Date(RNOW - n * RDAY).toISOString();
+  const rng = (n: number) => Array.from({ length: n }, (_, i) => i);
+
+  const mem = (id: string, started: string, status: Membership['status']): Membership => ({
+    id: `m-${id}-${started}`, memberId: id, memberName: id, planId: 'p1', planName: 'Gym',
+    startedOn: started, endsOn: null, status,
+  });
+  const vis = (id: string, daysAgo: number, classId: string | null = null): Visit => ({
+    id: `v-${id}-${daysAgo}`, memberId: id, memberName: id, passId: null, classId,
+    enteredAt: rAgo(daysAgo), exitedAt: null, source: 'door', note: null,
+  });
+  const bk = (id: string, daysAgo: number, attended: boolean): MemberBooking => ({
+    bookingId: `b-${id}-${daysAgo}`, memberId: id, classId: `c-${daysAgo}`, classTitle: 'HIIT',
+    startsAt: rAgo(daysAgo), status: 'booked', attendedAt: attended ? rAgo(daysAgo) : null,
+  });
+  const rrec = (ms: Membership[], vs: Visit[], bs: MemberBooking[]): RetentionRecord => ({
+    memberships: sliceReady(ms), visits: sliceReady(vs),
+    bookings: sliceReady(bs), sessions: sliceReady<PtSession>([]),
+  });
+
+  // ── TRAP 2: a percentage over a handful of people ──
+  //
+  // Three cohorts: January is twelve and mature, March is three, August is
+  // twenty and started three weeks ago.
+  const roster: Membership[] = [
+    ...rng(12).map((i) => mem(`jan-${i}`, '2026-01-10', i < 9 ? 'active' : 'cancelled')),
+    ...rng(3).map((i) => mem(`mar-${i}`, '2026-03-05', i < 2 ? 'active' : 'cancelled')),
+    ...rng(20).map((i) => mem(`aug-${i}`, '2026-08-02', 'active')),
+    { ...mem('nodate', '2025-01-01', 'active'), startedOn: '' },
+  ];
+  const gc = buildGymRetention(rrec(roster, [], []), { now: RNOW });
+  const spine = gc.spine!;
+  const jan = spine.cohorts.find((c) => c.month === '2026-01')!;
+  const feb = spine.cohorts.find((c) => c.month === '2026-02')!;
+  const mar = spine.cohorts.find((c) => c.month === '2026-03')!;
+  const aug = spine.cohorts.find((c) => c.month === '2026-08')!;
+
+  ok(gc.summary.roster === 36 && gc.summary.onBooks === 32, 'the roster and the live memberships are counted');
+  ok(jan.joined === 12 && jan.onBooks === 9 && jan.lapsed === 3, 'January: twelve joined, nine still on the books');
+  ok(jan.retention === 0.75, 'a cohort of twelve, matured, does report its rate');
+  ok(mar.joined === 3, 'March took three joiners');
+  ok(mar.retention === null, 'A COHORT OF THREE REPORTS NO RETENTION PERCENTAGE — two of three is not a 67% retention rate, it is two people');
+  ok(mar.suppressed === 'too-small', 'and the row says which floor it failed rather than just showing a dash');
+  ok(mar.onBooks === 2 && mar.lapsed === 1, 'while still reporting the counts, which are true and useful');
+  ok((suppressionNote(mar) ?? '').includes('33.3'), 'the note states it in the cohort’s own terms: one member there is worth 33.3 points');
+  ok(suppressionNote(jan) === null, 'and a cohort that carries a rate has nothing to explain');
+  ok(aug.joined === 20 && aug.retention === null && aug.suppressed === 'too-young',
+    'a cohort twice the floor STILL gets no rate three weeks in — nobody who joined this month has had the chance to leave, so 100% would be a fact about the calendar');
+  ok(feb.joined === 0 && feb.retention === null,
+    'a month the gym recruited nobody is present at zero rather than skipped, and has no rate over no joiners');
+  ok(spine.undated === 1, 'the membership with no usable start date is in no cohort');
+  ok(spine.cohorts.reduce((a, c) => a + c.joined, 0) + spine.undated === gc.summary.roster,
+    'and nobody is lost between the roster and the spine');
+  ok(spine.reportable === 1, 'exactly one of the three cohorts clears both the floor and the maturity rule');
+  ok(spine.floorNote.includes('10') && spine.floorNote.includes('30 days'),
+    'the rule is stated on screen, not buried in the module');
+
+  // the arithmetic the floor comes from
+  ok(MIN_COHORT_FOR_RATE === 10, 'the floor is ten');
+  ok(pointsPerMember(10) === 10, 'because at ten joiners one member is worth exactly ten points of the rate');
+  ok(pointsPerMember(9)! > 10, 'and at nine, more than ten — further than anything an owner would act on');
+  ok(pointsPerMember(0) === null, 'over an empty cohort a member is worth nothing, because there are none');
+  ok(rateOf(3, 4) === null, 'three of four is not 75% retention');
+  ok(rateOf(0, 0) === null, 'a rate over zero opportunities is null — not 0%, and not 100%');
+  ok(rateOf(9, 12) === 0.75, 'a rate over a real denominator is a number');
+
+  // join dates, and the timezone that could move a whole cohort
+  ok(monthOfDate('2026-08-01') === '2026-08',
+    'a plain date is read off the STRING, so no timezone west of Greenwich can file an August joiner under July');
+  ok(monthOfDate('2026-01-31T22:00:00Z') === '2026-01', 'a timestamp with a date prefix is read the same way');
+  ok(monthOfDate('') === null && monthOfDate(null) === null && monthOfDate('sometime') === null,
+    'and an unusable date is null, never today');
+
+  const rejoin = buildGymRetention(
+    rrec([mem('g', '2025-03-01', 'cancelled'), mem('g', '2026-07-01', 'active')], [], []),
+    { now: RNOW },
+  );
+  ok(rejoin.rows![0].cohort === '2025-03',
+    'somebody who cancelled and rejoined belongs to their ORIGINAL cohort — filing them under the rejoin month draws a gym that recruits well and keeps nobody, built entirely out of its own returning members');
+  ok(rejoin.rows![0].status === 'active', 'while their membership today is the live row');
+
+  ok(cohortFeasibility([{ joinedOn: '2026-02-01' }, { joinedOn: '2026-02-08' }]).usable === false,
+    'every dated membership starting in one month is an imported roster, not a cohort spine — checked rather than assumed');
+  ok(cohortFeasibility([{ joinedOn: '2026-02-01' }, { joinedOn: '2026-03-08' }]).usable === true,
+    'two join months is enough to compare one against another');
+  ok(cohortFeasibility([{ joinedOn: null }, { joinedOn: null }]).usable === false,
+    'and no usable dates at all is not a spine either');
+  ok(cohortFeasibility([{ joinedOn: null }, { joinedOn: '2026-02-01' }, { joinedOn: '2026-03-01' }]).undated === 1,
+    'undated members are counted and reported, never folded into the oldest cohort');
+
+  // ── TRAP 1: a gym with no door log cannot be told who has lapsed ──
+  //
+  // a: stopped booking classes, still through the door. b: stopped entirely.
+  // c: still booking and still coming.
+  const live = rrec(
+    [mem('a', '2026-01-10', 'active'), mem('b', '2026-01-10', 'active'), mem('c', '2026-01-10', 'active')],
+    [
+      ...[3, 7, 10, 14].map((d) => vis('a', d)),
+      ...[30, 37, 44, 51].map((d) => vis('b', d)),
+      ...[2, 5, 9, 12, 16, 19, 23, 26, 30, 33, 37, 40, 44, 47, 51, 54].map((d) => vis('c', d)),
+    ],
+    [
+      ...[30, 37, 44, 51].map((d) => bk('a', d, true)),
+      ...[30, 37, 44, 51].map((d) => bk('b', d, true)),
+      ...[2, 9, 16, 23, 30, 37, 44, 51].map((d) => bk('c', d, true)),
+    ],
+  );
+  const gl = buildGymRetention(live, { now: RNOW });
+  ok(gl.doorLog === 'live', 'a log with rows in it is live');
+  ok(absenceBlocker(live) === null, 'so the absence figure is allowed');
+  ok(gl.summary.offTimetable === 1, 'one member stopped booking classes and did not stop training');
+  ok(gl.rows!.find((r) => r.memberId === 'a')!.offTimetable === true, 'and it is the one on the gym floor');
+  ok(gl.summary.quiet === 1, 'exactly one is absent from a log that was recording the other two');
+  ok(gl.rows!.find((r) => r.memberId === 'b')!.quiet === true, 'and it is the one who stopped');
+  ok(gl.rows!.find((r) => r.memberId === 'a')!.quiet === false,
+    'the member who moved to the floor is NOT counted as gone — the whole point of reading the door log beside the timetable');
+  ok(headline(gl)!.includes('still coming through the door'),
+    'the headline surfaces the member a class-only report would have written off');
+
+  // the same gym, read, with nothing at the door
+  const dark: RetentionRecord = { ...live, visits: sliceReady<Visit>([]) };
+  const gd = buildGymRetention(dark, { now: RNOW });
+  ok(gd.doorLog === 'silent', 'read and empty is SILENT, which is not the same as unread');
+  ok(gd.summary.quiet === null,
+    'A GYM WITH NO DOOR LOG IS TOLD NOTHING ABOUT WHO HAS LAPSED — the count is null, never 0 and never the whole roster');
+  ok(gd.rows!.every((r) => r.quiet === false), 'and not one member is marked absent on no evidence');
+  ok(gd.summary.offTimetable === null,
+    'nor is anybody counted as training off the timetable — with no terminal there is nowhere to be seen instead, and 0 would read as a finding');
+  ok(absenceBlocker(dark)!.includes('terminal'), 'the screen is told why, in terms of the gym rather than the query');
+  ok(gd.caveat !== null && gd.caveat!.includes('class bookings only'),
+    'and warned that the attendance under it is class bookings only');
+  ok(gd.warning === null, 'nothing failed, so there is no failure banner — silent and broken are different renders');
+
+  // the same gym again, with the door read broken
+  const blind: RetentionRecord = { ...live, visits: sliceFailed('permission denied for table gym_visits') };
+  const gb = buildGymRetention(blind, { now: RNOW });
+  ok(gb.doorLog === 'unread', 'a failed read is UNREAD, and not quietly rounded to silent');
+  ok(gb.summary.quiet === null && gb.summary.offTimetable === null, 'neither door figure is offered');
+  ok(gb.rows!.every((r) => r.read === null), 'and no per-member verdict either — the read needs both halves');
+  ok(gb.warning!.includes('door log') && gb.warning!.includes('not counted as nil'),
+    'the banner names the read and says the figures are missing rather than zero');
+  ok(gb.broken.some((b) => b.part === 'visits' && b.cost.includes('in the building')),
+    'and says what that read was carrying, in the owner’s words');
+  ok(gb.sources.join(',') === 'bookings,sessions', 'the remaining two sources are still used');
+
+  // ── drift: a break in a pattern, not a level — the coach-side model, rolled up ──
+  const drifters = rrec(
+    [mem('c2', '2025-06-01', 'active'), mem('d2', '2025-06-01', 'active')],
+    [
+      ...[3, 20, 34, 48].map((d) => vis('c2', d)),
+      vis('d2', 3),
+      ...[16, 17, 18, 19, 23, 24, 25, 26, 30, 31, 32, 33, 37, 38, 39, 40, 44, 45, 46, 47, 51, 52, 53, 54].map((d) => vis('d2', d)),
+    ],
+    [],
+  );
+  const gdr = buildGymRetention(drifters, { now: RNOW });
+  const dc = gdr.rows!.find((r) => r.memberId === 'c2')!.drift!;
+  const dd = gdr.rows!.find((r) => r.memberId === 'd2')!.drift!;
+  ok(dc.recentPerWeek === 0.5 && dd.recentPerWeek === 0.5, 'two members training at exactly the same rate today');
+  ok(dc.status === 'on_track' && dd.status === 'at_risk',
+    'and only the one who used to do four days a week is drifting — the roll-up keeps clientDrift’s model, where drift is a break in a person’s own pattern and not a level');
+  ok(gdr.summary.bands!.steady === 1 && gdr.summary.bands!.drifting === 1, 'the bands count them apart');
+  ok(gdr.rows![0].memberId === 'd2', 'and the one breaking their pattern leads the list');
+
+  // one day of training is one day, however many rows recorded it
+  const sameDay = rrec([mem('e', '2025-06-01', 'active')], [vis('e', 5, 'c1')], [bk('e', 5, true)]);
+  ok(buildGymRetention(sameDay, { now: RNOW }).rows![0].drift!.recentActiveDays === 1,
+    'a class attendance that also produced a door scan is ONE day of training — counting it twice lets a busy Tuesday cover a fortnight of silence');
+  const notTicked = rrec([mem('f', '2025-06-01', 'active')], [], [bk('f', 5, false)]);
+  ok(buildGymRetention(notTicked, { now: RNOW }).rows![0].drift!.recentActiveDays === 0,
+    'a booking nobody ticked off is an intention, not attendance');
+
+  // ── nothing read is not the same as nothing happening ──
+  const noActivity: RetentionRecord = {
+    memberships: sliceReady([mem('a', '2026-01-10', 'active')]),
+    visits: sliceFailed('down'), bookings: sliceFailed('down'), sessions: sliceFailed('down'),
+  };
+  const gn = buildGymRetention(noActivity, { now: RNOW });
+  ok(gn.sources.length === 0, 'nothing that records attendance landed');
+  ok(gn.summary.bands === null,
+    'so NO bands at all — a roster marked "nothing recorded" would be a statement about three failed queries wearing the clothes of a statement about the gym');
+  ok(gn.rows![0].drift === null, 'and no verdict on the member: not judged, which is not the same as unknown');
+  ok(headline(gn)!.includes('unknown — not zero'), 'the headline says so in as many words');
+
+  // ── no roster, and still loading ──
+  const noRoster: RetentionRecord = {
+    memberships: sliceFailed('relation "memberships" does not exist'),
+    visits: sliceReady<Visit>([]), bookings: sliceReady<MemberBooking>([]), sessions: sliceReady<PtSession>([]),
+  };
+  const gnr = buildGymRetention(noRoster, { now: RNOW });
+  ok(gnr.rows === null && gnr.spine === null,
+    'with no roster there is no member-centred view, and one is not invented from whoever happens to appear in the door log');
+  ok(gnr.summary.roster === null && gnr.summary.onBooks === null, 'and the counts are null, not 0');
+
+  const stillReading: RetentionRecord = {
+    memberships: sliceLoading(), visits: sliceLoading(), bookings: sliceLoading(), sessions: sliceLoading(),
+  };
+  const gld = buildGymRetention(stillReading, { now: RNOW });
+  ok(gld.warning === null, 'still loading is not a failure, so there is no failure banner');
+  ok(gld.rows === null && gld.summary.quiet === null, 'and no figures are claimed while the reads are in flight');
+  ok(gld.blocker !== null, 'but nobody can be called absent either — an unread log is not an empty gym');
+  ok(pendingRetentionParts(stillReading).length === 4, 'and the page can say which four reads it is waiting on');
+  ok(doorLogState(stillReading) === 'unread', 'a log that has not arrived is unread');
 }
 
 if (errors.length) { console.log('COVERAGE FAILURES:\n' + errors.join('\n')); process.exit(1); }
