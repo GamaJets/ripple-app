@@ -19,7 +19,7 @@ import { classEntry, ptEntry, mergeTimetable, overlapping, entriesAt, floorAt, f
 import { groupSessions, sessionKey, sessionDuration, sessionActivity, sessionKcal, sessionDistanceMeters, planSession, planWrite, summariseResult, HK_WRITE_ACTIVITIES, type Ledger } from './wearables/appleHealthWrite';
 import { sliceLoading, sliceReady, sliceFailed, rowsOf, brokenParts, completeness, partialWarning, memberIds, buildDossier, buildDossiers, retentionRead, doorLogActive, attendanceCaveat, type MemberRecord, type MemberBooking } from './memberView';
 import { payroll30For, payrollBlocker, type GymTrainer } from './gymTrainers';
-import { gymRollup } from './ownerAnalytics';
+import { gymRollup, trainerHealth } from './ownerAnalytics';
 import { isDelivered, isAwaitingOutcome, isPayable, payrollByTrainer, payrollTotal, settlementBlocker, settleableSessions, settlementAmount, settleBlocker, PAY_DELIVERED_ONLY, type PtSession } from './gymSessions';
 import { dwellMinutes, averageDwellMinutes, uniqueMembers, summariseVisits, visitsByHour, peakHour, visitsPerDay, lastSeenDays, type Visit } from './gymVisits';
 import { remainingUses, isExpired, isRedeemable, expiryFor, passRevenueCents, summarisePasses, guestsByHost, passStatus, type GymPass } from './gymPasses';
@@ -40,6 +40,12 @@ import {
   CLOSE_PARTS, CLOSE_LABEL, CLOSE_COST,
   type CloseRecord, type GymInvoice, type MonthWindow,
 } from './monthEnd';
+import {
+  buildStaff, brokenStaffParts, loadingStaffParts, staffCompleteness, staffWarning,
+  caveatOf, compareStaff, STAFF_RANK, STAFF_STATUS_LABEL, STAFF_PARTS, STAFF_COST,
+  NEW_TRAINER_DAYS,
+  type StaffRecord, type StaffTrainer, type StaffClient, type ClientActivity,
+} from './staffView';
 
 const errors: string[] = [];
 let checks = 0;
@@ -2452,6 +2458,292 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
   ok(unnamed.prefix === 'repple-export-2026-08-26', 'no gym name means no gym name in the filename — not the word "null"');
   ok(slug('Iron House, Dubai!') === 'iron-house-dubai' && slug(null) === '', 'the slug drops punctuation and refuses to invent one');
   ok(EXPORT_FILE.visits === 'door-log.csv', 'the door log is named for what an owner calls it');
+}
+
+// ── the staff view: a trainer with no data must never read as fine ──────────
+//
+// The whole point of staffView.ts. `trainerHealth` scores on bookings whose
+// clock has passed, so a trainer with six clients and twenty sessions that
+// NOBODY MARKED comes back "ok" — healthy, green, sorted in among the people
+// actually delivering. That trainer is simultaneously the one whose pay cannot
+// be computed. The assertions below hold the gate that stops it.
+{
+  const NOW = new Date(2026, 5, 15, 12, 0, 0).getTime();
+  const DAY_MS = 86_400_000;
+  const at = (n: number) => new Date(NOW - n * DAY_MS).toISOString();
+  const span = (daysAgo: number, hours: number) => ({
+    startsAt: at(daysAgo),
+    endsAt: new Date(NOW - daysAgo * DAY_MS + hours * 3_600_000).toISOString(),
+  });
+
+  const tr = (id: string, name: string, sinceDaysAgo: number | null): StaffTrainer =>
+    ({ trainerId: id, name, since: sinceDaysAgo == null ? null : at(sinceDaysAgo) });
+
+  const sess = (
+    id: string, trainerId: string, daysAgo: number,
+    outcome: PtSession['outcome'], rateCents: number | null, settlementId: string | null = null,
+  ): PtSession => ({
+    id, trainerId, trainerName: trainerId, clientId: null, clientName: null,
+    startsAt: at(daysAgo), durationMin: 60, status: 'booked',
+    outcome, outcomeAt: outcome ? at(daysAgo) : null, rateCents, settlementId,
+  });
+
+  const shift = (id: string, trainerId: string, daysAgo: number, hours: number, status: 'scheduled' | 'cancelled' = 'scheduled'): Shift => ({
+    id, trainerId, trainerName: trainerId, ...span(daysAgo, hours),
+    role: 'pt', status, note: null,
+  });
+
+  const cl = (clientId: string, trainerId: string | null): StaffClient =>
+    ({ clientId, name: clientId, trainerId, since: at(200) });
+
+  // ── the roster ──
+  const trainers: StaffTrainer[] = [
+    tr('omar', 'Omar', 300),    // delivering, and paid for it
+    tr('dana', 'Dana', 300),    // six clients, twenty sessions, NOT ONE MARKED
+    tr('rae', 'Rae', 3),        // hired on Friday
+    tr('nadia', 'Nadia', 300),  // four clients and nothing delivered in 30 days
+    tr('sol', 'Sol', 300),      // nothing on record at all
+  ];
+
+  const clients: StaffClient[] = [
+    ...['c1', 'c2', 'c3', 'c4', 'c5'].map((c) => cl(c, 'omar')),
+    ...['d1', 'd2', 'd3', 'd4', 'd5', 'd6'].map((c) => cl(c, 'dana')),
+    cl('r1', 'rae'), cl('r2', 'rae'),
+    ...['n1', 'n2', 'n3', 'n4'].map((c) => cl(c, 'nadia')),
+    cl('u1', null),   // on nobody's book — a real state, not a rounding error
+  ];
+
+  const sessions: PtSession[] = [
+    // Omar: six delivered and unsettled, one already paid, one delivered with
+    // no rate anybody snapshotted, one no-show.
+    ...[1, 2, 3, 4, 5, 6].map((n) => sess(`o${n}`, 'omar', n, 'completed', 20_000)),
+    sess('o7', 'omar', 7, 'completed', 20_000, 'run-1'),
+    sess('o8', 'omar', 8, 'completed', null),
+    sess('o9', 'omar', 9, 'no_show', 20_000),
+    // Dana: twenty finished sessions, no outcome on any of them, plus one
+    // booked for next week which nobody is late marking.
+    ...Array.from({ length: 20 }, (_, i) => sess(`dn${i}`, 'dana', i + 1, null, 20_000)),
+    sess('dnext', 'dana', -6, null, 20_000),
+    // Somebody who is not on the roster at all, and is owed for it.
+    sess('g1', 'ghost', 4, 'completed', 20_000),
+    sess('g2', 'ghost', 5, 'completed', 20_000),
+  ];
+
+  const shifts: Shift[] = [
+    shift('s-omar', 'omar', 2, 10),
+    shift('s-dana', 'dana', 2, 8),
+    shift('s-rae', 'rae', 2, 6, 'cancelled'),   // pulled, so it is not cover
+  ];
+
+  const classes: DemandBlock[] = [
+    { kind: 'class', label: 'Conditioning', startsAt: at(3), durationMin: 60, trainerId: 'omar' },
+  ];
+
+  // c1 holds a steady pattern, c2 has gone silent off a real one, c3–c5 have
+  // nothing recorded at all. Everyone else's book is silent.
+  const acts = (offsets: number[]): ActivityEvent[] => offsets.map((n) => ({ at: at(n), kind: 'workout' as const }));
+  const activity: ClientActivity[] = clients.map((c) => ({
+    clientId: c.clientId,
+    events:
+      c.clientId === 'c1' ? acts([3, 10, 17, 24, 31, 38, 45, 52])
+      : c.clientId === 'c2' ? acts([15, 17, 19, 22, 24, 26, 29, 31, 33, 36, 38, 40, 43, 45, 47, 50, 52, 54])
+      : [],
+  }));
+
+  const whole: StaffRecord = {
+    trainers: sliceReady(trainers),
+    sessions: sliceReady(sessions),
+    shifts: sliceReady(shifts),
+    clients: sliceReady(clients),
+    activity: sliceReady(activity),
+    classes: sliceReady(classes),
+  };
+  const build = (rec: StaffRecord) => buildStaff(rec, {
+    policy: PAY_DELIVERED_ONLY, fallbackRateCents: null, now: NOW, windowDays: 30,
+  });
+
+  const v = build(whole);
+  const by = (id: string) => v.members!.find((m) => m.trainerId === id)!;
+  const order = v.members!.map((m) => m.trainerId);
+  const posOf = (id: string) => order.indexOf(id);
+
+  // ── THE TRAP ──
+  //
+  // First, prove the bug is real and would have been reproduced by the obvious
+  // implementation: hand ownerAnalytics the booked count, as GymTrainer would,
+  // and it calls Dana healthy.
+  ok(trainerHealth({ id: 'dana', name: 'Dana', clients: 6, sessions30: 20 }).risk === 'ok',
+    'scored on bookings alone, twenty unmarked sessions read as a healthy trainer — this is the bug');
+  ok(by('dana').status === 'idle' && by('dana').unknown === true,
+    'the staff view refuses that: twenty sessions nobody marked is UNKNOWN, not healthy');
+  ok(by('dana').status !== 'on_track', 'a trainer with no evidence never comes back on_track');
+  ok(by('dana').delivered === 0 && by('dana').unmarked === 20,
+    'because not one of them is confirmed delivered');
+  ok(by('dana').reason.includes('20 one-to-ones finished') && by('dana').reason.includes('not one has an outcome recorded'),
+    'and the reason says exactly which kind of nothing it is looking at');
+  ok(by('dana').reason.includes('no pay can be computed'),
+    'naming the consequence an owner acts on, not the query that came back thin');
+  ok(by('dana').upcoming === 1,
+    'a session booked for next week is not one anybody is late marking, and is counted apart');
+  ok(by('dana').deliveredHours === null,
+    'with nothing marked, delivered hours are unknown — 0h would assert they delivered nothing');
+  ok(by('dana').floorUse === null && by('dana').rosteredHours === 8,
+    'so no share of their rostered hours is claimed either, though the rota itself is known');
+  ok(by('dana').settleable === false && by('dana').settleBlocker!.includes('unfinished period'),
+    'and nothing about them can be settled');
+
+  // ── the other three ways a person ends up unknown ──
+  ok(by('rae').unknown === true && by('rae').reason.includes('On the books 3 days'),
+    'somebody hired on Friday is not failing to deliver');
+  ok(by('rae').clients === 2 && by('rae').sessions === 0, 'even carrying clients already');
+  ok(NEW_TRAINER_DAYS === 14, 'and the grace period is stated rather than buried in a branch');
+  ok(by('sol').unknown === true && by('sol').reason.includes('Nothing to assess'),
+    'a trainer with no clients and no sessions is nothing to assess');
+  ok(by('sol').reason.includes('not the same as nothing wrong'), 'said so out loud');
+
+  // ── evidence, when there is some, is ownerAnalytics\' own verdict ──
+  ok(by('nadia').status === 'at_risk' && by('nadia').unknown === false,
+    'four clients and nothing delivered in thirty days IS a judgement the record supports');
+  ok(by('nadia').reason === trainerHealth({ id: '', name: 'Nadia', clients: 4, sessions30: 0 }).reason,
+    "and it is ownerAnalytics' own sentence, printed verbatim rather than reworded");
+  ok(by('omar').status === 'on_track' && by('omar').unknown === false, 'Omar is the one person here who is fine');
+
+  // ── ordering: unknown is never filed under fine ──
+  ok(STAFF_RANK.idle === 1, 'unknown sorts second, directly under the trainers who need attention');
+  ok(STAFF_RANK.idle < STAFF_RANK.on_track && STAFF_RANK.idle < STAFF_RANK.watch, 'above both watch and on-track');
+  ok(STATUS_RANK.idle === 3 && STAFF_RANK.idle !== STATUS_RANK.idle,
+    'deliberately unlike STATUS_RANK, which buries idle for the Overview glance');
+  ok(STAFF_RANK.idle === DRIFT_RANK.idle, 'and it is the same deviation clientDrift already makes, not a third scale');
+  ok(STAFF_STATUS_LABEL.idle === 'Unknown', '"Idle" is a verdict on a colleague; "Unknown" is the truth');
+  ok(STAFF_STATUS_LABEL.at_risk === STATUS_LABEL.at_risk && STAFF_STATUS_LABEL.on_track === STATUS_LABEL.on_track,
+    'the three concern levels keep the product-wide words');
+  ok(order[0] === 'nadia', 'the trainer the record can actually fault leads the list');
+  ok(posOf('dana') < posOf('omar') && posOf('rae') < posOf('omar') && posOf('sol') < posOf('omar'),
+    'every unassessable trainer sorts above the one who is demonstrably fine');
+  ok(posOf('omar') === order.length - 1, 'so the only healthy row is the last row');
+  ok(posOf('dana') < posOf('rae') && posOf('rae') < posOf('sol'),
+    'within the unknown band the biggest book leads — the largest exposure is the first call');
+  ok(compareStaff(by('dana'), by('dana')) === 0, 'a trainer does not outrank themselves');
+
+  // ── delivery, money and hours ──
+  ok(by('omar').delivered === 8 && by('omar').noShows === 1 && by('omar').unmarked === 0, 'the buckets are what the outcomes say');
+  ok(by('omar').marked === 9 && by('omar').sessions === 9, 'and everything of theirs carries an outcome');
+  ok(by('omar').owedCents === 140_000 && by('omar').payable === 8 && by('omar').priced === 7,
+    'a payable session nobody priced is counted as payable and left OUT of the money');
+  ok(by('omar').outstandingCents === 120_000 && by('omar').outstandingSessions === 6,
+    'what a settlement would hand over excludes the one already paid and the one with no rate');
+  ok(by('omar').settleable === true && by('omar').settleBlocker === null, 'and it is safe to settle');
+  ok(by('omar').rosteredHours === 10 && by('omar').deliveredHours === 8 && by('omar').floorUse === 0.8,
+    'ten hours rostered, eight confirmed delivering');
+  ok(by('omar').classHours === 1 && by('omar').hoursNote!.includes('1 class hour'),
+    'and the class they teach is named as absent from that ratio rather than silently ignored');
+  ok(by('rae').rosteredHours === null && by('rae').pulledShifts === 1 && by('rae').shifts === 1,
+    'a shift somebody pulled leaves no rostered hours — not zero hours, which would read as a trainer who worked none');
+  ok(by('rae').hoursNote!.includes('not the same as a trainer who worked none'), 'said in the note');
+  ok(by('nadia').rosteredHours === null && by('nadia').shifts === 0, 'and never rostered at all is its own answer');
+
+  // ── the book ──
+  ok(by('omar').clients === 5 && by('omar').drifting === 1 && by('omar').unknownClients === 3 && by('omar').steadyClients === 1,
+    "a trainer's book is assessed client by client against each client's own pattern");
+  ok(by('omar').book!.length === 5 && by('omar').book![0].status === 'at_risk', 'and comes back drifting-first');
+  ok(by('dana').clients === 6 && by('dana').unknownClients === 6,
+    'six clients nobody has a data point for are six unknowns, not six steady members');
+
+  // ── the gym-wide figures ──
+  ok(v.rollup.trainers === 5 && v.rollup.unknown === 3 && v.rollup.atRisk === 1 && v.rollup.onTrack === 1,
+    'three of five people on this roster cannot be assessed at all');
+  ok(v.rollup.flagged === 4, 'and "flagged" is the same set gymRollup counts as atRiskCount, named for what it is');
+  ok(v.rollup.flagged === gymRollup([
+    { id: 'dana', name: 'Dana', clients: 6, sessions30: 0 },
+    { id: 'rae', name: 'Rae', clients: 2, sessions30: 0 },
+    { id: 'nadia', name: 'Nadia', clients: 4, sessions30: 0 },
+    { id: 'sol', name: 'Sol', clients: 0, sessions30: 0 },
+    { id: 'omar', name: 'Omar', clients: 5, sessions30: 8 },
+  ], null).atRiskCount, 'so the two screens cannot be read as disagreeing about how many need looking at');
+  ok(v.rollup.flaggedClients === 12, 'the exposure is the clients under those trainers, not the headcount');
+  ok(v.rollup.clients === 18 && v.rollup.unassignedClients === 1, 'a member on nobody\'s book is counted and named');
+  ok(v.rollup.delivered === 8 && v.rollup.unmarked === 20 && v.rollup.noShows === 1, 'gym-wide delivery');
+  ok(v.rollup.outstandingCents === 120_000,
+    'the payable-now headline equals the sum of the rows beneath it, off-roster money excluded');
+  ok(v.rollup.rosteredHours === 18 && v.rollup.deliveredHours === 8 && v.rollup.classHours === 1, 'gym-wide hours');
+  ok(v.offRoster!.length === 1 && v.offRoster![0].trainerId === 'ghost' && v.offRoster![0].cents === 40_000,
+    'sessions run by somebody not on the roster are real money and are surfaced, not dropped');
+  ok(v.caveat!.includes('3 of 5 cannot be assessed') && v.caveat!.includes('Dana'),
+    'and the page says up front how much of its own roster it cannot judge, by name');
+  ok(v.warning === null && staffCompleteness(whole) === 'whole', 'with every read in, there is nothing to warn about');
+
+  // ── a failed read is never an empty roster ──
+  const noSessions: StaffRecord = { ...whole, sessions: sliceFailed('permission denied for table sessions') };
+  const fv = build(noSessions);
+  ok(fv.members!.every((m) => m.unknown), 'with the one-to-ones unreadable, NOBODY can be judged');
+  ok(fv.members!.every((m) => m.status !== 'on_track'), 'and in particular nobody comes back fine');
+  ok(by2(fv, 'omar').reason.includes('could not be read') && by2(fv, 'omar').reason.includes('unknown, not nil'),
+    'the reason names the failed read rather than the person');
+  ok(by2(fv, 'omar').delivered === null && by2(fv, 'omar').owedCents === null && by2(fv, 'omar').outstandingCents === null,
+    'every derived figure is null, never 0 — a broken query must not report a trainer who delivered nothing');
+  ok(fv.rollup.delivered === null && fv.rollup.unmarked === null, 'and no gym-wide total is offered over it');
+  ok(fv.rollup.trainers === 5, 'the roster itself is still known, so the people are still named');
+  ok(fv.warning!.includes('the one-to-ones') && fv.warning!.includes('what was delivered and what is owed are unknown'),
+    'the banner names the part AND what the reader is therefore not seeing');
+  ok(staffCompleteness(noSessions) === 'broken', 'a page missing a part is not a whole picture');
+  ok(brokenStaffParts(noSessions)[0].reason === 'permission denied for table sessions', 'carrying the actual reason, not a shrug');
+
+  // ── loading is a third state, not a kind of failure and not a kind of empty ──
+  const stillReading: StaffRecord = { ...whole, sessions: sliceLoading() };
+  ok(build(stillReading).members!.every((m) => m.unknown), 'nothing is claimed while a read is in flight either');
+  ok(by2(build(stillReading), 'omar').reason.includes('Still reading'), 'but it says so differently from a failure');
+  ok(staffCompleteness(stillReading) === 'loading' && loadingStaffParts(stillReading)[0] === 'sessions', 'and the page knows which');
+  ok(staffWarning(stillReading) === null, 'a read still in flight raises no failure banner');
+  ok(staffCompleteness({ ...whole, sessions: sliceLoading(), clients: sliceFailed('boom') }) === 'broken',
+    'but once something has definitively failed, "loading" would promise a completeness that is not coming');
+
+  // ── the halves fail independently ──
+  const noClients: StaffRecord = { ...whole, clients: sliceFailed('permission denied for table clients') };
+  ok(by2(build(noClients), 'omar').clients === null && by2(build(noClients), 'omar').unknown === true,
+    'a trainer with no clients reads very differently from one whose clients did not load, so no verdict is offered');
+  ok(by2(build(noClients), 'omar').delivered === 8, 'though what they delivered is still known and still shown');
+  ok(build(noClients).rollup.clients === null && build(noClients).rollup.unassignedClients === null,
+    'and no client count is invented for the gym');
+
+  const noActivity: StaffRecord = { ...whole, activity: sliceFailed('permission denied for table check_ins') };
+  ok(by2(build(noActivity), 'omar').book === null && by2(build(noActivity), 'omar').drifting === null,
+    'drift over an unread training record would call every client silent, so none is judged');
+  ok(by2(build(noActivity), 'omar').clients === 5, 'the book is still counted — only the reading of it is withheld');
+  ok(by2(build(noActivity), 'omar').status === 'on_track',
+    'and a failure in one half does not drag the other half to a verdict it does not warrant');
+
+  // ── no roster, no page ──
+  const noRoster = build({ ...whole, trainers: sliceFailed('permission denied for table trainers') });
+  ok(noRoster.members === null && noRoster.rollup.trainers === null, 'with no roster there is nobody to name');
+  ok(noRoster.offRoster === null, 'and nothing can be called off-roster when the roster itself is unknown');
+  ok(noRoster.caveat === null, 'no claim is made about how many can be assessed');
+
+  // ── an empty gym is a different fact from a broken one ──
+  const emptyGym: StaffRecord = {
+    trainers: sliceReady([]), sessions: sliceReady([]), shifts: sliceReady([]),
+    clients: sliceReady([]), activity: sliceReady([]), classes: sliceReady([]),
+  };
+  const ev = build(emptyGym);
+  ok(ev.members!.length === 0 && ev.rollup.trainers === 0, 'a gym with no trainers has a roster of none, and says so');
+  ok(ev.warning === null && ev.caveat === null && staffCompleteness(emptyGym) === 'whole', 'with nothing wrong about it');
+  ok(ev.rollup.clients === 0 && ev.rollup.outstandingCents === null,
+    'no clients is zero clients; no money owed is a dash, because nothing was priced rather than nothing being due');
+
+  // ── a roster nothing can be said about ──
+  const blind = build({ ...whole, trainers: sliceReady([tr('dana', 'Dana', 300), tr('sol', 'Sol', 300)]) });
+  ok(blind.caveat!.includes('Not one of the 2 people'), 'a gym where nobody marks outcomes gets that as the finding, not a footnote');
+  ok(blind.caveat!.includes('none of them is a clean bill of health'), 'said in exactly those terms');
+  ok(blind.warning === null, 'and it fires even though every single read succeeded — this is not a broken page');
+
+  // ── the parts each name what their absence costs ──
+  ok(STAFF_PARTS.every((p) => STAFF_COST[p].length > 20), 'every part states what the reader loses without it');
+  ok(STAFF_COST.shifts.includes('not nil') && STAFF_COST.activity.includes('looks the same as a steady one'),
+    'in terms of the missing answer, not the missing table');
+}
+
+/** Find one person in a staff view under test. */
+function by2(v: ReturnType<typeof buildStaff>, id: string) {
+  return v.members!.find((m) => m.trainerId === id)!;
 }
 
 if (errors.length) { console.log('COVERAGE FAILURES:\n' + errors.join('\n')); process.exit(1); }

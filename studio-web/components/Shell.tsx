@@ -19,6 +19,12 @@ export const NAV: NavItem[] = [
   // worse than one that offers nothing.
   { href: '/', label: 'Overview', roles: ['owner'] },
   { href: '/members', label: 'Members', roles: ['owner'] },
+  // Beside Members, and owner-only for the same reason /close is: it carries
+  // every colleague's pay and delivery record on one screen. A trainer must not
+  // be offered a link to their own performance file, still less to everyone
+  // else's — and the page refuses the role independently, so this nav entry and
+  // that check say the same thing rather than one covering for the other.
+  { href: '/staff', label: 'Staff', roles: ['owner'] },
   { href: '/timetable', label: 'Timetable', roles: ['owner'] },
   { href: '/sessions', label: 'Sessions', roles: ['owner'] },
   { href: '/money', label: 'Money', roles: ['owner'] },
