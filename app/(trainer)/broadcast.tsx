@@ -41,13 +41,35 @@ export default function Broadcast() {
     if (!b || !recipients.length || busy) return;
     setBusy(true);
     try {
+      let delivered = recipients.length;
       if (USE_SUPABASE) {
-        const { error } = await supabase.from('messages').insert(recipients.map((c) => ({ client_id: c.id, sender: 'coach', body: b })));
-        if (error) { Alert.alert('Not sent', 'The message could not be written to your clients’ threads. Check your connection and try again.'); return; }
-        sendPush(recipients.map((c) => c.id), 'Message from your coach', b, { route: '/(client)/messages' });
+        // One insert per recipient, not one statement covering all of them.
+        // The roster merges real `clients` with coach-added `coach_clients`,
+        // whose ids have no clients row behind them — and messages.client_id is
+        // a foreign key to clients(id). A multi-row insert is a single
+        // statement, so one client added by hand made Postgres reject the whole
+        // broadcast and nobody heard from their coach. dashboard.tsx sends one
+        // at a time for exactly this reason; this is the same treatment.
+        const results = await Promise.all(recipients.map(async (c) => {
+          const { error } = await supabase.from('messages').insert({ client_id: c.id, sender: 'coach', body: b });
+          return error ? null : c.id;
+        }));
+        const ok = results.filter((id): id is string => !!id);
+        if (!ok.length) { Alert.alert('Not sent', 'The message could not be written to your clients’ threads. Check your connection and try again.'); return; }
+        delivered = ok.length;
+        sendPush(ok, 'Message from your coach', b, { route: '/(client)/messages' });
       }
       setBody('');
-      Alert.alert('Sent', `Added to ${recipients.length} client thread${recipients.length === 1 ? '' : 's'}${seg ? ' in “' + seg + '”' : ''}.`);
+      const where = seg ? ' in “' + seg + '”' : '';
+      // Partial delivery is reported as partial. Saying "Sent" for a broadcast
+      // that reached two thirds of the segment is the failure this screen keeps
+      // making in a different way.
+      Alert.alert(
+        delivered === recipients.length ? 'Sent' : 'Partly sent',
+        delivered === recipients.length
+          ? `Added to ${delivered} client thread${delivered === 1 ? '' : 's'}${where}.`
+          : `Added to ${delivered} of ${recipients.length} client threads${where}. The rest were added by hand and have no client account to message yet.`,
+      );
     } catch {
       Alert.alert('Not sent', 'The message could not be written to your clients’ threads. Check your connection and try again.');
     } finally { setBusy(false); }

@@ -23,6 +23,7 @@ const DAY = 86400000;
 export default function Timetable() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
   const [gymName, setGymName] = useState<string | null>(null);
+  const [gymNameErr, setGymNameErr] = useState<string | null>(null);
   const [classes, setClasses] = useState<GymClass[] | null>(null);
   const [openClass, setOpenClass] = useState<GymClass | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -56,8 +57,18 @@ export default function Timetable() {
       if (!live) return;
       setMe(who);
       if (!who?.tenantId) { setClasses([]); return; }
-      const { data: t } = await supabase.from('tenants').select('name').eq('id', who.tenantId).single();
-      if (live) setGymName(t?.name ?? null);
+      // supabase-js resolves with { data, error } rather than rejecting, so a
+      // read that failed — or that RLS refused — arrives here as t === null and
+      // is indistinguishable from a tenant row that genuinely is not there.
+      // Dropping the error leaves the sidebar saying "No gym linked", which the
+      // owner reads as a fact about their account: they go off to re-link a gym
+      // that was linked all along, and never learn the read is the thing that
+      // broke. Named on screen instead, next to the timetable it belongs to.
+      const { data: t, error: tErr } = await supabase.from('tenants').select('name').eq('id', who.tenantId).single();
+      if (live) {
+        setGymName(tErr ? null : (t?.name ?? null));
+        setGymNameErr(tErr ? (tErr.message ?? 'Could not read which gym this account is linked to.') : null);
+      }
       await load(who.tenantId);
     })();
     return () => { live = false; };
@@ -101,7 +112,18 @@ export default function Timetable() {
         <span style={{ display: 'inline-flex', gap: 12 }}>
           <button onClick={() => setOpenClass(c)} style={linkBtn}>Check in</button>
           <button
-            onClick={() => { if (confirm(`Remove "${c.title}" from the timetable?`)) deleteClass(supabase, c.id).then(refresh); }}
+            onClick={() => {
+              if (!confirm(`Remove "${c.title}" from the timetable?`)) return;
+              // deleteClass throws on a database error, and this is the point
+              // after the owner has already said yes. Unreported, the class is
+              // simply still on the board a moment later — which reads as a
+              // click that did not register, so the next thing anyone does is
+              // press Remove again, and members keep booking a class the gym
+              // believes it cancelled.
+              deleteClass(supabase, c.id).then(refresh).catch((e: any) => {
+                setErr(e?.message ?? 'Could not remove that class.');
+              });
+            }}
             style={{ ...linkBtn, color: 'var(--crit)' }}
           >Remove</button>
         </span>
@@ -121,6 +143,13 @@ export default function Timetable() {
           <button onClick={() => setWeekOffset((w) => w + 1)} style={ghostBtn}>Next →</button>
         </div>
       </div>
+
+      {gymNameErr ? (
+        <Banner tone="crit">
+          The gym this account is linked to could not be read: {gymNameErr}. The sidebar says no
+          gym is linked because that lookup failed, not because one is missing.
+        </Banner>
+      ) : null}
 
       {err ? <Banner tone="crit">{err}</Banner> : null}
 
@@ -272,9 +301,21 @@ function Roster({ gymClass, onClose }: { gymClass: GymClass; onClose: () => void
 
   useEffect(() => { load(); }, [load]);
 
+  // setAttendance throws on a database error. Unreported, the row simply
+  // re-renders as it was: the desk sees "Mark here" still sitting there and
+  // reads it as a mis-click, or worse walks away assuming the tick landed. The
+  // register is the record of who was in the room, so a check-in that silently
+  // does not stick marks a member absent from a class they attended — and that
+  // history is what the show rate above, and any later retention work, is read
+  // from. A wrong attendance record is worse than a visible failure.
   const toggle = async (r: RosterEntry) => {
-    await setAttendance(supabase, r.bookingId, !r.attendedAt);
-    load();
+    try {
+      await setAttendance(supabase, r.bookingId, !r.attendedAt);
+      setErr(null);
+      load();
+    } catch (e: any) {
+      setErr(e?.message ?? 'Could not save that check-in.');
+    }
   };
 
   return (

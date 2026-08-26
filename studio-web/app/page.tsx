@@ -64,7 +64,7 @@ export default function Overview() {
       const dayStart = new Date(new Date().toISOString().slice(0, 10) + 'T00:00:00Z').toISOString();
       const [mRes, pRes, plRes, cRes, vRes] = await Promise.allSettled([
         fetchMemberships(supabase, who.tenantId),
-        fetchPayments(supabase, who.tenantId),
+        fetchPayments(supabase, who.tenantId, from30),   // windowed: the tile says 30d
         fetchPlans(supabase, who.tenantId),
         fetchClasses(supabase, who.tenantId, from30, new Date().toISOString()),
         fetchVisits(supabase, who.tenantId, { sinceIso: dayStart }),

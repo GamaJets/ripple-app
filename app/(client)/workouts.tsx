@@ -28,7 +28,11 @@ import { Confetti } from '../../src/ui/Confetti';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { importSources, withHr, useImportedIds, isLogged, fetchRecent } from '../../src/ui/watchImport';
 import { parseWorkoutText } from '../../src/lib/workoutParse';
-import { useExerciseVideos } from '../../src/ui/exerciseVideos';
+import { useExerciseVideos, type VideoItem, type LibraryStatus } from '../../src/ui/exerciseVideos';
+import { ExerciseVideoBlock } from '../../src/ui/ExerciseVideo';
+import { videoForExercise } from '../../src/lib/exerciseId';
+import { supabase } from '../../src/lib/supabase';
+import { USE_SUPABASE } from '../../src/lib/config';
 import { DidYouKnow } from '../../src/ui/DidYouKnow';
 import { injuryFlag, areaLabel, type Injury } from '../../src/lib/injuries';
 import { warmupSets, deloadCheck } from '../../src/lib/training';
@@ -148,7 +152,24 @@ export default function Train() {
   const [videoFor, setVideoFor] = useState<string | null>(null);
   const [injRevealed, setInjRevealed] = useState<string[]>([]);
   const [deloadDismiss, setDeloadDismiss] = useState(false);
-  const { videos: exVideos } = useExerciseVideos();
+  const { videos: exVideos, status: exVideoStatus } = useExerciseVideos();
+  // Who coaches this member. The library read is filtered by policy, not by
+  // trainer, so it can hand back both a platform clip and this member's own
+  // coach demonstrating the same lift — and being shown a stranger when your
+  // coach filmed it for you is the wrong one of the two. Same lookup messaging.ts
+  // does for the chat thread; null is fine, it just means no tie-break.
+  const [coachId, setCoachId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!USE_SUPABASE || !cd.id || cd.id === 'unknown') return;
+    let live = true;
+    (async () => {
+      try {
+        const { data } = await supabase.from('clients').select('trainer_id').eq('id', cd.id).single();
+        if (live) setCoachId((data as any)?.trainer_id ?? null);
+      } catch { /* no tie-break, which is the same as having no coach */ }
+    })();
+    return () => { live = false; };
+  }, [cd.id]);
   const [session, setSession] = useState(false);
 
   // While the guided session modal is open, poll local HR sources every 5s instead
@@ -556,7 +577,12 @@ export default function Train() {
                                 <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }} numberOfLines={1}>{sug.reason}</Text>
                               </View>
                             ) : <View style={{ flex: 1 }} />}
-                            {!isCustom ? <Pressable accessibilityLabel="Watch exercise demo" accessibilityRole="button" onPress={() => setVideoFor(nameOf(e))} style={{ width: 38, height: 38, backgroundColor: t.surface2, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' }}><Icon name="video" size={15} color={t.ink2} /></Pressable> : null}
+                            {/* Offered for a movement the user typed in themselves too. A
+                                custom exercise mints its own catalogue slug the first time
+                                a clip is recorded against it, so "Kettlebell Windmill" can
+                                genuinely have a demo — hiding the button meant a client
+                                whose coach had filmed exactly that could never reach it. */}
+                            <Pressable accessibilityLabel={'Watch a demonstration of ' + nameOf(e)} accessibilityRole="button" onPress={() => setVideoFor(nameOf(e))} style={{ width: 38, height: 38, backgroundColor: t.surface2, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' }}><Icon name="video" size={15} color={t.ink2} /></Pressable>
                             <Pressable accessibilityRole="button" accessibilityLabel={isCustom ? 'Edit ' + nameOf(e) : 'Swap ' + nameOf(e)} onPress={() => replaceExercise(e)} style={{ width: 38, height: 38, backgroundColor: t.surface2, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' }}><Icon name={isCustom ? 'pencil' : 'swap'} size={15} color={flag ? t.s3 : t.ink2} /></Pressable>
                           </View>
                           <LogRow t={t} onLog={(reps, kg) => logSet(e, reps, kg)} />
@@ -691,30 +717,40 @@ export default function Train() {
         </View>
       </Modal>
 
-      <Modal visible={!!videoFor} transparent animationType="fade" onRequestClose={() => setVideoFor(null)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', alignItems: 'center', justifyContent: 'center', padding: layout.gutter }} onPress={() => setVideoFor(null)}>
+      {/* The demo plays here, on top of this screen, and this screen stays
+          mounted underneath it. That is the whole point: the old affordance was
+          Linking.openURL, which put the client in the system browser and took
+          them off the session they were halfway through typing. */}
+      <Modal visible={!!videoFor} transparent animationType="slide" onRequestClose={() => setVideoFor(null)}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Close the demonstration"
+          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }}
+          onPress={() => setVideoFor(null)}
+        />
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: Math.max(insets.bottom, layout.gutter), ...elevation.e2 }}>
           {(() => {
             const nm = videoFor || '';
-            const norm = (x: string) => x.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
-            const n = norm(nm);
-            const vid = n ? (exVideos.find((v) => { const vn = norm(v.name); return vn === n || vn.includes(n) || n.includes(vn); }) || null) : null;
+            // Exact catalogue-slug match, never a substring. This used to be
+            // `vn === n || vn.includes(n) || n.includes(vn)`, so asking for the
+            // demo on "Squat" played whichever of Back / Front / Goblet Squat
+            // sorted first — a different movement, captioned as this one, to
+            // someone about to copy it under load. No clip is an honest answer.
+            const vid = videoForExercise(nm, exVideos, coachId);
             return (
-              <Pressable onPress={() => {}} style={{ width: '100%' }}>
-                <View style={{ width: '100%', aspectRatio: 16 / 9, backgroundColor: '#000', borderRadius: radius.md, alignItems: 'center', justifyContent: 'center' }}>
-                  <Icon name="play" size={40} color="#fff" />
-                  <Text style={{ ...ty.body, fontWeight: '500', color: '#fff', marginTop: sp.sm, textTransform: 'capitalize' }}>{nm}</Text>
-                  <Text style={{ ...ty.caption, color: '#999', marginTop: sp.xs }}>{vid ? (vid.url ? 'Demo from your coach' : "Your coach's clip — streams once hosting is on") : 'No coach demo yet'}</Text>
-                </View>
-                {vid && vid.url ? (
-                  <View style={{ marginTop: sp.lg }}><Cta label="Play demo" wide onPress={() => Linking.openURL(vid.url as string)} /></View>
-                ) : (
-                  <View style={{ marginTop: sp.lg }}><Ghost label="Watch a how-to on YouTube" icon="video" onPress={() => Linking.openURL('https://www.youtube.com/results?search_query=' + encodeURIComponent('how to ' + nm + ' proper form'))} /></View>
-                )}
-                <Text style={{ ...ty.caption, color: '#bbb', marginTop: sp.lg, textAlign: 'center' }}>Tap outside to close</Text>
-              </Pressable>
+              <View>
+                <Text style={{ ...ty.head, color: t.ink, textTransform: 'capitalize' }}>{nm}</Text>
+                <ExerciseVideoBlock
+                  video={vid}
+                  exerciseName={nm}
+                  status={exVideoStatus}
+                  onSearch={() => Linking.openURL('https://www.youtube.com/results?search_query=' + encodeURIComponent('how to ' + nm + ' proper form'))}
+                />
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm, textAlign: 'center' }}>Tap outside to close — the sets you have typed are still there.</Text>
+              </View>
             );
           })()}
-        </Pressable>
+        </View>
       </Modal>
 
       <Modal visible={showCal} transparent animationType="slide" onRequestClose={() => setShowCal(false)}>
@@ -813,7 +849,7 @@ export default function Train() {
       </Modal>
 
       <Modal visible={session} animationType="slide" onRequestClose={() => setSession(false)}>
-        <SessionRunner t={t} exercises={planEx.filter((e) => !isInjHidden(e))} focus={workout.focus} nameOf={nameOf} age={ageFromDob(cd.dob)} log={workoutLog} injuries={cd.injuries} onComplete={addWorkouts} onClose={() => setSession(false)} />
+        <SessionRunner t={t} exercises={planEx.filter((e) => !isInjHidden(e))} focus={workout.focus} nameOf={nameOf} age={ageFromDob(cd.dob)} log={workoutLog} injuries={cd.injuries} videos={exVideos} videoStatus={exVideoStatus} preferTrainerId={coachId} onComplete={addWorkouts} onClose={() => setSession(false)} />
       </Modal>
 
       {/* KeyboardAvoidingView, or the keyboard sits on top of the very fields
@@ -864,7 +900,7 @@ function LogRow({ t, onLog }: { t: Theme; onLog: (reps: string, kg: string) => v
   );
 }
 
-function SessionRunner({ t, exercises, focus, nameOf, age, log, injuries, onComplete, onClose }: { t: Theme; exercises: ProgramExercise[]; focus: string; nameOf: (e: ProgramExercise) => string; age: number | null; log: WorkoutEntry[]; injuries: Injury[]; onComplete: (entries: WorkoutEntry[]) => void; onClose: () => void }) {
+function SessionRunner({ t, exercises, focus, nameOf, age, log, injuries, videos, videoStatus, preferTrainerId, onComplete, onClose }: { t: Theme; exercises: ProgramExercise[]; focus: string; nameOf: (e: ProgramExercise) => string; age: number | null; log: WorkoutEntry[]; injuries: Injury[]; videos: VideoItem[]; videoStatus: LibraryStatus; preferTrainerId: string | null; onComplete: (entries: WorkoutEntry[]) => void; onClose: () => void }) {
   const insets = useSafeAreaInsets();
   const topPad = Math.max(insets.top, 44);
   const w = useWearables();
@@ -915,6 +951,14 @@ function SessionRunner({ t, exercises, focus, nameOf, age, log, injuries, onComp
   const [results, setResults] = useState<{ reps: number; kg: number }[][]>(() => exercises.map(() => []));
   const [reps, setReps] = useState(''); const [kg, setKg] = useState('');
   const [rest, setRest] = useState(0);
+  // Whether the demonstration is on screen for the current exercise.
+  //
+  // It is deliberately its own flag rather than `rest > 0`. Opening it with the
+  // first rest period puts the movement in front of the one person who has 90
+  // seconds and a reason to look at it; tying it to the timer would then rip the
+  // clip away at 0:00 from someone still watching. It never opens itself over a
+  // set in progress — the toggle is there if they want it sooner.
+  const [demoOpen, setDemoOpen] = useState(false);
   const [rpes, setRpes] = useState<('easy' | 'ok' | 'hard')[][]>(() => exercises.map(() => []));
   const [pendingFeel, setPendingFeel] = useState<number | null>(null);
   const [finished, setFinished] = useState(false);
@@ -934,6 +978,7 @@ function SessionRunner({ t, exercises, focus, nameOf, age, log, injuries, onComp
     setReps('');
     setPrMsg(null);
     setPendingFeel(null);
+    setDemoOpen(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [idx]);
 
@@ -947,6 +992,9 @@ function SessionRunner({ t, exercises, focus, nameOf, age, log, injuries, onComp
     const priorBest = Math.max(priorBest1RM(log, name), ...done.map((s) => (s.kg && s.reps ? est1RM(s.kg, s.reps) : 0)), 0);
     if (newE1 > 0 && newE1 > priorBest) { setPrMsg(`New PR on ${name}! ${wkg}kg × ${r}`); setConfetti(true); }
     setResults((prev) => { const n = prev.map((a) => [...a]); n[idx].push({ reps: r, kg: wkg }); return n; });
+    // Only after the first set of an exercise. By set three they have done the
+    // movement three times and do not need it offered again.
+    if (done.length === 0) setDemoOpen(true);
     setReps(''); setRest(90); setPendingFeel(wkg);
   };
   const feelStep = (base: number) => (base >= 60 ? 5 : base >= 20 ? 2.5 : base > 0 ? 1 : 0);
@@ -1081,8 +1129,35 @@ function SessionRunner({ t, exercises, focus, nameOf, age, log, injuries, onComp
           <View style={{ backgroundColor: t.brand, borderRadius: radius.md, padding: sp.xl, alignItems: 'center', marginTop: sp.xl }}>
             <Text style={{ ...ty.micro, color: t.brandInk }}>Rest</Text>
             <Text style={{ ...value(40), color: t.brandInk, marginTop: sp.xs }}>{Math.floor(rest / 60)}:{String(rest % 60).padStart(2, '0')}</Text>
-            <Pressable onPress={() => setRest(0)} hitSlop={8} style={{ marginTop: sp.sm }}><Text style={{ ...ty.label, fontWeight: '500', color: t.brandInk }}>Skip rest</Text></Pressable>
+            <Pressable accessibilityRole="button" accessibilityLabel="Skip the rest timer" onPress={() => setRest(0)} hitSlop={8} style={{ marginTop: sp.sm }}><Text style={{ ...ty.label, fontWeight: '500', color: t.brandInk }}>Skip rest</Text></Pressable>
           </View>
+        ) : null}
+
+        {/* The movement, playing here rather than in a browser. A client mid-set
+            who is unsure of their form had no way to see the lift from this
+            screen at all — the only demo in the app was back on the plan, behind
+            leaving the session. */}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={(demoOpen ? 'Hide the demonstration of ' : 'Watch a demonstration of ') + nameOf(ex)}
+          onPress={() => { setDemoOpen((v) => !v); tapLight(); }}
+          style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.xl }}
+        >
+          <Icon name="video" size={14} color={t.ink3} />
+          <Text style={{ ...ty.micro, color: t.ink3, flex: 1 }}>{demoOpen ? 'Hide the demo' : 'Watch this movement'}</Text>
+          <View style={{ transform: [{ rotate: demoOpen ? '90deg' : '0deg' }] }}><Icon name="chevron" size={14} color={t.ink3} /></View>
+        </Pressable>
+        {/* No onSearch here, unlike the plan screen. A live session's sets live
+            in this component's state and nowhere else, so sending the client to
+            the browser risks the OS reclaiming the app and taking the whole
+            session with it. "No demonstration yet" is the honest answer; losing
+            an hour of logged work to a web search is not a fair price for it. */}
+        {demoOpen ? (
+          <ExerciseVideoBlock
+            video={videoForExercise(nameOf(ex), videos, preferTrainerId)}
+            exerciseName={nameOf(ex)}
+            status={videoStatus}
+          />
         ) : null}
 
         {done.length > 0 ? (

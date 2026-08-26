@@ -31,6 +31,7 @@
     "expo-notifications": "~57.0.14",
     "expo-router": "~57.0.16",
     "expo-updates": "~57.0.17",
+    "expo-video": "~57.0.2",
     "expo-web-browser": "~57.0.2",
     "react": "19.2.3",
     "react-native": "0.86.2",
@@ -45,6 +46,7 @@
     "typescript": "~6.0.3"
   },
   "//deferred-native-deps": "Added at the dev-build/EAS stage (they require native code and do NOT run in Expo Go): @stripe/stripe-react-native",
+  "//native-deps-in-tree": "Already installed and native, so a dev build is required from here on — Expo Go will not run the app: expo-video (exercise demos play inline; the alternative was Linking.openURL, which sends a client out of the app mid-session and is what lost their typed sets).",
   "expo": {
     "doctor": {
       "reactNativeDirectoryCheck": {

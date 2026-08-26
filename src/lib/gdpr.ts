@@ -22,8 +22,16 @@ export async function exportMyData(): Promise<string> {
     out.userId = auth?.user?.id ?? null;
     out.email = auth?.user?.email ?? null;
     for (const tbl of TABLES) {
-      try { const { data } = await supabase.from(tbl).select('*'); out[tbl] = data ?? []; }
-      catch { out[tbl] = 'unavailable'; }
+      // The error has to be read, not caught. supabase-js resolves with
+      // { data, error } instead of throwing, so the catch below never fires for
+      // a rejected read — and a table that could not be read was landing in the
+      // export as [], which tells someone their data is not there when the
+      // truth is that nobody managed to look. That is the one distinction this
+      // file exists to preserve.
+      try {
+        const { data, error } = await supabase.from(tbl).select('*');
+        out[tbl] = error ? 'unavailable' : (data ?? []);
+      } catch { out[tbl] = 'unavailable'; }
     }
   } catch { /* ignore */ }
   return JSON.stringify(out, null, 2);

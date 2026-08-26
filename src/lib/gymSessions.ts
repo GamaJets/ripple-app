@@ -273,6 +273,71 @@ export function settleBlocker(payable: PtSession[], unmarked: number): string | 
 
 /* ── reads ─────────────────────────────────────────────────────────────────── */
 
+/**
+ * The distinct profile ids a set of session rows names — trainers and clients
+ * alike, since both are keyed on profiles.id.
+ *
+ * Pure, so the half of the name lookup that can quietly go wrong — dropping an
+ * id, and showing a dash where a name belongs — is testable without a database.
+ */
+export function sessionProfileIds(
+  rows: Array<{ trainer_id?: string | null; client_id?: string | null }>,
+): string[] {
+  const ids = new Set<string>();
+  for (const r of rows) {
+    if (r.trainer_id) ids.add(r.trainer_id);
+    if (r.client_id) ids.add(r.client_id);
+  }
+  return Array.from(ids);
+}
+
+/**
+ * Profile rows to a name lookup keyed by id.
+ *
+ * A blank or whitespace-only full_name is left out rather than mapped to '',
+ * so the screen falls back to its dash instead of printing an empty cell that
+ * reads as a broken table.
+ */
+export function namesById(
+  profiles: Array<{ id: string; full_name?: string | null }>,
+): Map<string, string> {
+  const m = new Map<string, string>();
+  for (const p of profiles ?? []) {
+    const name = (p?.full_name ?? '').trim();
+    if (p?.id && name) m.set(p.id, name);
+  }
+  return m;
+}
+
+/**
+ * Names for the people these rows name, in one query.
+ *
+ * Not a PostgREST embed, and that is the whole point: `trainers` and `clients`
+ * carry no name of their own, so `trainers(full_name)` asked for a column that
+ * does not exist and PostgREST rejected the entire read with 42703 —
+ * "column trainers_1.full_name does not exist". Every caller of fetchSessions
+ * threw, which is why the sessions screen showed "Could not read the session
+ * record." instead of the payroll board. (`clients(full_name)` had a second
+ * fault waiting behind the first: sessions reaches clients through two foreign
+ * keys — client_id and session_waitlist — so that embed is ambiguous even once
+ * the column exists.) The shape below is the one in
+ * gymTrainers.fetchGymTrainers: collect the ids, resolve them against profiles,
+ * which an owner may read for their own tenant (profiles_owner_r).
+ *
+ * A failure here is not fatal. Names are labels on a board whose subject is
+ * money: leaving them null renders a dash, which is honest, where throwing
+ * would black out a payroll figure that is perfectly readable without them.
+ * Anyone whose profile this caller may not read — RLS filters rather than
+ * errors — lands in the same place.
+ */
+async function fetchSessionNames(sb: Queryable, rows: any[]): Promise<Map<string, string>> {
+  const ids = sessionProfileIds(rows);
+  if (!ids.length) return new Map();
+  const { data, error } = await sb.from('profiles').select('id, full_name').in('id', ids);
+  if (error) return new Map();
+  return namesById((data ?? []) as Array<{ id: string; full_name?: string | null }>);
+}
+
 export async function fetchSessions(
   sb: Queryable,
   tenantId: string,
@@ -281,26 +346,26 @@ export async function fetchSessions(
 ): Promise<PtSession[]> {
   let q = sb
     .from('sessions')
-    .select('id, trainer_id, client_id, starts_at, duration_min, status, outcome, outcome_at, rate_cents, settlement_id, ' +
-            'trainers(full_name), clients(full_name)')
+    .select('id, trainer_id, client_id, starts_at, duration_min, status, outcome, outcome_at, rate_cents, settlement_id')
     .eq('tenant_id', tenantId)
     .gte('starts_at', sinceIso)
     .order('starts_at', { ascending: false });
   if (untilIso) q = q.lte('starts_at', untilIso);
   const { data, error } = await q;
   if (error) throw error;
-  return (data ?? []).map(rowToSession);
+
+  const rows = (data ?? []) as any[];
+  const names = await fetchSessionNames(sb, rows);
+  return rows.map((r) => rowToSession(r, names));
 }
 
-function rowToSession(r: any): PtSession {
-  const tr = Array.isArray(r.trainers) ? r.trainers[0] : r.trainers;
-  const cl = Array.isArray(r.clients) ? r.clients[0] : r.clients;
+function rowToSession(r: any, names: Map<string, string>): PtSession {
   return {
     id: r.id,
     trainerId: r.trainer_id,
-    trainerName: tr?.full_name ?? null,
+    trainerName: names.get(r.trainer_id) ?? null,
     clientId: r.client_id ?? null,
-    clientName: cl?.full_name ?? null,
+    clientName: r.client_id ? names.get(r.client_id) ?? null : null,
     startsAt: r.starts_at,
     durationMin: r.duration_min ?? 60,
     status: r.status,
