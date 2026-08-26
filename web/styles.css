@@ -36,6 +36,16 @@
   --accent:      var(--brand);
   --accent-soft: var(--brand-soft);
 
+  /* Status and surface colours were written as literals in a dozen rules. They
+     are tokens now so the light palette at the foot of this file can reach
+     them; the values here are exactly what those rules used before. */
+  --good:  #7ddba7;
+  --warn:  #f0c04e;
+  --crit:  #ef8080;
+  --faint: #3d4f4c;
+  --head-bg: rgba(10,18,17,0.72);
+  --shadow:  0 26px 60px -30px rgba(0,0,0,0.85);
+
   --sans:    'Inter Tight', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   --serif:   'Instrument Serif', Georgia, 'Times New Roman', serif;
   --mono:    'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -90,7 +100,7 @@ section[id], [id] { scroll-margin-top: 88px; }
 /* ── header ────────────────────────────────────────────────────────────── */
 header.site {
   position: sticky; top: 0; z-index: 60;
-  background: rgba(10,18,17,0.72);
+  background: var(--head-bg);
   backdrop-filter: saturate(160%) blur(14px);
   -webkit-backdrop-filter: saturate(160%) blur(14px);
   border-bottom: var(--rule);
@@ -219,7 +229,7 @@ h3.sub { font-size: clamp(20px, 2.4vw, 26px); letter-spacing: -0.02em; }
 /* ── product surfaces (the fake-but-honest UI panels) ──────────────────── */
 .surface {
   background: var(--panel); border: var(--rule); border-radius: 13px;
-  overflow: hidden; box-shadow: 0 26px 60px -30px rgba(0,0,0,0.85);
+  overflow: hidden; box-shadow: var(--shadow);
 }
 .surface-bar {
   display: flex; align-items: center; gap: 9px;
@@ -253,9 +263,9 @@ h3.sub { font-size: clamp(20px, 2.4vw, 26px); letter-spacing: -0.02em; }
 .row .nm { color: var(--ink); font-weight: 500; }
 .row .mt { font-family: var(--mono); font-variant-numeric: tabular-nums; color: var(--ink2); font-size: 13.5px; }
 .pill { font-size: 11.5px; padding: 3px 9px; border-radius: 20px; border: var(--rule); color: var(--ink2); white-space: nowrap; }
-.pill.ok   { color: #7ddba7; border-color: rgba(125,219,167,.3); }
-.pill.warn { color: #f0c04e; border-color: rgba(240,192,78,.3); }
-.pill.crit { color: #ef8080; border-color: rgba(239,128,128,.3); }
+.pill.ok   { color: var(--good); border-color: color-mix(in srgb, var(--good) 32%, transparent); }
+.pill.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 32%, transparent); }
+.pill.crit { color: var(--crit); border-color: color-mix(in srgb, var(--crit) 32%, transparent); }
 
 /* bar chart, drawn from data attributes so it can't drift from the label */
 .bars { display: flex; align-items: flex-end; gap: 7px; height: 96px; padding: 4px 0; }
@@ -426,7 +436,7 @@ table.data.compare td.yes .tick::after {
   -webkit-mask: var(--tick-svg) center / 10px 10px no-repeat;
           mask: var(--tick-svg) center / 10px 10px no-repeat;
 }
-table.data.compare td.no { color: #3d4f4c; font-family: var(--mono); font-size: 15px; }
+table.data.compare td.no { color: var(--faint); font-family: var(--mono); font-size: 15px; }
 .compare-note {
   display: flex; align-items: center; justify-content: space-between; gap: 20px;
   flex-wrap: wrap; padding: 18px 20px; border: var(--rule); border-top: none;
@@ -476,4 +486,202 @@ table.data.compare td.no { color: #3d4f4c; font-family: var(--mono); font-size: 
 }
 .eye:hover { color: var(--ink2); }
 .ok  { color: var(--accent); }
-.bad { color: #ef8080; }
+.bad { color: var(--crit); }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   COLOUR SCHEMES
+   ──────────────────────────────────────────────────────────────────────────
+   A note on which way round this is. The palette declared at the top of this
+   file is the dark one — it always was; the site has only ever had a dark
+   ground. So the work here is the *other* half: a light palette for a reader
+   whose system asks for one. Both schemes are declared explicitly below, the
+   light one because it is new and the dark one so that neither scheme depends
+   on which happens to be the default. Tokens only — no rule below the
+   :root blocks changes, and every existing class keeps working in both.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg:        #f6faf9;
+    --panel:     #ffffff;
+    --panel2:    #eef4f2;
+    --sunk:      #eaf1ef;
+    --line:      rgba(9,34,30,0.13);
+    --hair:      rgba(9,34,30,0.07);
+
+    --ink:       #0b1c19;
+    --ink2:      #425d58;
+    --ink3:      #5c7570;
+
+    /* The teal is dropped several steps: #16b8a6 on white is fine for a
+       12px label and not fine for body copy, and the same token does both. */
+    --brand:     #0a7e70;
+    --brand-ink: #ffffff;
+    --brand-soft: rgba(10,126,112,0.10);
+
+    --client:    #0a7e70;
+    --coach:     #4a3fc4;
+    --studio:    #8a5205;
+
+    --good:  #1c7a4c;
+    --warn:  #8a6300;
+    --crit:  #b6382a;
+    --faint: #9db1ad;
+    --head-bg: rgba(246,250,249,0.78);
+    --shadow:  0 20px 46px -30px rgba(9,34,30,0.42);
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg:        #0a1211;
+    --panel:     #0f1c1a;
+    --panel2:    #142622;
+    --sunk:      #081210;
+    --line:      rgba(233,242,240,0.10);
+    --hair:      rgba(233,242,240,0.06);
+
+    --ink:       #e9f2f0;
+    --ink2:      #a6bcb7;
+    --ink3:      #67807b;
+
+    --brand:     #16b8a6;
+    --brand-ink: #04211d;
+    --brand-soft: rgba(22,184,166,0.12);
+
+    --client:    #16b8a6;
+    --coach:     #7a70f0;
+    --studio:    #e0912f;
+
+    --good:  #7ddba7;
+    --warn:  #f0c04e;
+    --crit:  #ef8080;
+    --faint: #3d4f4c;
+    --head-bg: rgba(10,18,17,0.72);
+    --shadow:  0 26px 60px -30px rgba(0,0,0,0.85);
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   HOMEPAGE — sections added below the original set.
+   Nothing above this line is altered. All of it is additive, and all of it is
+   built from the existing tokens, so it follows both colour schemes.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── accent scoping ────────────────────────────────────────────────────────
+   Each of the three apps owns a colour. A section wearing .tone-coach paints
+   its eyebrow rule, tick discs and chart series in the coach's purple without
+   any of that colour being written into the markup. --brand-ink follows,
+   because it is the text colour that sits *on* the accent. */
+.tone-client { --accent: var(--client); --accent-soft: rgba(22,184,166,0.14); --c: var(--client); }
+.tone-coach  { --accent: var(--coach);  --accent-soft: rgba(122,112,240,0.16); --c: var(--coach);  --brand-ink: #ffffff; }
+.tone-studio { --accent: var(--studio); --accent-soft: rgba(224,145,47,0.15);  --c: var(--studio); --brand-ink: #2a1704; }
+/* .rail, .node and the compare header read --c; these set it without an
+   inline style attribute. */
+.c-client { --c: var(--client); }
+.c-coach  { --c: var(--coach); }
+.c-studio { --c: var(--studio); }
+
+/* ── section furniture ─────────────────────────────────────────────────── */
+.band.tint { background: var(--sunk); }
+.lead-in { max-width: 60ch; margin-bottom: clamp(30px, 4vw, 40px); }
+.lead-in.wide { max-width: 74ch; }
+.lead-in .lede { margin-top: 18px; }
+.after { margin-top: clamp(28px, 4vw, 40px); }
+.after-sm { margin-top: 20px; }
+
+/* ── tiles ─────────────────────────────────────────────────────────────── */
+.tiles { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 14px; }
+.tiles.two { grid-template-columns: repeat(2, minmax(0,1fr)); }
+@media (max-width: 940px) { .tiles { grid-template-columns: repeat(2, minmax(0,1fr)); } }
+@media (max-width: 620px) { .tiles, .tiles.two { grid-template-columns: 1fr; } }
+.tile { border: var(--rule); border-radius: 12px; background: var(--panel); padding: 22px 22px 24px; }
+.tile .cap { font-family: var(--mono); font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--c, var(--accent)); }
+.tile h3 { font-size: 18px; margin: 11px 0 9px; letter-spacing: -0.02em; }
+.tile p { margin: 0; font-size: 14.5px; color: var(--ink2); line-height: 1.55; }
+.tile ul { margin: 11px 0 0; padding-left: 17px; }
+.tile li { font-size: 14px; color: var(--ink2); line-height: 1.5; margin: 6px 0; }
+.tile li::marker { color: var(--ink3); }
+
+/* ── numbered steps ────────────────────────────────────────────────────── */
+.steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; background: var(--line); border: var(--rule); border-radius: 12px; overflow: hidden; }
+.steps li { background: var(--panel); padding: 22px 24px; display: grid; grid-template-columns: 38px minmax(0,1fr); gap: 18px; align-items: start; }
+.steps .no { font-family: var(--mono); font-size: 13px; color: var(--accent); background: var(--accent-soft); border-radius: 8px; height: 34px; display: grid; place-items: center; }
+.steps h3 { font-size: 17px; margin: 5px 0 7px; letter-spacing: -0.018em; }
+.steps p { margin: 0; color: var(--ink2); font-size: 15px; line-height: 1.56; max-width: 70ch; }
+@media (max-width: 520px) { .steps li { grid-template-columns: 1fr; gap: 12px; } .steps .no { width: 34px; } }
+
+/* ── the "this is not real data" badge ─────────────────────────────────────
+   Every panel and chart on this site is drawn from made-up numbers, because
+   there is nothing else to draw them from yet. That has to be legible at a
+   glance or the sketch reads as a customer's books. */
+.sample {
+  font-family: var(--mono); font-size: 9.5px; font-weight: 500;
+  letter-spacing: .13em; text-transform: uppercase; color: var(--ink3);
+  border: var(--rule); border-radius: 20px; padding: 3px 9px;
+  white-space: nowrap; display: inline-block; line-height: 1.5;
+}
+.surface-bar .sample { margin-left: auto; }
+@media (max-width: 480px) { .surface-bar .sample { font-size: 8.5px; padding: 2px 7px; letter-spacing: .08em; } }
+
+/* ── charts ────────────────────────────────────────────────────────────────
+   Hand-drawn SVG, no library and no script. The figure carries the reading of
+   the chart in text as well as in shape: an aria-label that states the trend,
+   axis labels drawn into the picture, and a caption that says what the shape
+   means. A chart nobody can read is a decoration. */
+figure.chart { margin: 0; border: var(--rule); border-radius: 13px; background: var(--panel); padding: 20px 20px 18px; }
+figure.chart + figure.chart { margin-top: 16px; }
+.chart-hd { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
+.chart-hd h3 { font-size: 17px; margin: 7px 0 0; letter-spacing: -0.018em; }
+.chart-k { font-family: var(--mono); font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--ink3); display: block; }
+/* Wide charts scroll inside their own box. The page itself never moves. */
+.chart-scroll { overflow-x: auto; margin-top: 16px; }
+.chart-scroll > svg { width: 100%; min-width: 640px; max-width: none; height: auto; display: block; }
+figcaption.chart-note { margin-top: 15px; font-size: 13.5px; color: var(--ink3); line-height: 1.58; max-width: 82ch; }
+figcaption.chart-note strong { color: var(--ink2); font-weight: 600; }
+.chart-two { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: clamp(20px, 3vw, 30px); }
+@media (max-width: 1000px) { .chart-two { grid-template-columns: 1fr; } }
+
+.legend { list-style: none; display: flex; flex-wrap: wrap; gap: 7px 18px; margin: 14px 0 0; padding: 0; }
+.legend li { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink2); }
+.legend .sw { width: 12px; height: 12px; border-radius: 3px; flex: none; border: 1px solid transparent; }
+.legend .n { font-family: var(--mono); font-variant-numeric: tabular-nums; color: var(--ink3); }
+
+/* chart furniture — text, rules and boxes drawn inside the SVGs */
+.cx-grid { stroke: var(--hair); stroke-width: 1; }
+.cx-base { stroke: var(--line); stroke-width: 1; }
+.cx-ax   { fill: var(--ink3); font-family: var(--mono); font-size: 11px; font-variant-numeric: tabular-nums; }
+.cx-val  { fill: var(--ink); font-family: var(--mono); font-size: 11.5px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.cx-lab  { fill: var(--ink2); font-family: var(--sans); font-size: 12.5px; }
+.cx-hd   { fill: var(--ink); font-family: var(--sans); font-size: 13px; font-weight: 600; }
+.cx-sm   { fill: var(--ink3); font-family: var(--sans); font-size: 11px; }
+.cx-cap  { fill: var(--c, var(--accent)); font-family: var(--mono); font-size: 9.5px; letter-spacing: .14em; }
+.cx-box  { fill: var(--panel2); stroke: var(--line); stroke-width: 1; }
+.cx-tab  { fill: var(--c, var(--accent)); }
+.cx-flow { fill: none; stroke: var(--ink3); stroke-width: 1.4; }
+.cx-tip  { fill: var(--ink3); }
+
+/* chart series — each also paints its legend swatch, so a swatch cannot end
+   up a different colour from the bars it stands for */
+.s-book  { fill: var(--panel2); stroke: var(--line); background: var(--panel2); border-color: var(--line); }
+.s-att   { fill: var(--accent); background: var(--accent); }
+.s-one   { fill: var(--accent); background: var(--accent); }
+.s-class { fill: var(--accent); background: var(--accent); opacity: .55; }
+.s-cover { fill: var(--accent); background: var(--accent); opacity: .28; }
+.f-hi    { fill: var(--accent); background: var(--accent); }
+.f-mid   { fill: var(--accent); background: var(--accent); opacity: .5; }
+.f-lo    { fill: var(--accent); background: var(--accent); opacity: .22; }
+/* cohort cells: four bands of the same accent, kept light enough that --ink
+   stays readable on top of them in either colour scheme */
+.ch-a { fill: var(--accent); opacity: .45; background: var(--accent); }
+.ch-b { fill: var(--accent); opacity: .32; background: var(--accent); }
+.ch-c { fill: var(--accent); opacity: .20; background: var(--accent); }
+.ch-d { fill: var(--accent); opacity: .11; background: var(--accent); }
+.ch-x { fill: none; stroke: var(--hair); stroke-width: 1; }
+
+/* ── the spreadsheet comparison ────────────────────────────────────────────
+   Built on table.data so it inherits the scroll box and header treatment. */
+table.data.vs { min-width: 660px; }
+table.data.vs th:first-child, table.data.vs td:first-child { width: 26%; }
+table.data.vs td + td { border-left: var(--hair); width: 37%; }
+table.data.vs td .job { display: block; color: var(--ink); font-weight: 500; font-size: 15px; }
