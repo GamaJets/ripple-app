@@ -94,10 +94,18 @@ of what exists; the code is the record.
 
 Getting the data in is worth little if the three audiences cannot see it.
 
-- Studio web: members, staff, retention and a real month-end close view.
-- Coach: the client book sorted by who is drifting, not alphabetically.
-- Member: a history that reads well going back, not just today.
-- Exports everywhere. It is the gym's record; leaving must be possible.
+Checked against the code on 26 Aug 2026, because this document has now been
+wrong three separate times about what already exists.
+
+| Item | Status |
+|---|---|
+| **Studio web: members** | **Built.** `studio-web/app/members` + `src/lib/memberView.ts`. Built around what class attendance alone cannot tell you: two members with identical class histories, one of whom moved to the gym floor and one of whom stopped. Only the door log separates them. |
+| **Coach: the book by who is drifting** | **Built.** `src/lib/clientDrift.ts` + the Clients screen. Ranks on the break in a person's own pattern, not on a level — a client who fell from 4 days a week to 1 outranks a steady 1-a-week client at the identical current rate. |
+| **Member: a history that reads well going back** | **In progress.** Eight screens already cover volume, progression, records, body trends, activity and reports — but **the longest window anywhere is 10 weeks**. Every one is a slice or a snapshot; a member who has trained for a year cannot see that year. |
+| **Studio web: staff** | Open. |
+| **Studio web: retention** | Partly. `retentionRead` in `memberView.ts` does it per member; there is no gym-wide view. |
+| **Studio web: month-end close** | In progress. |
+| **Exports everywhere** | In progress for the gym side. The member side exists — `src/lib/gdpr.ts` exports 14 tables as JSON. |
 
 ---
 
