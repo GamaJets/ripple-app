@@ -169,7 +169,7 @@ export default function OwnerSettings() {
   const signOut = () => {
     Alert.alert('Sign out?', 'You will need your email and password to sign back in. Nothing is deleted.', [
       { text: 'Stay signed in', style: 'cancel' },
-      { text: 'Sign out', onPress: () => { try { auth.signOut(); } catch (e) { reportError('ownerSettings.signOut', e); } } },
+      { text: 'Sign out', onPress: () => { try { auth.signOut(); router.replace('/welcome'); } catch (e) { reportError('ownerSettings.signOut', e); } } },
     ]);
   };
 
@@ -207,7 +207,7 @@ export default function OwnerSettings() {
         [
           { text: 'Stay signed in', style: 'cancel' },
           { text: 'Open Deletion requests', onPress: () => router.push('/(owner)/deletions') },
-          { text: 'Sign out', style: 'destructive', onPress: () => { try { auth.signOut(); } catch (e) { reportError('ownerSettings.signOut', e); } } },
+          { text: 'Sign out', style: 'destructive', onPress: () => { try { auth.signOut(); router.replace('/welcome'); } catch (e) { reportError('ownerSettings.signOut', e); } } },
         ],
       );
     } catch (e) {

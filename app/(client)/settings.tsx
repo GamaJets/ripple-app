@@ -90,7 +90,12 @@ export default function Settings() {
   const signOut = () => {
     Alert.alert('Sign out', 'You will need your email and password to sign back in.', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Sign out', onPress: () => { try { auth.signOut(); } catch (e) { reportError('clientSettings.signOut', e); } } },
+      // Sent back to the sign-in screen explicitly. The only auth gate is the
+      // one in app/index.tsx, which redirects when !authed — and that route is
+      // not on screen when somebody signs out from Settings. Without this the
+      // session ends and the screen simply stays put, showing dashes where the
+      // name and email were. Seen in the simulator, not in a test.
+      { text: 'Sign out', onPress: () => { try { auth.signOut(); router.replace('/welcome'); } catch (e) { reportError('clientSettings.signOut', e); } } },
     ]);
   };
   const [legal, setLegal] = useState<'privacy' | 'terms' | null>(null);
@@ -142,7 +147,7 @@ export default function Settings() {
         const ok = await requestAccountDeletion();
         await loadDeletion();
         if (!ok) { Alert.alert('Not requested', "We couldn't record your request just now, so nothing has been scheduled. Check your connection and try again, or email support@repplefitness.com from the address on your account."); return; }
-        Alert.alert('Deletion requested', 'Your account is scheduled for deletion and your data will be erased. You have been signed out.\n\nYou can withdraw the request from Settings until it is actioned — sign back in to do that.', [{ text: 'OK', onPress: () => { try { auth.signOut(); } catch { /* ignore */ } } }]);
+        Alert.alert('Deletion requested', 'Your account is scheduled for deletion and your data will be erased. You have been signed out.\n\nYou can withdraw the request from Settings until it is actioned — sign back in to do that.', [{ text: 'OK', onPress: () => { try { auth.signOut(); router.replace('/welcome'); } catch { /* ignore */ } } }]);
       } },
     ]);
   };

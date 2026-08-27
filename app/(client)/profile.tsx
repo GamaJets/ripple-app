@@ -131,7 +131,7 @@ const HUB_ICON: Record<string, IconName> = {
   '/(client)/recovery': 'water', '/(client)/habits': 'check', '/(client)/checkin': 'pencil', '/(client)/injuries': 'heart',
   '/(client)/foodlog': 'meals', '/(client)/coach': 'chat', '/(client)/messages': 'message', '/(client)/reminders': 'bell', '/(client)/packages': 'trophy',
   '/(client)/social': 'share', '/(client)/devices': 'clock', '/(client)/music': 'play',
-  '/(client)/appearance': 'palette', '/(client)/settings': 'settings', '/': 'swap', '/(client)/trainers': 'people', '/(client)/feedback': 'message',
+  '/(client)/appearance': 'palette', '/(client)/settings': 'settings', '/(client)/trainers': 'people', '/(client)/feedback': 'message',
 };
 const HUB_GROUPS: { title: string; items: { label: string; note: string; route: string }[] }[] = [
   { title: 'Progress & Insights', items: [
@@ -170,7 +170,6 @@ const HUB_GROUPS: { title: string; items: { label: string; note: string; route: 
     { label: 'Music & Playlists', note: 'AI workout playlists', route: '/(client)/music' },
   ] },
   { title: 'Account', items: [
-    { label: 'Switch portal', note: 'Client · Trainer · Owner', route: '/' },
     { label: 'Appearance', note: 'Theme & accent colour', route: '/(client)/appearance' },
     { label: 'Settings', note: 'Account, notifications, units, legal & version', route: '/(client)/settings' },
     { label: 'Send Feedback', note: 'Tell us what to improve', route: '/(client)/feedback' },

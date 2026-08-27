@@ -143,7 +143,7 @@ export default function TrainerSettings() {
   const signOut = () => {
     Alert.alert('Sign out?', 'You will need your email and password to sign back in. Nothing is deleted.', [
       { text: 'Stay signed in', style: 'cancel' },
-      { text: 'Sign out', onPress: () => { try { auth.signOut(); } catch (e) { reportError('trainerSettings.signOut', e); } } },
+      { text: 'Sign out', onPress: () => { try { auth.signOut(); router.replace('/welcome'); } catch (e) { reportError('trainerSettings.signOut', e); } } },
     ]);
   };
 
@@ -161,7 +161,7 @@ export default function TrainerSettings() {
       Alert.alert(
         'Deletion requested',
         `Your request is recorded and now sits in your gym's deletion queue. ${tenant ? `The owner of ${tenant.name}` : "Your gym's owner"} has 30 days to action it, after which your account and your data are erased permanently.\n\nYou will be signed out now.`,
-        [{ text: 'OK', onPress: () => { try { auth.signOut(); } catch (e) { reportError('trainerSettings.signOut', e); } } }],
+        [{ text: 'OK', onPress: () => { try { auth.signOut(); router.replace('/welcome'); } catch (e) { reportError('trainerSettings.signOut', e); } } }],
       );
     } catch (e) {
       reportError('trainerSettings.delete', e);
