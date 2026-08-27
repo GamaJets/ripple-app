@@ -169,6 +169,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (wanted) {
         // Only fills a blank. See the note above on not overwriting a name.
         try {
+          // no-error-ok: an unreadable profile leaves the name unset, which is the same outcome as it already having one — the sign-in itself has already succeeded either way
           const { data: prof } = await supabase.from('profiles').select('full_name').eq('id', data.session.user.id).maybeSingle();
           if (!((prof as any)?.full_name || '').trim()) {
             await supabase.from('profiles').update({ full_name: wanted }).eq('id', data.session.user.id);
