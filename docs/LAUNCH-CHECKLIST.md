@@ -209,3 +209,76 @@ because the insert path had never once succeeded. But it means **`getPublicUrl`
 no longer returns anything playable for this bucket**. If a future change starts
 returning public URLs again, it is not a convenience; it is the permission model
 being removed.
+
+---
+
+## 7. Never submit with `--latest` from this repo
+
+Learned the hard way on 27 Aug 2026, submitting the first builds in four days.
+
+`eas submit --platform ios --profile production --latest` reads as "submit the
+newest production build". It does not. **`--latest` picks the newest build for
+the PLATFORM**; `--profile` only decides which App Store Connect app to aim at.
+
+One repo builds three apps here, so the newest iOS build is very often not the
+one the profile means. That morning the newest was Repple Studio, and two
+submit commands — one for the client, one for the coach — both picked up the
+Studio binary:
+
+    efe04979  Studio build 4  →  aimed at 6790096518 (client)   finished
+    c5203b57  Studio build 4  →  aimed at 6804358275 (coach)    finished
+    ba3ad9a6  Studio build 4  →  aimed at 6790096518 (client)   errored
+
+What saved it: **Apple routes an upload by the binary's bundle identifier, not
+by the ascAppId the submitter passed.** All three went to Repple Studio, where
+the bundle id pointed, and the duplicates came back as ITMS-90189 "Redundant
+Binary Upload". Nothing wrong reached a tester, and the only real cost was that
+the coach's actual build never got submitted while everyone believed it had.
+
+Do not rely on that routing to keep saving you. Submit by explicit build id:
+
+```bash
+eas build:list --limit 10          # find the id for the profile you mean
+eas submit --platform ios --profile production-coach --id <BUILD_ID>
+```
+
+Before it uploads, EAS prints the bundle identifier. Read that line. It must
+match the app you meant:
+
+    com.washateria.repple          Repple          6790096518
+    com.washateria.repple.coach    Repple Coach    6804358275
+    com.washateria.repple.studio   Repple Studio   6804417240
+
+One more thing seen the same morning, which is cosmetic and looks alarming:
+`eas submit` prints "Looking up credentials configuration for
+com.washateria.repple" even when submitting the coach. It evaluates
+`app.config.ts` without the build profile's `EXPO_PUBLIC_APP_VARIANT`, so it
+falls back to the default identity in `app.json`. It only affects which
+credential record is looked up, and an account-level ASC API key makes it moot.
+The binary's own bundle id is fixed at build time.
+
+---
+
+## 8. A production build bundles JavaScript; a development build does not
+
+Also 27 Aug 2026. Every production build of all three apps had failed since the
+Apple Health write path landed, and nothing said so for thirty commits.
+
+`lazy()` in `src/lib/wearables/appleHealthWrite.ts` called `require(mod)` on a
+variable. Metro resolves requires statically and refuses the file:
+
+    SyntaxError: appleHealthWrite.ts:467: Invalid call at line 467: require(mod)
+
+That is the **Bundle JavaScript** phase, which only production builds run — a
+development client loads its JS from the Metro server and never bundles it. So
+the apps stayed developable and became unshippable, silently.
+
+The whole class of problem is cheap to catch. This is the same bundle step EAS
+runs, and it takes about half a minute:
+
+```bash
+npx expo export --platform ios --output-dir /tmp/repple-export
+```
+
+Run it before any store build. `tsc` will not catch this — the code typechecks
+perfectly; it is the bundler that refuses it.
