@@ -26,6 +26,8 @@ import { PROVIDERS } from '../../src/lib/wearables/registry';
 import { Rule, Section, SectionHead, Hero, Cta, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { Icon } from '../../src/ui/Icon';
+import { useWorkoutLog } from '../../src/ui/workoutLog';
+import { RECOVERY_ACTIVITIES, isRecoveryActivity } from '../../src/lib/recoveryActs';
 
 const MOBILITY = [
  { name: 'Full-body warm-up', dur: '6 min', moves: ['Leg swings ×10/side', 'World’s greatest stretch ×5/side', 'Cat-cow ×10', 'Band pull-aparts ×15', 'Bodyweight squats ×10'] },
@@ -50,6 +52,12 @@ export default function Recovery() {
  const { cups, goalCups, addCup, removeCup, sleep, addSleep } = useWellness();
  const cd = useClientData();
  const wear = useWearables();
+ const { log: workoutLog, status: logStatus } = useWorkoutLog();
+ // Sauna, cold plunge and the rest are logged on Train like every other
+ // session. They belong on this screen too — a member who logs a sauna looks
+ // for it under Recovery, and finding nothing here while a screen called
+ // Recovery exists is the confusion this section removes.
+ const recoverySessions = workoutLog.filter((l) => isRecoveryActivity(l.exercise)).slice(0, 6);
  const age = ageFromDob(cd.dob);
  // Source order, most to least detailed. No demo fallback: an empty chart that
  // says so beats a fabricated curve that looks like the user's own training.
@@ -190,6 +198,38 @@ export default function Recovery() {
      </View>
     </View>
    ))}
+  </Section>
+
+  <Rule />
+
+  {/* ── logged recovery sessions ─────────────────────────────────────── */}
+  <Section>
+   <SectionHead title="Recovery sessions" note={recoverySessions.length ? `${recoverySessions.length} recent` : undefined} />
+   {logStatus === 'error' ? (
+    <Text style={{ ...ty.label, color: t.ink2 }}>
+     Your sessions could not be read, so none are shown. That is not the same as having logged none.
+    </Text>
+   ) : recoverySessions.length === 0 ? (
+    <Text style={{ ...ty.label, color: t.ink3 }}>
+     Nothing logged yet. {RECOVERY_ACTIVITIES.join(', ')} — duration and heart rate are kept; there is no
+     calorie figure, because heating up is not work.
+    </Text>
+   ) : (
+    recoverySessions.map((l, i) => (
+     <View key={(l.id ?? '') + i} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+       gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, flex: 1 }}>{l.exercise}</Text>
+      <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>
+       {[l.cardio?.mins ? `${l.cardio.mins} min` : null,
+         new Date(l.t).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })]
+        .filter(Boolean).join(' · ')}
+      </Text>
+     </View>
+    ))
+   )}
+   <View style={{ marginTop: sp.md }}>
+    <Ghost label="Log a recovery session" onPress={() => router.push('/(client)/workouts?mode=recovery')} />
+   </View>
   </Section>
 
   <Rule />

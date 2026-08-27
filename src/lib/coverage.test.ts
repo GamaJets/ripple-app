@@ -18,6 +18,7 @@ import { parseMoneyCents, parseDate, detectDateOrder, previewMembers, previewPay
 import { classEntry, ptEntry, mergeTimetable, overlapping, entriesAt, floorAt, floorByHour, clashes, summariseBoard, slotBlocker, type PtSlot } from './gymPtSchedule';
 import { mergeExerciseLists } from './coachExerciseList';
 import { attributionLine } from './workoutAttribution';
+import { RECOVERY_ACTIVITIES, isRecoveryActivity } from './recoveryActs';
 import { groupSessions, sessionKey, sessionDuration, sessionActivity, sessionKcal, sessionDistanceMeters, planSession, planWrite, summariseResult, HK_WRITE_ACTIVITIES, type Ledger } from './wearables/appleHealthWrite';
 import { sliceLoading, sliceReady, sliceFailed, rowsOf, brokenParts, completeness, partialWarning, memberIds, buildDossier, buildDossiers, retentionRead, doorLogActive, attendanceCaveat, type MemberRecord, type MemberBooking } from './memberView';
 import { payroll30For, payrollBlocker, type GymTrainer } from './gymTrainers';
@@ -1609,6 +1610,20 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
   }
   ok(!HK_WRITE_ACTIVITIES.has('Circuit') && HK_WRITE_ACTIVITIES.has('Other'),
      'the allowlist is the bridge dictionary, not the app vocabulary');
+
+  // Recovery is one idea in two places, kept in step by one list.
+  {
+    ok(isRecoveryActivity('Sauna') && isRecoveryActivity('Cold Plunge'),
+       'the modalities Train offers are the ones the Recovery screen recognises');
+    ok(isRecoveryActivity('sauna') && isRecoveryActivity('  SAUNA  '),
+       'matched however it was cased or spaced, since it arrives as a logged string');
+    ok(!isRecoveryActivity('Back Squat') && !isRecoveryActivity('') && !isRecoveryActivity(null),
+       'and nothing else is swept onto the Recovery screen');
+    for (const name of RECOVERY_ACTIVITIES) {
+      ok(isRecoveryActivity(name),
+         `${name} is offered on Train, so it must show under Recovery — one list, two screens`);
+    }
+  }
 
   // Attribution on a workout a coach logged for a client.
   {

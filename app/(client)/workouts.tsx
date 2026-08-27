@@ -9,7 +9,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView, Modal, Alert, Linking, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useRouter, useFocusEffect } from 'expo-router';
+import { useRouter, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { tapLight } from '../../src/ui/haptics';
 import { Icon } from '../../src/ui/Icon';
 import { useTheme } from '../../src/ui/components';
@@ -40,6 +40,7 @@ import { hrColor, hrZoneNo, zoneOf, zoneKey, emptyZoneSeconds, splatPoints, zone
 import { ZoneNow, ZoneBoard } from '../../src/ui/ZoneBoard';
 import { SessionHrSheet } from '../../src/ui/SessionHrSheet';
 import { ageFromDob } from '../../src/lib/age';
+import { RECOVERY_ACTIVITIES } from '../../src/lib/recoveryActs';
 import { attributionLine } from '../../src/lib/workoutAttribution';
 
 const WEEK = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -80,14 +81,9 @@ const HIIT_ACTS: Activity[] = [
 
 // Recovery is time spent deliberately not training. Duration and heart rate are
 // real measurements and are kept; calories are not derivable and are not shown.
-const RECOVERY_ACTS: Activity[] = [
-  { name: 'Breathwork',       met: null },
-  { name: 'Cold Plunge',      met: null },
-  { name: 'Contrast Therapy', met: null },
-  { name: 'Massage',          met: null },
-  { name: 'Sauna',            met: null },
-  { name: 'Steam Room',       met: null },
-];
+// The names live in src/lib/recoveryActs.ts so the Recovery screen and this one
+// cannot drift — a modality added there appears in both places.
+const RECOVERY_ACTS: Activity[] = RECOVERY_ACTIVITIES.map((name) => ({ name, met: null }));
 
 const MOBILITY_ACTS: Activity[] = [
   { name: 'Dynamic Warm-Up',  met: 4.0 },
@@ -161,7 +157,13 @@ export default function Train() {
   const program = coachProgram ?? buildProgram(cd.goal, cd.bodyFatPct);
   const jsToMon = (new Date().getDay() + 6) % 7;
   const [dayIdx, setDayIdx] = useState(jsToMon);
-  const [mode, setMode] = useState<'strength' | 'cardio' | 'hiit' | 'mobility' | 'recovery'>('strength');
+  // `?mode=recovery` lets the Recovery screen send somebody straight to the
+  // right type, so logging a sauna is one tap from the screen that shows it.
+  // Anything unrecognised falls back to the program, which is the default.
+  const { mode: modeParam } = useLocalSearchParams<{ mode?: string }>();
+  const startMode = (['strength', 'cardio', 'hiit', 'mobility', 'recovery'] as const)
+    .find((m) => m === modeParam) ?? 'strength';
+  const [mode, setMode] = useState<'strength' | 'cardio' | 'hiit' | 'mobility' | 'recovery'>(startMode);
   const [swaps, setSwaps] = useState<Record<string, string>>({});
   const [logged, setLogged] = useState<Record<string, { reps: string; kg: string }[]>>({});
 
