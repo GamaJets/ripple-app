@@ -20,6 +20,7 @@ import {
 } from '../lib/supabase';
 import { resetPasswordUrl } from '../lib/deepLink';
 import { reportError } from '../lib/reportError';
+import { phoneAuthError } from '../lib/phone';
 
 export type Role = 'owner' | 'trainer' | 'client';
 export interface AuthUser { id: string; name: string; email: string; role: Role }
@@ -39,6 +40,16 @@ interface AuthValue {
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (name: string, email: string, password: string, role?: Role) => Promise<SignUpResult>;
   signInWithProvider: (provider: 'apple' | 'google') => Promise<void>;
+  /**
+   * Text a one-time code to an E.164 number. Resolves with what to say next.
+   *
+   * `ok: false` carries a reason the reader can act on — an SMS that never
+   * arrives is the single most common support message any OTP flow gets, and
+   * the flow must never claim to have sent one it did not.
+   */
+  sendPhoneCode: (e164: string) => Promise<{ ok: true } | { ok: false; reason: string }>;
+  /** Exchange a code for a session. Only `ok: true` means they are signed in. */
+  verifyPhoneCode: (e164: string, code: string, name?: string) => Promise<{ ok: true } | { ok: false; reason: string }>;
   demo: boolean;
   enterDemo: () => void;
   signOut: () => void;
@@ -116,6 +127,61 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { needsConfirmation: true };
   };
 
+  /**
+   * Phone sign-in, step one.
+   *
+   * `shouldCreateUser` is deliberately true: a phone number IS the account
+   * here, so a first-time number signing in and a new member signing up are
+   * the same gesture. That is the whole point of the change — David Lloyd asks
+   * for a number and never mentions whether you already exist.
+   */
+  const sendPhoneCode = async (e164: string): Promise<{ ok: true } | { ok: false; reason: string }> => {
+    if (!USE_SUPABASE) return { ok: false, reason: 'Not connected to Repple, so no code was sent.' };
+    try {
+      const { error } = await supabase.auth.signInWithOtp({ phone: e164, options: { shouldCreateUser: true } });
+      if (error) { reportError('auth.sendPhoneCode', error); return { ok: false, reason: phoneAuthError(error.message) }; }
+      return { ok: true };
+    } catch (e: any) {
+      reportError('auth.sendPhoneCode', e);
+      return { ok: false, reason: phoneAuthError(e?.message) };
+    }
+  };
+
+  /**
+   * Phone sign-in, step two.
+   *
+   * `name` is only used the first time a number is seen — an existing member
+   * verifying on a new phone must not have their profile name overwritten by
+   * whatever the sign-in screen happened to have in its field.
+   */
+  const verifyPhoneCode = async (e164: string, code: string, name?: string): Promise<{ ok: true } | { ok: false; reason: string }> => {
+    if (!USE_SUPABASE) return { ok: false, reason: 'Not connected to Repple, so the code could not be checked.' };
+    try {
+      const { data, error } = await supabase.auth.verifyOtp({ phone: e164, token: code, type: 'sms' });
+      if (error) return { ok: false, reason: phoneAuthError(error.message) };
+      if (!data?.session) {
+        // verifyOtp resolving without a session is not success. Saying "signed
+        // in" here would drop somebody into an app with no session behind it.
+        reportError('auth.verifyPhoneCode', new Error('verifyOtp returned no session'));
+        return { ok: false, reason: 'The code was accepted but the sign-in did not complete. Try once more.' };
+      }
+      const wanted = (name || '').trim();
+      if (wanted) {
+        // Only fills a blank. See the note above on not overwriting a name.
+        try {
+          const { data: prof } = await supabase.from('profiles').select('full_name').eq('id', data.session.user.id).maybeSingle();
+          if (!((prof as any)?.full_name || '').trim()) {
+            await supabase.from('profiles').update({ full_name: wanted }).eq('id', data.session.user.id);
+          }
+        } catch (e) { reportError('auth.verifyPhoneCode.name', e); }
+      }
+      await refreshFromSession();
+      return { ok: true };
+    } catch (e: any) {
+      return { ok: false, reason: phoneAuthError(e?.message) };
+    }
+  };
+
   const signInWithProvider = async (provider: 'apple' | 'google') => {
     if (!USE_SUPABASE) {
       setUser({ id: 'local', name: provider === 'apple' ? 'Apple User' : 'Google User', email: `demo@${provider}.com`, role: 'client' });
@@ -161,7 +227,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <Ctx.Provider value={{ authed: !!user, user, loading, demo, enterDemo, signIn, signUp, signInWithProvider, signOut, sendPasswordReset, beginPasswordRecoveryWithTokenHash, beginPasswordRecoveryWithCode, beginPasswordRecoveryWithTokens, completePasswordReset }}>
+    <Ctx.Provider value={{ authed: !!user, user, loading, demo, enterDemo, signIn, signUp, signInWithProvider, sendPhoneCode, verifyPhoneCode, signOut, sendPasswordReset, beginPasswordRecoveryWithTokenHash, beginPasswordRecoveryWithCode, beginPasswordRecoveryWithTokens, completePasswordReset }}>
       {children}
     </Ctx.Provider>
   );

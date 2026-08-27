@@ -138,7 +138,27 @@ export default function Welcome() {
 
           {mode === 'up' ? (
             <>
-              <Text style={lab}>Full name</Text>
+              {/* The phone door, offered first. Every tester who could not get in
+              this week was stuck on a password or a link: a policy that said
+              six characters and enforced eight, a reset token spent by a mail
+              scanner, an invitation sent to a mistyped address. A texted code
+              has none of those failure modes. Email and password stay below,
+              because an existing member has no phone on their account yet. */}
+          <Pressable onPress={() => router.push('/phone-signin')} accessibilityRole="button"
+            accessibilityLabel="Continue with your phone number"
+            style={{
+              flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 9,
+              backgroundColor: t.surface2, borderRadius: radius.sm, paddingVertical: 14,
+              marginBottom: sp.lg,
+            }}>
+            <Text style={{ ...ty.body, fontWeight: '600', color: t.ink }}>Continue with your phone number</Text>
+          </Pressable>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginBottom: sp.lg }}>
+            <View style={{ flex: 1, height: hairline, backgroundColor: t.ring }} />
+            <Text style={{ ...ty.caption, color: t.ink3 }}>or</Text>
+            <View style={{ flex: 1, height: hairline, backgroundColor: t.ring }} />
+          </View>
+          <Text style={lab}>Full name</Text>
               <TextInput value={name} onChangeText={setName} placeholder="Full name" placeholderTextColor={t.ink3} autoCapitalize="words" style={inp} accessibilityLabel="Full name" />
             </>
           ) : null}

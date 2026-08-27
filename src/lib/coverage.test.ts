@@ -24,6 +24,7 @@ import { RECOVERY_ACTIVITIES, isRecoveryActivity } from './recoveryActs';
 import { normaliseCode, isPlausibleCode, joinErrorMessage, CODE_ALPHABET, CODE_LENGTH } from './joinCode';
 import { passwordRules, passwordMeetsLocalRules, passwordErrorMessage, PASSWORD_MIN } from './passwordRules';
 import { RELEASES, releasesFor, unseenReleases, compareVersions, storeNotes } from './releaseNotes';
+import { toE164, stripTrunkZero, isPlausiblePhone, formatNational, maskedForDisplay, phoneAuthError, COUNTRIES, flagFor } from './phone';
 import { groupSessions, sessionKey, sessionDuration, sessionActivity, sessionKcal, sessionDistanceMeters, planSession, planWrite, summariseResult, HK_WRITE_ACTIVITIES, type Ledger } from './wearables/appleHealthWrite';
 import { sliceLoading, sliceReady, sliceFailed, rowsOf, brokenParts, completeness, partialWarning, memberIds, buildDossier, buildDossiers, retentionRead, doorLogActive, attendanceCaveat, type MemberRecord, type MemberBooking } from './memberView';
 import { payroll30For, payrollBlocker, type GymTrainer } from './gymTrainers';
@@ -3946,6 +3947,72 @@ function by2(v: ReturnType<typeof buildStaff>, id: string) {
       ok(e.apps.length > 0, `"${e.title}" names at least one app`);
     }
   }
+}
+
+/* ── phone numbers ────────────────────────────────────────────────────────
+ *
+ * THE TRUNK ZERO. Across most of the world people write their mobile with a
+ * leading zero, because that is what you dial domestically. It is a trunk
+ * prefix, not part of the number, and E.164 has none:
+ *
+ *     +9710507671842   is not a number and reaches nobody
+ *     +971507671842    is the number
+ *
+ * Somebody typing their own number exactly as they have written it their whole
+ * life would get silence, retype it, get silence again, and conclude the app
+ * is broken. For them it would be.
+ */
+{
+  ok(toE164('0507671842', 'AE') === '+971507671842', 'a UAE mobile with its trunk zero becomes E.164 without it');
+  ok(toE164('507671842', 'AE') === '+971507671842', 'and without the zero it is the same number');
+  ok(toE164('07700900123', 'GB') === '+447700900123', 'a UK mobile drops its trunk zero too');
+  ok(toE164('+971507671842', 'AE') === '+971507671842', 'an already-international number is left alone');
+  ok(toE164('00971507671842', 'AE') === '+971507671842', 'the 00 international prefix is understood');
+  ok(toE164('+971 50 767 1842', 'AE') === '+971507671842', 'spaces people type are ignored');
+  ok(toE164('(050) 767-1842', 'AE') === '+971507671842', 'so are brackets and dashes');
+
+  // The US and Canada have no trunk zero, so a leading 0 there is a typo, not
+  // a prefix to helpfully remove.
+  ok(toE164('3147950156', 'US') === '+13147950156', 'a US number needs no stripping');
+
+  ok(stripTrunkZero('0') === '0', 'a lone zero is somebody mid-type, not a trunk prefix');
+  ok(stripTrunkZero('0507671842') === '507671842', 'one leading zero comes off');
+  ok(stripTrunkZero('507671842') === '507671842', 'a number without one is unchanged');
+
+  // Refusals. The button stays disabled rather than sending a code nowhere.
+  ok(toE164('', 'AE') === null, 'nothing typed is not a number');
+  ok(toE164('12345', 'AE') === null, 'too short for the country is refused');
+  ok(toE164('05076718421234', 'AE') === null, 'too long for the country is refused');
+  ok(toE164('+1', 'US') === null, 'a bare plus and country code is not a number');
+  ok(toE164('+' + '9'.repeat(16), 'AE') === null, 'E.164 caps at fifteen digits');
+  ok(!isPlausiblePhone('050', 'AE'), 'a half-typed number does not enable the button');
+  ok(isPlausiblePhone('0507671842', 'AE'), 'a complete one does');
+
+  // Shown back to them in the shape they would write it themselves.
+  ok(formatNational('+971507671842', 'AE').startsWith('0'), 'a UAE number is displayed with its trunk zero restored');
+  ok(!formatNational('+13147950156', 'US').startsWith('0'), 'a US number is not given a zero it never had');
+
+  // The confirmation line must not print somebody's full number back at them.
+  const masked = maskedForDisplay('+971507671842');
+  ok(masked.endsWith('1842'), 'the last four digits identify it to the owner');
+  ok(!masked.includes('50767'), 'the rest is not shown');
+
+  // Every country entry has to be usable.
+  for (const c of COUNTRIES) {
+    ok(/^[A-Z]{2}$/.test(c.iso), `${c.name}: a two-letter ISO code`);
+    ok(/^\d+$/.test(c.dial), `${c.name}: a numeric dial code`);
+    ok(c.len[0] > 0 && c.len[1] >= c.len[0], `${c.name}: a sane length range`);
+    ok(flagFor(c.iso).length > 0, `${c.name}: a flag renders`);
+  }
+  ok(new Set(COUNTRIES.map((c) => c.iso)).size === COUNTRIES.length, 'no country is listed twice');
+  ok(COUNTRIES[0].iso === 'AE', 'the UAE leads the list — it is where the gyms are');
+
+  // Failures a person can act on.
+  ok(phoneAuthError('Token has expired').includes('new one'), 'an expired code says to ask for another');
+  ok(phoneAuthError('Invalid login credentials').includes('six digits'), 'a wrong code explains what a right one looks like');
+  ok(phoneAuthError('over_sms_send_rate_limit').includes('Wait'), 'a rate limit says to wait rather than retrying blindly');
+  ok(phoneAuthError('phone_provider_disabled').includes('email'), 'a disabled provider points at the path that still works');
+  ok(phoneAuthError('something unheard of') === 'something unheard of', 'an unknown failure is passed through, not replaced with a guess');
 }
 
 if (errors.length) { console.log('COVERAGE FAILURES:\n' + errors.join('\n')); process.exit(1); }
