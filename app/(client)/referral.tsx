@@ -37,7 +37,8 @@ export default function Referral() {
   const c = useClientData();
   const { appName } = useBrand();
   const code = codeFrom(c.name, c.id);
-  const [joined, setJoined] = useState(0);
+  // null covers both 'not read yet' and 'could not be read'. Neither is 0.
+  const [joined, setJoined] = useState<number | null>(null);
   useEffect(() => { let on = true; referralCount(code).then((n) => { if (on) setJoined(n); }); return () => { on = false; }; }, [code]);
   const shareMsg = `Join me on ${appName} — the app I use to plan workouts, track progress and dial in my nutrition. Use my code ${code} when you sign up.`;
 
@@ -70,7 +71,7 @@ export default function Referral() {
           <Card>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Your code</Text>
             <Text style={{ ...value(30), color: t.ink, letterSpacing: 1.5, marginTop: 6 }}>{code}</Text>
-            {joined > 0 ? (
+            {joined != null && joined > 0 ? (
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.md }}>
                 <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.brand }} />
                 <Text style={{ ...ty.label, ...numeric, color: t.ink2 }}>{joined} friend{joined === 1 ? '' : 's'} joined with your code</Text>

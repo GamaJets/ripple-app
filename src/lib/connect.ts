@@ -6,6 +6,7 @@
 import { Linking } from 'react-native';
 import { appLink } from './deepLink';
 import { supabase } from './supabase';
+import { reportError } from './reportError';
 
 export interface ConnectStatus { stripe_account_id: string | null; charges_enabled: boolean; details_submitted: boolean }
 export interface TrainerPackage { id: string; trainer_id: string; name: string; price_cents: number; currency: string; sessions: number | null; active: boolean }
@@ -28,7 +29,11 @@ export async function fetchMyConnect(): Promise<ConnectStatus | null> {
   try {
     const { data: auth } = await supabase.auth.getUser();
     const uid = auth?.user?.id; if (!uid) return null;
-    const { data } = await supabase.from('connect_accounts').select('*').eq('trainer_id', uid).maybeSingle();
+    // A refused read used to fall through to the same default a trainer with no
+    // account gets — telling somebody who IS set up for payments that they are
+    // not. null means "could not read"; the caller renders that differently.
+    const { data, error } = await supabase.from('connect_accounts').select('*').eq('trainer_id', uid).maybeSingle();
+    if (error) { reportError('connect.fetchMyConnect', error); return null; }
     return (data as ConnectStatus) ?? { stripe_account_id: null, charges_enabled: false, details_submitted: false };
   } catch { return null; }
 }
@@ -75,12 +80,20 @@ export async function deactivatePackage(id: string): Promise<boolean> {
   } catch { return false; }
 }
 
-/** Active packages a client can buy from a given trainer. */
-export async function fetchTrainerPackages(trainerId: string): Promise<TrainerPackage[]> {
+/**
+ * Active packages a client can buy from a given trainer.
+ *
+ * `[]` means this trainer sells none. **`null` means we could not read them** —
+ * the same distinction fetchMyPackages already makes, and this twin did not.
+ * A client shown "this coach sells nothing" because a read failed is a lost
+ * sale explained as a fact about the coach.
+ */
+export async function fetchTrainerPackages(trainerId: string): Promise<TrainerPackage[] | null> {
   try {
-    const { data } = await supabase.from('trainer_packages').select('*').eq('trainer_id', trainerId).eq('active', true).order('price_cents', { ascending: true });
+    const { data, error } = await supabase.from('trainer_packages').select('*').eq('trainer_id', trainerId).eq('active', true).order('price_cents', { ascending: true });
+    if (error) { reportError('connect.fetchTrainerPackages', error); return null; }
     return (data as TrainerPackage[]) ?? [];
-  } catch { return []; }
+  } catch { return null; }
 }
 
 /** Client buys a package → Stripe Checkout (funds to the trainer, minus fee). */
@@ -129,7 +142,13 @@ export async function redeemSession(trainerId: string): Promise<{ ok: boolean; r
   try {
     const { data: auth } = await supabase.auth.getUser();
     const uid = auth?.user?.id; if (!uid) return { ok: false, error: 'Not signed in.' };
-    const { data } = await supabase.from('client_purchases').select('*').eq('client_id', uid).eq('trainer_id', trainerId).eq('status', 'paid').not('sessions_total', 'is', null).order('created_at', { ascending: true });
+    const { data, error: readErr } = await supabase.from('client_purchases').select('*').eq('client_id', uid).eq('trainer_id', trainerId).eq('status', 'paid').not('sessions_total', 'is', null).order('created_at', { ascending: true });
+    // A refused read was becoming "No sessions left in a pack" — telling
+    // somebody who has paid for ten that they have none. Different sentence.
+    if (readErr) {
+      reportError('connect.redeemSession.read', readErr);
+      return { ok: false, error: 'Your session packs could not be read, so none was drawn down. This is not the same as having none left.' };
+    }
     const packs = (data as Purchase[]) ?? [];
     const pack = packs.find((p) => (p.sessions_total || 0) - p.sessions_used > 0);
     if (!pack) return { ok: false, error: 'No sessions left in a pack.' };
@@ -143,7 +162,8 @@ export async function redeemSession(trainerId: string): Promise<{ ok: boolean; r
  *  other-client identity leaks to the caller beyond opaque ids. */
 export async function reofferSlot(sessionId: string): Promise<string[]> {
   try {
-    const { data } = await supabase.rpc('reoffer_client_ids', { p_session: sessionId });
+    const { data, error } = await supabase.rpc('reoffer_client_ids', { p_session: sessionId });
+    if (error) { reportError('connect.reofferSlot', error); return []; }
     return Array.isArray(data) ? data.map((r: any) => r.client_id).filter(Boolean) : [];
   } catch { return []; }
 }
@@ -153,7 +173,10 @@ export async function refundSession(trainerId: string): Promise<{ ok: boolean }>
   try {
     const { data: auth } = await supabase.auth.getUser();
     const uid = auth?.user?.id; if (!uid) return { ok: false };
-    const { data } = await supabase.from('client_purchases').select('*').eq('client_id', uid).eq('trainer_id', trainerId).eq('status', 'paid').not('sessions_total', 'is', null).order('created_at', { ascending: false });
+    const { data, error: readErr } = await supabase.from('client_purchases').select('*').eq('client_id', uid).eq('trainer_id', trainerId).eq('status', 'paid').not('sessions_total', 'is', null).order('created_at', { ascending: false });
+    // A credit not returned because the read failed is a credit taken. Report
+    // it rather than resolving false, which reads as "nothing to refund".
+    if (readErr) { reportError('connect.refundSession.read', readErr); return { ok: false }; }
     const pack = ((data as Purchase[]) ?? []).find((p) => p.sessions_used > 0);
     if (!pack) return { ok: false };
     const { error } = await supabase.from('client_purchases').update({ sessions_used: pack.sessions_used - 1 }).eq('id', pack.id);
