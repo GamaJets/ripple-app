@@ -20,3 +20,18 @@ dist-verify/
 # so it never belongs in the repo — eas.json only points at it by path.
 /play-service-account.json
 .preflight-export/
+
+# Signing material. Nothing here today — EAS holds the certificates on its own
+# servers and none of this exists locally. These patterns are pre-emptive: the
+# moment somebody picks a "download" option in `eas credentials`, a .p8 or .p12
+# lands in this directory, and a private key committed once is a private key to
+# be rotated.
+*.p8
+*.p12
+*.mobileprovision
+*.cer
+*.keystore
+*.jks
+credentials.json
+# The Google Play submission key, if one is ever added for Android auto-submit.
+play-service-account*.json
