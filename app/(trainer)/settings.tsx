@@ -28,15 +28,17 @@
 //    belong to the gym and stay; what goes is the coach and everything written
 //    only by them. The confirmation says so rather than leaving it implied.
 import { useState, useEffect, useCallback } from 'react';
-import { View, Text, ScrollView, Alert } from 'react-native';
+import { View, Text, ScrollView, Alert, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { Rule, Section, SectionHead, ListRow, Ghost, fig } from '../../src/ui/kit';
-import { sp, layout, hairline, type as ty } from '../../src/theme/scale';
+import { sp, layout, hairline, type as ty, radius } from '../../src/theme/scale';
 import { BuildInfo } from '../../src/ui/BuildInfo';
 import { useAuth } from '../../src/ui/auth';
+import { useAppLock } from '../../src/ui/appLock';
+import { lockSettingNote } from '../../src/lib/appLock';
 import { useTenant } from '../../src/ui/tenant';
 import { exportMyDataDetailed, requestAccountDeletion, withdrawAccountDeletion, fetchDeletionRequestedAt } from '../../src/lib/gdpr';
 import { shareTextFile } from '../../src/lib/exportShare';
@@ -65,6 +67,19 @@ export default function TrainerSettings() {
   const t = useTheme();
   const router = useRouter();
   const auth = useAuth();
+  const lock = useAppLock();
+  const toggleLock = async () => {
+    if (!lock.available) {
+      Alert.alert('Not available on this device',
+        'Set up Face ID, Touch ID or a passcode in iOS Settings, then this can be turned on.');
+      return;
+    }
+    const want = !lock.enabled;
+    const ok = await lock.setEnabled(want);
+    if (!ok && want) {
+      Alert.alert('Not turned on', `${lock.label} was not confirmed, so the lock is still off.`);
+    }
+  };
   const { tenant, loading: tenantLoading } = useTenant();
 
   // null = not read yet. `requestedAt: null` inside a loaded object means
@@ -214,6 +229,20 @@ export default function TrainerSettings() {
           <View style={{ flexDirection: 'row', marginTop: sp.md }}>
             <Ghost label="Sign out" onPress={signOut} />
           </View>
+
+          {/* A phone left on a bench is a phone left on a bench, whichever of
+              the three apps is installed. */}
+          <Pressable onPress={() => { void toggleLock(); }} accessibilityRole="switch"
+            accessibilityState={{ checked: lock.enabled }}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.lg }}>
+            <View style={{ flex: 1 }}>
+              <Text style={{ ...ty.body, color: t.ink }}>{lock.available ? `Require ${lock.label}` : 'Require Face ID'}</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{lockSettingNote(lock.available, lock.enabled, lock.label)}</Text>
+            </View>
+            <View style={{ width: 46, height: 27, borderRadius: radius.pill, backgroundColor: lock.enabled ? t.brand : t.surface3, borderWidth: hairline, borderColor: lock.enabled ? t.brand : t.ring, justifyContent: 'center', paddingHorizontal: 3 }}>
+              <View style={{ width: 21, height: 21, borderRadius: radius.pill, backgroundColor: lock.enabled ? t.brandInk : t.ink3, alignSelf: lock.enabled ? 'flex-end' : 'flex-start' }} />
+            </View>
+          </Pressable>
         </Section>
 
         <Rule />

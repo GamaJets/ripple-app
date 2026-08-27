@@ -18,6 +18,7 @@ import { parseMoneyCents, parseDate, detectDateOrder, previewMembers, previewPay
 import { classEntry, ptEntry, mergeTimetable, overlapping, entriesAt, floorAt, floorByHour, clashes, summariseBoard, slotBlocker, type PtSlot } from './gymPtSchedule';
 import { mergeExerciseLists } from './coachExerciseList';
 import { coverageFor, coverageLine } from './videoCoverage';
+import { lockDecision, lockSettingNote, GRACE_MS } from './appLock';
 import { attributionLine } from './workoutAttribution';
 import { RECOVERY_ACTIVITIES, isRecoveryActivity } from './recoveryActs';
 import { groupSessions, sessionKey, sessionDuration, sessionActivity, sessionKcal, sessionDistanceMeters, planSession, planWrite, summariseResult, HK_WRITE_ACTIVITIES, type Ledger } from './wearables/appleHealthWrite';
@@ -1616,6 +1617,33 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
   }
   ok(!HK_WRITE_ACTIVITIES.has('Circuit') && HK_WRITE_ACTIVITIES.has('Other'),
      'the allowlist is the bridge dictionary, not the app vocabulary');
+
+  // The Face ID lock over an app you are already signed in to.
+  {
+    const base = { enabled: true, available: true, signedIn: true, backgroundedAt: null, now: 1_000_000 };
+
+    ok(lockDecision({ ...base, signedIn: false }).state === 'open',
+       'a lock over a sign-in screen protects nothing');
+    ok(lockDecision({ ...base, enabled: false }).state === 'open',
+       'off is off');
+    ok(lockDecision(base).state === 'locked',
+       'a cold start locks — there is no record of when the app was last put down');
+    ok(lockDecision({ ...base, backgroundedAt: base.now - GRACE_MS }).state === 'locked',
+       'and so does coming back after the grace period');
+    ok(lockDecision({ ...base, backgroundedAt: base.now - 1 }).state === 'unlocked',
+       'but glancing at a notification does not — a lock people switch off protects nobody');
+
+    const noHw = lockDecision({ ...base, available: false });
+    ok(noHw.state === 'open' && noHw.reason !== null && noHw.reason.includes('passcode'),
+       'a device with nothing enrolled says WHY it is not asking, rather than silently not locking');
+
+    ok(lockSettingNote(false, true, 'Face ID').startsWith('Unavailable'),
+       'and Settings says the same thing');
+    ok(lockSettingNote(true, false, 'Face ID').includes('Anyone who picks up this phone'),
+       'off states the risk plainly rather than describing the feature');
+    ok(lockSettingNote(true, true, 'Face ID').includes('stays signed in either way'),
+       'and on makes clear this is a lock, not a second sign-in');
+  }
 
   // How full a class is, for the mark beside the exact count.
   {

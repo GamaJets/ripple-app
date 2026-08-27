@@ -40,6 +40,8 @@ import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale'
 import { Icon } from '../../src/ui/Icon';
 import { useSettings } from '../../src/ui/settings';
 import { useAuth } from '../../src/ui/auth';
+import { useAppLock } from '../../src/ui/appLock';
+import { lockSettingNote } from '../../src/lib/appLock';
 import { exportMyDataDetailed, requestAccountDeletion, withdrawAccountDeletion, fetchDeletionRequestedAt } from '../../src/lib/gdpr';
 import { shareTextFile } from '../../src/lib/exportShare';
 import { reportError } from '../../src/lib/reportError';
@@ -87,6 +89,21 @@ export default function Settings() {
   const router = useRouter();
   const st = useSettings();
   const auth = useAuth();
+  const lock = useAppLock();
+  // Turning the lock ON asks for a face first, inside setEnabled — enabling a
+  // lock you cannot open is how somebody gets shut out of their own record.
+  const toggleLock = async () => {
+    if (!lock.available) {
+      Alert.alert('Not available on this device',
+        'Set up Face ID, Touch ID or a passcode in iOS Settings, then this can be turned on.');
+      return;
+    }
+    const want = !lock.enabled;
+    const ok = await lock.setEnabled(want);
+    if (!ok && want) {
+      Alert.alert('Not turned on', `${lock.label} was not confirmed, so the lock is still off.`);
+    }
+  };
   const signOut = () => {
     Alert.alert('Sign out', 'You will need your email and password to sign back in.', [
       { text: 'Cancel', style: 'cancel' },
@@ -194,6 +211,16 @@ export default function Settings() {
           <View style={{ flexDirection: 'row', marginTop: sp.md }}>
             <Ghost label="Sign out" onPress={signOut} />
           </View>
+        </Section>
+
+        <Rule />
+
+        <Section>
+          <SectionHead title="Security" />
+          <Row t={t} first
+            label={lock.available ? `Require ${lock.label}` : 'Require Face ID'}
+            sub={lockSettingNote(lock.available, lock.enabled, lock.label)}
+            right={<Toggle t={t} on={lock.enabled} onPress={() => { void toggleLock(); }} />} />
         </Section>
 
         <Rule />

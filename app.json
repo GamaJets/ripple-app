@@ -59,7 +59,14 @@
           "color": "#16b8a6"
         }
       ],
-      "expo-web-browser"
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Repple uses Face ID to unlock the app, so your training record is not open to anyone who picks up your phone."
+        }
+      ],
+      "expo-web-browser",
+      "expo-secure-store"
     ],
     "extra": {
       "router": {},

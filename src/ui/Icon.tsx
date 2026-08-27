@@ -8,7 +8,7 @@ export type IconName =
   | 'home' | 'train' | 'meals' | 'progress' | 'me'
   | 'grid' | 'people' | 'palette' | 'trending' | 'wrench'
   | 'play' | 'plus' | 'minus' | 'calendar' | 'video' | 'chart' | 'chevron' | 'back'
-  | 'pencil' | 'search' | 'swap' | 'camera' | 'flame' | 'bell' | 'check'
+  | 'pencil' | 'search' | 'swap' | 'camera' | 'flame' | 'bell' | 'check' | 'lock'
   | 'water' | 'moon' | 'sun' | 'target' | 'trophy' | 'clock' | 'message'
   | 'ruler' | 'scale' | 'heart' | 'share' | 'settings' | 'sparkle' | 'dumbbell' | 'chat'
   | 'eye' | 'eye-off';
@@ -59,6 +59,8 @@ export function Icon({ name, size = 22, color = '#fff', filled = false, strokeWi
       return S(<><Rect x="2" y="6" width="14" height="12" rx="2" {...common} /><Path d="M16 10l6-3v10l-6-3z" {...common} /></>);
     case 'chevron':
       return S(<Path d="M9 6l6 6-6 6" {...common} />);
+    case 'lock':
+      return S(<><Path d="M6 10.5h12v9H6z" {...common} /><Path d="M8.5 10.5V7.5a3.5 3.5 0 017 0v3" {...common} /></>);
     case 'back':
       return S(<Path d="M15 6l-6 6 6 6" {...common} />);
     case 'pencil':

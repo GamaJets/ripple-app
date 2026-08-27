@@ -32,6 +32,9 @@ import { ProgramTemplatesProvider } from '../src/ui/programTemplates';
 import { ClassesProvider } from '../src/ui/classes';
 import { AuthProvider } from '../src/ui/auth';
 import { ErrorBoundary } from '../src/ui/ErrorBoundary';
+import { AppLockProvider } from '../src/ui/appLock';
+import { LockGate } from '../src/ui/LockScreen';
+import { useAuth } from '../src/ui/auth';
 import { AppThemeProvider, useTheme } from '../src/ui/components';
 import { BrandProvider } from '../src/ui/brand';
 import { TenantProvider } from '../src/ui/tenant';
@@ -62,6 +65,25 @@ function useApplyUpdateOnLaunch() {
       } catch { /* offline or check failed — just stay on the current bundle */ }
     })();
   }, []);
+}
+
+/**
+ * The app, behind the Face ID lock when one is set.
+ *
+ * Inside AuthProvider on purpose: the lock asks whether anybody is signed in,
+ * and a lock over a sign-in screen protects nothing while teaching people to
+ * dismiss it. Shared by all three apps, because a phone left on a bench is a
+ * phone left on a bench whichever one is installed.
+ */
+function LockedApp() {
+  const { authed } = useAuth();
+  return (
+    <AppLockProvider signedIn={authed}>
+      <LockGate>
+        <ThemedStack />
+      </LockGate>
+    </AppLockProvider>
+  );
 }
 
 export default function RootLayout() {
@@ -100,7 +122,7 @@ export default function RootLayout() {
                         <ProgramTemplatesProvider>
                         <ClassesProvider>
                         <ErrorBoundary>
-                          <ThemedStack />
+                          <LockedApp />
                         </ErrorBoundary>
                         </ClassesProvider>
                         </ProgramTemplatesProvider>
