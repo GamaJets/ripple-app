@@ -62,11 +62,17 @@ export default function Home() {
   // inputs opened on ~64/100 'Moderately recovered' and a tip telling them how to
   // train, all of it computed from a literal.
   const _avgSleep = _recentSleep.length ? _recentSleep.reduce((a, x) => a + x.hours, 0) / _recentSleep.length : null;
-  const _hasReadiness = _avgSleep != null;
   const _since2d = Date.now() - 2 * 86400000;
   const _load2d = new Set(log.filter((e) => Date.parse(e.t) >= _since2d).map((e) => e.t.slice(0, 10))).size;
-  const readiness = readinessScore({ avgSleepHours: _avgSleep ?? 0, hydrationPct: waterGoal ? water / waterGoal : 0, workoutsLast2Days: _load2d });
-  const readinessColor = readiness.tone === 'good' ? t.brand : readiness.tone === 'moderate' ? t.warn : t.crit;
+  // `?? 0` was the bug: no sleep logged became zero hours slept, which scored 20
+  // and read as 'Under-recovered'. Nulls now travel as nulls, and readinessScore
+  // returns null rather than a number nobody's data supports.
+  const readiness = readinessScore({
+    avgSleepHours: _avgSleep ?? null,
+    hydrationPct: waterGoal ? water / waterGoal : null,
+    workoutsLast2Days: _load2d,
+  });
+  const readinessColor = readiness == null ? t.ink3 : readiness.tone === 'good' ? t.brand : readiness.tone === 'moderate' ? t.warn : t.crit;
   const [needsOnboard, setNeedsOnboard] = useState(false);
   useFocusEffect(useCallback(() => { let c = false; (async () => { try { const v = await AsyncStorage.getItem(ONBOARD_KEY); if (!c) setNeedsOnboard(!v); } catch { /* ignore */ } })(); return () => { c = true; }; }, []));
   const { sessions } = useSessions();
@@ -112,10 +118,13 @@ export default function Home() {
   const _todayKey = new Date().toISOString().slice(0, 10);
   const trainedToday = log.some((e) => (e.t || '').slice(0, 10) === _todayKey);
   const kcalLeft = macros ? Math.max(0, macros.kcal + burnedToday - consumed.kcal) : 0;
-  const today = readiness.tone === 'low'
+  // Only claim somebody is under-recovered when there is a score saying so.
+  // Unknown readiness falls through to the ordinary prompts, which assert
+  // nothing about their body.
+  const today = readiness != null && readiness.tone === 'low'
     ? { headline: 'Recover today', tip: 'Under-recovered — keep it light or take a rest day.', cta: 'Recovery', route: '/(client)/recovery', tone: t.warn }
     : !trainedToday
-    ? { headline: 'Ready to train', tip: readiness.tip, cta: 'Start workout', route: '/(client)/workouts', tone: t.brand }
+    ? { headline: 'Ready to train', tip: readiness?.tip ?? 'Log tonight’s sleep and your readiness appears here.', cta: 'Start workout', route: '/(client)/workouts', tone: t.brand }
     : kcalLeft > 200
     ? { headline: 'Fuel up', tip: kcalLeft + ' kcal left today' + (burnedToday > 0 ? ' (incl. ' + burnedToday + ' burned)' : '') + '.', cta: 'Log a meal', route: '/(client)/nutrition', tone: t.brand }
     : { headline: 'On track', tip: 'Session done and your macros are on point. Nice work.', cta: 'View plan', route: '/(client)/nutrition', tone: t.brand };
@@ -229,11 +238,11 @@ export default function Home() {
         {/* ── the hero: one number leads the screen ───────────────────────── */}
         <Hero
           label="Readiness"
-          figure={_hasReadiness ? String(readiness.score) : '—'}
-          unit={_hasReadiness ? '/100' : undefined}
-          note={_hasReadiness ? readiness.tip : 'Log a night of sleep to see your readiness.'}
-          arc={_hasReadiness ? readiness.score / 100 : undefined}
-          tone={_hasReadiness ? readinessColor : undefined}
+          figure={readiness != null ? String(readiness.score) : '—'}
+          unit={readiness != null ? '/100' : undefined}
+          note={readiness != null ? readiness.tip : 'Log a night of sleep to see your readiness.'}
+          arc={readiness != null ? readiness.score / 100 : undefined}
+          tone={readiness != null ? readinessColor : undefined}
           onPress={() => router.push('/(client)/recovery')}
         />
 

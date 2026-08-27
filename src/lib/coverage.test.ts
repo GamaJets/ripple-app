@@ -25,6 +25,7 @@ import { normaliseCode, isPlausibleCode, joinErrorMessage, CODE_ALPHABET, CODE_L
 import { passwordRules, passwordMeetsLocalRules, passwordErrorMessage, PASSWORD_MIN } from './passwordRules';
 import { RELEASES, releasesFor, unseenReleases, compareVersions, storeNotes } from './releaseNotes';
 import { toE164, stripTrunkZero, isPlausiblePhone, formatNational, maskedForDisplay, phoneAuthError, COUNTRIES, flagFor } from './phone';
+import { readinessScore } from './readiness';
 import { groupSessions, sessionKey, sessionDuration, sessionActivity, sessionKcal, sessionDistanceMeters, planSession, planWrite, summariseResult, HK_WRITE_ACTIVITIES, type Ledger } from './wearables/appleHealthWrite';
 import { sliceLoading, sliceReady, sliceFailed, rowsOf, brokenParts, completeness, partialWarning, memberIds, buildDossier, buildDossiers, retentionRead, doorLogActive, attendanceCaveat, type MemberRecord, type MemberBooking } from './memberView';
 import { payroll30For, payrollBlocker, type GymTrainer } from './gymTrainers';
@@ -4013,6 +4014,49 @@ function by2(v: ReturnType<typeof buildStaff>, id: string) {
   ok(phoneAuthError('over_sms_send_rate_limit').includes('Wait'), 'a rate limit says to wait rather than retrying blindly');
   ok(phoneAuthError('phone_provider_disabled').includes('email'), 'a disabled provider points at the path that still works');
   ok(phoneAuthError('something unheard of') === 'something unheard of', 'an unknown failure is passed through, not replaced with a guess');
+}
+
+/* -- readiness -----------------------------------------------------------
+ *
+ * Found in the simulator on a brand-new account: the home screen said
+ * "Recover today - Under-recovered - keep it light or take a rest day" to
+ * somebody who had logged nothing at all.
+ *
+ * Sleep is half the scale. Treating its ABSENCE as zero hours slept scored
+ * 0 + 0 + 20 = 20, which is 'low', and the card asserted a physiological state
+ * from it - while the Readiness hero directly above showed a dash and said
+ * "Log a night of sleep to see your readiness". Two elements, one screen,
+ * opposite claims.
+ */
+{
+  ok(readinessScore({ avgSleepHours: null, hydrationPct: null, workoutsLast2Days: 0 }) === null,
+    'no sleep logged yields NO score - not the 20 that used to read as under-recovered');
+  ok(readinessScore({ avgSleepHours: null, hydrationPct: 0.5, workoutsLast2Days: 0 }) === null,
+    'hydration alone cannot carry a readiness score');
+  ok(readinessScore({ avgSleepHours: 0, hydrationPct: null, workoutsLast2Days: 0 }) === null,
+    'zero hours is treated as absent rather than as a catastrophic night');
+
+  const rested = readinessScore({ avgSleepHours: 8, hydrationPct: 1, workoutsLast2Days: 0 });
+  ok(rested != null && rested.score === 100, 'eight hours, hydrated, fresh - full marks');
+  ok(rested != null && rested.tone === 'good', 'and that reads as well recovered');
+
+  // Untracked hydration is not dehydration. Before rescaling, anybody who
+  // ignored the water tracker was capped at 70 and told to rest.
+  const noWater = readinessScore({ avgSleepHours: 8, hydrationPct: null, workoutsLast2Days: 0 });
+  ok(noWater != null && noWater.score === 100,
+    'eight hours and no water tracking still scores full - an untracked signal is not a failed one');
+  const someWater = readinessScore({ avgSleepHours: 8, hydrationPct: 0, workoutsLast2Days: 0 });
+  ok(someWater != null && someWater.score < 100,
+    'but a tracked zero genuinely counts against it');
+
+  const tired = readinessScore({ avgSleepHours: 4, hydrationPct: 0.2, workoutsLast2Days: 3 });
+  ok(tired != null && tired.tone === 'low', 'four hours, dehydrated, three sessions - genuinely under-recovered');
+
+  for (const h of [1, 4, 6, 7, 8, 9, 12]) {
+    const r = readinessScore({ avgSleepHours: h, hydrationPct: 0.5, workoutsLast2Days: 1 });
+    ok(r != null && r.score >= 0 && r.score <= 100, h + 'h stays within 0-100');
+    ok(r != null && r.label.length > 0 && r.tip.length > 0, h + 'h carries a label and a tip');
+  }
 }
 
 if (errors.length) { console.log('COVERAGE FAILURES:\n' + errors.join('\n')); process.exit(1); }
