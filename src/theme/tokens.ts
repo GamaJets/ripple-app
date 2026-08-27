@@ -4,7 +4,13 @@
 // custom brand colour on top (white-label).
 
 const darkSem = { grid: '#2c2c2a', s1: '#3987e5', s2: '#199e70', s3: '#c98500', s5: '#9085e9', s6: '#e66767', good: '#0ca30c', warn: '#fab219', serious: '#ec835a', crit: '#d03b3b' };
-const lightSem = { grid: '#e1e0d9', s1: '#2a78d6', s2: '#1baf7a', s3: '#eda100', s5: '#4a3aa7', s6: '#e34948', good: '#0ca30c', warn: '#fab219', serious: '#ec835a', crit: '#d03b3b' };
+// The six series colours below were given light-background values; the four
+// STATUS colours were not, and sat here byte-identical to darkSem. On white
+// that made warn 1.68:1 and serious 2.42:1 — below even the 3:1 a non-text
+// mark needs, let alone the 4.5:1 for text. Solved by holding each hue exactly
+// and walking lightness down until the worst of the three light backgrounds
+// (and plain white) cleared 4.5:1. crit barely moved, 4.40 → 4.52.
+const lightSem = { grid: '#e1e0d9', s1: '#2a78d6', s2: '#1baf7a', s3: '#eda100', s5: '#4a3aa7', s6: '#e34948', good: '#0a820a', warn: '#956703', serious: '#c44717', crit: '#cf3737' };
 
 // ── Elevated Teal (DEFAULT) ────────────────────────────────────────────────
 export const teal = {
