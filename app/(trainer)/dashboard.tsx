@@ -40,7 +40,7 @@ import { billingAvailable } from '../../src/lib/billing';
 import { Icon, type IconName } from '../../src/ui/Icon';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
-import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Card, Cta, Ghost, Notice, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Card, Cta, Ghost, Notice, fig, Flag as KitFlag } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric } from '../../src/theme/scale';
 import { useCoachProfile } from '../../src/ui/coachProfile';
 import { CoachRequests } from '../../src/ui/CoachRequests';
@@ -873,9 +873,9 @@ export default function TrainerClients() {
               <View style={{ marginBottom: sp.xl }}>
                 <SheetHead t={t} title={`Progress photos · sent by ${sel.name.split(' ')[0]}`} />
                 {sharedErr ? (
-                  <Text style={{ ...ty.label, color: t.warn }}>
+                  <KitFlag tone={t.warn}>
                     {sharedErr} That is not the same as them having sent none — the list could not be read, so this sheet cannot say either way.
-                  </Text>
+                  </KitFlag>
                 ) : shared === null ? (
                   <Text style={{ ...ty.label, color: t.ink3 }}>Loading what they have sent you…</Text>
                 ) : shared.length === 0 ? (
@@ -904,9 +904,9 @@ export default function TrainerClients() {
                       {shared.length === 1 ? 'One photo' : shared.length + ' photos'}, sent by {sel.name.split(' ')[0]} — and only these. They can take any of them back whenever they like; once they do, it stops opening here within {Math.round(SHARED_URL_TTL_S / 60)} minutes.
                     </Text>
                     {(missingSharedFiles(shared) ?? 0) > 0 ? (
-                      <Text style={{ ...ty.caption, color: t.warn, marginTop: 4 }}>
+                      <KitFlag tone={t.warn} style={{ marginTop: 4 }}>
                         {missingSharedFiles(shared) === 1 ? 'One of these has no picture behind it any more.' : `${missingSharedFiles(shared)} of these have no picture behind them any more.`}
-                      </Text>
+                      </KitFlag>
                     ) : null}
                   </View>
                 )}

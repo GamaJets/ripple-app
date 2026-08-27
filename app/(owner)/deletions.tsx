@@ -37,7 +37,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Hero, KpiRow, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, KpiRow, fig, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import type { Theme } from '../../src/theme/tokens';
 import { supabase } from '../../src/lib/supabase';
@@ -259,10 +259,10 @@ export default function OwnerDeletions() {
           <SectionHead title={loaded && queue.length ? `The queue · ${queue.length}` : 'The queue'} />
           {failed ? (
             <View>
-              <Text style={{ ...ty.label, color: t.crit }}>
+              <Flag tone={t.crit}>
                 Could not read the queue. Nobody has been cleared — this screen simply does not
                 know who is waiting, which is not the same as nobody waiting.
-              </Text>
+              </Flag>
               <Pressable
                 onPress={() => { void load(); }}
                 hitSlop={8}

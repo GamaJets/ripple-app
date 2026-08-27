@@ -19,7 +19,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Cta, Ghost, Notice } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Cta, Ghost, Notice, Flag } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty, value } from '../../src/theme/scale';
 import { PLANS } from '../../src/lib/ownerMock';
 import { billingAvailable, subscribeToPlan, openBillingPortal, fetchMySubscription, PRICE_IDS, type Subscription } from '../../src/lib/billing';
@@ -85,10 +85,10 @@ export default function TrainerBilling() {
         ) : subErr ? (
           <Section>
             <SectionHead title="Current plan" />
-            <Text style={{ ...ty.label, color: t.crit }}>
+            <Flag tone={t.crit}>
               We could not read your subscription, so nothing below tells you whether you have one.
               If you are already subscribed you still are — do not subscribe again from this screen.
-            </Text>
+            </Flag>
             <Text style={{ ...ty.caption, color: t.ink3, paddingTop: sp.xs }}>{subErr}</Text>
           </Section>
         ) : sub && sub.status ? (

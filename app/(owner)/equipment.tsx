@@ -22,7 +22,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import type { Theme } from '../../src/theme/tokens';
 import { useTenant } from '../../src/ui/tenant';
@@ -189,10 +189,10 @@ export default function OwnerEquipment() {
             { label: 'Out of service', value: !loaded || list.length === 0 ? '—' : String(sum!.downUnits) },
           ]} />
           {failed ? (
-            <Text style={{ ...ty.caption, color: t.crit, marginTop: sp.md }}>
+            <Flag tone={t.crit} style={{ marginTop: sp.md }}>
               These are blank because the read failed, not because the register is empty. Check
               your connection and pull the screen again before assuming nothing is due.
-            </Text>
+            </Flag>
           ) : loaded && list.length === 0 ? (
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
               An empty register is not an empty gym. These stay blank until the kit is entered,
@@ -238,10 +238,10 @@ export default function OwnerEquipment() {
         <Section>
           <SectionHead title={loaded && list.length ? `All kit · ${list.length}` : 'All kit'} />
           {failed ? (
-            <Text style={{ ...ty.label, color: t.crit }}>
+            <Flag tone={t.crit}>
               The register could not be read. This is not a list of your kit — it is nothing at
               all. Check your connection and try again.
-            </Text>
+            </Flag>
           ) : !loaded ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Loading…</Text>
           ) : list.length === 0 ? (

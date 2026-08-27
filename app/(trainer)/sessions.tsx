@@ -21,7 +21,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Hero, KpiRow, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, KpiRow, fig, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import type { Theme } from '../../src/theme/tokens';
 import { useTenant } from '../../src/ui/tenant';
@@ -194,7 +194,7 @@ export default function TrainerSessions() {
 
         {failed ? (
           <View style={{ alignItems: 'center', paddingVertical: sp.xl }}>
-            <Text style={{ ...ty.head, color: t.crit }}>Could not read your sessions</Text>
+            <Flag tone={t.crit}>Could not read your sessions</Flag>
             <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: sp.xs }}>
               There may or may not be sessions waiting on an outcome — the app could not reach the
               server to find out. Do not settle payroll on this screen until it loads.

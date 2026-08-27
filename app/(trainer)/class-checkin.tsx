@@ -26,7 +26,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Hero, Ghost, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, Ghost, fig, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { tapLight } from '../../src/ui/haptics';
 import { classRoster, setAttendance, type RosterMember } from '../../src/lib/classAttendance';
@@ -129,7 +129,7 @@ export default function ClassCheckin() {
         <Rule />
 
         {saveFailed ? (
-          <Text style={{ ...ty.label, color: t.crit, paddingTop: sp.sm }}>{saveFailed}</Text>
+          <Flag tone={t.crit} style={{ paddingTop: sp.sm }}>{saveFailed}</Flag>
         ) : null}
 
         {/* ── the roster ─────────────────────────────────────────────────── */}
@@ -143,11 +143,11 @@ export default function ClassCheckin() {
           ) : loading ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Loading roster…</Text>
           ) : readFailed || roster === null ? (
-            <Text style={{ ...ty.label, color: t.crit }}>
+            <Flag tone={t.crit}>
               This class's roster could not be read, so nobody can be checked in here yet. This is
               not the same as an empty class — do not treat it as one. Leave the screen and open it
               again once you have signal.
-            </Text>
+            </Flag>
           ) : roster.length === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>No one has booked this class yet — members appear here as they book.</Text>
           ) : (

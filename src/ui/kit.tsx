@@ -355,6 +355,29 @@ export function WeekDots({ done }: { done: number }) {
   );
 }
 
+/**
+ * One line of trouble, inline — the Notice idiom without the card.
+ *
+ * scale.ts: "Status colours are reserved for status and are never used as text
+ * colour; a coloured mark sits beside ink-coloured text instead." Nineteen
+ * places across eleven screens did the opposite, and measuring says the rule
+ * was right twice over: t.crit as text is between 3.87:1 and 4.47:1 on all ten
+ * palettes, so it fails AA everywhere it appeared. As a MARK it only needs
+ * 3:1, which it clears everywhere. Same colour, same meaning, legible.
+ */
+export function Flag({ tone, children, style }: {
+  tone?: string; children: ReactNode; style?: StyleProp<ViewStyle>;
+}) {
+  const t = useTheme();
+  const mark = tone || t.crit;
+  return (
+    <View style={[{ flexDirection: 'row', gap: sp.sm, alignItems: 'flex-start' }, style]}>
+      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: mark, marginTop: 6, flexShrink: 0 }} />
+      <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}>{children}</Text>
+    </View>
+  );
+}
+
 /** A quiet banner for something that needs attention. Tone marks it; text stays ink. */
 export function Notice({ tone, kicker, title, note, children }: {
   tone?: string; kicker: string; title: string; note?: string; children?: ReactNode;

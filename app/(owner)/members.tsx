@@ -21,7 +21,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import type { Theme } from '../../src/theme/tokens';
 import { useTenant } from '../../src/ui/tenant';
@@ -244,11 +244,11 @@ export default function OwnerMembers() {
           ) : null}
 
           {failed ? (
-            <Text style={{ ...ty.label, color: t.crit }}>
+            <Flag tone={t.crit}>
               The register could not be read. Nobody has been removed and no membership has
               lapsed — this screen simply has nothing to show you. Check your connection and try
               again.
-            </Text>
+            </Flag>
           ) : !loaded ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Loading…</Text>
           ) : list.length === 0 ? (
@@ -303,8 +303,14 @@ export default function OwnerMembers() {
                     {live ? (
                       <Pressable onPress={() => changeStatus(m, 'cancelled')} hitSlop={6}
                         accessibilityRole="button" accessibilityLabel="Cancel membership"
-                        style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 7 }}>
-                        <Text style={{ ...ty.label, fontWeight: '600', color: t.crit }}>Cancel</Text>
+                        style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 7,
+                                 flexDirection: 'row', alignItems: 'center', gap: 7 }}>
+                        {/* The mark carries the warning, the word stays legible. `t.crit` as
+                            label text measured under 4.5:1 on every palette; as a 6px dot it
+                            needs 3:1 and clears it everywhere. Destructive intent is not lost
+                            — the confirm step is what actually carries it. */}
+                        <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
+                        <Text style={{ ...ty.label, fontWeight: '600', color: t.ink }}>Cancel</Text>
                       </Pressable>
                     ) : null}
                   </View>
@@ -346,10 +352,10 @@ export default function OwnerMembers() {
                   placeholder="Type at least two letters of their name"
                   placeholderTextColor={t.ink3} style={inp} accessibilityLabel="Search for a member" />
                 {searchFailed ? (
-                  <Text style={{ ...ty.caption, color: t.crit, marginTop: sp.sm }}>
+                  <Flag tone={t.crit} style={{ marginTop: sp.sm }}>
                     The lookup failed, so this cannot tell you whether they have an account. Do
                     not read it as “not found” — check your connection and type the name again.
-                  </Text>
+                  </Flag>
                 ) : found !== null ? (
                   found.length === 0 ? (
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
@@ -378,10 +384,10 @@ export default function OwnerMembers() {
               // an owner who has plans would be told they have none and open
               // the membership unpriced, which is how a paying member ends up
               // contributing nothing to MRR.
-              <Text style={{ ...ty.caption, color: t.crit }}>
+              <Flag tone={t.crit}>
                 Your plans could not be read, so none can be offered here. Opening a membership
                 now would leave it with no plan attached even if you have one.
-              </Text>
+              </Flag>
             ) : plans.length === 0 ? (
               <Text style={{ ...ty.caption, color: t.ink3 }}>
                 No plans set up yet. The membership can still be opened without one — recurring

@@ -39,7 +39,7 @@ import { macrosFor } from '../../src/lib/nutrition';
 import { progressDoc, shareDoc } from '../../src/lib/exportShare';
 import { useRouter } from 'expo-router';
 import { useBrand } from '../../src/ui/brand';
-import { Rule, Section, SectionHead, Hero, KpiRow, ActionCard, Cta, Ghost, Spark, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, KpiRow, ActionCard, Cta, Ghost, Spark, fig, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 import { Icon } from '../../src/ui/Icon';
 import { analyzeInBody, analyzePhysique, visionAvailable, lastVisionError, type PhysiqueVision } from '../../src/lib/vision';
@@ -516,9 +516,9 @@ export default function Scans() {
             <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 4 }}>Your coach can see{sharedNote(shares) ? ' · ' + sharedNote(shares) : ''}</Text>
             {sharesErr ? (
               <View>
-                <Text style={{ ...ty.label, color: t.warn }}>
+                <Flag tone={t.warn}>
                   {sharesErr} Nothing has changed either way — this screen just could not read the list, so it will not tell you these are private.
-                </Text>
+                </Flag>
                 <View style={{ alignSelf: 'flex-start', marginTop: sp.sm }}><Ghost label="Try again" onPress={loadShares} /></View>
               </View>
             ) : shares === null ? (
@@ -642,9 +642,9 @@ export default function Scans() {
                 })}
               </ScrollView>
               {(missingFileCount(photos) ?? 0) > 0 ? (
-                <Text style={{ ...ty.caption, color: t.warn, marginTop: sp.md }}>
+                <Flag tone={t.warn} style={{ marginTop: sp.md }}>
                   {missingFileCount(photos) === 1 ? 'One of these has no picture behind it any more.' : `${missingFileCount(photos)} of these have no picture behind them any more.`} Press and hold to clear it.
-                </Text>
+                </Flag>
               ) : null}
             </View>
           )}

@@ -18,7 +18,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Cta, Ghost, Notice } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Cta, Ghost, Notice, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { money } from '../../src/lib/billing';
 import { startTrainerOnboarding, fetchMyConnect, fetchMyPackages, createPackage, deactivatePackage, type ConnectStatus, type TrainerPackage } from '../../src/lib/connect';
@@ -116,10 +116,10 @@ export default function TrainerPayments() {
             <Section>
               <SectionHead title="Your packages" note={(pkgs ?? []).filter((p) => p.active).length ? String((pkgs ?? []).filter((p) => p.active).length) : undefined} />
               {pkgErr ? (
-                <Text style={{ ...ty.label, color: t.crit }}>
+                <Flag tone={t.crit}>
                   Your packages could not be read, so this is not a list of what you sell. Do not add
                   them again from here — reopen the screen once you have signal.
-                </Text>
+                </Flag>
               ) : (pkgs ?? []).filter((p) => p.active).length === 0 ? (
                 <Text style={{ ...ty.label, color: t.ink3 }}>No packages yet. Add one below — a monthly membership or a pack of sessions.</Text>
               ) : null}
