@@ -26,6 +26,12 @@ export interface WorkoutRow {
   /** Whole-session length in minutes, when the person typed one. See
    *  `WorkoutEntry.sessionMins` — null means unknown, never zero. */
   session_mins?: number | null;
+  /** Set by a coach logging a session for their client. The insert policy
+   *  requires it to equal the coach's own id, so it cannot be forged. */
+  logged_by?: string | null;
+  /** Stamped by the guard_workout_attribution trigger when the client edits a
+   *  workout their coach logged. Read-only from the app. */
+  amended_at?: string | null;
 }
 
 export const rowToEntry = (r: WorkoutRow): WorkoutEntry => ({
@@ -38,6 +44,8 @@ export const rowToEntry = (r: WorkoutRow): WorkoutEntry => ({
   kcal: r.kcal ?? undefined,
   zones: r.zones ?? undefined,
   sessionMins: r.session_mins ?? undefined,
+  loggedBy: r.logged_by ?? undefined,
+  amendedAt: r.amended_at ?? undefined,
 });
 
 export const entryToRow = (uid: string, e: WorkoutEntry): WorkoutRow => ({
@@ -50,9 +58,14 @@ export const entryToRow = (uid: string, e: WorkoutEntry): WorkoutRow => ({
   kcal: e.kcal ?? null,
   zones: e.zones ?? null,
   session_mins: e.sessionMins ?? null,
+  // No amended_at: the trigger owns it. Writing it from here would let a client
+  // decide whether their own edit left a mark, which is the point of the mark.
+  logged_by: e.loggedBy ?? null,
 });
 
 /** Every field of an entry that is meant to survive a trip to the database.
  *  `id` is excluded: the server assigns it, so a new entry has none yet. */
 export const PERSISTED_FIELDS: (keyof WorkoutEntry)[] =
-  ['t', 'exercise', 'sets', 'feel', 'cardio', 'kcal', 'zones', 'sessionMins'];
+  ['t', 'exercise', 'sets', 'feel', 'cardio', 'kcal', 'zones', 'sessionMins', 'loggedBy'];
+// `amendedAt` is deliberately absent, for the same reason `id` is: the server
+// assigns it. It comes back on the way in and is never sent on the way out.

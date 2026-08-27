@@ -17,6 +17,7 @@ import { parseCsv, parseSheet, sniffDelimiter, mapColumns } from './csv';
 import { parseMoneyCents, parseDate, detectDateOrder, previewMembers, previewPayments, previewPlans, describePreview, MEMBER_ALIASES } from './csvImport';
 import { classEntry, ptEntry, mergeTimetable, overlapping, entriesAt, floorAt, floorByHour, clashes, summariseBoard, slotBlocker, type PtSlot } from './gymPtSchedule';
 import { mergeExerciseLists } from './coachExerciseList';
+import { attributionLine } from './workoutAttribution';
 import { groupSessions, sessionKey, sessionDuration, sessionActivity, sessionKcal, sessionDistanceMeters, planSession, planWrite, summariseResult, HK_WRITE_ACTIVITIES, type Ledger } from './wearables/appleHealthWrite';
 import { sliceLoading, sliceReady, sliceFailed, rowsOf, brokenParts, completeness, partialWarning, memberIds, buildDossier, buildDossiers, retentionRead, doorLogActive, attendanceCaveat, type MemberRecord, type MemberBooking } from './memberView';
 import { payroll30For, payrollBlocker, type GymTrainer } from './gymTrainers';
@@ -1608,6 +1609,26 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
   }
   ok(!HK_WRITE_ACTIVITIES.has('Circuit') && HK_WRITE_ACTIVITIES.has('Other'),
      'the allowlist is the bridge dictionary, not the app vocabulary');
+
+  // Attribution on a workout a coach logged for a client.
+  {
+    ok(attributionLine({}, 'Dave', true) === null,
+       'a workout somebody logged themselves carries no attribution line');
+    ok(attributionLine({ loggedBy: 'coach-1' }, 'Dave', true) === 'Logged by Dave',
+       'the client is told who logged it');
+    ok(attributionLine({ loggedBy: 'coach-1' }, null, true) === 'Logged by your coach',
+       'and is still told SOMEBODY logged it when the name could not be read');
+    ok(attributionLine({ loggedBy: 'coach-1' }, 'Dave', false) === 'Logged by you',
+       'the coach sees it as their own entry');
+    const amended = attributionLine({ loggedBy: 'coach-1', amendedAt: '2026-08-27T09:00:00Z' }, 'Dave', false);
+    ok(amended !== null && amended.startsWith('Logged by you · amended by them'),
+       'a coach is told plainly that their account of the session was changed');
+    const clientSide = attributionLine({ loggedBy: 'coach-1', amendedAt: '2026-08-27T09:00:00Z' }, 'Dave', true);
+    ok(clientSide !== null && clientSide.startsWith('Logged by Dave · amended by you'),
+       'and the client is told their change is visible, rather than it being silent');
+    ok(attributionLine({ loggedBy: 'coach-1', amendedAt: 'not-a-date' }, 'Dave', true) === 'Logged by Dave · amended by you',
+       'an unreadable timestamp drops the date rather than rendering Invalid Date');
+  }
 
   // A coach's own exercise names, merged into the picker ahead of the built-ins.
   {

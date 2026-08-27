@@ -56,6 +56,14 @@ export interface WorkoutEntry {
    *
    *  Session-scoped, so every entry sharing a `t` carries the same number. */
   sessionMins?: number;
+  /** The coach who recorded this on the client's behalf, when it was not the
+   *  client. Absent means they logged it themselves. Attribution is not
+   *  editable from either app — the database trigger refuses a change. */
+  loggedBy?: string;
+  /** When the client changed something their coach had logged. Absent means
+   *  untouched since. Server-set: the trigger stamps it, the app only reads it,
+   *  which is why it is not in PERSISTED_FIELDS. */
+  amendedAt?: string;
 }
 
 export const MOCK_CLIENT: MockClient = {
