@@ -213,12 +213,18 @@ export default function Builder() {
               })}
             </ScrollView>
           )}
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.md }}>
-            <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: assignedNow ? t.brand : t.ink3 }} />
-            <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }}>
-              {assignedNow ? 'Currently on a coach-assigned program' : 'Currently on their auto-generated program'} · goal: {client?.goal ?? '—'}
-            </Text>
-          </View>
+          {/* Only when there IS a client. With an empty roster this line sat
+              directly under "No clients yet" and said "Currently on their
+              auto-generated program · goal: —" — a sentence about somebody who
+              does not exist, with a dash where their goal would be. */}
+          {client ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.md }}>
+              <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: assignedNow ? t.brand : t.ink3 }} />
+              <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }}>
+                {assignedNow ? 'Currently on a coach-assigned program' : `${client.name.split(' ')[0]} is on their auto-generated program`} · goal: {client.goal ?? '—'}
+              </Text>
+            </View>
+          ) : null}
         </Section>
 
         <Rule />

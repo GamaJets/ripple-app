@@ -51,11 +51,15 @@ export default function TrainerAnalytics() {
   // billing is not switched on while this screen called them a paying Pro
   // customer.
   const revenue = sessionsMo * sessionFee;
-  const valuePerClient = clients ? Math.round(revenue / clients) : 0;
+  // Null, not 0, with no clients: an average over nobody is undefined, and
+  // "$0 / client" reads as a fact about a coaching business that has none.
+  const valuePerClient = clients ? Math.round(revenue / clients) : null;
   // Average over clients who have actually checked in. Averaging a null-as-100
   // default meant a roster of strangers reported 100% adherence.
   const _adhKnown = roster.map((c) => c.adherence).filter((a): a is number => a != null);
-  const avgAdh = _adhKnown.length ? Math.round(_adhKnown.reduce((a, x) => a + x, 0) / _adhKnown.length) : 0;
+  // Same rule. 0% adherence is a damning number to show a coach whose clients
+  // have simply never checked in — and this screen opens by saying so.
+  const avgAdh = _adhKnown.length ? Math.round(_adhKnown.reduce((a, x) => a + x, 0) / _adhKnown.length) : null;
   // Clients with no check-in are counted as unknown, not as on-track.
   const onTrack = roster.filter((c) => c.adherence != null && c.adherence >= 85).length;
   const watch = roster.filter((c) => c.adherence != null && c.adherence >= 70 && c.adherence < 85).length;
@@ -116,8 +120,8 @@ export default function TrainerAnalytics() {
           <SectionHead title="Roster" note="Leaderboard" onPress={() => router.push('/(trainer)/leaderboard')} />
           <KpiRow items={[
             { label: 'Clients', value: fig(clients) },
-            { label: 'Avg adherence', value: fig(avgAdh), unit: '%' },
-            { label: 'Value / client', value: '$' + valuePerClient.toLocaleString(), unit: '/mo' },
+            { label: 'Avg adherence', value: fig(avgAdh), unit: avgAdh == null ? undefined : '%' },
+            { label: 'Value / client', value: valuePerClient == null ? '—' : '$' + valuePerClient.toLocaleString(), unit: valuePerClient == null ? undefined : '/mo' },
           ]} />
         </Section>
 
@@ -127,6 +131,16 @@ export default function TrainerAnalytics() {
         <Section>
           <SectionHead title="Your goals" note="Edit"
             onPress={() => { setGRev(String(goals.revenue)); setGCli(String(goals.clients)); setGoalOpen(true); }} />
+          {[
+            { label: 'Monthly revenue', cur: revenue, goal: goals.revenue, money: true },
+            { label: 'Active clients', cur: clients, goal: goals.clients, money: false },
+          ].filter((g) => g.goal > 0).length === 0 ? (
+            // Was a heading with nothing under it. A section that renders
+            // empty looks broken; this one is simply not set up yet.
+            <Text style={{ ...ty.label, color: t.ink3 }}>
+              No targets set. Tap Edit to give yourself a monthly revenue or client number to work towards.
+            </Text>
+          ) : null}
           {[
             { label: 'Monthly revenue', cur: revenue, goal: goals.revenue, money: true },
             { label: 'Active clients', cur: clients, goal: goals.clients, money: false },
@@ -179,7 +193,7 @@ export default function TrainerAnalytics() {
 
         {/* ── roster health ──────────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Roster health" note={`${avgAdh}% avg adherence`} onPress={() => router.push('/(trainer)/leaderboard')} />
+          <SectionHead title="Roster health" note={avgAdh == null ? 'no check-ins yet' : `${avgAdh}% avg adherence`} onPress={() => router.push('/(trainer)/leaderboard')} />
           <DistBar segments={[
             { label: STATUS_LABEL.on_track, value: onTrack, color: t.brand },
             { label: STATUS_LABEL.watch, value: watch, color: t.warn },
