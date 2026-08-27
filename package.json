@@ -16,7 +16,10 @@
     "db:check": "node scripts/build-supabase-setup.mjs --check",
     "studio": "npm --prefix studio-web run dev",
     "postinstall": "patch-package",
-    "check:native": "node scripts/check-native.mjs"
+    "check:native": "node scripts/check-native.mjs",
+    "check:schema": "node scripts/check-schema.mjs",
+    "preflight": "npm run typecheck && npm test && npm run db:check && npm run check:native && npm run check:schema && npm run check:bundle",
+    "check:bundle": "expo export --platform all --output-dir .preflight-export"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",
