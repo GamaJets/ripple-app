@@ -1151,7 +1151,24 @@ export default function TrainerClients() {
             <View style={{ flexDirection: 'row', gap: sp.md }}>
               <View style={{ flex: 1 }}><Ghost label="Cancel" onPress={() => setAddOpen(false)} /></View>
               <View style={{ flex: 2 }}>
-                <Cta label="Add client" wide onPress={() => { if (!newName.trim()) { Alert.alert('Add a name', 'Enter the client name.'); return; } addClient(newName, newGoal, newMode); const em = newEmail.trim(); const invited = !!em && em.includes('@'); if (invited) { sendInvite(em, newMode); } setAddOpen(false); Alert.alert('Client added', invited ? newName.trim() + ' is on your roster. Repple does not send email — ' + em + ' is recorded as an invite, and they link to you the first time they sign in to Repple with that address. Tell them yourself so they know to install it.' : newName.trim() + ' is now on your roster.', [{ text: 'Great' }]); }} />
+                <Cta label="Add client" wide onPress={async () => {
+                  if (!newName.trim()) { Alert.alert('Add a name', 'Enter the client name.'); return; }
+                  addClient(newName, newGoal, newMode);
+                  const em = newEmail.trim();
+                  const wanted = !!em && em.includes('@');
+                  // Awaited and read. sendInvite resolves false when the write
+                  // was refused, and this used to announce success either way.
+                  const invited = wanted ? await sendInvite(em, newMode) : false;
+                  setAddOpen(false);
+                  const nm = newName.trim();
+                  Alert.alert('Client added',
+                    !wanted
+                      ? nm + ' is now on your roster.'
+                      : invited
+                        ? nm + ' is on your roster. Repple does not send email — ' + em + ' is recorded as an invite, and they link to you the first time they sign in to Repple with that address. Tell them yourself so they know to install it.'
+                        : nm + ' is on your roster, but the invite for ' + em + ' was NOT recorded, so they will not link to you when they sign in. Try adding the email again from Invite a client.',
+                    [{ text: invited || !wanted ? 'Great' : 'OK' }]);
+                }} />
               </View>
             </View>
           </View>
@@ -1197,7 +1214,21 @@ export default function TrainerClients() {
             <View style={{ flexDirection: 'row', gap: sp.md }}>
               <View style={{ flex: 1 }}><Ghost label="Cancel" onPress={() => setInvOpen(false)} /></View>
               <View style={{ flex: 2 }}>
-                <Cta label="Send invite" wide onPress={() => { const e = invEmail.trim(); if (!e || !e.includes('@')) { Alert.alert('Enter an email', 'Add a valid client email address.'); return; } sendInvite(e, invMode); setInvOpen(false); Alert.alert('Invitation sent', e + ' will see your ' + (invMode === 'inperson' ? 'in-person' : 'online') + ' coaching invite when they sign in to Repple.', [{ text: 'Done' }]); }} />
+                <Cta label="Send invite" wide onPress={async () => {
+                  const e = invEmail.trim();
+                  if (!e || !e.includes('@')) { Alert.alert('Enter an email', 'Add a valid client email address.'); return; }
+                  const ok = await sendInvite(e, invMode);
+                  setInvOpen(false);
+                  // "Invitation sent" was the wrong two words: nothing is sent.
+                  // The invite waits in Repple for that address to sign in, and
+                  // the only person who can tell them it exists is the coach.
+                  Alert.alert(
+                    ok ? 'Invite recorded' : 'Invite not recorded',
+                    ok
+                      ? 'Repple does not send email. ' + e + ' is saved as your ' + (invMode === 'inperson' ? 'in-person' : 'online') + ' coaching invite and they link to you the first time they sign in to Repple with that address. Tell them yourself so they know to install it.'
+                      : 'Nothing was saved for ' + e + ', so no invite is waiting for them. Check your connection and try again.',
+                    [{ text: ok ? 'Done' : 'OK' }]);
+                }} />
               </View>
             </View>
           </View>
