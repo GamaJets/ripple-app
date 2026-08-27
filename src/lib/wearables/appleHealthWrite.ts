@@ -197,6 +197,14 @@ const EXERCISE_TO_HK: Record<string, string> = {
   core: 'CoreTraining', 'core training': 'CoreTraining',
   stretching: 'Flexibility', mobility: 'Flexibility', flexibility: 'Flexibility',
   cooldown: 'Cooldown', 'cool down': 'Cooldown',
+  // Recovery. Apple has no sauna type; PreparationAndRecovery is the one it
+  // provides for exactly this, and MindAndBody for the breathing kind. Both
+  // are in HK_WRITE_ACTIVITIES. Naming them here matters more than it looks:
+  // an unrecognised string does not fail, it files as American Football (see
+  // the note above HK_WRITE_ACTIVITIES).
+  sauna: 'PreparationAndRecovery', 'steam room': 'PreparationAndRecovery',
+  'cold plunge': 'PreparationAndRecovery', 'contrast therapy': 'PreparationAndRecovery',
+  massage: 'PreparationAndRecovery', breathwork: 'MindAndBody',
   boxing: 'Boxing', kickboxing: 'Kickboxing', 'martial arts': 'MartialArts',
   'jump rope': 'JumpRope', skipping: 'JumpRope',
   hiit: 'HighIntensityIntervalTraining',

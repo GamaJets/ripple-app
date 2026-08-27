@@ -1608,6 +1608,27 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
   ok(!HK_WRITE_ACTIVITIES.has('Circuit') && HK_WRITE_ACTIVITIES.has('Other'),
      'the allowlist is the bridge dictionary, not the app vocabulary');
 
+  // Recovery: a sauna is a real session with a real duration and a real heart
+  // rate, and no calorie figure at all. Apple has no sauna type, so it files
+  // under the one it provides for this — and it MUST be named, because the
+  // fallback for an unknown string is American Football, not an error.
+  for (const [name, expected] of [
+    ['Sauna', 'PreparationAndRecovery'],
+    ['Steam Room', 'PreparationAndRecovery'],
+    ['Cold Plunge', 'PreparationAndRecovery'],
+    ['Contrast Therapy', 'PreparationAndRecovery'],
+    ['Massage', 'PreparationAndRecovery'],
+    ['Breathwork', 'MindAndBody'],
+  ] as const) {
+    const one: WorkoutEntry[] = [{ t: T1, exercise: name, cardio: { mins: 20, dist: 0, unit: 'km' } }];
+    ok(sessionActivity(one).activity === expected,
+       `${name} writes to Apple Health as ${expected}`);
+    ok(HK_WRITE_ACTIVITIES.has(sessionActivity(one).activity),
+       `${name} resolves to an activity Apple Health defines`);
+    ok(sessionKcal(one) === null,
+       `${name} reports no energy — thermoregulation is not work, and a figure there would be invented`);
+  }
+
   ok(sessionKcal(cardioPair.map((e) => ({ ...e, kcal: 120 }))) === 240,
      'energy is the sum when every entry recorded some');
   ok(sessionKcal([{ ...cardioPair[0], kcal: 120 }, cardioPair[1]]) === null,

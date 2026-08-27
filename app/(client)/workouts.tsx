@@ -50,7 +50,11 @@ const WEEK = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 //
 // Titles are Title Case throughout and each list is alphabetical. Acronyms
 // (EMOM, AMRAP) stay upper-case; they are not words.
-interface Activity { name: string; met: number }
+// `met: null` means "this is not exercise expenditure and no calorie figure
+// may be derived from it". A sauna raises heart rate, but the energy cost is
+// thermoregulation rather than work, so any kcal we printed beside it would be
+// invention. Null travels all the way to the log, which renders it as a dash.
+interface Activity { name: string; met: number | null }
 
 const CARDIO_ACTS: Activity[] = [
   { name: 'Cycling',          met: 7.5 },
@@ -73,6 +77,17 @@ const HIIT_ACTS: Activity[] = [
   { name: 'Tabata',           met: 10.0 },
 ];
 
+// Recovery is time spent deliberately not training. Duration and heart rate are
+// real measurements and are kept; calories are not derivable and are not shown.
+const RECOVERY_ACTS: Activity[] = [
+  { name: 'Breathwork',       met: null },
+  { name: 'Cold Plunge',      met: null },
+  { name: 'Contrast Therapy', met: null },
+  { name: 'Massage',          met: null },
+  { name: 'Sauna',            met: null },
+  { name: 'Steam Room',       met: null },
+];
+
 const MOBILITY_ACTS: Activity[] = [
   { name: 'Dynamic Warm-Up',  met: 4.0 },
   { name: 'Foam Rolling',     met: 2.5 },
@@ -87,23 +102,34 @@ const byName = (a: Activity, b: Activity) => a.name.localeCompare(b.name);
 const names = (acts: Activity[]) => [...acts].sort(byName).map((a) => a.name);
 
 const CARDIO = names(CARDIO_ACTS);
-const SESSION_TYPES: Record<'cardio' | 'hiit' | 'mobility', string[]> = {
+const SESSION_TYPES: Record<'cardio' | 'hiit' | 'mobility' | 'recovery', string[]> = {
   cardio: CARDIO,
   hiit: names(HIIT_ACTS),
   mobility: names(MOBILITY_ACTS),
+  recovery: names(RECOVERY_ACTS),
 };
-const WTYPES = [['strength', 'Program'], ['cardio', 'Cardio'], ['hiit', 'HIIT'], ['mobility', 'Mobility']] as const;
+const WTYPES = [['strength', 'Program'], ['cardio', 'Cardio'], ['hiit', 'HIIT'], ['mobility', 'Mobility'], ['recovery', 'Recovery']] as const;
 
 // Approx METs per activity — kcal = MET x weight(kg) x hours (standard estimate).
 const MET: Record<string, number> = Object.fromEntries(
-  [...CARDIO_ACTS, ...HIIT_ACTS, ...MOBILITY_ACTS].map((a) => [a.name, a.met]),
+  [...CARDIO_ACTS, ...HIIT_ACTS, ...MOBILITY_ACTS, ...RECOVERY_ACTS]
+    .filter((a) => a.met != null)
+    .map((a) => [a.name, a.met as number]),
 );
 // Returns null when we do not know what the client weighs. It used to fall
 // back to 70 kg, so the burn shown next to a session was MET x 70 regardless
 // of who was training, and that number was written into the workout log and
 // re-surfaced in the weekly report as a measured figure.
-const cardioKcal = (type: string, mins: number, weightKg?: number | null): number | null =>
-  (weightKg && weightKg > 0) ? Math.round((MET[type] ?? 7) * weightKg * (mins / 60)) : null;
+//
+// It also used to fall back to MET 7 — roughly rowing — for any activity not in
+// the table. That made a typo, or a new entry like Sauna, silently produce a
+// plausible-looking burn for something nobody had measured. An unknown MET is
+// now null, exactly as an unknown weight is.
+const cardioKcal = (type: string, mins: number, weightKg?: number | null): number | null => {
+  const met = MET[type];
+  if (met == null) return null;
+  return (weightKg && weightKg > 0) ? Math.round(met * weightKg * (mins / 60)) : null;
+};
 
 /** Metric columns divided by a hairline — the KpiRow idiom, where a status dot is needed. */
 function MetricCols({ t, items }: { t: Theme; items: { label: string; value: string; dot?: string }[] }) {
@@ -134,7 +160,7 @@ export default function Train() {
   const program = coachProgram ?? buildProgram(cd.goal, cd.bodyFatPct);
   const jsToMon = (new Date().getDay() + 6) % 7;
   const [dayIdx, setDayIdx] = useState(jsToMon);
-  const [mode, setMode] = useState<'strength' | 'cardio' | 'hiit' | 'mobility'>('strength');
+  const [mode, setMode] = useState<'strength' | 'cardio' | 'hiit' | 'mobility' | 'recovery'>('strength');
   const [swaps, setSwaps] = useState<Record<string, string>>({});
   const [logged, setLogged] = useState<Record<string, { reps: string; kg: string }[]>>({});
 
@@ -276,7 +302,10 @@ export default function Train() {
   // Today's cardio, read from the saved log so it persists across navigation (not just this mount).
   const todayCardio = workoutLog
     .filter((l) => l.cardio && dstr(new Date(l.t)) === dstr(today0))
-    .map((l) => ({ type: l.exercise, mins: l.cardio!.mins, dist: l.cardio!.dist, unit: l.cardio!.unit, watts: l.cardio!.watts ?? 0, kcal: l.kcal ?? 0 }));
+    // `?? null`, not `?? 0`. The row below guards on `kcal != null` so it can
+    // omit the figure entirely, and `?? 0` defeated that guard — a sauna, which
+    // has no derivable burn, would have read "0 kcal". Zero is a measurement.
+    .map((l) => ({ type: l.exercise, mins: l.cardio!.mins, dist: l.cardio!.dist, unit: l.cardio!.unit, watts: l.cardio!.watts ?? 0, kcal: l.kcal ?? null }));
   const calMonth = monday0.getMonth(), calYear = monday0.getFullYear();
   const firstDow = (new Date(calYear, calMonth, 1).getDay() + 6) % 7;
   const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
@@ -618,9 +647,9 @@ export default function Train() {
             </View>
           ) : (
             <View>
-              <Text style={{ ...ty.head, color: t.ink, marginBottom: sp.md }}>Log a {mode === 'hiit' ? 'HIIT' : mode === 'mobility' ? 'mobility' : 'cardio'} session</Text>
+              <Text style={{ ...ty.head, color: t.ink, marginBottom: sp.md }}>Log a {mode === 'hiit' ? 'HIIT' : mode === 'mobility' ? 'mobility' : mode === 'recovery' ? 'recovery' : 'cardio'} session</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.md }}>
-                {(SESSION_TYPES[(mode as 'cardio' | 'hiit' | 'mobility')] || CARDIO).map((ct) => (
+                {(SESSION_TYPES[(mode as 'cardio' | 'hiit' | 'mobility' | 'recovery')] || CARDIO).map((ct) => (
                   <Pressable key={ct} onPress={() => setCtype(ct)} style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: ctype === ct ? t.brand : t.surface2 }}>
                     <Text style={{ ...ty.label, fontWeight: ctype === ct ? '500' : '400', color: ctype === ct ? t.brandInk : t.ink2 }}>{ct}</Text>
                   </Pressable>
