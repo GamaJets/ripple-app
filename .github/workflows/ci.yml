@@ -57,6 +57,15 @@ jobs:
       - name: Schema is in sync
         run: npm run db:check
 
+      # Three times now a native module has gone missing without failing
+      # anything: expo-video absent from a store build so clips never played,
+      # HealthKit writes refused for want of a usage string, Face ID shipping
+      # the library's own "Allow $(PRODUCT_NAME) to use Face ID". None of it
+      # fails a typecheck, a test or a bundle — the JavaScript is correct and
+      # the binary is wrong. This is the only step that looks.
+      - name: Native modules and their permission strings
+        run: npm run check:native
+
   studio_web:
     name: Studio web console · build
     runs-on: ubuntu-latest

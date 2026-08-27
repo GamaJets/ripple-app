@@ -2,7 +2,7 @@
   "name": "repple-app",
   "version": "1.1.0",
   "private": true,
-  "description": "Repple — white-label fitness platform (Expo + Supabase). Production scaffold.",
+  "description": "Repple \u2014 white-label fitness platform (Expo + Supabase). Production scaffold.",
   "main": "expo-router/entry",
   "scripts": {
     "start": "expo start",
@@ -15,7 +15,8 @@
     "db:build": "node scripts/build-supabase-setup.mjs",
     "db:check": "node scripts/build-supabase-setup.mjs --check",
     "studio": "npm --prefix studio-web run dev",
-    "postinstall": "patch-package"
+    "postinstall": "patch-package",
+    "check:native": "node scripts/check-native.mjs"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",
@@ -53,7 +54,7 @@
     "typescript": "~6.0.3"
   },
   "//deferred-native-deps": "Added at the dev-build/EAS stage (they require native code and do NOT run in Expo Go): @stripe/stripe-react-native",
-  "//native-deps-in-tree": "Already installed and native, so a dev build is required from here on — Expo Go will not run the app: expo-video (exercise demos play inline; the alternative was Linking.openURL, which sends a client out of the app mid-session and is what lost their typed sets).",
+  "//native-deps-in-tree": "Already installed and native, so a dev build is required from here on \u2014 Expo Go will not run the app: expo-video (exercise demos play inline; the alternative was Linking.openURL, which sends a client out of the app mid-session and is what lost their typed sets).",
   "expo": {
     "doctor": {
       "reactNativeDirectoryCheck": {
@@ -67,5 +68,5 @@
   "engines": {
     "node": ">=20.19"
   },
-  "//react-native-health-patch": "react-native-health 1.19.0 (last published Oct 2024, unmaintained) calls [self.callableJSModules setBridge:] in emitEventInternal, a selector RCTCallableJSModules no longer exposes in React Native 0.86 — so every iOS build under Expo SDK 57 failed to compile. The call is vestigial: RCTEventEmitter's own sendEventWithName:body: does not need the bridge set by hand. patches/ removes that one line and postinstall reapplies it, including on the EAS build server. Remove both if the package ever ships a fix."
+  "//react-native-health-patch": "react-native-health 1.19.0 (last published Oct 2024, unmaintained) calls [self.callableJSModules setBridge:] in emitEventInternal, a selector RCTCallableJSModules no longer exposes in React Native 0.86 \u2014 so every iOS build under Expo SDK 57 failed to compile. The call is vestigial: RCTEventEmitter's own sendEventWithName:body: does not need the bridge set by hand. patches/ removes that one line and postinstall reapplies it, including on the EAS build server. Remove both if the package ever ships a fix."
 }
