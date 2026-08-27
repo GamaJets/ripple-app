@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Email confirmed — Repple</title>
+<title>Confirm your email — Repple</title>
 <meta name="robots" content="noindex">
 <link rel="stylesheet" href="styles.css?v=3a417a5124">
 <link rel="icon" href="favicon.png">
@@ -69,31 +69,50 @@ addEventListener('DOMContentLoaded', function () {
         <a class="btn" href="mailto:support@repplefitness.com?subject=Confirmation%20link">Email support</a>
       </p>
     </div>
+
+    <div id="confirm" hidden>
+      <p class="btn-row">
+        <button class="btn primary" type="button" id="go">Confirm my email</button>
+      </p>
+    </div>
   </div>
 </main>
 
 <script type="module">
-  import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+  import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
 
-  const head = document.getElementById('head');
-  const body = document.getElementById('body');
-  const actions = document.getElementById('actions');
-  const retry = document.getElementById('retry');
+  // detectSessionInUrl off: this page reads the URL itself and must not have a
+  // session created behind its back. persistSession off: confirming an address
+  // is not signing in, and this may well be a borrowed or public computer —
+  // nothing should be left in its storage afterwards.
+  const sb = createClient(
+    'https://phgfwzpkkwdysftlgkoq.supabase.co',
+    'sb_publishable_Td-L1IVNMzPpQsa30hUExQ_K--w76RZ',
+    { auth: { detectSessionInUrl: false, persistSession: false } },
+  );
 
-  const say = (h, b, showRetry) => {
+  const $ = (id) => document.getElementById(id);
+  const head = $('head'), body = $('body');
+  const panels = { actions: $('actions'), retry: $('retry'), confirm: $('confirm') };
+  const go = $('go');
+
+  const say = (h, b, panel) => {
     head.textContent = h;
     body.innerHTML = b;
-    (showRetry ? retry : actions).hidden = false;
+    for (const [k, el] of Object.entries(panels)) el.hidden = k !== panel;
   };
 
-  // Supabase writes the outcome one of two ways depending on the flow: an
-  // error in the hash, or tokens in the hash after a successful verify. It
-  // can also send token_hash in the query string for the newer PKCE flow.
+  const q = new URLSearchParams(location.search);
   const hash = new URLSearchParams(location.hash.replace(/^#/, ''));
-  const query = new URLSearchParams(location.search);
 
-  const err = hash.get('error') || query.get('error');
-  const errDesc = hash.get('error_description') || query.get('error_description');
+  const err = hash.get('error') || q.get('error');
+  const errDesc = hash.get('error_description') || q.get('error_description');
+  const tokenHash = q.get('token_hash');
+
+  // Supabase's own email types, so a link for one flow is not verified as
+  // another. Anything unrecognised falls back to the one this page is for.
+  const TYPES = ['signup', 'email', 'email_change', 'invite', 'magiclink'];
+  const linkType = TYPES.includes(q.get('type')) ? q.get('type') : 'signup';
 
   if (err) {
     // Almost always an expired or already-used link. Say which, because the
@@ -101,20 +120,57 @@ addEventListener('DOMContentLoaded', function () {
     const d = (errDesc || '').replace(/\+/g, ' ');
     if (/expired/i.test(d)) {
       say('That link has expired',
-          'Confirmation links do not last forever. Sign up again with the same address and we will send a fresh one &mdash; nothing you did is lost.', true);
+          'Confirmation links do not last forever. Sign up again with the same address and we will send a fresh one &mdash; nothing you did is lost.', 'retry');
     } else if (/already|used/i.test(d)) {
       say('Already confirmed',
-          'This address is confirmed and the link has been used. You can sign in from the app.', false);
+          'This address is confirmed and the link has been used. You can sign in from the app.', 'actions');
     } else {
-      say('That link did not work', d || 'The link could not be verified. Sign up again and we will send a new one.', true);
+      say('That link did not work', d || 'The link could not be verified. Sign up again and we will send a new one.', 'retry');
     }
-  } else if (hash.get('access_token') || query.get('token_hash') || query.get('code')) {
+
+  } else if (tokenHash) {
+    // NOT verified on load, and this is the whole point of the page.
+    //
+    // A confirmation token can be spent once. Mail filters — Microsoft Safe
+    // Links, Gmail's scanner, anything a company puts in front of a mailbox —
+    // spend it by fetching the URL before its owner ever sees the message. The
+    // person then clicks a dead link and is told it expired. That is what
+    // happened to a real signup in August, and it is why the toggle for email
+    // confirmation is currently off.
+    //
+    // Scanners fetch. They do not run scripts and they do not press buttons.
+    // So the token waits here for a press.
+    say('Confirm your email',
+        'One press and your Repple account is ready to sign in to.', 'confirm');
+
+    go.addEventListener('click', async () => {
+      go.disabled = true;
+      go.textContent = 'Confirming\u2026';
+      const { error } = await sb.auth.verifyOtp({ type: linkType, token_hash: tokenHash });
+      if (error) {
+        go.disabled = false;
+        go.textContent = 'Confirm my email';
+        say('That link did not work',
+            `${error.message}. Confirmation links can be used once and they expire, so this one has most likely already been used or has run out &mdash; sign up again with the same address for a fresh one.`, 'retry');
+        return;
+      }
+      say('Email confirmed',
+          'Your address is confirmed and your account is ready. Sign in from the app with the email and password you chose.', 'actions');
+    });
+
+  } else if (hash.get('access_token')) {
+    // The older link shape: /auth/v1/verify confirmed the address server-side
+    // and redirected here with tokens already in the fragment. Nothing left to
+    // do, and saying "confirmed" is true for this shape — which it was NOT for
+    // token_hash, where this page used to claim success having verified
+    // nothing at all.
     say('Email confirmed',
-        'Your address is confirmed and your account is ready. Sign in from the app with the email and password you chose.', false);
+        'Your address is confirmed and your account is ready. Sign in from the app with the email and password you chose.', 'actions');
+
   } else {
     // No token of any kind: somebody navigated here directly.
     say('Nothing to confirm here',
-        'This page is where a confirmation link lands. If you are waiting on one, check your spam and junk folders &mdash; that is usually where it is. If it never arrives, email <a href="mailto:support@repplefitness.com">support@repplefitness.com</a> and we will confirm you by hand.', true);
+        'This page is where a confirmation link lands. If you are waiting on one, check your spam and junk folders &mdash; that is usually where it is. If it never arrives, email <a href="mailto:support@repplefitness.com">support@repplefitness.com</a> and we will confirm you by hand.', 'retry');
   }
 </script>
 

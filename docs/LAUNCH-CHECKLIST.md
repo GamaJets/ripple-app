@@ -31,7 +31,23 @@ gyms you have spoken to. It is not defensible when strangers can sign up:
 unverified addresses mean password resets can be aimed at accounts somebody
 else owns, and it lets one person squat on another's email.
 
-**Before flipping it back**, fix the thing that made it necessary:
+**The link shape is fixed already — 27 Aug 2026.** The Confirm sign up template
+must be changed at the same time as the toggle, or this comes straight back:
+
+    <a href="https://repplefitness.com/confirmed?token_hash={{ .TokenHash }}&amp;type=signup">Confirm my email</a>
+
+It must be the ONLY link in that template. `{{ .ConfirmationURL }}` routes
+through `/auth/v1/verify`, which spends the token server-side the moment
+*anything* fetches the URL — and a scanning mail filter fetches it before the
+person reads the message. `web/confirmed.html` now holds a `token_hash` and
+spends it when somebody presses the button, which a scanner does not do. Reset
+password was moved to this shape on 27 Aug and is the working example.
+
+Note that until that template changes, `web/confirmed.html` is still correct for
+the old `#access_token` shape — both are handled. Nothing breaks by waiting; the
+scanner problem simply persists.
+
+**Also before flipping it back**, fix the rest of what made it necessary:
 
 - `repplefitness.com` was verified in Resend on 25 Aug 2026 and had no sending
   reputation. That is the single biggest reason corporate filters quarantined
