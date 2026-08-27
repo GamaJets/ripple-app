@@ -169,8 +169,10 @@ export interface ClientAnalytics {
   engaged: number;
   /** Clients whose trainer is flagged. */
   atRisk: number;
-  engagementPct: number;
-  avgPerTrainer: number;
+  /** NULL with no clients — a percentage of nobody. */
+  engagementPct: number | null;
+  /** NULL with no trainers — an average over an empty set. */
+  avgPerTrainer: number | null;
   /** Client load per trainer, biggest book first. */
   byTrainer: { id: string; name: string; clients: number; pct: number }[];
 }
@@ -187,8 +189,8 @@ export function clientAnalytics(trainers: TrainerLike[]): ClientAnalytics {
     .sort((a, b) => b.clients - a.clients);
   return {
     total, engaged, atRisk,
-    engagementPct: total ? Math.round((engaged / total) * 100) : 0,
-    avgPerTrainer: trainers.length ? Math.round((total / trainers.length) * 10) / 10 : 0,
+    engagementPct: total ? Math.round((engaged / total) * 100) : null,
+    avgPerTrainer: trainers.length ? Math.round((total / trainers.length) * 10) / 10 : null,
     byTrainer,
   };
 }

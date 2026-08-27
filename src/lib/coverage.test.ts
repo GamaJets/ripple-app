@@ -17,6 +17,7 @@ import { parseCsv, parseSheet, sniffDelimiter, mapColumns } from './csv';
 import { parseMoneyCents, parseDate, detectDateOrder, previewMembers, previewPayments, previewPlans, describePreview, MEMBER_ALIASES } from './csvImport';
 import { classEntry, ptEntry, mergeTimetable, overlapping, entriesAt, floorAt, floorByHour, clashes, summariseBoard, slotBlocker, type PtSlot } from './gymPtSchedule';
 import { mergeExerciseLists } from './coachExerciseList';
+import { coverageFor, coverageLine } from './videoCoverage';
 import { attributionLine } from './workoutAttribution';
 import { RECOVERY_ACTIVITIES, isRecoveryActivity } from './recoveryActs';
 import { groupSessions, sessionKey, sessionDuration, sessionActivity, sessionKcal, sessionDistanceMeters, planSession, planWrite, summariseResult, HK_WRITE_ACTIVITIES, type Ledger } from './wearables/appleHealthWrite';
@@ -28,7 +29,7 @@ import { dwellMinutes, averageDwellMinutes, uniqueMembers, summariseVisits, visi
 import { remainingUses, isExpired, isRedeemable, expiryFor, passRevenueCents, summarisePasses, guestsByHost, passStatus, type GymPass } from './gymPasses';
 import { estimateDish, searchDishes, DISHES } from './restaurant';
 import { normaliseEmail, inviteState, isExpired as inviteExpired, isRedeemable as inviteRedeemable, expiryFor as inviteExpiryFor, daysUntilExpiry, inviteBlocker, screenInvites, summariseInvites, DEFAULT_VALID_DAYS, type MemberInvite } from './memberInvites';
-import { exerciseSlug, sameExercise, findExercise, videoForExercise, type ExerciseRef } from './exerciseId';
+import { exerciseSlug, sameExercise, findExercise, videoForExercise, type ExerciseRef, isAcademyClip } from './exerciseId';
 import { weekStartOf, weekDays, shiftWeek, hoursSpanned, shiftHours, hourLabel, buildRota, coverage, shiftsByDay, rosterByTrainer, summariseRota, shiftFromHours, type Shift, type DemandBlock } from './gymRota';
 import { photoObjectPath, isOwnPhotoPath, sortOldestFirst, comparePair, daysApart, photosNote, missingFileCount, rowToPhoto, PHOTO_PATH_RE, type ProgressPhoto } from './progressPhotos';
 import { viewerMaySee, shareStateOf, shareLabel, sharedNote, sharedCount, sendBlocker, sentPhotos, sortNewestShared, missingSharedFiles, revokeCaveat, SHARED_URL_TTL_S, type ShareGrant, type CoachLink, type SharedPhoto } from './photoShare';
@@ -973,8 +974,13 @@ ok(videoForExercise('Goblet Squat', vids) === null, 'a different squat is not th
 ok(videoForExercise('', vids) === null, 'no exercise, no clip');
 ok(videoForExercise('Back Squat', vids, 't2')?.trainerId === 't2',
    'a member sees their own coach demonstrating it, not a stranger');
-ok(videoForExercise('Back Squat', vids, 't9')?.trainerId === 't1',
-   'and still sees something when their own coach has not recorded one');
+// This used to assert the opposite — that a member coached by t9 would be shown
+// t1's clip. Two lines above, the file already says "not a stranger". Both
+// could not be true, and the fallback was the wrong one: right movement, wrong
+// person, from a gym they have nothing to do with. There is no Academy clip in
+// `vids`, so the honest answer here is none.
+ok(videoForExercise('Back Squat', vids, 't9') === null,
+   'a member is shown no clip rather than one belonging to a coach who is not theirs');
 }
 
 
@@ -1610,6 +1616,55 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
   }
   ok(!HK_WRITE_ACTIVITIES.has('Circuit') && HK_WRITE_ACTIVITIES.has('Other'),
      'the allowlist is the bridge dictionary, not the app vocabulary');
+
+  // What a coach programmes vs what anybody has filmed.
+  {
+    const vids = [
+      { exerciseId: 'back-squat', name: 'Back Squat', trainerId: 'me' },
+      { exerciseId: 'bench-press', name: 'Bench Press', trainerId: null },
+      { exerciseId: 'deadlift', name: 'Deadlift', trainerId: 'other-coach' },
+    ];
+    const programmed = ['Back Squat', 'Bench Press', 'Deadlift', 'Hip Thrust', 'back squat'];
+    const r = coverageFor(programmed, vids, 'me');
+
+    ok(r.all.length === 4,
+       'the same movement written twice is one job, however it was cased');
+    ok(r.mine.join() === 'Back Squat', 'what this coach has filmed');
+    ok(r.academyOnly.join() === 'Bench Press',
+       'what only the Academy covers — theirs to replace if they want to');
+    ok(r.missing.join() === 'Deadlift,Hip Thrust',
+       'and what nobody has filmed. Another coach\u2019s clip does NOT count as covered, because the client will never be shown it');
+
+    ok(coverageLine(coverageFor([], vids, 'me')) === null,
+       'a coach who has programmed nothing gets no claim about coverage either way');
+    const line = coverageLine(r);
+    ok(line !== null && line.includes('2 of the 4') && line.includes('Academy'),
+       'the line names both jobs: what is missing, and what is only the Academy');
+    const done = coverageLine(coverageFor(['Back Squat'], vids, 'me'));
+    ok(done !== null && done.startsWith('Every movement you programme has your own clip'),
+       'and says so plainly when there is nothing left to film');
+  }
+
+  // Which demo clip a client sees: their coach, then the Academy, then none.
+  {
+    const mine    = { exerciseId: 'back-squat', name: 'Back Squat', trainerId: 'coach-me' };
+    const academy = { exerciseId: 'back-squat', name: 'Back Squat', trainerId: null };
+    const other   = { exerciseId: 'back-squat', name: 'Back Squat', trainerId: 'coach-someone-else' };
+
+    ok(videoForExercise('Back Squat', [academy, other, mine], 'coach-me') === mine,
+       'a member sees their OWN coach demonstrating, ahead of anything else');
+    ok(videoForExercise('Back Squat', [other, academy], 'coach-me') === academy,
+       'and the Academy clip when their coach has not filmed it');
+    ok(videoForExercise('Back Squat', [other], 'coach-me') === null,
+       'but NEVER a stranger from another gym — that used to be the fallback');
+    ok(videoForExercise('Back Squat', [other]) === other,
+       'with nobody to prefer, the only clip there is is the right answer');
+    ok(videoForExercise('Front Squat', [mine, academy], 'coach-me') === null,
+       'and a different movement matches nothing — no fuzzy fallback, ever');
+
+    ok(isAcademyClip(academy) && !isAcademyClip(mine) && !isAcademyClip(other),
+       'an Academy clip is the one belonging to no coach');
+  }
 
   // An average over no trainers is undefined, not zero.
   {

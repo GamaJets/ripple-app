@@ -113,7 +113,7 @@ export default function OwnerGrowth() {
           <KpiRow items={[
             { label: 'Idle', value: loading ? '—' : fig(idlePct), unit: loading ? undefined : '%', delta: loading ? 'not read yet' : `${idle} of ${roll.trainers}` },
             { label: 'Sessions · 30d', value: loading ? '—' : fig(roll.sessions30), delta: loading ? 'not read yet' : `${roll.avgSessionsPerTrainer} avg / trainer` },
-            { label: 'Clients', value: loading ? '—' : fig(ca.total), delta: loading ? 'not read yet' : `${ca.avgPerTrainer} avg / trainer` },
+            { label: 'Clients', value: loading ? '—' : fig(ca.total), delta: loading ? 'not read yet' : ca.avgPerTrainer == null ? 'no trainers yet' : `${ca.avgPerTrainer} avg / trainer` },
           ]} />
         </Section>
 
@@ -124,7 +124,7 @@ export default function OwnerGrowth() {
           <SectionHead title="Platform clients" note="Across every trainer" />
           <KpiRow items={[
             { label: 'Active clients', value: loading ? '—' : fig(ca.total) },
-            { label: 'Engaged', value: loading ? '—' : fig(ca.engagementPct), unit: loading ? undefined : '%' },
+            { label: 'Engaged', value: loading ? '—' : fig(ca.engagementPct), unit: loading || ca.engagementPct == null ? undefined : '%' },
             { label: 'Avg / trainer', value: loading ? '—' : fig(ca.avgPerTrainer) },
           ]} />
           <View style={{ marginTop: sp.xl }}>

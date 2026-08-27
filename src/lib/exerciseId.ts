@@ -85,8 +85,20 @@ export interface VideoLike {
  * wrong movement presented as the right one, and a client copying it under load
  * is how people get hurt. No clip is an honest answer; the wrong clip is not.
  *
- * `preferTrainerId` breaks a tie towards the client's own coach, so a member
- * sees their coach demonstrating the lift rather than a platform stock clip.
+ * Which of several clips, in strict order:
+ *
+ *   1. the client's OWN coach — a member should see the person who actually
+ *      trains them demonstrating the lift;
+ *   2. the platform Academy clip, which is `trainer_id is null` — the fallback
+ *      that means a new coach's clients are not staring at an empty library
+ *      while their coach finds time to film;
+ *   3. nothing.
+ *
+ * Explicitly NOT "some other coach's clip". That used to be rule 3, by way of
+ * `?? hits[0]` — so a member whose own coach had not filmed a squat could be
+ * shown a stranger from another gym demonstrating it. The movement would be
+ * right and the person would be wrong, which is confusing at best; and with a
+ * private bucket and per-clip visibility it may not even be theirs to see.
  */
 export function videoForExercise<T extends VideoLike & { trainerId?: string | null }>(
   exerciseName: string,
@@ -98,6 +110,20 @@ export function videoForExercise<T extends VideoLike & { trainerId?: string | nu
 
   const hits = videos.filter((v) => v.exerciseId === id || exerciseSlug(v.name) === id);
   if (!hits.length) return null;
-  if (!preferTrainerId) return hits[0];
-  return hits.find((v) => v.trainerId === preferTrainerId) ?? hits[0];
+
+  const mine = preferTrainerId ? hits.find((v) => v.trainerId === preferTrainerId) : null;
+  if (mine) return mine;
+
+  // The Academy: belongs to no coach, shown to everyone.
+  const academy = hits.find((v) => v.trainerId == null);
+  if (academy) return academy;
+
+  // No coach of this client's, and no Academy clip. When nobody has been asked
+  // to prefer anyone, the only clip there is is the right answer.
+  return preferTrainerId ? null : hits[0];
+}
+
+/** Whether a clip is a platform Academy one rather than a coach's own. */
+export function isAcademyClip(v: { trainerId?: string | null }): boolean {
+  return v.trainerId == null;
 }

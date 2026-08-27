@@ -70,6 +70,10 @@ import { Rule, Section, SectionHead, Hero, ListRow, Cta, Ghost, fig } from '../.
 import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/theme/scale';
 import { useExerciseVideos, uploadExerciseVideo, videoUploadAvailable, type VideoItem, type Visibility } from '../../src/ui/exerciseVideos';
 import { ExerciseVideo } from '../../src/ui/ExerciseVideo';
+import { useProgramTemplates } from '../../src/ui/programTemplates';
+import { useAuth } from '../../src/ui/auth';
+import { coverageFor, coverageLine } from '../../src/lib/videoCoverage';
+import { isAcademyClip } from '../../src/lib/exerciseId';
 import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
 
@@ -293,6 +297,17 @@ export default function TrainerVideos() {
   const t = useTheme();
   const { videos: vids, status, addVideo, removeVideo, setVisibility, grantTo, revokeFrom, listGrants, reload } = useExerciseVideos();
   const router = useRouter();
+  const auth = useAuth();
+  const { templates } = useProgramTemplates();
+  // Every movement this coach has written into a template, however they spelt
+  // it. Null while the library has not been read: a coverage claim built on a
+  // failed read would tell a coach they have nothing filmed when they may have
+  // filmed everything.
+  const coverage = status === 'error' || status === 'loading' ? null : coverageFor(
+    templates.flatMap((tpl) => tpl.program.days.flatMap((d) => d.exercises.map((e) => e.name))),
+    vids,
+    auth.user?.id ?? null,
+  );
   const [linkOpen, setLinkOpen] = useState(false);
   const [lName, setLName] = useState('');
   const [lGroup, setLGroup] = useState('');
@@ -472,6 +487,58 @@ export default function TrainerVideos() {
         />
 
         <Rule />
+
+        {/* ── what you programme but nobody has filmed ────────────────────
+            The library answers "what have I recorded". This answers the more
+            useful question: what am I asking people to do that they have never
+            seen done. Scoped to the movements in this coach's own templates,
+            not the whole 56-row catalogue — a list of everything is a chore
+            nobody starts. */}
+        {coverage && coverageLine(coverage) ? (
+          <>
+            <Section>
+              <SectionHead title="What your programmes need"
+                note={coverage.missing.length ? `${coverage.missing.length} to film` : undefined} />
+              <Text style={{ ...ty.label, color: t.ink2 }}>{coverageLine(coverage)}</Text>
+
+              {coverage.missing.length ? (
+                <View style={{ marginTop: sp.md }}>
+                  {coverage.missing.slice(0, 8).map((nm, i) => (
+                    <View key={nm} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm,
+                      paddingVertical: sp.sm, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn }} />
+                      <Text style={{ ...ty.body, color: t.ink, flex: 1 }}>{nm}</Text>
+                      <Text style={{ ...ty.caption, color: t.ink3 }}>no clip</Text>
+                    </View>
+                  ))}
+                  {coverage.missing.length > 8 ? (
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                      …and {coverage.missing.length - 8} more.
+                    </Text>
+                  ) : null}
+                </View>
+              ) : null}
+
+              {coverage.academyOnly.length ? (
+                <View style={{ marginTop: sp.lg }}>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.sm }}>
+                    Showing the Academy clip — record your own and yours is what your clients see instead.
+                  </Text>
+                  {coverage.academyOnly.slice(0, 6).map((nm, i) => (
+                    <View key={nm} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm,
+                      paddingVertical: sp.sm, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.brand }} />
+                      <Text style={{ ...ty.body, color: t.ink, flex: 1 }}>{nm}</Text>
+                      <Text style={{ ...ty.caption, color: t.ink3 }}>Academy</Text>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+            </Section>
+
+            <Rule />
+          </>
+        ) : null}
 
         {/* ── add a clip: the primary action ─────────────────────────────── */}
         <Section>
