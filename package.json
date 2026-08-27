@@ -1,6 +1,6 @@
 {
   "name": "repple-app",
-  "version": "0.1.0",
+  "version": "1.1.0",
   "private": true,
   "description": "Repple — white-label fitness platform (Expo + Supabase). Production scaffold.",
   "main": "expo-router/entry",
