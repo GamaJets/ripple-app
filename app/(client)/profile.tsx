@@ -172,7 +172,7 @@ const HUB_GROUPS: { title: string; items: { label: string; note: string; route: 
   { title: 'Account', items: [
     { label: 'Switch portal', note: 'Client · Trainer · Owner', route: '/' },
     { label: 'Appearance', note: 'Theme & accent colour', route: '/(client)/appearance' },
-    { label: 'Settings', note: 'Notifications, units, legal & version', route: '/(client)/settings' },
+    { label: 'Settings', note: 'Account, notifications, units, legal & version', route: '/(client)/settings' },
     { label: 'Send Feedback', note: 'Tell us what to improve', route: '/(client)/feedback' },
   ] },
 ];

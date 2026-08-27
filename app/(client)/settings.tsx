@@ -1,6 +1,12 @@
-// Client · Settings & About. Notification prefs, unit preference, legal, your
-// data (GDPR export / erasure), and the build this phone is actually running.
-// Profile hub.
+// Client · Settings & About. Who you are signed in as (and the way back out),
+// notification prefs, unit preference, legal, your data (GDPR export /
+// erasure), and the build this phone is actually running. Profile hub.
+//
+// The "Signed in as" section was missing here while the trainer and owner
+// screens both had it, so the client app had no sign-out anywhere at all — the
+// only call to auth.signOut() was the one that runs after an account deletion
+// request. Reported from a real build. The section is a copy of the trainer's,
+// minus Role and Gym, which a member has no use for.
 //
 // Re-skinned onto the instrument-panel kit (`src/ui/kit`) and the scale
 // (`src/theme/scale`): hairline-separated sections instead of six stacked
@@ -46,6 +52,16 @@ function Toggle({ t, on, onPress }: { t: Theme; on: boolean; onPress: () => void
   );
 }
 
+/** A label and a fact, the same line the trainer and owner settings screens use. */
+function Line({ t, label, value, first }: { t: Theme; label: string; value: string; first?: boolean }) {
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: sp.md, paddingVertical: sp.md, borderTopWidth: first ? 0 : hairline, borderTopColor: t.ring }}>
+      <Text style={{ ...ty.label, color: t.ink3 }}>{label}</Text>
+      <Text style={{ ...ty.body, color: t.ink, flex: 1, textAlign: 'right' }} numberOfLines={1}>{value}</Text>
+    </View>
+  );
+}
+
 function Row({ t, label, sub, right, first }: { t: Theme; label: string; sub?: string; right: React.ReactNode; first?: boolean }) {
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: sp.md, borderTopWidth: first ? 0 : hairline, borderTopColor: t.ring }}>
@@ -71,6 +87,12 @@ export default function Settings() {
   const router = useRouter();
   const st = useSettings();
   const auth = useAuth();
+  const signOut = () => {
+    Alert.alert('Sign out', 'You will need your email and password to sign back in.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Sign out', onPress: () => { try { auth.signOut(); } catch (e) { reportError('clientSettings.signOut', e); } } },
+    ]);
+  };
   const [legal, setLegal] = useState<'privacy' | 'terms' | null>(null);
   const [dataBusy, setDataBusy] = useState(false);
   // null = not read yet · 'failed' = the read itself failed · otherwise the
@@ -157,6 +179,17 @@ export default function Settings() {
           </View>
         </View>
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>Preferences, legal & version</Text>
+
+        <Rule />
+
+        <Section>
+          <SectionHead title="Signed in as" />
+          <Line t={t} first label="Name" value={auth.loading ? 'Checking\u2026' : fig(auth.user?.name)} />
+          <Line t={t} label="Email" value={auth.loading ? 'Checking\u2026' : fig(auth.user?.email)} />
+          <View style={{ flexDirection: 'row', marginTop: sp.md }}>
+            <Ghost label="Sign out" onPress={signOut} />
+          </View>
+        </Section>
 
         <Rule />
 
