@@ -25,6 +25,28 @@ export interface GymClass {
   attended: number;
 }
 
+/**
+ * How full a class is, for the mark beside it.
+ *
+ * The words keep the exact number — `capacity - booked` is a real subtraction
+ * of two real rows and there is no reason to blur it into "Nearly Full" the
+ * way a chain does when it would rather not publish its capacity. What the
+ * number cannot do is carry urgency at a glance: "12 spots left" and "2 spots
+ * left" were the same grey dot, so a class about to go was indistinguishable
+ * from an empty one.
+ *
+ * The threshold is proportional with a floor, because neither alone works: 3
+ * spots is nearly full in a class of 8 and half empty in a class of 60.
+ */
+export type ClassFill = 'open' | 'nearly' | 'full';
+
+export function classFillState(capacity: number, booked: number): ClassFill {
+  const cap = Math.max(0, Math.floor(capacity));
+  const left = Math.max(0, cap - Math.max(0, Math.floor(booked)));
+  if (cap <= 0 || left === 0) return 'full';
+  return left <= Math.max(2, Math.ceil(cap * 0.15)) ? 'nearly' : 'open';
+}
+
 export interface RosterEntry {
   bookingId: string;
   userId: string;

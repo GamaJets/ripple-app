@@ -11,6 +11,7 @@ import { View, Text, Pressable, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
+import { classFillState } from '../../src/lib/gymSchedule';
 import { Rule, Section, SectionHead, Cta, Ghost } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
 import { useClasses } from '../../src/ui/classes';
@@ -102,7 +103,8 @@ export default function Classes() {
               {g.items.map((c, i) => {
                 const mine = myStatus[c.id];
                 const spotsLeft = Math.max(0, c.capacity - c.booked);
-                const full = spotsLeft === 0;
+                const fill = classFillState(c.capacity, c.booked);
+                const full = fill === 'full';
                 return (
                   <View key={c.id}>
                     {i > 0 ? <Rule /> : null}
@@ -112,7 +114,12 @@ export default function Classes() {
                         <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, marginTop: 3 }}>{c.title}</Text>
                         <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{timeLabel(c.startsAt)} · {c.durationMin}m · {c.instructor} · {c.branch}{c.room ? ' · ' + c.room : ''}</Text>
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 }}>
-                          <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: mine ? t.brand : full ? t.s3 : t.ink3 }} />
+                          {/* The mark carries the urgency; the words keep the
+                              exact count. A class with two spots left and one
+                              with twelve were the same grey dot, so the one
+                              about to go looked like the one nobody wants. */}
+                          <View style={{ width: 6, height: 6, borderRadius: 3,
+                            backgroundColor: mine ? t.brand : full ? t.s3 : fill === 'nearly' ? t.warn : t.ink3 }} />
                           <Text style={{ ...ty.caption, color: t.ink2 }}>{mine === 'waitlist' ? 'On the waitlist' : mine ? 'Booked' : full ? 'Class full' : `${spotsLeft} spot${spotsLeft === 1 ? '' : 's'} left`}</Text>
                         </View>
                       </View>

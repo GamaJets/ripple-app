@@ -5,7 +5,7 @@ import { overlaps, isLateCancellation, cancelSession, nextFromWaitlist } from '.
 import type { WorkoutEntry } from './mockData';
 import { rowToEntry, entryToRow, PERSISTED_FIELDS } from './workoutRow';
 import { summarise, money, type MembershipPlan, type Membership, type GymPayment } from './gymRecord';
-import { weeklyOccurrences, summariseAttendance, weeklyAttendance, pct, type GymClass, type NewClass } from './gymSchedule';
+import { weeklyOccurrences, summariseAttendance, weeklyAttendance, pct, type GymClass, type NewClass, classFillState } from './gymSchedule';
 import { summariseClassRows, type ClassSummaryRow } from './classRates';
 import { STATUS_LABEL, STATUS_RANK, statusFromRisk, riskLabel } from './status';
 import { reconcile, reconcileNote } from './finReconcile';
@@ -1616,6 +1616,22 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
   }
   ok(!HK_WRITE_ACTIVITIES.has('Circuit') && HK_WRITE_ACTIVITIES.has('Other'),
      'the allowlist is the bridge dictionary, not the app vocabulary');
+
+  // How full a class is, for the mark beside the exact count.
+  {
+    ok(classFillState(20, 20) === 'full' && classFillState(20, 25) === 'full',
+       'no spots left is full, and over-booked is still full rather than negative');
+    ok(classFillState(20, 0) === 'open', 'an empty class is open');
+    ok(classFillState(20, 17) === 'nearly',
+       '3 left in a class of 20 is nearly full — 15% of capacity');
+    ok(classFillState(20, 16) === 'open', 'and 4 left is not');
+    ok(classFillState(8, 6) === 'nearly',
+       '2 left in a small class is nearly full, where a flat percentage would have said otherwise');
+    ok(classFillState(60, 9) === 'open' && classFillState(60, 51) === 'nearly',
+       'and 9 left in a class of 60 is roomy, where a flat count of 3 would have said otherwise');
+    ok(classFillState(0, 0) === 'full',
+       'a class with no capacity cannot be joined');
+  }
 
   // What a coach programmes vs what anybody has filmed.
   {
