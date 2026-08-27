@@ -1109,6 +1109,9 @@ export default function TrainerClients() {
               <ListRow icon="grid" title="Open program builder" note={`Edit sets, reps & exercises for ${sel.name.split(' ')[0]}`}
                 onPress={() => { const id = sel.id; setSel(null); router.push({ pathname: '/(trainer)/builder', params: { clientId: id } }); }} />
 
+              <ListRow icon="train" title="Log a session you ran" note={`Goes into ${sel.name.split(' ')[0]}'s own record, marked as logged by you`}
+                onPress={() => { const id = sel.id; const nm = sel.name; setSel(null); router.push({ pathname: '/(trainer)/log-session', params: { clientId: id, name: nm } }); }} />
+
               <Pressable
                 onPress={() => { const s = sel; Alert.alert('Remove client?', `Remove ${s.name} from your roster?`, [{ text: 'Keep', style: 'cancel' }, { text: 'Remove', style: 'destructive', onPress: () => { removeClient(s.id); setSel(null); } }]); }}
                 style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingVertical: 13, marginTop: sp.lg, marginBottom: sp.sm }}>

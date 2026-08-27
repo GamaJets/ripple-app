@@ -40,6 +40,7 @@ import { hrColor, hrZoneNo, zoneOf, zoneKey, emptyZoneSeconds, splatPoints, zone
 import { ZoneNow, ZoneBoard } from '../../src/ui/ZoneBoard';
 import { SessionHrSheet } from '../../src/ui/SessionHrSheet';
 import { ageFromDob } from '../../src/lib/age';
+import { attributionLine } from '../../src/lib/workoutAttribution';
 
 const WEEK = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 // Session catalog. Each activity carries its own MET value, because the two used
@@ -856,6 +857,19 @@ export default function Train() {
                               <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 5 }}>{[`${l.cardio.mins} min`, l.cardio.dist > 0 ? `${l.cardio.dist} ${l.cardio.unit}` : null, l.cardio.watts && l.cardio.watts > 0 ? `${l.cardio.watts} W` : null, l.cardio.hrAvg ? `♥ ${l.cardio.hrAvg} avg / ${l.cardio.hrHigh ?? l.cardio.hrAvg} hi` : null].filter(Boolean).join(' · ')}</Text>
                             ) : null}
                             {l.kcal ? <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 6 }}>{l.kcal} kcal</Text> : null}
+                            {/* Who put this in the log. Absent when you did it
+                                yourself, which is almost always — so the line
+                                only appears when it is telling you something.
+                                `null` for the name on purpose: the client app has
+                                no coach-name lookup yet, and attributionLine
+                                renders "your coach" rather than a blank. Better a
+                                true generic than a name fetched wrong. */}
+                            {attributionLine(l, null, true) ? (
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 }}>
+                                <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: t.brand }} />
+                                <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }}>{attributionLine(l, null, true)}</Text>
+                              </View>
+                            ) : null}
                             <Pressable onPress={() => { tapLight(); setHrEntry(l); }} accessibilityRole="button" accessibilityLabel={'Heart rate for ' + l.exercise} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: sp.md, alignSelf: 'flex-start', backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 7 }}>
                               <Icon name="heart" size={13} color={t.brand} />
                               <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>Heart rate</Text>
