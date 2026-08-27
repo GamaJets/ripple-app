@@ -282,3 +282,58 @@ npx expo export --platform ios --output-dir /tmp/repple-export
 
 Run it before any store build. `tsc` will not catch this — the code typechecks
 perfectly; it is the bundler that refuses it.
+
+---
+
+## 9. A migration can exist in this repo and not exist in the database
+
+Found on 27 Aug 2026, in the simulator, by watching a write fail.
+
+`supabase/parts/46-session-duration.sql` adds `workouts.session_mins`. It was
+written on 26 Aug, it is in the repo, it is in the generated `setup.sql` — and
+it had never been run against the live database.
+
+`entryToRow` puts `session_mins` in EVERY workout insert. PostgREST rejects the
+whole row for one unknown column, so from the moment that code shipped:
+
+    newest row in `workouts`   2026-08-25 16:14
+    today                      2026-08-27
+
+Two days in which no workout saved for anybody, from any app, and nothing said
+so. `workoutLog.persist` does report the error — that part works — but nobody
+was reading a phone at the moment it happened.
+
+**Nothing in the repo catches this.** `tsc` passes: the TypeScript is correct.
+The assertions pass: `workoutRow`'s round-trip only checks the code agrees with
+itself. `expo export` passes: it is a runtime rejection, not a build one. Only
+an actual insert against the actual database fails.
+
+So before any release, and after adding any migration, check the parts are
+really applied. Not "did I paste setup.sql", which is the step that was missed
+— check the objects:
+
+```sql
+select 'workouts.session_mins' as thing, count(*) as present
+  from information_schema.columns
+  where table_schema='public' and table_name='workouts' and column_name='session_mins'
+union all select 'workouts.logged_by', count(*) from information_schema.columns
+  where table_schema='public' and table_name='workouts' and column_name='logged_by'
+union all select 'table coach_exercises', count(*) from information_schema.tables
+  where table_schema='public' and table_name='coach_exercises';
+```
+
+Every row must read 1. On 27 Aug the rest of the schema was audited the same
+way — gym_shifts, progress_photos, progress_photo_shares, photo_purge,
+exercise_video_grants, member_interventions, coach_exercises, gym_passes,
+gym_visits, sessions.outcome — and `session_mins` was the only thing missing.
+One gap in fifty-three parts, and it happened to be on the busiest write path
+in the product.
+
+The cheapest tell that it has happened again: log a workout on a real account,
+then
+
+```sql
+select max(created_at) from public.workouts;
+```
+
+If that timestamp is not the workout you just logged, writes are being refused.
