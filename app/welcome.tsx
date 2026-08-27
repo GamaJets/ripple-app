@@ -12,7 +12,8 @@ import { useState } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useRouter } from 'expo-router';
-import { useTheme, PasswordField } from '../src/ui/components';
+import { useTheme, PasswordField, PasswordRules } from '../src/ui/components';
+import { passwordMeetsLocalRules, passwordErrorMessage, PASSWORD_MIN } from '../src/lib/passwordRules';
 import { useAuth } from '../src/ui/auth';
 import { useBrand } from '../src/ui/brand';
 import { USE_SUPABASE } from '../src/lib/config';
@@ -56,7 +57,14 @@ export default function Welcome() {
   const [refCode, setRefCode] = useState('');
   const [notice, setNotice] = useState<string | null>(null);
 
-  const canGo = email.trim().length > 3 && pw.length >= 6 && (mode === 'in' || name.trim().length > 0);
+  // Signing IN must not apply the new-password rules: an existing account may
+  // hold a password created under the old, looser policy, and gating the button
+  // on today's rules would lock them out of their own account with no way
+  // forward. Only signing UP has to satisfy what the server will demand.
+  const pwOkForSignUp = passwordMeetsLocalRules(pw);
+  const canGo = email.trim().length > 3
+    && (mode === 'in' ? pw.length > 0 : pwOkForSignUp)
+    && (mode === 'in' || name.trim().length > 0);
   const go = async () => {
     if (!canGo || busy) return;
     setBusy(true); setNotice(null);
@@ -145,7 +153,8 @@ export default function Welcome() {
           <Text style={lab}>Email</Text>
           <TextInput value={email} onChangeText={setEmail} placeholder="Email" placeholderTextColor={t.ink3} keyboardType="email-address" autoCapitalize="none" autoCorrect={false} style={inp} accessibilityLabel="Email" />
           <Text style={lab}>Password</Text>
-          <PasswordField value={pw} onChangeText={setPw} placeholder="Password (min 6 characters)" style={inp} accessibilityLabel="Password" />
+          <PasswordField value={pw} onChangeText={setPw} placeholder={mode === 'in' ? 'Password' : `Password (${PASSWORD_MIN}+ characters)`} style={inp} accessibilityLabel="Password" />
+          {mode === 'up' ? <PasswordRules value={pw} /> : null}
           {mode === 'up' ? (
             <>
               <Text style={lab}>Referral code (optional)</Text>

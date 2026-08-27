@@ -8,6 +8,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { paletteByKey, brandInkFor, DEFAULT_PALETTE, PALETTES, teal, type Theme, type PaletteMeta } from '../theme/tokens';
 import { VARIANT, VARIANT_ACCENT } from '../lib/variant';
 import { Icon } from './Icon';
+import { passwordRules } from '../lib/passwordRules';
 // `value` is aliased to `figure` so it can't shadow <Tile/>'s `value` prop.
 import { sp, layout, radius, hairline, type as ty, value as figure } from '../theme/scale';
 
@@ -158,3 +159,47 @@ const s = StyleSheet.create({
   row: { flexDirection: 'row', gap: sp.md, marginBottom: sp.md },
   btn: { paddingHorizontal: sp.lg, paddingVertical: 9, borderRadius: radius.sm, borderWidth: hairline, alignItems: 'center' },
 });
+
+/**
+ * The password rules, shown while somebody types rather than after they are
+ * refused.
+ *
+ * Every rule is listed from the start, greyed until met, so the requirement is
+ * knowable before the first attempt. The alternative — and what this replaces —
+ * was a placeholder claiming "min 6 characters" and a server that refused six
+ * characters, then refused again for a missing uppercase, then again for a
+ * missing symbol. Three round trips to learn one rule.
+ *
+ * `note` deliberately stops short of promising acceptance: Supabase also checks
+ * the password against a public breach corpus, which cannot be evaluated here.
+ */
+export function PasswordRules({ value }: { value: string }) {
+  const t = useTheme();
+  const rules = passwordRules(value);
+  const started = (value || '').length > 0;
+  return (
+    <View style={{ marginTop: 8, marginBottom: 4 }} accessibilityRole="summary"
+      accessibilityLabel={`Password needs ${rules.filter((r) => !r.met).map((r) => r.label).join(', ') || 'nothing further'}`}>
+      <Text style={{ fontSize: 12, color: t.ink3, marginBottom: 4 }}>Needs:</Text>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+        {rules.map((r) => (
+          <View key={r.label} style={{
+            flexDirection: 'row', alignItems: 'center', gap: 4,
+            paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999,
+            backgroundColor: r.met ? (t.good || t.brand) + '22' : t.surface2,
+          }}>
+            <Text style={{ fontSize: 11, color: r.met ? (t.good || t.brand) : t.ink3 }}>
+              {r.met ? '✓' : '•'}
+            </Text>
+            <Text style={{ fontSize: 12, color: r.met ? t.ink2 : t.ink3 }}>{r.label}</Text>
+          </View>
+        ))}
+      </View>
+      {started && rules.every((r) => r.met) ? (
+        <Text style={{ fontSize: 12, color: t.ink3, marginTop: 6 }}>
+          This should be accepted. Passwords found in public data breaches are refused, which we can only check when you continue.
+        </Text>
+      ) : null}
+    </View>
+  );
+}

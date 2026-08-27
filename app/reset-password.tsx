@@ -27,11 +27,12 @@ import { useEffect, useRef, useState } from 'react';
 import { View, Text, Pressable, ScrollView, KeyboardAvoidingView, Platform, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useRouter } from 'expo-router';
-import { useTheme, PasswordField } from '../src/ui/components';
+import { useTheme, PasswordField, PasswordRules } from '../src/ui/components';
 import { useAuth } from '../src/ui/auth';
 import { useBrand } from '../src/ui/brand';
 import { Card, Cta } from '../src/ui/kit';
 import { sp, layout, radius, type as ty } from '../src/theme/scale';
+import { passwordMeetsLocalRules, PASSWORD_MIN } from '../src/lib/passwordRules';
 
 function parseAuthParams(url: string): Record<string, string> {
   const params: Record<string, string> = {};
@@ -108,7 +109,9 @@ export default function ResetPassword() {
     return () => { active = false; sub.remove(); clearTimeout(timer); };
   }, []);
 
-  const canSave = pw.length >= 6 && pw === pw2 && stage === 'ready';
+  // Setting a NEW password: the server's rules apply in full, so the button
+  // must not enable on six characters it is about to refuse.
+  const canSave = passwordMeetsLocalRules(pw) && pw === pw2 && stage === 'ready';
 
   const save = async () => {
     if (!canSave) return;
@@ -163,7 +166,8 @@ export default function ResetPassword() {
                 </Card>
               ) : null}
               <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>New password</Text>
-              <PasswordField value={pw} onChangeText={setPw} placeholder="New password (min 6 characters)" style={inp} accessibilityLabel="New password" autoFocus />
+              <PasswordField value={pw} onChangeText={setPw} placeholder={`New password (${PASSWORD_MIN}+ characters)`} style={inp} accessibilityLabel="New password" autoFocus />
+              <PasswordRules value={pw} />
               <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Confirm new password</Text>
               <PasswordField value={pw2} onChangeText={setPw2} placeholder="Confirm new password" style={inp} accessibilityLabel="Confirm new password" />
               {pw2.length > 0 && pw !== pw2 ? (

@@ -22,6 +22,7 @@ import { lockDecision, lockSettingNote, GRACE_MS } from './appLock';
 import { attributionLine } from './workoutAttribution';
 import { RECOVERY_ACTIVITIES, isRecoveryActivity } from './recoveryActs';
 import { normaliseCode, isPlausibleCode, joinErrorMessage, CODE_ALPHABET, CODE_LENGTH } from './joinCode';
+import { passwordRules, passwordMeetsLocalRules, passwordErrorMessage, PASSWORD_MIN } from './passwordRules';
 import { groupSessions, sessionKey, sessionDuration, sessionActivity, sessionKcal, sessionDistanceMeters, planSession, planWrite, summariseResult, HK_WRITE_ACTIVITIES, type Ledger } from './wearables/appleHealthWrite';
 import { sliceLoading, sliceReady, sliceFailed, rowsOf, brokenParts, completeness, partialWarning, memberIds, buildDossier, buildDossiers, retentionRead, doorLogActive, attendanceCaveat, type MemberRecord, type MemberBooking } from './memberView';
 import { payroll30For, payrollBlocker, type GymTrainer } from './gymTrainers';
@@ -3829,6 +3830,55 @@ function by2(v: ReturnType<typeof buildStaff>, id: string) {
     'and still says the request did not go anywhere');
   ok(joinErrorMessage(null).includes('nothing was sent'),
     'a failure with no message at all still reports that nothing was sent');
+}
+
+/* ── password rules ───────────────────────────────────────────────────────
+ *
+ * Three screens promised "min 6 characters". The project enforces eight, plus
+ * four character classes, plus a breach check. Established by probing the live
+ * signup endpoint, not by reading one error message:
+ *
+ *     Aa1!aa    → "Password should be at least 8 characters."
+ *     aaaaaaaa  → "…at least one character of each: lower, upper, digit, symbol"
+ *
+ * A tester read "min 6", typed six, and was refused — then refused again, once
+ * per rule. Two of the people who could not get in this week were on these
+ * screens.
+ */
+{
+  ok(PASSWORD_MIN === 8, 'the minimum matches what the server was observed to enforce, not the six the UI used to promise');
+
+  // Exactly the rule set, in a fixed order so the list never reorders as
+  // somebody types and re-reads it.
+  const labels = passwordRules('').map((r) => r.label);
+  ok(labels.length === 5, 'five rules: length, lower, upper, digit, symbol');
+  ok(labels[0].startsWith('8'), 'length leads, because it is the one people get wrong first');
+
+  ok(!passwordMeetsLocalRules('Aa1!aa'), 'six characters with every class still fails — this is the exact password the server refused');
+  ok(passwordMeetsLocalRules('Aa1!aaaa'), 'eight characters with every class passes');
+  ok(!passwordMeetsLocalRules('aaaaaaaa'), 'eight lowercase is refused, as the server refuses it');
+  ok(!passwordMeetsLocalRules('Aa1aaaaa'), 'no symbol is refused, as the server refuses it');
+  ok(!passwordMeetsLocalRules('AA1!AAAA'), 'no lowercase is refused');
+  ok(!passwordMeetsLocalRules('aa1!aaaa'), 'no uppercase is refused');
+  ok(!passwordMeetsLocalRules('Aa!!aaaa'), 'no digit is refused');
+  ok(!passwordMeetsLocalRules(''), 'nothing typed satisfies nothing');
+
+  // Every symbol Supabase named in its own refusal must count as a symbol. A
+  // narrower set here would reject a password the server would have taken.
+  for (const ch of '!@#$%^&*()_+-=[]{};\'\\:"|<>?,./`~') {
+    ok(passwordMeetsLocalRules('Aa1aaaa' + ch), `${ch} counts as a symbol, matching the server's own list`);
+  }
+
+  // The breach refusal is a fact about the string, not a judgement of the person.
+  const weak = passwordErrorMessage('Password is known to be weak and easy to guess');
+  ok(weak.includes('public data breach'), 'the breach refusal explains what actually happened');
+  ok(!weak.toLowerCase().includes('easy to guess'), 'and drops the phrasing that reads as a judgement of the reader');
+  ok(passwordErrorMessage('Password should be at least 8 characters.').includes('8'),
+    'the length refusal names the real number');
+  ok(passwordErrorMessage('Password should contain at least one character of each: abc').includes('symbol'),
+    'the character-class refusal is stated in words rather than as a character dump');
+  ok(passwordErrorMessage('some new server rule') === 'some new server rule',
+    'an unrecognised refusal is passed through rather than replaced with a guess');
 }
 
 if (errors.length) { console.log('COVERAGE FAILURES:\n' + errors.join('\n')); process.exit(1); }
