@@ -59,7 +59,7 @@ import { useAnnouncements } from '../../src/ui/announcements';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useCheckIns } from '../../src/ui/checkins';
 import { useInvites } from '../../src/ui/invites';
-import { fetchMyJoinCode } from '../../src/ui/joinCode';
+import { fetchMyJoinCode, fetchJoinCodeStats, rotateJoinCode } from '../../src/ui/joinCode';
 import { useTrainerInvites } from '../../src/ui/trainerInvites';
 import { useClientTags } from '../../src/ui/clientTags';
 import { useProgramTemplates } from '../../src/ui/programTemplates';
@@ -324,6 +324,8 @@ export default function TrainerClients() {
   // write.
   const [myCode, setMyCode] = useState<string | null>(null);
   const [myCodeErr, setMyCodeErr] = useState<string | null>(null);
+  /** null while unread — 'no one has used it' and 'we could not check' differ. */
+  const [codeStats, setCodeStats] = useState<{ joined: number; pending: number } | null>(null);
   const [invEmail, setInvEmail] = useState('');
   const [invMode, setInvMode] = useState<'online' | 'inperson'>('online');
   const [newEmail, setNewEmail] = useState('');
@@ -709,6 +711,7 @@ export default function TrainerClients() {
                 setMyCode(null); setMyCodeErr(null);
                 const r = await fetchMyJoinCode();
                 if (r.ok) setMyCode(r.code); else setMyCodeErr(r.reason);
+                setCodeStats(await fetchJoinCodeStats());
               }} /></View>
             <View style={{ flex: 1 }}><Cta label="Add client" wide onPress={() => { setNewName(''); setNewEmail(''); setNewGoal('Fat loss'); setNewMode('online'); setAddOpen(true); }} /></View>
           </View>
@@ -1259,6 +1262,32 @@ export default function TrainerClients() {
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
                     They enter this in the Repple app under Find a trainer, at the top. You still approve them before they join your roster.
                   </Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: sp.md }}>
+                    {/* "Is the code working?" is the first thing anybody asks
+                        about a code, and until now nothing recorded the answer.
+                        Unread is not zero: a failed count says so. */}
+                    <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }}>
+                      {codeStats == null
+                        ? 'We couldn’t check how many people have used it.'
+                        : codeStats.joined === 0 && codeStats.pending === 0
+                        ? 'Nobody has used it yet.'
+                        : `${codeStats.joined} joined with it${codeStats.pending ? ` · ${codeStats.pending} waiting on you` : ''}.`}
+                    </Text>
+                    <Ghost label="New code" onPress={() => {
+                      Alert.alert(
+                        'Issue a new code?',
+                        'Your current code stops working straight away. Anyone you have already given it to will not be able to use it, and clients who already joined are unaffected.',
+                        [
+                          { text: 'Keep it' },
+                          { text: 'New code', style: 'destructive', onPress: async () => {
+                            const r = await rotateJoinCode();
+                            if (r.ok) { setMyCode(r.code); setMyCodeErr(null); }
+                            else Alert.alert('Not changed', r.reason);
+                          } },
+                        ],
+                      );
+                    }} />
+                  </View>
                 </>
               )}
             </View>

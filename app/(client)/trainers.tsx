@@ -70,7 +70,11 @@ export default function FindTrainer() {
   const submitCode = async () => {
     if (codeBusy || !isPlausibleCode(code)) return;
     setCodeBusy(true);
-    const r = await joinByCode(code);
+    // Their own answer to how they are coached, not an assumption. 'solo'
+    // means they had no coach until now, and asking for one online is the
+    // safer default — a wrong 'inperson' puts them on a roster for sessions
+    // nobody is going to run.
+    const r = await joinByCode(code, cd.coachingMode === 'inperson' ? 'inperson' : 'online');
     setCodeBusy(false);
     if (!r.ok) { Alert.alert('That code didn’t work', r.reason); return; }
     setCode('');

@@ -12,6 +12,33 @@ import { joinErrorMessage, normaliseCode } from '../lib/joinCode';
 
 export type MyCode = { ok: true; code: string } | { ok: false; reason: string };
 
+/** How many people have joined by this coach's code, and how many are waiting. */
+export async function fetchJoinCodeStats(): Promise<{ joined: number; pending: number } | null> {
+  if (!USE_SUPABASE) return null;
+  try {
+    const { data, error } = await supabase.rpc('my_join_code_stats');
+    if (error) { reportError('joinCode.stats', error); return null; }
+    const row = Array.isArray(data) ? data[0] : data;
+    if (!row) return null;
+    return { joined: Number(row.joined) || 0, pending: Number(row.pending) || 0 };
+  } catch (e) { reportError('joinCode.stats', e); return null; }
+}
+
+/** Issue a new code, retiring the old one. Returns the new code, or a reason. */
+export async function rotateJoinCode(): Promise<MyCode> {
+  if (!USE_SUPABASE) return { ok: false, reason: 'Sign in to Repple to change your code.' };
+  try {
+    const { data, error } = await supabase.rpc('rotate_join_code');
+    if (error) { reportError('joinCode.rotate', error); return { ok: false, reason: 'Your code could not be changed, so the old one is still the one to give out.' }; }
+    const code = typeof data === 'string' ? data.trim() : '';
+    if (!code) return { ok: false, reason: 'The new code came back empty, so the old one is still in use.' };
+    return { ok: true, code };
+  } catch (e: any) {
+    reportError('joinCode.rotate', e);
+    return { ok: false, reason: 'Your code could not be changed, so the old one is still the one to give out.' };
+  }
+}
+
 /** The signed-in coach's code, allocated on first ask and stable after. */
 export async function fetchMyJoinCode(): Promise<MyCode> {
   if (!USE_SUPABASE) return { ok: false, reason: 'Sign in to Repple to get your coaching code.' };
@@ -37,12 +64,19 @@ export type JoinResult =
   | { ok: true; trainerId: string; trainerName: string; already: boolean }
   | { ok: false; reason: string };
 
-/** Spend a code: creates the pending coach request, or reports why it did not. */
-export async function joinByCode(input: string): Promise<JoinResult> {
+/**
+ * Spend a code: creates the pending coach request, or reports why it did not.
+ *
+ * `mode` is the client's own answer to how they are coached, taken from their
+ * profile. The first version hardcoded 'inperson' server-side, so every client
+ * who used an online-only coach's code appeared on an in-person roster for
+ * sessions nobody was going to run.
+ */
+export async function joinByCode(input: string, mode: 'online' | 'inperson' = 'online'): Promise<JoinResult> {
   const code = normaliseCode(input);
   if (!USE_SUPABASE) return { ok: false, reason: 'Sign in to Repple first, then enter the code.' };
   try {
-    const { data, error } = await supabase.rpc('join_by_code', { p_code: code });
+    const { data, error } = await supabase.rpc('join_by_code', { p_code: code, p_mode: mode });
     if (error) return { ok: false, reason: joinErrorMessage(error.message) };
     // The RPC RETURNS TABLE, so supabase-js hands back an array. No row means
     // the function did not reach its `return query` — treat it as a failure
