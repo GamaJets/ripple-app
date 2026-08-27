@@ -1,0 +1,111 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+  <style>
+    body { margin: 0; background: #0a1211; }
+    a { color: #16b8a6; text-decoration: none; }
+    a:hover { color: #3fd3c2; text-decoration: underline; text-underline-offset: 3px; }
+    .mono { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; }
+  </style>
+</helmet>
+
+<div style="background: #0a1211; color: #e9f2f0; font-family: 'Inter Tight', -apple-system, BlinkMacSystemFont, system-ui, sans-serif; font-size: 17px; line-height: 1.6; padding: 90px 64px;">
+  <div style="max-width: 1180px; margin: 0 auto;">
+
+    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 22px;">
+      <span style="width: 22px; height: 1px; background: #16b8a6; flex: none;"></span>
+      <span class="mono" style="font-size: 11.5px; font-weight: 500; letter-spacing: 0.16em; text-transform: uppercase; color: #67807b;">Three apps · one record</span>
+    </div>
+
+    <h2 style="font-size: 50px; line-height: 1.08; letter-spacing: -0.028em; margin: 0 0 22px; font-weight: 400;">
+      The same complaint,<br><span style="font-family: 'Instrument Serif', Georgia, serif; font-style: italic; color: #16b8a6;">three scales up</span>.
+    </h2>
+
+    <p style="font-size: 21px; line-height: 1.55; color: #a6bcb7; max-width: 60ch; margin: 0 0 60px;">
+      One person juggling five apps and a coach juggling forty clients are not different problems.
+      Neither is a gym reconciling six systems on a Sunday. It is one problem at three sizes, which
+      is why it is one record and three ways in — not three products that integrate.
+    </p>
+
+    <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px;">
+
+      <!-- CLIENT -->
+      <div style="background: #0f1c1a; border: 1px solid rgba(233,242,240,0.10); border-radius: 13px; overflow: hidden;">
+        <div style="height: 3px; background: #16b8a6;"></div>
+        <div style="padding: 26px 26px 28px;">
+          <div class="mono" style="font-size: 10.5px; letter-spacing: 0.13em; text-transform: uppercase; color: #16b8a6; margin-bottom: 12px;">Repple · for the person training</div>
+          <div style="font-size: 22px; letter-spacing: -0.02em; margin-bottom: 14px;">“Five apps, and none of them talk.”</div>
+          <p style="font-size: 14.5px; line-height: 1.55; color: #a6bcb7; margin: 0 0 20px;">
+            Meals, sessions, measurements and progress in one place — with targets that move when
+            your body does, and one instruction for today.
+          </p>
+          <div style="border-top: 1px solid rgba(233,242,240,0.06); padding-top: 16px;">
+            <div class="mono" style="font-size: 10.5px; letter-spacing: 0.13em; text-transform: uppercase; color: #67807b; margin-bottom: 10px;">A day looks like</div>
+            <p style="font-size: 13.5px; line-height: 1.6; color: #a6bcb7; margin: 0;">
+              Log the session, photograph the meal, step on the scale on Sunday. The plan changes
+              itself. If your coach ran the session, it is already there.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- COACH -->
+      <div style="background: #0f1c1a; border: 1px solid rgba(233,242,240,0.10); border-radius: 13px; overflow: hidden;">
+        <div style="height: 3px; background: #7a70f0;"></div>
+        <div style="padding: 26px 26px 28px;">
+          <div class="mono" style="font-size: 10.5px; letter-spacing: 0.13em; text-transform: uppercase; color: #7a70f0; margin-bottom: 12px;">Repple Coach · for the coach</div>
+          <div style="font-size: 22px; letter-spacing: -0.02em; margin-bottom: 14px;">“Waiting on a reply to book a session.”</div>
+          <p style="font-size: 14.5px; line-height: 1.55; color: #a6bcb7; margin: 0 0 20px;">
+            Availability a client can book against without asking. Programs, check-ins and progress
+            in one place, so nobody starts a conversation by re-establishing where they are.
+          </p>
+          <div style="border-top: 1px solid rgba(233,242,240,0.06); padding-top: 16px;">
+            <div class="mono" style="font-size: 10.5px; letter-spacing: 0.13em; text-transform: uppercase; color: #67807b; margin-bottom: 10px;">A day looks like</div>
+            <p style="font-size: 13.5px; line-height: 1.6; color: #a6bcb7; margin: 0;">
+              Log the session you just ran into their record. Hand a new client a six-character
+              code. See which four people have not trained this week.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- OWNER -->
+      <div style="background: #0f1c1a; border: 1px solid rgba(233,242,240,0.10); border-radius: 13px; overflow: hidden;">
+        <div style="height: 3px; background: #e0912f;"></div>
+        <div style="padding: 26px 26px 28px;">
+          <div class="mono" style="font-size: 10.5px; letter-spacing: 0.13em; text-transform: uppercase; color: #e0912f; margin-bottom: 12px;">Repple Studio · for the gym</div>
+          <div style="font-size: 22px; letter-spacing: -0.02em; margin-bottom: 14px;">“Six systems, reconciled on Sundays.”</div>
+          <p style="font-size: 14.5px; line-height: 1.55; color: #a6bcb7; margin: 0 0 20px;">
+            Timetable, door, memberships, payments, equipment and staff on one board — so you can
+            ask which area is moving the others.
+          </p>
+          <div style="border-top: 1px solid rgba(233,242,240,0.06); padding-top: 16px;">
+            <div class="mono" style="font-size: 10.5px; letter-spacing: 0.13em; text-transform: uppercase; color: #67807b; margin-bottom: 10px;">A day looks like</div>
+            <p style="font-size: 13.5px; line-height: 1.6; color: #a6bcb7; margin: 0;">
+              See who is in the building. Price payroll against sessions actually delivered — and
+              nothing at all until every one has an outcome recorded.
+            </p>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <p style="font-size: 14.5px; color: #67807b; line-height: 1.55; max-width: 78ch; margin: 32px 0 0;">
+      A member logs a set. Their coach sees it that evening. The owner sees what it did to
+      attendance, and to the month. Same row, same database, read three ways — by three people who
+      each need something different from it.
+    </p>
+
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

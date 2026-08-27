@@ -1,0 +1,40 @@
+{
+  "artboards": [
+    {
+      "file": "Main.dc.html",
+      "x": 0,
+      "y": 0,
+      "w": 1280,
+      "h": 900,
+      "title": "Why Repple exists"
+    },
+    {
+      "file": "Scales.dc.html",
+      "x": 1400,
+      "y": 0,
+      "w": 1280,
+      "h": 900,
+      "title": "Three apps, one record"
+    },
+    {
+      "file": "Owner.dc.html",
+      "x": 0,
+      "y": 1060,
+      "w": 1280,
+      "h": 1080,
+      "title": "For the gym owner"
+    }
+  ],
+  "annotations": [
+    {
+      "id": "origin-note",
+      "x": 0,
+      "y": -150,
+      "w": 520,
+      "text": "Two origins, both yours and both first-hand:\n\n1. Training \u2014 too many apps for meals, workouts, measurements and progress; wanting one thing that takes the data, adjusts automatically, and says what to do next.\n\n2. Studio \u2014 the gym you train at runs an outdated app; a gym owner should be able to hand members something that works.\n\nNothing here is invented. Owner-board figures are marked Illustrative."
+    }
+  ],
+  "launch": {
+    "view": "canvas"
+  }
+}

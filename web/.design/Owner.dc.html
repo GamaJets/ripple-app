@@ -1,0 +1,135 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+  <style>
+    body { margin: 0; background: #0a1211; }
+    a { color: #e0912f; text-decoration: none; }
+    a:hover { color: #f0a94f; text-decoration: underline; text-underline-offset: 3px; }
+    .mono { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; }
+  </style>
+</helmet>
+
+<div style="background: #0a1211; color: #e9f2f0; font-family: 'Inter Tight', -apple-system, BlinkMacSystemFont, system-ui, sans-serif; font-size: 17px; line-height: 1.6; padding: 84px 64px;">
+  <div style="max-width: 1180px; margin: 0 auto;">
+
+    <!-- eyebrow: mono 11.5px / .16em / ink3, with the 22px accent rule before it -->
+    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 22px;">
+      <span style="width: 22px; height: 1px; background: #e0912f; flex: none;"></span>
+      <span class="mono" style="font-size: 11.5px; font-weight: 500; letter-spacing: 0.16em; text-transform: uppercase; color: #67807b;">One application</span>
+    </div>
+
+    <h2 style="font-size: 50px; line-height: 1.08; letter-spacing: -0.028em; margin: 0 0 22px; font-weight: 400;">
+      Your gym already produces<br>all of this. <span style="font-family: 'Instrument Serif', Georgia, serif; font-style: italic; color: #e0912f;">Nothing reads it together.</span>
+    </h2>
+
+    <p style="font-size: 21px; line-height: 1.55; color: #a6bcb7; max-width: 60ch; margin: 0 0 64px;">
+      A gym runs six or seven systems that each work. The timetable knows who booked. The door knows
+      who came. The card machine knows who paid. None of them know about each other — so every question
+      that crosses two of them becomes an evening with a spreadsheet. And the app your members
+      actually hold is usually the oldest thing in the stack.
+    </p>
+
+    <!-- ── the two columns: today, and on one record ─────────────────────── -->
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 48px; align-items: start;">
+
+      <!-- TODAY -->
+      <div>
+        <div class="mono" style="font-size: 10.5px; letter-spacing: 0.13em; text-transform: uppercase; color: #67807b; margin-bottom: 18px;">What most gyms run today</div>
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          <div style="display: grid; grid-template-columns: 1fr auto; gap: 14px; align-items: center; background: #0f1c1a; border: 1px solid rgba(233,242,240,0.10); border-radius: 10px; padding: 14px 16px;">
+            <span style="font-weight: 500;">Class booking system</span>
+            <span class="mono" style="font-size: 12px; color: #67807b;">knows who booked</span>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr auto; gap: 14px; align-items: center; background: #0f1c1a; border: 1px solid rgba(233,242,240,0.10); border-radius: 10px; padding: 14px 16px;">
+            <span style="font-weight: 500;">Door / access control</span>
+            <span class="mono" style="font-size: 12px; color: #67807b;">knows who came</span>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr auto; gap: 14px; align-items: center; background: #0f1c1a; border: 1px solid rgba(233,242,240,0.10); border-radius: 10px; padding: 14px 16px;">
+            <span style="font-weight: 500;">Card machine &amp; direct debits</span>
+            <span class="mono" style="font-size: 12px; color: #67807b;">knows who paid</span>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr auto; gap: 14px; align-items: center; background: #0f1c1a; border: 1px solid rgba(233,242,240,0.10); border-radius: 10px; padding: 14px 16px;">
+            <span style="font-weight: 500;">A spreadsheet for PT commission</span>
+            <span class="mono" style="font-size: 12px; color: #67807b;">rebuilt every month</span>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr auto; gap: 14px; align-items: center; background: #0f1c1a; border: 1px solid rgba(233,242,240,0.10); border-radius: 10px; padding: 14px 16px;">
+            <span style="font-weight: 500;">A whiteboard for the rota</span>
+            <span class="mono" style="font-size: 12px; color: #67807b;">photographed on Sundays</span>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr auto; gap: 14px; align-items: center; background: #0f1c1a; border: 1px solid rgba(233,242,240,0.10); border-radius: 10px; padding: 14px 16px;">
+            <span style="font-weight: 500;">WhatsApp for everything else</span>
+            <span class="mono" style="font-size: 12px; color: #67807b;">searchable by nobody</span>
+          </div>
+        </div>
+        <p style="font-size: 13.5px; color: #67807b; line-height: 1.5; margin: 18px 0 0;">
+          Each one is fine. The cost is not in any of them — it is in the reconciling, and it lands on
+          one person, usually on a Sunday.
+        </p>
+      </div>
+
+      <!-- ON ONE RECORD -->
+      <div>
+        <div class="mono" style="font-size: 10.5px; letter-spacing: 0.13em; text-transform: uppercase; color: #67807b; margin-bottom: 18px;">On one record</div>
+
+        <div style="background: #0f1c1a; border: 1px solid rgba(233,242,240,0.10); border-radius: 13px; overflow: hidden; box-shadow: 0 26px 60px -30px rgba(0,0,0,0.85);">
+          <div style="display: flex; align-items: center; gap: 9px; padding: 11px 15px; border-bottom: 1px solid rgba(233,242,240,0.10); background: #081210;">
+            <span style="width: 8px; height: 8px; border-radius: 50%; background: rgba(233,242,240,0.10);"></span>
+            <span style="width: 8px; height: 8px; border-radius: 50%; background: rgba(233,242,240,0.10);"></span>
+            <span style="width: 8px; height: 8px; border-radius: 50%; background: rgba(233,242,240,0.10);"></span>
+            <span class="mono" style="font-size: 11.5px; color: #67807b; letter-spacing: .06em; margin-left: 6px;">repple studio</span>
+            <span class="mono" style="font-size: 10.5px; color: #67807b; border: 1px solid rgba(233,242,240,0.10); border-radius: 20px; padding: 2px 8px; margin-left: auto;">Illustrative</span>
+          </div>
+
+          <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 1px; background: rgba(233,242,240,0.10);">
+            <div style="background: #0f1c1a; padding: 15px 16px;">
+              <div class="mono" style="font-size: 10.5px; letter-spacing: .13em; text-transform: uppercase; color: #67807b; line-height: 1.35;">Class fill</div>
+              <div class="mono" style="font-size: 27px; margin-top: 7px; letter-spacing: -0.02em;">71%</div>
+              <div style="font-size: 11.5px; color: #67807b; margin-top: 3px;">down from 83% · 30 days</div>
+            </div>
+            <div style="background: #0f1c1a; padding: 15px 16px;">
+              <div class="mono" style="font-size: 10.5px; letter-spacing: .13em; text-transform: uppercase; color: #67807b; line-height: 1.35;">Members through the door</div>
+              <div class="mono" style="font-size: 27px; margin-top: 7px; letter-spacing: -0.02em;">435</div>
+              <div style="font-size: 11.5px; color: #67807b; margin-top: 3px;">37 in the building now</div>
+            </div>
+            <div style="background: #0f1c1a; padding: 15px 16px;">
+              <div class="mono" style="font-size: 10.5px; letter-spacing: .13em; text-transform: uppercase; color: #67807b; line-height: 1.35;">Recurring / month</div>
+              <div class="mono" style="font-size: 27px; margin-top: 7px; letter-spacing: -0.02em;">60,008</div>
+              <div style="font-size: 11.5px; color: #67807b; margin-top: 3px;">AED · from priced plans</div>
+            </div>
+            <div style="background: #0f1c1a; padding: 15px 16px;">
+              <div class="mono" style="font-size: 10.5px; letter-spacing: .13em; text-transform: uppercase; color: #67807b; line-height: 1.35;">Trainers flagged</div>
+              <div class="mono" style="font-size: 27px; margin-top: 7px; letter-spacing: -0.02em; color: #f0c04e;">2</div>
+              <div style="font-size: 11.5px; color: #67807b; margin-top: 3px;">of 6 · 14 clients between them</div>
+            </div>
+          </div>
+
+          <!-- the cross-system answer: the whole point -->
+          <div style="padding: 20px; border-top: 1px solid rgba(233,242,240,0.10);">
+            <div class="mono" style="font-size: 10.5px; letter-spacing: .13em; text-transform: uppercase; color: #e0912f; margin-bottom: 10px;">Why class fill moved</div>
+            <p style="font-size: 14.5px; line-height: 1.55; color: #a6bcb7; margin: 0;">
+              Two trainers left last month. Their fourteen clients still hold memberships and still come
+              through the door — but none of them have rebooked a class since.
+            </p>
+          </div>
+        </div>
+
+        <p style="font-size: 13.5px; color: #67807b; line-height: 1.5; margin: 18px 0 0;">
+          That sentence needs the timetable, the door, the membership record and the staff list at once.
+          No single system above can produce it. It is not a smarter report — it is the same data,
+          finally in one place.
+        </p>
+      </div>
+    </div>
+
+  </div>
+</div>
+</x-dc>
+</body>
+</html>
