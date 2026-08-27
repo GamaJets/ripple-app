@@ -1245,7 +1245,7 @@ export default function TrainerClients() {
                       // would need a new binary before any coach could use this.
                       // Share is core React Native, and is what a coach actually
                       // does with a code — sends it to the person standing there.
-                      Share.share({ message: `Join me on Repple — open the app, go to Coach and enter my code: ${myCode}` })
+                      Share.share({ message: `Join me on Repple — open the app, tap Find a trainer, and enter my code: ${myCode}` })
                         .catch(() => { /* dismissing the sheet is not a failure; the code is on screen */ });
                     }}
                     accessibilityRole="button"
@@ -1257,7 +1257,7 @@ export default function TrainerClients() {
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>Tap to send it to them</Text>
                   </Pressable>
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                    They enter this in the Repple app under Coach › Have a code. You still approve them before they join your roster.
+                    They enter this in the Repple app under Find a trainer, at the top. You still approve them before they join your roster.
                   </Text>
                 </>
               )}

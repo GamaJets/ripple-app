@@ -369,7 +369,7 @@ export default function Home() {
             onPress={() => router.push('/(client)/challenges')} />
 
           {solo ? (
-            <ListRow icon="people" title="Work with a coach" note="Browse trainers · online or in-person"
+            <ListRow icon="people" title="Work with a coach" note="Enter your coach's code, or browse trainers"
               onPress={() => router.push('/(client)/trainers')} />
           ) : null}
         </Section>

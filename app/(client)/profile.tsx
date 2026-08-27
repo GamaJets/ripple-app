@@ -159,7 +159,7 @@ const HUB_GROUPS: { title: string; items: { label: string; note: string; route: 
     { label: 'Reminders', note: 'Hydration & supplement nudges', route: '/(client)/reminders' },
   ] },
   { title: 'Connect', items: [
-    { label: 'Find a trainer', note: 'Browse coaches · book online or in-person', route: '/(client)/trainers' },
+    { label: 'Find a trainer', note: 'Have a code from your coach? Enter it here', route: '/(client)/trainers' },
     { label: 'Memberships & packs', note: 'Your session packs & payments', route: '/(client)/packages' },
     { label: 'AI Coach', note: 'Chat with your AI coach', route: '/(client)/coach' },
     { label: 'Messages', note: 'Chat with your coach', route: '/(client)/messages' },
