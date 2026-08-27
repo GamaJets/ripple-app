@@ -223,7 +223,11 @@ export default function TrainerClients() {
   const router = useRouter();
   const [trial, setTrial] = useState<{ daysLeft: number; expired: boolean } | null>(null);
   useEffect(() => { trialInfo().then((ti) => setTrial({ daysLeft: ti.daysLeft, expired: ti.expired })); }, []);
-  const { roster, addClient, removeClient, setClientMode } = useRoster();
+  // `status` was computed by the roster provider and read by nobody, so a
+  // refused read reached this screen as an empty list and was announced as
+  // "No clients yet" — to a coach who has clients.
+  const { roster, status: rosterStatus, addClient, removeClient, setClientMode } = useRoster();
+  const rosterUnread = rosterStatus === 'error';
   const { tenant } = useTenant();
 
   // ── who is drifting ───────────────────────────────────────────────────────
@@ -608,7 +612,7 @@ export default function TrainerClients() {
         <Hero
           label="Active clients"
           figure={fig(active)}
-          note={active === 0 ? 'No clients yet — add or invite your first below.' : driftNote()}
+          note={rosterUnread ? 'Your roster could not be read in full' : active === 0 ? 'No clients yet — add or invite your first below.' : driftNote()}
           tone={toContact == null ? t.ink3 : toContact > 0 ? t.warn : t.brand}
           onPress={() => router.push('/(trainer)/analytics')}
         />
@@ -723,7 +727,9 @@ export default function TrainerClients() {
 
           {shownRoster.length === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>
-              {roster.length === 0 ? 'No clients yet. Add or invite your first — they connect once they accept in the app.' : 'No clients in this segment.'}
+              {rosterUnread && roster.length === 0
+                ? 'Your roster could not be read, so this is not "no clients" — pull down to try again.'
+                : roster.length === 0 ? 'No clients yet. Add or invite your first — they connect once they accept in the app.' : 'No clients in this segment.'}
             </Text>
           ) : null}
 

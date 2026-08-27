@@ -421,6 +421,7 @@ function toInvite(r: any, planNames: Map<string, string>): MemberInvite {
 async function planNamesFor(sb: Queryable, ids: string[]): Promise<Map<string, string>> {
   const unique = [...new Set(ids.filter(Boolean))];
   if (!unique.length) return new Map();
+  // no-error-ok: an unreadable plan name becomes null and renders as a dash; the invite is still listed
   const { data } = await sb.from('membership_plans').select('id, name').in('id', unique);
   return new Map((data ?? []).map((p: any) => [p.id, p.name]));
 }

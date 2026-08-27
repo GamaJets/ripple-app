@@ -92,6 +92,7 @@ export function RosterProvider({ children }: { children: ReactNode }) {
         // switching coach. coaching_relationships is when this book started.
         const joined: Record<string, string> = {};
         try {
+          // no-error-ok: a join date we cannot read stays null and renders '—'; the client is listed either way
           const { data: rel } = await supabase
             .from('coaching_relationships').select('client_id, created_at').eq('coach_id', uid);
           (rel || []).forEach((r: any) => { if (r.created_at) joined[r.client_id] = r.created_at; });
@@ -105,6 +106,7 @@ export function RosterProvider({ children }: { children: ReactNode }) {
         const ids = cls.map((c: any) => c.id);
         const names: Record<string, string> = {};
         try {
+          // no-error-ok: a name we cannot read falls back to 'Client'; the person is still on the roster
           const { data: profs } = await supabase.from('profiles').select('id, full_name').in('id', ids);
           (profs || []).forEach((p: any) => { names[p.id] = p.full_name || 'Client'; });
         } catch { /* a missing name falls back to 'Client'; the client is still listed */ }
@@ -118,17 +120,24 @@ export function RosterProvider({ children }: { children: ReactNode }) {
         // exist to subtract, and a client with one scan has no delta yet.
         ids.forEach((id: string) => { st[id] = { wDelta: null, adh: null, last: 0 }; });
         try {
-          const { data: sc } = await supabase.from('scans').select('client_id, weight_kg, taken_at, metrics').in('client_id', ids).order('taken_at', { ascending: true });
+          const { data: sc, error: scErr } = await supabase.from('scans').select('client_id, weight_kg, taken_at, metrics').in('client_id', ids).order('taken_at', { ascending: true });
+          // supabase-js resolves on a database error, so the catch below never
+          // saw the failure that actually happens. Without this, a refused read
+          // left every client reading "no activity yet" — which is a claim
+          // about the client, and a coach acts on it by chasing them.
+          if (scErr) partialFailure = true;
           const byC: Record<string, { w: number; t: number; m: any }[]> = {};
           (sc || []).forEach((r: any) => { (byC[r.client_id] = byC[r.client_id] || []).push({ w: Number(r.weight_kg), t: Date.parse(r.taken_at), m: r.metrics }); });
           for (const id of ids) { const arr = byC[id]; if (arr && arr.length) { st[id].wDelta = arr.length > 1 ? Math.round((arr[arr.length - 1].w - arr[0].w) * 10) / 10 : null; st[id].last = Math.max(st[id].last, arr[arr.length - 1].t); for (let k = arr.length - 1; k >= 0; k--) { if (arr[k].m) { st[id].mx = arr[k].m; break; } } } }
         } catch { /* stats decorate a row that is listed regardless */ }
         try {
-          const { data: wo } = await supabase.from('workouts').select('user_id, performed_at').in('user_id', ids).order('performed_at', { ascending: false });
+          const { data: wo, error: woErr } = await supabase.from('workouts').select('user_id, performed_at').in('user_id', ids).order('performed_at', { ascending: false });
+          if (woErr) partialFailure = true;
           (wo || []).forEach((r: any) => { if (st[r.user_id]) st[r.user_id].last = Math.max(st[r.user_id].last, Date.parse(r.performed_at)); });
         } catch { /* as above */ }
         try {
-          const { data: ci } = await supabase.from('check_ins').select('user_id, at, adherence').in('user_id', ids).order('at', { ascending: false });
+          const { data: ci, error: ciErr } = await supabase.from('check_ins').select('user_id, at, adherence').in('user_id', ids).order('at', { ascending: false });
+          if (ciErr) partialFailure = true;
           const seen = new Set<string>();
           (ci || []).forEach((r: any) => { if (st[r.user_id]) { st[r.user_id].last = Math.max(st[r.user_id].last, Date.parse(r.at)); if (!seen.has(r.user_id) && typeof r.adherence === 'number') { seen.add(r.user_id); // check_ins.adherence is a 1-5 self-rating (see the Rating control on the client check-in screen), but every trainer surface renders this field as a PERCENTAGE and atRiskClient() flags anything under 80. Passing it through raw meant a client who rated themselves 4/5 showed as '4% adherence' and was flagged at risk. Convert.
             st[r.user_id].adh = Math.round((Math.max(1, Math.min(5, r.adherence)) / 5) * 100); } } });

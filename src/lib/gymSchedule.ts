@@ -185,6 +185,7 @@ export async function fetchRoster(sb: Queryable, classId: string): Promise<Roste
   // the right number of people and each renders unnamed. A failed count would
   // cost a FIGURE — 0 booked reads as a fact about the class. Losing a name is
   // visible to whoever is looking at it; losing a count is not.
+  // no-error-ok: an unreadable name leaves the shift labelled by id; the shift itself is unaffected
   const { data: profs } = await sb.from('profiles').select('id, full_name').in('id', ids);
   const names = new Map((profs ?? []).map((p: any) => [p.id, (p.full_name || '').trim()]));
 

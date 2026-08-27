@@ -193,6 +193,7 @@ export default function Train() {
     let live = true;
     (async () => {
       try {
+        // no-error-ok: a tie-break only; the note above says null is the same as having no coach
         const { data } = await supabase.from('clients').select('trainer_id').eq('id', cd.id).single();
         if (live) setCoachId((data as any)?.trainer_id ?? null);
       } catch { /* no tie-break, which is the same as having no coach */ }

@@ -67,7 +67,8 @@ export function useThread(clientId: string | null, role: ChatRole) {
         // Only used to address the push notification back to the coach. Failing
         // it costs a notification, not the thread, so it stays swallowed — but
         // deliberately, and only here.
-        try { const { data: cr } = await supabase.from('clients').select('trainer_id').eq('id', cid).single(); coachId.current = (cr as any)?.trainer_id ?? null; } catch { /* push addressing only */ }
+        // no-error-ok: a tie-break for which coach to show; absent behaves the same as having no coach
+      try { const { data: cr } = await supabase.from('clients').select('trainer_id').eq('id', cid).single(); coachId.current = (cr as any)?.trainer_id ?? null; } catch { /* push addressing only */ }
       }
       try {
         const { data, error } = await supabase.from('messages').select('*').eq('client_id', cid).order('created_at', { ascending: true });

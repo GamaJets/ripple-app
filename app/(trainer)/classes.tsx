@@ -30,7 +30,7 @@ const dayShort = (iso: string) => { const d = new Date(iso); const t = new Date(
 export default function TrainerClasses() {
   const t = useTheme();
   const router = useRouter();
-  const { classes, addClass } = useClasses();
+  const { classes, addClass, countsKnown } = useClasses();
 
   const [title, setTitle] = useState('');
   const [kind, setKind] = useState<string>(CLASS_KINDS[0]);
@@ -153,7 +153,9 @@ export default function TrainerClasses() {
         <Section>
           <SectionHead title="Upcoming" note={upcoming.length ? String(upcoming.length) : undefined} />
           {upcoming.map((c: GymClass, i) => {
-            const full = c.booked >= c.capacity;
+            // Unknown is not "not full". Without the counts, `booked` is 0
+            // for every class and nothing would ever read as full.
+            const full = countsKnown && c.booked >= c.capacity;
             return (
               <View key={c.id} style={{
                 flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md,
@@ -166,9 +168,9 @@ export default function TrainerClasses() {
                 <View style={{ alignItems: 'flex-end', gap: 6 }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                     {full ? <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: t.warn }} /> : null}
-                    <Text style={{ ...value(16), color: t.ink }}>{c.booked}/{c.capacity}</Text>
+                    <Text style={{ ...value(16), color: t.ink }}>{countsKnown ? c.booked : '—'}/{c.capacity}</Text>
                   </View>
-                  <Text style={{ ...ty.caption, color: t.ink3 }}>{full ? 'full' : 'booked'}</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3 }}>{!countsKnown ? 'capacity' : full ? 'full' : 'booked'}</Text>
                 </View>
                 <Ghost label="Check in" onPress={() => router.push({ pathname: '/(trainer)/class-checkin', params: { id: c.id, title: c.title, branch: c.branch } })} />
               </View>

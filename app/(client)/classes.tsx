@@ -25,7 +25,7 @@ const dayLabel = (iso: string) => { const d = new Date(iso); const t = new Date(
 export default function Classes() {
   const t = useTheme();
   const router = useRouter();
-  const { classes, myStatus, book, cancel } = useClasses();
+  const { classes, myStatus, book, cancel, countsKnown } = useClasses();
   const [branch, setBranch] = useState<string | null>(null);
 
   const branches = useMemo(() => Array.from(new Set(classes.map((c) => c.branch).filter(Boolean))).sort(), [classes]);
@@ -102,8 +102,11 @@ export default function Classes() {
               <SectionHead title={g.label} note={`${g.items.length} class${g.items.length === 1 ? '' : 'es'}`} />
               {g.items.map((c, i) => {
                 const mine = myStatus[c.id];
-                const spotsLeft = Math.max(0, c.capacity - c.booked);
-                const fill = classFillState(c.capacity, c.booked);
+                // `booked` is 0 for every class until the count RPC fills it
+                // in. When that failed, subtracting it would advertise a full
+                // class as completely empty, so no claim is made about spaces.
+                const spotsLeft = countsKnown ? Math.max(0, c.capacity - c.booked) : null;
+                const fill = countsKnown ? classFillState(c.capacity, c.booked) : null;
                 const full = fill === 'full';
                 return (
                   <View key={c.id}>
@@ -120,7 +123,7 @@ export default function Classes() {
                               about to go looked like the one nobody wants. */}
                           <View style={{ width: 6, height: 6, borderRadius: 3,
                             backgroundColor: mine ? t.brand : full ? t.s3 : fill === 'nearly' ? t.warn : t.ink3 }} />
-                          <Text style={{ ...ty.caption, color: t.ink2 }}>{mine === 'waitlist' ? 'On the waitlist' : mine ? 'Booked' : full ? 'Class full' : `${spotsLeft} spot${spotsLeft === 1 ? '' : 's'} left`}</Text>
+                          <Text style={{ ...ty.caption, color: t.ink2 }}>{mine === 'waitlist' ? 'On the waitlist' : mine ? 'Booked' : spotsLeft == null ? 'Spaces unknown' : full ? 'Class full' : `${spotsLeft} spot${spotsLeft === 1 ? '' : 's'} left`}</Text>
                         </View>
                       </View>
                       {mine ? (

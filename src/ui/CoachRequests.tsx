@@ -22,6 +22,8 @@ export function CoachRequests() {
   const t = useTheme();
   const [reqs, setReqs] = useState<Req[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
+  /** The request list could not be read. Not the same as having none. */
+  const [unread, setUnread] = useState(false);
 
   const load = useCallback(async () => {
     if (!USE_SUPABASE) return;
@@ -29,14 +31,21 @@ export function CoachRequests() {
       const { data: auth } = await supabase.auth.getUser();
       const uid = auth?.user?.id;
       if (!uid) return;
-      const { data: rows } = await supabase
+      const { data: rows, error } = await supabase
         .from('coach_requests')
         .select('id, client_id, mode, created_at')
         .eq('trainer_id', uid)
         .eq('status', 'pending')
         .order('created_at', { ascending: false });
+      // A refused read used to leave this list empty, which renders as nothing
+      // at all — no pending requests. This is the join flow: a client asks to
+      // be coached, the coach never learns they asked, and both sides wait on
+      // the other. Silence is the one outcome this component must not invent.
+      if (error) { reportError('coachRequests.load', error); setUnread(true); return; }
+      setUnread(false);
       const ids = (rows ?? []).map((r: any) => r.client_id);
       if (ids.length === 0) { setReqs([]); return; }
+      // no-error-ok: a name we cannot read falls back to 'A client'; the request is still shown and actionable
       const { data: profs } = await supabase.from('profiles').select('id, full_name').in('id', ids);
       const nameById = new Map<string, string>((profs ?? []).map((p: any) => [p.id, p.full_name]));
       setReqs((rows ?? []).map((r: any) => ({
@@ -46,7 +55,7 @@ export function CoachRequests() {
         mode: r.mode === 'inperson' ? 'inperson' : 'online',
         at: r.created_at,
       })));
-    } catch (e) { reportError('coachRequests.load', e); }
+    } catch (e) { reportError('coachRequests.load', e); setUnread(true); }
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -101,7 +110,24 @@ export function CoachRequests() {
     setBusy(null);
   }, []);
 
-  if (reqs.length === 0) return null;
+  // Nothing pending renders nothing — correct, and the reason the failed-read
+  // case had to be given a shape of its own. An invisible component cannot say
+  // "I could not check", and that is precisely what a coach needs to know.
+  if (reqs.length === 0) {
+    if (!unread) return null;
+    return (
+      <Card tone={t.warn} style={{ marginBottom: sp.lg }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
+          <Icon name="people" size={15} color={t.warn} />
+          <Text style={{ ...ty.micro, color: t.ink3 }}>Coaching requests</Text>
+        </View>
+        <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>
+          We couldn’t check whether anyone has asked to be coached by you. Pull down to try again —
+          if a client is waiting, they can’t tell the difference between you declining and this.
+        </Text>
+      </Card>
+    );
+  }
 
   return (
     <Card tone={t.brand} style={{ marginBottom: sp.lg }}>

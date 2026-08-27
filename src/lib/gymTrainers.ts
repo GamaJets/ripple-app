@@ -50,13 +50,19 @@ export async function fetchGymTrainers(sb: Queryable, tenantId: string): Promise
 
   // Names come from profiles, which the owner may read for their own tenant
   // (profiles_owner_tenant_r).
+  // no-error-ok: an unreadable name falls back to 'Trainer'; every figure beside it is still real
   const { data: profs } = await sb.from('profiles').select('id, full_name, created_at').in('id', ids);
   const meta = new Map<string, { name: string; since: string | null }>(
     (profs ?? []).map((p: any) => [p.id, { name: (p.full_name || '').trim(), since: p.created_at ?? null }]),
   );
 
   // Client counts: one query for the whole tenant rather than N queries.
-  const { data: cls } = await sb.from('clients').select('trainer_id').in('trainer_id', ids);
+  //
+  // Thrown, not defaulted, for the same reason the `trainers` read above throws:
+  // a missing count becomes 0, and 0 clients is a statement about a trainer that
+  // an owner acts on. The screen renders a thrown read as an error.
+  const { data: cls, error: clsErr } = await sb.from('clients').select('trainer_id').in('trainer_id', ids);
+  if (clsErr) throw clsErr;
   const clientCount = new Map<string, number>();
   (cls ?? []).forEach((c: any) => {
     if (c.trainer_id) clientCount.set(c.trainer_id, (clientCount.get(c.trainer_id) ?? 0) + 1);
@@ -64,13 +70,18 @@ export async function fetchGymTrainers(sb: Queryable, tenantId: string): Promise
 
   // Sessions delivered: booked and already started.
   const since = new Date(Date.now() - 30 * DAY).toISOString();
-  const { data: sess } = await sb
+  // This one pays people. `delivered30` feeds `payroll30For`, so a swallowed
+  // failure here does not merely understate a dashboard figure — every trainer
+  // shows 0 delivered, nothing is left unmarked, and payroll prices out at
+  // exactly zero owed. A refused read must never be able to say that.
+  const { data: sess, error: sessErr } = await sb
     .from('sessions')
     .select('trainer_id, outcome')
     .in('trainer_id', ids)
     .eq('status', 'booked')
     .gte('starts_at', since)
     .lte('starts_at', new Date().toISOString());
+  if (sessErr) throw sessErr;
   const sessionCount = new Map<string, number>();
   const deliveredCount = new Map<string, number>();
   const unmarkedCount = new Map<string, number>();

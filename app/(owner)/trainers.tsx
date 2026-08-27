@@ -51,7 +51,7 @@ export default function OwnerTrainers() {
         {/* Sessions delivered leads, because it is the number that moves. */}
         <Hero
           label="Sessions delivered · 30 days"
-          figure={loading ? '—' : String(sessions30)}
+          figure={loading || sessions30 == null ? '—' : String(sessions30)}
           note={
             loading ? 'Loading your roster…'
             : trainers.length === 0 ? 'Invite a trainer and their delivered sessions start counting here.'

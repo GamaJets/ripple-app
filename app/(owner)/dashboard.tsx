@@ -37,7 +37,13 @@ export default function OwnerOverview() {
   // trainers yet" on the console's biggest figure while the query was still in
   // flight — an owner opening the app first thing was told their gym delivered
   // nothing last month, in the same confident type used when it is true.
-  const { trainers, loading, sessions30, payroll30 } = usePlatformTrainers();
+  const { trainers, loading, status: trainersStatus, sessions30, payroll30 } = usePlatformTrainers();
+  // `loading` covered the in-flight case. It does not cover the read having
+  // FAILED — that also leaves `trainers` empty, and every roll-up below then
+  // computes a confident 0 over it. Same wrong sentence, arrived at a second
+  // later: an owner told their gym delivered nothing last month.
+  const trainersUnread = trainersStatus === 'error';
+  const trainersUnknown = loading || trainersUnread;
   const { tenant } = useTenant();
   const roll = gymRollup(trainers as TrainerLike[], tenant?.sessionFee ?? null);
   const { series, labels, delta, months } = useSessionsHistory(sessions30);
@@ -155,7 +161,9 @@ export default function OwnerOverview() {
         {!loading && roll.trainers === 0 ? (
           <Card style={{ marginTop: sp.sm }}>
             <Text style={{ ...ty.label, color: t.ink2 }}>
-              No trainers yet — clients, delivered sessions and trainer health fill in as they join your gym.
+              {trainersUnread
+                ? 'Your trainers could not be read, so this is not "no trainers" — pull down to try again.'
+                : 'No trainers yet — clients, delivered sessions and trainer health fill in as they join your gym.'}
             </Text>
           </Card>
         ) : null}
@@ -163,9 +171,11 @@ export default function OwnerOverview() {
         {/* ── the hero ───────────────────────────────────────────────────── */}
         <Hero
           label="Sessions delivered · 30 days"
-          figure={loading ? '—' : fig(roll.sessions30)}
+          figure={trainersUnknown ? '—' : fig(roll.sessions30)}
           note={loading
             ? 'Reading your roster…'
+            : trainersUnread
+            ? 'Your trainers could not be read'
             : delta !== 0
             ? `${delta > 0 ? '+' : '−'}${Math.abs(delta)} vs last month`
             : roll.payroll30 == null

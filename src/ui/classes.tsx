@@ -42,6 +42,18 @@ interface ClassesValue {
   /** Whether `classes` is the timetable the server holds. Under 'error' an
    *  empty list means we could not read it, not that nothing is scheduled. */
   status: LoadStatus;
+  /**
+   * Whether `booked` on each class is a real count.
+   *
+   * `rowToClass` starts every class at `booked: 0` and the `class_counts` RPC
+   * fills it in. When that RPC fails the zeros stay, and a zero is not a
+   * neutral placeholder here — it is the specific claim that the class is
+   * empty. The member's screen computes `capacity - booked` and offers a full
+   * class as wide open; the coach's screen computes `booked >= capacity` and
+   * never shows one as full. Both then let somebody book a seat that is not
+   * there, and the failure surfaces as a refused booking with no explanation.
+   */
+  countsKnown: boolean;
 }
 
 const Ctx = createContext<ClassesValue | null>(null);
@@ -58,6 +70,7 @@ export function ClassesProvider({ children }: { children: React.ReactNode }) {
   const [uid, setUid] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
+  const [countsKnown, setCountsKnown] = useState(!USE_SUPABASE);
 
   const load = useCallback(async () => {
     if (!USE_SUPABASE) { setReady(true); setStatus('ready'); return; }
@@ -75,7 +88,19 @@ export function ClassesProvider({ children }: { children: React.ReactNode }) {
         // confirmed counts (security-definer aggregate over everyone's bookings)
         // A missing count only understates how full a class is; the class itself
         // is still listed, so this stays best-effort.
-        try { const { data: counts } = await supabase.rpc('class_counts'); if (Array.isArray(counts)) { const cmap: Record<string, number> = {}; counts.forEach((c: any) => { cmap[String(c.class_id)] = c.booked; }); list.forEach((cl) => { cl.booked = cmap[cl.id] ?? 0; }); } } catch { /* counts only */ }
+        // Not "counts only": every class starts at booked 0, so a failure here
+        // leaves that zero standing as a claim of emptiness. Record whether the
+        // numbers are real so the screens can decline to make the claim.
+        try {
+          const { data: counts, error: cntErr } = await supabase.rpc('class_counts');
+          if (cntErr || !Array.isArray(counts)) setCountsKnown(false);
+          else {
+            const cmap: Record<string, number> = {};
+            counts.forEach((c: any) => { cmap[String(c.class_id)] = c.booked; });
+            list.forEach((cl) => { cl.booked = cmap[cl.id] ?? 0; });
+            setCountsKnown(true);
+          }
+        } catch { setCountsKnown(false); }
         // Assign even when empty: an empty timetable that the server confirmed
         // is a real answer, and leaving the previous list up would be staler.
         setClasses(list);
@@ -162,7 +187,7 @@ export function ClassesProvider({ children }: { children: React.ReactNode }) {
     } catch { return false; }
   };
 
-  return <Ctx.Provider value={{ classes, myStatus, book, cancel, addClass, refresh: load, ready, status }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ classes, myStatus, book, cancel, addClass, refresh: load, ready, status, countsKnown }}>{children}</Ctx.Provider>;
 }
 
 export function useClasses(): ClassesValue {

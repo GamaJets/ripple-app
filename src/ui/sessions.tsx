@@ -88,6 +88,7 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
         // A failure here must not cost us the sessions themselves — the screen is
         // still usable without knowing what has been approved.
         try {
+          // no-error-ok: an unread approval leaves the session showing as not-yet-approved, which is what it shows before anyone approves it; the sessions themselves are the point of this screen
           const { data: appr } = await supabase.from('session_approvals').select('session_id, approved_at, note');
           if (appr?.length) {
             const byId = new Map(appr.map((a: any) => [String(a.session_id), a]));

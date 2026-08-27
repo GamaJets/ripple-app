@@ -38,7 +38,7 @@ interface TrainersValue {
    *  confirm and must not be shown as the gym's numbers. */
   status: LoadStatus;
   /** Sessions delivered across the gym in the last 30 days. */
-  sessions30: number;
+  sessions30: number | null;
   /**
    * What those sessions are worth at the tenant's session fee, or null when no
    * fee is set — an unpriced session has no value we can honestly state.
@@ -80,8 +80,13 @@ export function PlatformTrainersProvider({ children }: { children: ReactNode }) 
     return () => { cancelled = true; };
   }, [tenant?.id, tick]);
 
-  const sessions30 = trainers.reduce((a, t) => a + t.sessions30, 0);
-  const payroll30 = payroll30For(trainers, tenant?.sessionFee ?? null);
+  // Both are sums over `trainers`, and on a failed read `trainers` is empty —
+  // so both summed to 0 and the owner's screens reported a real number: nought
+  // sessions delivered, nought pounds owed. A sum over a list we could not read
+  // is not zero, it is unknown, and neither figure may be computed from it.
+  const unread = status === 'error';
+  const sessions30 = unread ? null : trainers.reduce((a, t) => a + t.sessions30, 0);
+  const payroll30 = unread ? null : payroll30For(trainers, tenant?.sessionFee ?? null);
 
   return (
     <Ctx.Provider value={{ trainers, loading, status, sessions30, payroll30, refresh }}>{children}</Ctx.Provider>

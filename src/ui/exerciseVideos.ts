@@ -123,6 +123,7 @@ async function ensureExercise(name: string, group: string): Promise<string | nul
   const id = exerciseSlug(name);
   if (!id) return null;
   try {
+    // no-error-ok: a failed lookup falls through to the insert below, whose 23505 branch handles the row already existing
     const { data: found } = await supabase.from('exercises').select('id').eq('id', id).maybeSingle();
     if (found?.id) return found.id;
     const { error } = await supabase

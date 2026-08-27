@@ -14,8 +14,17 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 
 export interface MonthlyHistory { series: (number | null)[]; labels: string[]; delta: number; months: number }
 
-/** Generic: record `currentValue` under `storageKey` for this month, return 6-mo series. */
-export function useMonthlyHistory(storageKey: string, currentValue: number): MonthlyHistory {
+/**
+ * Generic: record `currentValue` under `storageKey` for this month, return 6-mo series.
+ *
+ * **A null `currentValue` is not recorded.** This hook writes to AsyncStorage,
+ * so a figure that is wrong because a read failed does not merely look wrong
+ * for a second — it is saved as this month's history and shows in the trend
+ * chart forever after, indistinguishable from a month that really was zero.
+ * Nothing later can tell the two apart, which is why the caller must pass null
+ * rather than a zero it is not sure of.
+ */
+export function useMonthlyHistory(storageKey: string, currentValue: number | null): MonthlyHistory {
   const [hist, setHist] = useState<Record<string, number>>({});
 
   useEffect(() => {
@@ -23,8 +32,10 @@ export function useMonthlyHistory(storageKey: string, currentValue: number): Mon
     (async () => {
       let stored: Record<string, number> = {};
       try { const raw = await AsyncStorage.getItem(storageKey); if (raw) stored = JSON.parse(raw); } catch { /* ignore */ }
-      stored[ym(new Date())] = currentValue;
-      try { await AsyncStorage.setItem(storageKey, JSON.stringify(stored)); } catch { /* ignore */ }
+      if (currentValue != null) {
+        stored[ym(new Date())] = currentValue;
+        try { await AsyncStorage.setItem(storageKey, JSON.stringify(stored)); } catch { /* ignore */ }
+      }
       if (!cancelled) setHist(stored);
     })();
     return () => { cancelled = true; };
@@ -45,8 +56,8 @@ export function useMonthlyHistory(storageKey: string, currentValue: number): Mon
   return {
     series,
     labels: months.map((m) => m.label),
-    // No previous month recorded means no month-over-month change to report.
-    delta: prev == null ? 0 : currentValue - prev,
+    // No previous month recorded, or nothing to compare it against.
+    delta: prev == null || currentValue == null ? 0 : currentValue - prev,
     months: recorded.length,
   };
 }
@@ -62,6 +73,6 @@ export function useMrrHistory(currentMrr: number): MonthlyHistory {
  * SaaS console, and feeding session counts into it would draw one line out of
  * two different units without saying so.
  */
-export function useSessionsHistory(currentSessions: number): MonthlyHistory {
+export function useSessionsHistory(currentSessions: number | null): MonthlyHistory {
   return useMonthlyHistory('repple.owner.sessionsHistory', currentSessions);
 }

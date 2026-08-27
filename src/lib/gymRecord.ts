@@ -251,6 +251,7 @@ export function money(cents: number | null | undefined, currency = 'AED'): strin
 async function namesFor(sb: Queryable, ids: string[]): Promise<Map<string, string>> {
   const unique = [...new Set(ids.filter(Boolean))];
   if (!unique.length) return new Map();
+  // no-error-ok: an unreadable name becomes null and renders as a dash; the row it labels is still real
   const { data } = await sb.from('profiles').select('id, full_name').in('id', unique);
   return new Map((data ?? []).map((p: any) => [p.id, (p.full_name || '').trim()]));
 }
@@ -258,6 +259,8 @@ async function namesFor(sb: Queryable, ids: string[]): Promise<Map<string, strin
 async function planNamesFor(sb: Queryable, ids: string[]): Promise<Map<string, string>> {
   const unique = [...new Set(ids.filter(Boolean))];
   if (!unique.length) return new Map();
+  // no-error-ok: an unreadable plan name becomes null and renders as a dash; the membership row is still real
   const { data } = await sb.from('membership_plans').select('id, name').in('id', unique);
   return new Map((data ?? []).map((p: any) => [p.id, p.name]));
 }
+
