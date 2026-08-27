@@ -1,0 +1,101 @@
+// A coach's own exercise names, kept between programs.
+//
+// Raised by a tester: typing a name into the builder's Add exercise sheet put
+// it in that one program and nowhere else. The client receiving the program
+// saw it; the coach retyped it next time.
+//
+// Scope is the coach, not the gym and not the platform. The existing
+// `exercises` table has no tenant_id and no coach_id — it is a global
+// catalogue the exercise-video library writes to — so a custom name written
+// there would appear in every other gym's picker. `coach_exercises` is per
+// coach, exactly as `program_templates` already is.
+//
+// Three states, never two: not loaded, loaded and empty, and could-not-load.
+// A failed read must not render as "you have saved none", which is the shape
+// of bug this codebase keeps finding.
+import { useCallback, useEffect, useState } from 'react';
+import { supabase } from '../lib/supabase';
+import { USE_SUPABASE } from '../lib/config';
+
+import { mergeExerciseLists, type CoachExercise } from '../lib/coachExerciseList';
+
+export { mergeExerciseLists, type CoachExercise };
+
+export type CoachExerciseStatus = 'loading' | 'ready' | 'error';
+
+export interface CoachExercisesApi {
+  /** The coach's saved names, alphabetical. Empty while loading or on failure. */
+  saved: CoachExercise[];
+  status: CoachExerciseStatus;
+  /**
+   * Remember a name. Resolves true when it reached the database, false when it
+   * did not — the caller keeps it in the program either way, because the
+   * program is the thing the coach asked for and this is the convenience.
+   */
+  remember: (name: string, group?: string) => Promise<boolean>;
+  forget: (name: string) => Promise<boolean>;
+}
+
+const byName = (a: CoachExercise, b: CoachExercise) => a.name.localeCompare(b.name);
+
+export function useCoachExercises(): CoachExercisesApi {
+  const [saved, setSaved] = useState<CoachExercise[]>([]);
+  const [status, setStatus] = useState<CoachExerciseStatus>(USE_SUPABASE ? 'loading' : 'ready');
+  const [uid, setUid] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!USE_SUPABASE) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data: auth, error: authErr } = await supabase.auth.getUser();
+        if (cancelled) return;
+        if (authErr) { setStatus('error'); return; }
+        const id = auth?.user?.id;
+        // Signed out is not a failure — there is simply nobody to have saved
+        // anything. The built-in list stands on its own.
+        if (!id) { setStatus('ready'); return; }
+        setUid(id);
+        const { data, error } = await supabase
+          .from('coach_exercises')
+          .select('name, muscle_group')
+          .eq('coach_id', id);
+        if (cancelled) return;
+        // Not `if (error || !data)`. A read that failed and a coach who has
+        // saved nothing are different facts and the picker says so.
+        if (error) { setStatus('error'); return; }
+        setSaved((data ?? []).map((r: any) => ({ name: r.name, group: r.muscle_group || '' })).sort(byName));
+        setStatus('ready');
+      } catch { if (!cancelled) setStatus('error'); }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const remember = useCallback(async (name: string, group = ''): Promise<boolean> => {
+    const nm = name.trim();
+    if (!nm) return false;
+    // Optimistic locally, so the name is in the list the moment it is typed
+    // even if the write is still in flight or never lands.
+    setSaved((p) => (p.some((x) => x.name.toLowerCase() === nm.toLowerCase()) ? p : [...p, { name: nm, group }].sort(byName)));
+    if (!USE_SUPABASE || !uid) return false;
+    try {
+      // upsert, because a coach retyping a name they already have should be a
+      // no-op rather than a duplicate-key error surfaced at them.
+      const { error } = await supabase
+        .from('coach_exercises')
+        .upsert({ coach_id: uid, name: nm, muscle_group: group }, { onConflict: 'coach_id,name' });
+      return !error;
+    } catch { return false; }
+  }, [uid]);
+
+  const forget = useCallback(async (name: string): Promise<boolean> => {
+    setSaved((p) => p.filter((x) => x.name !== name));
+    if (!USE_SUPABASE || !uid) return false;
+    try {
+      const { error } = await supabase.from('coach_exercises').delete().eq('coach_id', uid).eq('name', name);
+      return !error;
+    } catch { return false; }
+  }, [uid]);
+
+  return { saved, status, remember, forget };
+}

@@ -30,6 +30,7 @@ import { sp, layout, radius, hairline, elevation, type as ty, value } from '../.
 import { useRoster } from '../../src/ui/roster';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
 import { useProgramTemplates } from '../../src/ui/programTemplates';
+import { useCoachExercises, mergeExerciseLists } from '../../src/ui/coachExercises';
 import { buildProgram, type Program } from '../../src/lib/programs';
 import type { Goal } from '../../src/lib/types';
 
@@ -75,6 +76,7 @@ export default function Builder() {
   const [note, setNote] = useState('');
   const [days, setDays] = useState<BDay[]>([]);
   const [pickerDay, setPickerDay] = useState<number | null>(null);
+  const coachEx = useCoachExercises();
   const [custom, setCustom] = useState('');
   const [tplPick, setTplPick] = useState(false);
   const [saveOpen, setSaveOpen] = useState(false);
@@ -343,10 +345,28 @@ export default function Builder() {
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginBottom: sp.lg }}>
             <TextInput value={custom} onChangeText={setCustom} placeholder="Custom exercise name" placeholderTextColor={t.ink3}
               style={[inp, { flex: 1 }]} />
-            <Cta label="Add" onPress={() => { if (custom.trim() && pickerDay !== null) { addExercise(pickerDay, custom.trim(), ''); setPickerDay(null); } }} />
+            <Cta label="Add" onPress={() => {
+              if (custom.trim() && pickerDay !== null) {
+                const nm = custom.trim();
+                addExercise(pickerDay, nm, '');
+                // Deliberately not awaited. The exercise belongs to the program
+                // the moment it is typed; remembering it for next time is the
+                // convenience, and a failed write must not hold up the sheet or
+                // lose the name the coach just entered.
+                void coachEx.remember(nm);
+                setCustom('');
+                setPickerDay(null);
+              }
+            }} />
           </View>
           <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
-            {LIB.map((x, i) => (
+            {coachEx.status === 'error' ? (
+              <Text style={{ ...ty.caption, color: t.ink2, marginBottom: sp.md }}>
+                Your saved exercises could not be read, so only the built-in ones are listed. That is
+                not the same as having none saved — try again in a moment.
+              </Text>
+            ) : null}
+            {mergeExerciseLists(coachEx.saved, LIB).map((x, i) => (
               <Pressable key={x.name} onPress={() => { if (pickerDay !== null) { addExercise(pickerDay, x.name, x.group); setPickerDay(null); } }}
                 style={{
                   flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: sp.md,

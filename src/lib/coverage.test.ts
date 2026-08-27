@@ -16,6 +16,7 @@ import { serviceState, nextServiceDue, usableUnits, outOfServiceUnits, capacityF
 import { parseCsv, parseSheet, sniffDelimiter, mapColumns } from './csv';
 import { parseMoneyCents, parseDate, detectDateOrder, previewMembers, previewPayments, previewPlans, describePreview, MEMBER_ALIASES } from './csvImport';
 import { classEntry, ptEntry, mergeTimetable, overlapping, entriesAt, floorAt, floorByHour, clashes, summariseBoard, slotBlocker, type PtSlot } from './gymPtSchedule';
+import { mergeExerciseLists } from './coachExerciseList';
 import { groupSessions, sessionKey, sessionDuration, sessionActivity, sessionKcal, sessionDistanceMeters, planSession, planWrite, summariseResult, HK_WRITE_ACTIVITIES, type Ledger } from './wearables/appleHealthWrite';
 import { sliceLoading, sliceReady, sliceFailed, rowsOf, brokenParts, completeness, partialWarning, memberIds, buildDossier, buildDossiers, retentionRead, doorLogActive, attendanceCaveat, type MemberRecord, type MemberBooking } from './memberView';
 import { payroll30For, payrollBlocker, type GymTrainer } from './gymTrainers';
@@ -1607,6 +1608,27 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
   }
   ok(!HK_WRITE_ACTIVITIES.has('Circuit') && HK_WRITE_ACTIVITIES.has('Other'),
      'the allowlist is the bridge dictionary, not the app vocabulary');
+
+  // A coach's own exercise names, merged into the picker ahead of the built-ins.
+  {
+    const builtIn = [{ name: 'Back Squat', group: 'Legs' }, { name: 'Bench Press', group: 'Chest' }];
+    const mine = [{ name: 'Sled Push', group: '' }, { name: 'Farmer Carry', group: '' }];
+    const merged = mergeExerciseLists(mine, builtIn);
+    ok(merged.length === 4, 'a coach\u2019s names are added to the built-in list, not swapped for it');
+    ok(merged[0].name === 'Farmer Carry' && merged[1].name === 'Sled Push',
+       'the coach\u2019s own come first, alphabetically');
+    ok(merged[2].name === 'Back Squat', 'the built-ins follow, in their own order');
+
+    // Retyping something that already exists must not double it up, whatever
+    // case it was typed in — the picker is a list a human reads.
+    const dup = mergeExerciseLists([{ name: 'bench press', group: '' }], builtIn);
+    ok(dup.length === 2, 'a saved name that duplicates a built-in appears once');
+    ok(dup[0].name === 'bench press',
+       'and it is the coach\u2019s spelling that survives, because they chose it');
+
+    ok(mergeExerciseLists([], builtIn).length === 2,
+       'a coach who has saved nothing still gets the whole built-in list');
+  }
 
   // Recovery: a sauna is a real session with a real duration and a real heart
   // rate, and no calorie figure at all. Apple has no sauna type, so it files
