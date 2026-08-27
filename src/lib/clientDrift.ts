@@ -422,6 +422,23 @@ export interface ActivityQuery {
  * failed read mean opposite things here: one says the client is silent, the
  * other says we do not know, and the difference is the whole feature.
  */
+/**
+ * Whether an id is something the database can be asked about.
+ *
+ * A client added by hand on the trainer's phone gets a local id like `c900`.
+ * Those columns are `uuid`, and Postgres does not skip a value it cannot
+ * parse — it refuses the entire statement:
+ *
+ *     invalid input syntax for type uuid: "c900"
+ *
+ * which was reaching a coach on the dashboard as a raw database error, with
+ * drift ordering switched off for as long as one hand-added client was on the
+ * roster. Seen in the simulator with a roster of exactly one.
+ */
+export function isQueryableId(id: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id.trim());
+}
+
 export async function fetchClientActivity(
   sb: Queryable,
   clientIds: string[],
@@ -430,6 +447,14 @@ export async function fetchClientActivity(
   const out: Record<string, ActivityEvent[]> = {};
   for (const id of clientIds) out[id] = [];
   if (!clientIds.length) return out;
+
+  // Everyone keeps their entry in `out`; only the ones the database can answer
+  // for are asked about. Somebody with no Repple account has no server-side
+  // activity by definition, and an empty list is the truthful answer for them —
+  // it flows into the same "nothing recorded" state the roster already shows,
+  // rather than taking the whole read down with it.
+  const askable = clientIds.filter(isQueryableId);
+  if (!askable.length) return out;
 
   const now = opts.now ?? Date.now();
   const days = opts.days ?? DEFAULT_WINDOWS.historyDays;
@@ -440,11 +465,11 @@ export async function fetchClientActivity(
     out[id].push({ at, kind });
   };
 
-  const ci = await sb.from('check_ins').select('user_id, at').in('user_id', clientIds).gte('at', sinceIso);
+  const ci = await sb.from('check_ins').select('user_id, at').in('user_id', askable).gte('at', sinceIso);
   if (ci.error) throw ci.error;
   for (const r of ci.data ?? []) push(r.user_id, r.at, 'check_in');
 
-  const wo = await sb.from('workouts').select('user_id, performed_at').in('user_id', clientIds).gte('performed_at', sinceIso);
+  const wo = await sb.from('workouts').select('user_id, performed_at').in('user_id', askable).gte('performed_at', sinceIso);
   if (wo.error) throw wo.error;
   for (const r of wo.data ?? []) push(r.user_id, r.performed_at, 'workout');
 
@@ -452,12 +477,12 @@ export async function fetchClientActivity(
   // passed is not evidence the client turned up — that inference is the bug
   // 33-session-outcomes.sql was written to end, and it would read here as a
   // client still attending when they had stopped.
-  const se = await sb.from('sessions').select('client_id, starts_at, outcome').in('client_id', clientIds).gte('starts_at', sinceIso).eq('outcome', 'completed');
+  const se = await sb.from('sessions').select('client_id, starts_at, outcome').in('client_id', askable).gte('starts_at', sinceIso).eq('outcome', 'completed');
   if (se.error) throw se.error;
   for (const r of se.data ?? []) push(r.client_id, r.starts_at, 'session');
 
   if (opts.tenantId) {
-    const vi = await sb.from('gym_visits').select('member_id, entered_at').eq('tenant_id', opts.tenantId).in('member_id', clientIds).gte('entered_at', sinceIso);
+    const vi = await sb.from('gym_visits').select('member_id, entered_at').eq('tenant_id', opts.tenantId).in('member_id', askable).gte('entered_at', sinceIso);
     if (vi.error) throw vi.error;
     for (const r of vi.data ?? []) push(r.member_id, r.entered_at, 'visit');
   }

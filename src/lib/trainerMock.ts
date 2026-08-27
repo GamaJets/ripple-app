@@ -5,7 +5,13 @@
 // "Sam R.", "Alex M.", "Priya N.") with invented adherence, weight deltas and
 // injuries, which shipped in the production bundle.
 export interface RosterClient {
-  id: string; name: string; goal: string; weightDelta: number;
+  id: string; name: string; goal: string;
+  /** Change in body weight across the scans on record, in kg.
+   *
+   *  NULL when there are none — which is every client added by hand, and every
+   *  real one until their second scan. It used to be 0, and 0 is a claim: it
+   *  says the person held their weight exactly, a measurement nobody took. */
+  weightDelta: number | null;
   /** null = this client has never submitted a check-in. It used to default to
    *  100, so a client nobody knew anything about scored a perfect adherence
    *  and could never be flagged at risk. */

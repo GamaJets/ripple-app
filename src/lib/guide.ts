@@ -75,7 +75,7 @@ const TRAINER: GuideSection[] = [
     tab: 'Clients',
     summary: 'Your roster, and who needs you today.',
     points: [
-      'Add client enters someone by hand. Invite by email sends a link they accept in their own app.',
+      'Add client enters someone by hand. Invite by email records an invite — Repple sends no email, so tell them yourself; they link to you when they sign in with that address.',
       'Filters split the roster by at-risk, online and in-person.',
       'Needs check-in surfaces the clients who have gone quiet.',
     ],

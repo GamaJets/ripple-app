@@ -129,7 +129,7 @@ export default function LogSession() {
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.lg }}>
             <Pressable onPress={() => router.back()} hitSlop={8} accessibilityRole="button" accessibilityLabel="Back"
               style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-              <Icon name="chevron" size={18} color={t.ink} />
+              <Icon name="back" size={18} color={t.ink} />
             </Pressable>
             <View>
               <Text style={{ ...ty.micro, color: t.ink3 }}>Log a session</Text>

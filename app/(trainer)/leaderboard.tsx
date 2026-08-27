@@ -25,10 +25,14 @@ export default function Leaderboard() {
   // negative weightDelta; others for positive). Simple, transparent.
   const scored = roster.map((c) => {
     const goalDown = /fat|tone/i.test(c.goal);
-    const prog = goalDown ? -c.weightDelta : c.weightDelta;
+    // A client with no scans has no progress to score. Null contributes
+    // nothing rather than counting as "held their weight", which is what a 0
+    // delta meant here — it let somebody who has never stepped on a scale
+    // score the same as somebody measured to be flat.
+    const prog = c.weightDelta == null ? null : (goalDown ? -c.weightDelta : c.weightDelta);
     // A client with no check-ins contributes 0 adherence, not a phantom 100 -
     // otherwise strangers outrank clients who are actually training.
-    const score = Math.round((c.adherence ?? 0) + Math.max(0, prog) * 4);
+    const score = Math.round((c.adherence ?? 0) + Math.max(0, prog ?? 0) * 4);
     return { c, score };
   }).sort((a, b) => b.score - a.score);
 
@@ -70,7 +74,7 @@ export default function Leaderboard() {
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{c.name}</Text>
-                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{c.goal} · {c.adherence}% adherence · {c.weightDelta > 0 ? '+' : ''}{c.weightDelta} kg</Text>
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{c.goal} · {c.adherence == null ? 'no check-ins' : `${c.adherence}% adherence`} · {c.weightDelta == null ? 'no scans yet' : `${c.weightDelta > 0 ? '+' : ''}${c.weightDelta} kg`}</Text>
                 <View style={{ height: 3, borderRadius: 2, backgroundColor: t.surface3, overflow: 'hidden', marginTop: 7 }}>
                   <View style={{ height: 3, borderRadius: 2, backgroundColor: t.brand, width: `${Math.round((score / maxScore) * 100)}%` }} />
                 </View>

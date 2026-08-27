@@ -35,7 +35,7 @@ import { viewerMaySee, shareStateOf, shareLabel, sharedNote, sharedCount, sendBl
 import { monthlyHistory, monthKey, monthLabel, yearRows, peakVolume, intensity, bestMonth, trainedMonths, gaps, longestGap, monthsSinceLast, historySpan, stageOf, historyNote, lifetimeTotals, prTimeline, volumeArc, tonnes } from './longView';
 import { buildPassConversion, hostsOf, intervalOf, coversDate, daysBetween, dateOf, attributionSentence, suppressionSentence, CAUSAL_CAVEAT, MONEY_NOTE, type PassConversionRecord } from './passConversion';
 import type { TrainingSession } from './types';
-import { assessDrift, rankClients, sortByDrift, summariseDrift, compareDrift, DRIFT_RANK, DRIFT_LABEL, DEFAULT_WINDOWS, type ActivityEvent, type DriftInput } from './clientDrift';
+import { assessDrift, rankClients, sortByDrift, summariseDrift, compareDrift, DRIFT_RANK, DRIFT_LABEL, DEFAULT_WINDOWS, type ActivityEvent, type DriftInput, isQueryableId } from './clientDrift';
 import { atRiskClient, noRecordOf } from './trainerMock';
 import { csvCell, csvRow, toCsv, minorToDecimal, isoDatePart, slug, buildGymExport, exportBlocker, incompleteWarning, EXPORT_PARTS, EXPORT_FILE, type GymExportInput, type PassType } from './gymExport';
 import {
@@ -1610,6 +1610,20 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
   }
   ok(!HK_WRITE_ACTIVITIES.has('Circuit') && HK_WRITE_ACTIVITIES.has('Other'),
      'the allowlist is the bridge dictionary, not the app vocabulary');
+
+  // Only ids the database can parse may reach a uuid column.
+  {
+    ok(isQueryableId('7d4ca6bf-2f1c-4b87-94f4-9b6bdd008aad'),
+       'a real uuid is queryable');
+    ok(isQueryableId('7D4CA6BF-2F1C-4B87-94F4-9B6BDD008AAD'),
+       'and case does not matter, since Postgres accepts either');
+    ok(!isQueryableId('c900'),
+       'a client added by hand on the phone is NOT — this is the id that took the whole read down');
+    ok(!isQueryableId('') && !isQueryableId('local-3') && !isQueryableId('c1'),
+       'nor any other local id shape');
+    ok(!isQueryableId('7d4ca6bf-2f1c-4b87-94f4-9b6bdd008aa'),
+       'a uuid one character short is refused rather than sent and rejected');
+  }
 
   // Recovery is one idea in two places, kept in step by one list.
   {

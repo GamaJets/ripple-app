@@ -83,7 +83,7 @@ export function RosterProvider({ children }: { children: ReactNode }) {
           // fact — either way the coach's manual clients are missing from what
           // they are about to be shown.
           if (mcErr) partialFailure = true;
-          manual = (mc || []).map((r: any) => ({ id: r.id, name: r.name, goal: r.goal || 'General', weightDelta: 0, adherence: null, lastActive: 'added by you', next: '—', unread: 0, mode: (r.mode === 'inperson' ? 'inperson' : 'online') as 'online' | 'inperson', joinedAt: r.created_at ?? null }));
+          manual = (mc || []).map((r: any) => ({ id: r.id, name: r.name, goal: r.goal || 'General', weightDelta: null, adherence: null, lastActive: 'added by you', next: '—', unread: 0, mode: (r.mode === 'inperson' ? 'inperson' : 'online') as 'online' | 'inperson', joinedAt: r.created_at ?? null }));
         } catch { partialFailure = true; }
         const { data: cls, error } = await supabase.from('clients').select('id, goal, diet, meals_per_day, avoid, mode').eq('trainer_id', uid);
         // When each linked client joined THIS coach's book. `clients` has no
@@ -113,13 +113,15 @@ export function RosterProvider({ children }: { children: ReactNode }) {
         // here degrades a figure rather than hiding a person — it does not move
         // the roster into 'error'.
         const ago = (t: number) => { const sec = Math.max(0, Math.round((Date.now() - t) / 1000)); if (sec < 3600) return Math.max(1, Math.round(sec / 60)) + 'm ago'; if (sec < 86400) return Math.round(sec / 3600) + 'h ago'; return Math.round(sec / 86400) + 'd ago'; };
-        const st: Record<string, { wDelta: number; adh: number | null; last: number; mx?: any }> = {};
-        ids.forEach((id: string) => { st[id] = { wDelta: 0, adh: null, last: 0 }; });
+        const st: Record<string, { wDelta: number | null; adh: number | null; last: number; mx?: any }> = {};
+        // wDelta starts null, not 0. It only becomes a number when two scans
+        // exist to subtract, and a client with one scan has no delta yet.
+        ids.forEach((id: string) => { st[id] = { wDelta: null, adh: null, last: 0 }; });
         try {
           const { data: sc } = await supabase.from('scans').select('client_id, weight_kg, taken_at, metrics').in('client_id', ids).order('taken_at', { ascending: true });
           const byC: Record<string, { w: number; t: number; m: any }[]> = {};
           (sc || []).forEach((r: any) => { (byC[r.client_id] = byC[r.client_id] || []).push({ w: Number(r.weight_kg), t: Date.parse(r.taken_at), m: r.metrics }); });
-          for (const id of ids) { const arr = byC[id]; if (arr && arr.length) { st[id].wDelta = Math.round((arr[arr.length - 1].w - arr[0].w) * 10) / 10; st[id].last = Math.max(st[id].last, arr[arr.length - 1].t); for (let k = arr.length - 1; k >= 0; k--) { if (arr[k].m) { st[id].mx = arr[k].m; break; } } } }
+          for (const id of ids) { const arr = byC[id]; if (arr && arr.length) { st[id].wDelta = arr.length > 1 ? Math.round((arr[arr.length - 1].w - arr[0].w) * 10) / 10 : null; st[id].last = Math.max(st[id].last, arr[arr.length - 1].t); for (let k = arr.length - 1; k >= 0; k--) { if (arr[k].m) { st[id].mx = arr[k].m; break; } } } }
         } catch { /* stats decorate a row that is listed regardless */ }
         try {
           const { data: wo } = await supabase.from('workouts').select('user_id, performed_at').in('user_id', ids).order('performed_at', { ascending: false });
@@ -142,7 +144,7 @@ export function RosterProvider({ children }: { children: ReactNode }) {
     const n = name.trim();
     if (!n) return false;
     const localId = `c${SEQ++}`;
-    setRoster((p) => [...p, { id: localId, name: n, goal, weightDelta: 0, adherence: null, lastActive: 'just added', next: '—', unread: 0, mode, joinedAt: new Date().toISOString() }]);
+    setRoster((p) => [...p, { id: localId, name: n, goal, weightDelta: null, adherence: null, lastActive: 'just added', next: '—', unread: 0, mode, joinedAt: new Date().toISOString() }]);
     // Durable: persist to coach_clients so the roster survives restarts/devices.
     if (!USE_SUPABASE || !uid) return false;
     try {

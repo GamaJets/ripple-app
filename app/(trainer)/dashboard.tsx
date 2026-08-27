@@ -619,7 +619,10 @@ export default function TrainerClients() {
         <Section>
           <SectionHead title="This month" note="Analytics" onPress={() => router.push('/(trainer)/analytics')} />
           <KpiRow items={[
-            { label: 'Est. revenue', value: '$' + revenue.toLocaleString(), unit: '/mo' },
+            // A dash, not $0, when no session rate is set: the estimate is
+            // unknowable rather than nil, and "$0/mo" reads as a fact about the
+            // business. Same rule as the "To contact" figure beside it.
+            { label: 'Est. revenue', value: sessionFee > 0 ? '$' + revenue.toLocaleString() : '—', unit: sessionFee > 0 ? '/mo' : undefined },
             { label: 'Unread', value: fig(unread) },
             // Null until the record has been read: an em-dash, never a zero
             // that would tell a coach nobody needs them this week.
@@ -762,8 +765,14 @@ export default function TrainerClients() {
                 </View>
                 <View style={{ alignItems: 'flex-end' }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                    <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: c.weightDelta <= 0 ? t.brand : t.ink3 }} />
-                    <Text style={{ ...ty.label, fontWeight: '500', ...numeric, color: t.ink }}>{c.weightDelta > 0 ? '+' : ''}{c.weightDelta} kg</Text>
+                    {/* No scan, no delta. "0 kg" said this client had held
+                        their weight exactly, which is a measurement nobody
+                        took — the same invented zero the rest of this screen
+                        renders as a dash. */}
+                    <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: c.weightDelta == null ? t.ink3 : c.weightDelta <= 0 ? t.brand : t.ink3 }} />
+                    <Text style={{ ...ty.label, fontWeight: '500', ...numeric, color: t.ink }}>
+                      {c.weightDelta == null ? '—' : `${c.weightDelta > 0 ? '+' : ''}${c.weightDelta} kg`}
+                    </Text>
                   </View>
                   {/* Days a week, against what this person's own weeks used to
                       look like. An em-dash where there is no baseline — never
@@ -824,7 +833,7 @@ export default function TrainerClients() {
           {sel && (
             <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 30 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
               <Text style={{ ...ty.title, color: t.ink, textTransform: 'capitalize' }}>{sel.name}</Text>
-              <Text style={{ ...ty.label, color: t.ink3, marginTop: 3, marginBottom: sp.xl }}>{sel.goal} · {sel.weightDelta > 0 ? '+' : ''}{sel.weightDelta} kg · {sel.adherence != null ? sel.adherence + '% adherence' : 'no check-ins yet'}</Text>
+              <Text style={{ ...ty.label, color: t.ink3, marginTop: 3, marginBottom: sp.xl }}>{sel.goal} · {sel.weightDelta == null ? 'no scans yet' : `${sel.weightDelta > 0 ? '+' : ''}${sel.weightDelta} kg`} · {sel.adherence != null ? sel.adherence + '% adherence' : 'no check-ins yet'}</Text>
 
               <View style={{ marginBottom: sp.xl }}>
                 <SheetHead t={t} title="Delivery" />
@@ -1134,7 +1143,7 @@ export default function TrainerClients() {
             <Text style={{ ...ty.label, color: t.ink3, marginTop: 3, marginBottom: sp.xl }}>They join your roster and become bookable in your schedule.</Text>
             <SheetHead t={t} title="Name" />
             <TextInput value={newName} onChangeText={setNewName} placeholder="Client name" placeholderTextColor={t.ink3} style={{ ...field(t), marginBottom: sp.lg }} />
-            <SheetHead t={t} title="Email · optional, sends an app invite" />
+            <SheetHead t={t} title="Email · optional, records an invite" />
             <TextInput value={newEmail} onChangeText={setNewEmail} placeholder="client@email.com" placeholderTextColor={t.ink3} autoCapitalize="none" keyboardType="email-address" style={{ ...field(t), marginBottom: sp.lg }} />
             <SheetHead t={t} title="Goal" />
             <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.lg }}>
