@@ -21,6 +21,7 @@ import { coverageFor, coverageLine } from './videoCoverage';
 import { lockDecision, lockSettingNote, GRACE_MS } from './appLock';
 import { attributionLine } from './workoutAttribution';
 import { RECOVERY_ACTIVITIES, isRecoveryActivity } from './recoveryActs';
+import { normaliseCode, isPlausibleCode, joinErrorMessage, CODE_ALPHABET, CODE_LENGTH } from './joinCode';
 import { groupSessions, sessionKey, sessionDuration, sessionActivity, sessionKcal, sessionDistanceMeters, planSession, planWrite, summariseResult, HK_WRITE_ACTIVITIES, type Ledger } from './wearables/appleHealthWrite';
 import { sliceLoading, sliceReady, sliceFailed, rowsOf, brokenParts, completeness, partialWarning, memberIds, buildDossier, buildDossiers, retentionRead, doorLogActive, attendanceCaveat, type MemberRecord, type MemberBooking } from './memberView';
 import { payroll30For, payrollBlocker, type GymTrainer } from './gymTrainers';
@@ -3761,6 +3762,73 @@ function by2(v: ReturnType<typeof buildStaff>, id: string) {
   ok(pc.counts!.alreadyMember + pc.counts!.joinedAfter + pc.counts!.undecided + pc.counts!.noMembership
     === pc.counts!.identified,
     'the four outcomes partition the identified holders — nobody is double-counted and nobody quietly disappears');
+}
+
+/* ── the coach join code ──────────────────────────────────────────────────
+ *
+ * The code exists because coach→client invites match on an exactly-typed email
+ * address, so one mistyped character strands both people silently and forever.
+ * These assertions guard the property that makes the replacement safe.
+ */
+{
+  // The alphabet must exclude exactly the glyph pairs people confuse when a
+  // code is read aloud, and must keep the ones that merely look similar in
+  // print. Getting this wrong is not cosmetic: see the substitution note below.
+  for (const c of 'IO01') {
+    ok(!CODE_ALPHABET.includes(c), `the generator alphabet excludes ${c}, which is misheard and misread`);
+  }
+  for (const c of 'LJQ') {
+    ok(CODE_ALPHABET.includes(c), `${c} is a VALID code character — anything that "corrects" it corrupts real codes`);
+  }
+  ok(CODE_LENGTH === 6, 'six characters — short enough to read across a gym floor');
+  ok(new Set(CODE_ALPHABET).size === CODE_ALPHABET.length, 'no character appears twice in the alphabet');
+
+  // Formatting a human applies is removed; the characters themselves are not.
+  ok(normaliseCode('k7m2qx') === 'K7M2QX', 'lowercase is folded up');
+  ok(normaliseCode('K7M-2QX') === 'K7M2QX', 'dashes people add to group a code are dropped');
+  ok(normaliseCode('  K7M 2QX  ') === 'K7M2QX', 'surrounding and internal spaces are dropped');
+  ok(normaliseCode('K7M2QXYZ') === 'K7M2QX', 'anything past the sixth character is discarded');
+  ok(normaliseCode('') === '' && normaliseCode(null as any) === '', 'empty and null normalise to empty, not to a crash');
+
+  // THE ONE THAT MATTERS. An earlier version of normaliseCode folded O→Q and
+  // I/1/L→J, reasoning that since the alphabet excludes O and I, any occurrence
+  // must be a misreading. But L, J and Q are all valid, and a typed O could
+  // equally have been Q, D or G. A fold that lands on a real six-character code
+  // connects the client to A DIFFERENT COACH — silently, with nothing on screen
+  // that looks wrong to either of them. Failing to find a code costs seconds;
+  // this does not announce itself at all.
+  ok(normaliseCode('LJQ123') === 'LJQ123', 'L, J and Q survive normalisation unchanged — they are real code characters');
+  ok(normaliseCode('QQQQQQ') === 'QQQQQQ', 'Q is never rewritten');
+  ok(!isPlausibleCode('OOOOOO'), 'a code of excluded glyphs is rejected, never silently rewritten into a valid one');
+  ok(!isPlausibleCode('K7M2QI'), 'one excluded glyph is enough to reject — no guessing what was meant');
+
+  ok(isPlausibleCode('K7M2QX'), 'a well-formed code passes');
+  ok(!isPlausibleCode('K7M2Q'), 'five characters is not yet a code, so the button stays disabled');
+  ok(!isPlausibleCode(''), 'nothing typed is not a code');
+
+  // Every generated code must pass the client-side check, or the app would
+  // reject codes its own database issued.
+  const sample = ['ABCDEF', 'K7M2QX', '234567', 'ZZZZZZ', 'LJQ999'];
+  for (const c of sample) {
+    ok(isPlausibleCode(c), `${c} is drawn from the generator's alphabet and must be accepted`);
+  }
+
+  // Failures say what to do. The excluded characters are named HERE, in the
+  // message, which is the safe place to help — rather than by rewriting input.
+  ok(joinErrorMessage('no coach uses that code').includes('O'),
+    'the not-found message names the characters a code never contains, so the reader can spot the misreading themselves');
+  ok(joinErrorMessage('that is your own code').includes('own coaching code'),
+    'pasting your own code is explained, not reported as a lookup failure');
+  ok(joinErrorMessage('not signed in').toLowerCase().includes('sign in'),
+    'a signed-out join tells them to sign in first');
+  // An unrecognised failure keeps the server's words rather than being
+  // flattened into a sentence that tells nobody anything.
+  ok(joinErrorMessage('connection reset by peer').includes('connection reset by peer'),
+    'an unknown error is passed through rather than replaced with "something went wrong"');
+  ok(joinErrorMessage('connection reset by peer').includes('Nothing was sent'),
+    'and still says the request did not go anywhere');
+  ok(joinErrorMessage(null).includes('nothing was sent'),
+    'a failure with no message at all still reports that nothing was sent');
 }
 
 if (errors.length) { console.log('COVERAGE FAILURES:\n' + errors.join('\n')); process.exit(1); }

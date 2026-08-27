@@ -32,7 +32,7 @@ import {
 } from '../../src/lib/clientDrift';
 import { useTenant } from '../../src/ui/tenant';
 import { reportError } from '../../src/lib/reportError';
-import { View, Text, Pressable, ScrollView, Modal, TextInput, Alert, Image, KeyboardAvoidingView, Platform, ActivityIndicator, type ViewStyle, type TextStyle } from 'react-native';
+import { View, Text, Pressable, ScrollView, Modal, TextInput, Alert, Image, KeyboardAvoidingView, Platform, ActivityIndicator, Share, type ViewStyle, type TextStyle } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { trialInfo } from '../../src/lib/trial';
@@ -41,7 +41,7 @@ import { Icon, type IconName } from '../../src/ui/Icon';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Card, Cta, Ghost, Notice, fig, Flag as KitFlag } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, elevation, type as ty, numeric } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../../src/theme/scale';
 import { useCoachProfile } from '../../src/ui/coachProfile';
 import { CoachRequests } from '../../src/ui/CoachRequests';
 import { atRiskClient } from '../../src/lib/trainerMock';
@@ -59,6 +59,7 @@ import { useAnnouncements } from '../../src/ui/announcements';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useCheckIns } from '../../src/ui/checkins';
 import { useInvites } from '../../src/ui/invites';
+import { fetchMyJoinCode } from '../../src/ui/joinCode';
 import { useTrainerInvites } from '../../src/ui/trainerInvites';
 import { useClientTags } from '../../src/ui/clientTags';
 import { useProgramTemplates } from '../../src/ui/programTemplates';
@@ -318,6 +319,11 @@ export default function TrainerClients() {
   const [newGoal, setNewGoal] = useState('Fat loss');
   const [newMode, setNewMode] = useState<'online' | 'inperson'>('online');
   const [invOpen, setInvOpen] = useState(false);
+  // The coach's own join code. Read when the sheet opens rather than on every
+  // dashboard mount: it is only ever looked at here, and allocating one is a
+  // write.
+  const [myCode, setMyCode] = useState<string | null>(null);
+  const [myCodeErr, setMyCodeErr] = useState<string | null>(null);
   const [invEmail, setInvEmail] = useState('');
   const [invMode, setInvMode] = useState<'online' | 'inperson'>('online');
   const [newEmail, setNewEmail] = useState('');
@@ -698,7 +704,12 @@ export default function TrainerClients() {
           ) : null}
 
           <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.lg }}>
-            <View style={{ flex: 1 }}><Ghost label="Invite by email" onPress={() => { setInvEmail(''); setInvMode('online'); setInvOpen(true); }} /></View>
+            <View style={{ flex: 1 }}><Ghost label="Add a client" onPress={async () => {
+                setInvEmail(''); setInvMode('online'); setInvOpen(true);
+                setMyCode(null); setMyCodeErr(null);
+                const r = await fetchMyJoinCode();
+                if (r.ok) setMyCode(r.code); else setMyCodeErr(r.reason);
+              }} /></View>
             <View style={{ flex: 1 }}><Cta label="Add client" wide onPress={() => { setNewName(''); setNewEmail(''); setNewGoal('Fat loss'); setNewMode('online'); setAddOpen(true); }} /></View>
           </View>
 
@@ -1216,9 +1227,45 @@ export default function TrainerClients() {
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end' }}>
           <Pressable style={SCRIM} onPress={() => setInvOpen(false)} />
           <View style={sheet(t)}>
-            <Text style={{ ...ty.title, color: t.ink }}>Invite a client by email</Text>
-            <Text style={{ ...ty.label, color: t.ink3, marginTop: 3, marginBottom: sp.xl }}>They see your invitation in the Repple app when they sign in with this email; accepting links them to you.</Text>
-            <SheetHead t={t} title="Email" />
+            <Text style={{ ...ty.title, color: t.ink }}>Add a client</Text>
+            <Text style={{ ...ty.label, color: t.ink3, marginTop: 3, marginBottom: sp.xl }}>Two ways in. The code works whoever they are and whatever address they signed up with; the email invite only reaches them if you spell it exactly as they did.</Text>
+
+            {/* ── the code ──────────────────────────────────────────────── */}
+            <SheetHead t={t} title="Your coaching code" />
+            <View style={{ marginBottom: sp.xl }}>
+              {myCodeErr ? (
+                <Text style={{ ...ty.label, color: t.ink2 }}>{myCodeErr}</Text>
+              ) : myCode == null ? (
+                <Text style={{ ...ty.label, color: t.ink3 }}>Reading your code…</Text>
+              ) : (
+                <>
+                  <Pressable
+                    onPress={() => {
+                      // Share, not copy: expo-clipboard is a native module and
+                      // would need a new binary before any coach could use this.
+                      // Share is core React Native, and is what a coach actually
+                      // does with a code — sends it to the person standing there.
+                      Share.share({ message: `Join me on Repple — open the app, go to Coach and enter my code: ${myCode}` })
+                        .catch(() => { /* dismissing the sheet is not a failure; the code is on screen */ });
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Share your coaching code, ${myCode.split('').join(' ')}`}
+                    style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingVertical: sp.lg, alignItems: 'center' }}>
+                    {/* Letter-spaced and in the numeric face: this gets read out
+                        loud across a gym floor and copied by hand. */}
+                    <Text style={{ ...value(30), color: t.ink, letterSpacing: 6 }}>{myCode}</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>Tap to send it to them</Text>
+                  </Pressable>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                    They enter this in the Repple app under Coach › Have a code. You still approve them before they join your roster.
+                  </Text>
+                </>
+              )}
+            </View>
+
+            <Rule />
+            <View style={{ height: sp.lg }} />
+            <SheetHead t={t} title="Or invite by email" />
             <TextInput value={invEmail} onChangeText={setInvEmail} placeholder="client@email.com" placeholderTextColor={t.ink3} autoCapitalize="none" keyboardType="email-address" style={{ ...field(t), marginBottom: sp.lg }} />
             <SheetHead t={t} title="Coaching type" />
             <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.xl }}>

@@ -32,6 +32,8 @@ const EXPECTED = [
   ['workouts',        ['user_id', 'performed_at', 'exercise', 'sets', 'feel', 'cardio', 'kcal', 'zones', 'session_mins', 'logged_by', 'amended_at']],
   ['exercise_videos', ['exercise_id', 'trainer_id', 'title', 'name', 'muscle_group', 'video_path', 'visibility']],
   ['coach_exercises', ['coach_id', 'name', 'muscle_group']],
+  ['trainers',        ['id', 'tenant_id', 'listed', 'join_code']],
+  ['coach_requests',  ['client_id', 'trainer_id', 'mode', 'status']],
   ['program_templates', ['coach_id', 'name', 'program']],
   ['progress_photos', ['client_id', 'taken_at', 'image_path']],
   ['sessions',        ['client_id', 'starts_at', 'outcome']],

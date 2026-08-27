@@ -15,7 +15,7 @@
 // <Notice> for the one thing that needs a decision — an invitation. Every
 // query, conditional and route above is untouched.
 import { useCallback, useEffect, useState } from 'react';
-import { View, Text, Pressable, ScrollView, Modal, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, Pressable, ScrollView, Modal, Alert, ActivityIndicator, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -24,6 +24,8 @@ import { Rule, Section, SectionHead, Cta, Ghost, Notice } from '../../src/ui/kit
 import { sp, layout, radius, hairline, elevation, type as ty, value } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
 import { useInvites } from '../../src/ui/invites';
+import { joinByCode } from '../../src/ui/joinCode';
+import { isPlausibleCode, normaliseCode, CODE_LENGTH } from '../../src/lib/joinCode';
 import { notifySuccess } from '../../src/ui/haptics';
 import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
@@ -58,6 +60,31 @@ export default function FindTrainer() {
   // and an unreadable list of requests are different things: the first means
   // "ask this coach", the second means "we don't know whether you already did".
   const [pendingUnknown, setPendingUnknown] = useState(false);
+  // The direct path. The directory below is opt-in — a coach who has not
+  // published a profile cannot be found in it at all — and the email invite
+  // only arrives if the coach spelled the address exactly as the client did.
+  // A code the coach hands over depends on neither.
+  const [code, setCode] = useState('');
+  const [codeBusy, setCodeBusy] = useState(false);
+
+  const submitCode = async () => {
+    if (codeBusy || !isPlausibleCode(code)) return;
+    setCodeBusy(true);
+    const r = await joinByCode(code);
+    setCodeBusy(false);
+    if (!r.ok) { Alert.alert('That code didn’t work', r.reason); return; }
+    setCode('');
+    // `already` is a real outcome, not a failure: they had asked before, or are
+    // already coached by this person. Saying "request sent" again would have
+    // them waiting on a second answer that is never coming.
+    Alert.alert(
+      r.already ? 'You’ve already asked ' + r.trainerName : 'Request sent to ' + r.trainerName,
+      r.already
+        ? 'Nothing new was sent. ' + r.trainerName + ' has your earlier request, or already coaches you.'
+        : r.trainerName + ' sees your request in their app and adds you once they accept. Not who you expected? Check the code with them before they do.',
+      [{ text: 'OK' }],
+    );
+  };
 
   const acceptCoach = async (id: string, coachName: string | null, mode: string) => {
     // "You are connected" used to be said whether or not the link was made. The
@@ -218,6 +245,43 @@ export default function FindTrainer() {
             ))}
           </View>
         ) : null}
+
+        <Rule />
+
+        {/* ── the direct path ────────────────────────────────────────────── */}
+        <Section>
+          <SectionHead title="Have a code from your coach?" />
+          <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
+            Ask them for their coaching code — it’s six characters, in their app under Clients › Add a client.
+            This works even if they aren’t listed in the directory below.
+          </Text>
+          <View style={{ flexDirection: 'row', gap: sp.sm }}>
+            <TextInput
+              value={code}
+              onChangeText={(v) => setCode(normaliseCode(v))}
+              placeholder="ABC123"
+              placeholderTextColor={t.ink3}
+              autoCapitalize="characters"
+              autoCorrect={false}
+              maxLength={CODE_LENGTH}
+              returnKeyType="go"
+              onSubmitEditing={submitCode}
+              accessibilityLabel="Your coach’s six-character code"
+              style={{
+                flex: 1, backgroundColor: t.surface2, borderRadius: radius.sm,
+                paddingHorizontal: sp.lg, paddingVertical: 13,
+                ...ty.body, color: t.ink, letterSpacing: 4,
+              }}
+            />
+            <View style={{ flex: 1 }}>
+              {/* Disabled until it could actually be a code, so the failure a
+                  half-typed code produces is never reached. */}
+              <Cta label={codeBusy ? 'Checking…' : 'Join'} wide
+                disabled={codeBusy || !isPlausibleCode(code)}
+                onPress={submitCode} />
+            </View>
+          </View>
+        </Section>
 
         <Rule />
 
