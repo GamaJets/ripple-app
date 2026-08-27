@@ -1,0 +1,9 @@
+{
+  "artboards": [
+    { "file": "Main.dc.html", "x": 0, "y": 0, "w": 1280, "h": 1020, "title": "Homepage — what to cut and why" }
+  ],
+  "annotations": [
+    { "id": "measured", "x": 0, "y": -170, "w": 560, "text": "Every number here was measured in the browser against the live page, not estimated.\n\nThis is a proposal, not a change. Nothing has been cut from the site — moving 2,661 words off a live homepage is hard to undo, so it wants your yes first." }
+  ],
+  "launch": { "view": "focused", "file": "Main.dc.html" }
+}
