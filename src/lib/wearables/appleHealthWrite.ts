@@ -461,10 +461,37 @@ export function summariseResult(r: WriteResult): string {
 
 const LEDGER_KEY = 'repple.hk.written';
 
-function lazy(mod: string): any {
+/**
+ * Load one of the three native modules this file needs, or null if it is not
+ * there. Still lazy, still never throws — but no longer dynamic.
+ *
+ * `require(mod)` with a variable does not survive Metro. The bundler resolves
+ * requires statically at build time, so it cannot follow a name it only learns
+ * at runtime, and it refuses the file outright:
+ *
+ *   SyntaxError: appleHealthWrite.ts:467: Invalid call at line 467: require(mod)
+ *
+ * That failed the Bundle JavaScript phase of EVERY production build — client,
+ * coach and owner alike — while development builds carried on working, because
+ * a dev client loads JS from Metro at runtime and never bundles it. So the
+ * three apps could still be developed and could no longer be shipped, and
+ * nothing said so until someone tried to build for the store.
+ *
+ * The names are literals now, one branch each, which is what lets Metro see
+ * them. The try/catch stays: on a build where a module genuinely is absent,
+ * this must return null rather than take the app down.
+ */
+type NativeMod = 'storage' | 'react-native' | 'health';
+
+function lazy(mod: NativeMod): any {
   try {
+    let m: any = null;
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const m = require(mod);
+    if (mod === 'storage') m = require('@react-native-async-storage/async-storage');
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    else if (mod === 'react-native') m = require('react-native');
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    else if (mod === 'health') m = require('react-native-health');
     return m?.default ?? m;
   } catch {
     return null;
@@ -472,7 +499,7 @@ function lazy(mod: string): any {
 }
 
 function storage(): any {
-  const s = lazy('@react-native-async-storage/async-storage');
+  const s = lazy('storage');
   return s && typeof s.getItem === 'function' ? s : null;
 }
 
@@ -518,7 +545,7 @@ function nativeHk(): any {
   const rn = lazy('react-native');
   if (!rn || rn.Platform?.OS !== 'ios') return null;
   if (!rn.NativeModules?.AppleHealthKit) return null;
-  const k = lazy('react-native-health');
+  const k = lazy('health');
   return k && typeof k.saveWorkout === 'function' ? k : null;
 }
 
