@@ -47,7 +47,8 @@ export default function OwnerOps() {
   useEffect(() => {
     let c = false;
     (async () => {
-      try { const d = await fetchAllFeedback(); if (!c) setFbRows(d); }
+      // null means unread, not empty — keep it out of the row list either way.
+      try { const d = await fetchAllFeedback(); if (!c) setFbRows(d ?? []); }
       catch (e) { reportError('ownerOps.feedback', e); }
     })();
     return () => { c = true; };

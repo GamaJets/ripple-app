@@ -1,8 +1,11 @@
 // Owner feedback inbox — every tester's in-app feedback, newest first.
 //
 // Every row here is a real `feedback` row and every error a real `app_errors`
-// row; both fetches return [] rather than sample data when Supabase is off, so
-// an empty inbox is a true empty inbox.
+// row; there is no sample data behind this screen.
+//
+// An empty inbox is a true empty inbox, and a *failed* read now says so rather
+// than borrowing the empty state's words. "No feedback yet" is a specific claim
+// about the testers, and it must not be what a refused query looks like.
 //
 // Rebuilt on the instrument-panel kit (`src/ui/kit`) and the scale
 // (`src/theme/scale`): the two bordered KPI boxes collapsed into the screen's
@@ -31,6 +34,8 @@ export default function OwnerFeedback() {
   const [errors, setErrors] = useState<AppErrorRow[]>([]);
   const [showErr, setShowErr] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  /** The inbox could not be read. Distinct from it being empty. */
+  const [unread, setUnread] = useState(false);
 
   const load = async () => {
     // The awaits are wrapped because a rejection used to skip every line after
@@ -39,9 +44,12 @@ export default function OwnerFeedback() {
     // with nothing to say it had stopped trying.
     try {
       const [data, errs] = await Promise.all([fetchAllFeedback(), fetchAppErrors(20)]);
-      setRows(data); setErrors(errs);
+      // null is "we could not read it" and must not become an empty list.
+      setRows(data ?? []); setErrors(errs ?? []);
+      setUnread(data == null);
     } catch (e) {
       reportError('ownerFeedback.load', e);
+      setUnread(true);
     } finally {
       setLoading(false);
     }
@@ -71,7 +79,7 @@ export default function OwnerFeedback() {
           figure={avg ? avg.toFixed(1) : '—'}
           unit={avg ? '/ 5' : undefined}
           arc={avg ? avg / 5 : undefined}
-          note={loading ? 'Loading…' : rows.length === 0 ? 'No submissions yet' : `${rows.length} submission${rows.length === 1 ? '' : 's'}`}
+          note={loading ? 'Loading…' : unread ? 'Could not be read' : rows.length === 0 ? 'No submissions yet' : `${rows.length} submission${rows.length === 1 ? '' : 's'}`}
         />
 
         <Rule />
@@ -82,9 +90,11 @@ export default function OwnerFeedback() {
             <SkeletonList n={4} />
           ) : rows.length === 0 ? (
             <View style={{ alignItems: 'center', paddingVertical: sp.xxl }}>
-              <Icon name="message" size={26} color={t.ink3} />
+              <Icon name={unread ? 'bell' : 'message'} size={26} color={t.ink3} />
               <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md, textAlign: 'center' }}>
-                No feedback yet. It shows up here as testers send it from inside the app.
+                {unread
+                  ? 'The inbox could not be read, so this is not "no feedback" — pull down to try again.'
+                  : 'No feedback yet. It shows up here as testers send it from inside the app.'}
               </Text>
             </View>
           ) : rows.map((r, i) => (

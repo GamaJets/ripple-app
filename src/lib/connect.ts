@@ -124,16 +124,38 @@ export async function fetchMyPurchases(): Promise<Purchase[] | null> {
   } catch { return null; }
 }
 
-/** Sessions remaining across the client's active packs (optionally for one trainer). */
-export async function sessionsRemaining(trainerId?: string): Promise<number> {
+/**
+ * Sessions remaining across the client's active packs (optionally for one trainer).
+ *
+ * **`null` means we could not count them**, and is not the same as `0`.
+ *
+ * This returned `0` on a failed read, which is a number, and a wrong one. Two
+ * things on the calendar screen are decided by it, and a fabricated zero got
+ * both backwards for the one client it matters most to — somebody holding
+ * credits whose read just failed:
+ *
+ *   - the "Pack credits" row silently disappears, so they cannot see the
+ *     balance they paid for;
+ *   - `hadCredits` goes false, which SUPPRESSES the warning that a booking was
+ *     not drawn from their pack. They book, nothing is deducted, and the app
+ *     says nothing at all, because it believes there was no pack to deduct from.
+ *
+ * The two functions on either side of this one — `fetchMyPurchases` above and
+ * `redeemSession` below — were both fixed for exactly this. This one was
+ * missed, and it feeds the screen the other two protect.
+ */
+export async function sessionsRemaining(trainerId?: string): Promise<number | null> {
   try {
     const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id; if (!uid) return 0;
+    const uid = auth?.user?.id; if (!uid) return null;
     let q = supabase.from('client_purchases').select('sessions_total, sessions_used').eq('client_id', uid).eq('status', 'paid').not('sessions_total', 'is', null);
     if (trainerId) q = q.eq('trainer_id', trainerId);
-    const { data } = await q;
-    return ((data as { sessions_total: number | null; sessions_used: number }[]) ?? []).reduce((a, r) => a + Math.max(0, (r.sessions_total || 0) - r.sessions_used), 0);
-  } catch { return 0; }
+    const { data, error } = await q;
+    if (error) { reportError('connect.sessionsRemaining', error); return null; }
+    if (!data) return null;
+    return (data as { sessions_total: number | null; sessions_used: number }[])
+      .reduce((a, r) => a + Math.max(0, (r.sessions_total || 0) - r.sessions_used), 0);
+  } catch (e) { reportError('connect.sessionsRemaining', e); return null; }
 }
 
 /** Draw down one credit from the client's oldest active pack for a trainer.

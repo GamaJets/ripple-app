@@ -87,7 +87,11 @@ export default function Calendar() {
   // alert claims only what actually happened.
   async function book(s: TrainingSession) {
     const slot = `${DOW[new Date(s.startsAt).getDay()]} ${timeLabel(s.startsAt)}`;
-    const hadCredits = packLeft != null && packLeft > 0;
+    // Unknown counts as "might have had credits". A null balance means the
+    // count could not be read, not that there is nothing to draw from, and
+    // silence is the wrong side to err on when somebody's pack may not have
+    // been debited.
+    const mayHaveCredits = packLeft == null || packLeft > 0;
     bookSession(s.id, cd.id);
 
     // `redeemSession` declines rather than throws — no pack, an exhausted pack,
@@ -95,7 +99,10 @@ export default function Calendar() {
     // `ok` branch existed, so a client whose credit was never drawn watched the
     // count sit unchanged and was told the session was confirmed regardless.
     const redeem = await redeemSession(s.trainerId);
-    if (redeem.ok) setPackLeft(await sessionsRemaining());
+    // Only replace the shown balance with a real count. A failed re-read is
+    // not news about the balance, and blanking the row would hide a number we
+    // still have every reason to believe.
+    if (redeem.ok) { const n = await sessionsRemaining(); if (n != null) setPackLeft(n); }
 
     // `sendPush` discards both outcomes, so a screen built on it can only ever
     // claim success — which is why `sendPushChecked` exists. "Your coach has
@@ -109,7 +116,7 @@ export default function Calendar() {
       : 'We couldn’t notify your coach — the booking is on their calendar, but message them if it’s soon.');
     // Only worth raising to someone who was showing credits: for a client who
     // pays per session there is no pack to draw from and nothing went wrong.
-    if (hadCredits && !redeem.ok) {
+    if (mayHaveCredits && !redeem.ok) {
       lines.push(`This wasn’t taken off your session pack${redeem.error ? ` (${redeem.error})` : ''} — check your package before you book again.`);
     }
     Alert.alert('Session booked', lines.join('\n\n'), [{ text: 'Great' }]);
@@ -133,7 +140,7 @@ export default function Calendar() {
       // "returned to your package" was printed either way, which is how a client
       // comes to believe they are holding a credit they do not have.
       const refund = late ? { ok: false } : await refundSession(s.trainerId);
-      setPackLeft(await sessionsRemaining());
+      { const n = await sessionsRemaining(); if (n != null) setPackLeft(n); }
       sendPush([s.trainerId], 'Session cancelled', `A client cancelled ${DOW[new Date(s.startsAt).getDay()]} ${timeLabel(s.startsAt)}. The slot re-opened.${late ? ' (Late cancel — charged.)' : ''}`, { route: '/(trainer)/calendar' });
 
       const lines: string[] = [];

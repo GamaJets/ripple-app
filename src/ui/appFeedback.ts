@@ -37,24 +37,40 @@ export async function submitAppFeedback(rating: number, category: string, body: 
   } catch (e: any) { reportError('feedback.submit', e); return { ok: false, reason: e?.message }; }
 }
 
-export async function fetchAllFeedback(): Promise<FeedbackRow[]> {
+/**
+ * Every tester's feedback, newest first.
+ *
+ * **`null` means the inbox could not be read.** `[]` means it is genuinely
+ * empty. The screen prints "No feedback yet. It shows up here as testers send
+ * it from inside the app." for an empty list — a confident, specific sentence
+ * that was also what a refused read produced. During a TestFlight round that is
+ * the worst possible thing to be wrong about: it says the testers are silent
+ * when what actually happened is that we could not hear them.
+ */
+export async function fetchAllFeedback(): Promise<FeedbackRow[] | null> {
   if (!USE_SUPABASE) return [];
   try {
-    const { data } = await supabase.from('feedback').select('*').order('created_at', { ascending: false });
-    return (data ?? []).map((r: any) => ({
+    const { data, error } = await supabase.from('feedback').select('*').order('created_at', { ascending: false });
+    if (error) { reportError('feedback.fetchAll', error); return null; }
+    if (!data) return null;
+    return data.map((r: any) => ({
       id: String(r.id), userId: r.user_id, role: r.role, rating: r.rating,
       category: r.category, body: r.body, appVersion: r.app_version, createdAt: r.created_at,
     }));
-  } catch { return []; }
+  } catch (e) { reportError('feedback.fetchAll', e); return null; }
 }
 
 export interface AppErrorRow { id: string; message: string; platform: string | null; appVersion: string | null; createdAt: string; }
 
 // Owner-only: recent captured crashes/errors (RLS restricts to the owner).
-export async function fetchAppErrors(limit = 20): Promise<AppErrorRow[]> {
+/** Recent captured crashes. `null` means the list could not be read — which is
+ *  not the same as there having been no crashes, and reads very differently. */
+export async function fetchAppErrors(limit = 20): Promise<AppErrorRow[] | null> {
   if (!USE_SUPABASE) return [];
   try {
-    const { data } = await supabase.from('app_errors').select('id, message, platform, app_version, created_at').order('created_at', { ascending: false }).limit(limit);
-    return (data ?? []).map((r: any) => ({ id: String(r.id), message: r.message, platform: r.platform, appVersion: r.app_version, createdAt: r.created_at }));
-  } catch { return []; }
+    const { data, error } = await supabase.from('app_errors').select('id, message, platform, app_version, created_at').order('created_at', { ascending: false }).limit(limit);
+    if (error) { reportError('feedback.fetchAppErrors', error); return null; }
+    if (!data) return null;
+    return data.map((r: any) => ({ id: String(r.id), message: r.message, platform: r.platform, appVersion: r.app_version, createdAt: r.created_at }));
+  } catch (e) { reportError('feedback.fetchAppErrors', e); return null; }
 }
