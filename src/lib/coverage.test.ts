@@ -23,6 +23,7 @@ import { attributionLine } from './workoutAttribution';
 import { RECOVERY_ACTIVITIES, isRecoveryActivity } from './recoveryActs';
 import { normaliseCode, isPlausibleCode, joinErrorMessage, CODE_ALPHABET, CODE_LENGTH } from './joinCode';
 import { passwordRules, passwordMeetsLocalRules, passwordErrorMessage, PASSWORD_MIN } from './passwordRules';
+import { RELEASES, releasesFor, unseenReleases, compareVersions, storeNotes } from './releaseNotes';
 import { groupSessions, sessionKey, sessionDuration, sessionActivity, sessionKcal, sessionDistanceMeters, planSession, planWrite, summariseResult, HK_WRITE_ACTIVITIES, type Ledger } from './wearables/appleHealthWrite';
 import { sliceLoading, sliceReady, sliceFailed, rowsOf, brokenParts, completeness, partialWarning, memberIds, buildDossier, buildDossiers, retentionRead, doorLogActive, attendanceCaveat, type MemberRecord, type MemberBooking } from './memberView';
 import { payroll30For, payrollBlocker, type GymTrainer } from './gymTrainers';
@@ -3879,6 +3880,72 @@ function by2(v: ReturnType<typeof buildStaff>, id: string) {
     'the character-class refusal is stated in words rather than as a character dump');
   ok(passwordErrorMessage('some new server rule') === 'some new server rule',
     'an unrecognised refusal is passed through rather than replaced with a guess');
+}
+
+/* ── release notes ────────────────────────────────────────────────────────
+ *
+ * One source feeds the in-app What's New sheet AND the App Store text, so a
+ * change described to a tester is the same change described in the app.
+ */
+{
+  ok(compareVersions('1.2.0', '1.1.0') > 0, '1.2.0 is newer than 1.1.0');
+  ok(compareVersions('1.10.0', '1.9.0') > 0, '1.10.0 beats 1.9.0 — compared as numbers, not strings');
+  ok(compareVersions('1.1.0', '1.1.0') === 0, 'a version equals itself');
+  ok(compareVersions('1.1', '1.1.0') === 0, 'missing segments count as zero');
+
+  // A fresh install must NOT be shown a changelog. Opening an app for the first
+  // time to a list of things that used to be broken explains nothing to
+  // somebody who never saw them broken.
+  ok(unseenReleases(null, '1.1.0', 'client').length === 0, 'a fresh install sees nothing');
+  ok(unseenReleases('1.1.0', '1.1.0', 'client').length === 0, 'nothing to show when you are already on this version');
+  ok(unseenReleases('1.0.0', '1.1.0', 'client').length > 0, 'coming from an older version, the notes appear');
+
+  // Entries are filtered per app: a coach reading about a client-only feature
+  // learns only that the notes are not written for them.
+  for (const a of ['client', 'trainer', 'owner'] as const) {
+    for (const r of releasesFor(a)) {
+      for (const e of r.entries) {
+        ok(e.apps.includes(a), `${a}: "${e.title}" is only listed for apps that actually have it`);
+      }
+    }
+  }
+  const clientTitles = releasesFor('client').flatMap((r) => r.entries.map((e) => e.title));
+  const ownerTitles = releasesFor('owner').flatMap((r) => r.entries.map((e) => e.title));
+  ok(clientTitles.some((t) => t.includes('six-character code')), 'the client is told about joining by code');
+  ok(!ownerTitles.some((t) => t.includes('six-character code')), 'the gym owner is not — there is no coach for them to join');
+  ok(ownerTitles.some((t) => t.includes('Repple Studio')), 'the owner is told about the naming fix, which was theirs');
+
+  // The headline is per app for the same reason. A shared one promised Studio
+  // owners they could "join your coach with a code" — a client feature.
+  for (const r of RELEASES) {
+    if (!r.headlines) continue;
+    for (const [aud, line] of Object.entries(r.headlines)) {
+      const titles = releasesFor(aud as 'client' | 'trainer' | 'owner').flatMap((x) => x.entries.map((e) => e.title.toLowerCase()));
+      if (/join your coach/i.test(line)) {
+        ok(titles.some((t) => t.includes('join your coach')),
+          `${aud}: the headline only promises what that app actually got`);
+      }
+    }
+  }
+
+  // Store text: real content, within App Store Connect's limit.
+  for (const a of ['client', 'trainer', 'owner'] as const) {
+    const text = storeNotes(a, '1.1.0');
+    ok(text.length > 0, `${a}: store notes are not empty`);
+    ok(text.length <= 4000, `${a}: store notes fit App Store Connect's 4000-character What to Test field`);
+    ok(!/\bRLS\b|supabase|postgrest|42P17|null\b/i.test(text),
+      `${a}: store notes carry no mechanism a reader cannot act on`);
+  }
+  ok(storeNotes('client', '9.9.9') === '', 'an unknown version yields no notes rather than invented ones');
+
+  // Every entry has to be readable as a sentence about the reader.
+  for (const r of RELEASES) {
+    for (const e of r.entries) {
+      ok(e.title.length > 0 && e.title.length <= 80, `"${e.title}" is one scannable line`);
+      ok(!e.title.endsWith('.'), `"${e.title}" has no trailing full stop — it is a heading, not a sentence`);
+      ok(e.apps.length > 0, `"${e.title}" names at least one app`);
+    }
+  }
 }
 
 if (errors.length) { console.log('COVERAGE FAILURES:\n' + errors.join('\n')); process.exit(1); }

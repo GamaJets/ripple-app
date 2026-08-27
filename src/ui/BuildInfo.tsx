@@ -14,6 +14,7 @@ import { View, Text, Pressable, Share } from 'react-native';
 import * as Updates from 'expo-updates';
 import Constants from 'expo-constants';
 import { useTheme } from './components';
+import { WhatsNewSheet } from './WhatsNew';
 import { sp, radius, hairline, type as ty, numeric } from '../theme/scale';
 
 /** Short form of an update UUID — enough to match against `eas update:list`. */
@@ -22,6 +23,11 @@ const shortId = (id: string | null): string => (id ? id.slice(0, 8) : '—');
 export function BuildInfo() {
   const t = useTheme();
   const [copied, setCopied] = useState(false);
+  // Reachable any time, not only on the launch after an update — people close
+  // the sheet to get on with something and then want to find it again. This
+  // component already renders in all three settings screens, so one entry here
+  // gives every app the same route to it.
+  const [notesOpen, setNotesOpen] = useState(false);
 
   const appVersion = Constants.expoConfig?.version ?? '—';
   // In development (and in Expo Go) there is no embedded update to report.
@@ -40,6 +46,22 @@ export function BuildInfo() {
   };
 
   return (
+    <>
+    <Pressable onPress={() => setNotesOpen(true)} accessibilityRole="button"
+      accessibilityLabel={`What's new in version ${appVersion}`}
+      style={{
+        flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+        backgroundColor: t.surface, borderRadius: radius.md,
+        paddingHorizontal: sp.lg, paddingVertical: 13, marginBottom: sp.sm,
+      }}>
+      <View>
+        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>What’s new</Text>
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>What changed in {appVersion}</Text>
+      </View>
+      <Text style={{ ...ty.body, color: t.ink3 }}>›</Text>
+    </Pressable>
+    <WhatsNewSheet visible={notesOpen} force onClose={() => setNotesOpen(false)} />
+
     <Pressable onPress={share} accessibilityRole="button" accessibilityLabel="Share build info"
       style={{ backgroundColor: t.surface, borderRadius: radius.md, paddingHorizontal: sp.lg, paddingVertical: sp.sm }}>
       {rows.map(([k, v], i) => (
@@ -55,5 +77,6 @@ export function BuildInfo() {
         {copied ? 'Shared' : 'Tap to share'}
       </Text>
     </Pressable>
+    </>
   );
 }

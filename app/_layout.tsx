@@ -34,6 +34,7 @@ import { AuthProvider } from '../src/ui/auth';
 import { ErrorBoundary } from '../src/ui/ErrorBoundary';
 import { AppLockProvider } from '../src/ui/appLock';
 import { LockGate } from '../src/ui/LockScreen';
+import { WhatsNewSheet, useWhatsNew } from '../src/ui/WhatsNew';
 import { useAuth } from '../src/ui/auth';
 import { AppThemeProvider, useTheme } from '../src/ui/components';
 import { BrandProvider } from '../src/ui/brand';
@@ -77,10 +78,16 @@ function useApplyUpdateOnLaunch() {
  */
 function LockedApp() {
   const { authed } = useAuth();
+  // What changed since the version they last opened. Gated on being signed in
+  // for the same reason the lock is: there is nothing to tell somebody looking
+  // at a sign-in screen, and it would land before they have seen the app at
+  // all. It sits INSIDE the gate so it cannot appear over the lock screen.
+  const whatsNew = useWhatsNew(authed);
   return (
     <AppLockProvider signedIn={authed}>
       <LockGate>
         <ThemedStack />
+        <WhatsNewSheet visible={whatsNew.visible} onClose={whatsNew.onClose} />
       </LockGate>
     </AppLockProvider>
   );
