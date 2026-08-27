@@ -45,7 +45,10 @@ create unique index if not exists trainers_join_code_uniq
   on public.trainers (upper(join_code)) where join_code is not null;
 
 /**
- * Six characters from a 30-letter alphabet — about 730 million codes.
+ * Six characters from a 32-character alphabet — 32^6, about 1.07 billion codes.
+ *
+ * (An earlier version of this comment said 30 letters and 730 million. Counted:
+ * 24 letters, I and O excluded, plus the digits 2-9.)
  *
  * Generated server-side, never by the app: a client that picks its own would
  * race another client picking the same one, and the retry loop below is only

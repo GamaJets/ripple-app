@@ -228,7 +228,13 @@ export default function Recovery() {
     ))
    )}
    <View style={{ marginTop: sp.md }}>
-    <Ghost label="Log a recovery session" onPress={() => router.push('/(client)/workouts?mode=recovery')} />
+    {/* The object form, not a query string: this targets a TAB, and the
+        pathname/params pair is the shape expo-router resolves unambiguously
+        for one. The Train screen reads `mode` in an effect rather than in a
+        useState initialiser, because a tab stays mounted and an initialiser
+        runs once in the life of the app. */}
+    <Ghost label="Log a recovery session"
+      onPress={() => router.push({ pathname: '/(client)/workouts', params: { mode: 'recovery' } })} />
    </View>
   </Section>
 

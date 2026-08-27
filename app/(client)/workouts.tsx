@@ -212,7 +212,29 @@ export default function Train() {
     setLiveMode(session);
     return () => setLiveMode(false);
   }, [session, setLiveMode]);
-  const [ctype, setCtype] = useState(CARDIO[0]); const [mins, setMins] = useState(''); const [dist, setDist] = useState(''); const [unit, setUnit] = useState<'km' | 'mi'>('km');
+  const [ctype, setCtype] = useState(CARDIO[0]); const [mins, setMins] = useState('');
+
+  // Read the param on EVERY arrival, not only the first.
+  //
+  // `workouts` is a TAB. Once mounted it stays mounted, so the `useState`
+  // initialiser above runs once in the life of the app and never again — a
+  // second visit carries a new `?mode=` that nothing looks at. Tapping "Log a
+  // recovery session" on the Recovery screen therefore dropped you on the Train
+  // tab showing your strength program, with no way to tell why, which is
+  // exactly what it was reported doing.
+  //
+  // The param is cleared once applied. Leaving it set would mean a later tap on
+  // the same link is not a CHANGE, so the effect would not fire and the second
+  // attempt would fail where the first worked — and it would also fight a
+  // manual chip choice every time the tab regained focus.
+  useEffect(() => {
+    const m = (['strength', 'cardio', 'hiit', 'mobility', 'recovery'] as const).find((x) => x === modeParam);
+    if (!m) return;
+    setMode(m);
+    if (m !== 'strength') setCtype(SESSION_TYPES[m][0]);
+    router.setParams({ mode: undefined });
+  }, [modeParam]);
+ const [dist, setDist] = useState(''); const [unit, setUnit] = useState<'km' | 'mi'>('km');
   const [watts, setWatts] = useState(''); const [kcalIn, setKcalIn] = useState('');
   const [hrEntry, setHrEntry] = useState<WorkoutEntry | null>(null);
   const [showCal, setShowCal] = useState(false);
