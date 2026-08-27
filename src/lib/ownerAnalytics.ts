@@ -94,8 +94,10 @@ export interface GymRollup {
   atRiskCount: number;
   /** Clients carried by those trainers — the exposure, not the headcount. */
   atRiskClients: number;
-  avgClientsPerTrainer: number;
-  avgSessionsPerTrainer: number;
+  /** NULL with no trainers. An average over an empty set is undefined, and 0
+   *  said "every trainer carries no clients" to a gym that has no trainers. */
+  avgClientsPerTrainer: number | null;
+  avgSessionsPerTrainer: number | null;
 }
 
 export function gymRollup(trainers: TrainerLike[], sessionFee: number | null): GymRollup {
@@ -119,8 +121,8 @@ export function gymRollup(trainers: TrainerLike[], sessionFee: number | null): G
       sessionFee == null || unmarked30 > 0 ? null : Math.round(delivered30 * sessionFee),
     atRiskCount,
     atRiskClients,
-    avgClientsPerTrainer: n ? Math.round((clients / n) * 10) / 10 : 0,
-    avgSessionsPerTrainer: n ? Math.round((sessions30 / n) * 10) / 10 : 0,
+    avgClientsPerTrainer: n ? Math.round((clients / n) * 10) / 10 : null,
+    avgSessionsPerTrainer: n ? Math.round((sessions30 / n) * 10) / 10 : null,
   };
 }
 

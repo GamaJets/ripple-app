@@ -100,7 +100,7 @@ export default function OwnerRevenue() {
           <KpiRow items={[
             { label: 'Session fee', value: fee == null ? '—' : usd(fee), delta: fee == null ? 'not set' : 'per delivered session' },
             { label: 'Value / client', value: loading || valuePerClient == null ? '—' : usd(valuePerClient), delta: loading ? 'not read yet' : valuePerClient == null ? 'needs a session fee' : 'last 30 days' },
-            { label: 'Clients', value: loading ? '—' : fig(roll.clients), delta: loading ? 'not read yet' : `${roll.avgClientsPerTrainer} avg / trainer` },
+            { label: 'Clients', value: loading ? '—' : fig(roll.clients), delta: loading ? 'not read yet' : roll.avgClientsPerTrainer == null ? 'no trainers yet' : `${roll.avgClientsPerTrainer} avg / trainer` },
           ]} />
         </Section>
 

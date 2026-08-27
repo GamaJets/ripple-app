@@ -1611,6 +1611,16 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
   ok(!HK_WRITE_ACTIVITIES.has('Circuit') && HK_WRITE_ACTIVITIES.has('Other'),
      'the allowlist is the bridge dictionary, not the app vocabulary');
 
+  // An average over no trainers is undefined, not zero.
+  {
+    const empty = gymRollup([], null);
+    ok(empty.avgClientsPerTrainer === null && empty.avgSessionsPerTrainer === null,
+       'a gym with no trainers has no average per trainer — 0 claimed every trainer carried nobody');
+    const one = gymRollup([{ clients: 6, sessions30: 12 } as any], null);
+    ok(one.avgClientsPerTrainer === 6 && one.avgSessionsPerTrainer === 12,
+       'and with one trainer the average is simply that trainer');
+  }
+
   // Only ids the database can parse may reach a uuid column.
   {
     ok(isQueryableId('7d4ca6bf-2f1c-4b87-94f4-9b6bdd008aad'),

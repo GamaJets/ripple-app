@@ -139,9 +139,15 @@ export function KpiRow({ items, onPress }: { items: KpiItem[]; onPress?: (i: Kpi
             {k.unit ? <Text style={{ ...ty.caption, color: t.ink3, marginLeft: 2 }}>{k.unit}</Text> : null}
           </View>
           {k.delta ? (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 4 }}>
-              <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: k.good ? t.brand : t.ink3 }} />
-              <Text style={{ ...ty.caption, color: t.ink2, flex: 1 }} numberOfLines={1}>{k.delta}</Text>
+            // Two lines, and the mark aligned to the first of them. Three
+            // columns on a 390pt phone give a delta roughly 14 characters at
+            // caption size, and one line silently ate the rest: "no session
+            // fee set" arrived as "no session fe…", which is not a sentence
+            // and not a fact. Anything genuinely longer still truncates, but
+            // the useful notes now fit.
+            <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 5, marginTop: 4 }}>
+              <View style={{ width: 5, height: 5, borderRadius: 2.5, marginTop: 5, flexShrink: 0, backgroundColor: k.good ? t.brand : t.ink3 }} />
+              <Text style={{ ...ty.caption, color: t.ink2, flex: 1 }} numberOfLines={2}>{k.delta}</Text>
             </View>
           ) : null}
         </Pressable>

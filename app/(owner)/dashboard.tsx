@@ -88,8 +88,13 @@ export default function OwnerOverview() {
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingTop: sp.md }}>
           <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Platform</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Repple HQ</Text>
+            {/* The owner's own gym, not "Repple HQ · Platform" — this app is
+                one gym's console, and the previous wording read like an
+                internal admin tool belonging to somebody else. */}
+            <Text style={{ ...ty.micro, color: t.ink3 }}>Your gym</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }} numberOfLines={1}>
+              {tenant?.name?.trim() || 'Name your gym in Ops'}
+            </Text>
           </View>
           <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: 2 }}>
             <Ghost icon="search" onPress={() => router.push('/(owner)/explore')} />
@@ -175,8 +180,8 @@ export default function OwnerOverview() {
         <Section>
           <SectionHead title="Your gym" note="Trainers" onPress={() => router.push('/(owner)/trainers')} />
           <KpiRow items={[
-            { label: 'Trainers', value: loading ? '—' : fig(roll.trainers), delta: loading ? 'not read yet' : `${roll.avgSessionsPerTrainer} sessions avg` },
-            { label: 'Clients', value: loading ? '—' : fig(roll.clients), delta: loading ? 'not read yet' : `${roll.avgClientsPerTrainer} avg / trainer` },
+            { label: 'Trainers', value: loading ? '—' : fig(roll.trainers), delta: loading ? 'not read yet' : roll.avgSessionsPerTrainer == null ? 'no trainers yet' : `${roll.avgSessionsPerTrainer} sessions avg` },
+            { label: 'Clients', value: loading ? '—' : fig(roll.clients), delta: loading ? 'not read yet' : roll.avgClientsPerTrainer == null ? 'no trainers yet' : `${roll.avgClientsPerTrainer} avg / trainer` },
             { label: 'Payroll · 30d', value: loading || roll.payroll30 == null ? '—' : '$' + roll.payroll30.toLocaleString(), delta: loading ? 'not read yet' : roll.payroll30 == null ? 'no session fee set' : 'at your session fee' },
           ]} />
         </Section>

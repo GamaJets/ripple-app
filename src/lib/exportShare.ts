@@ -111,7 +111,8 @@ export interface OwnerReportData {
   payroll30: number | null;
   atRiskCount: number;
   atRiskClients: number;
-  avgClientsPerTrainer: number;
+  /** NULL with no trainers — an average over an empty set, not zero. */
+  avgClientsPerTrainer: number | null;
   cohorts: { label: string; total: number; active: number; pct: number }[];
   generatedOn: string;
 }
@@ -122,7 +123,7 @@ export function ownerReportDoc(d: OwnerReportData, brand = 'Repple'): { html: st
     ['Clients', String(d.clients)],
     ['Sessions · 30d', String(d.sessions30)],
     ['Value of those sessions', d.payroll30 == null ? '—' : '$' + d.payroll30.toLocaleString()],
-    ['Avg clients / trainer', String(d.avgClientsPerTrainer)],
+    ['Avg clients / trainer', d.avgClientsPerTrainer == null ? '\u2014' : String(d.avgClientsPerTrainer)],
     ['Trainers needing a look', String(d.atRiskCount)],
     ['Clients with those trainers', String(d.atRiskClients)],
   ];
