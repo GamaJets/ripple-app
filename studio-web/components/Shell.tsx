@@ -39,6 +39,12 @@ export const NAV: NavItem[] = [
   { href: '/timetable', label: 'Timetable', roles: ['owner'] },
   { href: '/sessions', label: 'Sessions', roles: ['owner'] },
   { href: '/money', label: 'Money', roles: ['owner'] },
+  // Revenue is the analysis behind /money's capture, and accounting is what
+  // leaves the building for somebody else to file. Analytics is the only screen
+  // here that answers "which way is this moving" rather than "what is true now".
+  { href: '/revenue', label: 'Revenue', roles: ['owner'] },
+  { href: '/accounting', label: 'Accounting', roles: ['owner'] },
+  { href: '/analytics', label: 'Analytics', roles: ['owner'] },
   // Beside Money because it is the same ledger read from the other side: Money
   // is what came in, this is what goes out to the people who earned it.
   { href: '/payroll', label: 'Payroll', roles: ['owner'] },
@@ -48,6 +54,11 @@ export const NAV: NavItem[] = [
   { href: '/close', label: 'Close', roles: ['owner'] },
   // Staff work the door, so this is the one operational screen a trainer sees.
   { href: '/door', label: 'Door', roles: ['owner', 'trainer'] },
+  // A coach's own book. Scoped to the signed-in trainer, not the tenant — an
+  // owner who also coaches sees their own clients here, not the gym's.
+  { href: '/coach', label: 'My day', roles: ['owner', 'trainer'] },
+  { href: '/coach/roster', label: 'My clients', roles: ['owner', 'trainer'] },
+  { href: '/coach/earnings', label: 'My earnings', roles: ['owner', 'trainer'] },
   // Beside Door because both are about the building rather than the books:
   // what is in the room, and who is coming through it.
   { href: '/equipment', label: 'Equipment', roles: ['owner'] },

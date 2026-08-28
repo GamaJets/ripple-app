@@ -780,8 +780,8 @@ function buildPacks(packs: Pack[]): PackView {
 function Split({ s, state, packs, packsState }: {
   s: SplitView | null; state: Unread; packs: PackView | null; packsState: Unread;
 }) {
-  const ccy = s?.currency ?? 'AED';
-
+  // No page-level currency fallback here on purpose: every amount below is
+  // labelled with its own bucket's currency or not shown at all.
   const cols: Column<Bucket>[] = [
     { key: 'label', header: 'What it was for', value: (b) => b.label },
     { key: 'count', header: 'Payments', value: (b) => b.count, numeric: true },

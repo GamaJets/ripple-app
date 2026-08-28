@@ -131,12 +131,37 @@ export interface Cohort { label: string; total: number; active: number; pct: num
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
 /** "2026-08-19T…" → "Aug 2026". Null/unparseable → null, never a guess. */
-function monthLabel(iso?: string | null): string | null {
+/**
+ * The calendar month a date belongs to, as [year, monthIndex].
+ *
+ * A bare `YYYY-MM-DD` is read off the STRING, never parsed. `Date.parse` treats
+ * a bare date as UTC midnight and `getMonth()` reads it back in local time, so
+ * anybody who joined on the 1st landed in the previous month's cohort anywhere
+ * west of Greenwich:
+ *
+ *     TZ=America/New_York  new Date(Date.parse('2026-08-01')).getMonth()  // 6, July
+ *     TZ=Asia/Dubai        new Date(Date.parse('2026-08-01')).getMonth()  // 7, August
+ *
+ * Which is why it survived: the gym it was written for is UTC+4, where it is
+ * correct. A US or UK gym had every first-of-the-month joiner counted a month
+ * early — and a cohort that quietly borrows from its neighbour is not the kind
+ * of wrong anybody spots by looking at it.
+ *
+ * A full timestamp is parsed as normal; it carries its own offset.
+ */
+function monthParts(iso?: string | null): [number, number] | null {
   if (!iso) return null;
-  const t = Date.parse(iso);
+  const bare = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso).trim());
+  if (bare) return [Number(bare[1]), Number(bare[2]) - 1];
+  const t = Date.parse(String(iso));
   if (!isFinite(t)) return null;
   const d = new Date(t);
-  return `${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+  return [d.getFullYear(), d.getMonth()];
+}
+
+function monthLabel(iso?: string | null): string | null {
+  const p = monthParts(iso);
+  return p ? `${MONTHS[p[1]]} ${p[0]}` : null;
 }
 
 /**
@@ -147,10 +172,10 @@ function monthLabel(iso?: string | null): string | null {
 export function cohorts(trainers: TrainerLike[]): Cohort[] {
   const map = new Map<string, { total: number; active: number; key: number }>();
   for (const t of trainers) {
-    const label = monthLabel(t.since);
-    if (!label) continue;
-    const d = new Date(Date.parse(t.since as string));
-    const key = d.getFullYear() * 12 + d.getMonth();
+    const parts = monthParts(t.since);
+    if (!parts) continue;
+    const label = `${MONTHS[parts[1]]} ${parts[0]}`;
+    const key = parts[0] * 12 + parts[1];
     const cur = map.get(label) || { total: 0, active: 0, key };
     cur.total++;
     if ((t.sessions30 || 0) > 0) cur.active++;

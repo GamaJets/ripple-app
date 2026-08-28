@@ -26,6 +26,7 @@ import { passwordRules, passwordMeetsLocalRules, passwordErrorMessage, PASSWORD_
 import { RELEASES, releasesFor, unseenReleases, compareVersions, storeNotes } from './releaseNotes';
 import { toE164, stripTrunkZero, isPlausiblePhone, formatNational, maskedForDisplay, phoneAuthError, COUNTRIES, flagFor } from './phone';
 import { readinessScore } from './readiness';
+import { cohorts } from './ownerAnalytics';
 import { groupSessions, sessionKey, sessionDuration, sessionActivity, sessionKcal, sessionDistanceMeters, planSession, planWrite, summariseResult, HK_WRITE_ACTIVITIES, type Ledger } from './wearables/appleHealthWrite';
 import { sliceLoading, sliceReady, sliceFailed, rowsOf, brokenParts, completeness, partialWarning, memberIds, buildDossier, buildDossiers, retentionRead, doorLogActive, attendanceCaveat, type MemberRecord, type MemberBooking } from './memberView';
 import { payroll30For, payrollBlocker, type GymTrainer } from './gymTrainers';
@@ -4057,6 +4058,42 @@ function by2(v: ReturnType<typeof buildStaff>, id: string) {
     ok(r != null && r.score >= 0 && r.score <= 100, h + 'h stays within 0-100');
     ok(r != null && r.label.length > 0 && r.tip.length > 0, h + 'h carries a label and a tip');
   }
+}
+
+/* -- cohort months --------------------------------------------------------
+ *
+ * Found by an agent building the console's analytics page. A bare YYYY-MM-DD
+ * parses as UTC midnight, and getMonth() reads it back in LOCAL time, so
+ * everyone who joined on the 1st fell into the previous month's cohort
+ * anywhere west of Greenwich:
+ *
+ *     TZ=America/New_York  new Date(Date.parse('2026-08-01')).getMonth()  // 6
+ *
+ * It survived because the gym it was written for is UTC+4, where it is right.
+ * These run in whatever zone the test host is in, so they assert the property
+ * that holds everywhere: the label comes from the string, not from a clock.
+ */
+{
+  const j = (since: string | null | undefined) => ({ id: String(since), name: String(since), since, clients: 1, sessions30: 1, delivered30: 1, unmarked30: 0 }) as any;
+
+  const firsts = cohorts([j('2026-08-01'), j('2026-08-15'), j('2026-08-31')]);
+  ok(firsts.length === 1, 'three joiners in August make one cohort, whatever timezone the reader is in');
+  ok(firsts[0].label === 'Aug 2026', `the 1st of the month stays in its own month (got ${firsts[0].label})`);
+  ok(firsts[0].total === 3, 'and all three are counted in it');
+
+  const split = cohorts([j('2026-07-31'), j('2026-08-01')]);
+  ok(split.length === 2, 'a month boundary still separates two cohorts');
+  ok(split.map((c) => c.label).join(',') === 'Jul 2026,Aug 2026', 'in chronological order');
+
+  const yr = cohorts([j('2026-01-01'), j('2025-12-31')]);
+  ok(yr.map((c) => c.label).join(',') === 'Dec 2025,Jan 2026', 'and across a year boundary');
+
+  // A full timestamp carries its own offset and is parsed, not string-read.
+  const ts = cohorts([j('2026-08-01T09:00:00+04:00')]);
+  ok(ts.length === 1 && /2026/.test(ts[0].label), 'a full timestamp still yields a cohort');
+
+  ok(cohorts([j(null), j(undefined), j('not a date')]).length === 0,
+    'an undated joiner is left out rather than bucketed into a month somebody invented');
 }
 
 if (errors.length) { console.log('COVERAGE FAILURES:\n' + errors.join('\n')); process.exit(1); }
