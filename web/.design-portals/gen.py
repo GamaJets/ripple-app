@@ -16,8 +16,8 @@ SANS = 'ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans
 MONO = 'ui-monospace, "SF Mono", Menlo, monospace'
 
 def micro(s, color=None):
-    return (f'<div style="font-family:{MONO};font-size:10.5px;letter-spacing:0.1em;'
-            f'text-transform:uppercase;color:{color or T["ink3"]}">{s}</div>')
+    return (f'<div style="font-family:{MONO};font-size:11px;letter-spacing:0.09em;'
+            f'text-transform:uppercase;color:{color or T["ink2"]}">{s}</div>')
 
 def kpi(label, value, note, tone=None, dash=False):
     col = T["ink3"] if dash else (tone or T["ink"])
@@ -35,7 +35,7 @@ def kpis(items, cols=4):
 def panel(title, body, note=None, accent=None):
     head = f'''<div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid {T['ring']}">
         <div style="font-size:13px;font-weight:600;color:{T['ink']}">{title}</div>
-        {f'<div style="font-family:{MONO};font-size:10.5px;color:{T["ink3"]}">{note}</div>' if note else ''}
+        {f'<div style="font-family:{MONO};font-size:11px;color:{T["ink2"]}">{note}</div>' if note else ''}
       </div>'''
     bar = f'<div style="height:2px;background:{accent}"></div>' if accent else ''
     return f'''<div style="background:{T['surface']};border:1px solid {T['ring']};border-radius:10px;overflow:hidden">{bar}{head}
@@ -44,8 +44,8 @@ def panel(title, body, note=None, accent=None):
 def table(headers, rows, aligns=None):
     aligns = aligns or ['left'] * len(headers)
     th = "".join(
-        f'<th style="text-align:{a};font-family:{MONO};font-size:10px;letter-spacing:0.1em;'
-        f'text-transform:uppercase;color:{T["ink3"]};font-weight:400;padding:0 10px 8px 0">{h}</th>'
+        f'<th style="text-align:{a};font-family:{MONO};font-size:11px;letter-spacing:0.08em;'
+        f'text-transform:uppercase;color:{T["ink2"]};font-weight:400;padding:0 10px 8px 0">{h}</th>'
         for h, a in zip(headers, aligns))
     trs = []
     for r in rows:
@@ -57,11 +57,18 @@ def table(headers, rows, aligns=None):
     return (f'<table style="width:100%;border-collapse:collapse"><thead><tr>{th}</tr></thead>'
             f'<tbody>{"".join(trs)}</tbody></table>')
 
+# Pills carry the most urgent words in the product, so they were the worst
+# place for 11px text at 3.5:1. Bumped to 12px, and the two dark tones are
+# lightened for small text — the tokens stay as they are for large figures.
+SMALL_SAFE = {T['crit']: '#ff7a7a', T['serious']: '#ffa780', T['good']: '#3ecf62'}
 def pill(text, tone):
-    return (f'<span style="font-size:11px;padding:2px 8px;border-radius:20px;'
-            f'border:1px solid {tone}55;color:{tone};white-space:nowrap">{text}</span>')
+    c = SMALL_SAFE.get(tone, tone)
+    return (f'<span style="font-size:12px;padding:3px 9px;border-radius:20px;'
+            f'border:1px solid {c}66;color:{c};white-space:nowrap">{text}</span>')
 
 def bar_row(label, pct, right, tone=None):
+    # pct is the bar's width. Callers pass a value derived from the figure on
+    # the right — a 7.5 kg drop drawn two units shorter is a lie in a shape.
     return f'''<div style="display:grid;grid-template-columns:130px 1fr 62px;gap:12px;align-items:center;padding:7px 0">
       <div style="font-size:12.5px;color:{T['ink2']};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{label}</div>
       <div style="height:7px;border-radius:4px;background:{T['surface3']};overflow:hidden">
@@ -69,12 +76,12 @@ def bar_row(label, pct, right, tone=None):
       <div style="font-family:{MONO};font-variant-numeric:tabular-nums;font-size:12px;color:{T['ink2']};text-align:right">{right}</div>
     </div>'''
 
-def shell(app, accent, nav, active, title, subtitle, body, illustrative=True):
+def shell(app, accent, nav, active, title, subtitle, body, illustrative=True, who=None):
     items = "".join(
         f'''<div style="padding:7px 11px;border-radius:7px;font-size:13px;
             {'background:'+T['surface3']+';color:'+T['ink'] if n==active else 'color:'+T['ink3']}">{n}</div>'''
         for n in nav)
-    tag = (f'<span style="font-family:{MONO};font-size:10px;color:{T["ink3"]};border:1px solid {T["ring"]};'
+    tag = (f'<span style="font-family:{MONO};font-size:11px;color:{T["ink2"]};border:1px solid {T["ring"]};'
            f'border-radius:20px;padding:2px 8px">Illustrative</span>') if illustrative else ''
     return f'''<!doctype html>
 <html>
@@ -100,8 +107,8 @@ def shell(app, accent, nav, active, title, subtitle, body, illustrative=True):
       <div style="font-size:13.5px;font-weight:650;letter-spacing:-0.01em">{app}</div>
     </div>
     <div style="display:flex;flex-direction:column;gap:2px">{items}</div>
-    <div style="margin-top:auto;font-family:{MONO};font-size:10px;color:{T['ink3']};line-height:1.6">
-      Signed in as owner<br>Kinetic Gym · Dubai
+    <div style="margin-top:auto;font-family:{MONO};font-size:11px;color:{T['ink2']};line-height:1.6">
+      {who or 'Signed in as owner<br>Kinetic Gym · Dubai'}
     </div>
   </div>
 
@@ -128,12 +135,12 @@ A, B, K = T['brand'], T['coach'], T['studio']
 pages = {}
 
 # ─────────────────────────── STUDIO ───────────────────────────
-pages['StudioOps'] = shell('Repple Studio', K, S_NAV, 'Overview',
+pages['Main'] = shell('Repple Studio', K, S_NAV, 'Overview',
   'This morning', 'Tuesday 27 August · everything the gym has produced so far today', f'''
   {kpis([
     kpi('In the building','37','of 243 active members'),
     kpi('Through the door','435','since 06:00'),
-    kpi('Class fill · today','71%','booked ÷ capacity', T['warn']),
+    kpi('Class fill · today','75%','68 of 91 places', T['warn']),
     kpi('Taken today','4,180','AED · 22 payments'),
   ])}
   <div style="height:16px"></div>
@@ -145,12 +152,12 @@ pages['StudioOps'] = shell('Repple Studio', K, S_NAV, 'Overview',
           <div style="font-size:11.5px;color:{T['ink3']}">Payroll cannot be priced until every one is marked</div></div>
           {pill('Mark them', T['warn'])}</div>
         <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;border-top:1px solid {T['ring']};padding-top:10px">
-          <div><div style="font-size:13px;color:{T['ink']}">2 trainers flagged</div>
-          <div style="font-size:11.5px;color:{T['ink3']}">14 clients between them have not rebooked in 21 days</div></div>
-          {pill('Review', T['serious'])}</div>
+          <div><div style="font-size:13px;color:{T['ink']}">14 clients left behind by two departures</div>
+          <div style="font-size:11.5px;color:{T['ink3']}">Still members, still coming in, none rebooked in 21 days</div></div>
+          {pill('Reassign', T['serious'])}</div>
         <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;border-top:1px solid {T['ring']};padding-top:10px">
-          <div><div style="font-size:13px;color:{T['ink']}">Rower 3 out of service</div>
-          <div style="font-size:11.5px;color:{T['ink3']}">Reported 4 days ago · no engineer booked</div></div>
+          <div><div style="font-size:13px;color:{T['ink']}">Leg press out of service · 11 days</div>
+          <div style="font-size:11.5px;color:{T['ink3']}">Two programs rewritten around it · no engineer booked</div></div>
           {pill('Book', T['crit'])}</div>
         <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;border-top:1px solid {T['ring']};padding-top:10px">
           <div><div style="font-size:13px;color:{T['ink']}">6 memberships lapse this week</div>
@@ -159,20 +166,20 @@ pages['StudioOps'] = shell('Repple Studio', K, S_NAV, 'Overview',
       </div>""", 'four things', K)}
     {panel('Why class fill moved', f"""
       <div style="font-size:13px;color:{T['ink2']};line-height:1.6">
-        Down from 83% to 71% over thirty days. Two trainers left last month; their fourteen clients
+        Down from 89% to 82% over thirty days. Two trainers left last month; their fourteen clients
         still hold memberships and still come through the door, and none of them has rebooked a class since.
       </div>
       <div style="margin-top:12px;padding-top:12px;border-top:1px solid {T['ring']}">
-        {micro('This needs four systems at once')}
+        {micro('Where the answer came from')}
         <div style="font-size:12px;color:{T['ink3']};margin-top:6px;line-height:1.6">
-          Timetable · door · memberships · staff. No single one of them can produce that sentence.
+          Timetable, door, memberships and staff — read together.
         </div>
       </div>""", None, K)}
   </div>
   <div style="height:16px"></div>
   {panel('Today, hour by hour', "".join([
       bar_row('06:00 Open gym','34','82', T['brand']),
-      bar_row('07:00 HIIT 45','92','22/24', T['brand']),
+      bar_row('07:00 HIIT 45','90','18/20', T['brand']),
       bar_row('09:30 Reformer','58','7/12', T['warn']),
       bar_row('12:15 Express','75','18/24', T['brand']),
       bar_row('17:30 Strength','100','20/20 · 4 waiting', T['good']),
@@ -182,9 +189,9 @@ pages['StudioOps'] = shell('Repple Studio', K, S_NAV, 'Overview',
 pages['StudioClasses'] = shell('Repple Studio', K, S_NAV, 'Classes',
   'Classes', 'Fill, attendance and what each class is actually worth', f'''
   {kpis([
-    kpi('Fill · 30 days','76%','booked ÷ capacity'),
-    kpi('Show rate','84%','attended ÷ booked'),
-    kpi('Empty places · 30 days','412','across 168 classes', T['warn']),
+    kpi('Fill · 30 days','82%','1,588 of 1,932 places'),
+    kpi('Show rate','85%','1,351 attended of 1,588'),
+    kpi('Empty places · 30 days','344','across 104 classes', T['warn']),
     kpi('Revenue per class','—','set a class price first', dash=True),
   ])}
   <div style="height:16px"></div>
@@ -194,19 +201,19 @@ pages['StudioClasses'] = shell('Repple Studio', K, S_NAV, 'Classes',
      ['HIIT 45','Priya Raman','24','438','372','85%','91%'],
      ['Express 30','Dane Whitfield','20','360','309','86%','75%'],
      ['Reformer','Nadia Cole','16','112','98','88%','58%'],
-     ['Yoga Flow','Sam Ellery','20','198','141','71%','33%'],
+     ['Yoga Flow','Sam Ellery','20','198','141','71%','66%'],
      ['Open gym','—','168','—','2,904','—','—']],
     ['left','left','right','right','right','right','right']), '5 classes + open gym', K)}
   <div style="height:16px"></div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
     {panel('Where the empty places are', "".join([
-        bar_row('Yoga Flow · 19:00','67','132 empty', T['crit']),
-        bar_row('Reformer · 09:30','42','98 empty', T['serious']),
-        bar_row('Express · 12:15','25','90 empty', T['warn']),
-        bar_row('HIIT · 07:00','9','42 empty', T['brand']),
+        bar_row('Express · 12:15','100','120 empty', T['crit']),
+        bar_row('Yoga Flow · 19:00','85','102 empty', T['serious']),
+        bar_row('Reformer · 09:30','67','80 empty', T['warn']),
+        bar_row('HIIT · 07:00','35','42 empty', T['brand']),
         bar_row('Strength · 17:30','0','0 empty', T['good']),
     ]), None, K)}
-    {panel('What a dash means here', f"""
+    {panel('Why revenue per class is blank', f"""
       <div style="font-size:13px;color:{T['ink2']};line-height:1.6">
         Revenue per class shows a dash because no class price is set. Studio will not divide
         membership revenue across classes to manufacture a figure — that number would look like
@@ -235,16 +242,16 @@ pages['StudioPayroll'] = shell('Repple Studio', K, S_NAV, 'Payroll',
   <div style="height:16px"></div>
   {panel('By trainer', table(
     ['Trainer','Clients','Delivered','Unmarked','Cancelled','At 55 AED'],
-    [['Marcus Vaughn','31','118','0','6','6,490'],
+    [['Marcus Vaughn','31','118','3','6','—'],
      ['Priya Raman','24','96','2','3','—'],
      ['Dane Whitfield','9','52','7','9','—'],
      ['Nadia Cole','18','74','0','2','4,070'],
-     ['Sam Ellery','12','46','3','1','—'],
+     ['Sam Ellery','12','46','0','1','2,530'],
      ['Total','94','386','12','21','—']],
     ['left','right','right','right','right','right']), '5 trainers', K)}''')
 
 pages['StudioMember'] = shell('Repple Studio', K, S_NAV, 'Members',
-  'Amira Haddad', 'Member since March 2024 · Unlimited · one record, every system', f'''
+  'Amira Haddad', 'Member since April · Unlimited · every system, one row each', f'''
   {kpis([
     kpi('Visits · 30 days','14','last in Tuesday 07:12'),
     kpi('Classes booked','9','8 attended · 89%'),
@@ -268,13 +275,13 @@ pages['StudioMember'] = shell('Repple Studio', K, S_NAV, 'Members',
         <div style="font-size:12.5px;color:{T['ink3']}">no intervention needed</div>
       </div>
       <div style="font-size:13px;color:{T['ink2']};line-height:1.6">
-        Fourteen visits, rising. Booked more classes this month than last. Payment history clean.
+        Fourteen visits this month against nine last. Nine classes booked against six. No failed payment.
       </div>
       <div style="margin-top:14px;padding-top:12px;border-top:1px solid {T['ring']}">
-        {micro('Nothing invented')}
-        <div style="font-size:12px;color:{T['ink3']};margin-top:6px;line-height:1.6">
-          Every figure here is a row somebody wrote — a scan, a tap at the door, a payment. Nothing
-          on this page is modelled or estimated.
+        {micro('Where this comes from')}
+        <div style="font-size:12px;color:{T['ink2']};margin-top:6px;line-height:1.6">
+          The figures above are rows somebody wrote — a scan, a tap at the door, a payment. The
+          word Healthy is not: it is this console reading them, and you can disagree with it.
         </div>
       </div>""", None, T['good'])}
   </div>''')
@@ -290,7 +297,7 @@ pages['StudioEquipment'] = shell('Repple Studio', K, S_NAV, 'Equipment',
   <div style="height:16px"></div>
   {panel('Out of service', table(
     ['Item','Location','Reported','Down','Effect'],
-    [['Rower 3','Cardio floor','23 Aug','4 days','Rowing classes capped at 11'],
+    [['Rower 3','Cardio floor','23 Aug','4 days','Conditioning circuits lose a station'],
      ['Leg press','Strength','16 Aug','11 days','2 programs re-written around it'],
      ['Treadmill 7','Cardio floor','26 Aug','1 day','—']],
     ['left','left','left','right','left']), '3 items', T['crit'])}
@@ -298,19 +305,22 @@ pages['StudioEquipment'] = shell('Repple Studio', K, S_NAV, 'Equipment',
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
     {panel('Service due', table(
       ['Item','Last service','Due','Interval'],
-      [['Treadmills 1-8','12 Feb','12 Sep','6 months'],
+      [['Treadmills 1-8','12 Feb','12 Aug · overdue','6 months'],
        ['Rowers 1-4','2 Mar','2 Sep','6 months'],
        ['Cable stack','—','—','never serviced']],
       ['left','left','left','left']), None, T['warn'])}
-    {panel('Why this belongs here', f"""
+    {panel('What it is costing', f"""
       <div style="font-size:13px;color:{T['ink2']};line-height:1.6">
-        A broken rower is not a maintenance fact, it is a timetable fact and a programming fact. Down
-        for four days, it capped every rowing class at eleven places and sent two coaches to rewrite
-        programs — none of which a maintenance log would ever have told you.
+        The leg press has been down eleven days. Two coaches have rewritten programs around it, and
+        nobody has booked an engineer. That is a programming problem and a scheduling problem before
+        it is a maintenance one, which is why it sits on the same board as the timetable.
       </div>""", None, K)}
   </div>''')
 
 # ─────────────────────────── COACH ───────────────────────────
+COACH_WHO = 'Marcus Vaughn · coach<br>Kinetic Gym · Dubai'
+MEMBER_WHO = 'Amira Haddad · member<br>Kinetic Gym · Dubai'
+
 pages['CoachToday'] = shell('Repple Coach', B, C_NAV, 'Today',
   'Today', 'Tuesday 27 August · six sessions, two clients drifting', f'''
   {kpis([
@@ -323,9 +333,9 @@ pages['CoachToday'] = shell('Repple Coach', B, C_NAV, 'Today',
   <div style="display:grid;grid-template-columns:1.3fr 1fr;gap:16px">
     {panel('Your day', table(
       ['Time','Client','Focus','Status'],
-      [['07:00','Amira Haddad','Lower · squat build', pill('Delivered', T['good'])],
-       ['08:00','Tom Beckett','Upper push', pill('Delivered', T['good'])],
-       ['10:30','Yusuf Rahman','Assessment', pill('Now', T['brand'])],
+      [['07:00','Tom Beckett','Upper push', pill('Delivered', T['good'])],
+       ['08:00','Yusuf Rahman','Assessment', pill('Delivered', T['good'])],
+       ['10:30','Amira Haddad','Lower · squat build', pill('Now', T['brand'])],
        ['12:00','Lena Sørensen','Conditioning', pill('Booked', T['ink3'])],
        ['17:30','Class · Strength 45','20 booked', pill('Booked', T['ink3'])],
        ['19:00','Priya Nair','Deload week', pill('Booked', T['ink3'])]],
@@ -336,7 +346,7 @@ pages['CoachToday'] = shell('Repple Coach', B, C_NAV, 'Today',
         They can correct it, and both of you see who logged it.
       </div>
       <div style="background:{T['surface2']};border:1px solid {T['ring']};border-radius:8px;padding:12px">
-        <div style="font-size:12.5px;color:{T['ink']};margin-bottom:8px">Yusuf Rahman · 10:30</div>
+        <div style="font-size:12.5px;color:{T['ink']};margin-bottom:8px">Yusuf Rahman · 08:00</div>
         {table(['Lift','Sets','Top set'],
                [['Back squat','4','82.5 kg'],['Romanian deadlift','3','70 kg'],['Split squat','3','24 kg']],
                ['left','right','right'])}
@@ -351,7 +361,7 @@ pages['CoachToday'] = shell('Repple Coach', B, C_NAV, 'Today',
      ['Marta Silva','12 days ago','Them, 11 days ago','3', pill('Watch', T['serious'])],
      ['Ben Traoré','10 days ago','You, 3 days ago','6', pill('Watch', T['warn'])],
      ['Aisha Karim','10 days ago','Them, yesterday','2', pill('On holiday', T['ink3'])]],
-    ['left','left','left','right','right']), 'four', T['serious'])}''')
+    ['left','left','left','right','right']), 'four', T['serious'])}''', who=COACH_WHO)
 
 pages['CoachRoster'] = shell('Repple Coach', B, C_NAV, 'Roster',
   'Roster', '31 clients · sorted by who needs you first', f'''
@@ -389,14 +399,14 @@ pages['CoachRoster'] = shell('Repple Coach', B, C_NAV, 'Roster',
         <div style="font-family:{MONO};font-size:28px;letter-spacing:6px;color:{T['ink']}">2JE8NC</div>
         <div style="font-size:11.5px;color:{T['ink3']};margin-top:5px">3 joined with it · 1 waiting on you</div>
       </div>""", None, B)}
-  </div>''')
+  </div>''', who=COACH_WHO)
 
 pages['CoachClient'] = shell('Repple Coach', B, C_NAV, 'Roster',
   'Amira Haddad', 'Fat loss · 18 weeks in · trains four times a week', f'''
   {kpis([
     kpi('Weight','−2.1','kg since starting', T['good']),
     kpi('Adherence','94%','check-ins kept'),
-    kpi('Sessions','72','11 logged by you'),
+    kpi('Sessions','68','11 logged by you'),
     kpi('Body fat','−1.4','pts · last scan 30 Jul', T['good']),
   ])}
   <div style="height:16px"></div>
@@ -404,8 +414,8 @@ pages['CoachClient'] = shell('Repple Coach', B, C_NAV, 'Roster',
     {panel('Squat · top set each week', "".join([
         bar_row('Week 12','62','72.5 kg'), bar_row('Week 13','66','75 kg'),
         bar_row('Week 14','66','75 kg'), bar_row('Week 15','72','80 kg'),
-        bar_row('Week 16','76','82.5 kg'), bar_row('Week 17','76','82.5 kg'),
-        bar_row('Week 18','82','85 kg', T['good']),
+        bar_row('Week 16','76','82.5 kg'), bar_row('Week 17','60','65 kg · deload', T['warn']),
+        bar_row('Week 18','88','82.5 kg', T['good']),
     ]), 'seven weeks', B)}
     {panel('What changed and when', f"""
       <div style="display:flex;flex-direction:column;gap:11px">
@@ -422,15 +432,15 @@ pages['CoachClient'] = shell('Repple Coach', B, C_NAV, 'Roster',
   <div style="height:16px"></div>
   {panel('This week', table(
     ['Day','Session','Logged by','Volume','Felt'],
-    [['Mon','Lower · squat build','Her','8,240 kg','Hard'],
-     ['Tue','Upper push','You','5,100 kg','Good'],
-     ['Thu','Lower · hinge','Her','7,900 kg','Good'],
-     ['Fri','Conditioning','Her','—','Easy'],
-     ['Sat','Rest','—','—','—']],
-    ['left','left','left','right','right']), 'five days', B)}''')
+    [['Mon 26','Upper push','You','5,100 kg','Good'],
+     ['Sat 24','Lower · hinge','Her','7,900 kg','Good'],
+     ['Fri 23','Conditioning','Her','—','Easy'],
+     ['Tue 27','Lower · squat build','—','—','booked 10:30'],
+     ['Wed 28','Rest','—','—','—']],
+    ['left','left','left','right','right']), 'five days', B)}''', who=COACH_WHO)
 
 pages['CoachProgram'] = shell('Repple Coach', B, C_NAV, 'Programs',
-  'Programs', 'Build once, assign to many, adjust for one', f'''
+  'Programs', 'Nine templates, 27 clients assigned, 4 without one', f'''
   {kpis([
     kpi('Templates','9','4 in use this week'),
     kpi('Assigned','27','of 31 clients'),
@@ -455,7 +465,7 @@ pages['CoachProgram'] = shell('Repple Coach', B, C_NAV, 'Programs',
         Two lifts use clips you filmed; one falls back to the Academy library; one has no video and
         says so rather than showing a stranger doing something different.
       </div>""", '4 exercises', B)}
-  </div>''')
+  </div>''', who=COACH_WHO)
 
 pages['CoachEarnings'] = shell('Repple Coach', B, C_NAV, 'Earnings',
   'Earnings', 'August · what you have delivered and what is still unmarked', f'''
@@ -482,18 +492,18 @@ pages['CoachEarnings'] = shell('Repple Coach', B, C_NAV, 'Earnings',
     {panel('How this is counted', f"""
       <div style="font-size:13px;color:{T['ink2']};line-height:1.6">
         A session counts when somebody records what happened to it — delivered, cancelled or no-show.
-        Not when it was booked, and not when its start time passed. A booking nobody turned up to is
-        not work, and Repple will not pay you for one or pretend it did.
+        Not when it was booked, and not when its start time passed. Your gym pays on delivered
+        sessions, so an unmarked one sits here until somebody says what happened.
       </div>""", None, B)}
-  </div>''')
+  </div>''', who=COACH_WHO)
 
 # ─────────────────────────── CLIENT ───────────────────────────
 pages['ClientToday'] = shell('Repple', A, M_NAV, 'Today',
   'Good morning, Amira', 'Tuesday 27 August · week 18', f'''
   {kpis([
-    kpi('Readiness','82','well recovered', T['good']),
-    kpi('Slept','7.4','h · seven-night average'),
-    kpi('Trained','4','sessions this week'),
+    kpi('Readiness','82','from sleep and load', T['good']),
+    kpi('Slept','7.4','h · seven nights, logged by you'),
+    kpi('Trained','1','session since Monday'),
     kpi('Fuel left','1,240','kcal of 2,180'),
   ])}
   <div style="height:16px"></div>
@@ -506,7 +516,7 @@ pages['ClientToday'] = shell('Repple', A, M_NAV, 'Today',
           <div style="font-size:16px;color:{T['ink']};margin-bottom:4px">Good day to push</div>
           <div style="font-size:13px;color:{T['ink2']};line-height:1.6">
             Seven and a half hours for three nights running, and you have not trained legs since
-            Thursday. Aim for a top set above 82.5 kg.
+            the 19th. Aim for a top set above 82.5 kg.
           </div></div>
       </div>
       <div style="margin-top:14px;padding-top:12px;border-top:1px solid {T['ring']}">
@@ -530,14 +540,14 @@ pages['ClientToday'] = shell('Repple', A, M_NAV, 'Today',
       <div style="margin-top:14px;padding-top:12px;border-top:1px solid {T['ring']};font-size:12px;color:{T['ink3']};line-height:1.6">
         A dash means Repple does not know, not that the number is zero.
       </div>""", None, A)}
-  </div>''')
+  </div>''', who=MEMBER_WHO)
 
 pages['ClientTraining'] = shell('Repple', A, M_NAV, 'Training',
-  'Training', '72 sessions · 18 weeks · every set you have logged', f'''
+  'Training', '68 sessions · 18 weeks · every set you have logged', f'''
   {kpis([
-    kpi('Sessions','72','4 a week average'),
-    kpi('Volume · this week','21,240','kg lifted'),
-    kpi('Personal records','9','2 this month', T['good']),
+    kpi('Sessions','68','4 a week average'),
+    kpi('Volume · this week','5,100','kg lifted · one session so far'),
+    kpi('Personal records','9','3 this month', T['good']),
     kpi('Longest streak','23','days'),
   ])}
   <div style="height:16px"></div>
@@ -546,30 +556,30 @@ pages['ClientTraining'] = shell('Repple', A, M_NAV, 'Training',
         bar_row('Week 12','62','72.5 kg'), bar_row('Week 13','66','75 kg'),
         bar_row('Week 14','66','75 kg'), bar_row('Week 15','72','80 kg'),
         bar_row('Week 16','76','82.5 kg'), bar_row('Week 17','60','65 kg · deload', T['warn']),
-        bar_row('Week 18','82','85 kg · PR', T['good']),
+        bar_row('Week 18','88','82.5 kg · PR', T['good']),
     ]), None, A)}
     {panel('Records', table(
       ['Lift','Best','When'],
-      [['Back squat','85 kg × 5','Today'],['Deadlift','120 kg × 3','12 Aug'],
+      [['Back squat','82.5 kg × 5','19 Aug'],['Deadlift','120 kg × 3','12 Aug'],
        ['Bench press','52.5 kg × 5','4 Aug'],['Hip thrust','140 kg × 8','29 Jul']],
       ['left','right','right']), 'four of nine', A)}
   </div>
   <div style="height:16px"></div>
   {panel('Recent sessions', table(
     ['Date','Session','Logged by','Volume','Felt'],
-    [['Today','Lower · squat build','You','8,240 kg','Hard'],
-     ['Yesterday','Upper push','Marcus Vaughn','5,100 kg','Good'],
+    [['Yesterday','Upper push','Marcus Vaughn','5,100 kg','Good'],
      ['24 Aug','Lower · hinge','You','7,900 kg','Good'],
      ['23 Aug','Conditioning','You','—','Easy'],
-     ['21 Aug','Upper pull','Marcus Vaughn','4,860 kg','Good']],
-    ['left','left','left','right','right']), 'five', A)}''')
+     ['21 Aug','Upper pull','Marcus Vaughn','4,860 kg','Good'],
+     ['19 Aug','Lower · squat build','You','8,240 kg','Hard']],
+    ['left','left','left','right','right']), 'five', A)}''', who=MEMBER_WHO)
 
 pages['ClientNutrition'] = shell('Repple', A, M_NAV, 'Nutrition',
-  'Nutrition', 'Targets that move with your body and your training', f'''
+  'Nutrition', 'What you ate today, against a target that changed in week 15', f'''
   {kpis([
     kpi('Eaten today','940','kcal of 2,180'),
     kpi('Protein','78','g of 130', T['warn']),
-    kpi('Burned','420','kcal from training'),
+    kpi('Burned','~420','kcal · estimated from the work logged'),
     kpi('Average · 7 days','2,090','kcal'),
   ])}
   <div style="height:16px"></div>
@@ -592,12 +602,12 @@ pages['ClientNutrition'] = shell('Repple', A, M_NAV, 'Nutrition',
          ['Calories','2,320','2,180','Scan · week 15'],
          ['Carbs','240 g','218 g','Follows calories']],
         ['left','right','right','left'])}""", None, A)}
-  </div>''')
+  </div>''', who=MEMBER_WHO)
 
 pages['ClientProgress'] = shell('Repple', A, M_NAV, 'Progress',
   'Progress', '18 weeks · weight, composition and the photos', f'''
   {kpis([
-    kpi('Weight','−2.1','kg since March', T['good']),
+    kpi('Weight','−2.1','kg since April', T['good']),
     kpi('Body fat','−1.4','pts · last scan 30 Jul', T['good']),
     kpi('Muscle','+0.8','kg', T['good']),
     kpi('Since last scan','28','days · book another', T['warn']),
@@ -612,7 +622,7 @@ pages['ClientProgress'] = shell('Repple', A, M_NAV, 'Progress',
     ]), 'six of eighteen', A)}
     {panel('Body composition', f"""
       {table(['Scan','Weight','Body fat','Muscle'],
-        [['4 Mar','68.4 kg','29.1%','24.2 kg'],
+        [['21 Apr','68.4 kg','29.1%','24.2 kg'],
          ['2 Jun','67.2 kg','28.0%','24.7 kg'],
          ['30 Jul','66.3 kg','27.7%','25.0 kg'],
          ['Next','—','—','—']],
@@ -620,7 +630,7 @@ pages['ClientProgress'] = shell('Repple', A, M_NAV, 'Progress',
       <div style="margin-top:12px;padding-top:12px;border-top:1px solid {T['ring']};font-size:12px;color:{T['ink3']};line-height:1.6">
         The next row is dashes because the scan has not happened. Repple will not project it.
       </div>""", None, A)}
-  </div>''')
+  </div>''', who=MEMBER_WHO)
 
 pages['ClientBookings'] = shell('Repple', A, M_NAV, 'Bookings',
   'Bookings', 'Your sessions, classes and what you have paid for', f'''
@@ -648,11 +658,12 @@ pages['ClientBookings'] = shell('Repple', A, M_NAV, 'Bookings',
         <div style="height:100%;width:67%;background:{T['brand']}"></div></div>
       {table(['Bought','Used','Expires'], [['12 Jul','4','12 Oct']], ['left','right','right'])}
       <div style="margin-top:12px;padding-top:12px;border-top:1px solid {T['ring']};font-size:12px;color:{T['ink3']};line-height:1.6">
-        If this ever cannot be read it shows a dash, not a zero — being told you have none when you
-        have eight is the worst thing an app can say to somebody who has paid.
+        If this cannot be read it shows a dash, not a zero. You have paid for these; you should never
+        be told you have none because a query failed.
       </div>""", None, A)}
-  </div>''')
+  </div>''', who=MEMBER_WHO)
 
+# Main.dc.html is the canvas entry file; it holds the Studio overview.
 out = pathlib.Path('.')
 for name, html in pages.items():
     (out / f'{name}.dc.html').write_text(html, encoding='utf-8')
