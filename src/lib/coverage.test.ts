@@ -27,6 +27,8 @@ import { RELEASES, releasesFor, unseenReleases, compareVersions, storeNotes } fr
 import { toE164, stripTrunkZero, isPlausiblePhone, formatNational, maskedForDisplay, phoneAuthError, COUNTRIES, flagFor } from './phone';
 import { readinessScore } from './readiness';
 import { cohorts } from './ownerAnalytics';
+import { dateParts, localDate } from './localDate';
+import { ageFromDob } from './age';
 import { groupSessions, sessionKey, sessionDuration, sessionActivity, sessionKcal, sessionDistanceMeters, planSession, planWrite, summariseResult, HK_WRITE_ACTIVITIES, type Ledger } from './wearables/appleHealthWrite';
 import { sliceLoading, sliceReady, sliceFailed, rowsOf, brokenParts, completeness, partialWarning, memberIds, buildDossier, buildDossiers, retentionRead, doorLogActive, attendanceCaveat, type MemberRecord, type MemberBooking } from './memberView';
 import { payroll30For, payrollBlocker, type GymTrainer } from './gymTrainers';
@@ -4094,6 +4096,43 @@ function by2(v: ReturnType<typeof buildStaff>, id: string) {
 
   ok(cohorts([j(null), j(undefined), j('not a date')]).length === 0,
     'an undated joiner is left out rather than bucketed into a month somebody invented');
+}
+
+/* -- date-only values ------------------------------------------------------
+ *
+ * Fourteen columns in this schema are Postgres `date` — a bare YYYY-MM-DD with
+ * no time and no offset. Date.parse resolves one to UTC midnight anyway, and
+ * every local getter then reads back the day before, west of Greenwich:
+ *
+ *     TZ=America/New_York  new Date('2026-08-01').getDate()   // 31
+ *
+ * Two shipped bugs came from it, both invisible in the UTC+4 gym they were
+ * written for: a member joining on the 1st landed in the previous month's
+ * retention cohort, and somebody born on the 1st turned a year older on the
+ * 31st. These assertions run in whatever zone the host is in and assert the
+ * property that has to hold in all of them.
+ */
+{
+  ok(String(dateParts('2026-08-01')) === '2026,7,1', 'the 1st reads as the 1st of August, not the 31st of July');
+  ok(String(dateParts('2026-01-01')) === '2026,0,1', 'and across a year boundary');
+  ok(String(dateParts('2026-12-31')) === '2026,11,31', 'and on the last day of a year');
+  ok(dateParts(null) === null && dateParts('') === null && dateParts('nonsense') === null,
+    'an unreadable value is null rather than a date somebody invented');
+
+  const d = localDate('2026-08-01');
+  ok(d != null && d.getDate() === 1 && d.getMonth() === 7 && d.getFullYear() === 2026,
+    'localDate builds the day that was written, in the reader\'s own zone');
+
+
+
+  // Age: the bug was somebody born on the 1st being aged up on the 31st.
+  const dayBefore = new Date(2026, 6, 31, 12, 0);
+  const birthday = new Date(2026, 7, 1, 12, 0);
+  ok(ageFromDob('1990-08-01', dayBefore) === 35, 'still 35 the day before the birthday');
+  ok(ageFromDob('1990-08-01', birthday) === 36, 'and 36 on the day');
+  ok(ageFromDob('1990-08-02', birthday) === 35, 'somebody a day younger is still 35');
+  ok(ageFromDob('', birthday) === null && ageFromDob('nope', birthday) === null,
+    'no readable date of birth yields no age rather than a number');
 }
 
 if (errors.length) { console.log('COVERAGE FAILURES:\n' + errors.join('\n')); process.exit(1); }

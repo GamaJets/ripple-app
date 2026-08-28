@@ -10,6 +10,8 @@
 // and how many sessions they actually delivered. Both come from rows.
 // No UI, no state → unit-testable.
 
+import { dateParts } from './localDate';
+
 export interface TrainerLike {
   id: string;
   name: string;
@@ -134,29 +136,14 @@ const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov
 /**
  * The calendar month a date belongs to, as [year, monthIndex].
  *
- * A bare `YYYY-MM-DD` is read off the STRING, never parsed. `Date.parse` treats
- * a bare date as UTC midnight and `getMonth()` reads it back in local time, so
- * anybody who joined on the 1st landed in the previous month's cohort anywhere
- * west of Greenwich:
- *
- *     TZ=America/New_York  new Date(Date.parse('2026-08-01')).getMonth()  // 6, July
- *     TZ=Asia/Dubai        new Date(Date.parse('2026-08-01')).getMonth()  // 7, August
- *
- * Which is why it survived: the gym it was written for is UTC+4, where it is
- * correct. A US or UK gym had every first-of-the-month joiner counted a month
- * early — and a cohort that quietly borrows from its neighbour is not the kind
- * of wrong anybody spots by looking at it.
- *
- * A full timestamp is parsed as normal; it carries its own offset.
+ * Delegates to src/lib/localDate.ts, which explains why a bare YYYY-MM-DD must
+ * never go through Date.parse: it resolves to UTC midnight and every local
+ * getter then reads back the previous day west of Greenwich, which put anyone
+ * joining on the 1st into the wrong retention cohort.
  */
 function monthParts(iso?: string | null): [number, number] | null {
-  if (!iso) return null;
-  const bare = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso).trim());
-  if (bare) return [Number(bare[1]), Number(bare[2]) - 1];
-  const t = Date.parse(String(iso));
-  if (!isFinite(t)) return null;
-  const d = new Date(t);
-  return [d.getFullYear(), d.getMonth()];
+  const p = dateParts(iso);
+  return p ? [p[0], p[1]] : null;
 }
 
 function monthLabel(iso?: string | null): string | null {
