@@ -1,0 +1,183 @@
+{
+  "artboards": [
+    {
+      "file": "Main.dc.html",
+      "x": 0,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "title": "Studio \u00b7 This morning",
+      "page": "page-1"
+    },
+    {
+      "file": "StudioClasses.dc.html",
+      "x": 1560,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "title": "Studio \u00b7 Classes",
+      "page": "page-1"
+    },
+    {
+      "file": "StudioPayroll.dc.html",
+      "x": 3120,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "title": "Studio \u00b7 Payroll",
+      "page": "page-1"
+    },
+    {
+      "file": "StudioMember.dc.html",
+      "x": 0,
+      "y": 1060,
+      "w": 1440,
+      "h": 900,
+      "title": "Studio \u00b7 One member",
+      "page": "page-1"
+    },
+    {
+      "file": "StudioEquipment.dc.html",
+      "x": 1560,
+      "y": 1060,
+      "w": 1440,
+      "h": 900,
+      "title": "Studio \u00b7 Equipment",
+      "page": "page-1"
+    },
+    {
+      "file": "CoachToday.dc.html",
+      "x": 0,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "title": "Coach \u00b7 Today",
+      "page": "page-2"
+    },
+    {
+      "file": "CoachRoster.dc.html",
+      "x": 1560,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "title": "Coach \u00b7 Roster",
+      "page": "page-2"
+    },
+    {
+      "file": "CoachClient.dc.html",
+      "x": 3120,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "title": "Coach \u00b7 One client",
+      "page": "page-2"
+    },
+    {
+      "file": "CoachProgram.dc.html",
+      "x": 0,
+      "y": 1060,
+      "w": 1440,
+      "h": 900,
+      "title": "Coach \u00b7 Programs",
+      "page": "page-2"
+    },
+    {
+      "file": "CoachEarnings.dc.html",
+      "x": 1560,
+      "y": 1060,
+      "w": 1440,
+      "h": 900,
+      "title": "Coach \u00b7 Earnings",
+      "page": "page-2"
+    },
+    {
+      "file": "ClientToday.dc.html",
+      "x": 0,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "title": "Member \u00b7 Today",
+      "page": "page-3"
+    },
+    {
+      "file": "ClientTraining.dc.html",
+      "x": 1560,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "title": "Member \u00b7 Training",
+      "page": "page-3"
+    },
+    {
+      "file": "ClientNutrition.dc.html",
+      "x": 3120,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "title": "Member \u00b7 Nutrition",
+      "page": "page-3"
+    },
+    {
+      "file": "ClientProgress.dc.html",
+      "x": 0,
+      "y": 1060,
+      "w": 1440,
+      "h": 900,
+      "title": "Member \u00b7 Progress",
+      "page": "page-3"
+    },
+    {
+      "file": "ClientBookings.dc.html",
+      "x": 1560,
+      "y": 1060,
+      "w": 1440,
+      "h": 900,
+      "title": "Member \u00b7 Bookings",
+      "page": "page-3"
+    }
+  ],
+  "annotations": [
+    {
+      "id": "note-page-1",
+      "x": 0,
+      "y": -150,
+      "w": 620,
+      "page": "page-1",
+      "text": "Studio is the hub \u2014 every board here answers a question that needs more than one system at once.\n\nFigures are illustrative. Dashes are deliberate: they mark what the console would genuinely not know."
+    },
+    {
+      "id": "note-page-2",
+      "x": 0,
+      "y": -150,
+      "w": 620,
+      "page": "page-2",
+      "text": "Coach portal \u2014 does not exist yet. These are proposals.\n\nBuilt on tables that already exist: sessions, coach_requests, program_templates, session_approvals."
+    },
+    {
+      "id": "note-page-3",
+      "x": 0,
+      "y": -150,
+      "w": 620,
+      "page": "page-3",
+      "text": "Member portal \u2014 does not exist yet. These are proposals.\n\nThe web can hold what a phone screen cannot: eighteen weeks of squat top sets on one line, a full scan history, a nutrition target with its reason beside it."
+    }
+  ],
+  "pages": [
+    {
+      "id": "page-1",
+      "name": "Studio"
+    },
+    {
+      "id": "page-2",
+      "name": "Coach"
+    },
+    {
+      "id": "page-3",
+      "name": "Member"
+    }
+  ],
+  "launch": {
+    "view": "canvas",
+    "page": "page-1"
+  }
+}
