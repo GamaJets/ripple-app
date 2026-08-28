@@ -28,7 +28,9 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
-const ROOTS = ['src', 'app'];
+// The web console reads the same tables through the same client, so it has the
+// same failure mode and gets the same rule.
+const ROOTS = ['src', 'app', 'studio-web/app', 'studio-web/lib'];
 const files = [];
 function walk(dir) {
   for (const e of readdirSync(dir)) {
@@ -38,7 +40,7 @@ function walk(dir) {
     else if (/\.tsx?$/.test(p)) files.push(p);
   }
 }
-for (const r of ROOTS) walk(r);
+for (const r of ROOTS) { try { walk(r); } catch { /* a root that is not there yet */ } }
 // A check that inspects no files passes every time. The first version of this
 // walked from '.' and filtered for paths starting './src/', which join()
 // normalises away — it reported success having read nothing.
@@ -71,4 +73,4 @@ if (offenders.length) {
   console.error('`no-error-ok: <why an empty answer is honest here>` if failure genuinely does not matter.');
   process.exit(1);
 }
-console.log(`reads ok — every supabase read in src/ and app/ either checks error or says why it need not.`);
+console.log(`reads ok — ${files.length} files across the apps and the console; every read either checks error or says why it need not.`);

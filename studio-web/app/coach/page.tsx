@@ -243,6 +243,7 @@ export default function Coach() {
       ...(rost ?? []).map((r) => r.clientId),
     ]);
     if (ids.size) {
+      // no-error-ok: an unreadable name renders as a labelled dash beside a row that is still shown and still actionable
       const { data } = await supabase.from('profiles').select('id, full_name').in('id', [...ids]);
       setNames(namesById((data ?? []) as Array<{ id: string; full_name?: string | null }>));
     } else {

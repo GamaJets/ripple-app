@@ -142,6 +142,7 @@ export default function Classes() {
       if (!live) return;
       setMe(who);
       if (!who?.tenantId) { setClasses([]); setTrainers([]); setUpcoming(0); return; }
+      // no-error-ok: the gym's name is a header label; without it the header is blank and every figure below is unaffected
       const { data: t } = await supabase.from('tenants').select('name').eq('id', who.tenantId).single();
       if (live) setGymName(t?.name ?? null);
       await load(who.tenantId, days);

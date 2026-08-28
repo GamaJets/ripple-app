@@ -57,3 +57,4 @@ export async function loadMe(): Promise<Me | null> {
     tenantId: data?.tenant_id ?? null,
   };
 }
+
