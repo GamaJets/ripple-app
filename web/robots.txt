@@ -1,0 +1,16 @@
+# Repple — repplefitness.com
+#
+# Everything public is listed in the sitemap. The four pages excluded from it
+# carry noindex in their own head: the two password flows, the confirmation
+# landing page and account deletion. Those are reached from an email or from
+# inside the app, never from a search result, and a password-reset page in an
+# index is a page somebody lands on by accident.
+
+User-agent: *
+Allow: /
+Disallow: /reset-password
+Disallow: /forgot-password
+Disallow: /confirmed
+Disallow: /delete-account
+
+Sitemap: https://www.repplefitness.com/sitemap.xml
