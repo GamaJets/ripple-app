@@ -53,7 +53,7 @@ export function DataTable<T>({
   }, [rows, columns, sortKey, desc]);
 
   if (!rows.length) {
-    return <div style={{ padding: '28px 20px', color: 'var(--ink3)', fontSize: 14 }}>{empty}</div>;
+    return <div style={{ padding: '22px 12px', color: 'var(--ink3)', fontSize: 12.5 }}>{empty}</div>;
   }
 
   const toggle = (key: string) => {
@@ -63,7 +63,7 @@ export function DataTable<T>({
 
   return (
     <div style={{ overflowX: 'auto' }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13.5 }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
         <thead>
           <tr>
             {columns.map((c) => (
@@ -73,14 +73,14 @@ export function DataTable<T>({
                 title={`Sort by ${c.header}`}
                 style={{
                   textAlign: c.align ?? (c.numeric ? 'right' : 'left'),
-                  padding: '9px 12px',
+                  padding: '5px 12px',
                   borderBottom: '1px solid var(--ring)',
                   color: sortKey === c.key ? 'var(--ink)' : 'var(--ink3)',
                   fontFamily: 'var(--mono)',
-                  fontSize: 10.5,
-                  letterSpacing: '0.1em',
+                  fontSize: 8,
+                  letterSpacing: '0.16em',
                   textTransform: 'uppercase',
-                  fontWeight: 600,
+                  fontWeight: 500,
                   cursor: 'pointer',
                   userSelect: 'none',
                   whiteSpace: 'nowrap',
@@ -103,8 +103,8 @@ export function DataTable<T>({
                     key={c.key}
                     style={{
                       textAlign: c.align ?? (c.numeric ? 'right' : 'left'),
-                      padding: '10px 12px',
-                      borderBottom: '1px solid var(--ring)',
+                      padding: '6px 12px',
+                      borderBottom: '1px solid var(--ring2)',
                       color: missing ? 'var(--ink3)' : 'var(--ink2)',
                       fontFamily: c.numeric ? 'var(--mono)' : 'var(--sans)',
                       fontVariantNumeric: c.numeric ? 'tabular-nums' : undefined,

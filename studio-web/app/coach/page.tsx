@@ -414,7 +414,7 @@ export default function Coach() {
         style={{
           display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
           gap: 1, background: 'var(--ring)', border: '1px solid var(--ring)',
-          borderRadius: 8, overflow: 'hidden', margin: '20px 0 26px',
+          borderRadius: 0, overflow: 'hidden', margin: '20px 0 26px',
         }}
       >
         <Kpi
@@ -733,7 +733,7 @@ function Quiet({ rows, unread, names }: {
 /* ── shared bits (the same shapes as Door and Sessions) ────────────────────── */
 
 const field = {
-  padding: '9px 11px', borderRadius: 7, fontSize: 13.5,
+  padding: '9px 11px', borderRadius: 0, fontSize: 13.5,
   background: 'var(--surface2)', color: 'var(--ink)',
   border: '1px solid var(--ring)', fontFamily: 'var(--sans)', minWidth: 0,
 } as const;
@@ -755,7 +755,7 @@ function Section({ title, sub, tone, children }: {
   return (
     <section
       style={{
-        border: '1px solid var(--ring)', borderRadius: 8, background: 'var(--surface)',
+        border: '1px solid var(--ring)', borderRadius: 0, background: 'var(--surface)',
         marginBottom: 22, borderLeft: tone === 'warn' ? '3px solid var(--warn)' : undefined,
       }}
     >
@@ -791,7 +791,7 @@ function Kpi({ label, text, note, tone }: {
 function Banner({ children, tone }: { children: React.ReactNode; tone?: 'crit' }) {
   return (
     <div style={{
-      margin: '14px 0', padding: '11px 14px', borderRadius: 8, background: 'var(--surface)',
+      margin: '14px 0', padding: '11px 14px', borderRadius: 0, background: 'var(--surface)',
       border: '1px solid var(--ring)', borderLeft: `3px solid ${tone === 'crit' ? 'var(--crit)' : 'var(--brand)'}`,
       color: 'var(--ink2)', fontSize: 13,
     }}>{children}</div>

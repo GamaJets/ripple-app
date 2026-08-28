@@ -33,6 +33,7 @@ import { groupSessions, sessionKey, sessionDuration, sessionActivity, sessionKca
 import { sliceLoading, sliceReady, sliceFailed, rowsOf, brokenParts, completeness, partialWarning, memberIds, buildDossier, buildDossiers, retentionRead, doorLogActive, attendanceCaveat, type MemberRecord, type MemberBooking } from './memberView';
 import { payroll30For, payrollBlocker, type GymTrainer } from './gymTrainers';
 import { gymRollup, trainerHealth } from './ownerAnalytics';
+import { ROW_CAP, capLimit, assertWhole, isTruncated, TruncatedRead } from './rowCap';
 import { isDelivered, isAwaitingOutcome, isPayable, payrollByTrainer, payrollTotal, settlementBlocker, settleableSessions, settlementAmount, settleBlocker, sessionProfileIds, namesById, PAY_DELIVERED_ONLY, type PtSession } from './gymSessions';
 import { dwellMinutes, averageDwellMinutes, uniqueMembers, summariseVisits, visitsByHour, peakHour, visitsPerDay, lastSeenDays, type Visit } from './gymVisits';
 import { remainingUses, isExpired, isRedeemable, expiryFor, passRevenueCents, summarisePasses, guestsByHost, passStatus, type GymPass } from './gymPasses';
@@ -2802,11 +2803,12 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
 
 // ── the staff view: a trainer with no data must never read as fine ──────────
 //
-// The whole point of staffView.ts. `trainerHealth` scores on bookings whose
-// clock has passed, so a trainer with six clients and twenty sessions that
-// NOBODY MARKED comes back "ok" — healthy, green, sorted in among the people
-// actually delivering. That trainer is simultaneously the one whose pay cannot
-// be computed. The assertions below hold the gate that stops it.
+// The whole point of staffView.ts. Handed bookings whose clock has passed and
+// nothing else, `trainerHealth` can only say "ok" — so a trainer with six
+// clients and twenty sessions that NOBODY MARKED came back healthy, green, and
+// sorted in among the people actually delivering. That trainer is simultaneously
+// the one whose pay cannot be computed. The assertions below hold the gate that
+// stops it, on the staff screen and now in the scorer itself.
 {
   const NOW = new Date(2026, 5, 15, 12, 0, 0).getTime();
   const DAY_MS = 86_400_000;
@@ -2913,7 +2915,42 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
   // implementation: hand ownerAnalytics the booked count, as GymTrainer would,
   // and it calls Dana healthy.
   ok(trainerHealth({ id: 'dana', name: 'Dana', clients: 6, sessions30: 20 }).risk === 'ok',
-    'scored on bookings alone, twenty unmarked sessions read as a healthy trainer — this is the bug');
+    'given bookings ALONE, ownerAnalytics has nothing to go on and still says ok — this is the shape of the bug');
+
+  // ── and the gate now exists one layer lower too ──
+  //
+  // staffView protects the staff screen, but the owner's dashboard, the owner's
+  // trainers screen and the console's Trainers table all call trainerHealth
+  // directly. fetchGymTrainers always returned delivered30/unmarked30; the
+  // scorer used to discard them, so Dana read green on all three.
+  {
+    const withEvidence = { id: 'dana', name: 'Dana', clients: 6, sessions30: 20, delivered30: 0, unmarked30: 20 };
+    const h = trainerHealth(withEvidence);
+    ok(h.risk === 'high',
+      'handed the delivery counts it was always being given, twenty unmarked sessions is no longer healthy');
+    ok(h.reason.includes('20 sessions finished but unmarked'),
+      'and the reason counts the unmarked sessions rather than claiming none were delivered');
+    ok(h.reason.includes('no pay can be computed'),
+      'naming the consequence an owner acts on');
+    ok(!h.reason.includes('no sessions delivered'),
+      'never that — "delivered nothing" is a different claim from "we do not know"');
+    ok(h.score === 25 && h.tone === 'low',
+      'and the score comes off delivered, not booked: six clients alone, no session points');
+
+    // partial evidence is still not a clean bill
+    const partial = trainerHealth({ id: 'e', name: 'E', clients: 6, sessions30: 20, delivered30: 14, unmarked30: 6 });
+    ok(partial.risk === 'watch' && partial.reason.includes('6 sessions still unmarked'),
+      'delivering but with part of the month unmarked is watch — that part cannot be valued');
+
+    // a trainer whose month is fully accounted for is still fine
+    const clean = trainerHealth({ id: 'f', name: 'F', clients: 6, sessions30: 20, delivered30: 20, unmarked30: 0 });
+    ok(clean.risk === 'ok' && clean.reason === 'Carrying clients and delivering sessions.',
+      'and a fully marked month still reads exactly as it did');
+
+    // somebody with unmarked work has not been idle, whatever else is unknown
+    ok(trainerHealth({ id: 'g', name: 'G', clients: 0, sessions30: 5, delivered30: 0, unmarked30: 5 }).risk !== 'idle',
+      'five sessions nobody marked is not "no clients and no sessions"');
+  }
   ok(by('dana').status === 'idle' && by('dana').unknown === true,
     'the staff view refuses that: twenty sessions nobody marked is UNKNOWN, not healthy');
   ok(by('dana').status !== 'on_track', 'a trainer with no evidence never comes back on_track');
@@ -4164,5 +4201,47 @@ function by2(v: ReturnType<typeof buildStaff>, id: string) {
     'so a payroll30For result must be scaled to minor units before formatting');
 }
 
+// ── a read at the row limit is not the whole set ───────────────────────────
+//
+// PostgREST answers with at most 1000 rows and says nothing about it. A query
+// matching three thousand sessions returns one thousand and is indistinguishable
+// from a query that matched one thousand — so payroll prices the month at a
+// third of what is owed, with no error anywhere to suggest otherwise. That is
+// worse than a failed read, which at least announces itself.
+{
+  const rows = (n: number) => Array.from({ length: n }, (_, i) => i);
+
+  ok(ROW_CAP === 1000, "the cap is stated, not buried in whichever caller last thought about it");
+  ok(capLimit() === 1001,
+    'and callers ask for one row PAST it — a full page and a truncated one are otherwise identical');
+  ok(capLimit(50) === 51, 'at whatever cap the caller names');
+
+  // the ordinary case: everything through, untouched
+  ok(assertWhole(rows(3), 'sessions').length === 3, 'a small set passes through unchanged');
+  ok(assertWhole(rows(1000), 'sessions').length === 1000,
+    'and so does a set that is exactly the cap — that one really did end there');
+  ok(assertWhole(null, 'sessions').length === 0 && assertWhole(undefined, 'sessions').length === 0,
+    'a null read is an empty set, not a crash');
+
+  // the case this module exists for
+  let threw: unknown = null;
+  try { assertWhole(rows(1001), 'sessions in the last 30 days'); } catch (e) { threw = e; }
+  ok(threw instanceof TruncatedRead,
+    'cap + 1 rows means the set was larger than the cap, and that read cannot be aggregated');
+  ok((threw as TruncatedRead).cap === 1000 && (threw as TruncatedRead).what === 'sessions in the last 30 days',
+    'the error carries what was being read and where the ceiling was');
+  ok(String((threw as Error).message).includes('not the whole set'),
+    'and says so in words that can reach a screen');
+  ok(!String((threw as Error).message).includes('PostgREST'),
+    'without naming a component the gym owner has never heard of');
+
+  // the boundary, stated explicitly — off by one here silently re-opens the bug
+  ok(!isTruncated(rows(1000)) && isTruncated(rows(1001)),
+    'the line is at the cap: 1000 ended, 1001 was cut off');
+  ok(isTruncated(rows(51), 50) && !isTruncated(rows(50), 50), 'and it moves with a custom cap');
+  ok(!isTruncated(null) && !isTruncated([]), 'nothing read is not something truncated');
+}
+
 if (errors.length) { console.log('COVERAGE FAILURES:\n' + errors.join('\n')); process.exit(1); }
+
 console.log(`ALL COVERAGE TESTS PASSED (${checks} assertions)`);

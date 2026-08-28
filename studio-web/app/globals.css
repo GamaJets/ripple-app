@@ -3,7 +3,17 @@
  * The palette is the phone app's default theme, lifted from src/theme/tokens.ts
  * so the two never disagree about what "brand" or "surface2" means. The scale is
  * not: a desk is not a phone, and a console people operate all day wants denser
- * type and tighter rows than a screen held at arm's length. */
+ * type and tighter rows than a screen held at arm's length.
+ *
+ * The visual direction is "Terminal": density is the aesthetic. Hairlines rather
+ * than cards, no corner radius anywhere, no elevation, mono for every figure,
+ * and as much of the gym's state on one screen as will honestly fit. It is built
+ * for an owner who opens this every morning and would rather trade air for
+ * seeing the whole position without scrolling.
+ *
+ * Editorial serif appears exactly once per screen, on the page title. That
+ * restraint is load-bearing — it is the difference between "considered" and
+ * "1998 admin panel", and adding a second serif anywhere undoes it. */
 
 :root {
   /* dark — the app's default theme */
@@ -15,6 +25,15 @@
   --ink2: #b6c9c4;
   --ink3: #6f8b87;
   --ring: rgba(255, 255, 255, 0.09);
+  /* The row rule, deliberately fainter than --ring. Terminal draws a lot of
+   * lines; if every one of them were --ring the grid would read as a cage. The
+   * structural lines are --ring, the repeating ones between rows are --ring2. */
+  --ring2: rgba(255, 255, 255, 0.05);
+  /* The rail is cut slightly darker than the working surface rather than raised
+   * above it — Terminal has no elevation, so recession is the only way left to
+   * say "this is chrome, not content". */
+  --rail: #0a1211;
+
   /* Studio's own accent, not the client app's.
    *
    * The three apps each carry a colour: client teal, coach indigo, Studio
@@ -35,11 +54,17 @@
   --serious: #ec835a;
   --crit: #d03b3b;
 
-  --sans: ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --sans: var(--font-sans), ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --mono: var(--font-mono), ui-monospace, "SF Mono", Menlo, monospace;
+  --display: var(--font-display), "Iowan Old Style", Georgia, "Times New Roman", serif;
 
-  --row: 40px;
-  --gutter: 24px;
+  /* Terminal's density. Rows were 40px and the gutter 24px; a console that wants
+   * the whole position visible cannot spend that much on air. */
+  --row: 32px;
+  --gutter: 18px;
+  /* Named so the intent survives: this is zero on purpose, not zero by
+   * omission. Every corner in this direction is square, status dots included. */
+  --radius: 0px;
 }
 
 /* light — "clinical" from the same file, for anyone running the desk in daylight */
@@ -52,6 +77,8 @@
   --ink2: #3c4a63;
   --ink3: #6b7896;
   --ring: rgba(15, 24, 48, 0.12);
+  --ring2: rgba(15, 24, 48, 0.07);
+  --rail: #eaeef6;
   /* The daylight palette takes the darker amber: on white, #e0912f is 2.0:1
    * and unreadable, while #b45309 is 5.02:1 and carries white ink at the same. */
   --brand: #b45309;
@@ -69,23 +96,49 @@ body {
   background: var(--bg);
   color: var(--ink);
   font-family: var(--sans);
-  font-size: 14px;
-  line-height: 1.5;
+  font-size: 13px;
+  line-height: 1.42;
+  font-variant-numeric: tabular-nums;
   -webkit-font-smoothing: antialiased;
 }
 
 a { color: var(--brand); text-decoration: none; }
 a:hover { text-decoration: underline; }
-:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; border-radius: 3px; }
+:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; border-radius: var(--radius); }
 
-h1, h2, h3 { margin: 0; letter-spacing: -0.015em; line-height: 1.2; }
-h1 { font-size: 24px; font-weight: 650; }
-h2 { font-size: 17px; font-weight: 600; }
+h1, h2, h3 { margin: 0; line-height: 1.2; }
+/* The one serif on the screen. Instrument Serif has no bold, so weight is not
+ * how it earns attention — size and the shape of the face are. */
+h1 {
+  font-family: var(--display);
+  font-size: 27px;
+  font-weight: 400;
+  letter-spacing: -0.005em;
+}
+h2 { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+h3 { font-size: 13px; font-weight: 600; letter-spacing: -0.005em; }
 
 .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+/* The label above a figure. Small and widely tracked so it reads as a caption
+ * rather than competing with the number underneath it. */
 .micro {
-  font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.1em;
-  text-transform: uppercase; color: var(--ink3);
+  font-family: var(--mono); font-size: 9px; letter-spacing: 0.16em;
+  text-transform: uppercase; color: var(--ink3); font-weight: 500;
+}
+
+/* One step smaller again, for the group headings in the rail and above a table:
+ * present, legible, and clearly not part of the data. */
+.eyebrow {
+  font-family: var(--mono); font-size: 8px; letter-spacing: 0.2em;
+  text-transform: uppercase; color: var(--ink3); font-weight: 500;
+}
+
+/* Any figure. Mono and tabular so a column of them lines up on the decimal,
+ * which is the whole reason this console carries a second typeface. */
+.fig {
+  font-family: var(--mono); font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
 }
 
 /* a figure that has no value is a dash, never a zero — the rule the app

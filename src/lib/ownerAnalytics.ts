@@ -44,31 +44,68 @@ export interface Health {
  * Health from the two things a gym can observe: client load and delivered
  * sessions. A coach with clients who is running no sessions is the signal an
  * owner wants — it is invisible on a headcount.
+ *
+ * ── Booked is not delivered ────────────────────────────────────────────────
+ *
+ * `sessions30` counts bookings whose clock has passed, marked or not. Scoring
+ * on it meant a trainer with six clients and twenty sessions that NOBODY MARKED
+ * came back "ok — carrying clients and delivering sessions", green, sorted in
+ * among the people actually working. The truthful statement is that there is no
+ * evidence any of the twenty happened, and that same trainer is the one whose
+ * pay cannot be computed. staffView.ts was written to hold that gate on the
+ * staff screen, but the owner's dashboard, the trainers screen and the console's
+ * Trainers table all call this function directly with no gate in front of it —
+ * so the inversion was live on three screens.
+ *
+ * `fetchGymTrainers` has always returned `delivered30` and `unmarked30`. This
+ * function simply threw them away. It now judges on evidence where the caller
+ * supplies it, and falls back to `sessions30` only for callers that do not
+ * track delivery — those get their old answer rather than being told, wrongly,
+ * that they delivered nothing.
  */
 export function trainerHealth(tr: TrainerLike): Health {
   const clients = tr.clients || 0;
-  const sessions = tr.sessions30 || 0;
+  const booked = tr.sessions30 || 0;
 
-  if (clients === 0 && sessions === 0) {
+  const tracksDelivery = tr.delivered30 != null;
+  const delivered = tr.delivered30 ?? 0;
+  const unmarked = tr.unmarked30 ?? 0;
+  /** What the record can actually stand behind. */
+  const evidenced = tracksDelivery ? delivered : booked;
+
+  // Still `booked`: somebody with twenty unmarked sessions has not been idle,
+  // whatever else is unknown about them.
+  if (clients === 0 && booked === 0) {
     return { score: 0, tone: 'low', risk: 'idle', reason: 'No clients and no sessions in the last 30 days.' };
   }
 
   // Client load and delivery weigh roughly equally; 12 clients and 20 sessions
   // in a month is a full book, not a ceiling on quality.
   const clientPts = Math.min(clients, 12) / 12 * 50;
-  const sessionPts = Math.min(sessions, 20) / 20 * 50;
+  const sessionPts = Math.min(evidenced, 20) / 20 * 50;
   const score = Math.max(0, Math.min(100, Math.round(clientPts + sessionPts)));
 
+  const plural = (n: number) => `${n} session${n === 1 ? '' : 's'}`;
+
   let risk: Risk, reason: string;
-  if (clients > 0 && sessions === 0) {
+  if (clients > 0 && evidenced === 0 && unmarked > 0) {
+    // The trap named above. Not "no sessions delivered" — that would assert
+    // they delivered nothing, which is a different claim from not knowing.
+    risk = 'high';
+    reason = `${plural(unmarked)} finished but unmarked — no evidence any were delivered, and no pay can be computed.`;
+  } else if (clients > 0 && evidenced === 0) {
     risk = 'high';
     reason = `${clients} client${clients === 1 ? '' : 's'} but no sessions delivered in 30 days.`;
   } else if (clients === 0) {
     risk = 'watch';
     reason = 'Delivering sessions but has no clients on the roster.';
-  } else if (sessions < 4) {
+  } else if (evidenced < 4) {
     risk = 'watch';
     reason = 'Few sessions delivered this month.';
+  } else if (unmarked > 0) {
+    // Delivering, but part of the month cannot be valued. Not healthy-green.
+    risk = 'watch';
+    reason = `Delivering, but ${plural(unmarked)} still unmarked — that part cannot be valued.`;
   } else {
     risk = 'ok';
     reason = 'Carrying clients and delivering sessions.';

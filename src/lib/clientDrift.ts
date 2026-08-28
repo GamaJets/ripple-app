@@ -36,9 +36,12 @@
 //   · every derived rate is null when its window was never observed. A rate
 //     over zero opportunities is not 0/week and not 100% — it is unknown.
 //
-// This is the same failure `atRiskClient` in trainerMock.ts still has: a client
-// with `adherence: null` and `lastActive: 'no activity yet'` fails both of its
-// clauses and is reported as not at risk.
+// This is the same failure `atRiskClient` in trainerMock.ts had: a client with
+// `adherence: null` and `lastActive: 'no activity yet'` failed both of its
+// clauses and was reported as not at risk. That one now errs toward surfacing
+// via `noRecordOf`, and `trainerHealth` in ownerAnalytics.ts was the third
+// instance — it scored a trainer on bookings nobody had marked. Three places,
+// one mistake: absence of evidence read as evidence of health.
 import { STATUS_LABEL, STATUS_RANK, statusFromRisk, type StatusLevel } from './status';
 
 type Queryable = { from: (table: string) => any };

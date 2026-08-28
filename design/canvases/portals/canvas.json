@@ -1,0 +1,150 @@
+{
+  "artboards": [
+    {
+      "file": "ClientToday.dc.html",
+      "x": 0,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "title": "Member · Today"
+    },
+    {
+      "file": "ClientTraining.dc.html",
+      "x": 1560,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "title": "Member · Training"
+    },
+    {
+      "file": "ClientNutrition.dc.html",
+      "x": 3120,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "title": "Member · Nutrition"
+    },
+    {
+      "file": "ClientProgress.dc.html",
+      "x": 4680,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "title": "Member · Progress"
+    },
+    {
+      "file": "ClientBookings.dc.html",
+      "x": 6240,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "title": "Member · Bookings"
+    },
+    {
+      "file": "CoachToday.dc.html",
+      "x": 0,
+      "y": 1300,
+      "w": 1440,
+      "h": 900,
+      "title": "Coach · Today"
+    },
+    {
+      "file": "CoachRoster.dc.html",
+      "x": 1560,
+      "y": 1300,
+      "w": 1440,
+      "h": 900,
+      "title": "Coach · Roster"
+    },
+    {
+      "file": "CoachClient.dc.html",
+      "x": 3120,
+      "y": 1300,
+      "w": 1440,
+      "h": 900,
+      "title": "Coach · One client"
+    },
+    {
+      "file": "CoachProgram.dc.html",
+      "x": 4680,
+      "y": 1300,
+      "w": 1440,
+      "h": 900,
+      "title": "Coach · Programs"
+    },
+    {
+      "file": "CoachEarnings.dc.html",
+      "x": 6240,
+      "y": 1300,
+      "w": 1440,
+      "h": 900,
+      "title": "Coach · Earnings"
+    },
+    {
+      "file": "Main.dc.html",
+      "x": 0,
+      "y": 2600,
+      "w": 1440,
+      "h": 900,
+      "title": "Studio · This morning"
+    },
+    {
+      "file": "StudioClasses.dc.html",
+      "x": 1560,
+      "y": 2600,
+      "w": 1440,
+      "h": 900,
+      "title": "Studio · Classes"
+    },
+    {
+      "file": "StudioPayroll.dc.html",
+      "x": 3120,
+      "y": 2600,
+      "w": 1440,
+      "h": 900,
+      "title": "Studio · Payroll"
+    },
+    {
+      "file": "StudioMember.dc.html",
+      "x": 4680,
+      "y": 2600,
+      "w": 1440,
+      "h": 900,
+      "title": "Studio · One member"
+    },
+    {
+      "file": "StudioEquipment.dc.html",
+      "x": 6240,
+      "y": 2600,
+      "w": 1440,
+      "h": 900,
+      "title": "Studio · Equipment"
+    }
+  ],
+  "annotations": [
+    {
+      "id": "note-member",
+      "x": 0,
+      "y": -220,
+      "w": 760,
+      "text": "MEMBER PORTAL — does not exist yet. These are proposals.\n\nThe web can hold what a phone screen cannot: eighteen weeks of squat top sets on one line, a full scan history, a nutrition target with its reason beside it.\n\nDensity is deliberately NOT the Terminal direction used in Studio. A member opens this occasionally, often on a phone, and wants clarity rather than the whole position at once."
+    },
+    {
+      "id": "note-coach",
+      "x": 0,
+      "y": 1080,
+      "w": 760,
+      "text": "COACH PORTAL — does not exist yet. These are proposals.\n\nBuilt on tables that already exist: sessions, coach_requests, program_templates, session_approvals.\n\nSame type system as Studio, lower density. A trainer checks this between clients, not all morning."
+    },
+    {
+      "id": "note-studio",
+      "x": 0,
+      "y": 2380,
+      "w": 760,
+      "text": "STUDIO — the hub, and the only one of the three that exists as code today.\n\nEvery board here answers a question that needs more than one system at once. Note these mockups predate the Terminal direction now live in studio-web, so the rail still shows the old grouping.\n\nFigures are illustrative. Dashes are deliberate: they mark what the console would genuinely not know."
+    }
+  ],
+  "launch": {
+    "view": "canvas"
+  }
+}

@@ -173,7 +173,7 @@ export default function Members() {
         style={{
           display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
           gap: 1, background: 'var(--ring)', border: '1px solid var(--ring)',
-          borderRadius: 8, overflow: 'hidden', margin: '20px 0 26px',
+          borderRadius: 0, overflow: 'hidden', margin: '20px 0 26px',
         }}
       >
         <Kpi
@@ -379,7 +379,7 @@ function Dossier({ d, rec, active, onClose }: {
   const broken = brokenParts(rec);
 
   return (
-    <section style={{ border: '1px solid var(--ring)', borderRadius: 8, background: 'var(--surface)', marginBottom: 22 }}>
+    <section style={{ border: '1px solid var(--ring)', borderRadius: 0, background: 'var(--surface)', marginBottom: 22 }}>
       <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--ring)', display: 'flex', gap: 10, alignItems: 'baseline' }}>
         <h2 style={{ flex: 1 }}>{d.name ?? <span className="dash">Unnamed account</span>}</h2>
         <span className="mono" style={{ fontSize: 11, color: 'var(--ink3)' }}>{d.memberId}</span>
@@ -652,7 +652,7 @@ function Part<T>({ title, slice, what, children }: {
 function Failed({ reason, what }: { reason: string; what: string }) {
   return (
     <div style={{
-      padding: '16px 14px', margin: '0 14px 14px', borderRadius: 8,
+      padding: '16px 14px', margin: '0 14px 14px', borderRadius: 0,
       border: '1px solid var(--ring)', borderLeft: '3px solid var(--crit)',
       background: 'var(--surface2)', color: 'var(--ink2)', fontSize: 13,
     }}>
@@ -695,7 +695,7 @@ const linkBtn = {
 
 function Section({ title, sub, children }: { title: string; sub?: string; children: React.ReactNode }) {
   return (
-    <section style={{ border: '1px solid var(--ring)', borderRadius: 8, background: 'var(--surface)', marginBottom: 22 }}>
+    <section style={{ border: '1px solid var(--ring)', borderRadius: 0, background: 'var(--surface)', marginBottom: 22 }}>
       <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--ring)' }}>
         <h2>{title}</h2>
         {sub ? <p style={{ margin: '4px 0 0', color: 'var(--ink3)', fontSize: 12.5 }}>{sub}</p> : null}
@@ -720,7 +720,7 @@ function Kpi({ label, text, note }: { label: string; text: string | null; note?:
 function Banner({ children, tone }: { children: React.ReactNode; tone?: 'crit' }) {
   return (
     <div style={{
-      margin: '14px 0', padding: '11px 14px', borderRadius: 8, background: 'var(--surface)',
+      margin: '14px 0', padding: '11px 14px', borderRadius: 0, background: 'var(--surface)',
       border: '1px solid var(--ring)', borderLeft: `3px solid ${tone === 'crit' ? 'var(--crit)' : 'var(--brand)'}`,
       color: 'var(--ink2)', fontSize: 13,
     }}>{children}</div>

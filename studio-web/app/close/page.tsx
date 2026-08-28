@@ -237,7 +237,7 @@ function CloseView({ c, rec, currency, feeRead, sessionFee }: {
         style={{
           display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
           gap: 1, background: 'var(--ring)', border: '1px solid var(--ring)',
-          borderRadius: 8, overflow: 'hidden', margin: '20px 0 26px',
+          borderRadius: 0, overflow: 'hidden', margin: '20px 0 26px',
         }}
       >
         <Kpi
@@ -308,7 +308,7 @@ function Verdict({ c }: { c: MonthClose }) {
       style={{
         border: '1px solid var(--ring)',
         borderLeft: `3px solid ${blocked ? 'var(--crit)' : 'var(--brand)'}`,
-        borderRadius: 8, background: 'var(--surface)', padding: '14px 16px', marginTop: 18,
+        borderRadius: 0, background: 'var(--surface)', padding: '14px 16px', marginTop: 18,
       }}
     >
       <div className="micro">{blocked ? 'Not closed' : 'Can be closed'}</div>
@@ -721,7 +721,7 @@ function Part<T>({ slice, what, children }: {
 function Failed({ reason, what, cost }: { reason: string; what: string; cost?: string }) {
   return (
     <div style={{
-      padding: '16px 14px', margin: '14px', borderRadius: 8,
+      padding: '16px 14px', margin: '14px', borderRadius: 0,
       border: '1px solid var(--ring)', borderLeft: '3px solid var(--crit)',
       background: 'var(--surface2)', color: 'var(--ink2)', fontSize: 13,
     }}>
@@ -734,12 +734,12 @@ function Failed({ reason, what, cost }: { reason: string; what: string; cost?: s
 
 const field = {
   background: 'var(--surface2)', color: 'var(--ink)', border: '1px solid var(--ring)',
-  borderRadius: 6, padding: '8px 10px', fontSize: 13, fontFamily: 'var(--sans)', minWidth: 0,
+  borderRadius: 0, padding: '8px 10px', fontSize: 13, fontFamily: 'var(--sans)', minWidth: 0,
 } as const;
 
 function Section({ title, sub, children }: { title: string; sub?: string; children: React.ReactNode }) {
   return (
-    <section style={{ border: '1px solid var(--ring)', borderRadius: 8, background: 'var(--surface)', marginBottom: 22 }}>
+    <section style={{ border: '1px solid var(--ring)', borderRadius: 0, background: 'var(--surface)', marginBottom: 22 }}>
       <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--ring)' }}>
         <h2>{title}</h2>
         {sub ? <p style={{ margin: '4px 0 0', color: 'var(--ink3)', fontSize: 12.5 }}>{sub}</p> : null}
@@ -764,7 +764,7 @@ function Kpi({ label, text, note }: { label: string; text: string | null; note?:
 function Banner({ children, tone }: { children: React.ReactNode; tone?: 'crit' }) {
   return (
     <div style={{
-      margin: '14px 0', padding: '11px 14px', borderRadius: 8, background: 'var(--surface)',
+      margin: '14px 0', padding: '11px 14px', borderRadius: 0, background: 'var(--surface)',
       border: '1px solid var(--ring)', borderLeft: `3px solid ${tone === 'crit' ? 'var(--crit)' : 'var(--brand)'}`,
       color: 'var(--ink2)', fontSize: 13,
     }}>{children}</div>

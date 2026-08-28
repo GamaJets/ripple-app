@@ -47,7 +47,7 @@ export function PasswordField({
           style={{
             width: '100%',
             padding: '10px 44px 10px 12px',
-            borderRadius: 7,
+            borderRadius: 0,
             fontSize: 14,
             background: 'var(--surface2)',
             color: 'var(--ink)',

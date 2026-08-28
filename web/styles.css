@@ -6,12 +6,14 @@
    own accent, taken from the launcher tile colours in app.config.ts and
    lifted a few steps for legibility on a dark ground.
 
-   Type: Instrument Serif carries the statements, Inter Tight does the work,
-   JetBrains Mono holds every number. Numbers are tabular everywhere — a
-   figure that shifts as it changes reads as decoration, not data.
+   Type: Instrument Serif carries the statements, Archivo does the work, IBM
+   Plex Mono holds every number — the same three the Studio console runs on, so
+   the site and the product a gym owner signs into are visibly one thing.
+   Numbers are tabular everywhere: a figure that shifts as it changes reads as
+   decoration, not data.
    ══════════════════════════════════════════════════════════════════════════ */
 
-@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
 
 :root {
   --bg:        #0a1211;
@@ -25,13 +27,56 @@
   --ink2:      #a6bcb7;
   --ink3:      #67807b;
 
-  --brand:     #16b8a6;
-  --brand-ink: #04211d;
-  --brand-soft: rgba(22,184,166,0.12);
+  /* This site sells to gym owners — the homepage asks them to talk to us about
+     their gym — and it was accented in #16b8a6, the CLIENT app's teal. It was
+     dressed as the one product a gym owner does not buy. The accent is Studio
+     amber now, the colour of the thing being sold. The console made exactly
+     this change for exactly this reason.
 
+     The per-product pages are untouched: .tone-client, .tone-coach and
+     .tone-studio still set their own accent, so /client stays teal. Only the
+     shared chrome and the homepage move. */
+  --brand:     #e0912f;
+  --brand-ink: #2a1503;
+  --brand-soft: rgba(224,145,47,0.14);
+
+  /* The reading accents. These are colours set as TEXT on the page, so each
+     one is pitched for its background and therefore differs by scheme. */
   --client:    #16b8a6;
   --coach:     #7a70f0;
   --studio:    #e0912f;
+
+  /* The app identity colours — what each icon actually looks like.
+     ────────────────────────────────────────────────────────────────────────
+     Every launcher icon is a GRADIENT, not a flat fill (assets/repple-icon*.svg):
+
+         Repple         #2dd4bf → #0d9488
+         Repple Coach   #818cf8 → #4338ca
+         Repple Studio  #fbbf24 → #b45309
+
+     A button carrying a word cannot use the gradient itself: no ink survives
+     both ends of it. White on the Coach gradient is 7.90:1 at the dark end and
+     2.98:1 at the light one; dark ink reverses the problem. Every combination
+     fails somewhere along it.
+
+     So each app is represented by the MIDPOINT of its own gradient, which is
+     what the icon reads as at a glance. Taking the dark end instead is what
+     made Studio look brown — #b45309 is the bottom corner of a golden amber
+     icon, not its character. These do not change with the colour scheme,
+     because an app icon does not, and they are not redefined in either media
+     block below. */
+  --client-tile: #1db4a3;  --client-tile-ink: #0d0a06;   /* 7.63:1 */
+  --coach-tile:  #6262e1;  --coach-tile-ink:  #ffffff;   /* 4.82:1 */
+  --studio-tile: #d78916;  --studio-tile-ink: #0d0a06;   /* 7.03:1 */
+
+  /* The accent as a SOLID FILL, as opposed to as text. Link text has to clear
+     4.5:1 against the page, which forces the light theme down to the dark end
+     of the amber; a button does not, because its ink sits on the fill rather
+     than on the page. Splitting the two lets the big colour blocks carry the
+     amber the product actually is instead of the darkest shade that happened
+     to pass a text rule. */
+  --brand-fill:     var(--brand);
+  --brand-fill-ink: var(--brand-ink);
 
   --accent:      var(--brand);
   --accent-soft: var(--brand-soft);
@@ -46,9 +91,15 @@
   --head-bg: rgba(10,18,17,0.72);
   --shadow:  0 26px 60px -30px rgba(0,0,0,0.85);
 
-  --sans:    'Inter Tight', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  /* The same three families the Studio console runs on, so the site and the
+     product a gym owner signs into are visibly one thing. Inter Tight is the
+     default every marketing site reaches for, and JetBrains Mono is a code
+     editor's face — neither said anything about this product. Archivo carries
+     the interface, IBM Plex Mono carries every figure, and Instrument Serif
+     stays: it was the one deliberate choice already here. */
+  --sans:    'Archivo', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   --serif:   'Instrument Serif', Georgia, 'Times New Roman', serif;
-  --mono:    'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --mono:    'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
   --measure: 68ch;
 
   --gut:  clamp(20px, 5vw, 64px);
@@ -107,33 +158,43 @@ header.site {
 }
 header.site .wrap {
   display: flex; align-items: center; justify-content: space-between;
-  gap: 24px; height: 78px;
+  gap: 24px; height: 90px;
 }
 .brand {
-  display: inline-flex; align-items: center; gap: 13px;
-  color: var(--ink); font-weight: 600; font-size: 19.5px;
+  display: inline-flex; align-items: center; gap: 15px;
+  color: var(--ink); font-weight: 600; font-size: 24px;
   letter-spacing: -0.02em; text-decoration: none; flex: none;
 }
 .brand:hover { text-decoration: none; }
+/* The glyph inside the mark was painted #04211d — the teal palette's ink, set
+   as an attribute on the SVG in all sixteen pages. Amber's ink is different,
+   and in daylight it is white on #b45309, where a hardcoded dark green would
+   have disappeared into the tile. Taking it from the token instead means the
+   mark follows the palette rather than one theme's memory of it. CSS wins over
+   the presentation attributes still on the element. */
+.mark svg [stroke] { stroke: var(--brand-ink); }
+.mark svg [fill]:not([fill="none"]) { fill: var(--brand-ink); }
 .mark {
-  width: 38px; height: 38px; border-radius: 10px; flex: none;
+  width: 48px; height: 48px; border-radius: 13px; flex: none;
   display: grid; place-items: center;
-  background: linear-gradient(150deg, var(--accent), color-mix(in srgb, var(--accent) 55%, #000));
+  /* Built from the fill rather than the text accent: this is a tile, not a
+     word on the page, so it should carry the colour the app icon actually is. */
+  background: linear-gradient(150deg, var(--brand-fill), color-mix(in srgb, var(--brand-fill) 62%, #000));
   box-shadow: 0 1px 0 rgba(255,255,255,0.14) inset;
 }
 nav.site { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
 .nav-links { display: flex; align-items: center; gap: 4px; }
 nav.site a {
-  color: var(--ink2); font-size: 15.5px; font-weight: 500;
-  padding: 9px 13px; border-radius: 8px; white-space: nowrap;
+  color: var(--ink2); font-size: 17px; font-weight: 500;
+  padding: 10px 15px; border-radius: 8px; white-space: nowrap;
 }
 nav.site a:hover { color: var(--ink); background: var(--hair); text-decoration: none; }
 nav.site a[aria-current="page"] { color: var(--ink); background: var(--hair); }
 nav.site a.cta {
-  background: var(--accent); color: var(--brand-ink); font-weight: 600;
-  padding: 10px 18px; margin-left: 8px; font-size: 15.5px;
+  background: var(--brand-fill); color: var(--brand-fill-ink); font-weight: 600;
+  padding: 11px 20px; margin-left: 8px; font-size: 17px;
 }
-nav.site a.cta:hover { filter: brightness(1.08); background: var(--accent); }
+nav.site a.cta:hover { filter: brightness(1.08); background: var(--brand-fill); }
 
 /* The menu button exists only on phones, and only when JavaScript is there to
    work it. Without JS the links stay in the bar and wrap onto a second row —
@@ -147,9 +208,9 @@ nav.site a.cta:hover { filter: brightness(1.08); background: var(--accent); }
    The links move behind one button; the bar keeps the brand and the one action
    the page is asking for. */
 @media (max-width: 760px) {
-  header.site .wrap { height: 64px; gap: 10px; flex-wrap: nowrap; }
-  .mark { width: 32px; height: 32px; border-radius: 9px; }
-  .brand { font-size: 17.5px; gap: 10px; }
+  header.site .wrap { height: 70px; gap: 10px; flex-wrap: nowrap; }
+  .mark { width: 38px; height: 38px; border-radius: 11px; }
+  .brand { font-size: 19.5px; gap: 11px; }
   nav.site { gap: 6px; flex-wrap: nowrap; }
   nav.site a.cta { padding: 9px 14px; margin-left: 0; font-size: 14.5px; }
 
@@ -220,8 +281,8 @@ h3.sub { font-size: clamp(20px, 2.4vw, 26px); letter-spacing: -0.02em; }
 }
 .btn:hover { text-decoration: none; background: var(--hair); border-color: var(--line); }
 .btn:active { transform: translateY(1px); }
-.btn.primary { background: var(--accent); color: var(--brand-ink); border-color: transparent; }
-.btn.primary:hover { filter: brightness(1.09); background: var(--accent); }
+.btn.primary { background: var(--brand-fill); color: var(--brand-fill-ink); border-color: transparent; }
+.btn.primary:hover { filter: brightness(1.09); background: var(--brand-fill); }
 .btn-row { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 34px; }
 
 /* ── hero ──────────────────────────────────────────────────────────────── */
@@ -546,15 +607,27 @@ table.data.compare td.no { color: var(--faint); font-family: var(--mono); font-s
     --ink2:      #425d58;
     --ink3:      #5c7570;
 
-    /* The teal is dropped several steps: #16b8a6 on white is fine for a
-       12px label and not fine for body copy, and the same token does both. */
-    --brand:     #0a7e70;
+    /* Amber needs the same treatment the teal did: #e0912f on this background
+       is 2.0:1 and unreadable. This was #8a5205, which passed contrast and was
+       wrong anyway — it reads as brown, and brown appears nowhere in the three
+       apps. #b45309 is the Studio launcher tile itself, so the site is accented
+       in a colour the product actually ships, and it still clears the bar at
+       4.77:1 here. */
+    --brand:     #b45309;
+    /* Solid fills take the amber from the middle of the Studio icon; only
+       TEXT needs the darker #b45309 above to clear 4.5:1 on this background. */
+    --brand-fill:     #d78916;
+    --brand-fill-ink: #0d0a06;
     --brand-ink: #ffffff;
-    --brand-soft: rgba(10,126,112,0.10);
+    --brand-soft: rgba(138,82,5,0.10);
 
+    /* Client and coach are darkened for legibility as text — #0d9488 is only
+       3.56:1 here and #4338ca is fine at 7.51:1 but kept in step. Studio is the
+       shipped tile exactly: it passes, so there is no reason to invent a browner
+       one. The unmodified tiles live in --*-tile and are what the app buttons use. */
     --client:    #0a7e70;
     --coach:     #4a3fc4;
-    --studio:    #8a5205;
+    --studio:    #b45309;
 
     --good:  #1c7a4c;
     --warn:  #8a6300;
@@ -578,9 +651,13 @@ table.data.compare td.no { color: var(--faint); font-family: var(--mono); font-s
     --ink2:      #a6bcb7;
     --ink3:      #67807b;
 
-    --brand:     #16b8a6;
-    --brand-ink: #04211d;
-    --brand-soft: rgba(22,184,166,0.12);
+    /* Kept in step with :root above. This block restates the whole dark
+       palette, so a change made only at :root is silently overridden here —
+       which is exactly what happened: the site went amber in daylight and
+       stayed teal at night. */
+    --brand:     #e0912f;
+    --brand-ink: #2a1503;
+    --brand-soft: rgba(224,145,47,0.14);
 
     --client:    #16b8a6;
     --coach:     #7a70f0;
@@ -606,9 +683,9 @@ table.data.compare td.no { color: var(--faint); font-family: var(--mono); font-s
    its eyebrow rule, tick discs and chart series in the coach's purple without
    any of that colour being written into the markup. --brand-ink follows,
    because it is the text colour that sits *on* the accent. */
-.tone-client { --accent: var(--client); --accent-soft: rgba(22,184,166,0.14); --c: var(--client); }
-.tone-coach  { --accent: var(--coach);  --accent-soft: rgba(122,112,240,0.16); --c: var(--coach);  --brand-ink: #ffffff; }
-.tone-studio { --accent: var(--studio); --accent-soft: rgba(224,145,47,0.15);  --c: var(--studio); --brand-ink: #2a1704; }
+.tone-client { --accent: var(--client); --accent-soft: rgba(22,184,166,0.14); --c: var(--client); --brand-fill: var(--client-tile); --brand-fill-ink: var(--client-tile-ink); }
+.tone-coach  { --accent: var(--coach);  --accent-soft: rgba(122,112,240,0.16); --c: var(--coach);  --brand-ink: #ffffff; --brand-fill: var(--coach-tile); --brand-fill-ink: var(--coach-tile-ink); }
+.tone-studio { --accent: var(--studio); --accent-soft: rgba(224,145,47,0.15);  --c: var(--studio); --brand-ink: #2a1704; --brand-fill: var(--studio-tile); --brand-fill-ink: var(--studio-tile-ink); }
 /* .rail, .node and the compare header read --c; these set it without an
    inline style attribute. */
 .c-client { --c: var(--client); }
@@ -794,7 +871,18 @@ table.data.vs td .job { display: block; color: var(--ink); font-weight: 500; fon
 }
 
 nav.site a.get { display: inline-flex; align-items: center; gap: 7px; }
-nav.site a.get .appicon { width: 26px; height: 26px; border-radius: 7px; box-shadow: none; }
+/* "Get the app" used to carry the client app's launcher tile — a saturated
+   teal square, the only foreign colour in the bar. It also misrepresented the
+   link, which goes to /download and offers all three apps, not that one.
+
+   Recolouring it to the accent would not have fixed it: that puts a second
+   solid block immediately beside the "Create account" button and the two fight.
+   Dropping the icon entirely would flatten "Get the app" into the topic links
+   beside it, losing a distinction that is doing real work. A line glyph in
+   currentColor keeps the affordance, inherits the link's colour and its hover,
+   and leaves exactly two colour events in the bar: the mark and the CTA. */
+nav.site a.get .getico { flex: none; opacity: .9; }
+nav.site a.get:hover .getico { opacity: 1; }
 
 /* ══════════════════════════════════════════════════════════════════════════
    SUPPORT & LEGAL — appended block

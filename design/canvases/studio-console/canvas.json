@@ -1,0 +1,19 @@
+{
+  "artboards": [
+    { "file": "Main.dc.html",       "x": 0,    "y": 0,    "w": 1440, "h": 900, "title": "1 · Composed — balanced, no single leader" },
+    { "file": "Briefing.dc.html",   "x": 1560, "y": 0,    "w": 1440, "h": 900, "title": "2 · Briefing — Editorial leads" },
+    { "file": "Terminal.dc.html",   "x": 3120, "y": 0,    "w": 1440, "h": 900, "title": "3 · Terminal — Instrument leads" },
+    { "file": "Panels.dc.html",     "x": 0,    "y": 1150, "w": 1440, "h": 900, "title": "4 · Panels — Depth leads" },
+    { "file": "Verdict.dc.html",    "x": 1560, "y": 1150, "w": 1440, "h": 900, "title": "5 · Verdict — each direction owns a band" },
+    { "file": "Instrument.dc.html", "x": 0,    "y": 2400, "w": 1440, "h": 900, "title": "Source: Instrument — density and precision" },
+    { "file": "Editorial.dc.html",  "x": 1560, "y": 2400, "w": 1440, "h": 900, "title": "Source: Editorial — scale and air" },
+    { "file": "Depth.dc.html",      "x": 3120, "y": 2400, "w": 1440, "h": 900, "title": "Source: Depth — surfaces and light" }
+  ],
+  "annotations": [
+    { "id": "brief", "x": 0, "y": -300, "w": 980,
+      "text": "FIVE BLENDS OF THE SAME THREE DIRECTIONS.\n\nThe three sources differ on axes that do not overlap, which is what makes blending possible at all:\n\n  Instrument  the GRID — hairline columns, mono micro-labels, tabular figures, em dash for absent.\n  Editorial   the VOICE — Instrument Serif, and one figure per screen allowed to be large.\n  Depth       the MATERIAL — recessed and raised planes, one light source, glow only for live status.\n\nEach blend below changes WHICH AXIS LEADS. That is the real decision — not the colour, which is already shared.\n\n  1 Composed   No leader. Depth is the chrome, Instrument the working grid, Editorial the title and one hero.\n  2 Briefing   Editorial leads. The screen tells you something in a sentence before it shows a number. No cards at all; Depth is almost absent because material would fight the type.\n  3 Terminal   Instrument leads, hard. Zero radius, hairlines, mono everywhere, twelve figures visible at once. Editorial gets exactly one word. For an owner who lives on this screen.\n  4 Panels     Depth leads. Four big lit panels instead of twelve tiles; material does the grouping that borders used to. The warning panel is its own lit surface.\n  5 Verdict    Nothing blends — each direction owns a BAND. Editorial floats on top with the answer; Instrument sits recessed beneath it with the evidence. Depth is the seam that makes them read as different kinds of thing.\n\nAll five share one type system: Archivo, IBM Plex Mono, Instrument Serif. Figtree and JetBrains Mono are dropped — six families is how a blend dies.\n\nEvery board carries the new rail: a context switch instead of the invented \"Mine\" group, and \"Plans & payments\" instead of \"Money\". Both are already live in the code." },
+    { "id": "sources", "x": 0, "y": 2250, "w": 820,
+      "text": "The three originals, kept for comparison. Same Overview screen, same content, same palette in each — so what you are reading is the direction and not the data. Their rails still show the old \"MINE\" group, which is what started all of this." }
+  ],
+  "launch": { "view": "canvas" }
+}

@@ -472,7 +472,7 @@ async function bookingsFor(classes: GymClass[]): Promise<MemberBooking[]> {
 /* ── bits, matching /money ─────────────────────────────────────────────────── */
 
 const primaryBtn = {
-  background: 'var(--brand)', color: 'var(--brand-ink)', border: 'none', borderRadius: 6,
+  background: 'var(--brand)', color: 'var(--brand-ink)', border: 'none', borderRadius: 0,
   padding: '8px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
 } as const;
 
@@ -488,7 +488,7 @@ const formRow = {
 
 function Section({ title, sub, children }: { title: string; sub?: string; children: React.ReactNode }) {
   return (
-    <section style={{ border: '1px solid var(--ring)', borderRadius: 8, background: 'var(--surface)', marginBottom: 22 }}>
+    <section style={{ border: '1px solid var(--ring)', borderRadius: 0, background: 'var(--surface)', marginBottom: 22 }}>
       <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--ring)' }}>
         <h2>{title}</h2>
         {sub ? <p style={{ margin: '4px 0 0', color: 'var(--ink3)', fontSize: 12.5 }}>{sub}</p> : null}
@@ -501,7 +501,7 @@ function Section({ title, sub, children }: { title: string; sub?: string; childr
 function Banner({ children, tone }: { children: React.ReactNode; tone?: 'crit' }) {
   return (
     <div style={{
-      margin: '14px 0', padding: '11px 14px', borderRadius: 8, background: 'var(--surface)',
+      margin: '14px 0', padding: '11px 14px', borderRadius: 0, background: 'var(--surface)',
       border: '1px solid var(--ring)', borderLeft: `3px solid ${tone === 'crit' ? 'var(--crit)' : 'var(--brand)'}`,
       color: 'var(--ink2)', fontSize: 13, lineHeight: 1.6,
     }}>{children}</div>

@@ -9,6 +9,8 @@
 // not belong anywhere near a ledger: 0.1 + 0.2 is a rounding error in a
 // spreadsheet and a dispute in a gym.
 
+import { assertWhole, capLimit } from './rowCap';
+
 type Queryable = { from: (table: string) => any };
 
 export type PlanInterval = 'month' | 'year' | 'once';
@@ -92,9 +94,13 @@ export async function fetchMemberships(sb: Queryable, tenantId: string): Promise
     .from('memberships')
     .select('id, member_id, plan_id, started_on, ends_on, status')
     .eq('tenant_id', tenantId)
-    .order('started_on', { ascending: false });
+    .order('started_on', { ascending: false })
+    .limit(capLimit());
   if (error) throw error;
-  const rows = data ?? [];
+  // Every membership in the gym's history, not just the live ones — a gym a few
+  // years old crosses a thousand rows without being large, and a truncated set
+  // silently drops the oldest, which is exactly the set a revenue trend reads.
+  const rows = assertWhole(data, "this gym's memberships");
   if (!rows.length) return [];
 
   const [names, planNames] = await Promise.all([
@@ -147,8 +153,13 @@ export async function fetchPayments(
     .eq('tenant_id', tenantId)
     .order('taken_at', { ascending: false });
   if (sinceISO) q = q.gte('taken_at', sinceISO);
+  q = q.limit(capLimit());
   const { data, error } = await q;
   if (error) throw error;
+  // Payments are what the gym was paid. A truncated read here does not make the
+  // figure smaller, it makes it wrong, and it is the number an owner reconciles
+  // against a bank statement.
+  assertWhole(data, 'this gym\u2019s payments');
   const rows = data ?? [];
   if (!rows.length) return [];
 

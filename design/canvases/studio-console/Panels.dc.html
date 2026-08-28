@@ -1,0 +1,174 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Instrument+Serif&display=swap">
+  <style> body { margin: 0; background: #070f0e; } </style>
+</helmet>
+
+<!--
+  PANELS — Depth leads. The console is an object with parts, lit from above.
+    Depth       everything spatial. Deep recessed rail, panels that genuinely
+                float, 14px radii, one light source, inset wells for anything
+                you type into. Amber is a lit surface, not a flat fill.
+    Instrument  survives inside the panels only — mono labels, tabular figures,
+                the em dash. It never gets to draw a line across the screen.
+    Editorial   one hero number and the panel titles. No body serif at all.
+  The bet: fewer, larger, obviously-separate regions are easier to scan than a
+  grid of equal tiles, and material does the grouping that borders used to.
+-->
+
+<div style="width:1440px;height:900px;overflow:hidden;background:#070f0e;color:#e8f2f0;font-family:'Archivo','Helvetica Neue',Arial,sans-serif;font-size:13px;line-height:1.45;font-variant-numeric:tabular-nums;display:flex">
+
+  <!-- rail: a deep groove cut into the case -->
+  <div style="width:212px;flex:none;box-sizing:border-box;background:#060d0c;padding:22px 14px 18px;display:flex;flex-direction:column;gap:20px;box-shadow:inset -14px 0 22px -14px rgba(0,0,0,0.9), inset -1px 0 0 rgba(255,255,255,0.04)">
+    <div style="display:flex;align-items:center;gap:10px">
+      <span style="width:30px;height:30px;border-radius:9px;background:linear-gradient(180deg,#eda54a,#d8862a);display:grid;place-items:center;flex:none;box-shadow:inset 0 1px 0 rgba(255,255,255,0.45), 0 5px 12px -4px rgba(224,145,47,0.6)">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#2a1503" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="2.3" fill="#2a1503" stroke="none"></circle><path d="M17.2 6.8a7.35 7.35 0 0 1 0 10.4"></path><path d="M6.8 17.2a7.35 7.35 0 0 1 0-10.4"></path></svg>
+      </span>
+      <div style="font-size:14px;font-weight:600">Repple <span style="color:#6f8b87;font-weight:500">Studio</span></div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:3px;padding:3px;border-radius:10px;background:#040a09;box-shadow:inset 0 3px 7px rgba(0,0,0,0.75), inset 0 -1px 0 rgba(255,255,255,0.05)">
+      <div style="text-align:center;padding:7px 4px;border-radius:8px;font-size:12px;font-weight:600;color:#2a1503;background:linear-gradient(180deg,#eda54a,#d5811f);box-shadow:inset 0 1px 0 rgba(255,255,255,0.5), 0 3px 9px -3px rgba(224,145,47,0.7)">The gym</div>
+      <div style="text-align:center;padding:7px 4px;border-radius:8px;font-size:12px;color:#6f8b87">My book</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;flex-direction:column;gap:2px">
+        <div style="padding:7px 11px;border-radius:9px;font-size:12.5px;font-weight:500;background:linear-gradient(180deg,#1b332c,#152722);box-shadow:inset 0 1px 0 rgba(255,255,255,0.08), 0 3px 7px -3px rgba(0,0,0,0.8)">Overview</div>
+        <div style="padding:7px 11px;font-size:12.5px;color:#6f8b87">Members</div>
+        <div style="padding:7px 11px;font-size:12.5px;color:#6f8b87">Retention</div>
+        <div style="padding:7px 11px;font-size:12.5px;color:#6f8b87">Passes</div>
+        <div style="padding:7px 11px;font-size:12.5px;color:#6f8b87">Door</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:2px">
+        <div style="padding:7px 11px;font-size:12.5px;color:#6f8b87">Classes</div>
+        <div style="padding:7px 11px;font-size:12.5px;color:#6f8b87">Timetable</div>
+        <div style="padding:7px 11px;font-size:12.5px;color:#6f8b87">Sessions</div>
+        <div style="padding:7px 11px;font-size:12.5px;color:#6f8b87">Staff</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:2px">
+        <div style="padding:7px 11px;font-size:12.5px;color:#6f8b87">Plans &amp; payments</div>
+        <div style="padding:7px 11px;font-size:12.5px;color:#6f8b87">Revenue</div>
+        <div style="padding:7px 11px;font-size:12.5px;color:#6f8b87">Accounting</div>
+        <div style="padding:7px 11px;font-size:12.5px;color:#6f8b87">Payroll</div>
+        <div style="padding:7px 11px;font-size:12.5px;color:#6f8b87;display:flex;justify-content:space-between;align-items:center">Close <span style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;color:#2a1503;background:#fab219;border-radius:5px;padding:2px 6px">12</span></div>
+      </div>
+    </div>
+
+    <div style="margin-top:auto;display:flex;align-items:center;gap:10px;padding:12px 8px 0;box-shadow:inset 0 1px 0 rgba(255,255,255,0.05)">
+      <span style="width:28px;height:28px;border-radius:9px;background:#16302b;display:grid;place-items:center;font-size:11px;color:#b6c9c4;box-shadow:inset 0 1px 0 rgba(255,255,255,0.08)">TR</span>
+      <div style="min-width:0">
+        <div style="font-size:12px;color:#b6c9c4">Tim Rodgers</div>
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:0.12em;color:#3f5b57">OWNER</div>
+      </div>
+    </div>
+  </div>
+
+  <div style="flex:1;min-width:0;box-sizing:border-box;padding:22px 24px;display:flex;flex-direction:column;gap:16px;background:radial-gradient(1200px 500px at 60% -12%, #14262200 0%, #0a1413 70%), #091312">
+
+    <div style="flex:none;display:flex;align-items:flex-end;justify-content:space-between;gap:28px">
+      <div>
+        <div style="font-family:'Instrument Serif','Iowan Old Style',Georgia,serif;font-size:40px;line-height:1;letter-spacing:-0.01em">Overview</div>
+        <div style="margin-top:5px;font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:0.14em;color:#6f8b87">KINETIC GYM · LAST 30 DAYS</div>
+      </div>
+      <div style="display:flex;gap:10px">
+        <div style="display:flex;align-items:center;gap:9px;padding:9px 13px;width:222px;box-sizing:border-box;border-radius:10px;background:#050c0b;box-shadow:inset 0 3px 7px rgba(0,0,0,0.7), inset 0 -1px 0 rgba(255,255,255,0.05)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#5d7a76" stroke-width="1.9" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"></circle><path d="M16 16l4.5 4.5"></path></svg>
+          <div style="font-size:12px;color:#5d7a76;flex:1">Search</div>
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;color:#3f5b57">⌘K</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:9px;padding:9px 14px;border-radius:10px;background:linear-gradient(180deg,#1d352e,#152722);box-shadow:inset 0 1px 0 rgba(255,255,255,0.09), inset 0 -1px 0 rgba(0,0,0,0.55), 0 4px 10px -4px rgba(0,0,0,0.75)">
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:0.13em;color:#b6c9c4">LAST 30 DAYS</div>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#6f8b87" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg>
+        </div>
+      </div>
+    </div>
+
+    <!-- four panels, not twelve tiles -->
+    <div style="flex:none;display:grid;grid-template-columns:1fr 1fr;gap:16px">
+
+      <div style="border-radius:15px;padding:22px 24px;background:linear-gradient(180deg,#152924,#0f1f1c);box-shadow:inset 0 1px 0 rgba(255,255,255,0.075), inset 0 -1px 0 rgba(0,0,0,0.55), 0 16px 30px -16px rgba(0,0,0,0.9);display:flex;align-items:center;gap:26px">
+        <div>
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:0.16em;color:#6f8b87">ACTIVE MEMBERS</div>
+          <div style="margin-top:6px;font-family:'Instrument Serif','Iowan Old Style',Georgia,serif;font-size:80px;line-height:0.84;font-feature-settings:'tnum' 1">243</div>
+        </div>
+        <div style="flex:1;display:flex;flex-direction:column;gap:10px">
+          <div style="display:flex;align-items:center;gap:7px"><svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="#0ca30c" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10 16V5"></path><path d="M5.5 9.5 10 5l4.5 4.5"></path></svg><span style="font-size:12.5px;color:#b6c9c4">Up 9 · 6 joined, 4 left</span></div>
+          <div style="display:flex;gap:4px;align-items:flex-end;height:40px">
+            <div style="width:15px;height:18px;border-radius:4px;background:#25443d;box-shadow:inset 0 1px 0 rgba(255,255,255,0.07)"></div>
+            <div style="width:15px;height:22px;border-radius:4px;background:#25443d;box-shadow:inset 0 1px 0 rgba(255,255,255,0.07)"></div>
+            <div style="width:15px;height:21px;border-radius:4px;background:#25443d;box-shadow:inset 0 1px 0 rgba(255,255,255,0.07)"></div>
+            <div style="width:15px;height:27px;border-radius:4px;background:#31564d;box-shadow:inset 0 1px 0 rgba(255,255,255,0.07)"></div>
+            <div style="width:15px;height:30px;border-radius:4px;background:#31564d;box-shadow:inset 0 1px 0 rgba(255,255,255,0.07)"></div>
+            <div style="width:15px;height:34px;border-radius:4px;background:#3d6a5f;box-shadow:inset 0 1px 0 rgba(255,255,255,0.07)"></div>
+            <div style="width:15px;height:40px;border-radius:4px;background:linear-gradient(180deg,#eda54a,#c2761f);box-shadow:inset 0 1px 0 rgba(255,255,255,0.4), 0 3px 10px -3px rgba(224,145,47,0.7)"></div>
+          </div>
+        </div>
+      </div>
+
+      <div style="border-radius:15px;padding:22px 24px;background:linear-gradient(180deg,#2a2013,#1c160e);box-shadow:inset 0 0 0 1px rgba(250,178,25,0.16), inset 0 1px 0 rgba(255,255,255,0.08), 0 16px 30px -16px rgba(0,0,0,0.9);display:flex;align-items:center;gap:26px">
+        <div>
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:0.16em;color:#c9a25e">UNMARKED SESSIONS</div>
+          <div style="margin-top:6px;font-family:'Instrument Serif','Iowan Old Style',Georgia,serif;font-size:80px;line-height:0.84;color:#fab219;font-feature-settings:'tnum' 1">12</div>
+        </div>
+        <div style="flex:1;display:flex;flex-direction:column;gap:12px">
+          <div style="font-size:12.5px;color:#e2d3b4;line-height:1.5">August cannot close and six trainers cannot be paid until these are marked.</div>
+          <div style="align-self:flex-start;padding:9px 16px;border-radius:9px;font-size:12.5px;font-weight:600;color:#2a1503;background:linear-gradient(180deg,#eda54a,#d5811f);box-shadow:inset 0 1px 0 rgba(255,255,255,0.5), 0 5px 13px -4px rgba(224,145,47,0.65)">Review the twelve</div>
+        </div>
+      </div>
+
+    </div>
+
+    <div style="flex:1;min-height:0;display:grid;grid-template-columns:1fr 366px;gap:16px">
+
+      <div style="min-height:0;border-radius:15px;background:linear-gradient(180deg,#152924,#0f1f1c);box-shadow:inset 0 1px 0 rgba(255,255,255,0.075), inset 0 -1px 0 rgba(0,0,0,0.55), 0 16px 30px -16px rgba(0,0,0,0.9);display:flex;flex-direction:column;overflow:hidden">
+        <div style="padding:17px 22px 13px;display:flex;align-items:baseline;justify-content:space-between">
+          <div style="font-family:'Instrument Serif','Iowan Old Style',Georgia,serif;font-size:21px;line-height:1">Needs a decision</div>
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:0.14em;color:#6f8b87">5 OF 18</div>
+        </div>
+        <div style="flex:1;min-height:0;padding:0 14px 14px;display:flex;flex-direction:column;gap:7px">
+          <div style="display:flex;align-items:center;gap:14px;padding:11px 14px;border-radius:11px;background:#132521;box-shadow:inset 0 1px 0 rgba(255,255,255,0.05), 0 2px 5px -2px rgba(0,0,0,0.6)"><div style="flex:1;font-size:12.5px">Sara Almeida</div><div style="font-size:12px;color:#6f8b87;width:88px">Unlimited</div><div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#6f8b87;width:56px">31d</div><div style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:0.09em;color:#2a1503;background:#fab219;border-radius:6px;padding:4px 8px">LAPSING</div></div>
+          <div style="display:flex;align-items:center;gap:14px;padding:11px 14px;border-radius:11px;background:#132521;box-shadow:inset 0 1px 0 rgba(255,255,255,0.05), 0 2px 5px -2px rgba(0,0,0,0.6)"><div style="flex:1;font-size:12.5px">Tom Okafor</div><div style="font-size:12px;color:#6f8b87;width:88px">Unlimited</div><div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#6f8b87;width:56px">44d</div><div style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:0.09em;color:#2a1503;background:#ec835a;border-radius:6px;padding:4px 8px">AT RISK</div></div>
+          <div style="display:flex;align-items:center;gap:14px;padding:11px 14px;border-radius:11px;background:#132521;box-shadow:inset 0 1px 0 rgba(255,255,255,0.05), 0 2px 5px -2px rgba(0,0,0,0.6)"><div style="flex:1;font-size:12.5px">Lena Fischer</div><div style="font-size:12px;color:#6f8b87;width:88px">Unlimited</div><div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#6f8b87;width:56px">6d</div><div style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:0.09em;color:#b6c9c4;background:#1d3630;border-radius:6px;padding:4px 8px">CARD FAILED</div></div>
+          <div style="display:flex;align-items:center;gap:14px;padding:11px 14px;border-radius:11px;background:#132521;box-shadow:inset 0 1px 0 rgba(255,255,255,0.05), 0 2px 5px -2px rgba(0,0,0,0.6)"><div style="flex:1;font-size:12.5px">Marcus Bell</div><div style="font-size:12px;color:#6f8b87;width:88px">10-pack</div><div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#6f8b87;width:56px">2d</div><div style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:0.09em;color:#b6c9c4;background:#1d3630;border-radius:6px;padding:4px 8px">1 LEFT</div></div>
+          <div style="display:flex;align-items:center;gap:14px;padding:11px 14px;border-radius:11px;background:#132521;box-shadow:inset 0 1px 0 rgba(255,255,255,0.05), 0 2px 5px -2px rgba(0,0,0,0.6)"><div style="flex:1;font-size:12.5px">Priya Nair</div><div style="font-size:12px;color:#6f8b87;width:88px">Off-peak</div><div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#4d6a65;width:56px">&mdash;</div><div style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:0.09em;color:#b6c9c4;background:#1d3630;border-radius:6px;padding:4px 8px">NEVER IN</div></div>
+        </div>
+      </div>
+
+      <div style="min-height:0;display:flex;flex-direction:column;gap:16px">
+        <div style="flex:none;border-radius:15px;padding:18px 20px;background:linear-gradient(180deg,#152924,#0f1f1c);box-shadow:inset 0 1px 0 rgba(255,255,255,0.075), inset 0 -1px 0 rgba(0,0,0,0.55), 0 16px 30px -16px rgba(0,0,0,0.9)">
+          <div style="display:flex;align-items:center;gap:9px">
+            <div style="width:7px;height:7px;border-radius:4px;background:#0ca30c;box-shadow:0 0 9px rgba(12,163,12,0.95)"></div>
+            <div style="font-family:'Instrument Serif','Iowan Old Style',Georgia,serif;font-size:20px;line-height:1">On the floor now</div>
+            <div style="margin-left:auto;font-family:'IBM Plex Mono',monospace;font-size:22px;letter-spacing:-0.02em">37</div>
+          </div>
+          <div style="margin-top:14px;display:flex;flex-direction:column;gap:10px">
+            <div style="display:flex;justify-content:space-between;font-size:12.5px"><span style="color:#b6c9c4">Strength &amp; Conditioning</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#6f8b87">14/16</span></div>
+            <div style="height:6px;border-radius:4px;background:#050c0b;box-shadow:inset 0 2px 4px rgba(0,0,0,0.75);overflow:hidden"><div style="width:87%;height:100%;border-radius:4px;background:linear-gradient(90deg,#c2761f,#eda54a);box-shadow:0 0 8px rgba(224,145,47,0.5)"></div></div>
+            <div style="display:flex;justify-content:space-between;font-size:12.5px"><span style="color:#b6c9c4">Open gym</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#6f8b87">23</span></div>
+            <div style="height:6px;border-radius:4px;background:#050c0b;box-shadow:inset 0 2px 4px rgba(0,0,0,0.75);overflow:hidden"><div style="width:46%;height:100%;border-radius:4px;background:#43746a"></div></div>
+          </div>
+        </div>
+
+        <div style="flex:1;min-height:0;border-radius:15px;padding:18px 20px;background:linear-gradient(180deg,#152924,#0f1f1c);box-shadow:inset 0 1px 0 rgba(255,255,255,0.075), inset 0 -1px 0 rgba(0,0,0,0.55), 0 16px 30px -16px rgba(0,0,0,0.9);display:flex;flex-direction:column;gap:11px;overflow:hidden">
+          <div style="font-family:'Instrument Serif','Iowan Old Style',Georgia,serif;font-size:20px;line-height:1">Next up</div>
+          <div style="display:flex;align-items:baseline;gap:12px"><div style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:#b6c9c4;width:44px;flex:none">09:15</div><div style="flex:1;font-size:12.5px;color:#b6c9c4">Spin · Dana</div><div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#6f8b87">9/20</div></div>
+          <div style="display:flex;align-items:baseline;gap:12px"><div style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:#b6c9c4;width:44px;flex:none">10:00</div><div style="flex:1;font-size:12.5px;color:#b6c9c4">Mobility · Ravi</div><div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#6f8b87">4/12</div></div>
+          <div style="display:flex;align-items:baseline;gap:12px"><div style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:#b6c9c4;width:44px;flex:none">11:00</div><div style="flex:1;font-size:12.5px;color:#b6c9c4">Strength · Tim</div><div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#4d6a65">&mdash;</div></div>
+          <div style="margin-top:auto;padding-top:12px;box-shadow:inset 0 1px 0 rgba(255,255,255,0.055);font-size:12px;color:#6f8b87;line-height:1.5">Taken, recurring, class fill and cash position are all <span style="color:#b6c9c4">&mdash;</span> until payments, capacity and a bank feed exist.</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

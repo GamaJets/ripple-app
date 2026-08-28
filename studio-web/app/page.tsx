@@ -165,7 +165,7 @@ export default function Overview() {
           : risk === 'high' ? 'var(--crit)' : 'var(--ink3)';
         return (
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ width: 6, height: 6, borderRadius: 3, background: tone }} />
+            <span style={{ width: 6, height: 6, borderRadius: 0, background: tone }} />
             <span style={{ color: 'var(--ink2)', textTransform: 'capitalize' }}>{risk}</span>
           </span>
         );
@@ -214,7 +214,7 @@ export default function Overview() {
           gap: 1,
           background: 'var(--ring)',
           border: '1px solid var(--ring)',
-          borderRadius: 8,
+          borderRadius: 0,
           overflow: 'hidden',
           margin: '20px 0 10px',
         }}
@@ -238,7 +238,7 @@ export default function Overview() {
           gap: 1,
           background: 'var(--ring)',
           border: '1px solid var(--ring)',
-          borderRadius: 8,
+          borderRadius: 0,
           overflow: 'hidden',
           margin: '20px 0 24px',
         }}
@@ -260,10 +260,22 @@ export default function Overview() {
         />
         <Kpi label="Awaiting an outcome" value={roll?.unmarked30 ?? null}
              note={roll && roll.unmarked30 > 0 ? 'payroll cannot settle over these' : undefined} />
-        <Kpi label="Trainers at risk" value={roll?.atRiskCount} />
+        {/* Not "at risk". `atRiskCount` is everyone `trainerHealth` does not
+            return 'ok' for, and that set includes `idle` — a trainer hired
+            yesterday with no clients and no sessions yet. Labelling them at
+            risk tells a brand-new gym its only coach is failing, when the
+            truthful statement is that there is nothing to assess. Every other
+            screen already words this as "needs a look"; this one did not, and
+            it is the first number an owner sees. The set is deliberately the
+            same one staffView calls `flagged` — the count is right, the word
+            for it was wrong. */}
+        <Kpi label="Trainers needing a look" value={roll?.atRiskCount}
+             note={roll && roll.atRiskCount > 0 && roll.atRiskClients === 0
+               ? 'nothing to assess yet — no clients between them'
+               : undefined} />
       </div>
 
-      <section style={{ border: '1px solid var(--ring)', borderRadius: 8, background: 'var(--surface)' }}>
+      <section style={{ border: '1px solid var(--ring)', borderRadius: 0, background: 'var(--surface)' }}>
         <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--ring)' }}>
           <h2>Roster</h2>
         </div>
@@ -308,7 +320,7 @@ function Notice({ children, tone }: { children: React.ReactNode; tone?: 'crit' }
       style={{
         margin: '18px 0 0',
         padding: '13px 15px',
-        borderRadius: 8,
+        borderRadius: 0,
         background: 'var(--surface)',
         border: '1px solid var(--ring)',
         borderLeft: `3px solid ${tone === 'crit' ? 'var(--crit)' : 'var(--brand)'}`,
@@ -360,7 +372,7 @@ function SignIn() {
   } as const;
 
   const field = {
-    width: '100%', padding: '10px 12px', borderRadius: 7, fontSize: 14,
+    width: '100%', padding: '10px 12px', borderRadius: 0, fontSize: 14,
     background: 'var(--surface2)', color: 'var(--ink)',
     border: '1px solid var(--ring)', fontFamily: 'var(--sans)',
   } as const;

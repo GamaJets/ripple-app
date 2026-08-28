@@ -566,7 +566,7 @@ function Note({ tone, children }: { tone: 'warn' | 'info'; children: React.React
     <p style={{
       border: '1px solid var(--ring)',
       borderLeft: `3px solid ${tone === 'warn' ? '#f0c04e' : 'var(--brand)'}`,
-      borderRadius: 8, background: 'var(--surface)', padding: '14px 16px', fontSize: 13,
+      borderRadius: 0, background: 'var(--surface)', padding: '14px 16px', fontSize: 13,
       lineHeight: 1.55, color: 'var(--ink2)', margin: '0 0 22px',
     }}>
       {children}
@@ -593,7 +593,7 @@ function Kpi({ label, text, note }: { label: string; text: string | null; note?:
 
 function Section({ title, sub, children }: { title: string; sub?: string; children: React.ReactNode }) {
   return (
-    <section style={{ border: '1px solid var(--ring)', borderRadius: 8, background: 'var(--surface)', marginBottom: 22 }}>
+    <section style={{ border: '1px solid var(--ring)', borderRadius: 0, background: 'var(--surface)', marginBottom: 22 }}>
       <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--ring)' }}>
         <h2 style={{ margin: 0, fontSize: 15 }}>{title}</h2>
         {sub ? <p style={{ margin: '4px 0 0', color: 'var(--ink3)', fontSize: 12.5 }}>{sub}</p> : null}
@@ -615,11 +615,11 @@ const NO_TENANT =
 
 const field = {
   background: 'var(--surface2)', color: 'var(--ink)', border: '1px solid var(--ring)',
-  borderRadius: 6, padding: '8px 10px', fontSize: 13, fontFamily: 'var(--sans)', minWidth: 0,
+  borderRadius: 0, padding: '8px 10px', fontSize: 13, fontFamily: 'var(--sans)', minWidth: 0,
 } as const;
 
 const primaryBtn = {
-  background: 'var(--brand)', color: 'var(--brand-ink)', border: 'none', borderRadius: 6,
+  background: 'var(--brand)', color: 'var(--brand-ink)', border: 'none', borderRadius: 0,
   padding: '8px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
 } as const;
 

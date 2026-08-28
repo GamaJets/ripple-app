@@ -232,7 +232,7 @@ export default function Timetable() {
       <div style={{
         display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
         gap: 1, background: 'var(--ring)', border: '1px solid var(--ring)',
-        borderRadius: 8, overflow: 'hidden', margin: '20px 0 26px',
+        borderRadius: 0, overflow: 'hidden', margin: '20px 0 26px',
       }}>
         <Kpi label="Classes" text={sum ? String(sum.classes) : null} />
         <Kpi label="One-to-ones" text={sum ? String(sum.oneToOnes) : null}
@@ -256,7 +256,7 @@ export default function Timetable() {
         <AddOneToOne tenantId={tenantId} onChange={refresh} />
       </div>
 
-      <section style={{ border: '1px solid var(--ring)', borderRadius: 8, background: 'var(--surface)' }}>
+      <section style={{ border: '1px solid var(--ring)', borderRadius: 0, background: 'var(--surface)' }}>
         <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--ring)' }}>
           <h2>This week</h2>
           <p style={{ margin: '4px 0 0', color: 'var(--ink3)', fontSize: 12.5 }}>
@@ -327,7 +327,7 @@ function FloorCover({ board, monday }: { board: TimetableEntry[] | null; monday:
   const busiest = hours ? Math.max(1, ...hours.map((h) => h.entries.length)) : 1;
 
   return (
-    <section style={{ border: '1px solid var(--ring)', borderRadius: 8, background: 'var(--surface)', marginBottom: 22 }}>
+    <section style={{ border: '1px solid var(--ring)', borderRadius: 0, background: 'var(--surface)', marginBottom: 22 }}>
       <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--ring)', display: 'flex', gap: 12, alignItems: 'baseline', justifyContent: 'space-between', flexWrap: 'wrap' }}>
         <div>
           <h2>Who is on the floor</h2>
@@ -360,7 +360,7 @@ function FloorCover({ board, monday }: { board: TimetableEntry[] | null; monday:
                   title={`${FIRST_HOUR + i}:00 — ${on} on the floor`}
                   style={{
                     border: selected ? '1px solid var(--brand)' : '1px solid var(--ring)',
-                    borderRadius: 5, padding: '6px 2px', cursor: 'pointer',
+                    borderRadius: 0, padding: '6px 2px', cursor: 'pointer',
                     background: on === 0 ? 'var(--surface2)' : 'var(--surface2)',
                     fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink3)',
                     display: 'grid', gap: 4, justifyItems: 'center',
@@ -371,7 +371,7 @@ function FloorCover({ board, monday }: { board: TimetableEntry[] | null; monday:
                     display: 'block', width: '100%',
                     height: 4 + Math.round((on / busiest) * 20),
                     background: on === 0 ? 'var(--ring)' : 'var(--brand)',
-                    borderRadius: 2, opacity: on === 0 ? 0.5 : 1,
+                    borderRadius: 0, opacity: on === 0 ? 0.5 : 1,
                   }} />
                   <span style={{ color: on === 0 ? 'var(--ink3)' : 'var(--ink2)' }}>
                     {on === 0 ? '—' : on}
@@ -420,7 +420,7 @@ function SliceDetail({ slice, hour, day }: { slice: FloorSlice | null; hour: num
           <li key={e.key} style={{
             display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap',
             fontSize: 12.5, color: 'var(--ink2)',
-            border: '1px solid var(--ring)', borderRadius: 6, padding: '7px 10px',
+            border: '1px solid var(--ring)', borderRadius: 0, padding: '7px 10px',
             background: 'var(--surface2)',
           }}>
             <Tag kind={e.kind} />
@@ -439,7 +439,7 @@ function SliceDetail({ slice, hour, day }: { slice: FloorSlice | null; hour: num
 
 function Clashes({ rows }: { rows: ReturnType<typeof clashes> }) {
   return (
-    <section style={{ border: '1px solid var(--ring)', borderLeft: '3px solid var(--crit)', borderRadius: 8, background: 'var(--surface)', marginBottom: 22 }}>
+    <section style={{ border: '1px solid var(--ring)', borderLeft: '3px solid var(--crit)', borderRadius: 0, background: 'var(--surface)', marginBottom: 22 }}>
       <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--ring)' }}>
         <h2>Double-booked</h2>
         <p style={{ margin: '4px 0 0', color: 'var(--ink3)', fontSize: 12.5 }}>
@@ -475,7 +475,7 @@ function Tag({ kind }: { kind: TimetableEntry['kind'] }) {
   return (
     <span style={{
       fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '0.09em', textTransform: 'uppercase',
-      border: '1px solid var(--ring)', borderRadius: 4, padding: '2px 5px', whiteSpace: 'nowrap',
+      border: '1px solid var(--ring)', borderRadius: 0, padding: '2px 5px', whiteSpace: 'nowrap',
       color: cls ? 'var(--ink2)' : 'var(--brand)',
     }}>{cls ? 'Class' : '1:1'}</span>
   );
@@ -530,7 +530,7 @@ function AddOneToOne({ tenantId, onChange }: { tenantId: string; onChange: () =>
   };
 
   return (
-    <section style={{ border: '1px solid var(--ring)', borderRadius: 8, background: 'var(--surface)' }}>
+    <section style={{ border: '1px solid var(--ring)', borderRadius: 0, background: 'var(--surface)' }}>
       <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--ring)' }}>
         <h2>Add a one-to-one</h2>
         <p style={{ margin: '4px 0 0', color: 'var(--ink3)', fontSize: 12.5 }}>
@@ -635,7 +635,7 @@ function AddClass({ tenantId, onChange }: { tenantId: string; onChange: () => vo
   };
 
   return (
-    <section style={{ border: '1px solid var(--ring)', borderRadius: 8, background: 'var(--surface)' }}>
+    <section style={{ border: '1px solid var(--ring)', borderRadius: 0, background: 'var(--surface)' }}>
       <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--ring)' }}>
         <h2>Add a class</h2>
         <p style={{ margin: '4px 0 0', color: 'var(--ink3)', fontSize: 12.5 }}>
@@ -716,7 +716,7 @@ function Roster({ gymClass, onClose }: { gymClass: GymClass; onClose: () => void
         onClick={(e) => e.stopPropagation()}
         style={{
           width: 520, maxWidth: '100%', maxHeight: '80vh', overflow: 'auto',
-          background: 'var(--surface)', border: '1px solid var(--ring)', borderRadius: 10,
+          background: 'var(--surface)', border: '1px solid var(--ring)', borderRadius: 0,
         }}
       >
         <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--ring)', display: 'flex', justifyContent: 'space-between', gap: 12 }}>
@@ -750,7 +750,7 @@ function Roster({ gymClass, onClose }: { gymClass: GymClass; onClose: () => void
                   onClick={() => toggle(r)}
                   aria-pressed={!!r.attendedAt}
                   style={{
-                    border: '1px solid var(--ring)', borderRadius: 6, padding: '5px 12px',
+                    border: '1px solid var(--ring)', borderRadius: 0, padding: '5px 12px',
                     fontSize: 12.5, cursor: 'pointer', fontFamily: 'var(--sans)',
                     background: r.attendedAt ? 'var(--brand)' : 'var(--surface2)',
                     color: r.attendedAt ? 'var(--brand-ink)' : 'var(--ink2)',
@@ -771,17 +771,17 @@ function Roster({ gymClass, onClose }: { gymClass: GymClass; onClose: () => void
 
 const field = {
   background: 'var(--surface2)', color: 'var(--ink)', border: '1px solid var(--ring)',
-  borderRadius: 6, padding: '8px 10px', fontSize: 13, fontFamily: 'var(--sans)', minWidth: 0,
+  borderRadius: 0, padding: '8px 10px', fontSize: 13, fontFamily: 'var(--sans)', minWidth: 0,
 } as const;
 
 const primaryBtn = {
-  background: 'var(--brand)', color: 'var(--brand-ink)', border: 'none', borderRadius: 6,
+  background: 'var(--brand)', color: 'var(--brand-ink)', border: 'none', borderRadius: 0,
   padding: '8px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
 } as const;
 
 const ghostBtn = {
   background: 'var(--surface2)', color: 'var(--ink2)', border: '1px solid var(--ring)',
-  borderRadius: 6, padding: '6px 11px', fontSize: 12.5, cursor: 'pointer',
+  borderRadius: 0, padding: '6px 11px', fontSize: 12.5, cursor: 'pointer',
   fontFamily: 'var(--sans)', whiteSpace: 'nowrap',
 } as const;
 
@@ -805,7 +805,7 @@ function Kpi({ label, text, note }: { label: string; text: string | null; note?:
 function Banner({ children, tone }: { children: React.ReactNode; tone?: 'crit' }) {
   return (
     <div style={{
-      margin: '14px 0', padding: '11px 14px', borderRadius: 8, background: 'var(--surface)',
+      margin: '14px 0', padding: '11px 14px', borderRadius: 0, background: 'var(--surface)',
       border: '1px solid var(--ring)', borderLeft: `3px solid ${tone === 'crit' ? 'var(--crit)' : 'var(--brand)'}`,
       color: 'var(--ink2)', fontSize: 13,
     }}>{children}</div>

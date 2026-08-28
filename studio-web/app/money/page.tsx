@@ -146,7 +146,7 @@ export default function Money() {
         style={{
           display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
           gap: 1, background: 'var(--ring)', border: '1px solid var(--ring)',
-          borderRadius: 8, overflow: 'hidden', margin: '20px 0 26px',
+          borderRadius: 0, overflow: 'hidden', margin: '20px 0 26px',
         }}
       >
         <Kpi label="Taken (30 days)" text={money(sum?.takenCents)} note={sum?.takenCents == null ? (unread ?? 'nothing recorded yet') : `${sum.payments} payments`} />
@@ -444,11 +444,11 @@ function why(reason: unknown, fallback: string): string {
 
 const field = {
   background: 'var(--surface2)', color: 'var(--ink)', border: '1px solid var(--ring)',
-  borderRadius: 6, padding: '8px 10px', fontSize: 13, fontFamily: 'var(--sans)', minWidth: 0,
+  borderRadius: 0, padding: '8px 10px', fontSize: 13, fontFamily: 'var(--sans)', minWidth: 0,
 } as const;
 
 const primaryBtn = {
-  background: 'var(--brand)', color: 'var(--brand-ink)', border: 'none', borderRadius: 6,
+  background: 'var(--brand)', color: 'var(--brand-ink)', border: 'none', borderRadius: 0,
   padding: '8px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
 } as const;
 
@@ -464,7 +464,7 @@ const formRow = {
 
 function Section({ title, sub, children }: { title: string; sub?: string; children: React.ReactNode }) {
   return (
-    <section style={{ border: '1px solid var(--ring)', borderRadius: 8, background: 'var(--surface)', marginBottom: 22 }}>
+    <section style={{ border: '1px solid var(--ring)', borderRadius: 0, background: 'var(--surface)', marginBottom: 22 }}>
       <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--ring)' }}>
         <h2>{title}</h2>
         {sub ? <p style={{ margin: '4px 0 0', color: 'var(--ink3)', fontSize: 12.5 }}>{sub}</p> : null}
@@ -489,7 +489,7 @@ function Kpi({ label, text, note }: { label: string; text: string | null; note?:
 function Banner({ children, tone }: { children: React.ReactNode; tone?: 'crit' }) {
   return (
     <div style={{
-      margin: '14px 0', padding: '11px 14px', borderRadius: 8, background: 'var(--surface)',
+      margin: '14px 0', padding: '11px 14px', borderRadius: 0, background: 'var(--surface)',
       border: '1px solid var(--ring)', borderLeft: `3px solid ${tone === 'crit' ? 'var(--crit)' : 'var(--brand)'}`,
       color: 'var(--ink2)', fontSize: 13,
     }}>{children}</div>

@@ -245,7 +245,7 @@ export default function RetentionPage() {
         style={{
           display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
           gap: 1, background: 'var(--ring)', border: '1px solid var(--ring)',
-          borderRadius: 8, overflow: 'hidden', margin: '20px 0 26px',
+          borderRadius: 0, overflow: 'hidden', margin: '20px 0 26px',
         }}
       >
         <Kpi
@@ -310,7 +310,7 @@ export default function RetentionPage() {
 
       {line ? (
         <p style={{
-          margin: '0 0 22px', padding: '13px 15px', borderRadius: 8,
+          margin: '0 0 22px', padding: '13px 15px', borderRadius: 0,
           border: '1px solid var(--ring)', borderLeft: '3px solid var(--brand)',
           background: 'var(--surface)', color: 'var(--ink2)', fontSize: 13.5,
         }}>{line}</p>
@@ -615,7 +615,7 @@ function BandBar({ total, parts }: {
     <svg
       viewBox={`0 0 ${W} ${H}`} width="100%" height={H} preserveAspectRatio="none"
       role="img" aria-label={label}
-      style={{ display: 'block', borderRadius: 5, overflow: 'hidden', background: 'var(--surface2)' }}
+      style={{ display: 'block', borderRadius: 0, overflow: 'hidden', background: 'var(--surface2)' }}
     >
       {rects.map((r) => (r.w > 0 ? (
         <rect key={r.key} x={r.x} y={0} width={r.w} height={H} fill={r.colour} />
@@ -627,7 +627,7 @@ function BandBar({ total, parts }: {
 function Legend({ colour, n, title, note }: { colour: string; n: number; title: string; note: string }) {
   return (
     <div style={{ display: 'flex', gap: 9 }}>
-      <span style={{ width: 3, borderRadius: 2, background: colour, flex: 'none' }} aria-hidden="true" />
+      <span style={{ width: 3, borderRadius: 0, background: colour, flex: 'none' }} aria-hidden="true" />
       <div style={{ minWidth: 0 }}>
         <div className="mono" style={{ fontSize: 17, letterSpacing: '-0.02em' }}>{n}</div>
         <div style={{ fontSize: 12.5, color: 'var(--ink2)' }}>{title}</div>
@@ -796,7 +796,7 @@ function CohortChart({ spine, earlier, minCohort }: {
 function Swatch({ colour, children }: { colour: string; children: React.ReactNode }) {
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-      <span style={{ width: 9, height: 9, borderRadius: 2, background: colour }} aria-hidden="true" />
+      <span style={{ width: 9, height: 9, borderRadius: 0, background: colour }} aria-hidden="true" />
       {children}
     </span>
   );
@@ -1057,12 +1057,12 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 const inputStyle: React.CSSProperties = {
-  width: '100%', padding: '7px 9px', borderRadius: 6, fontSize: 13,
+  width: '100%', padding: '7px 9px', borderRadius: 0, fontSize: 13,
   border: '1px solid var(--ring)', background: 'var(--surface2)', color: 'var(--ink)',
 };
 
 const buttonStyle: React.CSSProperties = {
-  padding: '8px 14px', borderRadius: 6, fontSize: 13, cursor: 'pointer',
+  padding: '8px 14px', borderRadius: 0, fontSize: 13, cursor: 'pointer',
   border: '1px solid var(--ring)', background: 'var(--surface2)', color: 'var(--ink)',
 };
 
@@ -1251,7 +1251,7 @@ function pct(r: number): string {
 
 function Section({ title, sub, children }: { title: string; sub?: string; children: React.ReactNode }) {
   return (
-    <section style={{ border: '1px solid var(--ring)', borderRadius: 8, background: 'var(--surface)', marginBottom: 22 }}>
+    <section style={{ border: '1px solid var(--ring)', borderRadius: 0, background: 'var(--surface)', marginBottom: 22 }}>
       <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--ring)' }}>
         <h2>{title}</h2>
         {sub ? <p style={{ margin: '4px 0 0', color: 'var(--ink3)', fontSize: 12.5 }}>{sub}</p> : null}
@@ -1284,7 +1284,7 @@ function Banner({ children, tone }: { children: React.ReactNode; tone?: 'crit' |
   const edge = tone === 'crit' ? 'var(--crit)' : tone === 'warn' ? 'var(--warn)' : 'var(--brand)';
   return (
     <div style={{
-      margin: '14px 0', padding: '11px 14px', borderRadius: 8, background: 'var(--surface)',
+      margin: '14px 0', padding: '11px 14px', borderRadius: 0, background: 'var(--surface)',
       border: '1px solid var(--ring)', borderLeft: `3px solid ${edge}`,
       color: 'var(--ink2)', fontSize: 13,
     }}>{children}</div>
@@ -1294,7 +1294,7 @@ function Banner({ children, tone }: { children: React.ReactNode; tone?: 'crit' |
 function Failed({ reason, what }: { reason: string; what: string }) {
   return (
     <div style={{
-      padding: '16px 14px', margin: '14px', borderRadius: 8,
+      padding: '16px 14px', margin: '14px', borderRadius: 0,
       border: '1px solid var(--ring)', borderLeft: '3px solid var(--crit)',
       background: 'var(--surface2)', color: 'var(--ink2)', fontSize: 13,
     }}>

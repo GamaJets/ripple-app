@@ -279,7 +279,7 @@ export default function Sessions() {
         style={{
           display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
           gap: 1, background: 'var(--ring)', border: '1px solid var(--ring)',
-          borderRadius: 8, overflow: 'hidden', margin: '20px 0 10px',
+          borderRadius: 0, overflow: 'hidden', margin: '20px 0 10px',
         }}
       >
         <Kpi label="Delivered" text={sessions ? String(total.delivered) : null} />
@@ -466,7 +466,7 @@ function Settle({ owed, unread, settling, onSettle }: {
             style={{
               background: t.blocker ? 'var(--surface2)' : 'var(--brand)',
               color: t.blocker ? 'var(--ink3)' : 'var(--brand-ink)',
-              border: 'none', borderRadius: 6, padding: '8px 14px', fontSize: 13,
+              border: 'none', borderRadius: 0, padding: '8px 14px', fontSize: 13,
               fontWeight: 600, cursor: t.blocker ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap',
             }}
           >
@@ -574,7 +574,7 @@ const linkBtn = {
 
 function Section({ title, sub, children }: { title: string; sub?: string; children: React.ReactNode }) {
   return (
-    <section style={{ border: '1px solid var(--ring)', borderRadius: 8, background: 'var(--surface)', marginBottom: 22 }}>
+    <section style={{ border: '1px solid var(--ring)', borderRadius: 0, background: 'var(--surface)', marginBottom: 22 }}>
       <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--ring)' }}>
         <h2>{title}</h2>
         {sub ? <p style={{ margin: '4px 0 0', color: 'var(--ink3)', fontSize: 12.5 }}>{sub}</p> : null}
@@ -599,7 +599,7 @@ function Kpi({ label, text, note }: { label: string; text: string | null; note?:
 function Banner({ children, tone }: { children: React.ReactNode; tone?: 'crit' }) {
   return (
     <div style={{
-      margin: '14px 0', padding: '11px 14px', borderRadius: 8, background: 'var(--surface)',
+      margin: '14px 0', padding: '11px 14px', borderRadius: 0, background: 'var(--surface)',
       border: '1px solid var(--ring)', borderLeft: `3px solid ${tone === 'crit' ? 'var(--crit)' : 'var(--brand)'}`,
       color: 'var(--ink2)', fontSize: 13,
     }}>{children}</div>

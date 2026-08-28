@@ -18,6 +18,8 @@
 // that says "£6,180 across 84 sessions, with 12 still unmarked" is useful. One
 // that says £7,060 because it counted the twelve is a dispute.
 
+import { assertWhole, capLimit } from './rowCap';
+
 type Queryable = { from: (table: string) => any };
 
 /** What happened to a booked session. Null means nobody has said yet. */
@@ -351,10 +353,14 @@ export async function fetchSessions(
     .gte('starts_at', sinceIso)
     .order('starts_at', { ascending: false });
   if (untilIso) q = q.lte('starts_at', untilIso);
+  q = q.limit(capLimit());
   const { data, error } = await q;
   if (error) throw error;
 
-  const rows = (data ?? []) as any[];
+  // This list is summed into what the gym owes its trainers. A thousand rows is
+  // a busy month, not an impossible one, and a set cut off at the limit would
+  // have priced the month at whatever fitted — with no error to say so.
+  const rows = assertWhole(data, 'sessions in this period') as any[];
   const names = await fetchSessionNames(sb, rows);
   return rows.map((r) => rowToSession(r, names));
 }

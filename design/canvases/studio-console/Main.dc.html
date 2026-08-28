@@ -1,0 +1,288 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap">
+  <style>
+    body { margin: 0; background: #0c1413; }
+  </style>
+</helmet>
+
+<!--
+  BLEND — each direction contributes on one axis and only its own axis.
+
+    Instrument  the grid and the data idiom: hairline six-column strip, mono
+                micro-labels, tabular figures, em dash for absent.
+    Editorial   the voice and the scale: Instrument Serif for the title and for
+                ONE hero figure per screen. Nothing else gets to be large.
+    Depth       the material: recessed rail, raised working surface, one light
+                source from above. Glow is reserved for live status.
+
+  Type is where a blend usually dies — three directions ship six families. This
+  takes Archivo and IBM Plex Mono from Instrument and Instrument Serif from
+  Editorial. Depth brings no typeface at all; it brings light. Figtree and
+  JetBrains Mono are deliberately dropped.
+-->
+
+<div style="width:1440px;height:900px;overflow:hidden;background:#0c1413;color:#e8f2f0;font-family:'Archivo','Helvetica Neue',Arial,sans-serif;font-size:13px;line-height:1.45;font-variant-numeric:tabular-nums;display:flex">
+
+  <!-- ================= RAIL — the recessed plane (Depth) ================= -->
+  <div style="width:209px;flex:none;box-sizing:border-box;background:#0b1614;padding:20px 14px 16px 14px;display:flex;flex-direction:column;gap:18px;box-shadow:inset -1px 0 0 rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.03)">
+
+    <div style="display:flex;align-items:center;gap:9px">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#e0912f" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="2.3" fill="#e0912f" stroke="none"></circle><path d="M17.2 6.8a7.35 7.35 0 0 1 0 10.4"></path><path d="M6.8 17.2a7.35 7.35 0 0 1 0-10.4"></path></svg>
+      <div style="font-size:13.5px;font-weight:600;letter-spacing:0.01em">Repple <span style="color:#6f8b87;font-weight:500">Studio</span></div>
+    </div>
+
+    <!-- The context switch, not a "Mine" group. Two subjects, one at a time. -->
+    <div style="display:flex;flex-direction:column;gap:7px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:2px;padding:2px;border-radius:8px;background:#081110;box-shadow:inset 0 2px 5px rgba(0,0,0,0.6), inset 0 -1px 0 rgba(255,255,255,0.04)">
+        <div style="text-align:center;padding:6px 4px;border-radius:6px;font-size:12px;font-weight:600;color:#2a1503;background:linear-gradient(180deg,#e9a23f,#d8862a);box-shadow:inset 0 1px 0 rgba(255,255,255,0.42), 0 2px 6px -2px rgba(224,145,47,0.55)">The gym</div>
+        <div style="text-align:center;padding:6px 4px;border-radius:6px;font-size:12px;color:#6f8b87">My book</div>
+      </div>
+      <div style="padding-left:3px;font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace;font-size:9px;letter-spacing:0.09em;color:#486460">EVERYTHING ACROSS THE GYM</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:13px;overflow:hidden">
+
+      <div style="display:flex;flex-direction:column;gap:1px">
+        <div style="padding:6px 9px;border-radius:6px;font-size:12.5px;font-weight:500;color:#e8f2f0;background:linear-gradient(180deg,#193029,#152722);box-shadow:inset 0 1px 0 rgba(255,255,255,0.06), 0 1px 2px rgba(0,0,0,0.35);position:relative">
+          <span style="position:absolute;left:0;top:7px;bottom:7px;width:2px;border-radius:2px;background:#e0912f;box-shadow:0 0 7px rgba(224,145,47,0.7)"></span>
+          Overview
+        </div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <div style="padding-left:9px;font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace;font-size:8.5px;font-weight:500;letter-spacing:0.18em;color:#3f5b57">FLOOR</div>
+        <div style="display:flex;flex-direction:column;gap:1px">
+          <div style="padding:5px 9px;font-size:12.5px;color:#6f8b87">Members</div>
+          <div style="padding:5px 9px;font-size:12.5px;color:#6f8b87">Retention</div>
+          <div style="padding:5px 9px;font-size:12.5px;color:#6f8b87">Passes</div>
+          <div style="padding:5px 9px;font-size:12.5px;color:#6f8b87">Door</div>
+        </div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <div style="padding-left:9px;font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace;font-size:8.5px;font-weight:500;letter-spacing:0.18em;color:#3f5b57">DELIVERY</div>
+        <div style="display:flex;flex-direction:column;gap:1px">
+          <div style="padding:5px 9px;font-size:12.5px;color:#6f8b87">Classes</div>
+          <div style="padding:5px 9px;font-size:12.5px;color:#6f8b87">Timetable</div>
+          <div style="padding:5px 9px;font-size:12.5px;color:#6f8b87">Sessions</div>
+          <div style="padding:5px 9px;font-size:12.5px;color:#6f8b87">Staff</div>
+        </div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <div style="padding-left:9px;font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace;font-size:8.5px;font-weight:500;letter-spacing:0.18em;color:#3f5b57">MONEY</div>
+        <div style="display:flex;flex-direction:column;gap:1px">
+          <div style="padding:5px 9px;font-size:12.5px;color:#6f8b87">Plans &amp; payments</div>
+          <div style="padding:5px 9px;font-size:12.5px;color:#6f8b87">Revenue</div>
+          <div style="padding:5px 9px;font-size:12.5px;color:#6f8b87">Accounting</div>
+          <div style="padding:5px 9px;font-size:12.5px;color:#6f8b87">Payroll</div>
+          <div style="padding:5px 9px;font-size:12.5px;color:#6f8b87">Close</div>
+        </div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <div style="padding-left:9px;font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace;font-size:8.5px;font-weight:500;letter-spacing:0.18em;color:#3f5b57">SYSTEM</div>
+        <div style="display:flex;flex-direction:column;gap:1px">
+          <div style="padding:5px 9px;font-size:12.5px;color:#6f8b87">Analytics</div>
+          <div style="padding:5px 9px;font-size:12.5px;color:#6f8b87">Equipment</div>
+          <div style="padding:5px 9px;font-size:12.5px;color:#6f8b87">Import</div>
+        </div>
+      </div>
+
+    </div>
+
+    <div style="margin-top:auto;display:flex;flex-direction:column;gap:5px;padding:13px 0 0 9px;box-shadow:inset 0 1px 0 rgba(255,255,255,0.06)">
+      <div style="font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace;font-size:9px;letter-spacing:0.14em;color:#3f5b57">OWNER</div>
+      <div style="font-size:12px;color:#b6c9c4">Tim Rodgers</div>
+      <div style="font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace;font-size:9px;letter-spacing:0.12em;color:#3f5b57">KINETIC GYM · 4.2.1</div>
+    </div>
+
+  </div>
+
+  <!-- ============= WORKING SURFACE — the raised plane (Depth) ============= -->
+  <div style="flex:1;min-width:0;box-sizing:border-box;padding:24px 28px 26px 28px;display:flex;flex-direction:column;gap:17px;background:linear-gradient(178deg,#101e1b 0%,#0d1917 62%,#0b1615 100%);box-shadow:inset 1px 0 0 rgba(255,255,255,0.055), inset 0 1px 0 rgba(255,255,255,0.035), -14px 0 34px -10px rgba(0,0,0,0.6)">
+
+    <!-- header — Editorial's serif title over Instrument's mono eyebrow -->
+    <div style="flex:none;display:flex;align-items:flex-end;justify-content:space-between;gap:32px">
+      <div style="display:flex;flex-direction:column;gap:5px">
+        <div style="font-family:'Instrument Serif','Iowan Old Style',Georgia,serif;font-size:44px;line-height:0.98;letter-spacing:-0.012em">Overview</div>
+        <div style="font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace;font-size:10.5px;letter-spacing:0.14em;color:#6f8b87">KINETIC GYM · LAST 30 DAYS</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:9px">
+        <div style="display:flex;align-items:center;gap:9px;padding:8px 12px;width:214px;box-sizing:border-box;border-radius:7px;background:#0a1513;box-shadow:inset 0 2px 5px rgba(0,0,0,0.55), inset 0 -1px 0 rgba(255,255,255,0.045)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#5d7a76" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"></circle><path d="M16 16l4.5 4.5"></path></svg>
+          <div style="font-size:12px;color:#5d7a76;flex:1">Search members, sessions</div>
+          <div style="font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace;font-size:9.5px;color:#3f5b57">⌘K</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:9px;padding:8px 12px;border-radius:7px;background:linear-gradient(180deg,#1a312b,#152722);box-shadow:inset 0 1px 0 rgba(255,255,255,0.075), inset 0 -1px 0 rgba(0,0,0,0.5), 0 2px 5px rgba(0,0,0,0.4)">
+          <div style="font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace;font-size:10px;font-weight:500;letter-spacing:0.13em;color:#b6c9c4">LAST 30 DAYS</div>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#6f8b87" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg>
+        </div>
+      </div>
+    </div>
+
+    <!-- hero — Editorial's one large figure, on Depth's raised card -->
+    <div style="flex:none;display:grid;grid-template-columns:1fr 392px;gap:17px">
+
+      <div style="border-radius:12px;padding:20px 24px 18px 24px;background:linear-gradient(180deg,#132521,#0f1e1b);box-shadow:inset 0 1px 0 rgba(255,255,255,0.065), inset 0 -1px 0 rgba(0,0,0,0.5), 0 10px 20px -12px rgba(0,0,0,0.8);display:flex;align-items:center;gap:28px">
+        <div style="display:flex;flex-direction:column;gap:2px">
+          <div style="font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace;font-size:9.5px;font-weight:500;letter-spacing:0.16em;color:#6f8b87">ACTIVE MEMBERS</div>
+          <div style="font-family:'Instrument Serif','Iowan Old Style',Georgia,serif;font-size:104px;line-height:0.86;letter-spacing:-0.025em;font-feature-settings:'tnum' 1">243</div>
+        </div>
+        <div style="flex:1;display:flex;flex-direction:column;gap:9px;padding-left:24px;box-shadow:inset 1px 0 0 rgba(255,255,255,0.055)">
+          <div style="display:flex;align-items:center;gap:8px">
+            <svg width="15" height="15" viewBox="0 0 20 20" fill="none" stroke="#0ca30c" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 16V5"></path><path d="M5.5 9.5 10 5l4.5 4.5"></path></svg>
+            <span style="font-size:13px;color:#b6c9c4">Up 9 on the previous thirty days</span>
+          </div>
+          <div style="font-size:12.5px;color:#6f8b87;line-height:1.5">6 joined and 4 left this month. The gym has grown every month since April.</div>
+          <div style="display:flex;gap:3px;align-items:flex-end;height:34px;margin-top:2px">
+            <div style="width:13px;height:16px;border-radius:2px;background:#2c4b44"></div>
+            <div style="width:13px;height:19px;border-radius:2px;background:#2c4b44"></div>
+            <div style="width:13px;height:18px;border-radius:2px;background:#2c4b44"></div>
+            <div style="width:13px;height:23px;border-radius:2px;background:#376056"></div>
+            <div style="width:13px;height:25px;border-radius:2px;background:#376056"></div>
+            <div style="width:13px;height:28px;border-radius:2px;background:#43746a"></div>
+            <div style="width:13px;height:34px;border-radius:2px;background:linear-gradient(180deg,#e9a23f,#c2761f);box-shadow:0 0 8px rgba(224,145,47,0.45)"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Editorial's italic serif subhead, doing the job a chart cannot -->
+      <div style="border-radius:12px;padding:18px 20px;background:linear-gradient(180deg,#132521,#0f1e1b);box-shadow:inset 0 1px 0 rgba(255,255,255,0.065), inset 0 -1px 0 rgba(0,0,0,0.5), 0 10px 20px -12px rgba(0,0,0,0.8);display:flex;flex-direction:column;gap:11px">
+        <div style="font-family:'Instrument Serif','Iowan Old Style',Georgia,serif;font-style:italic;font-size:19px;line-height:1;color:#e8f2f0">Not shown, and why</div>
+        <div style="display:flex;align-items:baseline;gap:12px">
+          <div style="font-family:'Instrument Serif','Iowan Old Style',Georgia,serif;font-size:30px;line-height:0.8;color:#4d6a65;width:26px;flex:none">&mdash;</div>
+          <div style="font-size:12.5px;color:#6f8b87;line-height:1.4"><span style="color:#b6c9c4">Taken, 30d.</span> No payments recorded yet.</div>
+        </div>
+        <div style="display:flex;align-items:baseline;gap:12px">
+          <div style="font-family:'Instrument Serif','Iowan Old Style',Georgia,serif;font-size:30px;line-height:0.8;color:#4d6a65;width:26px;flex:none">&mdash;</div>
+          <div style="font-size:12.5px;color:#6f8b87;line-height:1.4"><span style="color:#b6c9c4">Class fill.</span> No capacity set on any class.</div>
+        </div>
+        <div style="display:flex;align-items:baseline;gap:12px">
+          <div style="font-family:'Instrument Serif','Iowan Old Style',Georgia,serif;font-size:30px;line-height:0.8;color:#4d6a65;width:26px;flex:none">&mdash;</div>
+          <div style="font-size:12.5px;color:#6f8b87;line-height:1.4"><span style="color:#b6c9c4">Cash position.</span> No bank feed connected.</div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- KPI strip — Instrument's hairline six, unchanged in idiom -->
+    <div style="flex:none;display:grid;grid-template-columns:repeat(6, minmax(0, 1fr));border-radius:10px;background:#0e1c19;box-shadow:inset 0 1px 0 rgba(255,255,255,0.05), inset 0 -1px 0 rgba(0,0,0,0.45), 0 6px 14px -10px rgba(0,0,0,0.8);overflow:hidden">
+      <div style="padding:15px 16px;display:flex;flex-direction:column;gap:7px">
+        <div style="font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace;font-size:9.5px;font-weight:500;letter-spacing:0.15em;color:#6f8b87">RECURRING / MO</div>
+        <div style="font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace;font-size:26px;font-weight:500;line-height:1;color:#4d6a65">&mdash;</div>
+        <div style="font-size:11px;color:#5d7a76;line-height:1.35">no priced plan active</div>
+      </div>
+      <div style="padding:15px 16px;display:flex;flex-direction:column;gap:7px;box-shadow:inset 1px 0 0 rgba(255,255,255,0.05)">
+        <div style="font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace;font-size:9.5px;font-weight:500;letter-spacing:0.15em;color:#6f8b87">IN THE BUILDING</div>
+        <div style="display:flex;align-items:center;gap:9px">
+          <div style="font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace;font-size:26px;font-weight:500;line-height:1;letter-spacing:-0.02em">37</div>
+          <div style="width:6px;height:6px;border-radius:3px;background:#0ca30c;box-shadow:0 0 7px rgba(12,163,12,0.9)"></div>
+        </div>
+        <div style="font-size:11px;color:#5d7a76;line-height:1.35">live · read 08:41</div>
+      </div>
+      <div style="padding:15px 16px;display:flex;flex-direction:column;gap:7px;box-shadow:inset 1px 0 0 rgba(255,255,255,0.05)">
+        <div style="font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace;font-size:9.5px;font-weight:500;letter-spacing:0.15em;color:#6f8b87">TRAINERS</div>
+        <div style="font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace;font-size:26px;font-weight:500;line-height:1;letter-spacing:-0.02em">6</div>
+        <div style="font-size:11px;color:#5d7a76;line-height:1.35">all on the floor this week</div>
+      </div>
+      <div style="padding:15px 16px;display:flex;flex-direction:column;gap:7px;box-shadow:inset 1px 0 0 rgba(255,255,255,0.05)">
+        <div style="font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace;font-size:9.5px;font-weight:500;letter-spacing:0.15em;color:#6f8b87">CLIENTS</div>
+        <div style="font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace;font-size:26px;font-weight:500;line-height:1;letter-spacing:-0.02em">118</div>
+        <div style="font-size:11px;color:#5d7a76;line-height:1.35">19.7 a trainer</div>
+      </div>
+      <div style="padding:15px 16px;display:flex;flex-direction:column;gap:7px;box-shadow:inset 1px 0 0 rgba(255,255,255,0.05)">
+        <div style="font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace;font-size:9.5px;font-weight:500;letter-spacing:0.15em;color:#6f8b87">SESSIONS · 30D</div>
+        <div style="font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace;font-size:26px;font-weight:500;line-height:1;letter-spacing:-0.02em">412</div>
+        <div style="font-size:11px;color:#5d7a76;line-height:1.35">13.7 a day</div>
+      </div>
+      <div style="padding:15px 16px;display:flex;flex-direction:column;gap:7px;box-shadow:inset 1px 0 0 rgba(255,255,255,0.05)">
+        <div style="font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace;font-size:9.5px;font-weight:500;letter-spacing:0.15em;color:#6f8b87">UNMARKED</div>
+        <div style="font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace;font-size:26px;font-weight:500;line-height:1;letter-spacing:-0.02em;color:#fab219">12</div>
+        <div style="font-size:11px;color:#5d7a76;line-height:1.35">blocking the August close</div>
+      </div>
+    </div>
+
+    <!-- working area — Instrument's 1fr / side split, on Depth's raised cards -->
+    <div style="flex:1;min-height:0;display:grid;grid-template-columns:1fr 392px;gap:17px">
+
+      <div style="min-height:0;border-radius:12px;background:linear-gradient(180deg,#132521,#0f1e1b);box-shadow:inset 0 1px 0 rgba(255,255,255,0.065), inset 0 -1px 0 rgba(0,0,0,0.5), 0 10px 20px -12px rgba(0,0,0,0.8);display:flex;flex-direction:column;overflow:hidden">
+        <div style="padding:15px 20px 12px 20px;display:flex;align-items:baseline;justify-content:space-between">
+          <div style="font-family:'Instrument Serif','Iowan Old Style',Georgia,serif;font-size:20px;line-height:1">Needs a decision</div>
+          <div style="font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace;font-size:9.5px;letter-spacing:0.14em;color:#6f8b87">5 OF 18</div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 104px 92px 104px;padding:0 20px 7px 20px;font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace;font-size:8.5px;font-weight:500;letter-spacing:0.16em;color:#3f5b57;box-shadow:inset 0 -1px 0 rgba(255,255,255,0.055)">
+          <div>MEMBER</div><div>PLAN</div><div>LAST IN</div><div style="text-align:right">STATUS</div>
+        </div>
+        <div style="flex:1;min-height:0;overflow:hidden">
+          <div style="display:grid;grid-template-columns:1fr 104px 92px 104px;padding:11px 20px;font-size:12.5px;align-items:center;box-shadow:inset 0 -1px 0 rgba(255,255,255,0.035)">
+            <div>Sara Almeida</div><div style="color:#6f8b87">Unlimited</div><div style="color:#6f8b87">31 days</div><div style="text-align:right"><span style="font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace;font-size:9.5px;letter-spacing:0.1em;color:#2a1503;background:#fab219;border-radius:4px;padding:3px 7px">LAPSING</span></div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 104px 92px 104px;padding:11px 20px;font-size:12.5px;align-items:center;box-shadow:inset 0 -1px 0 rgba(255,255,255,0.035)">
+            <div>Marcus Bell</div><div style="color:#6f8b87">10-pack</div><div style="color:#6f8b87">2 days</div><div style="text-align:right"><span style="font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace;font-size:9.5px;letter-spacing:0.1em;color:#b6c9c4">1 LEFT</span></div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 104px 92px 104px;padding:11px 20px;font-size:12.5px;align-items:center;box-shadow:inset 0 -1px 0 rgba(255,255,255,0.035)">
+            <div>Priya Nair</div><div style="color:#6f8b87">Off-peak</div><div style="color:#4d6a65">&mdash;</div><div style="text-align:right"><span style="font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace;font-size:9.5px;letter-spacing:0.1em;color:#b6c9c4">NEVER IN</span></div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 104px 92px 104px;padding:11px 20px;font-size:12.5px;align-items:center;box-shadow:inset 0 -1px 0 rgba(255,255,255,0.035)">
+            <div>Tom Okafor</div><div style="color:#6f8b87">Unlimited</div><div style="color:#6f8b87">44 days</div><div style="text-align:right"><span style="font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace;font-size:9.5px;letter-spacing:0.1em;color:#2a1503;background:#ec835a;border-radius:4px;padding:3px 7px">AT RISK</span></div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 104px 92px 104px;padding:11px 20px;font-size:12.5px;align-items:center">
+            <div>Lena Fischer</div><div style="color:#6f8b87">Unlimited</div><div style="color:#6f8b87">6 days</div><div style="text-align:right"><span style="font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace;font-size:9.5px;letter-spacing:0.1em;color:#b6c9c4">CARD FAILED</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div style="min-height:0;border-radius:12px;padding:16px 20px;background:linear-gradient(180deg,#132521,#0f1e1b);box-shadow:inset 0 1px 0 rgba(255,255,255,0.065), inset 0 -1px 0 rgba(0,0,0,0.5), 0 10px 20px -12px rgba(0,0,0,0.8);display:flex;flex-direction:column;gap:13px;overflow:hidden">
+        <div style="display:flex;align-items:center;gap:8px">
+          <div style="width:6px;height:6px;border-radius:3px;background:#0ca30c;box-shadow:0 0 7px rgba(12,163,12,0.9)"></div>
+          <div style="font-family:'Instrument Serif','Iowan Old Style',Georgia,serif;font-size:20px;line-height:1">On the floor now</div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:9px">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+            <div style="font-size:12.5px;color:#b6c9c4">Strength &amp; Conditioning</div>
+            <div style="font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace;font-size:11px;color:#6f8b87">14/16</div>
+          </div>
+          <div style="height:5px;border-radius:3px;background:#0a1513;box-shadow:inset 0 1px 3px rgba(0,0,0,0.6);overflow:hidden"><div style="width:87%;height:100%;border-radius:3px;background:linear-gradient(90deg,#c2761f,#e9a23f)"></div></div>
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:3px">
+            <div style="font-size:12.5px;color:#b6c9c4">Open gym</div>
+            <div style="font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace;font-size:11px;color:#6f8b87">23</div>
+          </div>
+          <div style="height:5px;border-radius:3px;background:#0a1513;box-shadow:inset 0 1px 3px rgba(0,0,0,0.6);overflow:hidden"><div style="width:46%;height:100%;border-radius:3px;background:#43746a"></div></div>
+        </div>
+        <div style="margin-top:2px;padding-top:12px;box-shadow:inset 0 1px 0 rgba(255,255,255,0.055);display:flex;flex-direction:column;gap:8px">
+          <div style="font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace;font-size:8.5px;font-weight:500;letter-spacing:0.16em;color:#3f5b57">NEXT UP</div>
+          <div style="display:flex;align-items:baseline;gap:11px">
+            <div style="font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace;font-size:11.5px;color:#b6c9c4;width:44px;flex:none">09:15</div>
+            <div style="font-size:12.5px;color:#b6c9c4;flex:1">Spin · Dana</div>
+            <div style="font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace;font-size:11px;color:#6f8b87">9/20</div>
+          </div>
+          <div style="display:flex;align-items:baseline;gap:11px">
+            <div style="font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace;font-size:11.5px;color:#b6c9c4;width:44px;flex:none">10:00</div>
+            <div style="font-size:12.5px;color:#b6c9c4;flex:1">Mobility · Ravi</div>
+            <div style="font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace;font-size:11px;color:#6f8b87">4/12</div>
+          </div>
+          <div style="display:flex;align-items:baseline;gap:11px">
+            <div style="font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace;font-size:11.5px;color:#b6c9c4;width:44px;flex:none">11:00</div>
+            <div style="font-size:12.5px;color:#b6c9c4;flex:1">Strength · Tim</div>
+            <div style="font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace;font-size:11px;color:#4d6a65">&mdash;</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+  </div>
+
+</div>
+</x-dc>
+</body>
+</html>

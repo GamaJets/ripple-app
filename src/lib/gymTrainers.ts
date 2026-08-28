@@ -10,6 +10,10 @@
 // that a 0 across the whole gym may mean the sessions_owner_r policy is missing
 // rather than that nobody trained.
 
+// The only import here, and deliberately a pure one — no Supabase, no front
+// end — so this module stays testable from either app.
+import { assertWhole, capLimit } from './rowCap';
+
 const DAY = 24 * 60 * 60 * 1000;
 
 export interface GymTrainer {
@@ -61,10 +65,16 @@ export async function fetchGymTrainers(sb: Queryable, tenantId: string): Promise
   // Thrown, not defaulted, for the same reason the `trainers` read above throws:
   // a missing count becomes 0, and 0 clients is a statement about a trainer that
   // an owner acts on. The screen renders a thrown read as an error.
-  const { data: cls, error: clsErr } = await sb.from('clients').select('trainer_id').in('trainer_id', ids);
+  //
+  // Bounded at cap + 1 so a truncated read is detectable. A gym with more than
+  // a thousand clients is ordinary, and PostgREST would have handed back the
+  // first thousand with no indication there were more — every trainer's book
+  // understated, silently, by however many rows fell off the end.
+  const { data: cls, error: clsErr } = await sb.from('clients').select('trainer_id')
+    .in('trainer_id', ids).limit(capLimit());
   if (clsErr) throw clsErr;
   const clientCount = new Map<string, number>();
-  (cls ?? []).forEach((c: any) => {
+  assertWhole(cls, "this gym's clients").forEach((c: any) => {
     if (c.trainer_id) clientCount.set(c.trainer_id, (clientCount.get(c.trainer_id) ?? 0) + 1);
   });
 
@@ -80,12 +90,16 @@ export async function fetchGymTrainers(sb: Queryable, tenantId: string): Promise
     .in('trainer_id', ids)
     .eq('status', 'booked')
     .gte('starts_at', since)
-    .lte('starts_at', new Date().toISOString());
+    .lte('starts_at', new Date().toISOString())
+    .limit(capLimit());
   if (sessErr) throw sessErr;
   const sessionCount = new Map<string, number>();
   const deliveredCount = new Map<string, number>();
   const unmarkedCount = new Map<string, number>();
-  (sess ?? []).forEach((s: any) => {
+  // The paragraph above worries about a read that FAILS. A read that is merely
+  // truncated is worse: it succeeds, so nothing throws, and payroll prices out
+  // at whatever fraction of the month happened to fit under the limit.
+  assertWhole(sess, 'sessions in the last 30 days').forEach((s: any) => {
     if (!s.trainer_id) return;
     sessionCount.set(s.trainer_id, (sessionCount.get(s.trainer_id) ?? 0) + 1);
     if (s.outcome === 'completed') {
