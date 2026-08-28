@@ -143,6 +143,19 @@ export default function Close() {
   if (me === undefined) return <div style={{ padding: 40, color: 'var(--ink3)' }}>Loading…</div>;
   if (me === null) return <div style={{ padding: 40 }}><a href="/">Sign in</a></div>;
 
+  if (me.roleUnknown) {
+    return (
+      <Shell me={me} gymName={gymName} current="/close">
+        <h1>We could not read your account</h1>
+        <p style={{ color: 'var(--ink2)', marginTop: 8, maxWidth: '62ch' }}>
+          Your profile did not load, so this console does not know what you are —
+          which is not the same as you not having access. Reload the page; if it
+          keeps happening the database refused the read rather than you.
+        </p>
+      </Shell>
+    );
+  }
+
   if (me.role !== 'owner') {
     return (
       <Shell me={me} gymName={gymName} current="/close">

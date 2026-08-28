@@ -120,6 +120,17 @@ export async function fetchGymTrainers(sb: Queryable, tenantId: string): Promise
  *
  * `payrollBlocker` says which, in words an owner can act on.
  */
+/**
+ * Returns MAJOR units — whole currency, not cents.
+ *
+ * `tenants.session_fee` is a numeric in whole currency (default 75 = AED 75),
+ * so `delivered * sessionFee` is 6,300, not 630,000. Do NOT pass this to
+ * `money()` from gymRecord, which divides by 100: the console did exactly that
+ * behind a variable named `cents`, and the payroll screen showed AED 63.00
+ * where the gym owed AED 6,300.
+ *
+ * If you need it formatted like every other figure, multiply by 100 first.
+ */
 export function payroll30For(trainers: GymTrainer[], sessionFee: number | null): number | null {
   if (sessionFee == null) return null;
   if (trainers.some((t) => t.unmarked30 > 0)) return null;

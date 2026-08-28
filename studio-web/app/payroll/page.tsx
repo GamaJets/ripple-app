@@ -213,6 +213,19 @@ export default function Payroll() {
   if (me === undefined) return <div style={{ padding: 40, color: 'var(--ink3)' }}>Loading…</div>;
   if (me === null) return <div style={{ padding: 40 }}><a href="/">Sign in</a></div>;
 
+  if (me.roleUnknown) {
+    return (
+      <Shell me={me} gymName={gymName} current="/payroll">
+        <h1>We could not read your account</h1>
+        <p style={{ color: 'var(--ink2)', marginTop: 8, maxWidth: '62ch' }}>
+          Your profile did not load, so this console does not know what you are —
+          which is not the same as you not having access. Reload the page; if it
+          keeps happening the database refused the read rather than you.
+        </p>
+      </Shell>
+    );
+  }
+
   if (me.role !== 'owner') {
     return (
       <Shell me={me} gymName={gymName} current="/payroll">
@@ -764,7 +777,13 @@ function LineItems({ sessions, unread, policy }: {
 function CrossCheck({ trainers, unread, sessionFee, gymError }: {
   trainers: GymTrainer[] | null; unread: Unread; sessionFee: number | null; gymError: string | null;
 }) {
-  const cents = trainers ? payroll30For(trainers, sessionFee) : null;
+  // MAJOR units, not cents. tenants.session_fee is a numeric in whole currency
+  // (default 75 = AED 75), and payroll30For returns delivered * fee — so 84
+  // sessions at 75 is 6,300, not 630,000. This was named `cents` and passed to
+  // money(), which divides by 100: the payroll screen showed AED 63.00 where
+  // the gym owed AED 6,300. A hundredfold understatement on the one screen
+  // whose entire job is to be right about what people are paid.
+  const major = trainers ? payroll30For(trainers, sessionFee) : null;
   const why = trainers
     ? (gymError && sessionFee == null
         ? `Your gym could not be read, so there is no session fee to price it with: ${gymError}`
@@ -793,10 +812,10 @@ function CrossCheck({ trainers, unread, sessionFee, gymError }: {
     >
       <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--ring)', display: 'flex', gap: 16, alignItems: 'baseline', flexWrap: 'wrap' }}>
         <span className="micro">30-day payroll</span>
-        <span className="mono" style={{ fontSize: 18, color: cents == null ? 'var(--ink3)' : 'var(--ink)' }}>
+        <span className="mono" style={{ fontSize: 18, color: major == null ? 'var(--ink3)' : 'var(--ink)' }}>
           {/* The same refusal as the run above, from the module that owns this
               window: unmarked sessions or no fee means a dash, never a figure. */}
-          {(cents != null && money(cents)) || '—'}
+          {(major != null && money(Math.round(major * 100))) || '—'}
         </span>
         {why ? <span style={{ fontSize: 12.5, color: 'var(--ink3)' }}>{why}</span> : null}
       </div>

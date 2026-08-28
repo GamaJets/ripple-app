@@ -15,8 +15,20 @@
   --ink2: #b6c9c4;
   --ink3: #6f8b87;
   --ring: rgba(255, 255, 255, 0.09);
-  --brand: #16b8a6;
-  --brand-ink: #04211d;
+  /* Studio's own accent, not the client app's.
+   *
+   * The three apps each carry a colour: client teal, coach indigo, Studio
+   * amber. This console is Repple Studio, so the mark and everything accented
+   * beside it are amber — it read as the client app before, which is the one
+   * product this console is not.
+   *
+   * #e0912f rather than the launcher tile's #b45309: the tile sits on a home
+   * screen, this sits on #0c1413, and the darker amber measures 3.72:1 there
+   * against 7.34:1 for this one. The marketing site lifted it for the same
+   * reason and to the same value, so the site and the console now agree.
+   */
+  --brand: #e0912f;
+  --brand-ink: #2a1503;
 
   --good: #0ca30c;
   --warn: #fab219;
@@ -40,7 +52,9 @@
   --ink2: #3c4a63;
   --ink3: #6b7896;
   --ring: rgba(15, 24, 48, 0.12);
-  --brand: #2f6bff;
+  /* The daylight palette takes the darker amber: on white, #e0912f is 2.0:1
+   * and unreadable, while #b45309 is 5.02:1 and carries white ink at the same. */
+  --brand: #b45309;
   --brand-ink: #ffffff;
   --good: #0ca30c;
   --warn: #fab219;

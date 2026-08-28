@@ -4135,5 +4135,34 @@ function by2(v: ReturnType<typeof buildStaff>, id: string) {
     'no readable date of birth yields no age rather than a number');
 }
 
+/* -- payroll units --------------------------------------------------------
+ *
+ * tenants.session_fee is a numeric in WHOLE currency (default 75 = AED 75), so
+ * payroll30For returns major units. The console named its result `cents` and
+ * passed it to money(), which divides by 100 — the payroll screen showed
+ * AED 63.00 where the gym owed AED 6,300. A hundredfold understatement on the
+ * one screen whose whole job is being right about what people are paid.
+ */
+{
+  const t = (delivered: number, unmarked = 0) => ({
+    id: 'x', name: 'x', clients: 1, sessions30: delivered,
+    delivered30: delivered, unmarked30: unmarked, since: null,
+  });
+
+  ok(payroll30For([t(84)], 75) === 6300, '84 delivered at a fee of 75 is 6,300 in whole currency, not 630,000');
+  ok(payroll30For([t(1)], 75) === 75, 'one session at 75 is 75');
+  ok(payroll30For([t(2), t(3)], 50) === 250, 'and it sums across trainers');
+
+  // The refusals, which matter more than the arithmetic.
+  ok(payroll30For([t(10)], null) === null, 'no session fee means no total, not a free gym');
+  ok(payroll30For([t(10, 3)], 75) === null, 'anything unmarked dashes the total rather than under-reporting it');
+  ok(payroll30For([], 75) === 0, 'no trainers is a measured zero — there is nobody to pay');
+
+  // money() takes MINOR units. This is the conversion the console got wrong.
+  ok(money(6300) === 'AED 63.00', 'money() divides by 100 — 6300 minor units is 63.00');
+  ok(money(Math.round((payroll30For([t(84)], 75) ?? 0) * 100)) === 'AED 6,300.00',
+    'so a payroll30For result must be scaled to minor units before formatting');
+}
+
 if (errors.length) { console.log('COVERAGE FAILURES:\n' + errors.join('\n')); process.exit(1); }
 console.log(`ALL COVERAGE TESTS PASSED (${checks} assertions)`);

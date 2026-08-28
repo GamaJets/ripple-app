@@ -31,6 +31,15 @@ export interface Me {
   fullName: string | null;
   role: Role | null;
   tenantId: string | null;
+  /**
+   * True when the profile could not be READ, as opposed to not existing.
+   *
+   * These two collapsed into `role: null` and every screen took the same
+   * branch, so an RLS hiccup told the actual gym owner "Not your console —
+   * you are signed in without a role". A refused read is not a statement
+   * about who somebody is.
+   */
+  roleUnknown: boolean;
 }
 
 /** Who is signed in, and what the database says they are. */
@@ -45,9 +54,24 @@ export async function loadMe(): Promise<Me | null> {
     .eq('id', user.id)
     .single();
 
-  // A missing profile row is not the same as being signed out: the person has
-  // an account but no profile yet. Say so rather than bouncing them to sign-in.
-  if (error) return { id: user.id, email: user.email ?? null, fullName: null, role: null, tenantId: null };
+  // Three outcomes, not two.
+  //
+  // A missing profile row is not being signed out: the person has an account
+  // but no profile yet, and PostgREST says so with PGRST116 from .single().
+  // Any OTHER error means the read failed and we do not know what they are —
+  // which must not be reported as "no role", because every screen refuses a
+  // roleless visitor by name.
+  if (error) {
+    const noRow = (error as { code?: string }).code === 'PGRST116';
+    return {
+      id: user.id,
+      email: user.email ?? null,
+      fullName: null,
+      role: null,
+      tenantId: null,
+      roleUnknown: !noRow,
+    };
+  }
 
   return {
     id: user.id,
@@ -55,6 +79,7 @@ export async function loadMe(): Promise<Me | null> {
     fullName: data?.full_name ?? null,
     role: (data?.role as Role) ?? null,
     tenantId: data?.tenant_id ?? null,
+    roleUnknown: false,
   };
 }
 
