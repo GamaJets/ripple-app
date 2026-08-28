@@ -33,15 +33,24 @@ export const NAV: NavItem[] = [
   // else's — and the page refuses the role independently, so this nav entry and
   // that check say the same thing rather than one covering for the other.
   { href: '/staff', label: 'Staff', roles: ['owner'] },
+  // Before Timetable because it is the thing the timetable is made of: a class
+  // is defined once, then scheduled many times.
+  { href: '/classes', label: 'Classes', roles: ['owner'] },
   { href: '/timetable', label: 'Timetable', roles: ['owner'] },
   { href: '/sessions', label: 'Sessions', roles: ['owner'] },
   { href: '/money', label: 'Money', roles: ['owner'] },
+  // Beside Money because it is the same ledger read from the other side: Money
+  // is what came in, this is what goes out to the people who earned it.
+  { href: '/payroll', label: 'Payroll', roles: ['owner'] },
   // Owner only, like every other entry here bar Door, and for the strongest
   // reason of any of them: the close carries every payment, every invoice and
   // every trainer's pay for the month on one screen.
   { href: '/close', label: 'Close', roles: ['owner'] },
   // Staff work the door, so this is the one operational screen a trainer sees.
   { href: '/door', label: 'Door', roles: ['owner', 'trainer'] },
+  // Beside Door because both are about the building rather than the books:
+  // what is in the room, and who is coming through it.
+  { href: '/equipment', label: 'Equipment', roles: ['owner'] },
   { href: '/import', label: 'Import', roles: ['owner'] },
   // Beside Import deliberately: a gym that can be imported into and not
   // exported out of is a gym that cannot leave.

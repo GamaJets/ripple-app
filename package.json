@@ -18,9 +18,10 @@
     "postinstall": "patch-package",
     "check:native": "node scripts/check-native.mjs",
     "check:schema": "node scripts/check-schema.mjs",
-    "preflight": "npm run typecheck && npm test && npm run db:check && npm run check:native && npm run check:reads && npm run check:schema && npm run check:bundle",
+    "preflight": "npm run typecheck && npm test && npm run db:check && npm run check:native && npm run check:reads && npm run check:portal && npm run check:schema && npm run check:bundle",
     "check:bundle": "expo export --platform all --output-dir .preflight-export",
-    "check:reads": "node scripts/check-reads.mjs"
+    "check:reads": "node scripts/check-reads.mjs",
+    "check:portal": "node scripts/check-portal-imports.mjs"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",

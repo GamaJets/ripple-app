@@ -125,7 +125,15 @@ export default function Payroll() {
   const [err, setErr] = useState<string | null>(null);
   const [settling, setSettling] = useState<string | null>(null);
 
-  const load = useCallback(async (tenantId: string, p: Period) => {
+  /**
+   * Read the run.
+   *
+   * `stale` is not tidiness. Switching from August to July while August is still
+   * in flight would otherwise let the slower answer land last and paint August's
+   * sessions under July's heading and July's total — a screen that pays people
+   * showing one month's work priced as another's. A late answer is dropped.
+   */
+  const load = useCallback(async (tenantId: string, p: Period, stale: () => boolean = () => false) => {
     setSessions(null); setTrainers(null); setRuns(null);
 
     // allSettled, not all: one failing read must not take the others with it.
@@ -138,6 +146,8 @@ export default function Payroll() {
       fetchGymTrainers(supabase, tenantId),
       fetchSettlements(supabase, tenantId),
     ]);
+
+    if (stale()) return;
 
     // A read that failed is null, never []. [] is the gym saying it has none;
     // null is nobody knowing. On this screen those two answers differ by a
@@ -183,7 +193,9 @@ export default function Payroll() {
   useEffect(() => {
     if (me === undefined) return;
     if (!me?.tenantId) { setSessions([]); setTrainers([]); setRuns([]); return; }
-    load(me.tenantId, period);
+    let dropped = false;
+    load(me.tenantId, period, () => dropped);
+    return () => { dropped = true; };
   }, [me, period, load]);
 
   // The gym's fee is in major units; everything downstream is minor units.
@@ -258,6 +270,12 @@ export default function Payroll() {
   // /sessions and clicking three buttons.
   const awaiting = sessions && sessions.filter((s) => isAwaitingOutcome(s));
 
+  // The evidence behind the money: every session somebody actually recorded an
+  // outcome for. Kept separate from `awaiting` rather than shown as one list
+  // with a status column, because a payslip dispute is settled by pointing at
+  // these rows and nothing else belongs among them.
+  const marked = sessions && sessions.filter((s) => s.outcome !== null);
+
   /*
    * Names this run could not resolve.
    *
@@ -297,7 +315,6 @@ export default function Payroll() {
         outstanding: [],
         blocker: null,
         onRoster: false,
-        inPeriod: true,
       });
     }
     // Only sessions with a recorded outcome, a rate, and no settlement already
@@ -319,7 +336,6 @@ export default function Payroll() {
         outstanding: [],
         blocker: 'No sessions in this period.',
         onRoster: true,
-        inPeriod: false,
       });
     }
     return [...byTrainer.values()].sort(
@@ -516,8 +532,8 @@ interface RunRow {
   /** Marked, priced, payable, and not already settled. */
   outstanding: PtSession[];
   blocker: string | null;
+  /** Whether the roster still lists them. Only meaningful once it has been read. */
   onRoster: boolean;
-  inPeriod: boolean;
 }
 
 /* ── what is holding the run up ────────────────────────────────────────────── */
@@ -568,7 +584,19 @@ function Run({ rows, unread, rosterUnread, settling, onSettle }: {
 }) {
   const cols: Column<RunRow>[] = [
     { key: 'name', header: 'Trainer', value: (r) => r.name ?? '',
-      render: (r) => r.name ?? <span className="dash">—</span> },
+      render: (r) => (
+        <span>
+          {r.name ?? <span className="dash">—</span>}
+          {/* Only once the roster has actually been read: with that read
+              refused, every row would carry this label and the one person it
+              is really about would be invisible among them. */}
+          {!r.onRoster && rosterUnread === null ? (
+            <span style={{ display: 'block', fontSize: 11.5, color: 'var(--ink3)' }}>
+              worked this period, not on the roster
+            </span>
+          ) : null}
+        </span>
+      ) },
     { key: 'delivered', header: 'Delivered', value: (r) => r.line?.delivered ?? null, numeric: true,
       // A trainer with no sessions in the period has no delivered count to give.
       // Zero would be a claim that they worked and delivered nothing.
@@ -656,6 +684,70 @@ function periodCents(r: RunRow): number | null {
   if (r.line.unmarked > 0) return null;
   if (r.line.priced < r.line.payable) return null;
   return r.line.cents;
+}
+
+/* ── the evidence ──────────────────────────────────────────────────────────── */
+
+const OUTCOME_LABEL: Record<string, string> = {
+  completed: 'Delivered',
+  no_show: 'No-show',
+  cancelled: 'Cancelled',
+  late_cancelled: 'Late cancel',
+};
+
+/**
+ * Every marked session in the period, line by line.
+ *
+ * The run above is a set of totals, and a trainer who disagrees with a total
+ * needs the rows it was made of — which session, what was recorded, at what
+ * rate, and whether the pay policy let it count. Without this the only way to
+ * answer "why is my August short" is to trust the total.
+ */
+function LineItems({ sessions, unread, policy }: {
+  sessions: PtSession[] | null; unread: Unread; policy: PayPolicy;
+}) {
+  const cols: Column<PtSession>[] = [
+    { key: 'when', header: 'When', value: (s) => s.startsAt,
+      render: (s) => new Date(s.startsAt).toLocaleDateString([], { day: 'numeric', month: 'short' }) },
+    { key: 'trainer', header: 'Trainer', value: (s) => s.trainerName ?? '',
+      render: (s) => s.trainerName ?? <span className="dash">—</span> },
+    { key: 'client', header: 'Client', value: (s) => s.clientName ?? '',
+      render: (s) => s.clientName ?? <span className="dash">—</span> },
+    { key: 'outcome', header: 'Recorded', value: (s) => s.outcome ?? '',
+      render: (s) => (
+        <span style={{ color: isDelivered(s) ? 'var(--good)' : 'var(--ink2)' }}>
+          {s.outcome ? OUTCOME_LABEL[s.outcome] ?? s.outcome : <span className="dash">—</span>}
+        </span>
+      ) },
+    { key: 'counts', header: 'Counts', value: (s) => (isPayable(s, policy) ? 1 : 0), numeric: true,
+      // Under this gym's stated policy, not under a default. A no-show counts or
+      // does not because somebody ticked a box on this page, and the row says
+      // which way it went rather than leaving the total to imply it.
+      render: (s) => isPayable(s, policy)
+        ? <span style={{ color: 'var(--ink2)' }}>yes</span>
+        : <span className="dash">no</span> },
+    { key: 'rate', header: 'Rate', value: (s) => s.rateCents ?? null, numeric: true,
+      // Null is a session nobody priced, which is not a session worth nothing.
+      render: (s) => s.rateCents == null
+        ? <span className="dash">not rated</span>
+        : money(s.rateCents) },
+    { key: 'paid', header: 'Settled', value: (s) => s.settlementId ?? '',
+      render: (s) => s.settlementId
+        ? <span style={{ color: 'var(--ink2)' }}>paid</span>
+        : <span className="dash">outstanding</span> },
+  ];
+  return (
+    <Section
+      title="Line items"
+      sub="Every session in this period that somebody recorded an outcome for — the rows the totals above are made of."
+    >
+      {sessions === null ? (
+        <Unresolved state={unread ?? 'loading'} what="the session record, so there are no line items to show" />
+      ) : (
+        <DataTable rows={sessions} columns={cols} rowKey={(s) => s.id} empty="Nothing in this period has been marked yet." />
+      )}
+    </Section>
+  );
 }
 
 /* ── the second opinion ────────────────────────────────────────────────────── */
