@@ -41,6 +41,7 @@ import { ZoneNow, ZoneBoard } from '../../src/ui/ZoneBoard';
 import { SessionHrSheet } from '../../src/ui/SessionHrSheet';
 import { ageFromDob } from '../../src/lib/age';
 import { RECOVERY_ACTIVITIES } from '../../src/lib/recoveryActs';
+import { HIIT_ACTIVITIES, MOBILITY_ACTIVITIES } from '../../src/lib/workoutKind';
 import { attributionLine } from '../../src/lib/workoutAttribution';
 
 const WEEK = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -69,15 +70,13 @@ const CARDIO_ACTS: Activity[] = [
   { name: 'Walk',             met: 3.8 },
 ];
 
-const HIIT_ACTS: Activity[] = [
-  { name: 'AMRAP',            met: 8.0 },
-  { name: 'Bag Work',         met: 7.0 },
-  { name: 'Bike Intervals',   met: 10.0 },
-  { name: 'Circuit',          met: 8.0 },
-  { name: 'EMOM',             met: 8.0 },
-  { name: 'Sprint Intervals', met: 12.0 },
-  { name: 'Tabata',           met: 10.0 },
-];
+// The HIIT and mobility names live in src/lib/workoutKind.ts for the same
+// reason the recovery names live in src/lib/recoveryActs.ts: one array with two
+// consumers cannot drift. The second consumer is the calendar, which colours a
+// day's dot by what kind of session was logged and has nothing but the name to
+// go on — so a HIIT activity added to this picker and nowhere else would show
+// up there as strength.
+const HIIT_ACTS: Activity[] = HIIT_ACTIVITIES;
 
 // Recovery is time spent deliberately not training. Duration and heart rate are
 // real measurements and are kept; calories are not derivable and are not shown.
@@ -85,13 +84,7 @@ const HIIT_ACTS: Activity[] = [
 // cannot drift — a modality added there appears in both places.
 const RECOVERY_ACTS: Activity[] = RECOVERY_ACTIVITIES.map((name) => ({ name, met: null }));
 
-const MOBILITY_ACTS: Activity[] = [
-  { name: 'Dynamic Warm-Up',  met: 4.0 },
-  { name: 'Foam Rolling',     met: 2.5 },
-  { name: 'Pilates',          met: 3.5 },
-  { name: 'Stretching',       met: 2.5 },
-  { name: 'Yoga',             met: 3.0 },
-];
+const MOBILITY_ACTS: Activity[] = MOBILITY_ACTIVITIES;
 
 // Sorted here as well as written in order, so a later addition dropped in the
 // wrong place still renders alphabetically.

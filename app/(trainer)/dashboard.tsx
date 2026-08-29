@@ -47,6 +47,7 @@ import { CoachRequests } from '../../src/ui/CoachRequests';
 import { atRiskClient } from '../../src/lib/trainerMock';
 import { METRIC_DEFS, METRIC_GROUPS } from '../../src/lib/inbodyMetrics';
 import { type RosterClient } from '../../src/lib/trainerMock';
+import { COACHED_MODES, COACHED_MODE_SHORT, COACHED_MODE_NOTE_COACH, type CoachedMode } from '../../src/lib/types';
 import { areaLabel } from '../../src/lib/injuries';
 import { supabase } from '../../src/lib/supabase';
 import { askCoach } from '../../src/lib/coach';
@@ -317,7 +318,7 @@ export default function TrainerClients() {
   const [addOpen, setAddOpen] = useState(false);
   const [newName, setNewName] = useState('');
   const [newGoal, setNewGoal] = useState('Fat loss');
-  const [newMode, setNewMode] = useState<'online' | 'inperson'>('online');
+  const [newMode, setNewMode] = useState<CoachedMode>('online');
   const [invOpen, setInvOpen] = useState(false);
   // The coach's own join code. Read when the sheet opens rather than on every
   // dashboard mount: it is only ever looked at here, and allocating one is a
@@ -327,7 +328,7 @@ export default function TrainerClients() {
   /** null while unread — 'no one has used it' and 'we could not check' differ. */
   const [codeStats, setCodeStats] = useState<{ joined: number; pending: number } | null>(null);
   const [invEmail, setInvEmail] = useState('');
-  const [invMode, setInvMode] = useState<'online' | 'inperson'>('online');
+  const [invMode, setInvMode] = useState<CoachedMode>('online');
   const [newEmail, setNewEmail] = useState('');
   // null means "we have not been able to read this client's food log", which is
   // a different sentence from "they have logged nothing". The distinction is
@@ -422,16 +423,17 @@ export default function TrainerClients() {
       ? [{ key: 'drifting', label: 'Drifting', n: bands.drifting },
          { key: 'nodata', label: 'Nothing recorded', n: bands.unknown }]
       : [{ key: 'atrisk', label: 'At-risk', n: atRisk }]),
-    { key: 'online', label: 'Online', n: roster.filter((c) => c.mode === 'online').length },
-    { key: 'inperson', label: 'In-person', n: roster.filter((c) => c.mode === 'inperson').length },
+    // One segment per delivery, built from the vocabulary rather than listed by
+    // hand — a book with no hybrid clients simply shows a zero, the same as the
+    // other two, instead of quietly filing them under Online.
+    ...COACHED_MODES.map((m) => ({ key: m, label: COACHED_MODE_SHORT[m], n: roster.filter((c) => c.mode === m).length })),
   ];
   const matchSeg = (c: RosterClient) =>
     seg === 'all' ? true
     : seg === 'drifting' ? driftFor(c)?.status === 'at_risk'
     : seg === 'nodata' ? driftFor(c)?.status === 'idle'
     : seg === 'atrisk' ? atRiskClient(c)
-    : seg === 'online' ? c.mode === 'online'
-    : seg === 'inperson' ? c.mode === 'inperson'
+    : (COACHED_MODES as readonly string[]).includes(seg) ? c.mode === seg
     : tagsFor(c.id).includes(seg);
   // A drift segment cannot be honoured once the read is gone; fall back to the
   // whole book rather than showing an empty list that reads as "none of these".
@@ -675,7 +677,7 @@ export default function TrainerClients() {
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }} numberOfLines={1}>{i.email}</Text>
-                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{i.mode === 'inperson' ? 'In-person' : 'Online'} · awaiting sign-up / accept</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{COACHED_MODE_SHORT[i.mode]} · awaiting sign-up / accept</Text>
                 </View>
                 <Ghost label="Cancel" onPress={() => revokeInvite(i.id)} />
               </View>
@@ -798,7 +800,7 @@ export default function TrainerClients() {
                 <Initials t={t} name={c.name} />
                 <View style={{ flex: 1 }}>
                   <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{c.name}</Text>
-                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{c.goal} · {c.mode === 'inperson' ? 'In-person' : 'Online'} · {c.lastActive}</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{c.goal} · {COACHED_MODE_SHORT[c.mode]} · {c.lastActive}</Text>
                 </View>
                 <View style={{ alignItems: 'flex-end' }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
@@ -875,8 +877,8 @@ export default function TrainerClients() {
               <View style={{ marginBottom: sp.xl }}>
                 <SheetHead t={t} title="Delivery" />
                 <View style={{ flexDirection: 'row', gap: sp.sm }}>
-                  {([['inperson', 'In-person'], ['online', 'Online']] as const).map(([m, label]) => (
-                    <Chip key={m} t={t} label={label} on={sel.mode === m}
+                  {COACHED_MODES.map((m) => (
+                    <Chip key={m} t={t} label={COACHED_MODE_SHORT[m]} on={sel.mode === m}
                       onPress={() => { setClientMode(sel.id, m); setSel({ ...sel, mode: m }); }} />
                   ))}
                 </View>
@@ -1189,11 +1191,15 @@ export default function TrainerClients() {
               ))}
             </View>
             <SheetHead t={t} title="Coaching type" />
-            <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.xl }}>
-              {([['online', 'Online'], ['inperson', 'In-person']] as const).map(([id, label]) => (
-                <Chip key={id} t={t} label={label} on={newMode === id} onPress={() => setNewMode(id)} />
+            <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.sm }}>
+              {COACHED_MODES.map((id) => (
+                <Chip key={id} t={t} label={COACHED_MODE_SHORT[id]} on={newMode === id} onPress={() => setNewMode(id)} />
               ))}
             </View>
+            {/* What the chip above does, for the one that is selected. Three
+                delivery names in a row are three words until something says
+                which client screens each of them turns on. */}
+            <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.xl }}>{COACHED_MODE_NOTE_COACH[newMode]}</Text>
             <View style={{ flexDirection: 'row', gap: sp.md }}>
               <View style={{ flex: 1 }}><Ghost label="Cancel" onPress={() => setAddOpen(false)} /></View>
               <View style={{ flex: 2 }}>
@@ -1337,11 +1343,12 @@ export default function TrainerClients() {
             <SheetHead t={t} title="Or invite by email" />
             <TextInput value={invEmail} onChangeText={setInvEmail} placeholder="client@email.com" placeholderTextColor={t.ink3} autoCapitalize="none" keyboardType="email-address" style={{ ...field(t), marginBottom: sp.lg }} />
             <SheetHead t={t} title="Coaching type" />
-            <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.xl }}>
-              {([['online', 'Online'], ['inperson', 'In-person']] as const).map(([id, label]) => (
-                <Chip key={id} t={t} label={label} on={invMode === id} onPress={() => setInvMode(id)} />
+            <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.sm }}>
+              {COACHED_MODES.map((id) => (
+                <Chip key={id} t={t} label={COACHED_MODE_SHORT[id]} on={invMode === id} onPress={() => setInvMode(id)} />
               ))}
             </View>
+            <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.xl }}>{COACHED_MODE_NOTE_COACH[invMode]}</Text>
             <View style={{ flexDirection: 'row', gap: sp.md }}>
               <View style={{ flex: 1 }}><Ghost label="Cancel" onPress={() => setInvOpen(false)} /></View>
               <View style={{ flex: 2 }}>
@@ -1356,7 +1363,7 @@ export default function TrainerClients() {
                   Alert.alert(
                     ok ? 'Invite recorded' : 'Invite not recorded',
                     ok
-                      ? 'Repple does not send email. ' + e + ' is saved as your ' + (invMode === 'inperson' ? 'in-person' : 'online') + ' coaching invite and they link to you the first time they sign in to Repple with that address. Tell them yourself so they know to install it.'
+                      ? 'Repple does not send email. ' + e + ' is saved as your ' + COACHED_MODE_SHORT[invMode].toLowerCase() + ' coaching invite and they link to you the first time they sign in to Repple with that address. Tell them yourself so they know to install it.'
                       : 'Nothing was saved for ' + e + ', so no invite is waiting for them. Check your connection and try again.',
                     [{ text: ok ? 'Done' : 'OK' }]);
                 }} />

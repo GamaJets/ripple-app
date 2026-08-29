@@ -22,18 +22,18 @@ import { macrosFor, applyCoachAdjust } from '../../src/lib/nutrition';
 import { useClientData, type CoachingMode } from '../../src/ui/clientData';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
 import { Icon, type IconName } from '../../src/ui/Icon';
-import type { Goal, Diet } from '../../src/lib/types';
+import { COACHING_MODE_LABEL, COACHING_MODE_NOTE, type Goal, type Diet } from '../../src/lib/types';
 
 const GOALS: { id: Goal; label: string }[] = [
   { id: 'fatloss', label: 'Fat loss' },
   { id: 'tone', label: 'Tone' },
   { id: 'muscle', label: 'Build muscle' },
 ];
-const COACH_MODES: { id: CoachingMode; label: string; note: string }[] = [
-  { id: 'online', label: 'Online coach', note: 'Remote coaching · plan, check-ins & messaging' },
-  { id: 'inperson', label: 'In-person coach', note: 'Coach trains you in person; app tracks progress' },
-  { id: 'solo', label: 'Solo', note: 'Self-managed with AI plans & tools' },
-];
+// The order is the order of the answers, and each carries the one line that
+// says what picking it changes — see COACHING_MODE_NOTE. Before TF-30 the first
+// two notes described a relationship rather than the app, which is why choosing
+// between them appeared to do nothing: it did nothing.
+const COACH_MODES: CoachingMode[] = ['online', 'inperson', 'hybrid', 'solo'];
 const DIETS: { id: Diet; label: string }[] = [
   { id: 'meat', label: 'Meat' }, { id: 'vegetarian', label: 'Veggie' }, { id: 'vegan', label: 'Vegan' }, { id: 'paleo', label: 'Paleo' }, { id: 'keto', label: 'Keto' },
 ];
@@ -314,14 +314,14 @@ export default function Profile() {
         {/* ── coaching mode ──────────────────────────────────────────────── */}
         <Section>
           <SectionHead title="Coaching" />
-          {COACH_MODES.map((mm) => {
-            const on = cd.coachingMode === mm.id;
+          {COACH_MODES.map((mm, i) => {
+            const on = cd.coachingMode === mm;
             return (
-              <Pressable key={mm.id} onPress={() => cd.setCoachingMode(mm.id)} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: mm.id === 'online' ? 0 : hairline, borderTopColor: t.ring }}>
+              <Pressable key={mm} onPress={() => cd.setCoachingMode(mm)} accessibilityRole="radio" accessibilityState={{ selected: on }} accessibilityLabel={`${COACHING_MODE_LABEL[mm]}. ${COACHING_MODE_NOTE[mm]}`} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                 <View style={{ width: 20, height: 20, borderRadius: radius.pill, borderWidth: 2, borderColor: on ? t.brand : t.ring, alignItems: 'center', justifyContent: 'center' }}>{on ? <View style={{ width: 10, height: 10, borderRadius: radius.pill, backgroundColor: t.brand }} /> : null}</View>
                 <View style={{ flex: 1 }}>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{mm.label}</Text>
-                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{mm.note}</Text>
+                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{COACHING_MODE_LABEL[mm]}</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{COACHING_MODE_NOTE[mm]}</Text>
                 </View>
               </Pressable>
             );

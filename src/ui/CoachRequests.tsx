@@ -15,8 +15,9 @@ import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
 import { notifySuccess } from './haptics';
+import { readCoachedMode, COACHED_MODE_SHORT, type CoachedMode } from '../lib/types';
 
-interface Req { id: string; clientId: string; name: string; mode: 'online' | 'inperson'; at: string }
+interface Req { id: string; clientId: string; name: string; mode: CoachedMode; at: string }
 
 export function CoachRequests() {
   const t = useTheme();
@@ -52,7 +53,7 @@ export function CoachRequests() {
         id: r.id,
         clientId: r.client_id,
         name: (nameById.get(r.client_id) || 'A client').trim() || 'A client',
-        mode: r.mode === 'inperson' ? 'inperson' : 'online',
+        mode: readCoachedMode(r.mode),
         at: r.created_at,
       })));
     } catch (e) { reportError('coachRequests.load', e); setUnread(true); }
@@ -141,7 +142,7 @@ export function CoachRequests() {
         <View key={r.id} style={{ paddingTop: sp.sm }}>
           <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{r.name}</Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2, marginBottom: sp.md }}>
-            Asked for {r.mode === 'inperson' ? 'in-person' : 'online'} coaching. Accepting adds them to your roster.
+            Asked for {COACHED_MODE_SHORT[r.mode].toLowerCase()} coaching. Accepting adds them to your roster.
           </Text>
           <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: 6 }}>
             <Pressable disabled={busy === r.id} onPress={() => respond(r, false)} style={{ flex: 1, paddingVertical: 11, borderRadius: radius.sm, alignItems: 'center', backgroundColor: t.surface2, borderWidth: hairline, borderColor: t.ring, opacity: busy === r.id ? 0.5 : 1 }}>

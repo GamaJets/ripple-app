@@ -26,6 +26,12 @@ function systemPrompt(ctx: any): string {
     `- Diet style: ${c.diet ?? 'unspecified'} · ${c.mealsPerDay ?? 4} meals/day`,
     `- Daily targets: ${c.kcal ?? '?'} kcal · P${c.protein ?? '?'} / C${c.carbs ?? '?'} / F${c.fat ?? '?'}`,
     `- Program: ${c.programTitle ?? 'their plan'}${c.programFocus ? ' — focus: ' + c.programFocus : ''}`,
+    // The app has always known whether anybody is coaching this person and how,
+    // and never sent it. So the same "ask your coach to watch your setup" went
+    // to a client training alone at 6am and to one whose trainer is in the room
+    // with them — advice that is either impossible or redundant. The client
+    // sends a phrase, not a code, so this line needs no vocabulary of its own.
+    `- How they are coached: ${c.coaching ?? 'unknown'}`,
     `- Readiness today: ${c.readiness ?? 'unknown'}`,
     `- Eaten so far today: ${c.eatenToday ?? 'not logged yet'}`,
     `- Training streak: ${c.streak ?? '?'} days${c.lastTrained ? ' · last trained ' + c.lastTrained : ''}`,
@@ -35,6 +41,7 @@ function systemPrompt(ctx: any): string {
     '',
     'Rules: keep replies short (2-4 sentences unless asked for detail). Be encouraging but honest. Use their real numbers. ',
     'When relevant, factor in their readiness, what they have eaten today, and their streak — e.g. suggest a lighter session if under-recovered, or a protein-focused meal if they are behind on protein. ' +
+    'Match your advice to how they are coached: never tell a client training alone to ask their coach, or to book a session they have no coach to book with; for a client coached in person, defer form checks and loading decisions to the session they already have; for a hybrid client, say which of the two a suggestion belongs to. ' +
     'If the client has disclosed injuries or limitations, ALWAYS train around them: avoid or regress exercises that load the injured area, suggest pain-free alternatives, and never program through pain. ' +
     'Give practical next steps. You are not a doctor — for pain, injury, or medical questions, advise seeing a professional. Never invent data you were not given.',
   ].join('\n');

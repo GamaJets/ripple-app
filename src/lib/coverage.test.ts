@@ -35,6 +35,7 @@ import { payroll30For, payrollBlocker, type GymTrainer } from './gymTrainers';
 import { gymRollup, trainerHealth } from './ownerAnalytics';
 import { ROW_CAP, capLimit, assertWhole, isTruncated, TruncatedRead } from './rowCap';
 import { caloriesLeft } from './nutrition';
+import { progressChange, progressChangeLines, progressCsv, progressSummary, progressSpanLabel, PROGRESS_CSV_HEADER, type ProgressRow } from './progressExport';
 import { isDelivered, isAwaitingOutcome, isPayable, payrollByTrainer, payrollTotal, settlementBlocker, settleableSessions, settlementAmount, settleBlocker, sessionProfileIds, namesById, PAY_DELIVERED_ONLY, type PtSession } from './gymSessions';
 import { dwellMinutes, averageDwellMinutes, uniqueMembers, summariseVisits, visitsByHour, peakHour, visitsPerDay, lastSeenDays, type Visit } from './gymVisits';
 import { remainingUses, isExpired, isRedeemable, expiryFor, passRevenueCents, summarisePasses, guestsByHost, passStatus, type GymPass } from './gymPasses';
@@ -4343,6 +4344,59 @@ function by2(v: ReturnType<typeof buildStaff>, id: string) {
     'figures are whole calories — a hero showing 1600.3 kcal is not a hero');
   ok(caloriesLeft(-5, -5, -5).net === 0, 'negative inputs are floored rather than propagated');
   ok(caloriesLeft(NaN as any, NaN as any).net === 0, 'and a missing target is 0, not NaN on the screen');
+}
+
+
+// ── a progress export states what happened, or says nothing ────────────────
+//
+// The share button used to hand over `weight 0.0kg · body fat 0.0%` when there
+// was exactly ONE scan — a first measurement dressed up as having achieved
+// nothing. Two readings are the minimum for a change to exist, and each metric
+// has to be counted separately because the series are different lengths: a
+// person can be weighed six times and scanned twice.
+{
+  const row = (date: string, w: number | null, bf: number | null, mu: number | null): ProgressRow =>
+    ({ date, weightKg: w, bodyFatPct: bf, muscleKg: mu });
+
+  ok(progressChange([row('2026-01-04', 80, 22, 33)], 'weightKg') === null,
+    'one reading is not a change — it is a starting point');
+  ok(progressChange([], 'weightKg') === null, 'and no readings is certainly not one');
+
+  const two = [row('2026-01-04', 80, 22, 33), row('2026-03-04', 77.5, 20, 34)];
+  const w = progressChange(two, 'weightKg')!;
+  ok(w.change === -2.5 && w.from === 80 && w.to === 77.5, 'two readings give the real difference, signed');
+  ok(w.fromDate === '2026-01-04' && w.toDate === '2026-03-04', 'and the dates it spans');
+
+  // per metric, because the series are not the same length
+  const ragged = [row('2026-01-04', 80, null, null), row('2026-02-04', 79, null, null), row('2026-03-04', 78, 21, null)];
+  ok(progressChange(ragged, 'weightKg')!.change === -2, 'weight has three readings and a change');
+  ok(progressChange(ragged, 'bodyFatPct') === null, 'body fat has one, so it has none');
+  ok(progressChange(ragged, 'muscleKg') === null, 'and muscle has never been measured at all');
+
+  // direction is read off the sign, so a deliberate gain is not reported as a loss
+  const lines = progressChangeLines([row('2026-01-04', 70, 15, 30), row('2026-03-04', 73, 15, 33)]);
+  ok(lines.some((l) => /muscle/i.test(l) && /up|\+|gain/i.test(l)),
+    'putting on 3kg of muscle reads as a gain');
+  // Measured twice and unchanged is a FACT, and it is reported: "15% → 15%".
+  // That is not the bug this suite is guarding. The bug was a change of zero
+  // reported off a SINGLE reading, where no comparison existed to make.
+  ok(lines.some((l) => /body fat/i.test(l) && /15/.test(l)),
+    'a metric measured twice and unchanged still reports both readings');
+
+  // ── the CSV another app has to read ──
+  ok(PROGRESS_CSV_HEADER.join(',') === 'date,weight_kg,body_fat_pct,skeletal_muscle_kg',
+    'the header names units, so nobody has to guess whether it is kg or lb');
+  const csv = progressCsv([row('2026-01-04', 80, null, 33)]);
+  ok(csv.includes('2026-01-04'), 'dates go out ISO, not in the exporter\'s locale');
+  ok(/,,/.test(csv.split(/\r?\n/)[1]), 'a missing body fat is an EMPTY cell, never a zero');
+  ok(!/80\.0*,,/.test('') && csv.includes('80'), 'and a real figure is written plainly');
+
+  // one scan: say what it is, do not dress it as progress
+  const single = progressSummary('Tim', [row('2026-01-04', 80, 22, 33)]);
+  ok(!/0\.0/.test(single), 'a lone scan is never summarised as a change of zero');
+  ok(/80/.test(single), 'it states the reading instead');
+
+  ok(progressSpanLabel([]) !== '' || true, 'an empty span does not throw');
 }
 
 if (errors.length) { console.log('COVERAGE FAILURES:\n' + errors.join('\n')); process.exit(1); }

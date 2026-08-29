@@ -26,8 +26,12 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import type { LoadStatus } from './loadStatus';
+import { readCoachedMode, modeForDb, type CoachedMode } from '../lib/types';
 
-export type InviteMode = 'online' | 'inperson';
+/** Alias kept because half the app imports the invite's mode from here. The
+ *  vocabulary itself is in src/lib/types.ts — an invite's delivery and a
+ *  roster entry's delivery are the same three answers. */
+export type InviteMode = CoachedMode;
 export interface Invite {
   id: string;
   coachId: string;
@@ -78,7 +82,7 @@ const rowToInvite = (r: any): Invite => ({
   coachId: r.coach_id,
   coachName: r.coach_name ?? null,
   email: r.email,
-  mode: r.mode === 'inperson' ? 'inperson' : 'online',
+  mode: readCoachedMode(r.mode),
   status: r.status ?? 'pending',
   createdAt: r.created_at ?? new Date().toISOString(),
 });
@@ -201,7 +205,11 @@ export function InvitesProvider({ children }: { children: ReactNode }) {
     try {
       const { data, error } = await supabase
         .from('coach_invites')
-        .upsert({ coach_id: uid, coach_name: myName, email: e, mode, status: 'pending' }, { onConflict: 'coach_id,email' })
+        // `coach_invites.mode` is CHECK-constrained to ('online','inperson'),
+        // so a hybrid invite goes out as 'inperson' and comes back that way in
+        // the coach's Pending list. It is the half of hybrid the invitee has to
+        // act on — turn up — and it is what the SQL in the TF-30 report widens.
+        .upsert({ coach_id: uid, coach_name: myName, email: e, mode: modeForDb(mode), status: 'pending' }, { onConflict: 'coach_id,email' })
         .select()
         .single();
       // An invitation that was refused still appeared in the coach's sent list

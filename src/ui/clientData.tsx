@@ -31,13 +31,16 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { ScanMetrics } from '../lib/inbodyMetrics';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
-import type { Goal, Diet } from '../lib/types';
+import { readCoachingMode, modeForDb, type CoachingMode, type Goal, type Diet } from '../lib/types';
 import type { Allergen } from '../lib/meals';
 import type { Injury } from '../lib/injuries';
 import { reportError } from '../lib/reportError';
 import type { LoadStatus } from './loadStatus';
 
-export type CoachingMode = 'online' | 'inperson' | 'solo';
+// Declared in src/lib/types.ts alongside the labels and the two predicates the
+// screens branch on; re-exported because every client screen imports it from
+// here and the shape of the union is not this provider's to own.
+export type { CoachingMode };
 export interface ScanRec { id: string; takenAt: string; weightKg: number; bodyFatPct: number; skeletalMuscleKg: number; source: string; image?: string; metrics?: ScanMetrics }
 interface Series { t: string; v: number }
 interface Value {
@@ -85,6 +88,22 @@ interface Value {
 }
 const Ctx = createContext<Value | null>(null);
 const KEY = 'repple.profile';
+// The client's own answer to how they are coached, on this device.
+//
+// `clients.mode` is CHECK-constrained to ('online','inperson') and can hold
+// only two of the four answers. Without this key, choosing 'hybrid' comes back
+// as 'inperson' on the next launch and choosing 'solo' comes back as whatever
+// was there before — the setting reverts on its own, which is the complaint
+// TF-30 opens with.
+//
+// It is deliberately NOT part of the `repple.profile` blob: that blob is
+// deleted on every launch when the backend is on, and a value wiped before it
+// is read is decoration.
+//
+// It never overrides the server, it only fills in what the server cannot say —
+// and only where the server does not contradict it (see the hydrate below).
+// Widening the five CHECK constraints makes it dead code.
+const MODE_KEY = 'repple.coachingMode';
 
 // No name yet means no initial. The old fallback was a hardcoded 'Y' — a
 // letter belonging to nobody, shown in the avatar of every user whose name
@@ -129,7 +148,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
           if (typeof p.dob === 'string' && p.dob) setDob(p.dob);
           if (typeof p.heightCm === 'number') setHeightCm(p.heightCm);
           if (typeof p.goal === 'string') setGoal(p.goal);
-          if (p.coachingMode === 'online' || p.coachingMode === 'inperson' || p.coachingMode === 'solo') setCoachingMode(p.coachingMode);
+          setCoachingMode(readCoachingMode(p.coachingMode));
           if (typeof p.diet === 'string') setDiet(p.diet);
           if (Array.isArray(p.avoid)) setAvoid(p.avoid);
           if (Array.isArray(p.injuries)) setInjuries(p.injuries);
@@ -183,7 +202,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
       try {
         const { data: c, error: cErr } = await supabase
           .from('clients')
-          .select('dob, height_cm, goal, diet, avoid, mode, injuries, focus_areas, manual_weight_kg, manual_body_fat_pct, manual_at, meals_per_day')
+          .select('dob, height_cm, goal, diet, avoid, mode, trainer_id, injuries, focus_areas, manual_weight_kg, manual_body_fat_pct, manual_at, meals_per_day')
           .eq('id', sbUid).single();
         if (cErr) { reportError('clientData.hydrate.clients', cErr); failed = true; }
         if (!cancelled && !cErr && c) {
@@ -193,7 +212,29 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
           if (typeof r.goal === 'string' && r.goal) setGoal(r.goal as Goal);
           if (typeof r.diet === 'string' && r.diet) setDiet(r.diet as Diet);
           if (Array.isArray(r.avoid)) setAvoid(r.avoid);
-          if (r.mode === 'online' || r.mode === 'inperson' || r.mode === 'solo') setCoachingMode(r.mode);
+          // Reconcile the server's two-value answer with the four-value one
+          // the client actually gave (MODE_KEY above). The device is read
+          // inline rather than from state because this effect is keyed on the
+          // signed-in uid and can land before a separately-loaded flag has —
+          // and a restore that loses that race reverts the setting silently,
+          // which is the bug.
+          if (r.mode != null) {
+            const stored = readCoachingMode(r.mode);
+            const mine = readCoachingMode(await AsyncStorage.getItem(MODE_KEY).catch(() => null));
+            const agreed =
+              // 'hybrid' was stored as 'inperson' (modeForDb). Still true of
+              // them while the server still says so; a coach who has since
+              // moved them to online overrules it.
+              mine === 'hybrid' && stored === 'inperson' ? 'hybrid'
+              // 'solo' was not stored at all — there is no truthful narrowing
+              // for it — so the only corroboration available is that nobody is
+              // coaching them. A linked trainer means the server is right and
+              // this device is out of date.
+              : mine === 'solo' && r.trainer_id == null ? 'solo'
+              : stored;
+            setCoachingMode(agreed);
+            if (agreed !== mine) AsyncStorage.setItem(MODE_KEY, agreed).catch(() => {});
+          }
           if (Array.isArray(r.injuries)) setInjuries(r.injuries);
           if (Array.isArray(r.focus_areas)) setFocusAreas(r.focus_areas);
           if (r.manual_weight_kg != null && !Number.isNaN(Number(r.manual_weight_kg))) setManualWeight(Number(r.manual_weight_kg));
@@ -219,6 +260,13 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
     if (!USE_SUPABASE || !sbUid || !hydrated || !nameSynced) return;
     const timer = setTimeout(() => {
       (async () => {
+        // The full answer, kept in step with the narrowed one written below. It
+        // lives here rather than in the local-cache effect because that one
+        // fires as soon as the DEVICE has hydrated — before the server read has
+        // come back — and would overwrite this with a default while the
+        // reconcile above was still reading it. This effect is gated on
+        // nameSynced, so both reads have already landed.
+        try { await AsyncStorage.setItem(MODE_KEY, coachingMode); } catch { /* the mode still applies this session; only the restore across launches is lost */ }
         // Both results are now inspected. Refusing to look was what let a
         // client's edited goal, diet or allergen list disappear at the next
         // launch with the screen having said nothing.
@@ -230,7 +278,24 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
               height_cm: heightCm,
               goal, diet, avoid,
               meals_per_day: mealsPerDay,
-              mode: coachingMode,
+              // `clients.mode` is CHECK-constrained to ('online','inperson'),
+              // and two of the four answers a client can give have no place in
+              // that vocabulary:
+              //
+              //  · 'hybrid' narrows to 'inperson' — true about them, just
+              //    incomplete — and the full answer is kept in MODE_KEY so the
+              //    next launch restores it.
+              //  · 'solo' has no truthful narrowing: 'online' would assert a
+              //    coach who does not exist. So the column is left out of the
+              //    update rather than sent a value the constraint refuses.
+              //    That refusal used to take the WHOLE row with it, which is
+              //    why a solo client's name, goal, diet, allergens and
+              //    injuries have never saved — one Postgres error, every field
+              //    on the screen lost, reported as "nothing is updated".
+              //
+              // Widening the constraint (SQL in the TF-30 report) makes both
+              // branches unnecessary.
+              ...(coachingMode === 'solo' ? {} : { mode: modeForDb(coachingMode) }),
               injuries,
               focus_areas: focusAreas,
               manual_weight_kg: manualWeight ?? null,

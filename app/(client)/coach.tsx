@@ -57,7 +57,22 @@ export default function Coach() {
   const _streak = currentStreak(log);
   const _lastEx = log.length ? log[0].exercise : '';
   const _prog = suggestProgression(log)[0];
+  // How this client is coached, in a sentence the model can act on.
+  //
+  // It was never sent, so the AI coach gave identical answers to someone whose
+  // trainer is standing next to them on Tuesday and to someone training alone
+  // with nobody to ask — "get a spotter", "ask your coach to check your setup"
+  // and "book a session" were all offered regardless of whether any of it was
+  // available. The three coached answers differ in exactly one way that matters
+  // to advice: who is in the room, and when.
+  const coaching =
+    cd.coachingMode === 'solo' ? 'training alone — no coach to refer them to'
+    : cd.coachingMode === 'inperson' ? 'coached in person — their coach is in the room for their booked sessions'
+    : cd.coachingMode === 'hybrid' ? 'coached in person for booked sessions and remotely in between — some weeks they train alone'
+    : 'coached remotely — their coach writes the plan but is never in the room';
+
   const context = {
+    coaching,
     name: cd.name, goal: cd.goal, diet: cd.diet, weightKg: cd.weightKg != null ? Math.round(cd.weightKg * 10) / 10 : 'not recorded',
     bodyFatPct: cd.bodyFatPct, muscleKg: cd.muscleKg, mealsPerDay: cd.mealsPerDay,
     kcal: macros?.kcal ?? 'not set', protein: macros?.protein ?? 'not set', carbs: macros?.carbs ?? 'not set', fat: macros?.fat ?? 'not set',

@@ -33,6 +33,7 @@ import { useFoodLog } from '../../src/ui/foodLog';
 import { useWearables } from '../../src/ui/wearables';
 import { currentStreak, weekStats, personalRecords, streakRisk, freezeBudget, currentStreakFrozen } from '../../src/lib/streaks';
 import { severeSummary } from '../../src/lib/injuries';
+import { booksInPerson, coachedRemotely, COACHED_MODE_SHORT, COACHING_MODE_NOTE } from '../../src/lib/types';
 import { scheduleLocal, pushAvailable } from '../../src/ui/pushNotifications';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -90,8 +91,22 @@ export default function Home() {
   const burnedToday = useWearables().today.activeKcal || 0;
 
   const solo = c.coachingMode === 'solo';
-  const online = c.coachingMode === 'online';
-  const inperson = c.coachingMode === 'inperson';
+  // What the coaching answer actually decides on this screen.
+  //
+  // It decided nothing before TF-30: `online || inperson` gated the booking row
+  // and the Book action, so the two produced an identical home screen and the
+  // only difference between them anywhere in the app was the noun printed in a
+  // caption. A tester picked one, then the other, and correctly reported that
+  // nothing had happened.
+  //
+  // `booksInPerson` — the booking calendar is in-person by construction (see
+  // the header of calendar.tsx), so an online-only client was being offered
+  // slots in a room they are never in. `coachedRemotely` — a coach who is not
+  // there only learns how the week went if the client writes it down, so the
+  // weekly check-in leads for them instead. Hybrid is both, which is the whole
+  // point of the option: sessions to book AND a check-in for the weeks between.
+  const booksSessions = booksInPerson(c.coachingMode);
+  const remoteCoached = coachedRemotely(c.coachingMode);
   // Same `??` as This Week: a coached client whose assignment could not be read
   // gets the generic auto program in its place, titled and laid out exactly like
   // a plan their coach wrote. Nothing on the screen distinguished the two, so
@@ -231,7 +246,7 @@ export default function Home() {
           {myInvites.length > 0 ? (
             <Notice tone={t.brand} kicker={`Coaching invitation${myInvites[0].demo ? ' · sample' : ''}`}
               title={`${myInvites[0].coachName || 'A coach'} invited you`}
-              note={`${myInvites[0].mode === 'inperson' ? 'In-person' : 'Online'} coaching. Accept to connect.`}>
+              note={`${COACHED_MODE_SHORT[myInvites[0].mode]} coaching. ${COACHING_MODE_NOTE[myInvites[0].mode]} Accept to connect.`}>
               <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.lg }}>
                 <View style={{ flex: 1 }}><Ghost label="Decline" onPress={() => declineCoachInvite(myInvites[0].id)} /></View>
                 <View style={{ flex: 2 }}>
@@ -378,15 +393,28 @@ export default function Home() {
 
         {/* ── the rest: navigational, deliberately quiet ──────────────────── */}
         <Section>
-          {(online || inperson) ? (
+          {/* `|| nextSession` because a booking is a fact, not a preference: a
+              client who switches to online after booking is still expected in
+              the room on Thursday, and hiding the row would be how they miss
+              it. The row appears to show them what exists; only the invitation
+              to book more is gated. */}
+          {(booksSessions || nextSession) ? (
             <ListRow icon="calendar"
               title={nextSession
                 ? `Next session · ${new Date(nextSession.startsAt).toLocaleDateString(undefined, { weekday: 'short' })} ${(() => { let h = new Date(nextSession.startsAt).getHours(); const ap = h >= 12 ? 'pm' : 'am'; h = h % 12 || 12; return `${h}${ap}`; })()}`
                 : 'No sessions booked'}
               note={nextSession
-                ? `${inperson ? 'In-person' : 'Online'} · ${nextSession.durationMin} min with your coach`
-                : `Tap to book ${inperson ? 'an in-person session' : 'with your coach'}`}
+                ? `In person · ${nextSession.durationMin} min with your coach`
+                : 'Tap to book an in-person session'}
               onPress={() => router.push('/(client)/calendar')} />
+          ) : null}
+
+          {remoteCoached ? (
+            <ListRow icon="message" title="Weekly check-in"
+              note={booksSessions
+                ? 'How the weeks you train alone went — your coach reads it'
+                : 'How the week went — your coach only sees what you send'}
+              onPress={() => router.push('/(client)/checkin')} />
           ) : null}
 
           <ListRow icon="clock" title="Your history" note="Every month you have trained, back to the start"
@@ -422,9 +450,14 @@ export default function Home() {
           <QuickRow items={[
             { icon: 'plus', label: 'Log', onPress: () => router.push('/(client)/workouts') },
             { icon: 'meals', label: 'Food', onPress: () => router.push('/(client)/foodlog') },
-            (online || inperson)
+            // One slot, so it goes to whichever of the three this client
+            // actually has: a session to book, a check-in to send, or — with
+            // nobody to send it to — their own report.
+            booksSessions
               ? { icon: 'calendar' as const, label: 'Book', onPress: () => router.push('/(client)/calendar') }
-              : { icon: 'chart' as const, label: 'Report', onPress: () => router.push('/(client)/report') },
+              : remoteCoached
+                ? { icon: 'message' as const, label: 'Check-in', onPress: () => router.push('/(client)/checkin') }
+                : { icon: 'chart' as const, label: 'Report', onPress: () => router.push('/(client)/report') },
             { icon: 'camera', label: 'Photo', onPress: () => router.push('/(client)/scans') },
           ]} />
         </Section>

@@ -30,8 +30,8 @@ import { notifySuccess } from '../../src/ui/haptics';
 import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
+import { COACHED_MODES, COACHED_MODE_SHORT, COACHING_MODE_NOTE, modeForDb, type CoachedMode } from '../../src/lib/types';
 
-type Mode = 'online' | 'inperson';
 interface Coach {
   id: string;
   name: string;
@@ -73,8 +73,9 @@ export default function FindTrainer() {
     // Their own answer to how they are coached, not an assumption. 'solo'
     // means they had no coach until now, and asking for one online is the
     // safer default — a wrong 'inperson' puts them on a roster for sessions
-    // nobody is going to run.
-    const r = await joinByCode(code, cd.coachingMode === 'inperson' ? 'inperson' : 'online');
+    // nobody is going to run. 'hybrid' passes straight through; joinByCode
+    // narrows it for the RPC and says why.
+    const r = await joinByCode(code, cd.coachingMode === 'solo' ? 'online' : cd.coachingMode);
     setCodeBusy(false);
     if (!r.ok) { Alert.alert('That code didn’t work', r.reason); return; }
     setCode('');
@@ -106,7 +107,7 @@ export default function FindTrainer() {
     }
     cd.setCoachingMode(m);
     notifySuccess();
-    Alert.alert('You are connected', (coachName || 'Your coach') + ' is now your ' + (m === 'inperson' ? 'in-person' : 'online') + ' coach. Their plan, feedback and messaging are now on your app.', [{ text: 'Great' }]);
+    Alert.alert('You are connected', (coachName || 'Your coach') + ' is now your ' + COACHED_MODE_SHORT[m].toLowerCase() + ' coach. Their plan, feedback and messaging are now on your app.', [{ text: 'Great' }]);
   };
 
   useEffect(() => {
@@ -185,14 +186,19 @@ export default function FindTrainer() {
     return () => { cancelled = true; };
   }, [attempt]);
 
-  const request = useCallback(async (coach: Coach, mode: Mode) => {
+  const request = useCallback(async (coach: Coach, mode: CoachedMode) => {
     setSel(null);
     try {
       const { data: auth } = await supabase.auth.getUser();
       const uid = auth?.user?.id;
       if (!uid) { Alert.alert('Sign in required', 'Sign in to Repple to request coaching.'); return; }
+      // `coach_requests.mode` is CHECK-constrained to ('online','inperson'), so
+      // a hybrid request is sent as 'inperson' — the half the coach has to make
+      // room for. Un-narrowed it would not degrade, it would be REFUSED, and
+      // the client would be told their request failed for no reason they could
+      // act on. Widening the constraint (SQL in the TF-30 report) removes this.
       const { error } = await supabase.from('coach_requests').insert({
-        client_id: uid, trainer_id: coach.id, mode, status: 'pending',
+        client_id: uid, trainer_id: coach.id, mode: modeForDb(mode), status: 'pending',
       });
       if (error && !/duplicate|unique/i.test(error.message)) {
         Alert.alert('Could not send request', error.message);
@@ -202,7 +208,7 @@ export default function FindTrainer() {
       notifySuccess();
       Alert.alert(
         'Request sent',
-        `${coach.name} will see your ${mode === 'inperson' ? 'in-person' : 'online'} coaching request on their dashboard. You'll be connected once they accept — nothing changes on your app until then.`,
+        `${coach.name} will see your ${COACHED_MODE_SHORT[mode].toLowerCase()} coaching request on their dashboard. You'll be connected once they accept — nothing changes on your app until then.`,
         [{ text: 'Got it' }]
       );
     } catch (e) {
@@ -240,7 +246,7 @@ export default function FindTrainer() {
               <Notice key={iv.id} tone={t.brand}
                 kicker={`Coaching invitation${iv.demo ? ' · sample' : ''}`}
                 title={`${iv.coachName || 'A coach'} invited you`}
-                note={`${iv.mode === 'inperson' ? 'In-person' : 'Online'} coaching. Accept to connect — their program, feedback and messaging turn on for you.`}>
+                note={`${COACHED_MODE_SHORT[iv.mode]} coaching. ${COACHING_MODE_NOTE[iv.mode]} Accept to connect — their program, feedback and messaging turn on for you.`}>
                 <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.lg }}>
                   <View style={{ flex: 1 }}><Ghost label="Decline" onPress={() => declineInvite(iv.id)} /></View>
                   <View style={{ flex: 2 }}><Cta label="Accept invitation" wide onPress={() => acceptCoach(iv.id, iv.coachName, iv.mode)} /></View>
@@ -412,9 +418,14 @@ export default function FindTrainer() {
                     We couldn’t check your existing requests, so we can’t tell whether you’ve already asked {sel.name}. Sending again won’t create a second request.
                   </Text>
                 ) : null}
-                {(['online', 'inperson'] as Mode[]).map((m) => (
-                  <View key={m} style={{ marginBottom: 9 }}>
-                    <Cta label={`Request ${m === 'inperson' ? 'in-person' : 'online'} coaching`} wide onPress={() => request(sel, m)} />
+                {/* Three buttons, each with the line that says what it changes.
+                    "Hybrid" is a word until it is spelled out, and the same is
+                    true of the two that were already here — a client picking
+                    between them had nothing to pick on. */}
+                {COACHED_MODES.map((m) => (
+                  <View key={m} style={{ marginBottom: sp.md }}>
+                    <Cta label={`Request ${COACHED_MODE_SHORT[m].toLowerCase()} coaching`} wide onPress={() => request(sel, m)} />
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 5, textAlign: 'center' }}>{COACHING_MODE_NOTE[m]}</Text>
                   </View>
                 ))}
               </>)}

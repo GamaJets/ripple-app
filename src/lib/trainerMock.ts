@@ -4,6 +4,8 @@
 // ROSTER is empty. It previously held five invented clients ("Jordan P.",
 // "Sam R.", "Alex M.", "Priya N.") with invented adherence, weight deltas and
 // injuries, which shipped in the production bundle.
+import type { CoachedMode } from './types';
+
 export interface RosterClient {
   id: string; name: string; goal: string;
   /** Change in body weight across the scans on record, in kg.
@@ -16,7 +18,7 @@ export interface RosterClient {
    *  100, so a client nobody knew anything about scored a perfect adherence
    *  and could never be flagged at risk. */
   adherence: number | null; lastActive: string; next: string; unread: number;
-  mode: 'online' | 'inperson';
+  mode: CoachedMode;
   /** When this client joined the coach's book, ISO. Null when unknown.
    *
    *  Load-bearing for src/lib/clientDrift.ts: without it, a client added

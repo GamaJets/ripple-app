@@ -37,7 +37,7 @@ import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { useClientData } from '../../src/ui/clientData';
 import { macrosFor } from '../../src/lib/nutrition';
-import { progressDoc, shareDoc } from '../../src/lib/exportShare';
+import { progressDoc, progressCsv, progressSummary, progressSpanLabel, shareDoc, shareText, shareTextFile, pdfExportAvailable, fileExportAvailable, type ProgressRow } from '../../src/lib/exportShare';
 import { useRouter } from 'expo-router';
 import { useBrand } from '../../src/ui/brand';
 import { Rule, Section, SectionHead, Hero, KpiRow, ActionCard, Cta, Ghost, Spark, fig, Flag } from '../../src/ui/kit';
@@ -110,10 +110,77 @@ export default function Scans() {
   const router = useRouter();
   const cd = useClientData();
   const { appName } = useBrand();
-  const shareProgress = async () => {
-    const rows = [...cd.scans].sort((a, b) => Date.parse(a.takenAt) - Date.parse(b.takenAt)).map((sc) => ({ date: new Date(sc.takenAt).toLocaleDateString(), weightKg: sc.weightKg, bodyFatPct: sc.bodyFatPct, muscleKg: sc.skeletalMuscleKg }));
-    const { html, text } = progressDoc(cd.name, rows, appName, t.brand);
-    await shareDoc(html, text, 'Progress');
+  // ── sharing and exporting this record ──────────────────────────────────
+  //
+  // TF-21 asked of the button in the header: "what gets sent and in what
+  // format?" It was an unlabelled share icon that produced a PDF, or produced
+  // plain text instead without saying so on a build with no expo-print, and
+  // there was no way to find out which except by sending it to somebody. The
+  // format is now named before anything leaves the phone, and only formats
+  // this build can actually produce are offered — a button reading "PDF" on a
+  // device that cannot make one is the same lie in a smaller place.
+  //
+  // TF-25 and TF-33 asked for Instagram, WhatsApp, TikTok and the rest. Every
+  // option below ends at the OS share sheet, which lists all of them plus the
+  // client's coach in Messages or Mail, and stays correct as those apps change.
+  const exportRows = (): ProgressRow[] => [...cd.scans]
+    .sort((a, b) => Date.parse(a.takenAt) - Date.parse(b.takenAt))
+    .map((sc) => ({
+      // The stored calendar day, not `new Date(...).toLocaleDateString()`,
+      // which resolved a bare `YYYY-MM-DD` to UTC midnight and dated every
+      // scan a day early for anyone west of Greenwich. Formatting for display
+      // happens inside the export, timezone-safely.
+      date: String(sc.takenAt).slice(0, 10),
+      weightKg: Number.isFinite(sc.weightKg) ? sc.weightKg : null,
+      bodyFatPct: Number.isFinite(sc.bodyFatPct) ? sc.bodyFatPct : null,
+      // clientData substitutes 0 when scans.skeletal_muscle_kg is null, and
+      // nobody has 0 kg of skeletal muscle. That zero is a reading the scan
+      // never took, so it leaves as an empty cell rather than as a figure a
+      // coach would read as muscle loss.
+      muscleKg: Number.isFinite(sc.skeletalMuscleKg) && sc.skeletalMuscleKg > 0 ? sc.skeletalMuscleKg : null,
+    }));
+
+  const sendPdf = async () => { const rows = exportRows(); const { html, text } = progressDoc(cd.name, rows, appName, t.brand); await shareDoc(html, text, 'My progress'); };
+  const sendCsv = async () => { await shareTextFile(progressCsv(exportRows()), 'my-progress.csv', 'text/csv', 'My progress'); };
+  const sendSummary = async () => { await shareText(progressSummary(cd.name, exportRows(), appName), 'My progress'); };
+
+  const shareProgress = () => {
+    const rows = exportRows();
+    // An empty export is a claim, not an absence: a PDF with no rows tells a
+    // coach this client has recorded nothing rather than that the app had
+    // nothing to send. Nothing goes out until there is something in it.
+    if (!rows.length) {
+      Alert.alert(
+        cd.scansStatus === 'error' ? 'Your scans could not be read' : 'Nothing to send yet',
+        cd.scansStatus === 'error'
+          ? 'Sending now would show your coach an empty record, which is not the same as an empty history. Try again once the screen has loaded your scans.'
+          : 'Add a body scan first, and your report, spreadsheet and summary will all have something in them.',
+      );
+      return;
+    }
+    const pdf = pdfExportAvailable();
+    const csvLine = fileExportAvailable()
+      ? 'Spreadsheet — a .csv file, one row per scan, for a coach or another app to import.'
+      : 'Spreadsheet — the same rows as text you can paste into a spreadsheet (this build cannot attach a file).';
+    const options: { text: string; onPress?: () => void; style?: 'cancel' }[] = [];
+    if (pdf) options.push({ text: 'PDF report', onPress: () => { void sendPdf(); } });
+    options.push({ text: 'Spreadsheet (CSV)', onPress: () => { void sendCsv(); } });
+    options.push({ text: 'Short summary', onPress: () => { void sendSummary(); } });
+    // Android's dialog has three button slots and React Native keeps only the
+    // first three, so a fourth row does not fail loudly — it disappears. The
+    // one that would disappear is this Cancel. The dialog is dismissable there
+    // by tapping away or pressing back, so it is left off deliberately rather
+    // than shipped as a button that exists on one platform and not the other.
+    if (Platform.OS !== 'android' || options.length < 3) options.push({ text: 'Cancel', style: 'cancel' });
+    Alert.alert(
+      'Share your progress',
+      `${progressSpanLabel(rows)}.\n\n`
+      + (pdf ? 'PDF report — a one-page document with every scan and the change since your first.\n' : '')
+      + csvLine + '\n'
+      + 'Short summary — a few lines of text for a message, a story or a post.\n\n'
+      + `Whichever you pick opens your phone's share sheet, so it can go to your coach, Instagram, WhatsApp, anywhere. ${appName} posts nothing on its own.`,
+      options,
+    );
   };
   const scans = cd.scans;
   const [img, setImg] = useState<string | null>(null);
@@ -423,7 +490,9 @@ export default function Scans() {
             <Text style={{ ...ty.micro, color: t.ink3 }}>InBody · body composition</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Progress</Text>
           </View>
-          <Ghost icon="share" onPress={shareProgress} />
+          {/* Labelled, not a bare icon: TF-21 was written by somebody who
+              could not tell what the icon would do until they had done it. */}
+          <Ghost icon="share" label="Share" onPress={shareProgress} />
         </View>
 
         {/* ── the hero: one number leads the screen ───────────────────────── */}

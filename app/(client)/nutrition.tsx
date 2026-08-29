@@ -22,7 +22,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Diet, Goal } from '../../src/lib/types';
 import { useClientData } from '../../src/ui/clientData';
 import { useWearables } from '../../src/ui/wearables';
-import { caloriesLeft } from '../../src/lib/nutrition';
+import { caloriesLeft, macrosFor, applyCoachAdjust } from '../../src/lib/nutrition';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
 import { Icon } from '../../src/ui/Icon';
 import { useRouter } from 'expo-router';
@@ -41,6 +41,20 @@ const DIETS: Diet[] = ['meat', 'vegetarian', 'vegan', 'paleo', 'keto'];
 const DIET_LABEL: Record<Diet, string> = { meat: 'Meat', vegetarian: 'Veggie', vegan: 'Vegan', paleo: 'Paleo', keto: 'Keto' };
 const GOALS: Goal[] = ['fatloss', 'tone', 'muscle'];
 const GOAL_LABEL: Record<Goal, string> = { fatloss: 'Fat loss', tone: 'Tone', muscle: 'Build muscle' };
+
+// The three day types, each with the definition shown in the info sheet. A
+// tester asked for these ("need a brief definition in each tab for Training
+// day, Standard day, Rest day") because the buttons only tell you what a day
+// does after you have already picked it.
+//
+// Deliberately worded as "the day" and not "today": the same three definitions
+// have to keep reading correctly when day types can be planned a week ahead,
+// which is the direction this is going.
+const DAY_TYPES = [
+  { key: 'training', label: 'Training day', blurb: 'A day you train — a gym session or a hard effort. Fuel goes up so there is something to train on.' },
+  { key: 'off', label: 'Standard', blurb: 'A normal day with no session: work, walking, ordinary movement. This is the baseline target.' },
+  { key: 'rest', label: 'Rest day', blurb: 'A full day off training. Fuel comes down, because there is no session to feed.' },
+] as const;
 
 export default function Nutrition() {
   const t = useTheme();
@@ -69,6 +83,7 @@ export default function Nutrition() {
   const [view, setView] = useState<'today' | 'week'>('today');
   const [showAvoid, setShowAvoid] = useState(false);
   const [dayType, setDayType] = useState<'training' | 'rest' | 'off'>('off');
+  const [dayInfo, setDayInfo] = useState(false);
   const [batch, setBatch] = useState(1);
   const [cook, setCook] = useState(false);
   const [cookStep, setCookStep] = useState(0);
@@ -100,10 +115,17 @@ export default function Nutrition() {
     else { Alert.alert('Could not read that', foodAIAvailable() ? 'Try e.g. \"2 eggs, toast and a coffee\".' : 'AI logging turns on with the AI backend.'); }
   };
 
-  const cycleDelta = dayType === 'training' ? 250 : dayType === 'rest' ? -250 : 0;
-  const cyclingAdjust = (coachAdjust || cycleDelta)
-    ? { kcalDelta: (coachAdjust?.kcalDelta || 0) + cycleDelta, proteinDelta: coachAdjust?.proteinDelta, carbDelta: coachAdjust?.carbDelta, fatDelta: coachAdjust?.fatDelta }
-    : undefined;
+  // Taken by day rather than read off `dayType`, so the info sheet can ask what
+  // the other two days would come to without the client having to tap each one
+  // to find out.
+  const CYCLE_KCAL = 250;
+  const adjustFor = (d: typeof dayType) => {
+    const cycleDelta = d === 'training' ? CYCLE_KCAL : d === 'rest' ? -CYCLE_KCAL : 0;
+    return (coachAdjust || cycleDelta)
+      ? { kcalDelta: (coachAdjust?.kcalDelta || 0) + cycleDelta, proteinDelta: coachAdjust?.proteinDelta, carbDelta: coachAdjust?.carbDelta, fatDelta: coachAdjust?.fatDelta }
+      : undefined;
+  };
+  const cyclingAdjust = adjustFor(dayType);
   const input = { id: c.id, weightKg: w, bodyFatPct: bf, activity: c.activity, goal: c.goal, diet, mealsPerDay: c.mealsPerDay, mealOverride: { ...(coachAdjust?.mealOverride ?? {}), ...override }, coachAdjust: cyclingAdjust, avoid: c.avoid };
   const { plan, target, tot } = buildPlan(input);
   const coachPick = (pos: number) => !!(coachAdjust?.mealOverride && coachAdjust.mealOverride[pos] != null && override[pos] == null);
@@ -142,7 +164,7 @@ export default function Nutrition() {
   // zero left, which reads as "exactly on target" at the moment that is untrue.
   const burnedKcal = useWearables().today.activeKcal || 0;
   const cal = caloriesLeft(target.kcal, eaten.kcal, burnedKcal);
-  const cycleNote = dayType === 'training' ? '+250 kcal, more carbs' : dayType === 'rest' ? '−250 kcal, fewer carbs' : undefined;
+  const cycleNote = dayType === 'training' ? `+${CYCLE_KCAL} kcal, more carbs` : dayType === 'rest' ? `−${CYCLE_KCAL} kcal, fewer carbs` : undefined;
 
   if (!hasBody) {
     return (
@@ -224,9 +246,23 @@ export default function Nutrition() {
 
         {/* ── macro cycling: training vs rest day ────────────────────────── */}
         <Section>
-          <SectionHead title="Today is a…" note={cycleNote} />
+          {/* Not <SectionHead/>: the note slot is already spoken for by
+              `cycleNote`, and the kit's tappable note carries no
+              accessibilityLabel of its own. The "i" is its own control so it
+              can be labelled and given a touch target of its own. */}
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sp.lg }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
+              <Text style={{ ...ty.micro, color: t.ink3 }}>Today is a…</Text>
+              <Pressable onPress={() => setDayInfo(true)} hitSlop={12} accessibilityRole="button"
+                accessibilityLabel="What training, standard and rest days mean"
+                style={{ width: 18, height: 18, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: t.surface2, borderWidth: hairline, borderColor: t.ring }}>
+                <Text style={{ ...ty.micro, fontWeight: '700', color: t.ink2 }}>i</Text>
+              </Pressable>
+            </View>
+            {cycleNote ? <Text style={{ ...ty.caption, color: t.ink3 }}>{cycleNote}</Text> : null}
+          </View>
           <View style={{ flexDirection: 'row', gap: sp.sm }}>
-            {([['training', 'Training day'], ['off', 'Standard'], ['rest', 'Rest day']] as const).map(([key, label]) => {
+            {DAY_TYPES.map(({ key, label }) => {
               const on = dayType === key;
               return (
                 <Pressable key={key} onPress={() => setDayType(key)} accessibilityRole="button" accessibilityState={{ selected: on }}
@@ -533,6 +569,41 @@ export default function Nutrition() {
             <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.sm }}>
               <View style={{ flex: 1 }}><Cta label="Share list" wide onPress={shareGrocery} /></View>
               <View style={{ flex: 1 }}><Ghost label="Close" onPress={() => setShowGrocery(false)} /></View>
+            </View>
+          </ScrollView>
+        </View>
+      </Modal>
+
+      {/* ── what the three day types mean ────────────────────────────────── */}
+      <Modal visible={dayInfo} transparent animationType="slide" onRequestClose={() => setDayInfo(false)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setDayInfo(false)} />
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, maxHeight: '82%', ...elevation.e2 }}>
+          <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 30 }}>
+            <Text style={{ ...ty.title, color: t.ink }}>Training, standard, rest</Text>
+            <Text style={{ ...ty.label, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>The day you pick sets the calorie and carb targets the whole plan is built to.</Text>
+            {DAY_TYPES.map((d, i) => {
+              // The figures are asked of the same engine the screen runs on
+              // rather than written into the copy. The ±250 kcal reaches carbs
+              // only because applyCoachAdjust holds protein and fat where they
+              // are and re-derives carbs from the new calorie total — and a
+              // coach who has set an explicit carb delta breaks that chain, at
+              // which point a hardcoded "+62 g" would be a number this client's
+              // plan never uses.
+              const m = applyCoachAdjust(macrosFor(input), adjustFor(d.key));
+              return (
+                <View key={d.key} style={{ marginBottom: sp.md }}>
+                  {i > 0 ? <Rule /> : null}
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: sp.md, marginTop: i > 0 ? sp.md : 0 }}>
+                    <Text style={{ ...ty.body, fontWeight: '600', color: t.ink }}>{d.label}</Text>
+                    <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{m.kcal.toLocaleString()} kcal · {m.carbs} g carbs</Text>
+                  </View>
+                  <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.xs }}>{d.blurb}</Text>
+                </View>
+              );
+            })}
+            <Text style={{ ...ty.caption, color: t.ink3 }}>Protein and fat targets are the same on all three days.</Text>
+            <View style={{ marginTop: sp.lg }}>
+              <Ghost label="Close" onPress={() => setDayInfo(false)} />
             </View>
           </ScrollView>
         </View>

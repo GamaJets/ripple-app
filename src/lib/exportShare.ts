@@ -3,6 +3,19 @@
 // back to the built-in Share sheet with a formatted text version — so this works
 // TODAY over-the-air and upgrades to real PDFs automatically once rebuilt.
 import { Share } from 'react-native';
+// The CSV writer is not written again here. gymExport.ts already quotes on
+// every delimiter src/lib/csv.ts is willing to sniff — not just the comma — so
+// a value cannot turn into a column break for somebody opening the file in a
+// comma-decimal locale, and its csvCell already renders null as an empty cell
+// rather than a zero. Both rules matter more in a body-composition export than
+// they do in a member list. Nothing in that module imports at runtime, so this
+// costs the bundle nothing.
+import { progressChangeLines, progressSpanLabel, progressSummary, figure, dayLabel, type ProgressRow } from './progressExport';
+// Date-only values are read through localDate for the reason its header
+// explains: `new Date('2026-08-01')` is UTC midnight, which is 31 July for
+// anybody west of Greenwich, and a scan dated the day before it happened is
+// exactly the sort of thing a coach notices and the app never would.
+import { localDate } from './localDate';
 
 let Print: any = null;
 let Sharing: any = null;
@@ -18,6 +31,16 @@ export const pdfExportAvailable = () => !!Print;
 // Share sheet with the calendar text, so it works over-the-air today.
 let FileSystem: any = null;
 try { FileSystem = require('expo-file-system'); } catch { /* lights up after a rebuild */ }
+
+/**
+ * Whether a real file can be written and handed to the share sheet.
+ *
+ * The companion of pdfExportAvailable, and it exists for the same reason: a
+ * button that offers "CSV" and then shares a wall of comma-separated text
+ * because this build has no expo-file-system has told the user the wrong thing
+ * about what they just sent. A screen can ask first and word itself honestly.
+ */
+export const fileExportAvailable = () => !!(FileSystem?.cacheDirectory && Sharing?.shareAsync);
 
 export { buildIcs, type IcsEvent } from './ics';
 
@@ -62,6 +85,23 @@ export async function shareDoc(html: string, text: string, title: string): Promi
   return 'text';
 }
 
+/**
+ * The system share sheet with a plain message.
+ *
+ * TF-25 and TF-33 asked for Facebook, Instagram, WhatsApp and TikTok buttons.
+ * This is that feature: the sheet iOS and Android open here already lists every
+ * app the phone has, so it reaches all four plus whatever the client actually
+ * uses, keeps working when any of them changes its SDK, and — unlike a row of
+ * per-network buttons — never offers a network the client has not installed.
+ * Repple gets no posting access from it either: the user picks the destination
+ * and confirms the post themselves.
+ */
+export async function shareText(message: string, title: string): Promise<void> {
+  // A dismissed share sheet rejects on some platforms. The user changing their
+  // mind is not an error and must not raise one at the call site.
+  try { await Share.share({ message, title }); } catch { /* dismissed */ }
+}
+
 const page = (title: string, body: string, brand = 'Repple', accent?: string) =>
   `<html><head><meta name="viewport" content="width=device-width, initial-scale=1"><style>
    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#0f172a;padding:26px;margin:0}
@@ -90,16 +130,45 @@ export function mealPlanDoc(name: string, targetKcal: number, meals: PlanMealRow
   return { html: page('Meal Plan', body, brand, accent), text };
 }
 
-export interface ProgressRow { date: string; weightKg: number; bodyFatPct: number; muscleKg: number }
+// ── A client's body-composition record, in three shapes ──────────────────────
+//
+// TF-21 asked of the share button on the progress screen: "what gets sent and
+// in what format?". It had one answer — a PDF, or silently plain text on a
+// build without expo-print — and no way to find that out except by sending it.
+// There are now three, each named before anything leaves the phone:
+//
+//   progressDoc      a one-page report a person reads
+//   progressCsv      a file another app imports
+//   progressSummary  a few lines for a message, a story or a post
+//
+// All three are built from the same rows so they cannot disagree, and all three
+// are pure: no React, no side effects, nothing read from a provider. The share
+// itself is a separate step.
+
+// The data half lives in ./progressExport — no react-native, so the suite can
+// assert on it. Re-exported here so no call site had to move.
+export {
+  progressChange, progressChangeLines, progressSpanLabel, progressSummary,
+  progressCsv, PROGRESS_CSV_HEADER,
+} from './progressExport';
+export type { ProgressRow, ProgressMetric } from './progressExport';
 
 export function progressDoc(name: string, rows: ProgressRow[], brand = 'Repple', accent?: string): { html: string; text: string } {
   const first = (name || '').split(' ')[0] || 'Your';
-  const tr = rows.map((r) => `<tr><td>${r.date}</td><td class="r">${r.weightKg}</td><td class="r">${r.bodyFatPct}%</td><td class="r">${r.muscleKg}</td></tr>`).join('');
-  const f = rows[0], l = rows[rows.length - 1];
-  const delta = f && l ? `<p style="color:#64748b;margin:0">Since ${f.date}: weight ${(l.weightKg - f.weightKg).toFixed(1)}kg · body fat ${(l.bodyFatPct - f.bodyFatPct).toFixed(1)}% · muscle ${(l.muscleKg - f.muscleKg).toFixed(1)}kg</p>` : '';
-  const body = `<h2 style="margin-top:20px">${first}'s progress</h2>${delta}
-    <table><tr><th>Date</th><th class="r">Weight</th><th class="r">Body fat</th><th class="r">Muscle</th></tr>${tr}</table>`;
-  const text = `${first}'s progress (${brand})\n` + rows.map((r) => `• ${r.date}: ${r.weightKg}kg · ${r.bodyFatPct}% BF · ${r.muscleKg}kg muscle`).join('\n');
+  const tr = rows.map((r) => `<tr><td>${dayLabel(r.date)}</td><td class="r">${figure(r.weightKg)}</td><td class="r">${figure(r.bodyFatPct, '%')}</td><td class="r">${figure(r.muscleKg)}</td></tr>`).join('');
+  const lines = progressChangeLines(rows);
+  // A single scan gets a sentence saying so. The previous version printed a
+  // delta line built from `rows[0]` and `rows[last]` being the same row, which
+  // reported "weight 0.0kg · body fat 0.0%" — a client's first scan rendered as
+  // having achieved nothing.
+  const note = lines.length ? lines.join(' · ')
+    : rows.length ? 'One scan so far — a change needs two.'
+    : 'No scans recorded yet.';
+  const body = `<h2 style="margin-top:20px">${first}'s progress</h2><p style="color:#64748b;margin:0">${note}</p>
+    <p style="color:#94a3b8;margin:6px 0 0;font-size:12px">${progressSpanLabel(rows)}. A dash means that scan did not record the figure.</p>
+    <table><tr><th>Date</th><th class="r">Weight (kg)</th><th class="r">Body fat</th><th class="r">Muscle (kg)</th></tr>${tr}</table>`;
+  const text = progressSummary(name, rows, brand) + '\n\n' +
+    rows.map((r) => `• ${dayLabel(r.date)}: ${figure(r.weightKg, ' kg')} · ${figure(r.bodyFatPct, '%')} BF · ${figure(r.muscleKg, ' kg')} muscle`).join('\n');
   return { html: page('Progress', body, brand, accent), text };
 }
 

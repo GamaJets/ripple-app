@@ -4,6 +4,105 @@ export type Goal = 'fatloss' | 'tone' | 'muscle';
 export type Diet = 'meat' | 'vegetarian' | 'vegan' | 'paleo' | 'keto';
 export type Sex = 'f' | 'm';
 
+// ── How somebody is coached ─────────────────────────────────────────────────
+//
+// This lived as an inline `'online' | 'inperson'` union in eight files, which
+// is why adding a third answer needed a sweep rather than an edit. It is one
+// vocabulary now: the type, the words shown for it, and the two questions the
+// rest of the app actually asks of it.
+//
+// The two original values differed only in the noun printed beside them —
+// picking one over the other changed nothing a client could see, which is the
+// first half of TF-30. `booksInPerson` and `coachedRemotely` below are what
+// make the answer load-bearing; every screen that branches on coaching should
+// go through one of them rather than comparing to a literal.
+
+/** A client's answer to how they train. 'solo' means nobody is coaching them. */
+export type CoachingMode = 'online' | 'inperson' | 'hybrid' | 'solo';
+/** The delivery of a real coaching relationship. 'solo' is the absence of one,
+ *  so it cannot describe an invite, a request, or a roster entry. */
+export type CoachedMode = 'online' | 'inperson' | 'hybrid';
+
+export const COACHED_MODES: readonly CoachedMode[] = ['online', 'inperson', 'hybrid'];
+
+/** For a coach's own surfaces, where the subject is the client, not the reader. */
+export const COACHED_MODE_SHORT: Record<CoachedMode, string> = {
+  online: 'Online',
+  inperson: 'In-person',
+  hybrid: 'Hybrid',
+};
+
+export const COACHING_MODE_LABEL: Record<CoachingMode, string> = {
+  online: 'Online coach',
+  inperson: 'In-person coach',
+  hybrid: 'Hybrid coach',
+  solo: 'On my own',
+};
+
+/** One line, in the client's own voice, saying what picking this changes. It
+ *  travels with the option everywhere it is offered — "Hybrid" on its own is
+ *  a word, not a choice anybody can make. */
+export const COACHING_MODE_NOTE: Record<CoachingMode, string> = {
+  online: 'Your coach programs and checks in remotely — no sessions to book.',
+  inperson: 'Your coach trains you in the room — book sessions with them.',
+  hybrid: 'Both — book sessions with them, and check in for the weeks you train alone.',
+  solo: 'No coach. AI plans and tools, and nothing sent to anybody.',
+};
+
+/** The same three, in the coach's voice, for the add-client and invite sheets. */
+export const COACHED_MODE_NOTE_COACH: Record<CoachedMode, string> = {
+  online: 'You program and check in remotely. They get no booking calendar.',
+  inperson: 'You train them in the room. They can book your open slots.',
+  hybrid: 'Both — they book your slots, and check in for the weeks they train alone.',
+};
+
+/** Whether this person has sessions with their coach to book. The booking
+ *  calendar is in-person by construction (see the header of calendar.tsx), so
+ *  an online-only client has nothing there to book. */
+export function booksInPerson(m: CoachingMode): boolean {
+  return m === 'inperson' || m === 'hybrid';
+}
+
+/** Whether their coach is working with them at a distance, and therefore only
+ *  learns how the week went if the client writes it down. */
+export function coachedRemotely(m: CoachingMode): boolean {
+  return m === 'online' || m === 'hybrid';
+}
+
+/** Tolerant read of a `mode` column. Anything unrecognised — including a
+ *  'hybrid' written by a newer build against an older database, and the reverse
+ *  — settles on 'online', which is the column's own default. */
+export function readCoachedMode(v: unknown): CoachedMode {
+  return v === 'inperson' || v === 'hybrid' ? v : 'online';
+}
+
+export function readCoachingMode(v: unknown, fallback: CoachingMode = 'online'): CoachingMode {
+  return v === 'online' || v === 'inperson' || v === 'hybrid' || v === 'solo' ? v : fallback;
+}
+
+/**
+ * What the database will actually accept in a `mode` column, today.
+ *
+ * Every `mode` column in the schema is CHECK-constrained to ('online',
+ * 'inperson') — clients, coach_clients, coach_invites, coach_requests and
+ * coaching_relationships, all five. Sending 'hybrid' does not degrade, it is
+ * REFUSED, and for `clients` that refusal takes the whole profile row with it.
+ *
+ * So 'hybrid' is narrowed to 'inperson' on the way out. That is an incomplete
+ * statement rather than a false one: a hybrid client does train in the room,
+ * and 'inperson' is the half of the answer with a real-world consequence for
+ * the coach — they have to hold the slot. Narrowing to 'online' would drop
+ * them off a roster for sessions that genuinely happen.
+ *
+ * Callers that can keep the full answer on the device do (clientData.tsx and
+ * roster.tsx both do), so this is a limit on what the SERVER remembers, not on
+ * what the app does. Widening the five constraints deletes this function; the
+ * SQL is in the TF-30 report.
+ */
+export function modeForDb(m: CoachedMode): 'online' | 'inperson' {
+  return m === 'online' ? 'online' : 'inperson';
+}
+
 export interface Macros {
   kcal: number;
   protein: number;   // grams

@@ -21,7 +21,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { ensureMediaPermission } from '../src/ui/permissions';
 import { useTheme } from '../src/ui/components';
 import { useClientData } from '../src/ui/clientData';
-import type { Goal, Diet } from '../src/lib/types';
+import { COACHING_MODE_LABEL, COACHING_MODE_NOTE, type CoachingMode, type Goal, type Diet } from '../src/lib/types';
 import { Icon } from '../src/ui/Icon';
 import { Cta, Ghost } from '../src/ui/kit';
 import { sp, layout, radius, type as ty } from '../src/theme/scale';
@@ -54,7 +54,7 @@ export default function Onboarding() {
   // Empty, not pre-filled: these are the user's own numbers or they're nothing.
   const [weight, setWeight] = useState('');
   const [height, setHeight] = useState('');
-  const [cmode, setCmode] = useState<'online' | 'inperson' | 'solo'>('online');
+  const [cmode, setCmode] = useState<CoachingMode>('online');
 
   // Client: 0 photo, 1 goal, 2 diet, 3 stats. Owner: one step, naming the gym.
   // Trainer: nothing to ask, so the screen redirects rather than showing a
@@ -234,8 +234,11 @@ export default function Onboarding() {
             <TextInput value={height} onChangeText={setHeight} keyboardType="numeric" placeholder="cm" placeholderTextColor={t.ink3} accessibilityLabel="Height in centimetres" style={inp} />
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>You can add or refine these any time in your profile, and an InBody scan updates them automatically.</Text>
             <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.xl, marginBottom: sp.sm }}>How are you coaching?</Text>
-            {([['online', 'Online coach', 'Remote coaching & messaging'], ['inperson', 'In-person coach', 'Coach trains you in person'], ['solo', 'On my own', 'Self-managed with AI & tools']] as const).map(([id, label, note]) => (
-              <Option key={id} on={cmode === id} onPress={() => setCmode(id)} label={label} note={note} mark="radio" />
+            {/* The same four answers, in the same words, as the profile screen
+                — and each says what it changes rather than describing a kind of
+                relationship. This is the first place anybody is asked. */}
+            {(['online', 'inperson', 'hybrid', 'solo'] as CoachingMode[]).map((id) => (
+              <Option key={id} on={cmode === id} onPress={() => setCmode(id)} label={COACHING_MODE_LABEL[id]} note={COACHING_MODE_NOTE[id]} mark="radio" />
             ))}
           </View>
         )}

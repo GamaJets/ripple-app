@@ -13,12 +13,17 @@ import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Hero, KpiRow, Card, ListRow, Cta, Ghost, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, KpiRow, Card, ListRow, Cta, Ghost, Notice, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../../src/theme/scale';
 import { useSessions } from '../../src/ui/sessions';
 import { useCoachProfile } from '../../src/ui/coachProfile';
 import { useClientData } from '../../src/ui/clientData';
+import { useWorkoutLog } from '../../src/ui/workoutLog';
 import type { TrainingSession } from '../../src/lib/types';
+import type { WorkoutEntry } from '../../src/lib/mockData';
+import { workoutKind, KIND_LABEL, WORKOUT_KINDS, type WorkoutKind } from '../../src/lib/workoutKind';
+import { dateParts } from '../../src/lib/localDate';
+import type { IconName } from '../../src/ui/Icon';
 import { sessionsRemaining, redeemSession, refundSession, reofferSlot } from '../../src/lib/connect';
 import { buildIcs, shareIcs } from '../../src/lib/exportShare';
 import { sendPush, sendPushChecked } from '../../src/ui/pushNotifications';
@@ -32,10 +37,51 @@ const initialsOf = (name: string) => name.replace('Coach ', '').split(' ').map((
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MON = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
-function dayKey(iso: string) { const d = new Date(iso); return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`; }
+// One key function for both of this screen's sources. A session's `startsAt` is
+// a timestamp and means an instant, but a workout's `performed_at` can come back
+// as a bare `YYYY-MM-DD`, which `new Date` resolves to UTC midnight — and every
+// local getter then reads that back as the previous day anywhere west of
+// Greenwich, filing Monday's session under Sunday. `dateParts` is the fix that
+// already exists for this; see src/lib/localDate.ts for the two shipped bugs it
+// was written for.
+function dayKey(iso: string) {
+  const p = dateParts(iso);
+  return p ? `${p[0]}-${p[1]}-${p[2]}` : '';
+}
 function timeLabel(iso: string) {
   const d = new Date(iso); let h = d.getHours(); const ap = h >= 12 ? 'pm' : 'am'; h = h % 12 || 12;
   const m = d.getMinutes(); return `${h}${m ? ':' + String(m).padStart(2, '0') : ''}${ap}`;
+}
+
+// An icon per kind, so the panel below the grid is not relying on colour alone.
+// It lives here rather than beside KIND_LABEL because src/lib/workoutKind.ts is
+// deliberately pure — a classifier that can be tested without a renderer should
+// not import an icon set.
+const KIND_ICON: Record<WorkoutKind, IconName> = {
+  strength: 'dumbbell', cardio: 'heart', hiit: 'flame', mobility: 'sparkle', recovery: 'moon',
+};
+
+// The one-line summary under a logged workout, built the way Activity builds it
+// (`app/(client)/activity.tsx`). TF-18 is a report that the two screens disagree
+// about the same day, so they have to say the same words about the same entry.
+//
+// One deliberate difference: Activity drops an entry that has neither sets nor a
+// cardio block, and here it is shown with a dash instead. This panel's job is to
+// account for the day, and an entry whose detail never saved is still a session
+// that happened — silently omitting it is the same absence-of-evidence mistake
+// the log's own status flag exists to prevent.
+function logDetail(e: WorkoutEntry): string {
+  if (e.sets && e.sets.length) return e.sets.map((x) => `${x[0]}×${x[1]}kg`).join(' · ');
+  if (e.cardio) {
+    const c = e.cardio;
+    return [
+      `${c.mins} min`,
+      c.dist > 0 ? `${c.dist} ${c.unit}` : null,
+      c.watts && c.watts > 0 ? `${c.watts} W` : null,
+      c.hrAvg ? `♥ ${c.hrAvg} avg / ${c.hrHigh ?? c.hrAvg} hi` : null,
+    ].filter(Boolean).join(' · ');
+  }
+  return fig(null);
 }
 
 export default function Calendar() {
@@ -45,6 +91,10 @@ export default function Calendar() {
   const { sessions, bookSession, releaseSession } = useSessions();
   const coach = useCoachProfile();
   const cd = useClientData();
+  // TF-18: this screen read PT session slots and nothing else, so a day full of
+  // logged training looked empty here while Activity listed all of it. Same log,
+  // same day, same words — see `logDetail` above.
+  const { log, status: logStatus, reload: reloadLog } = useWorkoutLog();
   const fee = coach.sessionFee;
   const [showCoach, setShowCoach] = useState(false);
   const [viewYear, setViewYear] = useState(now.getFullYear());
@@ -61,6 +111,33 @@ export default function Calendar() {
   const byDay = new Map<string, TrainingSession[]>();
   for (const s of visible) { const k = dayKey(s.startsAt); (byDay.get(k) ?? byDay.set(k, []).get(k)!).push(s); }
 
+  // Under 'error' an empty log means the read failed, not that nothing was
+  // trained. Every "0 workouts" defect this app has shipped came from treating
+  // those two answers as the same one — see src/ui/loadStatus.ts.
+  const logKnown = logStatus !== 'error';
+  const logByDay = new Map<string, WorkoutEntry[]>();
+  for (const e of log) { const k = dayKey(e.t); (logByDay.get(k) ?? logByDay.set(k, []).get(k)!).push(e); }
+
+  // TF-16: one dot per DISTINCT kind trained that day. Five sets of bench press
+  // are one strength session to the reader, not five marks under the 14th — and
+  // five marks would not fit under a date anyway. Ordered by WORKOUT_KINDS so
+  // the dots always read left to right in the same order as the legend.
+  const kindsByDay = new Map<string, WorkoutKind[]>();
+  for (const [k, entries] of logByDay) {
+    const seen = new Set<WorkoutKind>(entries.map((e) => workoutKind(e)));
+    kindsByDay.set(k, WORKOUT_KINDS.filter((kind) => seen.has(kind)));
+  }
+
+  // The series palette (s1/s2/s3/s5/s6), not the status palette. good, warn,
+  // serious and crit each carry a judgement — something is fine, something needs
+  // attention — and the kind of training somebody did is not a status: a HIIT
+  // day is not a warning. These five are the tokens that exist to be told apart
+  // from one another, and they also stay clear of the two colours already spoken
+  // for on this grid (brand for your session, ink3 for an open slot).
+  const KIND_DOT: Record<WorkoutKind, string> = {
+    strength: t.s1, cardio: t.s6, hiit: t.s3, mobility: t.s2, recovery: t.s5,
+  };
+
   const first = new Date(viewYear, viewMonth, 1);
   const startDow = first.getDay();
   const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
@@ -73,6 +150,14 @@ export default function Calendar() {
   const [selY, selM, selD] = selKey.split('-').map(Number);
   const selDate = new Date(selY, selM, selD);
   const selDaySessions = (byDay.get(selKey) ?? []).sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt));
+  const selDayLog = (logByDay.get(selKey) ?? []).sort((a, b) => Date.parse(a.t) - Date.parse(b.t));
+  // Only counts we can stand behind. With the log unread the workout half of
+  // this day is unknown, so the header states the slots and stays quiet about
+  // the rest rather than implying a total.
+  const dayNote = [
+    selDaySessions.length ? `${selDaySessions.length} slot${selDaySessions.length === 1 ? '' : 's'}` : null,
+    logKnown && selDayLog.length ? `${selDayLog.length} logged` : null,
+  ].filter(Boolean).join(' · ') || undefined;
 
   function shiftMonth(delta: number) {
     let m = viewMonth + delta, y = viewYear;
@@ -224,23 +309,52 @@ export default function Calendar() {
                 const isToday = k === todayKey;
                 const hasMine = daySess.some((s) => s.status === 'booked');
                 const hasOpen = daySess.some((s) => s.status === 'available');
+                const dayKinds = kindsByDay.get(k) ?? [];
+                // Colour is not a label. Spelling the dots out here is what makes
+                // the grid usable to a screen reader and to anyone who cannot
+                // separate the amber dot from the gold one.
+                const a11y = [
+                  `${MON[viewMonth]} ${d}`,
+                  hasMine ? 'your session' : null,
+                  hasOpen ? 'open slot' : null,
+                  ...dayKinds.map((kind) => `${KIND_LABEL[kind]} logged`),
+                ].filter(Boolean).join(', ');
                 return (
-                  <Pressable key={i} onPress={() => setSelKey(k)} style={{ flex: 1, aspectRatio: 1, alignItems: 'center', justifyContent: 'center' }}>
+                  <Pressable key={i} onPress={() => setSelKey(k)} accessibilityRole="button" accessibilityLabel={a11y} style={{ flex: 1, aspectRatio: 1, alignItems: 'center', justifyContent: 'center' }}>
                     <View style={{ width: 34, height: 34, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center', backgroundColor: isSel ? t.brand : 'transparent', borderWidth: isToday && !isSel ? hairline : 0, borderColor: t.brand }}>
                       <Text style={{ ...value(14), color: isSel ? t.brandInk : isToday ? t.ink : t.ink2 }}>{d}</Text>
                     </View>
-                    <View style={{ flexDirection: 'row', gap: 3, height: 6, marginTop: 2 }}>
-                      {hasMine && <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: t.brand }} />}
-                      {hasOpen && <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: t.ink3 }} />}
+                    {/* The two session marks first, then one per kind logged.
+                        Dropped from 5pt to 4pt with a 2pt gap because a day can
+                        now carry seven of them: 7x4 + 6x2 = 40pt, inside the
+                        ~47pt cell a 7-column grid leaves on the narrowest phone,
+                        so they never wrap into the row beneath. */}
+                    <View style={{ flexDirection: 'row', gap: 2, height: 6, marginTop: 2 }}>
+                      {hasMine && <View style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: t.brand }} />}
+                      {hasOpen && <View style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: t.ink3 }} />}
+                      {dayKinds.map((kind) => (
+                        <View key={kind} style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: KIND_DOT[kind] }} />
+                      ))}
                     </View>
                   </Pressable>
                 );
               })}
             </View>
           ))}
-          <View style={{ flexDirection: 'row', gap: sp.lg, marginTop: sp.md, justifyContent: 'center' }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}><View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.brand }} /><Text style={{ ...ty.caption, color: t.ink3 }}>Your session</Text></View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}><View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.ink3 }} /><Text style={{ ...ty.caption, color: t.ink3 }}>Open slot</Text></View>
+          {/* The legend is the only thing that turns a coloured dot into a fact.
+              Seven entries no longer fit on one line, so it wraps rather than
+              truncating — a legend with an item missing is worse than a tall one. */}
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.md, marginTop: sp.md, justifyContent: 'center' }}>
+            {[
+              { dot: t.brand, label: 'Your session' },
+              { dot: t.ink3, label: 'Open slot' },
+              ...WORKOUT_KINDS.map((kind) => ({ dot: KIND_DOT[kind], label: KIND_LABEL[kind] })),
+            ].map((it) => (
+              <View key={it.label} style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: it.dot }} />
+                <Text style={{ ...ty.caption, color: t.ink3 }}>{it.label}</Text>
+              </View>
+            ))}
           </View>
         </Section>
 
@@ -248,14 +362,30 @@ export default function Calendar() {
 
         {/* ── the selected day ───────────────────────────────────────────── */}
         <Section>
-          <SectionHead title={`${DOW[selDate.getDay()]} · ${MON[selM].slice(0, 3)} ${selD}`}
-            note={selDaySessions.length > 0 ? `${selDaySessions.length} slot${selDaySessions.length === 1 ? '' : 's'}` : undefined} />
-          {selDaySessions.length === 0 ? (
+          <SectionHead title={`${DOW[selDate.getDay()]} · ${MON[selM].slice(0, 3)} ${selD}`} note={dayNote} />
+
+          {/* Said before either list, because with the log unread everything
+              below is half an answer and the reader has to be told which half is
+              missing before they read a quiet day as a lazy one. */}
+          {!logKnown ? (
+            <Notice tone={t.warn} kicker="This day" title="We couldn’t read your training log"
+              note="Sessions with your coach are still shown below, but workouts you logged yourself are not — and the coloured dots are missing from the grid above for the same reason. Nothing has been lost.">
+              <View style={{ marginTop: sp.lg }}>
+                <Cta label="Try again" wide onPress={reloadLog} />
+              </View>
+            </Notice>
+          ) : null}
+
+          {/* An empty day may only be called empty when the log actually
+              answered. Under 'error' the Notice above stands in its place. */}
+          {logKnown && selDaySessions.length === 0 && selDayLog.length === 0 ? (
             <View style={{ alignItems: 'center', paddingVertical: sp.lg }}>
               <Icon name="calendar" size={24} color={t.ink3} />
-              <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: sp.md }}>No sessions this day. Days with a grey dot have open slots you can book.</Text>
+              <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: sp.md }}>Nothing on this day. Days with a grey dot have open slots you can book; a coloured dot is a workout you logged.</Text>
             </View>
-          ) : selDaySessions.map((s, si) => {
+          ) : null}
+
+          {selDaySessions.map((s, si) => {
             const isMine = s.status === 'booked';
             return (
               <View key={s.id}>
@@ -275,6 +405,39 @@ export default function Calendar() {
               </View>
             );
           })}
+
+          {/* What TF-18 says is missing: the workouts logged under Activity,
+              on the day they were performed. Presented as Activity presents
+              them — the same icon tile, the same title, the same detail line —
+              with the kind named in words beside it so the dot above the date
+              has something to be read against. */}
+          {selDayLog.length > 0 ? (
+            <View style={{ marginTop: selDaySessions.length > 0 ? sp.lg : 0 }}>
+              {selDaySessions.length > 0 ? <Rule /> : null}
+              <Text style={{ ...ty.micro, color: t.ink3, marginTop: selDaySessions.length > 0 ? sp.lg : 0, marginBottom: sp.sm }}>Logged</Text>
+              {selDayLog.map((e, ei) => {
+                const kind = workoutKind(e);
+                return (
+                  <View key={e.id ?? `${e.t}-${e.exercise}-${ei}`}>
+                    {ei > 0 ? <Rule /> : null}
+                    <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingVertical: sp.md }}>
+                      <View style={{ width: 34, height: 34, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+                        <Icon name={KIND_ICON[kind]} size={17} color={KIND_DOT[kind]} />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>Logged {e.exercise}</Text>
+                        <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{KIND_LABEL[kind]} · {logDetail(e)}</Text>
+                      </View>
+                      <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{timeLabel(e.t)}</Text>
+                    </View>
+                  </View>
+                );
+              })}
+              <View style={{ alignSelf: 'flex-start', marginTop: sp.sm }}>
+                <Ghost label="All activity" onPress={() => router.push('/(client)/activity')} />
+              </View>
+            </View>
+          ) : null}
         </Section>
 
         <Rule />
