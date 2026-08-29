@@ -33,7 +33,8 @@ import { groupSessions, sessionKey, sessionDuration, sessionActivity, sessionKca
 import { sliceLoading, sliceReady, sliceFailed, rowsOf, brokenParts, completeness, partialWarning, memberIds, buildDossier, buildDossiers, retentionRead, doorLogActive, attendanceCaveat, type MemberRecord, type MemberBooking } from './memberView';
 import { payroll30For, payrollBlocker, type GymTrainer } from './gymTrainers';
 import { gymRollup, trainerHealth } from './ownerAnalytics';
-import { ROW_CAP, capLimit, assertWhole, isTruncated, TruncatedRead } from './rowCap';
+import { ROW_CAP, capLimit, capped, assertWhole, isTruncated, TruncatedRead } from './rowCap';
+import { isWhole, worstStatus } from '../ui/loadStatus';
 import { caloriesLeft } from './nutrition';
 import { progressChange, progressChangeLines, progressCsv, progressSummary, progressSpanLabel, PROGRESS_CSV_HEADER, type ProgressRow } from './progressExport';
 import { isDelivered, isAwaitingOutcome, isPayable, payrollByTrainer, payrollTotal, settlementBlocker, settleableSessions, settlementAmount, settleBlocker, sessionProfileIds, namesById, PAY_DELIVERED_ONLY, type PtSession } from './gymSessions';
@@ -4243,6 +4244,70 @@ function by2(v: ReturnType<typeof buildStaff>, id: string) {
     'the line is at the cap: 1000 ended, 1001 was cut off');
   ok(isTruncated(rows(51), 50) && !isTruncated(rows(50), 50), 'and it moves with a custom cap');
   ok(!isTruncated(null) && !isTruncated([]), 'nothing read is not something truncated');
+
+  // ── capped(): the phone's answer, where throwing is the wrong one ─────────
+  //
+  // The console throws, because every capped read there feeds a figure. The
+  // phone providers mostly feed a LIST, and a thousand real sessions is worth
+  // showing to the coach looking at them — so `capped` hands back the honest
+  // page and the flag together and the provider reports 'partial'.
+  //
+  // The two halves must not be separable. Slice without the flag and the screen
+  // shows a prefix as the whole set, which is the original bug; flag without the
+  // slice and the probe row — asked for so it could be COUNTED, never rendered —
+  // is drawn to the user as a real row.
+  const short = rows(3);
+  const small = capped(short);
+  ok(small.rows.length === 3 && !small.truncated, 'a short read is all of it, and says so');
+  ok(small.rows === short, 'and is handed straight back rather than copied for no reason');
+
+  const exact = capped(rows(1000));
+  ok(exact.rows.length === 1000 && !exact.truncated,
+    'a read of exactly the cap ended there — this is the off-by-one that reopens the bug');
+
+  const over = capped(rows(1001));
+  ok(over.truncated, 'cap + 1 rows back means there were more than the cap');
+  ok(over.rows.length === 1000,
+    'and the probe row is dropped: it was requested to be counted, not to be shown');
+  ok(over.rows[999] === 999 && !over.rows.includes(1000),
+    'the rows kept are the first cap of them, in the order the server returned them');
+
+  const customCap = capped(rows(51), 50);
+  ok(customCap.truncated && customCap.rows.length === 50, 'the cap the caller names is the cap that applies');
+  ok(!capped(rows(50), 50).truncated, 'and its boundary sits in the same place');
+
+  const nothing = capped(null);
+  ok(nothing.rows.length === 0 && !nothing.truncated,
+    'a null read is an empty set that ended, not a truncated one — a provider that read nothing must not report partial');
+  ok(capped(undefined).rows.length === 0 && capped([]).rows.length === 0,
+    'and undefined behaves the same as null');
+
+  // The two functions have to agree, because providers pick between them by
+  // whether they are showing a list or computing a figure, and a set that is
+  // truncated for one of them is truncated for both.
+  for (const n of [0, 1, 999, 1000, 1001, 2000]) {
+    ok(capped(rows(n)).truncated === isTruncated(rows(n)),
+      `capped and isTruncated agree at ${n} rows`);
+  }
+
+  // ── the fourth load status ────────────────────────────────────────────────
+  //
+  // 'partial' is deliberately not 'ready'. Screens gate their figures on
+  // `status === 'ready'`, so a truncated read arriving as 'partial' renders
+  // those figures as a dash on its own. Arriving as 'ready' it would have
+  // printed a subtotal as a total on every one of them.
+  ok(isWhole('ready'), "'ready' is the one status that means this is all of it");
+  ok(!isWhole('partial') && !isWhole('loading') && !isWhole('error'),
+    'and no other status may be counted, summed or averaged over');
+
+  ok(worstStatus('ready', 'ready') === 'ready', 'all whole is whole');
+  ok(worstStatus('ready', 'partial') === 'partial',
+    'one truncated part makes the whole screen partial — a screen is only as complete as its worst read');
+  ok(worstStatus('partial', 'loading') === 'loading',
+    'but a part still in flight outranks a truncated one: it is not yet known to be anything');
+  ok(worstStatus('partial', 'error') === 'error' && worstStatus('loading', 'error') === 'error',
+    'and a read that did not happen outranks everything');
+  ok(worstStatus() === 'ready', 'nothing to be incomplete about is complete');
 }
 
 

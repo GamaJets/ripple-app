@@ -53,7 +53,8 @@ import { USE_SUPABASE } from '../lib/config';
 import { macrosFor, applyCoachAdjust } from '../lib/nutrition';
 import { buildProgram } from '../lib/programs';
 import { buildChecklist, scheduledFocus, type ChecklistGap, type ChecklistSource, type CoachChecklistItem } from '../lib/checklist';
-import type { LoadStatus } from './loadStatus';
+import { worstStatus, type LoadStatus } from './loadStatus';
+import { capLimit, capped } from '../lib/rowCap';
 import { useAuthRevision } from './authRevision';
 import { useClientData } from './clientData';
 import { useCoachNutrition } from './coachNutrition';
@@ -87,8 +88,12 @@ const today = () => {
 
 // Worst of the three, in the order a screen cares about: an unknown beats a
 // still-loading beats a confirmed answer.
-const worst = (...s: LoadStatus[]): LoadStatus =>
-  s.includes('error') ? 'error' : s.includes('loading') ? 'loading' : 'ready';
+//
+// Moved to loadStatus.ts. The local copy predated 'partial' and, being written
+// as a chain of ternaries ending in 'ready', would have answered "complete" for
+// a truncated part — the exact silent lie the status exists to prevent, from
+// the one line whose whole job is not to tell it.
+const worst = worstStatus;
 
 const Ctx = createContext<HabitsValue | null>(null);
 
@@ -136,15 +141,22 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
         if (!id) { setTicksStatus('ready'); setCoachStatus('ready'); return; }
         setUid(id);
 
-        const { data, error } = await supabase.from('habit_logs').select('habit').eq('user_id', id).eq('done_on', today());
+        // One row per habit ticked today by one person: a handful, and it cannot
+        // grow with the business the way the roster reads do. Capped because the
+        // ceiling is free and `capped()` turns "it cannot be long" from an
+        // assumption into something the code checks.
+        const { data, error } = await supabase.from('habit_logs').select('habit')
+          .eq('user_id', id).eq('done_on', today())
+          .order('habit', { ascending: true }).limit(capLimit());
         if (cancelled) return;
         if (error) { setTicksStatus('error'); }
         else {
+          const page = capped(data);
           // Replaces rather than merges. A tick that is not in the server's
           // answer is not ticked, and carrying a stale optimistic one forward
           // is how a refused write stayed green until the next launch.
-          setDoneIds(new Set((data ?? []).map((r: any) => String(r.habit))));
-          setTicksStatus('ready');
+          setDoneIds(new Set(page.rows.map((r: any) => String(r.habit))));
+          setTicksStatus(page.truncated ? 'partial' : 'ready');
         }
 
         // Inactive rows are filtered here rather than in RLS — the client is
@@ -156,11 +168,16 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
           .eq('client_id', id)
           .eq('active', true)
           .order('sort', { ascending: true })
-          .order('created_at', { ascending: true });
+          .order('created_at', { ascending: true })
+          // The coach's own ordering decides which items survive a cap, which is
+          // the right answer: a coach who put an item at the top of a client's
+          // list meant it to be seen.
+          .limit(capLimit());
         if (cancelled) return;
         if (ciErr) { setCoachStatus('error'); return; }
-        setCoachItems((ci ?? []).map((r: any) => ({ id: String(r.id), label: String(r.label ?? ''), icon: r.icon ?? null })));
-        setCoachStatus('ready');
+        const ciPage = capped(ci);
+        setCoachItems(ciPage.rows.map((r: any) => ({ id: String(r.id), label: String(r.label ?? ''), icon: r.icon ?? null })));
+        setCoachStatus(ciPage.truncated ? 'partial' : 'ready');
       } catch { if (!cancelled) { setTicksStatus('error'); setCoachStatus('error'); } }
     })();
     return () => { cancelled = true; };

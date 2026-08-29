@@ -21,6 +21,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import type { LoadStatus } from './loadStatus';
+import { capLimit, capped } from '../lib/rowCap';
 import { useAuthRevision } from './authRevision';
 
 export interface AvailSlot { id: string; dow: number; hour: number; dur: number }
@@ -59,16 +60,28 @@ export function useAvailability() {
         // Signed out: there is no server copy to be out of step with.
         if (!u) { setStatus('ready'); return; }
         setUid(u);
-        const { data: rows, error } = await supabase.from('trainer_availability').select('id, dow, hour, dur').eq('trainer_id', u).order('dow', { ascending: true });
+        // A weekly grid: seven days by twenty-four hours is 168 slots at the
+        // absolute most, so this cannot truncate. Capped regardless, because
+        // "the table only holds a few rows" is a fact about today's schema that
+        // no future writer is obliged to preserve, and the cost of the limit is
+        // nothing. `capped()` below is what makes it a claim rather than a hope.
+        const { data: rows, error } = await supabase.from('trainer_availability')
+          .select('id, dow, hour, dur').eq('trainer_id', u)
+          .order('dow', { ascending: true }).order('hour', { ascending: true })
+          .limit(capLimit());
         if (cancelled) return;
         // This early return is the whole bug: the cached slots stayed on screen
         // and nothing recorded that they had not been checked.
         if (error) { setStatus('error'); return; }
-        if (rows && rows.length) {
-          const server: AvailSlot[] = rows.map((r: any) => ({ id: String(r.id), dow: r.dow, hour: r.hour, dur: r.dur }));
+        const page = capped(rows);
+        if (page.rows.length) {
+          const server: AvailSlot[] = page.rows.map((r: any) => ({ id: String(r.id), dow: r.dow, hour: r.hour, dur: r.dur }));
           setSlots(server.sort((a, b) => a.dow - b.dow || a.hour - b.hour));
-          try { AsyncStorage.setItem(KEY, JSON.stringify(server)); } catch { /* the slots are correct this session either way */ }
-          setStatus('ready');
+          // Deliberately not cached when short. This copy is what the coach
+          // sees offline, and writing a truncated grid over the good one would
+          // turn a temporary gap into the device's idea of their week.
+          if (!page.truncated) { try { AsyncStorage.setItem(KEY, JSON.stringify(server)); } catch { /* the slots are correct this session either way */ } }
+          setStatus(page.truncated ? 'partial' : 'ready');
         } else if (local.length) {
           // Server has nothing, this device does: push the device copy up. Until
           // that insert lands the local slots are still unconfirmed, so a

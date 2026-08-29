@@ -13,6 +13,7 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from '
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import type { LoadStatus } from './loadStatus';
+import { capLimit, capped } from '../lib/rowCap';
 import { useAuthRevision } from './authRevision';
 
 export interface CheckIn {
@@ -63,14 +64,19 @@ export function CheckInsProvider({ children }: { children: ReactNode }) {
         const id = auth?.user?.id;
         if (!id) { setStatus('ready'); return; }
         setUid(id);
-        const { data, error } = await supabase.from('check_ins').select('*').eq('user_id', id).order('at', { ascending: false });
+        // Newest-first and capped. Daily check-ins reach a thousand rows in under
+        // three years of the habit this app is built to encourage, and the coach's
+        // adherence figure is an average over whatever came back.
+        const { data, error } = await supabase.from('check_ins').select('*')
+          .eq('user_id', id).order('at', { ascending: false }).order('id', { ascending: false }).limit(capLimit());
         if (cancelled) return;
         if (error) { setStatus('error'); return; }
+        const page = capped(data);
         // No rows means no check-ins. Show that, do NOT invent one — this used to
         // INSERT a fabricated 68.0 kg check-in into Supabase for every new account,
         // which then persisted forever and drove the trainer's adherence figures.
-        setCheckins(data && data.length ? data.map(rowToCI) : []);
-        setStatus('ready');
+        setCheckins(page.rows.length ? page.rows.map(rowToCI) : []);
+        setStatus(page.truncated ? 'partial' : 'ready');
       } catch { if (!cancelled) setStatus('error'); }
     })();
     return () => { cancelled = true; };

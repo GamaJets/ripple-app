@@ -26,6 +26,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import type { LoadStatus } from './loadStatus';
+import { capLimit, capped } from '../lib/rowCap';
 import { readCoachedMode, type CoachedMode } from '../lib/types';
 
 /** Alias kept because half the app imports the invite's mode from here. The
@@ -142,6 +143,9 @@ export function InvitesProvider({ children }: { children: ReactNode }) {
       // Real backend: only ever show genuine pending invites for this email.
       // No fake/sample invite for a live account (that was the re-pop bug).
       let failed = false;
+      // A read that came back short, which is not a read that did not happen:
+      // the invitations listed are real, there are simply more of them.
+      let truncated = false;
       try {
         // getSession() first, deliberately. getUser() REJECTS when there is no
         // session, and treating that as a failed check is what latched this
@@ -166,22 +170,39 @@ export function InvitesProvider({ children }: { children: ReactNode }) {
         // showed the coach an empty "invitations sent" list and invited them to
         // send the same invitation over again.
         try {
-          const s = await supabase.from('coach_invites').select('*').eq('coach_id', u.id).order('created_at', { ascending: false });
+          // Newest-first and capped. Same shape as the owner's list in
+          // trainerInvites.tsx: append-only, so it crosses a thousand rows on
+          // its own, and the recent end is the one that stops a coach inviting
+          // the same client twice.
+          const s = await supabase.from('coach_invites').select('*').eq('coach_id', u.id)
+            .order('created_at', { ascending: false }).order('id', { ascending: false }).limit(capLimit());
           if (s.error) failed = true;
-          else if (!cancelled() && s.data) setSent(s.data.map(rowToInvite));
+          else if (!cancelled() && s.data) {
+            const page = capped(s.data);
+            if (page.truncated) truncated = true;
+            setSent(page.rows.map(rowToInvite));
+          }
         } catch { failed = true; }
 
         // Received (addressed to my email, still pending, not already handled here).
         const email = u.email;
         if (email && !cancelled()) {
           try {
-            const r = await supabase.from('coach_invites').select('*').ilike('email', email).eq('status', 'pending');
+            // Pending invites to one email address — small, but capped and
+            // ordered so the same set comes back each time rather than whichever
+            // the server felt like returning.
+            const r = await supabase.from('coach_invites').select('*').ilike('email', email)
+              .eq('status', 'pending').order('created_at', { ascending: false }).order('id', { ascending: false }).limit(capLimit());
             if (r.error) failed = true;
-            else if (!cancelled()) setReceived((r.data ?? []).map(rowToInvite).filter((i) => !skip.has(i.id)));
+            else if (!cancelled()) {
+              const page = capped(r.data);
+              if (page.truncated) truncated = true;
+              setReceived(page.rows.map(rowToInvite).filter((i) => !skip.has(i.id)));
+            }
           } catch { failed = true; if (!cancelled()) setReceived([]); }
         }
       } catch { failed = true; /* leave received empty — no sample invite on a real account */ }
-      if (!cancelled()) setStatus(failed ? 'error' : 'ready');
+      if (!cancelled()) setStatus(failed ? 'error' : truncated ? 'partial' : 'ready');
     };
     run();
     const { data: sub } = supabase.auth.onAuthStateChange((event) => {

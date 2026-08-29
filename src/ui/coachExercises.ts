@@ -19,10 +19,20 @@ import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 
 import { mergeExerciseLists, type CoachExercise } from '../lib/coachExerciseList';
+import { capLimit, capped } from '../lib/rowCap';
+import type { LoadStatus } from './loadStatus';
 
 export { mergeExerciseLists, type CoachExercise };
 
-export type CoachExerciseStatus = 'loading' | 'ready' | 'error';
+/**
+ * The same vocabulary as every other provider, aliased rather than restated.
+ *
+ * It was its own three-member union, which was fine until `LoadStatus` grew a
+ * fourth: a picker that cannot say "these are some of your saved names" is
+ * exactly the surface this whole change exists for, and a private copy of the
+ * type would have quietly opted out of it.
+ */
+export type CoachExerciseStatus = LoadStatus;
 
 export interface CoachExercisesApi {
   /** The coach's saved names, alphabetical. Empty while loading or on failure. */
@@ -65,16 +75,23 @@ export function useCoachExercises(): CoachExercisesApi {
         // anything. The built-in list stands on its own.
         if (!id) { setStatus('ready'); return; }
         setUid(id);
+        // Ordered as well as capped. The list is re-sorted by name below, so the
+        // order here is purely about WHICH names survive the ceiling — and left
+        // to the server that answer changes between launches, which in a picker
+        // reads as exercises the coach saved going missing at random.
         const { data, error } = await supabase
           .from('coach_exercises')
           .select('name, muscle_group')
-          .eq('coach_id', id);
+          .eq('coach_id', id)
+          .order('name', { ascending: true })
+          .limit(capLimit());
         if (cancelled) return;
         // Not `if (error || !data)`. A read that failed and a coach who has
         // saved nothing are different facts and the picker says so.
         if (error) { setStatus('error'); return; }
-        setSaved((data ?? []).map((r: any) => ({ name: r.name, group: r.muscle_group || '' })).sort(byName));
-        setStatus('ready');
+        const page = capped(data);
+        setSaved(page.rows.map((r: any) => ({ name: r.name, group: r.muscle_group || '' })).sort(byName));
+        setStatus(page.truncated ? 'partial' : 'ready');
       } catch { if (!cancelled) setStatus('error'); }
     })();
     return () => { cancelled = true; };

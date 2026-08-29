@@ -26,6 +26,7 @@ import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
 import type { LoadStatus } from './loadStatus';
+import { capLimit, capped } from '../lib/rowCap';
 import { useAuthRevision } from './authRevision';
 
 interface WorkoutLogValue {
@@ -90,14 +91,26 @@ export function WorkoutLogProvider({ children }: { children: React.ReactNode }) 
         // accurate rather than a swallowed failure.
         if (!id) { setStatus('ready'); return; }
         setUid(id);
+        // One row per set, not per session, so this is the fastest-growing read
+        // a single client has: four sessions a week at twenty sets apiece passes
+        // a thousand rows inside three months. It was unbounded, and the whole
+        // of Home is computed from it — the streak, the personal records, the
+        // week's volume. Every one of those would have gone quietly wrong.
+        //
+        // Newest-first was already the order and is the right one to cap on: the
+        // screens that read this care about now. What a capped page cannot
+        // support is `longestStreak` or a lifetime total, which is what 'partial'
+        // exists to tell them.
         const { data, error } = await supabase
-          .from('workouts').select('*').eq('user_id', id).order('performed_at', { ascending: false });
+          .from('workouts').select('*').eq('user_id', id)
+          .order('performed_at', { ascending: false }).order('id', { ascending: false }).limit(capLimit());
         if (cancelled) return;
         if (error) { reportError('workoutLog.hydrate', error); setStatus('error'); return; }
+        const page = capped(data);
         // No rows means a genuinely empty history. Leave it empty — and, now,
         // say that it is empty rather than merely unknown.
-        setLog(data && data.length ? data.map(rowToEntry) : []);
-        setStatus('ready');
+        setLog(page.rows.length ? page.rows.map(rowToEntry) : []);
+        setStatus(page.truncated ? 'partial' : 'ready');
       } catch (e) { reportError('workoutLog.hydrate', e); if (!cancelled) setStatus('error'); }
     })();
     return () => { cancelled = true; };

@@ -35,7 +35,8 @@ import { readCoachingMode, type CoachingMode, type Goal, type Diet } from '../li
 import type { Allergen } from '../lib/meals';
 import type { Injury } from '../lib/injuries';
 import { reportError } from '../lib/reportError';
-import type { LoadStatus } from './loadStatus';
+import { worstStatus, type LoadStatus } from './loadStatus';
+import { capLimit, capped } from '../lib/rowCap';
 
 // Declared in src/lib/types.ts alongside the labels and the two predicates the
 // screens branch on; re-exported because every client screen imports it from
@@ -344,15 +345,23 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
     const loadForUser = async (id: string) => {
       setSbUid(id);
       try {
-        const { data, error } = await supabase.from('scans').select('*').eq('client_id', id).order('taken_at', { ascending: true });
+        // Read newest-first and turned back below, rather than the ascending
+        // read this was. Ascending is what the charts want and descending is
+        // which end to keep: a client who has scanned weekly for twenty years
+        // has more than a thousand scans, and the ascending page would have been
+        // their first twenty years and none of this one — a weight chart ending
+        // in 2006 on a screen headed "your progress".
+        const { data, error } = await supabase.from('scans').select('*')
+          .eq('client_id', id).order('taken_at', { ascending: false }).order('id', { ascending: false }).limit(capLimit());
         if (cancelled) return;
         // `if (error || cancelled) return;` left scans at [] and therefore
         // weight, body fat and muscle at null — which every screen renders as
         // "not measured yet". Say instead that we do not know.
         if (error) { reportError('clientData.hydrate.scans', error); setScansStatus('error'); return; }
+        const page = capped(data);
         // Only ever show the user's own real scans — never seed demo scans into a live account.
-        setScans((data || []).map((r: any) => ({ id: r.id, takenAt: r.taken_at, weightKg: Number(r.weight_kg), bodyFatPct: Number(r.body_fat_pct), skeletalMuscleKg: r.skeletal_muscle_kg != null ? Number(r.skeletal_muscle_kg) : null, source: r.source ?? '', metrics: r.metrics ?? undefined })));
-        setScansStatus('ready');
+        setScans(page.rows.slice().reverse().map((r: any) => ({ id: r.id, takenAt: r.taken_at, weightKg: Number(r.weight_kg), bodyFatPct: Number(r.body_fat_pct), skeletalMuscleKg: r.skeletal_muscle_kg != null ? Number(r.skeletal_muscle_kg) : null, source: r.source ?? '', metrics: r.metrics ?? undefined })));
+        setScansStatus(page.truncated ? 'partial' : 'ready');
       } catch (e) { reportError('clientData.hydrate.scans', e); if (!cancelled) setScansStatus('error'); }
     };
     (async () => {
@@ -439,10 +448,10 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
     profileStatus, scansStatus, saveFailed,
     // The combined view: 'error' the moment either half failed, because a
     // profile screen shows both at once and cannot honestly present half of it
-    // as the client's own data.
-    status: (profileStatus === 'error' || scansStatus === 'error')
-      ? 'error'
-      : ((profileStatus === 'loading' || scansStatus === 'loading') ? 'loading' : 'ready'),
+    // as the client's own data. 'partial' rolls up the same way — a truncated
+    // scan history makes the profile's total change since starting a figure
+    // over an unknown fraction of the record.
+    status: worstStatus(profileStatus, scansStatus),
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

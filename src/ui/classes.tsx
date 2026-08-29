@@ -22,6 +22,7 @@ import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import type { GymClass, ClassBookingStatus } from '../lib/classesMock';
 import type { LoadStatus } from './loadStatus';
+import { capLimit, capped } from '../lib/rowCap';
 import { useAuthRevision } from './authRevision';
 
 interface ClassesValue {
@@ -77,6 +78,10 @@ export function ClassesProvider({ children }: { children: React.ReactNode }) {
   const load = useCallback(async () => {
     if (!USE_SUPABASE) { setReady(true); setStatus('ready'); return; }
     let failed = false;
+    // Separate from `failed`: a read that came back short is not a read that did
+    // not happen, and a member looking at a timetable that is missing its far
+    // end should be told that rather than told the timetable is broken.
+    let truncated = false;
     try {
       // Signed out is a true answer, not a failed read: getUser() rejects when
       // there is no session, which marked this whole load as failed on the
@@ -89,10 +94,18 @@ export function ClassesProvider({ children }: { children: React.ReactNode }) {
       const id = auth?.user?.id ?? null;
       setUid(id);
       const nowIso = new Date(Date.now() - 3600_000).toISOString();
-      const { data: rows, error } = await supabase.from('gym_classes').select('*').gte('starts_at', nowIso).order('starts_at', { ascending: true });
+      // Soonest-first and capped. Ascending is the right half to keep here, and
+      // for once that is not a coincidence: the read is already filtered to
+      // classes that have not finished, so the first thousand are the next
+      // thousand. A gym running forty classes a week has half a year of
+      // timetable inside the cap.
+      const { data: rows, error } = await supabase.from('gym_classes').select('*')
+        .gte('starts_at', nowIso).order('starts_at', { ascending: true }).order('id', { ascending: true }).limit(capLimit());
       if (error) failed = true;
       else if (rows) {
-        const list = rows.map(rowToClass);
+        const page = capped(rows);
+        if (page.truncated) truncated = true;
+        const list = page.rows.map(rowToClass);
         // confirmed counts (security-definer aggregate over everyone's bookings)
         // A missing count only understates how full a class is; the class itself
         // is still listed, so this stays best-effort.
@@ -100,11 +113,18 @@ export function ClassesProvider({ children }: { children: React.ReactNode }) {
         // leaves that zero standing as a claim of emptiness. Record whether the
         // numbers are real so the screens can decline to make the claim.
         try {
-          const { data: counts, error: cntErr } = await supabase.rpc('class_counts');
-          if (cntErr || !Array.isArray(counts)) setCountsKnown(false);
+          // An RPC returning a table comes back through PostgREST and stops at
+          // the same ceiling a table read does, so it is capped like one. A
+          // class missing from a short answer falls to `?? 0` — the exact zero
+          // the comment above says must not be allowed to stand as a claim of
+          // emptiness — so truncation here retracts the counts wholesale rather
+          // than leaving a full class showing as empty and bookable.
+          const { data: counts, error: cntErr } = await supabase.rpc('class_counts').limit(capLimit());
+          const cntPage = capped(Array.isArray(counts) ? counts : null);
+          if (cntErr || !Array.isArray(counts) || cntPage.truncated) setCountsKnown(false);
           else {
             const cmap: Record<string, number> = {};
-            counts.forEach((c: any) => { cmap[String(c.class_id)] = c.booked; });
+            cntPage.rows.forEach((c: any) => { cmap[String(c.class_id)] = c.booked; });
             list.forEach((cl) => { cl.booked = cmap[cl.id] ?? 0; });
             setCountsKnown(true);
           }
@@ -116,12 +136,22 @@ export function ClassesProvider({ children }: { children: React.ReactNode }) {
       if (id) {
         // Which seats I hold. Failing this and leaving myStatus empty makes
         // every class I am already booked into render as bookable again.
-        const { data: mine, error: mineErr } = await supabase.from('class_bookings').select('class_id, status').eq('user_id', id);
+        // Newest first, then capped. A seat I hold that falls off the end of
+        // this read renders as a class I can still book — the exact failure the
+        // comment above is about — so which rows come back decides which of my
+        // bookings become invisible. Newest keeps the ones I am about to attend.
+        const { data: mine, error: mineErr } = await supabase.from('class_bookings')
+          .select('class_id, status').eq('user_id', id)
+          .order('created_at', { ascending: false }).order('id', { ascending: false }).limit(capLimit());
         if (mineErr) failed = true;
-        else if (Array.isArray(mine)) { const ms: Record<string, ClassBookingStatus> = {}; mine.forEach((b: any) => { ms[String(b.class_id)] = b.status; }); setMyStatus(ms); }
+        else if (Array.isArray(mine)) {
+          const minePage = capped(mine);
+          if (minePage.truncated) truncated = true;
+          const ms: Record<string, ClassBookingStatus> = {}; minePage.rows.forEach((b: any) => { ms[String(b.class_id)] = b.status; }); setMyStatus(ms);
+        }
       }
     } catch { failed = true; }
-    setStatus(failed ? 'error' : 'ready');
+    setStatus(failed ? 'error' : truncated ? 'partial' : 'ready');
     setReady(true);
   }, [authRev]);
 

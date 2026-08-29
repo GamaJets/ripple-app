@@ -11,6 +11,7 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from '
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import type { LoadStatus } from './loadStatus';
+import { capLimit, capped } from '../lib/rowCap';
 import { useAuthRevision } from './authRevision';
 
 export interface MeasureEntry {
@@ -81,13 +82,27 @@ export function MeasurementsProvider({ children }: { children: ReactNode }) {
         const id = auth?.user?.id;
         if (!id) { setStatus('ready'); return; }
         setUid(id);
-        const { data, error } = await supabase.from('measurements').select('*').eq('user_id', id).order('taken_at', { ascending: false });
+        // One row per tape measurement per site, so a client measuring eight
+        // sites weekly writes four hundred rows a year and reaches the ceiling
+        // without ever feeling like a heavy user. Newest-first, because the
+        // change since last time is the question this screen answers.
+        const { data, error } = await supabase.from('measurements').select('*')
+          .eq('user_id', id)
+          // `taken_at` is a DATE, so a client who measures eight sites writes
+          // eight rows carrying the same value. An order with ties in it is not
+          // an order: at the cap the server breaks them however it likes, and it
+          // may break them differently on the next launch — a chest measurement
+          // that was on the chart yesterday is simply gone today. The id settles
+          // them. Every capped read below does the same for the same reason.
+          .order('taken_at', { ascending: false }).order('id', { ascending: false })
+          .limit(capLimit());
         if (cancelled) return;
         if (error) { setStatus('error'); return; }
+        const page = capped(data);
         // Same rule as check-ins and the workout log: an empty result is an empty
         // history, not a cue to write fabricated measurements into Supabase.
-        setEntries(data && data.length ? rowsToEntries(data) : []);
-        setStatus('ready');
+        setEntries(page.rows.length ? rowsToEntries(page.rows) : []);
+        setStatus(page.truncated ? 'partial' : 'ready');
       } catch { if (!cancelled) setStatus('error'); }
     })();
     return () => { cancelled = true; };

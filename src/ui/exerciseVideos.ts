@@ -30,6 +30,8 @@
 // client library asserted the former in both cases.
 import { useEffect, useState, useCallback } from 'react';
 import { useAuthRevision } from './authRevision';
+import { capLimit, capped } from '../lib/rowCap';
+import type { LoadStatus } from './loadStatus';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { ExVideo } from '../lib/trainerMock';
 import { supabase } from '../lib/supabase';
@@ -54,8 +56,13 @@ export interface VideoItem extends ExVideo {
 }
 
 /** Whether the library could be read. `[]` with status 'error' is not the same
- *  claim as `[]` with status 'ready', and the screens must not conflate them. */
-export type LibraryStatus = 'loading' | 'ready' | 'error';
+ *  claim as `[]` with status 'ready', and the screens must not conflate them.
+ *
+ *  Aliased to the shared vocabulary rather than restated, so that 'partial' —
+ *  a library longer than one read of it — arrives here too. videos.tsx already
+ *  gates its clip count on `status === 'ready'`, which means a truncated
+ *  library renders its figure as a dash without that screen being touched. */
+export type LibraryStatus = LoadStatus;
 
 const KEY = 'repple.exerciseVideos';
 const SIGNED_TTL = 60 * 60; // an hour is longer than any set, shorter than a share
@@ -168,13 +175,20 @@ export function useExerciseVideos() {
       // No trainer filter: exvid_read decides what this person may see, and it
       // knows about grants and gym-wide sharing that a client-side filter would
       // get wrong. The error is read rather than assumed away.
+      // Newest-first was already the order, which is the end worth keeping, and
+      // now it is bounded. Unfiltered by trainer on purpose (see above), so at a
+      // gym this is every coach's clips in one list — the read here that grows
+      // with the business rather than with one person's use of it.
       const { data, error } = await supabase
         .from('exercise_videos')
         .select('id, exercise_id, trainer_id, title, name, muscle_group, url, video_path, visibility, created_at')
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: false })
+        .limit(capLimit());
       if (error) { setStatus('error'); return; }
-      setRemote((data ?? []).map(rowToItem));
-      setStatus('ready');
+      const page = capped(data);
+      setRemote(page.rows.map(rowToItem));
+      setStatus(page.truncated ? 'partial' : 'ready');
     } catch { setStatus('error'); }
     // Re-armed on sign-in. This read is RLS-scoped, so running it once at mount
     // — while still signed out — left status latched at 'error' for the life of
@@ -266,10 +280,24 @@ export function useExerciseVideos() {
    */
   const listGrants = async (id: string): Promise<string[] | null> => {
     if (!id.startsWith('db') || !USE_SUPABASE) return null;
+    // One row per person this clip was handed to, so it is bounded by the gym's
+    // client list rather than by anything about the clip — a gym-wide "shared
+    // with everyone" clip at a 1,200-member gym is over the ceiling.
+    //
+    // Truncation returns null, the same as a failed read, and the contract above
+    // is why: the caller's question is "who has this", and a partial answer to
+    // that question is worse than none. The screen renders null as "we could not
+    // list who this is shared with" and a trainer checks rather than assumes; a
+    // short list renders as names, and the person missing from it looks like
+    // somebody the trainer never shared with and may then be re-shared or, far
+    // worse, believed to have never been given access to it at all.
     const { data, error } = await supabase
-      .from('exercise_video_grants').select('client_id').eq('video_id', id.slice(2));
+      .from('exercise_video_grants').select('client_id').eq('video_id', id.slice(2))
+      .order('client_id', { ascending: true }).limit(capLimit());
     if (error) return null;
-    return (data ?? []).map((r: any) => r.client_id);
+    const page = capped(data);
+    if (page.truncated) return null;
+    return page.rows.map((r: any) => r.client_id);
   };
 
   const revokeFrom = async (id: string, clientId: string): Promise<boolean> => {

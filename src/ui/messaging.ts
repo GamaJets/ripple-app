@@ -24,6 +24,7 @@ import { sendPush } from './pushNotifications';
 import { useAuthRevision } from './authRevision';
 import type { Message } from '../lib/types';
 import type { LoadStatus } from './loadStatus';
+import { capLimit, capped } from '../lib/rowCap';
 import { resolvePeerName, type PeerName } from '../lib/threadPeer';
 
 export type ChatRole = 'client' | 'coach';
@@ -77,13 +78,26 @@ export function useThread(clientId: string | null, role: ChatRole) {
       try { const { data: cr } = await supabase.from('clients').select('trainer_id').eq('id', cid).single(); coachId.current = (cr as any)?.trainer_id ?? null; } catch { /* push addressing only */ }
       }
       try {
-        const { data, error } = await supabase.from('messages').select('*').eq('client_id', cid).order('created_at', { ascending: true });
+        // Newest-first on the wire, oldest-first in the state. A thread is the
+        // one read here where the ascending page is unambiguously the wrong
+        // half: a coach and client who have exchanged a thousand messages open
+        // the screen to say something now, and the ascending cap would have
+        // shown them the conversation they had when they met and silently
+        // dropped everything since — including the message that just arrived.
+        const { data, error } = await supabase.from('messages').select('*')
+          .eq('client_id', cid).order('created_at', { ascending: false }).order('id', { ascending: false }).limit(capLimit());
         if (cancelled) return;
         if (error) { setStatus('error'); }
         else {
-          seen.current = new Set((data ?? []).map((r: any) => String(r.id)));
-          if (data && data.length) setMessages(data.map(rowToMsg));
-          setStatus('ready');
+          const page = capped(data);
+          const rows = page.rows.slice().reverse();
+          // `seen` guards the realtime subscription against re-appending a
+          // message already on screen. It is keyed on what we HOLD, so it is
+          // built from the trimmed page — seeding it with the probe row would
+          // have made the realtime handler drop a message we never rendered.
+          seen.current = new Set(rows.map((r: any) => String(r.id)));
+          if (rows.length) setMessages(rows.map(rowToMsg));
+          setStatus(page.truncated ? 'partial' : 'ready');
         }
       } catch { if (!cancelled) setStatus('error'); }
       if (!cancelled) setReady(true);

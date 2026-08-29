@@ -28,6 +28,7 @@ import { readCoachedMode, type CoachedMode } from '../lib/types';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import type { LoadStatus } from './loadStatus';
+import { capLimit, capped } from '../lib/rowCap';
 import { useAuthRevision } from './authRevision';
 
 let SEQ = 900;
@@ -36,7 +37,10 @@ const MODE_KEY = 'repple.clientModes';
 interface RosterValue {
   roster: RosterClient[];
   /** Whether `roster` is the server's answer. Under 'error' an empty roster
-   *  means the list could not be read, NOT that the coach has no clients. */
+   *  means the list could not be read, NOT that the coach has no clients.
+   *  Under 'partial' the people listed are real but there are more of them, or
+   *  their stats were read from a set that hit its cap — so the roster may be
+   *  browsed, and it may not be counted. */
   status: LoadStatus;
   /** Resolves true only when the client row reached `coach_clients` and will
    *  survive a relaunch. False means it exists on this phone only. */
@@ -92,41 +96,74 @@ export function RosterProvider({ children }: { children: ReactNode }) {
         // means the list on screen is incomplete and must not be presented as
         // the whole roster.
         let partialFailure = false;
+        // Distinct from partialFailure on purpose. That one means a read did not
+        // happen; this one means a read happened and there was more of it than
+        // came back. They land on different statuses because they mean different
+        // things to the coach reading the screen: one is "we could not look",
+        // the other is "this is some of them".
+        let partialRead = false;
         // Coach-created (manual) clients — durable in coach_clients (session-9 SQL).
         let manual: RosterClient[] = [];
         try {
-          const { data: mc, error: mcErr } = await supabase.from('coach_clients').select('id, name, goal, mode, created_at').eq('trainer_id', uid).order('created_at', { ascending: true });
+          const { data: mc, error: mcErr } = await supabase.from('coach_clients')
+            .select('id, name, goal, mode, created_at').eq('trainer_id', uid)
+            .order('created_at', { ascending: true }).order('id', { ascending: true }).limit(capLimit());
           // A table that does not exist yet is a deployment state, not a data
           // fact — either way the coach's manual clients are missing from what
           // they are about to be shown.
           if (mcErr) partialFailure = true;
-          manual = (mc || []).map((r: any) => ({ id: r.id, name: r.name, goal: r.goal || 'General', weightDelta: null, adherence: null, lastActive: 'added by you', next: '—', unread: 0, mode: readCoachedMode(r.mode), joinedAt: r.created_at ?? null }));
+          const mcPage = capped(mc);
+          if (mcPage.truncated) partialRead = true;
+          manual = mcPage.rows.map((r: any) => ({ id: r.id, name: r.name, goal: r.goal || 'General', weightDelta: null, adherence: null, lastActive: 'added by you', next: '—', unread: 0, mode: readCoachedMode(r.mode), joinedAt: r.created_at ?? null }));
         } catch { partialFailure = true; }
-        const { data: cls, error } = await supabase.from('clients').select('id, goal, diet, meals_per_day, avoid, mode').eq('trainer_id', uid);
-        // When each linked client joined THIS coach's book. `clients` has no
-        // created_at of its own, and the account's own creation date is the
-        // wrong question anyway — somebody can have trained for a year before
-        // switching coach. coaching_relationships is when this book started.
-        const joined: Record<string, string> = {};
-        try {
-          // no-error-ok: a join date we cannot read stays null and renders '—'; the client is listed either way
-          const { data: rel } = await supabase
-            .from('coaching_relationships').select('client_id, created_at').eq('coach_id', uid);
-          (rel || []).forEach((r: any) => { if (r.created_at) joined[r.client_id] = r.created_at; });
-        } catch { /* a missing join date is null, never a guessed one */ }
+        // Ordered as well as capped. This read had no `.order()` at all, which
+        // was harmless while it returned everything and stops being harmless the
+        // moment it returns a thousand of a larger set: PostgREST is then free to
+        // pick which thousand, and it can pick a different thousand on the next
+        // launch. A coach would have watched clients appear and vanish between
+        // refreshes with nothing wrong on the server. `clients` carries no
+        // created_at (see the join-date note below), so id is the stable key.
+        const { data: cls, error } = await supabase.from('clients')
+          .select('id, goal, diet, meals_per_day, avoid, mode').eq('trainer_id', uid)
+          .order('id', { ascending: true }).limit(capLimit());
         if (cancelled) return;
         // Split apart what used to be one branch. A refused read is 'error'
         // whatever else we managed to load; an empty table with the manual list
         // intact is a real, complete answer.
         if (error) { if (manual.length) setRoster(manual); setStatus('error'); return; }
-        if (!cls || !cls.length) { setRoster(manual); setStatus(partialFailure ? 'error' : 'ready'); return; }
-        const ids = cls.map((c: any) => c.id);
+        if (!cls || !cls.length) { setRoster(manual); setStatus(partialFailure ? 'error' : partialRead ? 'partial' : 'ready'); return; }
+        const clsPage = capped(cls);
+        if (clsPage.truncated) partialRead = true;
+        const linked = clsPage.rows as any[];
+        const ids = linked.map((c: any) => c.id);
         const names: Record<string, string> = {};
         try {
+          // Bounded by `ids`, which the cap above holds at ROW_CAP or fewer, so
+          // one profile per id cannot reach the ceiling. The limit is written
+          // down anyway: the bound lives in another statement, and a later edit
+          // that widens the client read should not have to notice this one.
           // no-error-ok: a name we cannot read falls back to 'Client'; the person is still on the roster
-          const { data: profs } = await supabase.from('profiles').select('id, full_name').in('id', ids);
+          const { data: profs } = await supabase.from('profiles').select('id, full_name').in('id', ids).limit(capLimit());
           (profs || []).forEach((p: any) => { names[p.id] = p.full_name || 'Client'; });
         } catch { /* a missing name falls back to 'Client'; the client is still listed */ }
+        // When each linked client joined THIS coach's book. `clients` has no
+        // created_at of its own, and the account's own creation date is the
+        // wrong question anyway — somebody can have trained for a year before
+        // switching coach. coaching_relationships is when this book started.
+        //
+        // Keyed on `ids` rather than on the coach, and moved below them to be
+        // able to be: read by coach it grows with every client the coach has
+        // ever held, including the ones they no longer coach, so it would have
+        // hit the ceiling before the roster it decorates did — and spent the
+        // rows it did get on relationships that are over.
+        const joined: Record<string, string> = {};
+        try {
+          // no-error-ok: a join date we cannot read stays null and renders '—'; the client is listed either way
+          const { data: rel } = await supabase
+            .from('coaching_relationships').select('client_id, created_at')
+            .eq('coach_id', uid).in('client_id', ids).limit(capLimit());
+          (rel || []).forEach((r: any) => { if (r.created_at) joined[r.client_id] = r.created_at; });
+        } catch { /* a missing join date is null, never a guessed one */ }
         // Real per-client stats (best-effort; RLS lets a trainer read linked clients' rows).
         // These are decorations on a row that exists either way, so a failure
         // here degrades a figure rather than hiding a person — it does not move
@@ -136,32 +173,79 @@ export function RosterProvider({ children }: { children: ReactNode }) {
         // wDelta starts null, not 0. It only becomes a number when two scans
         // exist to subtract, and a client with one scan has no delta yet.
         ids.forEach((id: string) => { st[id] = { wDelta: null, adh: null, last: 0 }; });
+        // ── Why these three are read newest-first and what a full page costs ──
+        //
+        // Each is one row per client per event, so they are the reads that grow
+        // fastest here: two hundred clients with six scans apiece is already
+        // past a thousand rows, and none of the three had any limit on it.
+        //
+        // Newest-first is what makes a capped page usable rather than merely
+        // safe. Every one of these figures is a "most recent" — last activity,
+        // latest adherence — so for any client who appears in the newest page at
+        // all, their newest row is in it by construction and the figure is
+        // exact. Read oldest-first the same page would have answered "last
+        // active" with a date from two years ago and been believed.
+        //
+        // Two things the page cannot answer, and both are handled below rather
+        // than guessed: a client absent from it has not been shown to be
+        // inactive, and a weight delta needs the client's FIRST scan, which is
+        // the row a newest-first cap drops first.
+        let statsTruncated = false;
+        let scansTruncated = false;
         try {
-          const { data: sc, error: scErr } = await supabase.from('scans').select('client_id, weight_kg, taken_at, metrics').in('client_id', ids).order('taken_at', { ascending: true });
+          const { data: sc, error: scErr } = await supabase.from('scans')
+            .select('client_id, weight_kg, taken_at, metrics').in('client_id', ids)
+            .order('taken_at', { ascending: false }).order('id', { ascending: false }).limit(capLimit());
           // supabase-js resolves on a database error, so the catch below never
           // saw the failure that actually happens. Without this, a refused read
           // left every client reading "no activity yet" — which is a claim
           // about the client, and a coach acts on it by chasing them.
           if (scErr) partialFailure = true;
+          const scPage = capped(sc);
+          if (scPage.truncated) { statsTruncated = true; scansTruncated = true; }
           const byC: Record<string, { w: number; t: number; m: any }[]> = {};
-          (sc || []).forEach((r: any) => { (byC[r.client_id] = byC[r.client_id] || []).push({ w: Number(r.weight_kg), t: Date.parse(r.taken_at), m: r.metrics }); });
+          // Back to oldest-first per client: the loop below reads arr[0] as the
+          // earliest scan and arr[last] as the newest, and handing it a reversed
+          // array would have flipped the sign of every weight change on the
+          // roster — a client who lost 4 kg shown as having gained it.
+          scPage.rows.slice().reverse().forEach((r: any) => { (byC[r.client_id] = byC[r.client_id] || []).push({ w: Number(r.weight_kg), t: Date.parse(r.taken_at), m: r.metrics }); });
           for (const id of ids) { const arr = byC[id]; if (arr && arr.length) { st[id].wDelta = arr.length > 1 ? Math.round((arr[arr.length - 1].w - arr[0].w) * 10) / 10 : null; st[id].last = Math.max(st[id].last, arr[arr.length - 1].t); for (let k = arr.length - 1; k >= 0; k--) { if (arr[k].m) { st[id].mx = arr[k].m; break; } } } }
         } catch { /* stats decorate a row that is listed regardless */ }
         try {
-          const { data: wo, error: woErr } = await supabase.from('workouts').select('user_id, performed_at').in('user_id', ids).order('performed_at', { ascending: false });
+          const { data: wo, error: woErr } = await supabase.from('workouts')
+            .select('user_id, performed_at').in('user_id', ids)
+            .order('performed_at', { ascending: false }).order('id', { ascending: false }).limit(capLimit());
           if (woErr) partialFailure = true;
-          (wo || []).forEach((r: any) => { if (st[r.user_id]) st[r.user_id].last = Math.max(st[r.user_id].last, Date.parse(r.performed_at)); });
+          const woPage = capped(wo);
+          if (woPage.truncated) statsTruncated = true;
+          woPage.rows.forEach((r: any) => { if (st[r.user_id]) st[r.user_id].last = Math.max(st[r.user_id].last, Date.parse(r.performed_at)); });
         } catch { /* as above */ }
         try {
-          const { data: ci, error: ciErr } = await supabase.from('check_ins').select('user_id, at, adherence').in('user_id', ids).order('at', { ascending: false });
+          const { data: ci, error: ciErr } = await supabase.from('check_ins')
+            .select('user_id, at, adherence').in('user_id', ids)
+            .order('at', { ascending: false }).order('id', { ascending: false }).limit(capLimit());
           if (ciErr) partialFailure = true;
+          const ciPage = capped(ci);
+          if (ciPage.truncated) statsTruncated = true;
           const seen = new Set<string>();
-          (ci || []).forEach((r: any) => { if (st[r.user_id]) { st[r.user_id].last = Math.max(st[r.user_id].last, Date.parse(r.at)); if (!seen.has(r.user_id) && typeof r.adherence === 'number') { seen.add(r.user_id); // check_ins.adherence is a 1-5 self-rating (see the Rating control on the client check-in screen), but every trainer surface renders this field as a PERCENTAGE and atRiskClient() flags anything under 80. Passing it through raw meant a client who rated themselves 4/5 showed as '4% adherence' and was flagged at risk. Convert.
+          ciPage.rows.forEach((r: any) => { if (st[r.user_id]) { st[r.user_id].last = Math.max(st[r.user_id].last, Date.parse(r.at)); if (!seen.has(r.user_id) && typeof r.adherence === 'number') { seen.add(r.user_id); // check_ins.adherence is a 1-5 self-rating (see the Rating control on the client check-in screen), but every trainer surface renders this field as a PERCENTAGE and atRiskClient() flags anything under 80. Passing it through raw meant a client who rated themselves 4/5 showed as '4% adherence' and was flagged at risk. Convert.
             st[r.user_id].adh = Math.round((Math.max(1, Math.min(5, r.adherence)) / 5) * 100); } } });
         } catch { /* as above */ }
+        if (statsTruncated) partialRead = true;
         const goalMap: Record<string, string> = { fatloss: 'Fat loss', tone: 'Tone', muscle: 'Build muscle' };
-        const real: RosterClient[] = cls.map((c: any) => { const sc = st[c.id]; return { id: c.id, name: names[c.id] || 'Client', goal: goalMap[c.goal] || 'General', weightDelta: sc.wDelta, adherence: sc.adh != null ? sc.adh : null, lastActive: sc.last ? ago(sc.last) : 'no activity yet', next: '—', unread: 0, mode: readCoachedMode(c.mode), metrics: sc.mx ?? undefined, diet: c.diet ?? undefined, mealsPerDay: c.meals_per_day ?? undefined, avoid: Array.isArray(c.avoid) ? c.avoid : undefined, joinedAt: joined[c.id] ?? null }; });
-        if (!cancelled) { setRoster([...real, ...manual]); setStatus(partialFailure ? 'error' : 'ready'); }
+        // The two suppressions the capped stat pages force, spelled out:
+        //
+        //   · 'no activity yet' is an assertion about the client, and a coach
+        //     acts on it by chasing someone who has done nothing wrong. It is
+        //     only true when we saw every row. Absent from a capped page means
+        //     unknown, which is a dash.
+        //   · a weight delta is last minus first, and a newest-first cap drops
+        //     the first. Computing it from the tail of a client's history does
+        //     not produce a smaller number, it produces a wrong one — often the
+        //     wrong sign. Null, and the screen already renders that as no change
+        //     recorded rather than as zero.
+        const real: RosterClient[] = linked.map((c: any) => { const sc = st[c.id]; return { id: c.id, name: names[c.id] || 'Client', goal: goalMap[c.goal] || 'General', weightDelta: scansTruncated ? null : sc.wDelta, adherence: sc.adh != null ? sc.adh : null, lastActive: sc.last ? ago(sc.last) : (statsTruncated ? '—' : 'no activity yet'), next: '—', unread: 0, mode: readCoachedMode(c.mode), metrics: sc.mx ?? undefined, diet: c.diet ?? undefined, mealsPerDay: c.meals_per_day ?? undefined, avoid: Array.isArray(c.avoid) ? c.avoid : undefined, joinedAt: joined[c.id] ?? null }; });
+        if (!cancelled) { setRoster([...real, ...manual]); setStatus(partialFailure ? 'error' : partialRead ? 'partial' : 'ready'); }
       } catch { if (!cancelled) setStatus('error'); }
     })();
     return () => { cancelled = true; };

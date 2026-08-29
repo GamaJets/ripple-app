@@ -18,6 +18,7 @@ import type { CoachAdjust } from '../lib/nutrition';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import type { LoadStatus } from './loadStatus';
+import { capLimit, capped } from '../lib/rowCap';
 import { useAuthRevision } from './authRevision';
 
 export interface NutritionAdjust extends CoachAdjust { note?: string; mealOverride?: Record<number, number> }
@@ -63,13 +64,21 @@ export function CoachNutritionProvider({ children }: { children: ReactNode }) {
         setUid(id);
         // `const { data } = …` — `error` was not even named, so a refused read
         // was indistinguishable from a client with no adjustment.
-        const { data, error } = await supabase.from('coach_nutrition').select('*').or('client_id.eq.' + id + ',coach_id.eq.' + id);
+        // One row per client for a coach, so this is the roster read wearing a
+        // different table, and it needs the same ceiling. A client whose
+        // adjustment falls off the end is not shown as unadjusted-and-unknown;
+        // `get()` returns null and every macro screen quietly serves them the
+        // unmodified target their coach deliberately changed.
+        const { data, error } = await supabase.from('coach_nutrition').select('*')
+          .or('client_id.eq.' + id + ',coach_id.eq.' + id)
+          .order('client_id', { ascending: true }).limit(capLimit());
         if (cancelled) return;
         if (error) { setStatus('error'); return; }
+        const page = capped(data);
         const m: Record<string, NutritionAdjust> = {};
-        for (const r of (data ?? []) as any[]) m[r.client_id] = { kcalDelta: r.kcal_delta ?? 0, proteinDelta: r.protein_delta ?? 0, carbDelta: r.carb_delta ?? 0, fatDelta: r.fat_delta ?? 0, note: r.note ?? undefined, mealOverride: r.meal_override ?? undefined };
+        for (const r of page.rows as any[]) m[r.client_id] = { kcalDelta: r.kcal_delta ?? 0, proteinDelta: r.protein_delta ?? 0, carbDelta: r.carb_delta ?? 0, fatDelta: r.fat_delta ?? 0, note: r.note ?? undefined, mealOverride: r.meal_override ?? undefined };
         if (Object.keys(m).length) setMap((prev) => ({ ...prev, ...m }));
-        setStatus('ready');
+        setStatus(page.truncated ? 'partial' : 'ready');
       } catch { if (!cancelled) setStatus('error'); /* stay in-memory, but say so */ }
     })();
     return () => { cancelled = true; };

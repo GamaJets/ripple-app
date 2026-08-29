@@ -19,6 +19,7 @@ import { View, Text, Pressable } from 'react-native';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useTheme } from './components';
 import { sp, radius, type as ty } from '../theme/scale';
+import type { LoadStatus } from './loadStatus';
 import { playbackUrl, type VideoItem } from './exerciseVideos';
 
 type Phase = 'resolving' | 'ready' | 'unavailable';
@@ -104,6 +105,13 @@ export function ExerciseVideo({
  * `status` comes from useExerciseVideos and is the difference between "your
  * coach has not recorded this one" and "we could not read the library" — which
  * the client app has been rendering identically, always as the first one.
+ *
+ * 'partial' is a third answer and gets a third sentence. A library read that
+ * stopped at its row limit really may not contain the clip for this exercise,
+ * and it really may — the clip could be sitting just past the end of what came
+ * back. Saying "no demonstration yet" there is the same lie as saying it over a
+ * failed read, and it costs the same thing: a client doing a movement they have
+ * never seen done, told their coach never filmed it.
  */
 export function ExerciseVideoBlock({
   video,
@@ -113,7 +121,7 @@ export function ExerciseVideoBlock({
 }: {
   video: VideoItem | null;
   exerciseName: string;
-  status: 'loading' | 'ready' | 'error';
+  status: LoadStatus;
   onSearch?: () => void;
 }) {
   const t = useTheme();
@@ -123,6 +131,19 @@ export function ExerciseVideoBlock({
       <View style={{ paddingVertical: sp.md }}>
         <Text style={{ ...ty.label, color: t.ink3 }}>
           The video library could not be loaded, so we cannot tell you whether your coach has a clip for this.
+        </Text>
+      </View>
+    );
+  }
+
+  // Only when there is no clip to show. A clip we DID find is a clip, however
+  // much of the library came back with it — the truncation cannot make a video
+  // that is on the screen not exist.
+  if (status === 'partial' && !video) {
+    return (
+      <View style={{ paddingVertical: sp.md }}>
+        <Text style={{ ...ty.label, color: t.ink3 }}>
+          We could only read part of the video library, so we cannot tell you whether there is a clip for this one.
         </Text>
       </View>
     );

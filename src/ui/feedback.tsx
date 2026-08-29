@@ -12,6 +12,7 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from '
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import type { LoadStatus } from './loadStatus';
+import { capLimit, capped } from '../lib/rowCap';
 import { useAuthRevision } from './authRevision';
 
 export interface FeedbackItem { id: string; at: string; body: string }
@@ -56,13 +57,18 @@ export function CoachFeedbackProvider({ children }: { children: ReactNode }) {
         // Rows where I'm the client (I read my feedback) or the coach (I manage it).
         const { data, error } = await supabase.from('coach_feedback').select('*')
           .or('client_id.eq.' + id + ',coach_id.eq.' + id)
-          .order('created_at', { ascending: false });
+          // Every note a coach has ever written to anyone, in one read. Newest
+          // first was already the order and is the right end to keep — but it
+          // was unbounded, and at the ceiling a client opening their feedback
+          // would have found their coach's older notes simply absent.
+          .order('created_at', { ascending: false }).order('id', { ascending: false }).limit(capLimit());
         if (cancelled) return;
         if (error) { setStatus('error'); return; }
+        const page = capped(data);
         const m: Record<string, FeedbackItem[]> = {};
-        for (const r of ((data ?? []) as any[])) { (m[r.client_id] = m[r.client_id] || []).push({ id: String(r.id), at: r.created_at, body: r.body }); }
+        for (const r of (page.rows as any[])) { (m[r.client_id] = m[r.client_id] || []).push({ id: String(r.id), at: r.created_at, body: r.body }); }
         if (Object.keys(m).length) setMap((prev) => ({ ...prev, ...m }));
-        setStatus('ready');
+        setStatus(page.truncated ? 'partial' : 'ready');
       } catch { if (!cancelled) setStatus('error'); }
     })();
     return () => { cancelled = true; };

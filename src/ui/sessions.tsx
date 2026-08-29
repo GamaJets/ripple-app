@@ -29,11 +29,14 @@ import { useAuthRevision } from './authRevision';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import type { LoadStatus } from './loadStatus';
+import { capLimit, capped } from '../lib/rowCap';
 
 interface SessionsValue {
   sessions: TrainingSession[];
   /** Whether `sessions` is the server's calendar. Under 'error' an empty list
-   *  means it could not be read, not that nothing is booked. */
+   *  means it could not be read, not that nothing is booked. Under 'partial'
+   *  the calendar is longer than what is here — the newest ROW_CAP sessions —
+   *  so it may be shown but not counted or totalled. */
   status: LoadStatus;
   /** Add a slot. Rejected (ok:false) if it overlaps an existing session — no
    *  double-booking. `saved` (present only when ok) resolves true once the slot
@@ -86,19 +89,39 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
         const id = auth?.user?.id;
         if (!id) { setStatus('ready'); return; }
         setUid(id);
-        const { data, error } = await supabase.from('sessions').select('*').order('starts_at', { ascending: true });
+        // Descending, then reversed below, rather than the ascending read this
+        // used to be. Both orders return the same rows until the cap bites; past
+        // it they return opposite halves of the calendar, and the ascending half
+        // is the useless one. A coach with 1,400 sessions on file would have got
+        // their oldest 1,000 — every one of them already delivered — and not a
+        // single upcoming booking, on the screen whose whole job is the week
+        // ahead. Newest-first keeps the future and drops the ancient history.
+        const { data, error } = await supabase.from('sessions').select('*')
+          .order('starts_at', { ascending: false }).order('id', { ascending: false }).limit(capLimit());
         if (cancelled) return;
         if (error) { setStatus('error'); return; }
         // A confirmed empty calendar is a real answer and now reports itself as
         // one, instead of returning down the same path as a failed read.
         if (!data || !data.length) { setSessions([]); setStatus('ready'); return; }
-        let rows = data.map(rowToSession);
+        const page = capped(data);
+        // Back to ascending for everyone downstream: the calendar, `overlaps`
+        // and the analytics screens were all written against a chronological
+        // list, and the read order is a fetching decision, not their business.
+        let rows = page.rows.map(rowToSession).reverse();
         // Approvals live in their own table (see supabase/session-approvals.sql).
         // A failure here must not cost us the sessions themselves — the screen is
         // still usable without knowing what has been approved.
         try {
+          // Keyed on the sessions we actually hold rather than read whole. It
+          // was unfiltered, so at scale it would have hit the same 1000-row
+          // ceiling and silently dropped approvals off sessions that had them —
+          // showing delivered, client-confirmed work as still awaiting sign-off.
+          // Scoped this way it cannot exceed the session count, which is capped.
           // no-error-ok: an unread approval leaves the session showing as not-yet-approved, which is what it shows before anyone approves it; the sessions themselves are the point of this screen
-          const { data: appr } = await supabase.from('session_approvals').select('session_id, approved_at, note');
+          const { data: appr } = await supabase.from('session_approvals')
+            .select('session_id, approved_at, note')
+            .in('session_id', rows.map((r) => r.id))
+            .limit(capLimit());
           if (appr?.length) {
             const byId = new Map(appr.map((a: any) => [String(a.session_id), a]));
             rows = rows.map((r) => {
@@ -109,7 +132,7 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
         } catch { /* sessions still load */ }
         if (cancelled) return;
         setSessions(rows);
-        setStatus('ready');
+        setStatus(page.truncated ? 'partial' : 'ready');
       } catch { if (!cancelled) setStatus('error'); }
     })();
     return () => { cancelled = true; };

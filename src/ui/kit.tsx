@@ -501,3 +501,33 @@ export function Notice({ tone, kicker, title, note, children }: {
     </Card>
   );
 }
+
+/**
+ * What a screen puts on the page when a provider comes back 'partial'.
+ *
+ * Truncation had no shape a screen could draw, and the shapes that already
+ * existed were both wrong for it: an error card says the read failed, which it
+ * did not, and saying nothing says the list is complete, which it is not. The
+ * rows below this banner are real and worth reading. What is not true is that
+ * they are all of them, and that is the sentence a coach needs before they
+ * count what they can see.
+ *
+ * `shown` is the number of rows actually on screen, not a total — deliberately
+ * phrased as "the first N" rather than "N of M", because M is exactly the
+ * figure a truncated read does not know. See src/lib/rowCap.ts.
+ */
+export function PartialRead({ what, shown, onPress }: {
+  what: string; shown?: number; onPress?: () => void;
+}) {
+  const t = useTheme();
+  return (
+    <Notice
+      tone={t.warn}
+      kicker="Not the whole list"
+      title={shown != null ? `Showing the first ${shown.toLocaleString()}` : 'Showing part of the list'}
+      note={`There are more ${what} than fit in one read. What is listed is real and current. The rest are on the server and not on this screen, so anything here that looks like a total is not one.`}
+    >
+      {onPress ? <View style={{ marginTop: sp.md }}><Ghost label="Try again" onPress={onPress} /></View> : null}
+    </Notice>
+  );
+}

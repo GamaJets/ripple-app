@@ -13,6 +13,7 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import type { LoadStatus } from './loadStatus';
+import { capLimit, capped } from '../lib/rowCap';
 import { useAuthRevision } from './authRevision';
 
 interface TagsValue {
@@ -65,16 +66,25 @@ export function ClientTagsProvider({ children }: { children: ReactNode }) {
         const id = auth?.user?.id;
         if (!id) { setStatus('ready'); return; }
         setUid(id);
-        const { data, error } = await supabase.from('client_tags').select('client_id, tag').eq('coach_id', id);
+        // Several rows per client rather than one, so this reaches the ceiling
+        // sooner than the roster it describes: two hundred clients with five
+        // tags apiece is already there. Ordered on client_id so the tags that
+        // survive a cap are at least the same ones every launch — `allTags`
+        // drives the filter chips, and chips that come and go on their own are
+        // read as tags being deleted.
+        const { data, error } = await supabase.from('client_tags')
+          .select('client_id, tag').eq('coach_id', id)
+          .order('client_id', { ascending: true }).order('tag', { ascending: true }).limit(capLimit());
         if (cancelled) return;
         // `error || !data` returned down the same path as a coach who has
         // tagged nobody, and `allTags` came out empty either way.
         if (error) { setStatus('error'); return; }
+        const page = capped(data);
         const next: Record<string, string[]> = {};
-        (data ?? []).forEach((r: any) => { (next[r.client_id] ||= []).push(r.tag); });
+        page.rows.forEach((r: any) => { (next[r.client_id] ||= []).push(r.tag); });
         // Merge real tags over the demo seed (real wins for overlapping clients).
         if (Object.keys(next).length) setMap((p) => ({ ...p, ...next }));
-        setStatus('ready');
+        setStatus(page.truncated ? 'partial' : 'ready');
       } catch { if (!cancelled) setStatus('error'); }
     })();
     return () => { cancelled = true; };

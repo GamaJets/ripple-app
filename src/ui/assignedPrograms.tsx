@@ -14,6 +14,7 @@ import type { Program } from '../lib/programs';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import type { LoadStatus } from './loadStatus';
+import { capLimit, capped } from '../lib/rowCap';
 import { useAuthRevision } from './authRevision';
 
 interface AssignedProgramsValue {
@@ -64,13 +65,21 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
         // `error` was previously discarded entirely: `const { data } = await …`.
         // A refused read handed back data === null, which read as "no
         // assignments" at every call site.
-        const { data, error } = await supabase.from('assigned_programs').select('*').or('client_id.eq.' + id + ',coach_id.eq.' + id);
+        // One row per client for a coach, so it scales with the roster and needs
+        // the roster's ceiling. Ordered on client_id because there is no other
+        // stable key here and an unordered cap lets the server return a
+        // different thousand each launch — a coach would see a client's
+        // programme appear on Monday and be gone on Tuesday.
+        const { data, error } = await supabase.from('assigned_programs').select('*')
+          .or('client_id.eq.' + id + ',coach_id.eq.' + id)
+          .order('client_id', { ascending: true }).limit(capLimit());
         if (cancelled) return;
         if (error) { setStatus('error'); return; }
+        const page = capped(data);
         const m: Record<string, Program> = {};
-        for (const r of (data ?? []) as any[]) { if (r.program) m[r.client_id] = r.program as Program; }
+        for (const r of page.rows as any[]) { if (r.program) m[r.client_id] = r.program as Program; }
         if (Object.keys(m).length) setPrograms((prev) => ({ ...prev, ...m }));
-        setStatus('ready');
+        setStatus(page.truncated ? 'partial' : 'ready');
       } catch { setStatus('error'); /* stay in-memory, but say the read failed */ }
     })();
     return () => { cancelled = true; };

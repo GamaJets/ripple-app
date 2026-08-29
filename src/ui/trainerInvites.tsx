@@ -18,6 +18,7 @@ import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { LoadStatus } from './loadStatus';
+import { capLimit, capped } from '../lib/rowCap';
 import { useAuthRevision } from './authRevision';
 
 export interface TrainerInvite {
@@ -89,6 +90,9 @@ export function TrainerInvitesProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     (async () => {
       let failed = false;
+      // A read that came back short, which is not a read that did not happen:
+      // the invitations listed are real, there are simply more of them.
+      let truncated = false;
       try {
         // No session is a true answer, not a failed check. getUser() REJECTS
         // when nobody is signed in, and treating that as an error latched this
@@ -109,23 +113,40 @@ export function TrainerInvitesProvider({ children }: { children: ReactNode }) {
           if (!cancelled && prof.data) { setMyName(prof.data.full_name ?? null); setTenantId(prof.data.tenant_id ?? null); }
         } catch { /* the owner's own name is cosmetic on the invite */ }
         try {
-          const s = await supabase.from('trainer_invites').select('*').eq('owner_id', u.id).order('created_at', { ascending: false });
+          // Newest-first and capped. An owner's sent-invite list only grows —
+          // nothing here is ever deleted, revoked rows stay — so it is the kind
+          // of table that crosses a thousand rows by sitting there. Newest is
+          // the end that matters: this list exists to stop an owner re-inviting
+          // somebody they invited last week.
+          const s = await supabase.from('trainer_invites').select('*').eq('owner_id', u.id)
+            .order('created_at', { ascending: false }).order('id', { ascending: false }).limit(capLimit());
           if (s.error) failed = true;
-          else if (!cancelled && s.data) setSent(s.data.map(rowTo));
+          else if (!cancelled && s.data) {
+            const page = capped(s.data);
+            if (page.truncated) truncated = true;
+            setSent(page.rows.map(rowTo));
+          }
         } catch { failed = true; }
         const email = u.email;
         if (email) {
           try {
-            const r = await supabase.from('trainer_invites').select('*').ilike('email', email).eq('status', 'pending');
+            // Pending invites addressed to one email address. Genuinely small —
+            // it takes a deliberate effort to be invited to a thousand gyms —
+            // but capped and ordered anyway so that whatever it does return is
+            // the same set twice running.
+            const r = await supabase.from('trainer_invites').select('*').ilike('email', email)
+              .eq('status', 'pending').order('created_at', { ascending: false }).order('id', { ascending: false }).limit(capLimit());
             if (r.error) failed = true;
             else if (!cancelled) {
-              if (r.data && r.data.length) setReceived(r.data.map(rowTo));
+              const page = capped(r.data);
+              if (page.truncated) truncated = true;
+              if (page.rows.length) setReceived(page.rows.map(rowTo));
               // no pending invites for a real account -> clean slate, no sample
             }
           } catch { failed = true; /* real account: never fall back to the sample invite */ }
         }
       } catch { failed = true; seedDemo(); }
-      if (!cancelled) setStatus(failed ? 'error' : 'ready');
+      if (!cancelled) setStatus(failed ? 'error' : truncated ? 'partial' : 'ready');
     })();
     return () => { cancelled = true; };
   }, [authRev]);

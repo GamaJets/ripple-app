@@ -9,13 +9,14 @@ import { useCallback, useEffect, useState } from 'react';
 import { View, Text, Pressable, Alert } from 'react-native';
 import { Icon } from './Icon';
 import { useTheme } from './components';
-import { Card } from './kit';
+import { Card, PartialRead } from './kit';
 import { sp, radius, hairline, type as ty } from '../theme/scale';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
 import { notifySuccess } from './haptics';
 import { readCoachedMode, COACHED_MODE_SHORT, type CoachedMode } from '../lib/types';
+import { capLimit, capped } from '../lib/rowCap';
 
 interface Req { id: string; clientId: string; name: string; mode: CoachedMode; at: string }
 
@@ -25,6 +26,9 @@ export function CoachRequests() {
   const [busy, setBusy] = useState<string | null>(null);
   /** The request list could not be read. Not the same as having none. */
   const [unread, setUnread] = useState(false);
+  /** The list was read and there are more requests than are on screen. Not the
+   *  same as having failed to read it, and not the same as having them all. */
+  const [truncated, setTruncated] = useState(false);
 
   const load = useCallback(async () => {
     if (!USE_SUPABASE) return;
@@ -37,19 +41,28 @@ export function CoachRequests() {
         .select('id, client_id, mode, created_at')
         .eq('trainer_id', uid)
         .eq('status', 'pending')
-        .order('created_at', { ascending: false });
+        // Newest first, capped. Pending requests only ever accumulate when a
+        // coach stops answering them, which is precisely the coach who has more
+        // than a thousand — and the oldest of those are the ones the client has
+        // long since given up on.
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: false })
+        .limit(capLimit());
       // A refused read used to leave this list empty, which renders as nothing
       // at all — no pending requests. This is the join flow: a client asks to
       // be coached, the coach never learns they asked, and both sides wait on
       // the other. Silence is the one outcome this component must not invent.
       if (error) { reportError('coachRequests.load', error); setUnread(true); return; }
       setUnread(false);
-      const ids = (rows ?? []).map((r: any) => r.client_id);
+      const page = capped(rows);
+      setTruncated(page.truncated);
+      const ids = page.rows.map((r: any) => r.client_id);
       if (ids.length === 0) { setReqs([]); return; }
+      // Bounded by `ids`, which the cap above holds at ROW_CAP or fewer.
       // no-error-ok: a name we cannot read falls back to 'A client'; the request is still shown and actionable
-      const { data: profs } = await supabase.from('profiles').select('id, full_name').in('id', ids);
+      const { data: profs } = await supabase.from('profiles').select('id, full_name').in('id', ids).limit(capLimit());
       const nameById = new Map<string, string>((profs ?? []).map((p: any) => [p.id, p.full_name]));
-      setReqs((rows ?? []).map((r: any) => ({
+      setReqs(page.rows.map((r: any) => ({
         id: r.id,
         clientId: r.client_id,
         name: (nameById.get(r.client_id) || 'A client').trim() || 'A client',
@@ -134,10 +147,15 @@ export function CoachRequests() {
     <Card tone={t.brand} style={{ marginBottom: sp.lg }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginBottom: sp.sm }}>
         <Icon name="people" size={15} color={t.brand} />
+        {/* The count is dropped when the read was truncated. `reqs.length` is
+            the size of the page, not the size of the queue, and printing it
+            here would tell a coach with 1,400 people waiting that 1,000 are —
+            a number they would then work through and believe they had cleared. */}
         <Text style={{ ...ty.micro, color: t.ink3 }}>
-          Coaching request{reqs.length > 1 ? 's' : ''} · {reqs.length}
+          Coaching request{reqs.length > 1 ? 's' : ''}{truncated ? '' : ` · ${reqs.length}`}
         </Text>
       </View>
+      {truncated ? <PartialRead what="people waiting on you" shown={reqs.length} onPress={() => { load(); }} /> : null}
       {reqs.map((r) => (
         <View key={r.id} style={{ paddingTop: sp.sm }}>
           <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{r.name}</Text>

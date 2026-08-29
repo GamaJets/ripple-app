@@ -17,6 +17,7 @@ import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
 import type { FoodFigures } from '../lib/entryEdit';
 import type { LoadStatus } from './loadStatus';
+import { capLimit, capped } from '../lib/rowCap';
 import { useAuthRevision } from './authRevision';
 
 export type LogVia = 'search' | 'barcode' | 'photo' | 'manual';
@@ -92,12 +93,19 @@ export function FoodLogProvider({ children }: { children: ReactNode }) {
         const id = auth?.user?.id;
         if (!id) { setStatus('ready'); return; }
         setUid(id);
+        // Already narrow — one client, one day — so the ceiling is not reachable
+        // by anybody eating food. It is capped anyway because the screen adds
+        // these rows up into the day's calories and macros, and a total over a
+        // truncated set is the one number in this app that must never be
+        // guessed: it is what the client eats the rest of the day against.
         const { data, error } = await supabase.from('food_logs').select('*')
-          .eq('client_id', id).gte('logged_at', startOfTodayISO()).order('logged_at', { ascending: true });
+          .eq('client_id', id).gte('logged_at', startOfTodayISO())
+          .order('logged_at', { ascending: true }).order('id', { ascending: true }).limit(capLimit());
         if (cancelled) return;
         if (error) { setStatus('error'); return; }
-        setEntries(data && data.length ? data.map(rowToEntry) : []);
-        setStatus('ready');
+        const page = capped(data);
+        setEntries(page.rows.length ? page.rows.map(rowToEntry) : []);
+        setStatus(page.truncated ? 'partial' : 'ready');
       } catch { if (!cancelled) setStatus('error'); /* leave the log empty rather than inventing entries */ }
     })();
     return () => { cancelled = true; };

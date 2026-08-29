@@ -27,6 +27,7 @@ import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
 import type { LoadStatus } from './loadStatus';
+import { capLimit, capped } from '../lib/rowCap';
 import { useAuthRevision } from './authRevision';
 import { sortGoals, type GoalTarget, type MeasuredKind } from '../lib/goalTargets';
 
@@ -72,13 +73,25 @@ export function GoalTrackerProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
   const [uid, setUid] = useState<string | null>(null);
 
-  const load = useCallback(async (who: string): Promise<GoalTarget[] | null> => {
+  // Returns null for a read that failed and `truncated` for one that came back
+  // at its ceiling. Two different answers, because the screen owes the client a
+  // different sentence for each: one is "we could not read your goals", the
+  // other is "these are your goals, and there are more of them".
+  const load = useCallback(async (who: string): Promise<{ goals: GoalTarget[]; truncated: boolean } | null> => {
+    // Newest-first, so a client who has set and achieved goals for years keeps
+    // the live ones. sortGoals puts the next due first regardless; the order
+    // here decides only which goals survive the cap, and the achieved ones from
+    // three years ago are not the ones worth keeping.
     const { data, error } = await supabase
       .from('goal_targets')
       .select('id, kind, target_value, title, target_date, achieved_at, created_at')
-      .eq('client_id', who);
+      .eq('client_id', who)
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .limit(capLimit());
     if (error) { reportError('goalTracker.load', error); return null; }
-    return sortGoals(((data ?? []) as unknown as Row[]).map(rowToGoal));
+    const page = capped(data as unknown as Row[]);
+    return { goals: sortGoals(page.rows.map(rowToGoal)), truncated: page.truncated };
   }, []);
 
   // Keyed on authRev, not []. Read the header of src/ui/authRevision.tsx: with
@@ -104,10 +117,10 @@ export function GoalTrackerProvider({ children }: { children: ReactNode }) {
       const mine = await load(who);
       if (cancelled) return;
       if (mine == null) { setStatus('error'); return; }
-      const after = await migrateLegacyTarget(who, mine);
+      const after = await migrateLegacyTarget(who, mine.goals);
       if (cancelled) return;
       setGoals(after);
-      setStatus('ready');
+      setStatus(mine.truncated ? 'partial' : 'ready');
     })();
     return () => { cancelled = true; };
   }, [authRev, load]);

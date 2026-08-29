@@ -19,6 +19,7 @@ import { buildProgram, type Program } from '../lib/programs';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import type { LoadStatus } from './loadStatus';
+import { capLimit, capped } from '../lib/rowCap';
 import { useAuthRevision } from './authRevision';
 
 export interface ProgramTemplate { id: string; name: string; program: Program }
@@ -78,16 +79,23 @@ export function ProgramTemplatesProvider({ children }: { children: ReactNode }) 
         // Signed out: the starters really are the whole library.
         if (!id) { setStatus('ready'); return; }
         setUid(id);
-        const { data, error } = await supabase.from('program_templates').select('id, name, program').eq('coach_id', id).order('created_at', { ascending: true });
+        // Newest-first rather than the oldest-first this was, because the cap
+        // decides which end is kept and a coach's most recent templates are the
+        // ones they are working from. The list is rebuilt in that order below,
+        // which is also the order the picker should show them in.
+        const { data, error } = await supabase.from('program_templates')
+          .select('id, name, program').eq('coach_id', id)
+          .order('created_at', { ascending: false }).order('id', { ascending: false }).limit(capLimit());
         if (cancelled) return;
         // `error || !data` used to return down the same path as a coach who has
         // simply not saved anything, leaving the seed starters standing in for
         // their library with nothing to mark the difference.
         if (error) { setStatus('error'); return; }
-        const real: ProgramTemplate[] = (data ?? []).filter((r: any) => r.program).map((r: any) => ({ id: r.id, name: r.name, program: r.program as Program }));
+        const page = capped(data);
+        const real: ProgramTemplate[] = page.rows.filter((r: any) => r.program).map((r: any) => ({ id: r.id, name: r.name, program: r.program as Program }));
         // Show the coach's own saved templates first, then the seed starters.
         if (real.length) setTemplates((p) => [...real, ...p.filter((x) => x.id.startsWith('seed_'))]);
-        setStatus('ready');
+        setStatus(page.truncated ? 'partial' : 'ready');
       } catch { if (!cancelled) setStatus('error'); }
     })();
     return () => { cancelled = true; };
