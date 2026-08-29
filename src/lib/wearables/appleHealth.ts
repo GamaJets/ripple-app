@@ -12,6 +12,7 @@ import { Platform, NativeModules } from 'react-native';
 import type { WearableProvider, ProviderMeta, DailyMetrics, WorkoutSample, HrPoint } from './types';
 import { emptyMetrics } from './types';
 import { nightsFromIntervals, type SleepFamily, type SleepInterval, type SleepRead, type SleepReading } from '../sleepMerge';
+import { canRememberSleepAsk, hasAskedForSleep, markSleepAsked, shouldAutoAskForSleep } from './sleepAccess';
 
 const meta: ProviderMeta = {
   id: 'apple',
@@ -95,13 +96,24 @@ function permissionSet(k: any) {
   };
 }
 
+/**
+ * Raise the permission sheet for the whole set above.
+ *
+ * It records that SleepAnalysis has been requested BEFORE calling, and that
+ * ordering is the point rather than an accident — see `markSleepAsked`. Every
+ * route that reaches initHealthKit goes through here (connect, the manual
+ * button, the one automatic ask), so no caller can forget to write the fact
+ * down and leave the automatic ask firing again on the next launch.
+ */
 function requestAuth(): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const k = hk();
-    if (!k || !k.Constants) return reject(new Error('HealthKit is not available in this build.'));
-    if (typeof k.initHealthKit !== 'function') return reject(new Error('The Apple Health module is not loaded in this build. A new build with the compatibility fix is needed.'));
-    k.initHealthKit(permissionSet(k), (err: string) => (err ? reject(new Error(String(err))) : resolve()));
-  });
+  const k = hk();
+  if (!k || !k.Constants) return Promise.reject(new Error('HealthKit is not available in this build.'));
+  if (typeof k.initHealthKit !== 'function') return Promise.reject(new Error('The Apple Health module is not loaded in this build. A new build with the compatibility fix is needed.'));
+  return markSleepAsked().then(
+    () => new Promise<void>((resolve, reject) => {
+      k.initHealthKit(permissionSet(k), (err: string) => (err ? reject(new Error(String(err))) : resolve()));
+    }),
+  );
 }
 
 /**
@@ -115,8 +127,13 @@ function requestAuth(): Promise<void> {
  *
  * Sleep is now in the same position: everyone who connected before TF-01 was
  * asked for heart rate, energy, steps and workouts and never for sleep, so
- * their sleep read comes back empty forever until this is called again. That is
- * why both screens that show sleep offer a way to trigger it.
+ * their sleep read comes back empty forever until this is called again.
+ * `fetchSleep` now does that once, by itself, for exactly the people in that
+ * state (see `wearables/sleepAccess.ts`). This stays exported for the manual
+ * button, which is the route for somebody who declined and later changed their
+ * mind — iOS will not show the sheet again for a decided type, but it does take
+ * them to the right place to reconsider, and the automatic ask never fires
+ * twice.
  */
 export function requestHealthAuth(): Promise<void> {
   return requestAuth();
@@ -237,6 +254,69 @@ function readSleepRows(options: any): Promise<{ ok: true; rows: any[] } | { ok: 
   });
 }
 
+/** The one automatic permission ask, shared across concurrent sleep reads. */
+let sleepAskInFlight: Promise<void> | null = null;
+
+/**
+ * The window and options for a sleep query.
+ *
+ * Split out because the read now happens twice on one path — once, and again
+ * after the permission sheet — and two copies of a limit that must not be
+ * omitted is how one of them ends up omitted. Sample reads need an explicit
+ * limit or react-native-health returns an empty array, the same trap fetchToday
+ * documents. A week of staged sleep is a few hundred samples per source; 20000
+ * is far above any real record and still bounded.
+ */
+function sleepQuery(sinceDays: number) {
+  const start = new Date();
+  start.setDate(start.getDate() - Math.max(1, sinceDays));
+  start.setHours(0, 0, 0, 0);
+  return { startDate: start.toISOString(), endDate: new Date().toISOString(), limit: 20000, ascending: true };
+}
+
+/**
+ * Sleep samples turned into one reading per writer per night.
+ *
+ * Grouped by writer first, then by what that writer measured. A source that
+ * stages sleep and also writes "in bed" contributes only its staged rows; one
+ * that writes nothing but "in bed" still contributes, marked as such.
+ */
+function sleepReadings(rows: any[]): SleepReading[] {
+  const bySource = new Map<string, { name: string; asleep: SleepInterval[]; inBed: SleepInterval[] }>();
+  for (const row of rows) {
+    const value = String(row?.value ?? '').toUpperCase();
+    const start = row?.startDate ?? row?.start;
+    const end = row?.endDate ?? row?.end;
+    if (!start || !end) continue;
+    const isAsleep = ASLEEP_VALUES.has(value);
+    const isInBed = IN_BED_VALUES.has(value);
+    if (!isAsleep && !isInBed) continue;
+    const sourceId = String(row?.sourceId ?? row?.sourceName ?? 'unknown');
+    const name = String(row?.sourceName ?? sourceId);
+    let bucket = bySource.get(sourceId);
+    if (!bucket) { bucket = { name, asleep: [], inBed: [] }; bySource.set(sourceId, bucket); }
+    (isAsleep ? bucket.asleep : bucket.inBed).push({ start: String(start), end: String(end) });
+  }
+
+  const readings: SleepReading[] = [];
+  for (const [sourceId, bucket] of bySource) {
+    const staged = bucket.asleep.length > 0;
+    const nights = nightsFromIntervals(staged ? bucket.asleep : bucket.inBed);
+    for (const n of nights) {
+      readings.push({
+        provider: 'apple',
+        sourceId,
+        sourceName: bucket.name,
+        family: familyOf(sourceId, bucket.name),
+        basis: staged ? 'asleep' : 'in-bed',
+        night: n.night,
+        minutesAsleep: n.minutesAsleep,
+      });
+    }
+  }
+  return readings;
+}
+
 // Map HealthKit's workout activity names onto Repple's exercise vocabulary so an
 // imported session lines up with the in-app cardio / mobility catalog. Anything we
 // don't recognise keeps its Health label.
@@ -354,14 +434,7 @@ export const appleHealth: WearableProvider = {
     if (!nativePresent()) {
       return { provider: 'apple', status: 'unsupported', readings: [], reason: unavailable() ?? 'Apple Health is not available in this build.' };
     }
-    const start = new Date();
-    start.setDate(start.getDate() - Math.max(1, sinceDays));
-    start.setHours(0, 0, 0, 0);
-    // Sample reads need an explicit limit or react-native-health returns an
-    // empty array — the same trap fetchToday documents. A week of staged sleep
-    // is a few hundred samples per source; 20000 is far above any real record
-    // and still bounded.
-    const res = await readSleepRows({ startDate: start.toISOString(), endDate: new Date().toISOString(), limit: 20000, ascending: true });
+    const res = await readSleepRows(sleepQuery(sinceDays));
     if (!res.ok) {
       return {
         provider: 'apple',
@@ -370,42 +443,46 @@ export const appleHealth: WearableProvider = {
         reason: res.reason,
       };
     }
+    let readings = sleepReadings(res.rows);
 
-    // Group by writer first, then by what that writer measured. A source that
-    // stages sleep and also writes "in bed" contributes only its staged rows;
-    // one that writes nothing but "in bed" still contributes, marked as such.
-    const bySource = new Map<string, { name: string; asleep: SleepInterval[]; inBed: SleepInterval[] }>();
-    for (const row of res.rows) {
-      const value = String(row?.value ?? '').toUpperCase();
-      const start = row?.startDate ?? row?.start;
-      const end = row?.endDate ?? row?.end;
-      if (!start || !end) continue;
-      const isAsleep = ASLEEP_VALUES.has(value);
-      const isInBed = IN_BED_VALUES.has(value);
-      if (!isAsleep && !isInBed) continue;
-      const sourceId = String(row?.sourceId ?? row?.sourceName ?? 'unknown');
-      const name = String(row?.sourceName ?? sourceId);
-      let bucket = bySource.get(sourceId);
-      if (!bucket) { bucket = { name, asleep: [], inBed: [] }; bySource.set(sourceId, bucket); }
-      (isAsleep ? bucket.asleep : bucket.inBed).push({ start: String(start), end: String(end) });
+    // The one automatic ask (TF-01, gap 2).
+    //
+    // Everybody who connected Health before sleep shipped was never asked for
+    // SleepAnalysis, and HealthKit answers an unrequested read with an empty
+    // array rather than an error — so their sleep is blank forever and nothing
+    // in the response says why. `shouldAutoAskForSleep` is what separates that
+    // case from a genuinely empty week, and it does it on a fact we own rather
+    // than one HealthKit will not tell us: whether Repple has ever put
+    // SleepAnalysis in front of this person. Once, then never again
+    // automatically — including if they decline, because a sheet that comes
+    // back after you have answered it is worse than the blank list. The manual
+    // button on Recovery stays for anyone who changes their mind.
+    const auto = shouldAutoAskForSleep({
+      present: true,
+      canRemember: canRememberSleepAsk(),
+      alreadyAsked: await hasAskedForSleep(),
+      readOk: true,
+      readingCount: readings.length,
+    });
+    if (auto) {
+      // Recovery and Devices both read sleep on mount, and the persisted flag
+      // is only written once the storage promise resolves — so two screens
+      // opening together could both see "never asked" and both raise a sheet.
+      // The in-flight promise makes them share one ask for the life of the
+      // process; the persisted flag covers every launch after this one.
+      //
+      // A refusal is an answer, not a failure: requestAuth has already recorded
+      // that we asked, so there is nothing to recover from and nothing to
+      // report. The re-read below simply finds whatever the person allowed.
+      if (!sleepAskInFlight) sleepAskInFlight = requestAuth().catch(() => { /* declined, or the sheet never appeared */ });
+      await sleepAskInFlight;
+      const again = await readSleepRows(sleepQuery(sinceDays));
+      // A second read that fails leaves the FIRST read's answer standing. That
+      // read succeeded, so the week is still known to be empty; downgrading it
+      // to an error here would report a failure that did not happen.
+      if (again.ok) readings = sleepReadings(again.rows);
     }
 
-    const readings: SleepReading[] = [];
-    for (const [sourceId, bucket] of bySource) {
-      const staged = bucket.asleep.length > 0;
-      const nights = nightsFromIntervals(staged ? bucket.asleep : bucket.inBed);
-      for (const n of nights) {
-        readings.push({
-          provider: 'apple',
-          sourceId,
-          sourceName: bucket.name,
-          family: familyOf(sourceId, bucket.name),
-          basis: staged ? 'asleep' : 'in-bed',
-          night: n.night,
-          minutesAsleep: n.minutesAsleep,
-        });
-      }
-    }
     // 'ready' with no readings is a real answer — Health was readable and holds
     // no sleep for this window. It is not the same as the 'error' above, and
     // the Recovery screen says something different for each.

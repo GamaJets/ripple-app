@@ -111,6 +111,57 @@ export async function fetchVendorWorkouts(id: ProviderId, sinceDays = 14): Promi
 }
 
 /**
+ * How a cloud sleep read went, before anything has been parsed.
+ *
+ * Three cases, and they must stay three all the way to the screen. `ok` with an
+ * empty `records` list is a real answer — the vendor was asked and holds no
+ * sleep for the window — while `ok: false` means we asked and got nothing back,
+ * which makes the night unknown rather than empty. A dead token is neither: it
+ * throws `WearableNotConnectedError`, because the fix is the user reconnecting
+ * and no amount of waiting will produce the night.
+ */
+export type VendorSleepResult = { ok: true; records: any[] } | { ok: false; reason: string };
+
+/**
+ * Ask the server for recent sleep from a connected cloud vendor.
+ *
+ * Unlike `fetchVendorDay`, a failure here is NOT flattened to null. Null would
+ * reach the merge as "this device recorded nothing", and the whole point of
+ * TF-01 is that a night we failed to read and a night nobody slept must not
+ * look the same on the Recovery screen.
+ */
+export async function fetchVendorSleep(id: ProviderId, sinceDays = 7): Promise<VendorSleepResult> {
+  let payload: any;
+  try {
+    const { data, error } = await supabase.functions.invoke('wearable-day', {
+      body: { provider: id, action: 'sleep', sinceDays },
+    });
+    if (error) {
+      reportError('wearables.fetchSleep.invoke', error, { provider: id });
+      return { ok: false, reason: 'Repple could not reach the server to read this device.' };
+    }
+    payload = data;
+  } catch (e) {
+    reportError('wearables.fetchSleep.invoke', e, { provider: id });
+    return { ok: false, reason: 'Repple could not reach the server to read this device.' };
+  }
+  if (payload?.connected === false) {
+    reportError('wearables.notConnected', payload?.reason || 'no usable token', { provider: id });
+    throw new WearableNotConnectedError(id, payload?.reason);
+  }
+  const sleep = payload?.sleep;
+  // An older deploy of `wearable-day` does not know the 'sleep' action and
+  // answers with the daily metrics instead. That response has no `sleep` key at
+  // all, and reading it as an empty night would tell the client their ring
+  // recorded nothing when the server was never asked the question.
+  if (!sleep || typeof sleep !== 'object') {
+    return { ok: false, reason: 'The server did not answer with sleep for this device.' };
+  }
+  if (sleep.ok === true) return { ok: true, records: Array.isArray(sleep.records) ? sleep.records : [] };
+  return { ok: false, reason: String(sleep.reason || 'unknown') };
+}
+
+/**
  * Actually drop the stored token. This used to be a no-op with a comment claiming
  * revocation happened server-side; nothing deleted the row, so "disconnect" only
  * cleared a local flag and the dead token lingered forever.

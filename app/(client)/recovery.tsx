@@ -194,7 +194,15 @@ export default function Recovery() {
  // Everyone who connected Apple Health before TF-01 was never asked for Sleep,
  // and HealthKit answers a read it never got permission for with an empty array
  // rather than an error — so a permanently blank list looks exactly like a
- // client who never wears their watch. This is the only way out of that.
+ // client who never wears their watch.
+ //
+ // The never-asked half of that is now handled without the client having to
+ // find this button: the provider raises the sheet once, by itself, for exactly
+ // the people who were never asked (src/lib/wearables/sleepAccess.ts). So by the
+ // time this block renders, the ask has happened — which is why the wording
+ // below no longer says "Repple may never have been granted Sleep" and points
+ // at the Health settings instead. The button stays for somebody who declined
+ // and has changed their mind.
  const appleRead = sleepReads.reads.find((r) => r.provider === 'apple');
  const appleSilent = appleRead?.status === 'ready' && appleRead.readings.length === 0;
  const [askingHealth, setAskingHealth] = useState(false);
@@ -336,7 +344,7 @@ export default function Recovery() {
     {appleSilent ? (
      <View style={{ marginTop: sp.md }}>
       <Text style={{ ...ty.caption, color: t.ink3 }}>
-       Apple Health returned no sleep at all. If you have been wearing your watch, Repple may never have been granted Sleep — it was asked for after you connected.
+       Apple Health was readable and holds no sleep for these nights. If you have been wearing your watch, Sleep sharing is probably switched off for Repple — Health ▸ Sharing ▸ Apps ▸ Repple.
       </Text>
       <View style={{ alignSelf: 'flex-start', marginTop: sp.sm }}>
        <Ghost label={askingHealth ? 'Asking…' : 'Allow sleep in Apple Health'} onPress={askHealthForSleep} />

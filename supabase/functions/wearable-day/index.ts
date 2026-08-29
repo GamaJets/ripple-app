@@ -228,6 +228,247 @@ async function whoopWorkouts(token: string, sinceDays: number) {
   return out;
 }
 
+// ── Sleep ──────────────────────────────────────────────────────────────────
+//
+// ⚠ EVERY FIELD NAME BELOW WAS READ OUT OF THE VENDOR'S OWN PUBLISHED
+// SPECIFICATION. NONE OF IT WAS OBSERVED IN A LIVE RESPONSE, because exercising
+// any of these endpoints needs a real user's OAuth token and there is no test
+// account. That distinction has already cost this codebase once — the zone
+// mapping in whoopDay above was written against an assumed shape and folded two
+// bands into one — so it is recorded here rather than left to be guessed at
+// later. The specifications used, fetched on 2026-08-29:
+//
+//   Oura API v2   https://cloud.ouraring.com/v2/docs
+//                 (Redoc over https://cloud.ouraring.com/v2/static/json/openapi-1.37.json)
+//                 GET /v2/usercollection/sleep → MultiDocumentResponse[PublicModifiedSleepModel]
+//   WHOOP  v2     https://developer.whoop.com/api/
+//                 (OpenAPI at https://api.prod.whoop.com/developer/doc/openapi.json)
+//                 GET /v2/activity/sleep → PaginatedSleepResponse
+//                 WHOOP v1 is retired; v2 is the only current version.
+//   Fitbit 1.2    https://dev.fitbit.com/build/reference/web-api/sleep/get-sleep-log-by-date-range/
+//                 GET /1.2/user/-/sleep/date/{start}/{end}.json
+//
+// What this half of the feature does NOT do is decide what a night is. It
+// fetches, checks the HTTP outcome, and passes each vendor's own field names
+// through untouched to the client, which owns the arithmetic and the calendar
+// (see src/lib/vendorSleep.ts). The reason is timezones: a night belongs to the
+// local day the person woke up on, this function runs in UTC, and every attempt
+// in this repo to derive a calendar day away from the reader's clock has been a
+// bug. So the server never computes a night key.
+//
+// The projections below exist only to keep the payload small — Oura alone
+// returns per-30-second sleep phase strings and 5-minute HRV sample arrays for
+// every night, which the client has no use for. They are a subset of the
+// vendor's fields under the vendor's own names, never a rename.
+
+/** Three distinguishable outcomes, never collapsed: read, dead token, failure. */
+type VendorSleep =
+  | { ok: true; records: any[] }
+  | { ok: false; notConnected: true; reason: string }
+  | { ok: false; reason: string };
+
+// A UTC day string, used ONLY to widen a request window — never to attribute a
+// night to a day. One day of slack on each end because the client asks in local
+// nights and this runs in UTC, and a window computed here can otherwise stop
+// one day short of the night the client is looking at. Extra records are free:
+// the client keys them by night and shows only the nights it asked for.
+const utcDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+const SLEEP_SLACK_DAYS = 1;
+function sleepWindow(sinceDays: unknown) {
+  const days = Math.min(90, Math.max(1, Math.floor(Number(sinceDays)) || 7));
+  const now = Date.now();
+  const startMs = now - (days + SLEEP_SLACK_DAYS) * 86400000;
+  const endMs = now + SLEEP_SLACK_DAYS * 86400000;
+  return { startMs, endMs, startDate: utcDay(startMs), endDate: utcDay(endMs) };
+}
+
+// 401 and 403 mean the stored token no longer speaks for this user, which the
+// client turns into "reconnect your device" rather than "you did not sleep".
+// Any other non-2xx is a failure of ours or theirs, and the night is unknown.
+const notConnected = (v: string): VendorSleep => ({ ok: false, notConnected: true, reason: `${v}_unauthorized` });
+
+/**
+ * Oura sleep periods for the window.
+ *
+ * `/v2/usercollection/sleep` is the per-period collection, not `daily_sleep`.
+ * daily_sleep carries only a 0-100 score and its contributors — no duration at
+ * all — so it cannot answer "how long did I sleep", which is the only question
+ * being asked here.
+ *
+ * Durations are SECONDS in this API, and `total_sleep_duration` is nullable
+ * while `time_in_bed` is a required field. Both are forwarded, unconverted, so
+ * the client can tell a staged night from a time-in-bed one.
+ */
+async function ouraSleep(token: string, sinceDays: unknown): Promise<VendorSleep> {
+  const h = { Authorization: 'Bearer ' + token };
+  const w = sleepWindow(sinceDays);
+  const records: any[] = [];
+  let nextToken = '';
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const url = new URL('https://api.ouraring.com/v2/usercollection/sleep');
+    url.searchParams.set('start_date', w.startDate);
+    url.searchParams.set('end_date', w.endDate);
+    if (nextToken) url.searchParams.set('next_token', nextToken);
+    let res: Response;
+    try {
+      res = await fetch(url.toString(), { headers: h });
+    } catch {
+      return { ok: false, reason: 'Oura could not be reached.' };
+    }
+    if (res.status === 401 || res.status === 403) return notConnected('oura');
+    if (!res.ok) return { ok: false, reason: `Oura answered ${res.status}.` };
+    let data: any;
+    try {
+      data = await res.json();
+    } catch {
+      return { ok: false, reason: 'Oura sent a response Repple could not read.' };
+    }
+    for (const r of Array.isArray(data?.data) ? data.data : []) {
+      records.push({
+        id: r?.id ?? null,
+        day: r?.day ?? null,
+        type: r?.type ?? null,
+        bedtime_start: r?.bedtime_start ?? null,
+        bedtime_end: r?.bedtime_end ?? null,
+        total_sleep_duration: r?.total_sleep_duration ?? null,
+        time_in_bed: r?.time_in_bed ?? null,
+        awake_time: r?.awake_time ?? null,
+        deep_sleep_duration: r?.deep_sleep_duration ?? null,
+        light_sleep_duration: r?.light_sleep_duration ?? null,
+        rem_sleep_duration: r?.rem_sleep_duration ?? null,
+      });
+    }
+    nextToken = String(data?.next_token || '');
+    if (!nextToken) break;
+  }
+  return { ok: true, records };
+}
+
+/**
+ * WHOOP sleep activities for the window.
+ *
+ * WHOOP reports no "total asleep" figure at all. `score.stage_summary` gives
+ * light, slow-wave and REM separately, in MILLISECONDS, and asleep is their
+ * sum; `total_in_bed_time_milli` is the wider figure that also contains the
+ * awake and no-data time. Both are forwarded so the client can keep them apart
+ * rather than quietly presenting time in bed as sleep.
+ *
+ * `score` is absent unless `score_state` is 'SCORED' — PENDING_SCORE and
+ * UNSCORABLE carry the session with no measurements — so score_state travels
+ * with the record and the client refuses the ones that have nothing in them.
+ */
+async function whoopSleep(token: string, sinceDays: unknown): Promise<VendorSleep> {
+  const h = { Authorization: 'Bearer ' + token };
+  const w = sleepWindow(sinceDays);
+  const records: any[] = [];
+  let nextToken = '';
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const url = new URL('https://api.prod.whoop.com/developer/v2/activity/sleep');
+    url.searchParams.set('start', new Date(w.startMs).toISOString());
+    url.searchParams.set('end', new Date(w.endMs).toISOString());
+    url.searchParams.set('limit', String(WHOOP_PAGE_LIMIT));
+    if (nextToken) url.searchParams.set('nextToken', nextToken);
+    let res: Response;
+    try {
+      res = await fetch(url.toString(), { headers: h });
+    } catch {
+      return { ok: false, reason: 'WHOOP could not be reached.' };
+    }
+    if (res.status === 401 || res.status === 403) return notConnected('whoop');
+    if (!res.ok) return { ok: false, reason: `WHOOP answered ${res.status}.` };
+    let data: any;
+    try {
+      data = await res.json();
+    } catch {
+      return { ok: false, reason: 'WHOOP sent a response Repple could not read.' };
+    }
+    const batch = Array.isArray(data?.records) ? data.records : [];
+    for (const r of batch) {
+      const st = r?.score?.stage_summary;
+      records.push({
+        id: r?.id ?? null,
+        start: r?.start ?? null,
+        end: r?.end ?? null,
+        timezone_offset: r?.timezone_offset ?? null,
+        nap: r?.nap ?? null,
+        score_state: r?.score_state ?? null,
+        score: st
+          ? {
+              stage_summary: {
+                total_in_bed_time_milli: st.total_in_bed_time_milli ?? null,
+                total_awake_time_milli: st.total_awake_time_milli ?? null,
+                total_no_data_time_milli: st.total_no_data_time_milli ?? null,
+                total_light_sleep_time_milli: st.total_light_sleep_time_milli ?? null,
+                total_slow_wave_sleep_time_milli: st.total_slow_wave_sleep_time_milli ?? null,
+                total_rem_sleep_time_milli: st.total_rem_sleep_time_milli ?? null,
+              },
+            }
+          : null,
+      });
+    }
+    nextToken = String(data?.next_token || '');
+    if (!nextToken || batch.length < WHOOP_PAGE_LIMIT) break;
+  }
+  return { ok: true, records };
+}
+
+/**
+ * Fitbit sleep logs for the window.
+ *
+ * Version 1.2, not 1: the v1 sleep endpoints are marked deprecated and it is
+ * 1.2 that carries `levels` and the stages/classic distinction. The range form
+ * returns every log in one call — no pagination — and caps the span at 100
+ * days, which sleepWindow is already well inside.
+ *
+ * Fitbit's durations are MINUTES (`minutesAsleep`, `timeInBed`), unlike the
+ * other two, and `dateOfSleep` is documented as the date the log ENDED, i.e.
+ * the morning the person woke. `startTime` and `endTime` are local wall-clock
+ * strings with no offset on them, which is exactly why they are passed through
+ * as written rather than being turned into instants here.
+ */
+async function fitbitSleep(token: string, sinceDays: unknown): Promise<VendorSleep> {
+  const h = { Authorization: 'Bearer ' + token };
+  const w = sleepWindow(sinceDays);
+  let res: Response;
+  try {
+    res = await fetch(`https://api.fitbit.com/1.2/user/-/sleep/date/${w.startDate}/${w.endDate}.json`, { headers: h });
+  } catch {
+    return { ok: false, reason: 'Fitbit could not be reached.' };
+  }
+  if (res.status === 401 || res.status === 403) return notConnected('fitbit');
+  if (!res.ok) return { ok: false, reason: `Fitbit answered ${res.status}.` };
+  let data: any;
+  try {
+    data = await res.json();
+  } catch {
+    return { ok: false, reason: 'Fitbit sent a response Repple could not read.' };
+  }
+  const records: any[] = [];
+  for (const r of Array.isArray(data?.sleep) ? data.sleep : []) {
+    records.push({
+      logId: r?.logId ?? null,
+      dateOfSleep: r?.dateOfSleep ?? null,
+      startTime: r?.startTime ?? null,
+      endTime: r?.endTime ?? null,
+      type: r?.type ?? null,
+      isMainSleep: r?.isMainSleep ?? null,
+      minutesAsleep: r?.minutesAsleep ?? null,
+      timeInBed: r?.timeInBed ?? null,
+    });
+  }
+  return { ok: true, records };
+}
+
+async function readVendorSleep(provider: string, token: string, sinceDays: unknown): Promise<VendorSleep> {
+  if (provider === 'fitbit') return await fitbitSleep(token, sinceDays);
+  if (provider === 'oura') return await ouraSleep(token, sinceDays);
+  if (provider === 'whoop') return await whoopSleep(token, sinceDays);
+  // Garmin needs an approved partnership before any endpoint answers, so there
+  // is nothing to call. 'unsupported' rather than a failure: the client must say
+  // "Repple cannot read this yet", not "we could not reach your device".
+  return { ok: false, reason: 'unsupported' };
+}
+
 async function readVendor(provider: string, token: string) {
   if (provider === 'fitbit') return await fitbitDay(token);
   if (provider === 'oura') return await ouraDay(token);
@@ -284,6 +525,21 @@ Deno.serve(async (req) => {
     } catch (_e) {
       return json({ workouts: [], connected: true, error: 'could not read workouts' });
     }
+  }
+
+  // Sleep is asked for separately from the daily roll-up, and answers with the
+  // vendor's own records rather than a number. Three outcomes, deliberately
+  // kept apart all the way to the screen: `sleep.ok` with records (which may be
+  // an empty list — a real answer meaning nothing was recorded), `connected:
+  // false` (the token is dead, so reconnect), and `sleep.ok: false` with a
+  // reason (we asked and did not get an answer, so the night is unknown). The
+  // recurring bug this shape exists to prevent is all three arriving as [].
+  if (String(body.action || '') === 'sleep') {
+    const res = await readVendorSleep(provider, access, body.sinceDays);
+    if (!res.ok && (res as any).notConnected) {
+      return json({ metrics: null, connected: false, reason: (res as any).reason });
+    }
+    return json({ sleep: res, connected: true });
   }
 
   const metrics = await readVendor(provider, access);
