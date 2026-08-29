@@ -75,7 +75,25 @@ function toProduct(p: any): OffProduct | null {
   const brand = (p.brands || '').split(',')[0]?.trim();
   const base = (p.product_name || '').trim() || 'Product';
   const name = brand && !base.toLowerCase().includes(brand.toLowerCase()) ? `${brand} ${base}` : base;
-  if (kcal <= 0 && protein <= 0 && carbs <= 0 && fat <= 0) return null;
+
+  // Zero is a real nutrition figure, and this used to throw it away.
+  //
+  // The old guard was `kcal <= 0 && protein <= 0 && carbs <= 0 && fat <= 0`,
+  // which cannot tell "this product records no nutrition" from "this product
+  // genuinely contains none". So scanning a Coke Zero — 0.3 kcal/100g, and 0
+  // per serving — returned null, and the screen said "No match in the Open Food
+  // Facts database for that barcode". The match was found; it was thrown away
+  // for being a diet drink. Water, black coffee, sweeteners and every zero-
+  // calorie mixer failed the same way, and the message blamed the database.
+  //
+  // Presence of the FIELD is the question, not its value. If Open Food Facts
+  // recorded nothing at all under any of these keys, there is nothing to log.
+  const RECORDED = [
+    'energy-kcal_serving', 'proteins_serving', 'carbohydrates_serving', 'fat_serving',
+    'energy-kcal_100g', 'proteins_100g', 'carbohydrates_100g', 'fat_100g',
+  ];
+  const anyRecorded = RECORDED.some((k) => nu[k] !== undefined && nu[k] !== null && nu[k] !== '');
+  if (!anyRecorded) return null;
   return {
     name,
     kcal: Math.round(kcal),

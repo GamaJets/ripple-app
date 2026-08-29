@@ -285,6 +285,9 @@ export default function Home() {
           <ActionCard
             ring={logKnown && goalDays ? wk.workouts / goalDays : 0}
             ringLabel={logKnown ? String(streak) : fig(null)}
+            // The number is a day streak and the ring is this week's sessions —
+            // neither is about the meal this card is asking you to log.
+            ringNote={logKnown ? (streak === 1 ? 'day streak' : 'day streak') : 'streak'}
             title={today.headline}
             note={today.tip}
             cta={today.cta}

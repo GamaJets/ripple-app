@@ -204,10 +204,20 @@ export default function Nutrition() {
 
         {/* ── the plan's macro split against target ──────────────────────── */}
         <Section>
-          <SectionHead title="Macros" note={`${tot.K.toLocaleString()} kcal planned`} />
-          <Meter label="Protein" val={tot.P} target={target.protein} />
-          <Meter label="Carbs" val={tot.C} target={target.carbs} dim />
-          <Meter label="Fat" val={tot.F} target={target.fat} dim />
+          {/* These meters showed the PLAN — tot.P/C/F, the totals of the meals
+              suggested below — while sitting directly under a hero that reads
+              "0 of 2,040 kcal eaten". Three filled bars beneath that sentence
+              say, in the only visual language this screen has for progress,
+              that you have eaten 89g of protein. You have not. A tester read it
+              exactly that way and said so: "I didn't log any meals today."
+
+              A meter toward a target means intake here, because that is what
+              the figure above it means. The plan's own total keeps its place in
+              the note, where it is named. */}
+          <SectionHead title="Macros eaten" note={`${tot.K.toLocaleString()} kcal planned below`} />
+          <Meter label="Protein" val={eaten.protein} target={target.protein} />
+          <Meter label="Carbs" val={eaten.carbs} target={target.carbs} dim />
+          <Meter label="Fat" val={eaten.fat} target={target.fat} dim />
         </Section>
 
         <Rule />

@@ -767,7 +767,7 @@ export default function Train() {
         <Section>
           <SectionHead title="Go to" />
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm }}>
-            {([['camera', 'Scan machine', '/(client)/scan-machine'], ['clock', 'History', '/(client)/activity'], ['chart', 'Trends', '/(client)/trends'], ['trending', 'Targets', '/(client)/progression'], ['calendar', 'This Week', '/(client)/week'], ['trophy', 'Records', '/(client)/records'], ['water', 'Recovery', '/(client)/recovery'], ['moon', 'Rest & deload', '/(client)/restday'], ['video', 'Library', '/(client)/library'], ['settings', 'Tools', '/(client)/tools']] as const).map(([ic, label, route]) => (
+            {([['camera', 'Scan machine', '/(client)/scan-machine'], ['clock', 'History', '/(client)/activity'], ['chart', 'Trends', '/(client)/trends'], ['trending', 'Targets', '/(client)/progression'], ['calendar', 'This Week', '/(client)/week'], ['trophy', 'Records', '/(client)/records'], ['water', 'Recovery', '/(client)/recovery'], ['moon', 'Rest & deload', '/(client)/restday'], ['heart', 'Watch & devices', '/(client)/devices'], ['video', 'Library', '/(client)/library'], ['settings', 'Tools', '/(client)/tools']] as const).map(([ic, label, route]) => (
               <Pressable key={route} onPress={() => router.push(route as any)} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: sp.sm }}>
                 <Icon name={ic} size={14} color={t.ink2} /><Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>{label}</Text>
               </Pressable>
@@ -1207,7 +1207,20 @@ function SessionRunner({ t, exercises, focus, nameOf, age, log, injuries, videos
               </View>
             ) : null}
           </View>
-        ) : null}
+        ) : (
+          /* With no heart-rate source this block used to render NOTHING — no
+             zones, and no reason for their absence. So the one screen where
+             live zones belong looked like it had never been built, which is
+             exactly how it was reported. Say what is missing and where it is
+             turned on. Deliberately not a link: leaving mid-session to go to
+             Settings would abandon the workout being logged. */
+          <View style={{ marginTop: sp.xl, paddingVertical: sp.md, paddingHorizontal: sp.md, backgroundColor: t.surface2, borderRadius: radius.sm }}>
+            <Text style={{ ...ty.label, fontWeight: '600', color: t.ink }}>Heart-rate zones</Text>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
+              Connect a watch under Train → Watch &amp; devices and your zones appear here live while you train.
+            </Text>
+          </View>
+        )}
 
         {prMsg ? (
           <View style={{ marginTop: sp.xl }}>

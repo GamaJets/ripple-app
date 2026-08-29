@@ -171,9 +171,15 @@ export default function Welcome() {
             </View>
           ) : null}
           <Text style={lab}>Email</Text>
-          <TextInput value={email} onChangeText={setEmail} placeholder="Email" placeholderTextColor={t.ink3} keyboardType="email-address" autoCapitalize="none" autoCorrect={false} style={inp} accessibilityLabel="Email" />
+          {/* Editing either field clears the last failure. A sign-in error
+              used to sit on this screen until the next submit, so somebody who
+              changed their password in another tab — or simply mistyped once —
+              was left looking at "Invalid login credentials" that had stopped
+              being true. A stale error is indistinguishable from a live one,
+              and this one names the reader's credentials as the problem. */}
+          <TextInput value={email} onChangeText={(v) => { setEmail(v); if (notice) setNotice(null); }} placeholder="Email" placeholderTextColor={t.ink3} keyboardType="email-address" autoCapitalize="none" autoCorrect={false} style={inp} accessibilityLabel="Email" />
           <Text style={lab}>Password</Text>
-          <PasswordField value={pw} onChangeText={setPw} placeholder={mode === 'in' ? 'Password' : `Password (${PASSWORD_MIN}+ characters)`} style={inp} accessibilityLabel="Password" />
+          <PasswordField value={pw} onChangeText={(v) => { setPw(v); if (notice) setNotice(null); }} placeholder={mode === 'in' ? 'Password' : `Password (${PASSWORD_MIN}+ characters)`} style={inp} accessibilityLabel="Password" />
           {mode === 'up' ? <PasswordRules value={pw} /> : null}
           {mode === 'up' ? (
             <>

@@ -104,23 +104,50 @@ export function InvitesProvider({ children }: { children: ReactNode }) {
   };
   const markDismissed = (id: string) => { const next = new Set(dismissed); next.add(id); persistDismissed(next); };
 
+  // ── Why this listens to auth instead of running once ──────────────────
+  //
+  // This effect used to be `useEffect(… , [])`: it ran a single time, when the
+  // provider mounted. That is BEFORE anybody has signed in — the app is sitting
+  // on the welcome screen — so `getUser()` came back with AuthSessionMissingError,
+  // the catch below set status to 'error', and the empty dependency array meant
+  // it was never asked again for the life of the app.
+  //
+  // Signing in did not re-run it. So a member who had genuinely been invited saw
+  // no invitation on their home screen, permanently, and the coach saw no
+  // acceptance — reported four separate times across both apps as "the coach is
+  // not listed here" and "client doesn't get the request to join". The edge logs
+  // show it plainly: after a successful sign-in, coach_invites is never
+  // requested at all.
+  //
+  // It now re-runs whenever the session changes. `gen` guards against an older,
+  // slower run finishing after a newer one and overwriting it.
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
+    let gen = 0;
+    let dead = false;
+    const run = async () => {
+      const mine = ++gen;
+      const cancelled = () => dead || mine !== gen;
       // What the user already handled (accepted/declined) — never show it again.
       let skip = new Set<string>();
       try { const raw = await AsyncStorage.getItem(DISMISS_KEY); if (raw) skip = new Set<string>(JSON.parse(raw)); } catch { /* ignore */ }
-      if (!cancelled) setDismissed(skip);
+      if (!cancelled()) setDismissed(skip);
 
       // Demo mode (no backend): show the sample invite unless already handled.
-      if (!USE_SUPABASE) { if (!cancelled) { setReceived([]); setStatus('ready'); } return; }
+      if (!USE_SUPABASE) { if (!cancelled()) { setReceived([]); setStatus('ready'); } return; }
 
       // Real backend: only ever show genuine pending invites for this email.
       // No fake/sample invite for a live account (that was the re-pop bug).
       let failed = false;
       try {
+        // getSession() first, deliberately. getUser() REJECTS when there is no
+        // session, and treating that as a failed check is what latched this
+        // provider into 'error' on every cold start. Signed out is a real
+        // answer — nobody has invited you, because nobody knows who you are.
+        const { data: sess } = await supabase.auth.getSession();
+        if (cancelled()) return;
+        if (!sess?.session) { setReceived([]); setSent([]); setStatus('ready'); return; }
         const { data: auth, error: authErr } = await supabase.auth.getUser();
-        if (cancelled) return;
+        if (cancelled()) return;
         if (authErr) { setStatus('error'); return; }
         const u = auth?.user;
         // Signed out: no invitations addressed to anybody, which is true.
@@ -128,7 +155,7 @@ export function InvitesProvider({ children }: { children: ReactNode }) {
         setUid(u.id);
         try {
           const prof = await supabase.from('profiles').select('full_name').eq('id', u.id).single();
-          if (!cancelled && prof.data) setMyName(prof.data.full_name ?? null);
+          if (!cancelled() && prof.data) setMyName(prof.data.full_name ?? null);
         } catch { /* the coach's own name is cosmetic on the invite */ }
 
         // Sent (I'm the coach). `s.error` was never read, so a refused read
@@ -137,22 +164,29 @@ export function InvitesProvider({ children }: { children: ReactNode }) {
         try {
           const s = await supabase.from('coach_invites').select('*').eq('coach_id', u.id).order('created_at', { ascending: false });
           if (s.error) failed = true;
-          else if (!cancelled && s.data) setSent(s.data.map(rowToInvite));
+          else if (!cancelled() && s.data) setSent(s.data.map(rowToInvite));
         } catch { failed = true; }
 
         // Received (addressed to my email, still pending, not already handled here).
         const email = u.email;
-        if (email && !cancelled) {
+        if (email && !cancelled()) {
           try {
             const r = await supabase.from('coach_invites').select('*').ilike('email', email).eq('status', 'pending');
             if (r.error) failed = true;
-            else if (!cancelled) setReceived((r.data ?? []).map(rowToInvite).filter((i) => !skip.has(i.id)));
-          } catch { failed = true; if (!cancelled) setReceived([]); }
+            else if (!cancelled()) setReceived((r.data ?? []).map(rowToInvite).filter((i) => !skip.has(i.id)));
+          } catch { failed = true; if (!cancelled()) setReceived([]); }
         }
       } catch { failed = true; /* leave received empty — no sample invite on a real account */ }
-      if (!cancelled) setStatus(failed ? 'error' : 'ready');
-    })();
-    return () => { cancelled = true; };
+      if (!cancelled()) setStatus(failed ? 'error' : 'ready');
+    };
+    run();
+    const { data: sub } = supabase.auth.onAuthStateChange((event) => {
+      // SIGNED_IN is the one that matters; the others keep the list honest when
+      // a session is restored, refreshed into a different user, or dropped.
+      if (event === 'SIGNED_IN' || event === 'SIGNED_OUT'
+          || event === 'USER_UPDATED' || event === 'INITIAL_SESSION') run();
+    });
+    return () => { dead = true; sub?.subscription?.unsubscribe(); };
   }, []);
 
   const sendInvite: InvitesValue['sendInvite'] = async (rawEmail, mode) => {

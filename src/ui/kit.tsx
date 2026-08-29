@@ -175,9 +175,23 @@ export function Card({ children, onPress, tone, style }: {
 
 /** The primary action: a ring, two lines, one button. */
 export function ActionCard({
-  ring, ringLabel, title, note, cta, onPress, tone,
+  ring, ringLabel, ringNote, title, note, cta, onPress, tone,
 }: {
-  ring?: number; ringLabel?: string; title: string; note?: string;
+  ring?: number;
+  ringLabel?: string;
+  /**
+   * What the number in the ring COUNTS. Not decoration — required wherever the
+   * ring measures something other than the card's own subject.
+   *
+   * This card is adaptive: on a "Fuel up" day the title and note are about
+   * calories and the button says "Log a meal", while the ring's fill is
+   * workouts-this-week and the number inside it is a day streak. Three
+   * quantities, one card, and the number had no label at all — so a reader saw
+   * "1" beside "Log a meal" and read it as one meal logged, which is what a
+   * tester did and said so.
+   */
+  ringNote?: string;
+  title: string; note?: string;
   cta: string; onPress: () => void; tone?: string;
 }) {
   const t = useTheme();
@@ -186,17 +200,27 @@ export function ActionCard({
   return (
     <Card>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.lg }}>
+        {/* The column is NOT width:56 — that is the ring's width, and pinning
+            the column to it clipped the caption to "DAY ST…". It sizes to
+            whichever is wider, the ring or the word under it. */}
         {ring != null ? (
-          <View style={{ width: 56, height: 56 }}>
-            <Svg width={56} height={56} viewBox="0 0 56 56">
-              <Circle cx="28" cy="28" r={R} fill="none" stroke={t.surface3} strokeWidth={2.5} />
-              <Circle cx="28" cy="28" r={R} fill="none" stroke={mark} strokeWidth={2.5} strokeLinecap="round"
-                strokeDasharray={C} strokeDashoffset={C * (1 - Math.max(0, Math.min(1, ring)))}
-                transform="rotate(-90 28 28)" />
-            </Svg>
-            <View style={{ position: 'absolute', width: 56, height: 56, alignItems: 'center', justifyContent: 'center' }}>
-              <Text style={{ ...ty.head, ...numeric, color: t.ink }}>{ringLabel}</Text>
+          <View style={{ alignItems: 'center' }}>
+            <View style={{ width: 56, height: 56 }}>
+              <Svg width={56} height={56} viewBox="0 0 56 56">
+                <Circle cx="28" cy="28" r={R} fill="none" stroke={t.surface3} strokeWidth={2.5} />
+                <Circle cx="28" cy="28" r={R} fill="none" stroke={mark} strokeWidth={2.5} strokeLinecap="round"
+                  strokeDasharray={C} strokeDashoffset={C * (1 - Math.max(0, Math.min(1, ring)))}
+                  transform="rotate(-90 28 28)" />
+              </Svg>
+              <View style={{ position: 'absolute', width: 56, height: 56, alignItems: 'center', justifyContent: 'center' }}>
+                <Text style={{ ...ty.head, ...numeric, color: t.ink }}>{ringLabel}</Text>
+              </View>
             </View>
+            {ringNote ? (
+              <Text numberOfLines={1} style={{ ...ty.micro, color: t.ink3, marginTop: 4, textAlign: 'center', letterSpacing: 0.4 }}>
+                {ringNote}
+              </Text>
+            ) : null}
           </View>
         ) : null}
         <View style={{ flex: 1 }}>
