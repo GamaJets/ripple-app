@@ -64,6 +64,7 @@ import { View, Text, Pressable, ScrollView, Alert, Modal, TextInput, ActivityInd
 import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
+import { ensureMediaPermission } from '../../src/ui/permissions';
 import { useTheme } from '../../src/ui/components';
 import { useRouter } from 'expo-router';
 import { Rule, Section, SectionHead, Hero, ListRow, Cta, Ghost, fig } from '../../src/ui/kit';
@@ -381,8 +382,7 @@ export default function TrainerVideos() {
   };
 
   const upload = async (fromCamera: boolean, prefill?: { name?: string; group?: string }) => {
-    const perm = fromCamera ? await ImagePicker.requestCameraPermissionsAsync() : await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) { Alert.alert('Permission needed', 'Allow access to ' + (fromCamera ? 'the camera' : 'your library') + ' to add a video.'); return; }
+    if (!(await ensureMediaPermission(fromCamera ? 'camera' : 'library', 'add a video'))) return;
     const res = fromCamera
       ? await ImagePicker.launchCameraAsync({ mediaTypes: ['videos'], videoMaxDuration: 60 })
       : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['videos'] });

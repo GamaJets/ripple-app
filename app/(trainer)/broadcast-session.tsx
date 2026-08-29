@@ -23,6 +23,7 @@ import { View, Text, Pressable, ScrollView, TextInput, Alert, ActivityIndicator 
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
+import { ensureMediaPermission } from '../../src/ui/permissions';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Card, Ghost } from '../../src/ui/kit';
@@ -38,8 +39,7 @@ export default function BroadcastSession() {
   const [busy, setBusy] = useState(false);
 
   const pick = async (fromCamera: boolean) => {
-    const perm = fromCamera ? await ImagePicker.requestCameraPermissionsAsync() : await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) { Alert.alert('Permission needed', 'Allow access to ' + (fromCamera ? 'the camera' : 'your library') + ' to add a video.'); return; }
+    if (!(await ensureMediaPermission(fromCamera ? 'camera' : 'library', 'add a video'))) return;
     const res = fromCamera
       ? await ImagePicker.launchCameraAsync({ mediaTypes: ['videos'], videoMaxDuration: 120 })
       : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['videos'] });

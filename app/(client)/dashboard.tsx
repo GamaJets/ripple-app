@@ -76,7 +76,16 @@ export default function Home() {
   const [needsOnboard, setNeedsOnboard] = useState(false);
   useFocusEffect(useCallback(() => { let c = false; (async () => { try { const v = await AsyncStorage.getItem(ONBOARD_KEY); if (!c) setNeedsOnboard(!v); } catch { /* ignore */ } })(); return () => { c = true; }; }, []));
   const { sessions } = useSessions();
-  const { received: myInvites, acceptInvite: acceptCoachInvite, declineInvite: declineCoachInvite } = useInvites();
+  // `status` is read, not discarded. useInvites documents that under 'error' an
+  // empty `received` means the check did not happen — not that nobody invited
+  // you — and this screen used to take the empty list at face value. A coach
+  // would add a client, the client's home screen would show no invitation and
+  // no reason for its absence, and both sides concluded the other had failed.
+  // Reported four separate times from two apps.
+  const {
+    received: myInvites, status: invitesStatus,
+    acceptInvite: acceptCoachInvite, declineInvite: declineCoachInvite,
+  } = useInvites();
   const foodToday = useFoodLog().consumed;
   const burnedToday = useWearables().today.activeKcal || 0;
 
@@ -211,6 +220,12 @@ export default function Home() {
                 {pushAvailable() ? <View style={{ flex: 1 }}><Ghost label="Remind me tonight" onPress={remindTonight} /></View> : null}
               </View>
             </Notice>
+          ) : null}
+
+          {myInvites.length === 0 && invitesStatus === 'error' ? (
+            <Notice tone={t.warn} kicker="Coaching invitations"
+              title="Could not check for invitations"
+              note="This is not the same as having none. If a coach has invited you, it will appear here once this loads — pull down to try again." />
           ) : null}
 
           {myInvites.length > 0 ? (

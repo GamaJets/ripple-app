@@ -238,23 +238,57 @@ export interface Settlement {
  * Unmarked sessions are excluded because nobody has said whether they happened.
  * They are the reason payrollTotal refuses to answer, and settling around them
  * would quietly pay a period that is not finished.
+ *
+ * ── fallbackRateCents, and why it has to be here ──────────────────────────
+ *
+ * This used to require `s.rateCents != null`, which meant it silently dropped
+ * every session priced by the gym's standard fee — while `payrollByTrainer`,
+ * two hundred lines up, was pricing exactly those sessions at exactly that fee
+ * and showing the owner the total. The two functions disagreed about what
+ * "priced" means, and the money went through the stricter one.
+ *
+ * `payrollTotal` had already taken a side: it counts a fallback-priced session
+ * in `priced`, so `settleable` goes true and `settlementBlocker` returns null.
+ * The gym-wide guard said the figure was safe to settle and the per-trainer
+ * settlement then paid a different number.
+ *
+ * What that looked like on a gym with a session fee and no snapshotted rates:
+ * the screen said AED 1,500 owed and the button said "nothing outstanding".
+ * Worse, on a MIXED month — some sessions carrying a rate, some on the fee —
+ * there was no blocker at all: the screen said 1,500, settling handed over 900,
+ * and the sessions were stamped with a settlement id so they never came round
+ * again. A trainer short AED 600 and a record saying they had been paid.
+ *
+ * Pass the same fallback the payroll figure was computed with. It defaults to
+ * null, which is the old behaviour, so a caller that has no fee set is unchanged.
  */
 export function settleableSessions(
   sessions: PtSession[],
   policy: PayPolicy,
   now: number = Date.now(),
+  fallbackRateCents: number | null = null,
 ): PtSession[] {
   return sessions.filter((s) =>
     s.settlementId == null &&
     s.outcome !== null &&
     !isAwaitingOutcome(s, now) &&
     isPayable(s, policy) &&
-    s.rateCents != null);
+    (s.rateCents ?? fallbackRateCents) != null);
 }
 
-/** What settling those sessions would hand over. */
-export function settlementAmount(sessions: PtSession[]): number {
-  return sessions.reduce((a, s) => a + (s.rateCents ?? 0), 0);
+/**
+ * What settling those sessions would hand over.
+ *
+ * Takes the same fallback for the same reason: priced by the gym's fee here, or
+ * this hands back less than the rows it was given are worth. The `?? 0` is now
+ * genuinely unreachable for anything settleableSessions returned — it survives
+ * only so a hand-assembled list cannot produce NaN.
+ */
+export function settlementAmount(
+  sessions: PtSession[],
+  fallbackRateCents: number | null = null,
+): number {
+  return sessions.reduce((a, s) => a + (s.rateCents ?? fallbackRateCents ?? 0), 0);
 }
 
 /**

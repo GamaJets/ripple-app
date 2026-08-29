@@ -17,6 +17,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { useWellness } from '../../src/ui/wellness';
+// Hydration comes from the same place the home screen's water counter does.
+// These were two separate stores and adding a glass on one never reached the
+// other — reported twice, from both directions.
+import { useHabits } from '../../src/ui/habits';
 import { useClientData } from '../../src/ui/clientData';
 import { HrZoneChart } from '../../src/ui/HrZoneChart';
 import { ageFromDob, type HrSample } from '../../src/lib/hr';
@@ -49,7 +53,8 @@ function Quality({ n, of = 5, color, dim }: { n: number; of?: number; color: str
 export default function Recovery() {
  const t = useTheme();
  const router = useRouter();
- const { cups, goalCups, addCup, removeCup, sleep, addSleep } = useWellness();
+ const { sleep, addSleep } = useWellness();
+ const { water: cups, waterGoal: goalCups, addWater: addCup, removeWater: removeCup } = useHabits();
  const cd = useClientData();
  const wear = useWearables();
  const { log: workoutLog, status: logStatus } = useWorkoutLog();
@@ -136,13 +141,13 @@ export default function Recovery() {
   <Hero
    label="Hydration"
    figure={fig(cups)}
-   unit={`of ${goalCups} cups`}
+   unit={`of ${goalCups} glasses`}
    arc={pct / 100}
    note={cups >= goalCups ? 'Goal met today — nice.' : `${goalCups - cups} more to hit today's goal.`}
   />
   <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, paddingBottom: layout.section }}>
    <Ghost icon="minus" onPress={removeCup} />
-   <View style={{ flex: 1 }}><Cta label="Add a cup" wide onPress={addCup} /></View>
+   <View style={{ flex: 1 }}><Cta label="Add a glass" wide onPress={addCup} /></View>
   </View>
 
   <Rule />

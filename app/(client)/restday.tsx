@@ -42,14 +42,22 @@ export default function RestDay() {
 
   const { dl, wk, restToday } = info;
   const tone = !known ? t.warn : dl.due ? t.s3 : restToday ? t.warn : t.brand;
-  const headline = !known ? 'We couldn’t read your training log' : dl.due ? 'Time for a deload week' : restToday ? 'Take a rest day' : 'You are well recovered';
+  // "You are well recovered" was a claim this screen is not entitled to make.
+  // Everything here is inferred from the TRAINING LOG: it knows how much you
+  // have trained and nothing else. Home's Readiness is a different measure —
+  // sleep, hydration and load together — so a person who had not trained but
+  // had slept badly was told "well recovered" here and "under-recovered" there,
+  // on the same morning. Both figures were right; the word was wrong.
+  //
+  // Narrowed to what the log can actually support: room to train, by volume.
+  const headline = !known ? 'We couldn’t read your training log' : dl.due ? 'Time for a deload week' : restToday ? 'Take a rest day' : 'You have room to train';
   const body = !known
     ? 'This screen works entirely from what you have logged, and we could not read it. Nothing here is a judgement about your recovery — read it as blank, not as a green light to train.'
     : dl.due
     ? dl.reason
     : restToday
     ? `You've trained ${wk.days} of the last 7 days. A rest day now protects your progress and lowers injury risk.`
-    : `${wk.days} training day${wk.days === 1 ? '' : 's'} this week. You have room to train — keep listening to your body.`;
+    : `${wk.days} training day${wk.days === 1 ? '' : 's'} this week — that is light by volume alone. This reads your training log only, not your sleep or hydration; Readiness on Home weighs those together.`;
 
   const restActions = [
     { icon: 'water', label: 'Hydrate & refuel', note: 'Protein + carbs to rebuild.' },

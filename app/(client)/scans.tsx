@@ -29,6 +29,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { View, Text, Pressable, Image, TextInput, ScrollView, Modal, Alert, Linking, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
+import { ensureMediaPermission } from '../../src/ui/permissions';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { supabase } from '../../src/lib/supabase';
 import { reportError } from '../../src/lib/reportError';
@@ -154,8 +155,7 @@ export default function Scans() {
   const scanDateLabel = () => { const y = YEARS[dY]; const maxd = daysIn(dM, y); return `${Math.min(dD, maxd - 1) + 1} ${MONTHS[dM]} ${y}`; };
 
   const pick = async (fromCamera: boolean) => {
-    const perm = fromCamera ? await ImagePicker.requestCameraPermissionsAsync() : await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) { Alert.alert('Permission needed', 'Allow access to ' + (fromCamera ? 'the camera' : 'your photos') + ' to add a scan.'); return; }
+    if (!(await ensureMediaPermission(fromCamera ? 'camera' : 'library', 'add a scan'))) return;
     const res = fromCamera ? await ImagePicker.launchCameraAsync({ quality: 0.7, base64: true }) : await ImagePicker.launchImageLibraryAsync({ quality: 0.7, base64: true });
     if (!res.canceled && res.assets && res.assets[0]) {
       const asset = res.assets[0]; const uri = asset.uri; setImg(uri); setReading(true); setOcrMsg(null); setScanMx(null);
@@ -275,8 +275,7 @@ export default function Scans() {
   };
 
   const physiqueCheck = async (fromCamera: boolean) => {
-    const perm = fromCamera ? await ImagePicker.requestCameraPermissionsAsync() : await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) { Alert.alert('Permission needed', 'Allow ' + (fromCamera ? 'camera' : 'photo library') + ' access.'); return; }
+    if (!(await ensureMediaPermission(fromCamera ? 'camera' : 'library', 'add a scan'))) return;
     const res = fromCamera ? await ImagePicker.launchCameraAsync({ quality: 0.5, base64: true }) : await ImagePicker.launchImageLibraryAsync({ quality: 0.5, base64: true });
     if (res.canceled || !res.assets || !res.assets[0]) return;
     const asset = res.assets[0];
@@ -293,8 +292,7 @@ export default function Scans() {
   };
 
   const addPhoto = async (fromCamera: boolean) => {
-    const perm = fromCamera ? await ImagePicker.requestCameraPermissionsAsync() : await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) { Alert.alert('Permission needed', 'Allow ' + (fromCamera ? 'camera' : 'photo library') + ' access to add a progress photo.'); return; }
+    if (!(await ensureMediaPermission(fromCamera ? 'camera' : 'library', 'add a scan'))) return;
     const res = fromCamera ? await ImagePicker.launchCameraAsync({ quality: 0.6 }) : await ImagePicker.launchImageLibraryAsync({ quality: 0.6 });
     if (!res.canceled && res.assets && res.assets[0]) await savePhoto(res.assets[0].uri);
   };

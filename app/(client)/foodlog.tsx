@@ -13,18 +13,21 @@
 // alerting "Barcode Scanned". No barcode was ever read and no product was ever
 // looked up: every scan produced the same invented protein bar. The button now
 // says nothing was logged and points at the real Open Food Facts lookup.
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView, Alert, Modal, Image, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
+import { ensureMediaPermission } from '../../src/ui/permissions';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { useTheme } from '../../src/ui/components';
-import { macrosFor, applyCoachAdjust } from '../../src/lib/nutrition';
+import { caloriesLeft, macrosFor, applyCoachAdjust } from '../../src/lib/nutrition';
 import { useClientData } from '../../src/ui/clientData';
 import { Icon } from '../../src/ui/Icon';
 import { analyzeMeal, visionAvailable } from '../../src/lib/vision';
 import { parseFoodText, foodAIAvailable } from '../../src/lib/foodAI';
+import { searchProducts } from '../../src/lib/openfoodfacts';
+import { BarcodeSheet } from '../../src/ui/BarcodeSheet';
 import { notifySuccess } from '../../src/ui/haptics';
 import { useFoodLog } from '../../src/ui/foodLog';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
@@ -66,7 +69,58 @@ export default function FoodLog() {
  const fl = useFoodLog();
  const [q, setQ] = useState('');
  const [nl, setNl] = useState(''); const [nlBusy, setNlBusy] = useState(false);
- const results = q ? FOOD_DB.filter((f) => f.n.toLowerCase().includes(q.toLowerCase())) : [];
+ // ── Search foods ────────────────────────────────────────────────────────
+ //
+ // This used to be `FOOD_DB.filter(...)` and nothing else: a 113-row table
+ // hardcoded above, holding chicken breast, oats and banana. It matched almost
+ // nothing anybody actually buys, which is why it was reported as not working —
+ // it was working, against a list that could never contain the answer. Two
+ // buttons away, the barcode path was already reading Open Food Facts.
+ //
+ // The local table stays, first and instant, because it is the fast path for
+ // exactly the generic staples people log most. Open Food Facts follows behind
+ // it for everything else — UK imports and Gulf brands alike.
+ const [remote, setRemote] = useState<Food[]>([]);
+ const [searching, setSearching] = useState(false);
+ // Distinct from "no matches": the lookup is free and rate-limited, and it
+ // answers 503 when busy. Saying "nothing found" to that would tell somebody
+ // their food does not exist because a server was throttling us.
+ const [searchDown, setSearchDown] = useState(false);
+
+ const local = useMemo(
+   () => (q.trim() ? FOOD_DB.filter((f) => f.n.toLowerCase().includes(q.trim().toLowerCase())) : []),
+   [q],
+ );
+
+ useEffect(() => {
+   const term = q.trim();
+   // Under three characters matches half the database and is never what was meant.
+   if (term.length < 3) { setRemote([]); setSearching(false); setSearchDown(false); return; }
+   const ctrl = new AbortController();
+   setSearching(true);
+   // Debounced: this fires under a field somebody is still typing into, and a
+   // request per keystroke would both rate-limit us and land out of order.
+   const timer = setTimeout(() => {
+     searchProducts(term, { signal: ctrl.signal }).then((res) => {
+       if (ctrl.signal.aborted) return;
+       setSearching(false);
+       if (!res.ok) { setSearchDown(true); setRemote([]); return; }
+       setSearchDown(false);
+       setRemote(res.products.map((x) => ({
+         // Say what the numbers are FOR. A per-100g figure logged as if it were
+         // a portion is the kind of quiet wrongness this app is built to avoid.
+         n: x.serving ? `${x.name} (${x.serving})` : x.name,
+         k: x.kcal, p: x.protein, c: x.carbs, f: x.fat,
+       })));
+     });
+   }, 350);
+   return () => { ctrl.abort(); clearTimeout(timer); };
+ }, [q]);
+
+ const results = useMemo(() => {
+   const seen = new Set(local.map((f) => f.n.toLowerCase()));
+   return [...local, ...remote.filter((f) => !seen.has(f.n.toLowerCase()))];
+ }, [local, remote]);
 
  // photo estimate modal state
  const [photoUri, setPhotoUri] = useState<string | null>(null);
@@ -89,12 +143,12 @@ export default function FoodLog() {
 
  const tot = { k: fl.consumed.kcal, p: fl.consumed.protein, c: fl.consumed.carbs, f: fl.consumed.fat };
  const burned = useWearables().today.activeKcal || 0;
- const remK = target ? (target.kcal + burned) - tot.k : 0;
+ // Same function the Meals tab calls, so the two cannot drift apart again.
+ const remK = target ? caloriesLeft(target.kcal, tot.k, burned).net : 0;
 
  const fillEst = (n: string, k: number, p: number, c: number, f: number) => { setEstN(n); setEstK(String(k)); setEstP(String(p)); setEstC(String(c)); setEstF(String(f)); setReadFailed(false); setReading(false); };
  const takeMealPhoto = async (fromCamera: boolean) => {
- const perm = fromCamera ? await ImagePicker.requestCameraPermissionsAsync() : await ImagePicker.requestMediaLibraryPermissionsAsync();
- if (!perm.granted) { Alert.alert('Permission needed', 'Allow access to ' + (fromCamera ? 'the camera' : 'your photos') + ' to log a meal by photo.'); return; }
+ if (!(await ensureMediaPermission(fromCamera ? 'camera' : 'library', 'log a meal by photo'))) return;
  const res = fromCamera ? await ImagePicker.launchCameraAsync({ quality: 0.5, base64: true }) : await ImagePicker.launchImageLibraryAsync({ quality: 0.5, base64: true });
  if (res.canceled || !res.assets?.[0]) return;
  const asset = res.assets[0];
@@ -121,7 +175,9 @@ export default function FoodLog() {
  };
 
  // Nothing is scanned and nothing is logged — say so instead of inventing a hit.
- const barcodeNote = () => Alert.alert('No barcode was scanned', 'Nothing was logged. A real barcode lookup lives on the Meals screen, under "Log what you ate" → Barcode — it reads the product from Open Food Facts.');
+ // Was `barcodeNote`: an alert that said nothing had been scanned and pointed
+ // at the Meals screen. A button whose only function was to name another button.
+ const [bcOpen, setBcOpen] = useState(false);
 
  const macroRow = (label: string, cur: number, tg: number, dim?: boolean) => {
  const rem = tg - cur;
@@ -190,7 +246,7 @@ export default function FoodLog() {
  <Icon name="plus" size={18} color={t.ink2} />
  <Text style={{ ...ty.caption, fontWeight: '500', color: t.ink }}>Upload</Text>
  </Pressable>
- <Pressable accessibilityLabel="Scan barcode" accessibilityRole="button" onPress={barcodeNote}
+ <Pressable accessibilityLabel="Scan barcode" accessibilityRole="button" onPress={() => setBcOpen(true)}
  style={{ flex: 1, backgroundColor: t.surface2, borderRadius: radius.sm, paddingVertical: sp.md, alignItems: 'center', gap: 5 }}>
  <Icon name="search" size={18} color={t.ink2} />
  <Text style={{ ...ty.caption, fontWeight: '500', color: t.ink }}>Barcode</Text>
@@ -219,12 +275,31 @@ export default function FoodLog() {
 
  {/* ── search the food table ──────────────────────────────────────── */}
  <Section>
- <SectionHead title="Search foods" note={q ? `${results.length} match${results.length === 1 ? '' : 'es'}` : undefined} />
+ <SectionHead
+ title="Search foods"
+ note={!q.trim() ? undefined
+   : searching ? 'searching…'
+   : searchDown ? 'search unavailable'
+   : `${results.length} match${results.length === 1 ? '' : 'es'}`} />
  <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md }}>
  <Icon name="search" size={16} color={t.ink3} />
  <TextInput value={q} onChangeText={setQ} placeholder="Chicken, oats, banana…" placeholderTextColor={t.ink3}
  style={{ flex: 1, ...ty.body, color: t.ink, paddingVertical: 11 }} />
  </View>
+ {q.trim().length > 0 && q.trim().length < 3 ? (
+ <Text style={{ ...ty.label, color: t.ink3, paddingTop: sp.md }}>Keep typing — three letters or more.</Text>
+ ) : null}
+ {q.trim().length >= 3 && !searching && searchDown && results.length === 0 ? (
+ <Text style={{ ...ty.label, color: t.ink3, paddingTop: sp.md }}>
+ Food search could not be reached just now — this says nothing about whether
+ the food is in there. Scan the barcode or describe it below in the meantime.
+ </Text>
+ ) : null}
+ {q.trim().length >= 3 && !searching && !searchDown && results.length === 0 ? (
+ <Text style={{ ...ty.label, color: t.ink3, paddingTop: sp.md }}>
+ Nothing found. Try the brand name, scan the barcode, or describe it below.
+ </Text>
+ ) : null}
  {results.map((f, i) => (
  <View key={f.n}>
  {i > 0 ? <Rule /> : null}
@@ -314,6 +389,8 @@ export default function FoodLog() {
  </View>
     </KeyboardAvoidingView>
  </Modal>
+ <BarcodeSheet visible={bcOpen} onClose={() => setBcOpen(false)}
+   onLogged={(f) => fl.addFood({ ...f, via: 'barcode' })} />
  </SafeAreaView>
  );
 }

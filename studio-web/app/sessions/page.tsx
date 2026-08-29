@@ -219,6 +219,7 @@ export default function Sessions() {
   // on this page.
   const owed = useMemo(() => {
     if (sessions === null) return null;
+    const feeCents = sessionFee == null ? null : Math.round(sessionFee * 100);
     const byTrainer = new Map<string, { name: string | null; rows: PtSession[]; unmarked: number }>();
     for (const s of sessions) {
       const e = byTrainer.get(s.trainerId)
@@ -226,18 +227,20 @@ export default function Sessions() {
       if (isAwaitingOutcome(s)) e.unmarked += 1;
       byTrainer.set(s.trainerId, e);
     }
-    for (const s of settleableSessions(sessions, policy)) {
+    // The same fee `lines` was priced with, or this panel offers to settle a
+    // smaller number than the payroll table above it is showing.
+    for (const s of settleableSessions(sessions, policy, undefined, feeCents)) {
       const e = byTrainer.get(s.trainerId);
       if (e) e.rows.push(s);
     }
     return [...byTrainer.entries()]
       .map(([trainerId, e]) => ({
         trainerId, name: e.name, rows: e.rows, unmarked: e.unmarked,
-        cents: settlementAmount(e.rows),
+        cents: settlementAmount(e.rows, feeCents),
         blocker: settleBlocker(e.rows, e.unmarked),
       }))
       .filter((x) => x.rows.length > 0 || x.unmarked > 0);
-  }, [sessions, policy]);
+  }, [sessions, policy, sessionFee]);
 
   const settle = async (t: NonNullable<typeof owed>[number]) => {
     if (!me?.tenantId || t.blocker) return;

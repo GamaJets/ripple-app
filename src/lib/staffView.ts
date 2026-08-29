@@ -439,7 +439,10 @@ export function buildStaff(rec: StaffRecord, opts: StaffOptions): StaffView {
   const lineOf = new Map((lines ?? []).map((l) => [l.trainerId, l]));
 
   // What a settlement would actually cover: unsettled, marked, priced, payable.
-  const settleable = sessionRows ? settleableSessions(sessionRows, opts.policy, now) : null;
+  // Same fallback the payroll lines above were priced with. Without it this
+  // drops every session carried by the gym's standard fee, and the staff view
+  // reports a trainer as owed money that the settle path would not pay.
+  const settleable = sessionRows ? settleableSessions(sessionRows, opts.policy, now, fallback) : null;
   const settleableOf = new Map<string, PtSession[]>();
   for (const x of settleable ?? []) {
     const list = settleableOf.get(x.trainerId) ?? [];

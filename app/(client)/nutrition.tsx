@@ -21,6 +21,8 @@ import { mealPlanDoc, shareDoc } from '../../src/lib/exportShare';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Diet, Goal } from '../../src/lib/types';
 import { useClientData } from '../../src/ui/clientData';
+import { useWearables } from '../../src/ui/wearables';
+import { caloriesLeft } from '../../src/lib/nutrition';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
 import { Icon } from '../../src/ui/Icon';
 import { useRouter } from 'expo-router';
@@ -29,7 +31,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { analyzeMeal, visionAvailable } from '../../src/lib/vision';
 import { parseFoodText, foodAIAvailable } from '../../src/lib/foodAI';
-import { lookupBarcode, normalizeBarcode } from '../../src/lib/openfoodfacts';
+import { BarcodeSheet } from '../../src/ui/BarcodeSheet';
 import { useFoodLog } from '../../src/ui/foodLog';
 import { notifySuccess } from '../../src/ui/haptics';
 import { Rule, Section, SectionHead, Hero, Card, Cta, Ghost, Meter, QuickRow } from '../../src/ui/kit';
@@ -75,8 +77,6 @@ export default function Nutrition() {
   const [nl, setNl] = useState('');
   const [logBusy, setLogBusy] = useState(false);
   const [bcOpen, setBcOpen] = useState(false);
-  const [bcCode, setBcCode] = useState('');
-  const [bcBusy, setBcBusy] = useState(false);
   const photoLog = async () => {
     const perm = await ImagePicker.requestCameraPermissionsAsync();
     if (!perm.granted) { Alert.alert('Camera needed', 'Allow camera to log a meal by photo.'); return; }
@@ -92,15 +92,7 @@ export default function Nutrition() {
     // the app invented.
     if (!done) { Alert.alert('Could not read that photo', visionAvailable() ? 'Nothing was logged. Describe it below, or add it from the Food Log.' : 'Photo logging turns on with the AI backend. Describe it below, or add it from the Food Log.'); }
   };
-  const barcodeLog = () => { setBcCode(''); setBcOpen(true); };
-  const runBarcodeLookup = async () => {
-    if (!normalizeBarcode(bcCode)) { Alert.alert('Enter a barcode', 'Type the 8–13 digit number under the barcode.'); return; }
-    setBcBusy(true); const p = await lookupBarcode(bcCode); setBcBusy(false);
-    if (!p) { Alert.alert('Not found', 'No match in the Open Food Facts database for that barcode. Try “Describe it” instead.'); return; }
-    fl.addFood({ name: p.name, kcal: p.kcal, protein: p.protein, carbs: p.carbs, fat: p.fat, via: 'barcode' });
-    notifySuccess(); setBcOpen(false);
-    Alert.alert('Logged', p.name + ' · ' + p.kcal + ' kcal (' + p.serving + ') added to today.');
-  };
+  const barcodeLog = () => setBcOpen(true);
   const describeLog = async () => {
     const text = nl.trim(); if (!text) return;
     setLogBusy(true); const items = await parseFoodText(text); setLogBusy(false);
@@ -143,7 +135,13 @@ export default function Nutrition() {
 
   const G = layout.gutter;
   const eaten = fl.consumed;
-  const kcalLeft = Math.max(0, target.kcal - eaten.kcal);
+  // One sum, shared with the Food Log. This was `Math.max(0, target - eaten)`:
+  // it ignored calories burned, so the two screens differed by exactly the day's
+  // activity — 3,948 on one and 2,860 on the other, reported twice. The clamp
+  // was the worse half: this hero could never say a person was OVER, it showed
+  // zero left, which reads as "exactly on target" at the moment that is untrue.
+  const burnedKcal = useWearables().today.activeKcal || 0;
+  const cal = caloriesLeft(target.kcal, eaten.kcal, burnedKcal);
   const cycleNote = dayType === 'training' ? '+250 kcal, more carbs' : dayType === 'rest' ? '−250 kcal, fewer carbs' : undefined;
 
   if (!hasBody) {
@@ -194,10 +192,10 @@ export default function Nutrition() {
 
         {/* ── the hero: what is left to eat today ────────────────────────── */}
         <Hero
-          label="Calories left"
-          figure={kcalLeft.toLocaleString()}
+          label={cal.net >= 0 ? 'Calories left' : 'Calories over'}
+          figure={Math.abs(cal.net).toLocaleString()}
           unit="kcal"
-          note={`${eaten.kcal.toLocaleString()} of ${target.kcal.toLocaleString()} kcal eaten`}
+          note={`${cal.eaten.toLocaleString()} of ${cal.target.toLocaleString()} kcal eaten${cal.burned ? ` · ${cal.burned.toLocaleString()} kcal burned` : ''}`}
           arc={target.kcal ? eaten.kcal / target.kcal : 0}
           onPress={() => router.push('/(client)/foodlog')}
         />
@@ -530,25 +528,11 @@ export default function Nutrition() {
         </View>
       </Modal>
 
-      {/* ── barcode sheet ────────────────────────────────────────────────── */}
-      <Modal visible={bcOpen} transparent animationType="slide" onRequestClose={() => setBcOpen(false)}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setBcOpen(false)} />
-        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30, ...elevation.e2 }}>
-          <Text style={{ ...ty.title, color: t.ink }}>Scan a barcode</Text>
-          <Text style={{ ...ty.label, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>Type the number under the barcode — we look it up in Open Food Facts and add the real macros.</Text>
-          <TextInput value={bcCode} onChangeText={setBcCode} placeholder="e.g. 0049000042566" placeholderTextColor={t.ink3} keyboardType="number-pad" returnKeyType="done" onSubmitEditing={runBarcodeLookup} autoFocus
-            style={{ ...ty.head, ...numeric, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: 13, letterSpacing: 1, marginBottom: sp.md }} />
-          <Pressable onPress={runBarcodeLookup} disabled={bcBusy}
-            style={{ backgroundColor: t.brand, borderRadius: radius.sm, paddingVertical: 11, alignItems: 'center', marginBottom: sp.sm }}>
-            {bcBusy ? <ActivityIndicator color={t.brandInk} /> : <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>Look up &amp; log</Text>}
-          </Pressable>
-          <Pressable onPress={() => setBcOpen(false)} style={{ paddingVertical: 10, alignItems: 'center' }}>
-            <Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>Cancel</Text>
-          </Pressable>
-        </View>
-              </KeyboardAvoidingView>
-      </Modal>
+      {/* The sheet itself lives in src/ui/BarcodeSheet — the Food Log needs the
+          same one, and a second copy is how the two calorie sums on these very
+          screens came to disagree. */}
+      <BarcodeSheet visible={bcOpen} onClose={() => setBcOpen(false)}
+        onLogged={(f) => fl.addFood({ ...f, via: 'barcode' })} />
     </SafeAreaView>
   );
 }

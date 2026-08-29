@@ -148,6 +148,7 @@ function MetricCols({ t, items }: { t: Theme; items: { label: string; value: str
 export default function Train() {
   const insets = useSafeAreaInsets();
   const t = useTheme();
+  const pageScroll = useRef<ScrollView>(null);
   const router = useRouter();
   const cd = useClientData();
   const _cp = useAssignedPrograms().getProgram(cd.id);
@@ -465,7 +466,7 @@ export default function Train() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+      <ScrollView ref={pageScroll} contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ paddingTop: sp.md }}>
@@ -681,21 +682,39 @@ export default function Train() {
                   </Pressable>
                 ))}
               </ScrollView>
+              {/* Recovery is not cardio, and this form used to treat it as if it
+                  were: logging a sauna asked for Distance, km and Avg watts.
+                  None of those has a meaning for Breathwork, a Cold Plunge or a
+                  Massage, and the note underneath was about bikes and rowers.
+                  Calories go too — recoveryActs.ts is explicit that these are
+                  thermoregulation rather than work, so a figure derived from
+                  time and body weight would be invented. A recovery session is
+                  how long it lasted. */}
               <View style={{ flexDirection: 'row', gap: sp.sm }}>
                 <TextInput value={mins} onChangeText={setMins} keyboardType="numeric" placeholder="Time (min)" placeholderTextColor={t.ink3} style={inp} />
-                <TextInput value={dist} onChangeText={setDist} keyboardType="numeric" placeholder="Distance" placeholderTextColor={t.ink3} style={inp} />
-                <Pressable onPress={() => setUnit(unit === 'km' ? 'mi' : 'km')} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, justifyContent: 'center' }}>
-                  <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>{unit}</Text>
-                </Pressable>
+                {mode !== 'recovery' ? (
+                  <>
+                    <TextInput value={dist} onChangeText={setDist} keyboardType="numeric" placeholder="Distance" placeholderTextColor={t.ink3} style={inp} />
+                    <Pressable onPress={() => setUnit(unit === 'km' ? 'mi' : 'km')} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, justifyContent: 'center' }}>
+                      <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>{unit}</Text>
+                    </Pressable>
+                  </>
+                ) : null}
                 <Pressable onPress={logCardio} style={{ backgroundColor: t.brand, borderRadius: radius.sm, paddingHorizontal: sp.lg, justifyContent: 'center' }}>
                   <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>Log</Text>
                 </Pressable>
               </View>
-              <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm }}>
-                <TextInput value={watts} onChangeText={setWatts} keyboardType="numeric" placeholder="Avg watts (optional)" placeholderTextColor={t.ink3} style={inp} />
-                <TextInput value={kcalIn} onChangeText={setKcalIn} keyboardType="numeric" placeholder="Calories (optional)" placeholderTextColor={t.ink3} style={inp} />
-              </View>
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>Bikes, rowers &amp; ski ergs: add your avg watts. Logging an Apple Watch workout by hand? Enter the minutes and the calories it shows — leave distance blank for studio classes like Pilates.</Text>
+              {mode !== 'recovery' ? (
+                <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm }}>
+                  <TextInput value={watts} onChangeText={setWatts} keyboardType="numeric" placeholder="Avg watts (optional)" placeholderTextColor={t.ink3} style={inp} />
+                  <TextInput value={kcalIn} onChangeText={setKcalIn} keyboardType="numeric" placeholder="Calories (optional)" placeholderTextColor={t.ink3} style={inp} />
+                </View>
+              ) : null}
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                {mode === 'recovery'
+                  ? 'Just how long it lasted. Recovery is not scored as calories burned — a sauna raises your heart rate, but the cost is keeping you cool rather than work done, so any figure here would be made up.'
+                  : 'Bikes, rowers & ski ergs: add your avg watts. Logging an Apple Watch workout by hand? Enter the minutes and the calories it shows — leave distance blank for studio classes like Pilates.'}
+              </Text>
 
               <View style={{ marginTop: layout.section }}>
                 <SectionHead title="Today's sessions" />
@@ -723,7 +742,19 @@ export default function Train() {
         <Section>
           <SectionHead title="Log by text" />
           <View style={{ flexDirection: 'row', gap: sp.sm }}>
-            <TextInput value={nlw} onChangeText={setNlw} placeholder='"bench 3x8 60kg, squat 5 5 5 100kg"' placeholderTextColor={t.ink3} onSubmitEditing={logWorkoutNL} returnKeyType="done" style={inp} />
+            {/* This field is the last thing on the screen, so when the keyboard
+                comes up it is exactly where the keyboard is. The ScrollView's
+                automaticallyAdjustKeyboardInsets makes the field REACHABLE by
+                scrolling, but nothing was scrolling — so what a person saw was
+                the section heading and then the keyboard, with whatever they
+                typed hidden behind it. Reported twice.
+
+                Scrolling to the end on focus puts it above the keyboard. The
+                frame of delay is for the inset to be applied first; scrolling
+                before that lands short by the height of the keyboard. */}
+            <TextInput value={nlw} onChangeText={setNlw} placeholder='"bench 3x8 60kg, squat 5 5 5 100kg"' placeholderTextColor={t.ink3}
+              onFocus={() => { setTimeout(() => pageScroll.current?.scrollToEnd({ animated: true }), 120); }}
+              onSubmitEditing={logWorkoutNL} returnKeyType="done" style={inp} />
             <Pressable onPress={logWorkoutNL} disabled={!nlw.trim()} accessibilityRole="button" accessibilityLabel="Log workout from text" style={{ backgroundColor: nlw.trim() ? t.brand : t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, justifyContent: 'center' }}>
               <Text style={{ ...ty.label, fontWeight: '600', color: nlw.trim() ? t.brandInk : t.ink3 }}>Log</Text>
             </Pressable>

@@ -15,6 +15,7 @@ import { Icon, type IconName } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
+import { ensureMediaPermission } from '../../src/ui/permissions';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { Rule, Section, SectionHead, Card, ListRow, QuickRow, Cta } from '../../src/ui/kit';
@@ -70,8 +71,7 @@ export default function CoachProfile() {
   const initials = p.name.replace('Coach ', '').split(' ').map((x) => x[0]).join('').slice(0, 2);
 
   const pickPhoto = async (fromCamera: boolean) => {
-    const perm = fromCamera ? await ImagePicker.requestCameraPermissionsAsync() : await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) { Alert.alert('Permission needed', 'Allow ' + (fromCamera ? 'camera' : 'photo library') + ' access to set your profile photo.'); return; }
+    if (!(await ensureMediaPermission(fromCamera ? 'camera' : 'library', 'set your profile photo'))) return;
     const res = fromCamera ? await ImagePicker.launchCameraAsync({ quality: 0.7, allowsEditing: true, aspect: [1, 1] }) : await ImagePicker.launchImageLibraryAsync({ quality: 0.7, allowsEditing: true, aspect: [1, 1] });
     if (!res.canceled && res.assets && res.assets[0]) p.setPhoto(res.assets[0].uri);
   };

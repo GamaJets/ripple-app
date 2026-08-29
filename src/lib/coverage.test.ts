@@ -34,6 +34,7 @@ import { sliceLoading, sliceReady, sliceFailed, rowsOf, brokenParts, completenes
 import { payroll30For, payrollBlocker, type GymTrainer } from './gymTrainers';
 import { gymRollup, trainerHealth } from './ownerAnalytics';
 import { ROW_CAP, capLimit, assertWhole, isTruncated, TruncatedRead } from './rowCap';
+import { caloriesLeft } from './nutrition';
 import { isDelivered, isAwaitingOutcome, isPayable, payrollByTrainer, payrollTotal, settlementBlocker, settleableSessions, settlementAmount, settleBlocker, sessionProfileIds, namesById, PAY_DELIVERED_ONLY, type PtSession } from './gymSessions';
 import { dwellMinutes, averageDwellMinutes, uniqueMembers, summariseVisits, visitsByHour, peakHour, visitsPerDay, lastSeenDays, type Visit } from './gymVisits';
 import { remainingUses, isExpired, isRedeemable, expiryFor, passRevenueCents, summarisePasses, guestsByHost, passStatus, type GymPass } from './gymPasses';
@@ -4240,6 +4241,108 @@ function by2(v: ReturnType<typeof buildStaff>, id: string) {
     'the line is at the cap: 1000 ended, 1001 was cut off');
   ok(isTruncated(rows(51), 50) && !isTruncated(rows(50), 50), 'and it moves with a custom cap');
   ok(!isTruncated(null) && !isTruncated([]), 'nothing read is not something truncated');
+}
+
+
+// ── the screen and the settle button must quote the same number ────────────
+//
+// `payrollByTrainer` prices a session at `rateCents ?? fallbackRateCents` — the
+// gym's standard fee stands in where no rate was snapshotted. `settleableSessions`
+// required `rateCents != null` and silently dropped every one of those, so the
+// two disagreed about what "priced" means and the money went through the
+// stricter of them.
+//
+// `payrollTotal` had already taken a side: it counts a fallback-priced session
+// in `priced`, so `settleable` goes true and `settlementBlocker` returns null.
+// The gym-wide guard cleared the button and the per-trainer path then paid a
+// different figure. On a mixed month there was no blocker at all — the screen
+// said 1,500, settling handed over 900, and the rows were stamped settled so
+// they never came round again.
+{
+  const NOW = Date.UTC(2026, 7, 20, 12, 0, 0);
+  const FEE = 7500;
+  const done = (id: string, rateCents: number | null, settlementId: string | null = null): PtSession => ({
+    id, trainerId: 't1', trainerName: 'Dana', clientId: null, clientName: null,
+    startsAt: new Date(NOW - 5 * 86_400_000).toISOString(), durationMin: 60,
+    status: 'booked', outcome: 'completed', outcomeAt: new Date(NOW - 5 * 86_400_000).toISOString(),
+    rateCents, settlementId,
+  });
+  const owed = (rows: PtSession[], fee: number | null) =>
+    payrollTotal(payrollByTrainer(rows, PAY_DELIVERED_ONLY, fee, NOW)).cents;
+  const pays = (rows: PtSession[], fee: number | null) =>
+    settlementAmount(settleableSessions(rows, PAY_DELIVERED_ONLY, NOW, fee), fee);
+
+  // the case that silently underpaid: some rated, some on the gym's fee
+  const mixed = [...Array.from({ length: 12 }, (_, i) => done('r' + i, FEE)),
+                 ...Array.from({ length: 8 }, (_, i) => done('n' + i, null))];
+  ok(owed(mixed, FEE) === 150_000, 'twenty delivered sessions at the gym fee is AED 1,500 owed');
+  ok(pays(mixed, FEE) === owed(mixed, FEE),
+    'and settling hands over exactly that — the eight priced by the fee are no longer dropped');
+  ok(settleableSessions(mixed, PAY_DELIVERED_ONLY, NOW, FEE).length === 20,
+    'all twenty are settleable, not just the twelve carrying a snapshotted rate');
+  ok(settleBlocker(settleableSessions(mixed, PAY_DELIVERED_ONLY, NOW, FEE), 0) === null,
+    'with nothing unmarked there is nothing to block, and now nothing hidden either');
+
+  // every session on the fee — this one used to say "nothing outstanding"
+  const allFee = Array.from({ length: 20 }, (_, i) => done('s' + i, null));
+  ok(owed(allFee, FEE) === 150_000 && pays(allFee, FEE) === 150_000,
+    'a gym that prices by its standard fee alone can both see and settle the figure');
+  ok(settleBlocker(settleableSessions(allFee, PAY_DELIVERED_ONLY, NOW, FEE), 0) === null,
+    'rather than being told there is nothing outstanding while the table says 1,500');
+
+  // ── the refusals that must survive ──
+  ok(owed(allFee, null) === null && pays(allFee, null) === 0,
+    'with no fee AND no rates there is still no figure — the fallback cannot invent one');
+  ok(settleBlocker(settleableSessions(allFee, PAY_DELIVERED_ONLY, NOW, null), 0)
+       === 'Nothing outstanding for this trainer.',
+    'and that case is still blocked, which is the behaviour the old filter got right');
+
+  const paid = Array.from({ length: 5 }, (_, i) => done('p' + i, null, 'settlement-1'));
+  ok(settleableSessions(paid, PAY_DELIVERED_ONLY, NOW, FEE).length === 0,
+    'a session already carrying a settlement id is never paid twice, fee or no fee');
+
+  const pending: PtSession = { ...done('u1', null), outcome: null, outcomeAt: null,
+    startsAt: new Date(NOW - 3_600_000).toISOString() };
+  ok(settleableSessions([pending], PAY_DELIVERED_ONLY, NOW, FEE).length === 0,
+    'and an unmarked session stays out — the fee prices work, it does not confirm it happened');
+
+  // the default is the old behaviour, so any caller not yet passing a fee is unchanged
+  ok(settleableSessions(allFee, PAY_DELIVERED_ONLY, NOW).length === 0,
+    'omitting the fallback still means "a snapshotted rate or nothing"');
+  ok(settlementAmount([done('x', 7500), done('y', null)]) === 7500,
+    'and settlementAmount without a fallback prices only what carries a rate');
+}
+
+
+// ── one day, one number of calories left ───────────────────────────────────
+//
+// The Food Log computed `(target + burned) - eaten`; the Meals tab computed
+// `Math.max(0, target - eaten)`. With 1,088 kcal burned the same day read 3,948
+// on one screen and 2,860 on the other, and a tester reported it from both
+// directions. The clamp was the worse of the two faults: Meals could not say a
+// person was over target, it said zero left — which reads as "exactly on
+// target" at the one moment that is untrue.
+{
+  const c = caloriesLeft(2860, 0, 1088);
+  ok(c.net === 3948, 'burned calories count toward what is left, on every screen that asks');
+  ok(c.target === 2860 && c.eaten === 0 && c.burned === 1088,
+    'and the parts stay available, so a screen can show its working');
+
+  ok(caloriesLeft(2000, 500, 0).net === 1500, 'no wearable is simply no burned calories, not a different sum');
+  ok(caloriesLeft(2000, 500).net === 1500, 'burned defaults to none rather than to undefined arithmetic');
+
+  // the clamp, which is the part that lied
+  const over = caloriesLeft(2000, 2600, 0);
+  ok(over.net === -600, 'eating past the target gives a NEGATIVE number, not a floor of zero');
+  ok(over.over === 600, 'with the size of the overshoot named, so a screen can say "600 over"');
+  ok(caloriesLeft(2000, 2000).net === 0 && caloriesLeft(2000, 2000).over === 0,
+    'and exactly on target is the only case that reads as zero');
+
+  // rounding and rubbish in
+  ok(caloriesLeft(2000.4, 500.6, 100.5).net === 1600,
+    'figures are whole calories — a hero showing 1600.3 kcal is not a hero');
+  ok(caloriesLeft(-5, -5, -5).net === 0, 'negative inputs are floored rather than propagated');
+  ok(caloriesLeft(NaN as any, NaN as any).net === 0, 'and a missing target is 0, not NaN on the screen');
 }
 
 if (errors.length) { console.log('COVERAGE FAILURES:\n' + errors.join('\n')); process.exit(1); }

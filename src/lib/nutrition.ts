@@ -135,3 +135,43 @@ export function buildMealPlan(
   };
   return { targets, meals, total };
 }
+
+/**
+ * How many calories are left today, computed in ONE place.
+ *
+ * Two screens answered this question with two different sums. The Food Log did
+ * `(target + burned) - eaten`; the Meals tab did `Math.max(0, target - eaten)`.
+ * On the same day with 1,088 kcal burned, one said 3,948 remaining and the
+ * other said 2,860 — reported twice, as "calories left doesn't match the
+ * calories on the other tab" and "these numbers don't match the meal tab".
+ *
+ * Two separate faults, and the clamp is the worse of them: `max(0, …)` meant
+ * the Meals tab could never say a person was over their target. It showed zero
+ * left and stopped, which reads as "you are exactly on target" at the precise
+ * moment that is untrue.
+ *
+ * Burned calories count. That is the same choice the Food Log already made and
+ * the one a person expects when their watch is feeding the app; what mattered
+ * was that both screens make it.
+ */
+export interface CaloriesLeft {
+  /** target + burned − eaten. Negative means over, and is meant to be shown. */
+  net: number;
+  /** How far over, or 0. Convenience for a screen that words the two cases. */
+  over: number;
+  target: number;
+  eaten: number;
+  burned: number;
+}
+
+export function caloriesLeft(
+  targetKcal: number,
+  eatenKcal: number,
+  burnedKcal: number = 0,
+): CaloriesLeft {
+  const target = Math.max(0, Math.round(targetKcal || 0));
+  const eaten = Math.max(0, Math.round(eatenKcal || 0));
+  const burned = Math.max(0, Math.round(burnedKcal || 0));
+  const net = target + burned - eaten;
+  return { net, over: net < 0 ? -net : 0, target, eaten, burned };
+}

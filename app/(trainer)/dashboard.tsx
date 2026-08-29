@@ -706,14 +706,31 @@ export default function TrainerClients() {
           ) : null}
 
           <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.lg }}>
-            <View style={{ flex: 1 }}><Ghost label="Add a client" onPress={async () => {
+            {/* Two buttons, and they used to be called "Add a client" and
+                "Add client" — eight characters apart, side by side, doing
+                different things. The prominent one made a roster entry; the
+                other opened the sheet that shows the coaching code. A coach
+                pressed the prominent one and asked "is this the only way? I
+                don't see a trainer's code", which is the only reasonable
+                reading of that pair. The sheet's own failure text already
+                called it "Invite a client"; the button label had drifted. */}
+            <View style={{ flex: 1 }}><Ghost label="Invite a client" onPress={async () => {
                 setInvEmail(''); setInvMode('online'); setInvOpen(true);
                 setMyCode(null); setMyCodeErr(null);
                 const r = await fetchMyJoinCode();
                 if (r.ok) setMyCode(r.code); else setMyCodeErr(r.reason);
                 setCodeStats(await fetchJoinCodeStats());
               }} /></View>
-            <View style={{ flex: 1 }}><Cta label="Add client" wide onPress={() => { setNewName(''); setNewEmail(''); setNewGoal('Fat loss'); setNewMode('online'); setAddOpen(true); }} /></View>
+            <View style={{ flex: 1 }}><Cta label="Add client" wide onPress={async () => {
+                setNewName(''); setNewEmail(''); setNewGoal('Fat loss'); setNewMode('online'); setAddOpen(true);
+                // The code is needed by the alert at the end of THIS flow, so
+                // it has to be loaded on this path too. It was only ever
+                // fetched by the button beside this one.
+                if (!myCode) {
+                  const r = await fetchMyJoinCode();
+                  if (r.ok) setMyCode(r.code); else setMyCodeErr(r.reason);
+                }
+              }} /></View>
           </View>
 
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -2, marginBottom: sp.md }} contentContainerStyle={{ gap: sp.sm, paddingHorizontal: 2 }}>
@@ -1190,13 +1207,36 @@ export default function TrainerClients() {
                   const invited = wanted ? await sendInvite(em, newMode) : false;
                   setAddOpen(false);
                   const nm = newName.trim();
+                  // The code goes IN the alert, because this is the moment the
+                  // coach needs it. This used to end on "tell them yourself so
+                  // they know to install it" without giving them anything to
+                  // tell — the coaching code lived behind a different button,
+                  // on a different sheet, also called "Add a client". A tester
+                  // asked "is this the only way? I don't see a trainer's code".
+                  //
+                  // It also matters that the code is the RELIABLE path: the
+                  // email invite only links if they sign up with that address
+                  // spelled exactly the same way, and nothing tells either side
+                  // when it does not.
+                  const codeLine = myCode
+                    ? '\n\nYour coaching code is ' + myCode + '. That works whoever they are and whatever address they sign up with — send it to them.'
+                    : '';
+                  const buttons: any[] = [{ text: invited || !wanted ? 'Great' : 'OK' }];
+                  if (myCode) {
+                    buttons.unshift({
+                      text: 'Share code',
+                      onPress: () => Share.share({
+                        message: 'Join me on Repple — open the app, tap Find a trainer, and enter my code: ' + myCode,
+                      }).catch(() => {}),
+                    });
+                  }
                   Alert.alert('Client added',
-                    !wanted
+                    (!wanted
                       ? nm + ' is now on your roster.'
                       : invited
-                        ? nm + ' is on your roster. Repple does not send email — ' + em + ' is recorded as an invite, and they link to you the first time they sign in to Repple with that address. Tell them yourself so they know to install it.'
-                        : nm + ' is on your roster, but the invite for ' + em + ' was NOT recorded, so they will not link to you when they sign in. Try adding the email again from Invite a client.',
-                    [{ text: invited || !wanted ? 'Great' : 'OK' }]);
+                        ? nm + ' is on your roster. Repple does not send email — ' + em + ' is recorded as an invite, and they link to you the first time they sign in to Repple with that address.'
+                        : nm + ' is on your roster, but the invite for ' + em + ' was NOT recorded, so they will not link to you when they sign in.') + codeLine,
+                    buttons);
                 }} />
               </View>
             </View>

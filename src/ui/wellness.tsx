@@ -1,4 +1,4 @@
-// Wellness — hydration (cups today) + sleep log.
+// Wellness — the sleep log. (Hydration moved to useHabits; see below.)
 //
 // Both start EMPTY. This provider used to ship two invented sleep nights (7.5h
 // and 6.5h, timestamped off Date.now() so they always read as "last night" and
@@ -16,18 +16,19 @@ let SEQ = 1;
 const seedSleep: SleepEntry[] = [];
 
 interface WellnessValue {
-  cups: number; goalCups: number;
-  addCup: () => void; removeCup: () => void;
+  // Hydration used to live here as well, as a plain useState(0): not persisted,
+  // and entirely separate from the water counter on the home screen, which is
+  // stored per day under repple.water:<date> by useHabits. Adding a glass on
+  // one screen left the other unchanged, and Recovery's count reset to zero on
+  // every app restart. Both were reported. There is one store now — useHabits —
+  // and Recovery reads it directly, so the two screens cannot drift again.
   sleep: SleepEntry[]; addSleep: (hours: number, quality: number) => void;
 }
 const Ctx = createContext<WellnessValue | null>(null);
 
 export function WellnessProvider({ children }: { children: ReactNode }) {
-  const [cups, setCups] = useState(0);
   const [sleep, setSleep] = useState<SleepEntry[]>(() => JSON.parse(JSON.stringify(seedSleep)));
-  const addCup = () => setCups((c) => Math.min(20, c + 1));
-  const removeCup = () => setCups((c) => Math.max(0, c - 1));
   const addSleep = (hours: number, quality: number) => { if (!hours) return; setSleep((p) => [{ id: 's' + SEQ++, at: new Date().toISOString(), hours, quality }, ...p]); };
-  return <Ctx.Provider value={{ cups, goalCups: 8, addCup, removeCup, sleep, addSleep }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ sleep, addSleep }}>{children}</Ctx.Provider>;
 }
 export function useWellness(): WellnessValue { const v = useContext(Ctx); if (!v) throw new Error('useWellness must be used inside <WellnessProvider>'); return v; }
