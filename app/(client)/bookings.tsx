@@ -6,6 +6,23 @@
 // separated section instead of a stack of bordered cards, and a coloured dot
 // beside ink text where "Waitlist" used to be status-coloured type. Every
 // provider, conditional and route is unchanged.
+//
+// ── TF-32: "PT with <the reader's own name>" ───────────────────────────────
+//
+// The personal-training rows were titled from `useCoachProfile().name`. That
+// provider is the COACH-side one — it calls `supabase.auth.getUser()` and loads
+// THAT user's own `profiles.full_name` — so on the client app it resolves to the
+// reader, and every PT booking in this list was headed "PT with <your own name>"
+// and located "with <your own name>". The title feeds the ICS export below as
+// well, so it was also being written into the client's real calendar.
+//
+// The name now comes from `useThreadPeerName`, which resolves `clients.
+// trainer_id` and then reads `profiles.full_name` for that id alone. A client
+// usually cannot read their coach's row at all — no policy on `profiles` runs
+// client → coach, and src/lib/threadPeer.ts sets out why — so where there is no
+// name the row is titled "PT session" and carries no location. A booking that
+// reads "PT with —" in the app, and worse in the calendar it is exported to, is
+// not more honest than one that simply says what it is.
 import { useMemo } from 'react';
 import { View, Text, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -15,10 +32,11 @@ import { Rule, Section, SectionHead, Cta, Ghost } from '../../src/ui/kit';
 import { sp, layout, type as ty, numeric } from '../../src/theme/scale';
 import { useClasses } from '../../src/ui/classes';
 import { useSessions } from '../../src/ui/sessions';
-import { useCoachProfile } from '../../src/ui/coachProfile';
 import { useBrand } from '../../src/ui/brand';
 import { useClientData } from '../../src/ui/clientData';
 import { buildIcs, shareIcs, type IcsEvent } from '../../src/lib/exportShare';
+import { peerHeading } from '../../src/lib/threadPeer';
+import { useThreadPeerName } from '../../src/ui/messaging';
 
 // NOTE: this screen used to filter and book against a hardcoded `CLIENT_ID = 'c1'`,
 // a leftover from the mock-data era. The real client id is the Supabase user id.
@@ -36,7 +54,14 @@ export default function Bookings() {
   const router = useRouter();
   const { classes, myStatus, cancel: cancelClass } = useClasses();
   const { sessions, releaseSession } = useSessions();
-  const coach = useCoachProfile();
+  const peer = useThreadPeerName('client', null);
+  const head = peerHeading(peer, 'coach');
+  // A name, or null when there is none we may show. This screen has nowhere to
+  // put the reason for a dash — a list row's title and an exported location are
+  // both too small to explain themselves — so it does not draw one, and the
+  // phrasing changes instead. The Book screen states the reason, on the card
+  // headed "Your coach" where there is room for a whole sentence.
+  const coachName = head.isName ? head.text : null;
   const cd = useClientData();
   const { appName } = useBrand();
 
@@ -50,11 +75,17 @@ export default function Bookings() {
     }
     for (const s of sessions) {
       if (s.clientId === cd.id && s.status === 'booked' && Date.parse(s.startsAt) > Date.now() - 3600_000) {
-        out.push({ id: 'p' + s.id, kind: 'pt', title: `PT with ${coach.name}`, sub: `${s.durationMin} min session`, startsAt: s.startsAt, durationMin: s.durationMin, location: coach.name ? `with ${coach.name}` : undefined, onCancel: () => releaseSession(s.id) });
+        // "PT session" rather than "PT with —". The title is the row's whole
+        // identity and it is what the ICS export writes into the calendar, and
+        // a booking named after a piece of punctuation is worse in both places
+        // than one named after what it is. The location is simply omitted for
+        // the same reason: `IcsEvent.location` is optional, and an absent line
+        // in a calendar entry says nothing, where a dash says something wrong.
+        out.push({ id: 'p' + s.id, kind: 'pt', title: coachName ? `PT with ${coachName}` : 'PT session', sub: `${s.durationMin} min session`, startsAt: s.startsAt, durationMin: s.durationMin, location: coachName ? `with ${coachName}` : undefined, onCancel: () => releaseSession(s.id) });
       }
     }
     return out.sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt));
-  }, [classes, myStatus, sessions, coach.name]);
+  }, [classes, myStatus, sessions, coachName]);
 
   const confirmCancel = (it: Item) => {
     Alert.alert('Cancel this booking?', `${it.title} · ${dayLabel(it.startsAt)} ${timeLabel(it.startsAt)}`, [
