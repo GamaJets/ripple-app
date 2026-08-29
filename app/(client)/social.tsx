@@ -16,11 +16,18 @@
 //    pretending to be data. It now says there is nothing to show yet.
 //  · the share text said "down X kg" even when the client had gained; the
 //    direction is now taken from the sign instead of being assumed.
+//  · TF-37: the weight change was announced in kilograms — on the screen and,
+//    worse, in the text the client sends to their friends, who will read it in
+//    whatever unit they think in and have no settings screen to consult. It now
+//    goes out in the unit the client reads. The body-fat figure beside it stays
+//    a percentage, because that is what it is in any unit system.
 import { View, Text, ScrollView, Share } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { useClientData } from '../../src/ui/clientData';
+import { useSettings } from '../../src/ui/settings';
+import { kgToLb } from '../../src/lib/units';
 import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, type as ty } from '../../src/theme/scale';
 
@@ -28,18 +35,24 @@ export default function Social() {
  const t = useTheme();
  const router = useRouter();
  const cd = useClientData();
+ const wu = useSettings().weightUnit;
 
  const first = cd.scans[0];
  const latest = cd.scans[cd.scans.length - 1];
  const bfDrop = first && latest ? Math.round((first.bodyFatPct - latest.bodyFatPct) * 10) / 10 : 0;
  const wtDrop = first && latest ? Math.round((first.weightKg - latest.weightKg) * 10) / 10 : 0;
+ // The change read out in the client's unit. It is converted as one span and
+ // rounded once at the end — rounding the first and latest scans into pounds
+ // and subtracting those would let half a pound of rounding on each end turn a
+ // real 0.4 kg loss into nothing, or into two pounds.
+ const wtDropShown = wu === 'lb' ? Math.round(kgToLb(wtDrop)) : wtDrop;
  // Two scans are the minimum that can describe a change. One (or none) is not
  // progress, and printing a zero here would read as one.
  const measured = cd.scans.length >= 2;
 
  const share = async () => {
  const msg = measured
- ? `My Repple progress — ${wtDrop >= 0 ? 'down' : 'up'} ${Math.abs(wtDrop)} kg and ${bfDrop >= 0 ? 'down' : 'up'} ${Math.abs(bfDrop)}% body fat so far. Every rep ripples out.`
+ ? `My Repple progress — ${wtDropShown >= 0 ? 'down' : 'up'} ${Math.abs(wtDropShown)} ${wu} and ${bfDrop >= 0 ? 'down' : 'up'} ${Math.abs(bfDrop)}% body fat so far. Every rep ripples out.`
  : 'I train with Repple. Every rep ripples out.';
  try { await Share.share({ message: msg }); } catch {}
  };
@@ -60,9 +73,9 @@ export default function Social() {
 
  {measured ? (
  <Hero
- label={wtDrop >= 0 ? 'Weight down' : 'Weight up'}
- figure={Math.abs(wtDrop).toString()}
- unit="kg"
+ label={wtDropShown >= 0 ? 'Weight down' : 'Weight up'}
+ figure={Math.abs(wtDropShown).toString()}
+ unit={wu}
  note={`Body fat ${bfDrop >= 0 ? 'down' : 'up'} ${Math.abs(bfDrop)}% across ${cd.scans.length} scans`}
  />
  ) : (
@@ -81,7 +94,7 @@ export default function Social() {
  <Section>
  <SectionHead title="Since your first scan" />
  <KpiRow items={[
- { label: 'Weight', value: `${wtDrop >= 0 ? '−' : '+'}${Math.abs(wtDrop)}`, unit: 'kg' },
+ { label: 'Weight', value: `${wtDropShown >= 0 ? '−' : '+'}${Math.abs(wtDropShown)}`, unit: wu },
  { label: 'Body fat', value: `${bfDrop >= 0 ? '−' : '+'}${Math.abs(bfDrop)}`, unit: '%' },
  { label: 'Scans', value: fig(cd.scans.length) },
  ]} />

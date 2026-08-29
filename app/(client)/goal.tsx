@@ -12,6 +12,13 @@
 //    complaining" has no series, so it has no ring and no projection — it has
 //    a Done button, which is the only honest signal available.
 //
+// A third rule arrived with TF-37: a target is read and typed in the unit the
+// client reads in, and stored in the kilograms `goalTargets` and every series
+// behind it are expressed in. Weight and muscle convert. Body fat does NOT —
+// it is a proportion of the body, and a proportion is the same number whatever
+// the scale is calibrated in. That distinction is made once, in `goalUnit` and
+// `weightKind` below, rather than at each of the eight places a unit is printed.
+//
 // The arithmetic is in src/lib/goalTargets.ts, where it is tested.
 import { useState } from 'react';
 import { View, Text, ScrollView, TextInput, Alert, Pressable } from 'react-native';
@@ -21,6 +28,8 @@ import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Hero, Cta, Ghost, Notice, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
+import { useSettings } from '../../src/ui/settings';
+import { weightIn, weightToKg, kgToLb, type WeightUnit } from '../../src/lib/units';
 import { useGoalTracker } from '../../src/ui/goalTracker';
 import {
   progressOf, projectionOf, goalLabel, isMeasured, isOverdue, sortGoals,
@@ -38,11 +47,39 @@ const DATE_CHIPS: [string, number | null][] = [['4 wks', 28], ['8 wks', 56], ['1
 const shortDate = (iso: string) =>
   new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 
+/** True for the two goal kinds whose numbers are kilograms on the record. */
+const weightKind = (k: MeasuredKind) => k !== 'bodyfat';
+
+/** The unit a goal of this kind is read in — the client's for the two weights,
+ *  and the metric table's own '%' for body fat, which never converts. */
+const goalUnit = (k: MeasuredKind, wu: WeightUnit) =>
+  weightKind(k) ? wu : GOAL_METRIC[k].unit;
+
+/** A stored goal figure — a target, a current reading — in the read unit. */
+const goalValue = (v: number, k: MeasuredKind, wu: WeightUnit) =>
+  weightKind(k) ? weightIn(v, wu) : v;
+
+/**
+ * A goal DIFFERENCE — how much is left to go, how fast it is moving — in the
+ * read unit. The whole span is converted and rounded once at the end; rounding
+ * each end into pounds first would let "2 lb to go" flicker to "3 lb" on a
+ * reading that had not really changed. Metric is passed through untouched so
+ * that a client reading kilograms sees exactly what they saw before.
+ */
+const goalDelta = (v: number, k: MeasuredKind, wu: WeightUnit) =>
+  weightKind(k) && wu === 'lb' ? Math.round(kgToLb(v)) : v;
+
 /** The client's trend, in a sentence, or null when there is no honest one. */
-function projectionLine(goal: GoalTarget, series: Point[]): string | null {
+function projectionLine(goal: GoalTarget, series: Point[], wu: WeightUnit): string | null {
   const p = projectionOf(goal, series, Date.now());
   if (!p) return null;
-  const unit = goal.kind === 'custom' ? '' : GOAL_METRIC[goal.kind as MeasuredKind].unit;
+  const measured = goal.kind === 'custom' ? null : (goal.kind as MeasuredKind);
+  const unit = measured == null ? '' : goalUnit(measured, wu);
+  // A weekly rate is a change per week, so it converts as a span. It keeps two
+  // decimals rather than dropping to whole pounds like a reading does: at half
+  // a kilogram a week the honest figure is 1.10 lb/wk, and "1 lb/wk" would make
+  // every pace between 0.7 and 1.5 look identical.
+  const rate = (v: number) => (measured != null && weightKind(measured) && wu === 'lb' ? kgToLb(v) : v);
   switch (p.kind) {
     case 'reached':
       return 'You’ve reached this one — mark it done, or set a new target.';
@@ -51,10 +88,10 @@ function projectionLine(goal: GoalTarget, series: Point[]): string | null {
     case 'flat':
       return 'Your readings haven’t moved since you set this, so there’s no pace to project from.';
     case 'wrongway':
-      return `Your recent trend (${p.weeklyRate > 0 ? '+' : ''}${p.weeklyRate.toFixed(2)} ${unit}/wk) is heading away from this target. Keep going, or adjust the goal.`;
+      return `Your recent trend (${p.weeklyRate > 0 ? '+' : ''}${rate(p.weeklyRate).toFixed(2)} ${unit}/wk) is heading away from this target. Keep going, or adjust the goal.`;
     case 'eta': {
       const eta = new Date(p.etaMs);
-      return `At your current pace (${p.weeklyRate > 0 ? '+' : ''}${p.weeklyRate.toFixed(2)} ${unit}/wk) you’ll get there around ${eta.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}.`;
+      return `At your current pace (${p.weeklyRate > 0 ? '+' : ''}${rate(p.weeklyRate).toFixed(2)} ${unit}/wk) you’ll get there around ${eta.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}.`;
     }
   }
 }
@@ -64,6 +101,10 @@ export default function Goal() {
   const router = useRouter();
   const c = useClientData();
   const g = useGoalTracker();
+  // The unit this client reads weight in. Targets are stored in kilograms, the
+  // same as every series they are measured against, so this only ever touches
+  // what is printed and what comes back out of the entry field (TF-37).
+  const wu = useSettings().weightUnit;
 
   const [kind, setKind] = useState<GoalKind>('weight');
   const [amount, setAmount] = useState('');
@@ -90,13 +131,21 @@ export default function Goal() {
       if (!title.trim()) { setSaving(false); Alert.alert('Say what the goal is', 'Type what you’re working toward.'); return; }
       ok = await g.addCustomGoal(title, targetDateISO);
     } else {
+      const mk = kind as MeasuredKind;
       const n = parseFloat(amount);
       if (!Number.isFinite(n) || n <= 0) {
         setSaving(false);
-        Alert.alert('Enter a number', `Type your ${GOAL_METRIC[kind as MeasuredKind].label.toLowerCase()} in ${GOAL_METRIC[kind as MeasuredKind].unit}.`);
+        Alert.alert('Enter a number', `Type your ${GOAL_METRIC[mk].label.toLowerCase()} in ${goalUnit(mk, wu)}.`);
         return;
       }
-      ok = await g.setMeasuredGoal(kind as MeasuredKind, n, targetDateISO);
+      // The stored target has to be in the same unit as the series it will be
+      // compared against, and those are kilograms. A client reading pounds who
+      // typed 165 was otherwise setting themselves a 165 kg target and being
+      // shown as a very long way from it. Body fat is a percentage and goes in
+      // exactly as typed.
+      const stored = weightKind(mk) ? weightToKg(amount, wu) : n;
+      if (stored == null) { setSaving(false); return; }
+      ok = await g.setMeasuredGoal(mk, stored, targetDateISO);
     }
     setSaving(false);
     if (!ok) {
@@ -149,14 +198,14 @@ export default function Goal() {
               <View>
                 <Hero
                   label={goalLabel(lead)}
-                  figure={fig(leadProgress.current)}
-                  unit={GOAL_METRIC[lead.kind as MeasuredKind].unit}
+                  figure={fig(goalValue(leadProgress.current, lead.kind as MeasuredKind, wu))}
+                  unit={goalUnit(lead.kind as MeasuredKind, wu)}
                   arc={leadProgress.pct / 100}
-                  note={`${leadProgress.pct}% of the way · ${Math.abs(leadProgress.remaining)} ${GOAL_METRIC[lead.kind as MeasuredKind].unit} to go`}
+                  note={`${leadProgress.pct}% of the way · ${Math.abs(goalDelta(leadProgress.remaining, lead.kind as MeasuredKind, wu))} ${goalUnit(lead.kind as MeasuredKind, wu)} to go`}
                 />
-                {projectionLine(lead, seriesFor(lead.kind as MeasuredKind)) ? (
+                {projectionLine(lead, seriesFor(lead.kind as MeasuredKind), wu) ? (
                   <Section>
-                    <Text style={{ ...ty.body, color: t.ink2 }}>{projectionLine(lead, seriesFor(lead.kind as MeasuredKind))}</Text>
+                    <Text style={{ ...ty.body, color: t.ink2 }}>{projectionLine(lead, seriesFor(lead.kind as MeasuredKind), wu)}</Text>
                   </Section>
                 ) : null}
                 <Rule />
@@ -173,14 +222,14 @@ export default function Goal() {
                 const measured = isMeasured(x);
                 const series = measured ? seriesFor(x.kind as MeasuredKind) : [];
                 const prog = measured ? progressOf(x, series) : null;
-                const unit = measured ? GOAL_METRIC[x.kind as MeasuredKind].unit : '';
+                const unit = measured ? goalUnit(x.kind as MeasuredKind, wu) : '';
                 const overdue = isOverdue(x, Date.now());
                 return (
                   <View key={x.id} style={{ paddingVertical: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
                     <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.sm }}>
                       <View style={{ flex: 1 }}>
                         <Text style={{ ...ty.body, color: x.achievedAtISO ? t.ink3 : t.ink, fontWeight: '600' }}>
-                          {goalLabel(x)}{measured ? ` · ${x.targetValue} ${unit}` : ''}
+                          {goalLabel(x)}{measured && x.targetValue != null ? ` · ${fig(goalValue(x.targetValue, x.kind as MeasuredKind, wu))} ${unit}` : ''}
                         </Text>
                         <Text style={{ ...ty.micro, color: overdue ? t.warn ?? t.ink3 : t.ink3, marginTop: 2 }}>
                           {x.achievedAtISO
@@ -193,7 +242,7 @@ export default function Goal() {
                         {measured ? (
                           <Text style={{ ...ty.micro, color: t.ink3, marginTop: 3 }}>
                             {prog
-                              ? `${prog.pct}% · ${Math.abs(prog.remaining)} ${unit} to go`
+                              ? `${prog.pct}% · ${Math.abs(goalDelta(prog.remaining, x.kind as MeasuredKind, wu))} ${unit} to go`
                               : `No ${GOAL_METRIC[x.kind as MeasuredKind].source} on record yet, so there’s nothing to measure this against.`}
                           </Text>
                         ) : (
@@ -241,11 +290,11 @@ export default function Goal() {
               ) : (
                 <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'center' }}>
                   <TextInput value={amount} onChangeText={setAmount} keyboardType="numeric"
-                    placeholder={GOAL_METRIC[kind as MeasuredKind].unit} placeholderTextColor={t.ink3}
-                    accessibilityLabel={`${GOAL_METRIC[kind as MeasuredKind].label} in ${GOAL_METRIC[kind as MeasuredKind].unit}`}
+                    placeholder={goalUnit(kind as MeasuredKind, wu)} placeholderTextColor={t.ink3}
+                    accessibilityLabel={`${GOAL_METRIC[kind as MeasuredKind].label} in ${goalUnit(kind as MeasuredKind, wu)}`}
                     style={{ flex: 1, ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring,
                              borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md }} />
-                  <Text style={{ ...ty.body, color: t.ink3 }}>{GOAL_METRIC[kind as MeasuredKind].unit}</Text>
+                  <Text style={{ ...ty.body, color: t.ink3 }}>{goalUnit(kind as MeasuredKind, wu)}</Text>
                 </View>
               )}
 

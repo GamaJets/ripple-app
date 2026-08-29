@@ -25,6 +25,18 @@
 // — not loaded, loaded and empty, loaded with photos — each render differently
 // on purpose: a screen that shows "no photos yet" while it is still asking is
 // telling somebody their history is gone.
+//
+// TF-37: this screen both reads and WRITES weights, and did neither in the
+// client's unit. The three-box entry sheet said "Weight kg" and "Muscle kg" and
+// put whatever was typed straight into the scan row, so a client transcribing a
+// report in pounds recorded a body twice their own — and this row is the one the
+// meal plan re-tunes from, so the error left immediately in their calorie
+// target. Entry now converts, the boxes say which unit they want, the OCR fills
+// them in that unit, and every figure printed back — including the "your stats
+// updated" message — reads in it too. Body fat stays a percentage throughout.
+//
+// One table is deliberately NOT converted; see the note above the
+// metric-by-metric section further down.
 import { useState, useEffect, useCallback } from 'react';
 import { View, Text, Pressable, Image, TextInput, ScrollView, Modal, Alert, Linking, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -36,6 +48,8 @@ import { reportError } from '../../src/lib/reportError';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { useClientData } from '../../src/ui/clientData';
+import { useSettings } from '../../src/ui/settings';
+import { weightIn, weightLabel, weightToKg, kgToLb, plain, convertedNote } from '../../src/lib/units';
 import { macrosFor } from '../../src/lib/nutrition';
 import { progressDoc, progressCsv, progressSummary, progressSpanLabel, shareDoc, shareText, shareTextFile, pdfExportAvailable, fileExportAvailable, type ProgressRow } from '../../src/lib/exportShare';
 import { useRouter } from 'expo-router';
@@ -110,6 +124,7 @@ export default function Scans() {
   const t = useTheme();
   const router = useRouter();
   const cd = useClientData();
+  const wu = useSettings().weightUnit;
   const { appName } = useBrand();
   // ── sharing and exporting this record ──────────────────────────────────
   //
@@ -182,6 +197,18 @@ export default function Scans() {
   const scans = cd.scans;
   const [img, setImg] = useState<string | null>(null);
   const [wt, setWt] = useState(''); const [bf, setBf] = useState(''); const [sm, setSm] = useState('');
+  // A figure that arrived in kilograms — from the vision reader, from the OCR
+  // text, from anywhere — put into a box that is labelled in the client's unit.
+  // Without this the reader would fill "Weight lb" with a kilogram and the
+  // client would either save it or "correct" it to something else again.
+  const fieldFromKg = (kg: number | null | undefined) => {
+    const v = weightIn(kg, wu);
+    return v == null ? '' : plain(v);
+  };
+  // Said under the entry boxes when the client reads in pounds: their InBody
+  // sheet prints kilograms, and without a word about it the two look like a
+  // disagreement rather than one reading said twice. Null in metric.
+  const weightNote = convertedNote(wu);
   // `null` is "not asked yet, or the ask failed" — never "you have none".
   // `[]` is "asked, and there are none". They render differently below.
   const [photos, setPhotos] = useState<ProgressPhoto[] | null>(null);
@@ -230,28 +257,40 @@ export default function Scans() {
         if (v && (v.weightKg != null || v.bodyFatPct != null || v.skeletalMuscleKg != null)) {
           setReading(false);
           setScanMx(v.metrics ?? null);
-          if (v.weightKg != null) setWt(String(v.weightKg));
+          if (v.weightKg != null) setWt(fieldFromKg(v.weightKg));
+          // Body fat comes back a percentage and goes in as one.
           if (v.bodyFatPct != null) setBf(String(v.bodyFatPct));
-          if (v.skeletalMuscleKg != null) setSm(String(v.skeletalMuscleKg));
+          if (v.skeletalMuscleKg != null) setSm(fieldFromKg(v.skeletalMuscleKg));
           if (v.takenAt) { const dm = /^(\d{4})-(\d{2})-(\d{2})/.exec(v.takenAt); if (dm) { const yi = YEARS.indexOf(parseInt(dm[1], 10)); const mo = parseInt(dm[2], 10) - 1; const dd = parseInt(dm[3], 10) - 1; if (yi >= 0 && mo >= 0 && mo <= 11 && dd >= 0) { setDY(yi); setDM(mo); setDD(dd); } } }
-          setOcrMsg('Read from your scan: ' + [v.weightKg != null ? 'weight ' + v.weightKg : '', v.bodyFatPct != null ? 'body fat ' + v.bodyFatPct + '%' : '', v.skeletalMuscleKg != null ? 'muscle ' + v.skeletalMuscleKg : ''].filter(Boolean).join(' · ') + '. Tap a field to correct.');
+          setOcrMsg('Read from your scan: ' + [v.weightKg != null ? 'weight ' + weightLabel(v.weightKg, wu) : '', v.bodyFatPct != null ? 'body fat ' + v.bodyFatPct + '%' : '', v.skeletalMuscleKg != null ? 'muscle ' + weightLabel(v.skeletalMuscleKg, wu) : ''].filter(Boolean).join(' · ') + '. Tap a field to correct.');
           return;
         }
       }
       const r = await ocrInBody(b64);
       setReading(false);
-      if (r.ok) { if (r.weight) setWt(r.weight); if (r.bf) setBf(r.bf); if (r.muscle) setSm(r.muscle);
-        setOcrMsg('Read from your scan: ' + [r.weight ? 'weight ' + r.weight : '', r.bf ? 'body fat ' + r.bf + '%' : '', r.muscle ? 'muscle ' + r.muscle : ''].filter(Boolean).join(' · ') + '. Tap a field to correct.');
+      // The text reader scrapes an InBody sheet, and an InBody sheet is printed
+      // in kilograms — so what it hands back is metric no matter what the boxes
+      // it is filling are labelled.
+      if (r.ok) {
+        const rw = r.weight ? fieldFromKg(parseFloat(r.weight)) : '';
+        const rm = r.muscle ? fieldFromKg(parseFloat(r.muscle)) : '';
+        if (rw) setWt(rw); if (r.bf) setBf(r.bf); if (rm) setSm(rm);
+        setOcrMsg('Read from your scan: ' + [rw ? 'weight ' + rw + ' ' + wu : '', r.bf ? 'body fat ' + r.bf + '%' : '', rm ? 'muscle ' + rm + ' ' + wu : ''].filter(Boolean).join(' · ') + '. Tap a field to correct.');
       } else { setOcrMsg((r.error || 'Could not read automatically' + (lastVisionError ? ' — ' + lastVisionError : '')) + ' Please type the numbers in.'); }
     }
   };
   const saveScan = () => {
-    const w = parseFloat(wt) || 0, f = parseFloat(bf) || 0;
+    // The two weights come back as the kilograms the scan row stores, whatever
+    // unit they were typed in. This is the write that used to file a client's
+    // 180 lb as 180 kg — and because the newest scan re-tunes the meal plan,
+    // the wrong body was in their calorie target before they left the sheet.
+    // Body fat is read as typed: it is a percentage in every unit system.
+    const w = weightToKg(wt, wu) ?? 0, f = parseFloat(bf) || 0;
     // Blank means the report did not give one, NOT zero. `parseFloat(sm) || 0`
     // wrote a 0 kg muscle reading for every client who filled in only the two
     // figures the form insists on.
-    const mNum = parseFloat(sm);
-    const m = sm.trim() && Number.isFinite(mNum) && mNum > 0 ? mNum : null;
+    const mNum = weightToKg(sm, wu);
+    const m = sm.trim() && mNum != null && mNum > 0 ? mNum : null;
     if (!w || !f) { Alert.alert('Add the numbers', 'Enter at least weight and body-fat % from your InBody report.'); return; }
     const newISO = scanDateISO();
     // The meal plan follows your MOST RECENT-dated scan only. A back-dated scan is
@@ -278,7 +317,10 @@ export default function Scans() {
     const sign = (x: number) => (x > 0 ? '+' + x : String(x));
     const changed = Math.abs(dK) >= 5 || Math.abs(dP) >= 2;
     Alert.alert(changed ? 'Scan saved — plan auto-tuned' : 'Scan saved', changed
-      ? 'Your stats updated (weight ' + pw + '→' + w + 'kg, body fat ' + pf + '%→' + f + '%), so your daily targets adjusted: ' + sign(dK) + ' kcal (now ' + after.kcal + '), protein ' + sign(dP) + 'g (now ' + after.protein + 'g). Your meal plan regenerated to match.'
+      // Both weights are read out in the client's unit — each is a reading in
+      // its own right, so each converts as a value rather than the pair being
+      // treated as one span.
+      ? 'Your stats updated (weight ' + weightIn(pw, wu) + '→' + weightIn(w, wu) + wu + ', body fat ' + pf + '%→' + f + '%), so your daily targets adjusted: ' + sign(dK) + ' kcal (now ' + after.kcal + '), protein ' + sign(dP) + 'g (now ' + after.protein + 'g). Your meal plan regenerated to match.'
       : 'Added to your history and charts. Targets are essentially unchanged (' + after.kcal + ' kcal / ' + after.protein + 'g protein).');
   };
   // ── progress photos ────────────────────────────────────────────────────
@@ -468,13 +510,28 @@ export default function Scans() {
   const latest = chrono[chrono.length - 1];
   const prev = chrono.length > 1 ? chrono[chrono.length - 2] : null;
   const wsv = cd.weightSeries.map((x) => x.v);
+  // The same series in the client's unit, converted point by point because each
+  // point is a reading rather than a change. The filter only satisfies the null
+  // contract of `weightIn`; a series entry is always a number.
+  const wsvShown = wsv.map((v) => weightIn(v, wu)).filter((v): v is number => v != null);
   const mTrends = metricTrends(cd.scans);
   const mInsights = compositionInsights(cd.scans);
   const mByGroup = METRIC_GROUPS.map((g) => ({ group: g, items: mTrends.filter((x) => x.def.group === g) })).filter((g) => g.items.length > 0);
   const wDelta = wsv.length > 1 ? +(wsv[wsv.length - 1] - wsv[0]).toFixed(1) : null;
+  const wDeltaShown = wDelta == null ? null : (wu === 'lb' ? Math.round(kgToLb(wDelta)) : wDelta);
   const fmt = (iso: string) => { const d = new Date(iso); return `${d.getDate()}/${d.getMonth() + 1}/${String(d.getFullYear()).slice(2)}`; };
   const daysAgo = latest ? Math.max(0, Math.round((Date.now() - Date.parse(latest.takenAt)) / 86400000)) : 0;
-  const dlt = (cur: number, was: number | undefined, unit: string) => (was == null ? null : `${cur - was < 0 ? '▼' : cur - was > 0 ? '▲' : ''} ${Math.abs(+(cur - was).toFixed(1))} ${unit}`.trim());
+  // A change between two stored weights, in the client's unit. The subtraction
+  // happens in kilograms and the result is converted once: rounding each of the
+  // two readings into whole pounds first and subtracting those would let half a
+  // pound of rounding at each end report a real 0.4 kg change as nothing, or as
+  // two pounds.
+  const dlt = (cur: number, was: number | undefined) => {
+    if (was == null) return null;
+    const d = +(cur - was).toFixed(1);
+    const shown = wu === 'lb' ? Math.round(kgToLb(d)) : d;
+    return `${d < 0 ? '▼' : d > 0 ? '▲' : ''} ${Math.abs(shown)} ${wu}`.trim();
+  };
   // Presentation-only helpers: the hero's movement line and a shared "how long ago".
   const bfMove = (prev && cd.bodyFatPct != null) ? +(cd.bodyFatPct - prev.bodyFatPct).toFixed(1) : null;
   const ago = daysAgo === 0 ? 'today' : daysAgo + ' days ago';
@@ -517,7 +574,7 @@ export default function Scans() {
           <ActionCard
             title={latest ? 'Latest InBody scan' : 'Add your first InBody scan'}
             note={latest
-              ? `${latest.weightKg} kg · ${latest.bodyFatPct}% BF · ${ago}`
+              ? `${fig(weightLabel(latest.weightKg, wu))} · ${latest.bodyFatPct}% BF · ${ago}`
               : 'Snap or upload your report — the numbers are read for you.'}
             cta={latest ? 'Add scan' : 'Start'}
             onPress={() => setShowAdd(true)}
@@ -532,8 +589,8 @@ export default function Scans() {
           <KpiRow
             onPress={(k) => { if (k.route) router.push(k.route as any); }}
             items={[
-              { label: 'Weight', value: cd.weightKg != null ? String(cd.weightKg) : '—', unit: cd.weightKg != null ? 'kg' : undefined, route: '/(client)/measurements', good: !prev || (cd.weightKg != null && cd.weightKg <= prev.weightKg), delta: (cd.weightKg != null ? dlt(cd.weightKg, prev?.weightKg, 'kg') : null) ?? undefined },
-              { label: 'Muscle', value: cd.muscleKg != null ? String(cd.muscleKg) : '—', unit: cd.muscleKg != null ? 'kg' : undefined, route: '/(client)/measurements', good: !prev || prev.skeletalMuscleKg == null || (cd.muscleKg != null && cd.muscleKg >= prev.skeletalMuscleKg), delta: (cd.muscleKg != null ? dlt(cd.muscleKg, prev?.skeletalMuscleKg ?? undefined, 'kg') : null) ?? undefined },
+              { label: 'Weight', value: fig(weightIn(cd.weightKg, wu)), unit: cd.weightKg != null ? wu : undefined, route: '/(client)/measurements', good: !prev || (cd.weightKg != null && cd.weightKg <= prev.weightKg), delta: (cd.weightKg != null ? dlt(cd.weightKg, prev?.weightKg) : null) ?? undefined },
+              { label: 'Muscle', value: fig(weightIn(cd.muscleKg, wu)), unit: cd.muscleKg != null ? wu : undefined, route: '/(client)/measurements', good: !prev || prev.skeletalMuscleKg == null || (cd.muscleKg != null && cd.muscleKg >= prev.skeletalMuscleKg), delta: (cd.muscleKg != null ? dlt(cd.muscleKg, prev?.skeletalMuscleKg ?? undefined) : null) ?? undefined },
               { label: 'Scans', value: fig(scans.length), delta: latest ? `last ${ago}` : undefined },
             ]}
           />
@@ -545,9 +602,9 @@ export default function Scans() {
         <Section>
           {wsv.length > 1 ? (<>
             <SectionHead title={`Weight · ${wsv.length} check-ins`}
-              note={wDelta !== null ? `${wDelta > 0 ? '+' : wDelta < 0 ? '−' : ''}${Math.abs(wDelta)} kg` : undefined}
+              note={wDeltaShown !== null ? `${wDeltaShown > 0 ? '+' : wDeltaShown < 0 ? '−' : ''}${Math.abs(wDeltaShown)} ${wu}` : undefined}
               onPress={() => router.push('/(client)/measurements')} />
-            <Spark data={wsv} />
+            <Spark data={wsvShown} unit={` ${wu}`} />
           </>) : (<>
             <SectionHead title="Weight" note="Measurements" onPress={() => router.push('/(client)/measurements')} />
             <Text style={{ ...ty.label, color: t.ink3 }}>No weight history yet — the trend charts from your second check-in.</Text>
@@ -785,6 +842,15 @@ export default function Scans() {
         {mByGroup.length > 0 && (<>
           <Rule />
           <Section>
+            {/* Deliberately left in the units the InBody sheet itself printed.
+                This table is a transcription of a report the client is holding,
+                and it mixes kilograms with litres, kcal, points and a visceral
+                fat "level" — and its segmental lean masses are carried to two
+                decimals, a grain of 0.01 kg that whole pounds (the honest grain
+                for a body weight, see src/lib/units.ts) cannot represent at all.
+                Converting these would need a second, finer rule for pounds than
+                the rest of the app uses, and two rules for the same unit is how
+                a client ends up seeing the same reading two ways. */}
             <SectionHead title="Body composition" note="Latest vs previous" />
             {(mInsights.improving.length > 0 || mInsights.watch.length > 0 || mInsights.balance.length > 0) && (
               <View style={{ marginBottom: sp.lg }}>
@@ -873,10 +939,14 @@ export default function Scans() {
               <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{scanDateLabel()}</Text><Icon name="calendar" size={15} color={t.ink3} />
             </Pressable>
             <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.lg }}>
-              <TextInput value={wt} onChangeText={setWt} keyboardType="numeric" placeholder="Weight kg" placeholderTextColor={t.ink3} style={input} />
-              <TextInput value={bf} onChangeText={setBf} keyboardType="numeric" placeholder="Body fat %" placeholderTextColor={t.ink3} style={input} />
-              <TextInput value={sm} onChangeText={setSm} keyboardType="numeric" placeholder="Muscle kg" placeholderTextColor={t.ink3} style={input} />
+              <TextInput value={wt} onChangeText={setWt} keyboardType="numeric" placeholder={`Weight ${wu}`} placeholderTextColor={t.ink3}
+                accessibilityLabel={wu === 'kg' ? 'Weight in kilograms' : 'Weight in pounds'} style={input} />
+              <TextInput value={bf} onChangeText={setBf} keyboardType="numeric" placeholder="Body fat %" placeholderTextColor={t.ink3}
+                accessibilityLabel="Body fat percentage" style={input} />
+              <TextInput value={sm} onChangeText={setSm} keyboardType="numeric" placeholder={`Muscle ${wu}`} placeholderTextColor={t.ink3}
+                accessibilityLabel={wu === 'kg' ? 'Skeletal muscle in kilograms' : 'Skeletal muscle in pounds'} style={input} />
             </View>
+            {weightNote ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: -sp.md, marginBottom: sp.lg }}>{weightNote}</Text> : null}
             <Cta label="Save scan & update profile" wide onPress={saveScan} />
 
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginTop: sp.xl, marginBottom: sp.sm }}>
@@ -887,7 +957,7 @@ export default function Scans() {
               <View key={s.id} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderBottomWidth: i < arr.length - 1 ? hairline : 0, borderBottomColor: t.ring }}>
                 {s.image ? <Image source={{ uri: s.image }} style={{ width: 40, height: 40, borderRadius: radius.sm }} /> : <View style={{ width: 40, height: 40, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}><Icon name="chart" size={16} color={t.ink3} /></View>}
                 <View style={{ flex: 1 }}>
-                  <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: t.ink }}>{s.weightKg} kg · {s.bodyFatPct}% BF</Text>
+                  <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: t.ink }}>{fig(weightLabel(s.weightKg, wu))} · {s.bodyFatPct}% BF</Text>
                   <Text style={{ ...ty.caption, color: t.ink3 }}>{fmt(s.takenAt)} · {s.source}</Text>
                 </View>
               </View>

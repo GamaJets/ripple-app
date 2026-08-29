@@ -7,11 +7,21 @@
 // became hairline rows, the level bar is on the kit's 3px mark spec, and the
 // level name and "Elite" tag no longer print in accent/status colour — the
 // status is a mark beside ink text. Five equal lifts is a list, so no hero.
+//
+// TF-37: the bodyweight, the best lift and the next target were all printed as
+// kilograms whatever the client reads in — which on this screen means telling
+// somebody who loads the bar in pounds that they need 140 for their next level
+// when they need 309. All three now convert. The bodyweight MULTIPLE does not,
+// and cannot: a ratio of two weights is the same number in every unit, and
+// running it through a conversion would be the one change that made this screen
+// say something untrue.
 import { View, Text, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { useClientData } from '../../src/ui/clientData';
+import { useSettings } from '../../src/ui/settings';
+import { weightIn, weightLabel } from '../../src/lib/units';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { personalRecords } from '../../src/lib/streaks';
 import { Rule, Section, SectionHead, Ghost } from '../../src/ui/kit';
@@ -37,6 +47,7 @@ export default function Standards() {
  const router = useRouter();
  const c = useClientData();
  const { log } = useWorkoutLog();
+ const wu = useSettings().weightUnit;
  const prs = personalRecords(log);
  const bw = c.weightKg;
 
@@ -46,7 +57,12 @@ export default function Standards() {
  .reduce((mx, p) => Math.max(mx, p.est1RM), 0);
  const ratio = best && bw ? best / bw : 0;
  const lvl = best ? levelFor(ratio, lift.mult) : -2;
- const nextTarget = (bw != null && lvl >= 0 && lvl < LEVELS.length - 1) ? Math.round(lift.mult[lvl + 1] * bw) : null;
+ // The target is worked out in the kilograms the PRs and the bodyweight are
+ // stored in, and only then read out in the client's unit. Multiplying a
+ // converted bodyweight would give the same answer here, but the moment one of
+ // these two is rounded and the other is not the ratios stop agreeing with the
+ // levels they are supposed to define.
+ const nextTarget = (bw != null && lvl >= 0 && lvl < LEVELS.length - 1) ? weightIn(lift.mult[lvl + 1] * bw, wu) : null;
  return { lift, best, ratio, lvl, nextTarget };
  });
  const G = layout.gutter;
@@ -67,15 +83,17 @@ export default function Standards() {
   <Rule />
 
   <Section>
-   <SectionHead title="The big lifts" note={bw != null ? `bodyweight ${bw} kg` : 'add your weight for ratios'} />
+   <SectionHead title="The big lifts" note={bw != null ? `bodyweight ${weightLabel(bw, wu)}` : 'add your weight for ratios'} />
    {rows.map(({ lift, best, ratio, lvl, nextTarget }, i) => (
     <View key={lift.name} style={{ paddingVertical: sp.lg, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' }}>
       <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{lift.name}</Text>
       {best ? (
        <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
-        <Text style={{ ...value(18), color: t.ink }}>{best}</Text>
-        <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginLeft: 4 }}>kg · {ratio.toFixed(2)}×</Text>
+        <Text style={{ ...value(18), color: t.ink }}>{weightIn(best, wu)}</Text>
+        {/* The multiple is deliberately printed raw beside the converted
+            lift: it is a ratio, so 1.75× is 1.75× in pounds too. */}
+        <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginLeft: 4 }}>{wu} · {ratio.toFixed(2)}×</Text>
        </View>
       ) : (
        <Text style={{ ...ty.caption, color: t.ink3 }}>No data</Text>
@@ -94,7 +112,7 @@ export default function Standards() {
          <Text style={{ ...ty.caption, fontWeight: '500', color: lvl >= 0 ? t.ink : t.ink3 }}>{lvl >= 0 ? LEVELS[lvl] : 'Getting started'}</Text>
         </View>
         {nextTarget ? (
-         <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>Next: {LEVELS[lvl + 1]} @ {nextTarget} kg</Text>
+         <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>Next: {LEVELS[lvl + 1]} @ {nextTarget} {wu}</Text>
         ) : lvl === LEVELS.length - 1 ? (
          <Text style={{ ...ty.caption, fontWeight: '500', color: t.ink2 }}>Top of the scale</Text>
         ) : null}

@@ -17,6 +17,8 @@ import { Icon } from '../../src/ui/Icon';
 import { macrosFor, applyCoachAdjust } from '../../src/lib/nutrition';
 import { buildProgram } from '../../src/lib/programs';
 import { useClientData } from '../../src/ui/clientData';
+import { useSettings } from '../../src/ui/settings';
+import { weightIn, kgToLb, type WeightUnit } from '../../src/lib/units';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
 import { useCoachFeedback } from '../../src/ui/feedback';
@@ -39,8 +41,24 @@ import { scheduleLocal, pushAvailable } from '../../src/ui/pushNotifications';
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
+/**
+ * A CHANGE in weight, in the unit the client reads in (TF-37). The whole span
+ * is converted and the result rounded once, rather than each end being rounded
+ * into pounds and then subtracted: two readings a genuine 0.4 kg apart can sit
+ * either side of a pound boundary, so rounding first turns the same loss into
+ * "0 lb" one week and "1 lb" the next off the back of nothing the client did.
+ * This is the weight twin of `lengthDeltaIn` in src/lib/units.ts, which cannot
+ * hold it because deltas of stored kilograms only ever arise on screens.
+ */
+function weightDeltaIn(deltaKg: number, unit: WeightUnit): number {
+  return unit === 'lb' ? Math.round(kgToLb(deltaKg)) : Math.round(deltaKg * 10) / 10;
+}
+
 export default function Home() {
   const t = useTheme();
+  // The unit this client reads weight in. Storage stays metric; this is only
+  // ever applied on the way to the screen (TF-37).
+  const wu = useSettings().weightUnit;
   const router = useRouter();
   const c = useClientData();
   const { log, status: logStatus } = useWorkoutLog();
@@ -154,6 +172,11 @@ export default function Home() {
     : { headline: 'On track', tip: 'Session done and your macros are on point. Nice work.', cta: 'View plan', route: '/(client)/nutrition', tone: t.brand };
 
   const ws = c.weightSeries.map((x) => x.v);
+  // The same series in the unit this client reads in, converted point by point
+  // because each point is a value rather than a change. The filter is only
+  // there to satisfy the null contract of `weightIn` — a series entry is always
+  // a number, and a null one would have no place on a trend line anyway.
+  const wsShown = ws.map((v) => weightIn(v, wu)).filter((v): v is number => v != null);
   const scSort = [...c.scans].sort((a, b) => Date.parse(a.takenAt) - Date.parse(b.takenAt));
   const scPrev = scSort.length > 1 ? scSort[scSort.length - 2] : null;
   const scLast = scSort[scSort.length - 1];
@@ -163,6 +186,14 @@ export default function Home() {
   const muD = scPrev?.skeletalMuscleKg != null && scLast?.skeletalMuscleKg != null
     ? +(scLast.skeletalMuscleKg - scPrev.skeletalMuscleKg).toFixed(1) : null;
   const wDelta = ws.length > 1 ? +(ws[ws.length - 1] - ws[0]).toFixed(1) : 0;
+  // The two body changes in the client's unit. They are converted here and the
+  // sign is taken from the converted figure, so that a change too small to show
+  // at this grain — 0.2 kg is under half a pound — is reported as no change
+  // rather than printed as "−0 lb", the fabricated zero this screen already
+  // refuses to show elsewhere. `good` deliberately keeps reading the metric
+  // value: whether a change is in the right direction does not depend on units.
+  const wDeltaShown = weightDeltaIn(wDelta, wu);
+  const muDShown = muD == null ? null : weightDeltaIn(muD, wu);
 
   const now = Date.now();
   const nextSession = sessions
@@ -322,9 +353,12 @@ export default function Home() {
           <KpiRow
             onPress={() => router.push('/(client)/scans')}
             items={[
-              { label: 'Weight', value: fig(c.weightKg), unit: 'kg', route: '/(client)/scans', good: wDelta <= 0, delta: wDelta !== 0 ? `${wDelta < 0 ? '−' : '+'}${Math.abs(wDelta)} kg` : undefined },
+              { label: 'Weight', value: fig(weightIn(c.weightKg, wu)), unit: wu, route: '/(client)/scans', good: wDelta <= 0, delta: wDeltaShown !== 0 ? `${wDeltaShown < 0 ? '−' : '+'}${Math.abs(wDeltaShown)} ${wu}` : undefined },
+              // Body fat is a proportion of the body, not an amount of it, and
+              // stays a percentage under every unit preference. Nothing on this
+              // line converts.
               { label: 'Body fat', value: fig(c.bodyFatPct), unit: '%', route: '/(client)/scans', good: bfD <= 0, delta: bfD !== 0 ? `${bfD < 0 ? '−' : '+'}${Math.abs(bfD)}` : undefined },
-              { label: 'Muscle', value: fig(c.muscleKg), unit: 'kg', route: '/(client)/scans', good: muD != null ? muD >= 0 : undefined, delta: muD ? `${muD < 0 ? '−' : '+'}${Math.abs(muD)}` : undefined },
+              { label: 'Muscle', value: fig(weightIn(c.muscleKg, wu)), unit: wu, route: '/(client)/scans', good: muD != null ? muD >= 0 : undefined, delta: muDShown ? `${muDShown < 0 ? '−' : '+'}${Math.abs(muDShown)}` : undefined },
             ]}
           />
         </Section>
@@ -334,9 +368,9 @@ export default function Home() {
           <Rule />
           <Section>
             <SectionHead title={`Weight · ${ws.length} check-ins`}
-              note={`${wDelta > 0 ? '+' : wDelta < 0 ? '−' : ''}${Math.abs(wDelta)} kg`}
+              note={`${wDeltaShown > 0 ? '+' : wDeltaShown < 0 ? '−' : ''}${Math.abs(wDeltaShown)} ${wu}`}
               onPress={() => router.push('/(client)/scans')} />
-            <Spark data={ws} labels={c.weightSeries.map((x) => x.t)} unit=" kg" />
+            <Spark data={wsShown} labels={c.weightSeries.map((x) => x.t)} unit={` ${wu}`} />
           </Section>
         </>) : null}
 
@@ -386,7 +420,11 @@ export default function Home() {
             { label: 'Sessions', value: logKnown ? fig(wk.workouts) : fig(null), unit: logKnown ? `/${goalDays}` : undefined },
             // `(0).toLocaleString()` is the string "0" — a tonnage stated as
             // measured, with no hint that nothing was measured.
-            { label: 'Lifted', value: logKnown ? Math.round(wk.volumeKg).toLocaleString() : fig(null), unit: logKnown ? 'kg' : undefined },
+            // Tonnage is a weight like any other — a client who loads the bar
+            // in pounds should be told what they shifted in pounds. Rounded to
+            // a whole unit either way, because nobody reads a week's volume to
+            // the tenth.
+            { label: 'Lifted', value: logKnown ? Math.round(wu === 'lb' ? kgToLb(wk.volumeKg) : wk.volumeKg).toLocaleString() : fig(null), unit: logKnown ? wu : undefined },
             { label: 'New PRs', value: logKnown ? fig(prs.length) : fig(null) },
           ]} />
           <WeekDots done={logKnown ? wk.days : 0} />

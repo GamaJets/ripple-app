@@ -15,6 +15,15 @@
 // the profile, and every calorie and macro target downstream was computed from
 // it. The three fields now start empty and are only written when the user
 // actually types a plausible figure.
+//
+// TF-37: those fields were also labelled "kg" and "cm" and stored what was
+// typed unchanged. This is the first thing a new client ever types, so a client
+// who thinks in pounds began their account with a body that was never theirs —
+// and unlike a display bug it is the stored record that was wrong, which every
+// calorie target, every goal and every coach view is then built from. Weight
+// and height now go through src/lib/units.ts in the unit the account reads in.
+// Body fat stays exactly as it was: a percentage is a percentage in every unit
+// system and there is nothing to convert.
 import { useState } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -24,11 +33,23 @@ import { useTheme } from '../../src/ui/components';
 import { Cta, Ghost } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
+import { useSettings } from '../../src/ui/settings';
+import { weightToKg, heightToCm, heightIn, kgToLb, cmToIn } from '../../src/lib/units';
 import { ALLERGENS, type Allergen } from '../../src/lib/meals';
 import type { Goal, Diet } from '../../src/lib/types';
 import { INJURY_AREAS, newInjuryId } from '../../src/lib/injuries';
 
 export const ONBOARD_KEY = 'repple.onboarded';
+
+// The plausible range for a human, in the metric this app stores. Each bound is
+// converted into whichever unit the client is typing in before it is applied,
+// because a range checked against a raw imperial figure is not a range at all:
+// 180 lb sits comfortably inside "20 to 400" and would have been waved through
+// as 180 kg.
+const MIN_KG = 20;
+const MAX_KG = 400;
+const MIN_CM = 80;
+const MAX_CM = 260;
 
 const GOALS: { id: Goal; label: string; sub: string }[] = [
   { id: 'fatloss', label: 'Lose fat', sub: 'Lean out, keep muscle' },
@@ -49,8 +70,23 @@ export default function Onboarding() {
   const [goal, setGoal] = useState<Goal>(c.goal);
   // Blank, not pre-filled: nothing here is known until the user types it.
   const [weight, setWeight] = useState('');
-  const [height, setHeight] = useState('');
+  const [height, setHeight] = useState('');    // centimetres, or whole feet
+  const [heightInVal, setHeightInVal] = useState(''); // inches, imperial only
   const [bf, setBf] = useState('');
+
+  // The units this account reads in. Nothing on this screen offers to change
+  // them — a first run is not the place for a settings control, and Settings
+  // and the profile sheet both already own that toggle.
+  const st = useSettings();
+  const wu = st.weightUnit;
+  const lu = st.lengthUnit;
+
+  // The same bounds, said in the unit being typed. Rounded to whole units so
+  // the comparison is against a number of the same shape as the one in the box.
+  const minWeight = wu === 'lb' ? Math.round(kgToLb(MIN_KG)) : MIN_KG;
+  const maxWeight = wu === 'lb' ? Math.round(kgToLb(MAX_KG)) : MAX_KG;
+  const minHeight = lu === 'in' ? Math.round(cmToIn(MIN_CM)) : MIN_CM;
+  const maxHeight = lu === 'in' ? Math.round(cmToIn(MAX_CM)) : MAX_CM;
   const [diet, setDiet] = useState<Diet>(c.diet);
   const [avoid, setAvoid] = useState<Allergen[]>(c.avoid || []);
   const [injAreas, setInjAreas] = useState<string[]>([]);
@@ -58,8 +94,19 @@ export default function Onboarding() {
   const finish = async () => {
     if (name.trim()) c.setName(name.trim());
     c.setGoal(goal);
-    const w = parseFloat(weight); if (w > 20 && w < 400) c.setWeightKg(w);
-    const h = parseFloat(height); if (h > 80 && h < 260) c.setHeightCm(h);
+    // Judge the figure the client actually typed against a bound on the same
+    // scale, then store the metric it converts to. Both steps matter: the check
+    // has to see pounds as pounds, and the record has to receive kilograms.
+    const w = parseFloat(weight);
+    if (w > minWeight && w < maxWeight) { const kg = weightToKg(weight, wu); if (kg != null) c.setWeightKg(kg); }
+    // Height comes from one box in metric and two in imperial, so the typed
+    // magnitude is recovered from the centimetres rather than re-parsed: feet
+    // and inches are only a plausible height taken together.
+    const cm = heightToCm(height, lu, heightInVal);
+    const h = heightIn(cm, lu);
+    if (cm != null && h != null && h > minHeight && h < maxHeight) c.setHeightCm(cm);
+    // Body fat is a percentage and is stored exactly as typed. There is no such
+    // thing as an imperial percentage, and converting one would be nonsense.
     const b = parseFloat(bf); if (b > 3 && b < 70) c.setBodyFat(b);
     c.setDiet(diet);
     c.setAvoid(avoid);
@@ -100,9 +147,21 @@ export default function Onboarding() {
         <Text style={{ ...ty.title, color: t.ink }}>Your stats</Text>
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs, marginBottom: sp.xl }}>Used to set your calorie and macro targets. Leave anything you don't know blank — you can add it later.</Text>
         <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 6 }}>Weight</Text>
-        <TextInput value={weight} onChangeText={setWeight} keyboardType="decimal-pad" placeholder="kg" placeholderTextColor={t.ink3} accessibilityLabel="Weight in kilograms" style={[inp, { marginBottom: sp.lg }]} />
+        <TextInput value={weight} onChangeText={setWeight} keyboardType="decimal-pad" placeholder={wu} placeholderTextColor={t.ink3}
+          accessibilityLabel={wu === 'kg' ? 'Weight in kilograms' : 'Weight in pounds'} style={[inp, { marginBottom: sp.lg }]} />
         <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 6 }}>Height</Text>
-        <TextInput value={height} onChangeText={setHeight} keyboardType="number-pad" placeholder="cm" placeholderTextColor={t.ink3} accessibilityLabel="Height in centimetres" style={[inp, { marginBottom: sp.lg }]} />
+        {/* Two boxes in imperial, one in metric, as in the profile sheet. A
+            single box asking for a height "in inches" is a box nobody who
+            thinks in feet knows how to fill in — they would type 5.10 and mean
+            five foot ten. */}
+        <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.lg }}>
+          <TextInput value={height} onChangeText={setHeight} keyboardType="number-pad" placeholder={lu === 'cm' ? 'cm' : 'ft'} placeholderTextColor={t.ink3}
+            accessibilityLabel={lu === 'cm' ? 'Height in centimetres' : 'Height, feet'} style={[inp, { flex: 1 }]} />
+          {lu === 'in' ? (
+            <TextInput value={heightInVal} onChangeText={setHeightInVal} keyboardType="number-pad" placeholder="in" placeholderTextColor={t.ink3}
+              accessibilityLabel="Height, inches" style={[inp, { flex: 1 }]} />
+          ) : null}
+        </View>
         <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 6 }}>Body fat % (optional)</Text>
         <TextInput value={bf} onChangeText={setBf} keyboardType="decimal-pad" placeholder="%" placeholderTextColor={t.ink3} accessibilityLabel="Body fat percentage" style={inp} />
       </View>

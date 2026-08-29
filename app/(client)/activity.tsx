@@ -6,19 +6,28 @@
 // A feed is list-shaped, so it leads with no hero: hairline-separated rows in one
 // section instead of forty bordered cards. Every store, conditional and route is
 // preserved.
+//
+// TF-37: the two figures in this feed that are weights — the load on each set,
+// and the weight sent with a check-in — were printed as kilograms regardless of
+// what the client reads in. Both now convert. The cardio distance beside them
+// does NOT: that unit is recorded on the log entry itself (the client chose km
+// or miles when they logged the run), so it is already the client's answer and
+// the body-measurement preference has no business overriding it.
 import { useState } from 'react';
 import { View, Text, Pressable, ScrollView } from 'react-native';
 import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Ghost } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useCheckIns } from '../../src/ui/checkins';
 import { useSessions } from '../../src/ui/sessions';
 import { currentStreak, isNewPR, streakMilestone } from '../../src/lib/streaks';
 import { useClientData } from '../../src/ui/clientData';
+import { useSettings } from '../../src/ui/settings';
+import { weightIn, weightLabel } from '../../src/lib/units';
 import { SessionHrSheet } from '../../src/ui/SessionHrSheet';
 import { ageFromDob } from '../../src/lib/hr';
 
@@ -51,6 +60,7 @@ export default function Activity() {
   const [open, setOpen] = useState<number | null>(null);
   const [hrFor, setHrFor] = useState<{ title: string; startISO: string; durationMin: number } | null>(null);
   const cd = useClientData();
+  const wu = useSettings().weightUnit;
   const age = ageFromDob(cd.dob);
   const { log } = useWorkoutLog();
   const { checkins } = useCheckIns();
@@ -62,7 +72,7 @@ export default function Activity() {
   for (const e of log) {
     const pr = isNewPR(log, e);
     if (e.sets) {
-      events.push({ at: e.t, icon: pr ? 'trophy' : 'dumbbell', title: pr ? `New PR — ${e.exercise}` : `Logged ${e.exercise}`, sub: e.sets.map((s) => `${s[0]}×${s[1]}kg`).join(' · '), route: pr ? '/(client)/records' : '/(client)/trends', hr: { title: e.exercise, startISO: e.t, durationMin: Math.max(20, e.sets.length * 4) } });
+      events.push({ at: e.t, icon: pr ? 'trophy' : 'dumbbell', title: pr ? `New PR — ${e.exercise}` : `Logged ${e.exercise}`, sub: e.sets.map((s) => `${s[0]}×${weightIn(s[1], wu)}${wu}`).join(' · '), route: pr ? '/(client)/records' : '/(client)/trends', hr: { title: e.exercise, startISO: e.t, durationMin: Math.max(20, e.sets.length * 4) } });
     } else if (e.cardio) {
       events.push({ at: e.t, icon: 'heart', title: `Logged ${e.exercise}`, sub: [`${e.cardio.mins} min`, e.cardio.dist > 0 ? `${e.cardio.dist} ${e.cardio.unit}` : null, e.cardio.watts && e.cardio.watts > 0 ? `${e.cardio.watts} W` : null, e.cardio.hrAvg ? `♥ ${e.cardio.hrAvg} avg / ${e.cardio.hrHigh ?? e.cardio.hrAvg} hi` : null].filter(Boolean).join(' · '), route: '/(client)/trends', hr: { title: e.exercise, startISO: e.t, durationMin: e.cardio.mins || 30 } });
     }
@@ -72,7 +82,7 @@ export default function Activity() {
   const milestone = streakMilestone(streak);
   if (milestone) events.push({ at: new Date().toISOString(), icon: 'flame', title: 'Streak milestone', sub: milestone, route: '/(client)/achievements' });
   // Check-ins
-  for (const c of checkins) events.push({ at: c.at, icon: 'pencil', title: 'Weekly check-in sent', sub: `${c.weightKg} kg · energy ${c.energy}/5 · sleep ${c.sleep}/5`, route: '/(client)/checkin' });
+  for (const c of checkins) events.push({ at: c.at, icon: 'pencil', title: 'Weekly check-in sent', sub: `${fig(weightLabel(c.weightKg, wu))} · energy ${c.energy}/5 · sleep ${c.sleep}/5`, route: '/(client)/checkin' });
   // My sessions
   for (const s of sessions) {
     if (s.status === 'booked' && s.clientId === cd.id) events.push({ at: s.startsAt, icon: 'calendar', title: 'Session booked', sub: `${timeLabel(s.startsAt)} · ${s.durationMin} min`, route: '/(client)/bookings' });
