@@ -18,6 +18,7 @@
     "postinstall": "patch-package",
     "check:native": "node scripts/check-native.mjs",
     "check:schema": "node scripts/check-schema.mjs",
+    "check:schema:offline": "node scripts/check-schema.mjs --offline",
     "preflight": "npm run typecheck && npm run test:zones && npm run db:check && npm run check:native && npm run check:reads && npm run check:portal && npm run check:schema && npm run check:bundle",
     "check:bundle": "expo export --platform all --output-dir .preflight-export",
     "check:reads": "node scripts/check-reads.mjs",

@@ -66,6 +66,46 @@ jobs:
       - name: Native modules and their permission strings
         run: npm run check:native
 
+      # Preflight has eight steps and this workflow ran four of them. The four
+      # below are the ones that caught the worst of a long session's bugs, and
+      # not one of them was running on push.
+
+      # Every Supabase read must inspect `error`, or say in a comment why an
+      # empty answer is honest without it. The bug this exists for is a refused
+      # read rendering as "you have no clients" / "nothing logged" / "no coach
+      # assigned" — a statement about the person rather than about the network,
+      # and the most expensive sentence any of these screens can say.
+      - name: Reads can tell failure from emptiness
+        run: npm run check:reads
+
+      # The console imports src/lib from the phone app. A module that reaches
+      # for react-native, AsyncStorage or expo-* compiles fine here and dies at
+      # runtime in the browser, because those globals do not exist. This is the
+      # only step that looks at that boundary.
+      - name: Console imports nothing phone-only
+        run: npm run check:portal
+
+      # Both directions of schema drift. PostgREST rejects the WHOLE statement
+      # for one unknown column, so a column the app writes and the database
+      # lacks loses every other field on the row too — silently, inside a
+      # debounced effect. Five columns existed in production that no file in
+      # this repo created, and nothing noticed, because the old check kept a
+      # hand-written list of ten tables that did not include `clients`.
+      #
+      # The offline form compares the app against supabase/setup.sql and needs
+      # no credentials. Probing the live database is the other half and belongs
+      # in a job that holds a key; this one deliberately holds none.
+      - name: Schema drift, app against repo
+        run: npm run check:schema:offline
+
+      # Metro resolves differently from tsc. A path case-wrong on a
+      # case-sensitive filesystem, a circular import, an asset that is not
+      # where the bundler thinks — none of it fails a typecheck or a test, and
+      # all of it fails a build. Slowest step here and the last line of defence
+      # before a build is cut.
+      - name: Bundles for both platforms
+        run: npm run check:bundle
+
   studio_web:
     name: Studio web console · build
     runs-on: ubuntu-latest

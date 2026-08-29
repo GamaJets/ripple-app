@@ -53,8 +53,9 @@
 // summary says how many tables were only spot-checked, rather than claiming a
 // coverage it does not have.
 //
-//     node scripts/check-schema.mjs            the whole check
+//     node scripts/check-schema.mjs             the whole check
 //     node scripts/check-schema.mjs --offline   app vs repo only, no credentials
+//     node scripts/check-schema.mjs --list      what it covers, table by table
 //
 // Exit codes: 0 agreed, 1 they disagree, 78 the live half could not be run
 // because the credentials were absent — which is not a pass and not a failure.
@@ -377,7 +378,7 @@ function scanFile(file) {
         selectColumns(list, table, add);
       } else if (WRITES.has(name)) {
         if (!args.length) { add(null, null, `.${name}() with no row`); continue; }
-        readRow(args[0], table, name, add, file, 0);
+        readRow(args[0], table, name, add, file, 0, null);
         // `.upsert(row, { onConflict: 'coach_id,name' })` names columns too, and
         // a wrong one there fails the write exactly as a wrong one in the row.
         const conflict = args[1] && /onConflict\s*:\s*'([^']*)'/.exec(args[1]);
@@ -411,14 +412,18 @@ function scanFile(file) {
  * tables unchecked — `workouts` among them, and entryToRow is the very function
  * the missing `session_mins` was passing through. So a definition in the same
  * file, or one imported over a relative path, is followed and read the same
- * way. Two hops, and then it says it cannot see.
+ * way — and where the trail runs out, it says so instead of returning half a
+ * row as if it were the whole one.
  */
-function readRow(arg, table, method, add, file, depth) {
+function readRow(arg, table, method, add, file, depth, origin) {
   // A definition is followed by handing back everything after its `=` or its
   // `return`, so the expression has to be cut out of what comes next.
   const text = splitTopLevel(arg.trim(), ';')[0].trim().replace(/\s+as\s+[\w<>[\]{}|,.\s]+$/, '');
-  const again = (t, f = file) => readRow(t, table, method, add, f, depth + 1);
-  const giveUp = (why) => add(null, null, `.${method}(${text.slice(0, 40).replace(/\s+/g, ' ')}) — ${why}`);
+  // Whatever the trail ends on, the complaint names the call that was written,
+  // because that is the line somebody has to go and look at.
+  const shown = origin ?? text;
+  const again = (t, f = file) => readRow(t, table, method, add, f, depth + 1, shown);
+  const giveUp = (why) => add(null, null, `.${method}(${shown.slice(0, 40).replace(/\s+/g, ' ')}) — ${why}`);
   if (depth > 6) return giveUp('followed as far as this goes');
   if (!text) return giveUp('the row is an expression this cannot read');
 
@@ -737,7 +742,13 @@ async function probe(table, columns) {
   if (status === 200 || status === 401) return { present: columns, missing: [] };
   if (status === 404) return { noTable: true, present: [], missing: [] };
   if (status !== 400) return { unknown: `answered ${status}: ${body.slice(0, 120)}`, present: [], missing: [] };
-  if (columns.length === 1) return { present: [], missing: columns };
+  if (columns.length === 1) {
+    // Only 42703 means "no such column". A 400 for any other reason is a
+    // question that did not get answered, and reporting it as a missing column
+    // would be inventing a fact out of a refusal to reply.
+    if (/42703|does not exist/.test(body)) return { present: [], missing: columns };
+    return { unknown: `answered 400: ${body.slice(0, 120)}`, present: [], missing: [] };
+  }
   // PostgREST names only the first offending column, so the rest are asked for
   // one at a time. This costs a request per column of a table that has drifted,
   // and only of a table that has drifted.
@@ -914,12 +925,18 @@ if (problems.length) {
 
 for (const n of notes) console.log(`Note: ${n}`);
 
+// The summary says what was checked, not that everything was. A count somebody
+// can compare against the next run is worth more than the word "ok".
+const caveat = unreadable.length
+  ? `, with ${new Set(unreadable).size} place${new Set(unreadable).size === 1 ? '' : 's'} in the source it could not read`
+  : '';
+
 if (OFFLINE) {
-  console.log(`schema ok, offline — ${columnCount} columns across ${used.size} tables named by ${files.length} source files, every one of them declared in ${SETUP_SQL}. The live database was not asked.`);
+  console.log(`schema ok, offline — ${columnCount} columns across ${used.size} tables named by ${files.length} source files, every one of them declared in ${SETUP_SQL}${caveat}. The live database was not asked.`);
   process.exit(0);
 }
 if (!url || !key) {
-  console.log(`app vs repo ok — ${columnCount} columns across ${used.size} tables are all declared in ${SETUP_SQL}.`);
+  console.log(`app vs repo ok — ${columnCount} columns across ${used.size} tables are all declared in ${SETUP_SQL}${caveat}.`);
   console.error('\nThe live half did NOT run and this is not a pass. Set EXPO_PUBLIC_SUPABASE_URL and');
   console.error('EXPO_PUBLIC_SUPABASE_ANON_KEY to check the database, or pass --offline to say so on purpose.');
   process.exit(78);
@@ -927,5 +944,5 @@ if (!url || !key) {
 
 const coverage = liveListed
   ? 'the whole live schema was listed and compared'
-  : `${tableCount} tables were asked about by name; a live column that neither the repo nor the app mentions is invisible without SUPABASE_SECRET_KEY`;
-console.log(`schema ok — ${liveChecked} columns checked against the live database, ${coverage}.`);
+  : `${tableCount} tables were asked about by name — a live column that neither the repo nor the app mentions is invisible without SUPABASE_SECRET_KEY`;
+console.log(`schema ok — ${liveChecked} columns checked against the live database, ${coverage}${caveat}.`);
