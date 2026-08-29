@@ -29,6 +29,7 @@
 // coach has not uploaded anything" and "we could not reach the server", and the
 // client library asserted the former in both cases.
 import { useEffect, useState, useCallback } from 'react';
+import { useAuthRevision } from './authRevision';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { ExVideo } from '../lib/trainerMock';
 import { supabase } from '../lib/supabase';
@@ -155,6 +156,7 @@ const rowToItem = (r: any): VideoItem => ({
 });
 
 export function useExerciseVideos() {
+  const authRev = useAuthRevision();
   const [added, setAdded] = useState<VideoItem[]>([]);
   const [remote, setRemote] = useState<VideoItem[]>([]);
   const [status, setStatus] = useState<LibraryStatus>('loading');
@@ -174,7 +176,10 @@ export function useExerciseVideos() {
       setRemote((data ?? []).map(rowToItem));
       setStatus('ready');
     } catch { setStatus('error'); }
-  }, []);
+    // Re-armed on sign-in. This read is RLS-scoped, so running it once at mount
+    // — while still signed out — left status latched at 'error' for the life of
+    // the app, and `load` never changed identity so the effect never re-ran.
+  }, [authRev]);
   useEffect(() => { load(); }, [load]);
 
   const persist = (next: VideoItem[]) => {

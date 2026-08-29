@@ -19,6 +19,7 @@ import { buildProgram, type Program } from '../lib/programs';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import type { LoadStatus } from './loadStatus';
+import { useAuthRevision } from './authRevision';
 
 export interface ProgramTemplate { id: string; name: string; program: Program }
 
@@ -53,6 +54,7 @@ interface TemplatesValue {
 const Ctx = createContext<TemplatesValue | null>(null);
 
 export function ProgramTemplatesProvider({ children }: { children: ReactNode }) {
+  const authRev = useAuthRevision();
   const [templates, setTemplates] = useState<ProgramTemplate[]>(() => seed());
   const [uid, setUid] = useState<string | null>(null);
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
@@ -62,6 +64,13 @@ export function ProgramTemplatesProvider({ children }: { children: ReactNode }) 
     let cancelled = false;
     (async () => {
       try {
+        // No session is a true answer, not a failed check. getUser() REJECTS
+        // when nobody is signed in, and treating that as an error latched this
+        // provider into 'error' on the first tick — before anybody had signed
+        // in — where it stayed, because the effect never ran a second time.
+        const { data: sess } = await supabase.auth.getSession();
+        if (cancelled) return;
+        if (!sess?.session) { setStatus('ready'); return; }
         const { data: auth, error: authErr } = await supabase.auth.getUser();
         if (cancelled) return;
         if (authErr) { setStatus('error'); return; }
@@ -82,7 +91,7 @@ export function ProgramTemplatesProvider({ children }: { children: ReactNode }) 
       } catch { if (!cancelled) setStatus('error'); }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [authRev]);
 
   const saveTemplate = async (name: string, program: Program): Promise<boolean> => {
     const nm = name.trim() || 'Untitled template';

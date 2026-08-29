@@ -18,6 +18,7 @@ import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { LoadStatus } from './loadStatus';
+import { useAuthRevision } from './authRevision';
 
 export interface TrainerInvite {
   id: string;
@@ -61,6 +62,7 @@ const rowTo = (r: any): TrainerInvite => ({
 const Ctx = createContext<TrainerInvitesValue | null>(null);
 
 export function TrainerInvitesProvider({ children }: { children: ReactNode }) {
+  const authRev = useAuthRevision();
   const [sent, setSent] = useState<TrainerInvite[]>([]);
   const [received, setReceived] = useState<TrainerInvite[]>([]);
   const [uid, setUid] = useState<string | null>(null);
@@ -88,6 +90,13 @@ export function TrainerInvitesProvider({ children }: { children: ReactNode }) {
     (async () => {
       let failed = false;
       try {
+        // No session is a true answer, not a failed check. getUser() REJECTS
+        // when nobody is signed in, and treating that as an error latched this
+        // provider into 'error' on the first tick — before anybody had signed
+        // in — where it stayed, because the effect never ran a second time.
+        const { data: sess } = await supabase.auth.getSession();
+        if (cancelled) return;
+        if (!sess?.session) { setStatus('ready'); return; }
         const { data: auth, error: authErr } = await supabase.auth.getUser();
         if (cancelled) return;
         if (authErr) { setStatus('error'); return; }
@@ -119,7 +128,7 @@ export function TrainerInvitesProvider({ children }: { children: ReactNode }) {
       if (!cancelled) setStatus(failed ? 'error' : 'ready');
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [authRev]);
 
   const sendTrainerInvite: TrainerInvitesValue['sendTrainerInvite'] = async (rawEmail) => {
     const e = (rawEmail || '').trim().toLowerCase();

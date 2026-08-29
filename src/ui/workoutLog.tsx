@@ -26,6 +26,7 @@ import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
 import type { LoadStatus } from './loadStatus';
+import { useAuthRevision } from './authRevision';
 
 interface WorkoutLogValue {
   log: WorkoutEntry[];
@@ -55,6 +56,7 @@ const matchRow = (q: any, uid: string, e: WorkoutEntry) =>
   e.id ? q.eq('id', e.id) : q.eq('user_id', uid).eq('performed_at', e.t).eq('exercise', e.exercise);
 
 export function WorkoutLogProvider({ children }: { children: React.ReactNode }) {
+  const authRev = useAuthRevision();
   const [log, setLog] = useState<WorkoutEntry[]>([]);
   const [uid, setUid] = useState<string | null>(null);
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
@@ -70,6 +72,11 @@ export function WorkoutLogProvider({ children }: { children: React.ReactNode }) 
         // The auth call has an error channel of its own. Failing to establish
         // WHO the user is is not the same as their having no workouts, and it is
         // the likelier failure on a cold launch with bad signal.
+        const { data: sess } = await supabase.auth.getSession();
+        if (cancelled) return;
+        // No session means no log to read, not a log we failed to read. This is
+        // the provider behind "We couldn't read your training log" on Home.
+        if (!sess?.session) { setStatus('ready'); return; }
         const { data: auth, error: authErr } = await supabase.auth.getUser();
         if (cancelled) return;
         if (authErr) { reportError('workoutLog.hydrate.auth', authErr); setStatus('error'); return; }
@@ -89,7 +96,7 @@ export function WorkoutLogProvider({ children }: { children: React.ReactNode }) 
       } catch (e) { reportError('workoutLog.hydrate', e); if (!cancelled) setStatus('error'); }
     })();
     return () => { cancelled = true; };
-  }, [reloadTick]);
+  }, [reloadTick, authRev]);
 
   // Insert, then adopt the ids the server assigns so the new entries can be
   // edited straight away rather than only after the next reload.

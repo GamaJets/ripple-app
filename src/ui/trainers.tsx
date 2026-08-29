@@ -27,6 +27,7 @@ import { fetchGymTrainers, payroll30For, type GymTrainer } from '../lib/gymTrain
 export type { GymTrainer };
 import { reportError } from '../lib/reportError';
 import { useTenant } from './tenant';
+import { useAuthRevision } from './authRevision';
 import type { LoadStatus } from './loadStatus';
 
 
@@ -50,6 +51,7 @@ interface TrainersValue {
 const Ctx = createContext<TrainersValue | null>(null);
 
 export function PlatformTrainersProvider({ children }: { children: ReactNode }) {
+  const authRev = useAuthRevision();
   const { tenant } = useTenant();
   const [trainers, setTrainers] = useState<GymTrainer[]>([]);
   const [loading, setLoading] = useState(true);
@@ -78,7 +80,7 @@ export function PlatformTrainersProvider({ children }: { children: ReactNode }) 
       if (!cancelled) setLoading(false);
     })();
     return () => { cancelled = true; };
-  }, [tenant?.id, tick]);
+  }, [tenant?.id, tick, authRev]);
 
   // Both are sums over `trainers`, and on a failed read `trainers` is empty —
   // so both summed to 0 and the owner's screens reported a real number: nought

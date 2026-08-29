@@ -11,6 +11,7 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from '
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import type { LoadStatus } from './loadStatus';
+import { useAuthRevision } from './authRevision';
 
 export interface MeasureEntry {
   id: string; at: string;
@@ -57,6 +58,7 @@ interface MeasureValue {
 const Ctx = createContext<MeasureValue | null>(null);
 
 export function MeasurementsProvider({ children }: { children: ReactNode }) {
+  const authRev = useAuthRevision();
   const [entries, setEntries] = useState<MeasureEntry[]>([]);
   const [uid, setUid] = useState<string | null>(null);
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
@@ -66,6 +68,13 @@ export function MeasurementsProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     (async () => {
       try {
+        // No session is a true answer, not a failed check. getUser() REJECTS
+        // when nobody is signed in, and treating that as an error latched this
+        // provider into 'error' on the first tick — before anybody had signed
+        // in — where it stayed, because the effect never ran a second time.
+        const { data: sess } = await supabase.auth.getSession();
+        if (cancelled) return;
+        if (!sess?.session) { setStatus('ready'); return; }
         const { data: auth, error: authErr } = await supabase.auth.getUser();
         if (cancelled) return;
         if (authErr) { setStatus('error'); return; }
@@ -82,7 +91,7 @@ export function MeasurementsProvider({ children }: { children: ReactNode }) {
       } catch { if (!cancelled) setStatus('error'); }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [authRev]);
 
   const addEntry = async (vals: Partial<Omit<MeasureEntry, 'id' | 'at'>>): Promise<boolean> => {
     const clean: Partial<MeasureEntry> = {};

@@ -22,6 +22,7 @@ import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import type { GymClass, ClassBookingStatus } from '../lib/classesMock';
 import type { LoadStatus } from './loadStatus';
+import { useAuthRevision } from './authRevision';
 
 interface ClassesValue {
   classes: GymClass[];
@@ -65,6 +66,7 @@ const rowToClass = (r: any): GymClass => ({
 });
 
 export function ClassesProvider({ children }: { children: React.ReactNode }) {
+  const authRev = useAuthRevision();
   const [classes, setClasses] = useState<GymClass[]>([]);
   const [myStatus, setMyStatus] = useState<Record<string, ClassBookingStatus>>({});
   const [uid, setUid] = useState<string | null>(null);
@@ -76,6 +78,12 @@ export function ClassesProvider({ children }: { children: React.ReactNode }) {
     if (!USE_SUPABASE) { setReady(true); setStatus('ready'); return; }
     let failed = false;
     try {
+      // Signed out is a true answer, not a failed read: getUser() rejects when
+      // there is no session, which marked this whole load as failed on the
+      // first tick — before anybody had signed in — and `load` never changed
+      // identity, so the effect below never asked again.
+      const { data: sess } = await supabase.auth.getSession();
+      if (!sess?.session) { setStatus('ready'); setReady(true); return; }
       const { data: auth, error: authErr } = await supabase.auth.getUser();
       if (authErr) failed = true;
       const id = auth?.user?.id ?? null;
@@ -115,7 +123,7 @@ export function ClassesProvider({ children }: { children: React.ReactNode }) {
     } catch { failed = true; }
     setStatus(failed ? 'error' : 'ready');
     setReady(true);
-  }, []);
+  }, [authRev]);
 
   useEffect(() => { let c = false; (async () => { if (!c) await load(); })(); return () => { c = true; }; }, [load]);
 

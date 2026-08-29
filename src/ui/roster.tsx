@@ -27,6 +27,7 @@ import type { RosterClient } from '../lib/trainerMock';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import type { LoadStatus } from './loadStatus';
+import { useAuthRevision } from './authRevision';
 
 let SEQ = 900;
 const MODE_KEY = 'repple.clientModes';
@@ -50,6 +51,7 @@ interface RosterValue {
 const Ctx = createContext<RosterValue | null>(null);
 
 export function RosterProvider({ children }: { children: ReactNode }) {
+  const authRev = useAuthRevision();
   const [roster, setRoster] = useState<RosterClient[]>([]);
   // Trainer-set online/in-person overrides (persisted). Real DB clients default to
   // 'online'; this lets the coach classify each so the roster filter works for them.
@@ -65,6 +67,13 @@ export function RosterProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     (async () => {
       try {
+        // No session is a true answer, not a failed check. getUser() REJECTS
+        // when nobody is signed in, and treating that as an error latched this
+        // provider into 'error' on the first tick — before anybody had signed
+        // in — where it stayed, because the effect never ran a second time.
+        const { data: sess } = await supabase.auth.getSession();
+        if (cancelled) return;
+        if (!sess?.session) { setStatus('ready'); return; }
         const { data: auth, error: authErr } = await supabase.auth.getUser();
         if (cancelled) return;
         if (authErr) { setStatus('error'); return; }
@@ -148,7 +157,7 @@ export function RosterProvider({ children }: { children: ReactNode }) {
       } catch { if (!cancelled) setStatus('error'); }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [authRev]);
   const addClient = async (name: string, goal: string, mode: 'online' | 'inperson' = 'online'): Promise<boolean> => {
     const n = name.trim();
     if (!n) return false;

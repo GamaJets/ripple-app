@@ -14,6 +14,7 @@ import type { Program } from '../lib/programs';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import type { LoadStatus } from './loadStatus';
+import { useAuthRevision } from './authRevision';
 
 interface AssignedProgramsValue {
   programs: Record<string, Program>;
@@ -35,6 +36,7 @@ interface AssignedProgramsValue {
 const Ctx = createContext<AssignedProgramsValue | null>(null);
 
 export function AssignedProgramsProvider({ children }: { children: ReactNode }) {
+  const authRev = useAuthRevision();
   const [programs, setPrograms] = useState<Record<string, Program>>({});
   const [uid, setUid] = useState<string | null>(null);
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
@@ -44,6 +46,13 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
     let cancelled = false;
     (async () => {
       try {
+        // No session is a true answer, not a failed check. getUser() REJECTS
+        // when nobody is signed in, and treating that as an error latched this
+        // provider into 'error' on the first tick — before anybody had signed
+        // in — where it stayed, because the effect never ran a second time.
+        const { data: sess } = await supabase.auth.getSession();
+        if (cancelled) return;
+        if (!sess?.session) { setStatus('ready'); return; }
         const { data: auth, error: authErr } = await supabase.auth.getUser();
         if (cancelled) return;
         if (authErr) { setStatus('error'); return; }
@@ -65,7 +74,7 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
       } catch { setStatus('error'); /* stay in-memory, but say the read failed */ }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [authRev]);
 
   const getProgram = (clientId: string) => programs[clientId] ?? null;
   const assignProgram = async (clientId: string, program: Program): Promise<boolean> => {

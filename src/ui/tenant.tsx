@@ -23,6 +23,7 @@ import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
 import type { LoadStatus } from './loadStatus';
+import { useAuthRevision } from './authRevision';
 
 export interface Tenant {
   id: string;
@@ -50,6 +51,7 @@ interface TenantValue {
 const Ctx = createContext<TenantValue | null>(null);
 
 export function TenantProvider({ children }: { children: ReactNode }) {
+  const authRev = useAuthRevision();
   const [tenant, setTenant] = useState<Tenant | null>(null);
   const [role, setRole] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -64,6 +66,12 @@ export function TenantProvider({ children }: { children: ReactNode }) {
       setLoading(true);
       setStatus('loading');
       try {
+        const { data: sess } = await supabase.auth.getSession();
+        if (cancelled) return;
+        // Signed out is not a failed read of the tenant — there is simply no
+        // user to have one. getUser() rejects with no session, which latched
+        // this at 'error' on the first tick and it never ran again.
+        if (!sess?.session) { setTenant(null); setStatus('ready'); setLoading(false); return; }
         const { data: auth, error: authErr } = await supabase.auth.getUser();
         if (cancelled) return;
         if (authErr) { reportError('tenant.load.auth', authErr); setStatus('error'); setLoading(false); return; }
@@ -101,7 +109,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
       if (!cancelled) setLoading(false);
     })();
     return () => { cancelled = true; };
-  }, [tick]);
+  }, [tick, authRev]);
 
   const updateTenant: TenantValue['updateTenant'] = useCallback(async (patch) => {
     if (!USE_SUPABASE || !tenant) return false;

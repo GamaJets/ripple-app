@@ -21,6 +21,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import type { LoadStatus } from './loadStatus';
+import { useAuthRevision } from './authRevision';
 
 export interface AvailSlot { id: string; dow: number; hour: number; dur: number }
 
@@ -28,6 +29,7 @@ const KEY = 'repple.trainer.availability';
 let SEQ = 1;
 
 export function useAvailability() {
+  const authRev = useAuthRevision();
   const [slots, setSlots] = useState<AvailSlot[]>([]);
   const [uid, setUid] = useState<string | null>(null);
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
@@ -43,6 +45,13 @@ export function useAvailability() {
       // Durable server copy (session-9 SQL): server wins; if the server is empty
       // but this device has slots, push them up (recovers pre-sync schedules).
       try {
+        // No session is a true answer, not a failed check. getUser() REJECTS
+        // when nobody is signed in, and treating that as an error latched this
+        // provider into 'error' on the first tick — before anybody had signed
+        // in — where it stayed, because the effect never ran a second time.
+        const { data: sess } = await supabase.auth.getSession();
+        if (cancelled) return;
+        if (!sess?.session) { setStatus('ready'); return; }
         const { data: auth, error: authErr } = await supabase.auth.getUser();
         if (cancelled) return;
         if (authErr) { setStatus('error'); return; }
@@ -73,7 +82,7 @@ export function useAvailability() {
       } catch { if (!cancelled) setStatus('error'); /* offline: local copy stands, and now says so */ }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [authRev]);
 
   const persist = (next: AvailSlot[]) => {
     const sorted = [...next].sort((a, b) => a.dow - b.dow || a.hour - b.hour);

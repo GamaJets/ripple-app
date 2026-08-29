@@ -17,6 +17,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import type { LoadStatus } from './loadStatus';
+import { useAuthRevision } from './authRevision';
 
 export interface Habit { id: string; label: string; icon: string; done: boolean }
 
@@ -51,6 +52,7 @@ const today = () => {
 const Ctx = createContext<HabitsValue | null>(null);
 
 export function HabitsProvider({ children }: { children: ReactNode }) {
+  const authRev = useAuthRevision();
   const [habits, setHabits] = useState<Habit[]>(() => SEED.map((h) => ({ ...h })));
   const [water, setWater] = useState(0);
   const [wHydrated, setWHydrated] = useState(false);
@@ -65,6 +67,13 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     (async () => {
       try {
+        // No session is a true answer, not a failed check. getUser() REJECTS
+        // when nobody is signed in, and treating that as an error latched this
+        // provider into 'error' on the first tick — before anybody had signed
+        // in — where it stayed, because the effect never ran a second time.
+        const { data: sess } = await supabase.auth.getSession();
+        if (cancelled) return;
+        if (!sess?.session) { setStatus('ready'); return; }
         const { data: auth, error: authErr } = await supabase.auth.getUser();
         if (cancelled) return;
         if (authErr) { setStatus('error'); return; }
@@ -82,7 +91,7 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
       } catch { if (!cancelled) setStatus('error'); }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [authRev]);
 
   const persist = async (id: string, done: boolean): Promise<boolean> => {
     if (!USE_SUPABASE || !uid) return false;

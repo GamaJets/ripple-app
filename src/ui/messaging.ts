@@ -21,6 +21,7 @@ import { useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { sendPush } from './pushNotifications';
+import { useAuthRevision } from './authRevision';
 import type { Message } from '../lib/types';
 import type { LoadStatus } from './loadStatus';
 
@@ -37,6 +38,7 @@ const rowToMsg = (r: any): Message => ({
  * @param role who I am in this thread ('client' | 'coach').
  */
 export function useThread(clientId: string | null, role: ChatRole) {
+  const authRev = useAuthRevision();
   const [messages, setMessages] = useState<Message[]>([]);
   const [ready, setReady] = useState(false);
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
@@ -53,6 +55,9 @@ export function useThread(clientId: string | null, role: ChatRole) {
       let cid = clientId;
       if (!cid && role === 'client') {
         try {
+          const { data: sess } = await supabase.auth.getSession();
+          if (cancelled) return;
+          if (!sess?.session) { setStatus('ready'); setReady(true); return; }
           const { data: auth, error: authErr } = await supabase.auth.getUser();
           // Not knowing who you are is a failure, not an empty thread.
           if (authErr) { if (!cancelled) { setStatus('error'); setReady(true); } return; }
@@ -94,7 +99,7 @@ export function useThread(clientId: string | null, role: ChatRole) {
       } catch { /* realtime optional: the thread is already loaded, this only adds live updates */ }
     })();
     return () => { cancelled = true; if (channel) { try { supabase.removeChannel(channel); } catch { /* ignore */ } } };
-  }, [clientId, role]);
+  }, [clientId, role, authRev]);
 
   /**
    * Send a message.

@@ -13,6 +13,7 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import type { LoadStatus } from './loadStatus';
+import { useAuthRevision } from './authRevision';
 
 interface TagsValue {
   tagsFor: (clientId: string) => string[];
@@ -41,6 +42,7 @@ const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ').slice(0,
 const Ctx = createContext<TagsValue | null>(null);
 
 export function ClientTagsProvider({ children }: { children: ReactNode }) {
+  const authRev = useAuthRevision();
   const [map, setMap] = useState<Record<string, string[]>>(() => JSON.parse(JSON.stringify(SEED)));
   const [uid, setUid] = useState<string | null>(null);
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
@@ -50,6 +52,13 @@ export function ClientTagsProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     (async () => {
       try {
+        // No session is a true answer, not a failed check. getUser() REJECTS
+        // when nobody is signed in, and treating that as an error latched this
+        // provider into 'error' on the first tick — before anybody had signed
+        // in — where it stayed, because the effect never ran a second time.
+        const { data: sess } = await supabase.auth.getSession();
+        if (cancelled) return;
+        if (!sess?.session) { setStatus('ready'); return; }
         const { data: auth, error: authErr } = await supabase.auth.getUser();
         if (cancelled) return;
         if (authErr) { setStatus('error'); return; }
@@ -69,7 +78,7 @@ export function ClientTagsProvider({ children }: { children: ReactNode }) {
       } catch { if (!cancelled) setStatus('error'); }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [authRev]);
 
   const addTag = async (clientId: string, raw: string): Promise<boolean> => {
     const tag = norm(raw); if (!tag) return false;

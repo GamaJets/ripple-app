@@ -14,6 +14,7 @@
 // A failed read must not render as "you have saved none", which is the shape
 // of bug this codebase keeps finding.
 import { useCallback, useEffect, useState } from 'react';
+import { useAuthRevision } from './authRevision';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 
@@ -39,6 +40,7 @@ export interface CoachExercisesApi {
 const byName = (a: CoachExercise, b: CoachExercise) => a.name.localeCompare(b.name);
 
 export function useCoachExercises(): CoachExercisesApi {
+  const authRev = useAuthRevision();
   const [saved, setSaved] = useState<CoachExercise[]>([]);
   const [status, setStatus] = useState<CoachExerciseStatus>(USE_SUPABASE ? 'loading' : 'ready');
   const [uid, setUid] = useState<string | null>(null);
@@ -48,6 +50,13 @@ export function useCoachExercises(): CoachExercisesApi {
     let cancelled = false;
     (async () => {
       try {
+        // No session is a true answer, not a failed check. getUser() REJECTS
+        // when nobody is signed in, and treating that as an error latched this
+        // provider into 'error' on the first tick — before anybody had signed
+        // in — where it stayed, because the effect never ran a second time.
+        const { data: sess } = await supabase.auth.getSession();
+        if (cancelled) return;
+        if (!sess?.session) { setStatus('ready'); return; }
         const { data: auth, error: authErr } = await supabase.auth.getUser();
         if (cancelled) return;
         if (authErr) { setStatus('error'); return; }
@@ -69,7 +78,7 @@ export function useCoachExercises(): CoachExercisesApi {
       } catch { if (!cancelled) setStatus('error'); }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [authRev]);
 
   const remember = useCallback(async (name: string, group = ''): Promise<boolean> => {
     const nm = name.trim();
