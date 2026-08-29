@@ -48,6 +48,7 @@ import { metricTrends, compositionInsights, METRIC_GROUPS, type ScanMetrics } fr
 import { focusToGroups, recommendedExercises } from '../../src/lib/focus';
 import { listProgressPhotos, uploadProgressPhoto, deleteProgressPhoto, comparePair, photosNote, missingFileCount, type ProgressPhoto } from '../../src/lib/progressPhotos';
 import { fetchMyCoach, fetchMyShares, sharePhoto, unsharePhoto, shareStateOf, shareLabel, sharedNote, sendBlocker, revokeCaveat, type ShareGrant, type CoachRef } from '../../src/lib/photoShare';
+import { compareRows, compareBasis, readingText, deltaText, spanLabel, COMPARE_DISCLAIMER } from '../../src/lib/photoCompare';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const ITEM_H = 42, VISIBLE = 5;
@@ -665,10 +666,72 @@ export default function Scans() {
                           )}
                           <Text style={{ ...ty.label, fontWeight: '500', color: t.ink, marginTop: 6 }}>{label}</Text>
                           <Text style={{ ...ty.caption, color: t.ink3 }}>{new Date(ph.takenAt).toLocaleDateString()}</Text>
+                          {/* The badge is repeated here and not left to the
+                              strip below. These are photographs of somebody's
+                              body shown four times the size, and this is where
+                              a person actually looks: "can my coach see this
+                              one?" must not be a question you have to scroll
+                              down and re-find the thumbnail to answer. Same
+                              three states as the strip, same em-dash when the
+                              grants have not been read. */}
+                          <Text style={{ ...ty.caption, fontWeight: '500', color: shareStateOf(ph.id, shares) === 'sent' ? t.brand : t.ink3 }}>{shareLabel(shareStateOf(ph.id, shares))}</Text>
                         </View>
                       ))}
                     </View>
-                    <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.sm }}>{sel.days === null ? '—' : sel.days === 0 ? 'Same day' : `${sel.days} day${sel.days === 1 ? '' : 's'} apart`}</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.sm }}>{spanLabel(sel.days)}</Text>
+
+                    {/* ── the readings from those two days ─────────────────
+                        TF-23 asks to see two photos "with their dates and the
+                        readings from those days". The readings are the InBody
+                        scan recorded on each photo's own calendar day and
+                        nothing else — src/lib/photoCompare.ts explains at
+                        length why it is not the photo row's own weight_kg
+                        column (always null: savePhoto uploads with no opts)
+                        and why "same day" is not a string slice.
+
+                        The Change column is the difference between two SCANS
+                        that both exist. It is not, and cannot be, anything
+                        read off the pictures: a row whose either side was not
+                        measured shows a dash there, and COMPARE_DISCLAIMER
+                        says so in words underneath. */}
+                    {cd.scansStatus === 'error' ? (
+                      // Not a table of dashes. A dash means "there was no scan
+                      // that day", and saying that when the app merely failed
+                      // to read the list would be inventing the tidier answer.
+                      <Flag tone={t.warn} style={{ marginTop: sp.md }}>
+                        Your scans could not be read just now, so no figures are shown beside these photos. The photos and their dates above are unaffected.
+                      </Flag>
+                    ) : cd.scansStatus === 'loading' ? (
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>Reading the scans from those days…</Text>
+                    ) : (() => {
+                      const rows = compareRows(sel.before.takenAt, sel.after.takenAt, scans);
+                      return (
+                        <View style={{ marginTop: sp.lg }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'flex-end', paddingBottom: sp.sm, borderBottomWidth: hairline, borderBottomColor: t.ring }}>
+                            <Text style={{ ...ty.micro, color: t.ink3, flex: 1.3 }}>Reading</Text>
+                            <Text style={{ ...ty.micro, color: t.ink3, flex: 1, textAlign: 'right' }}>Before</Text>
+                            <Text style={{ ...ty.micro, color: t.ink3, flex: 1, textAlign: 'right' }}>After</Text>
+                            <Text style={{ ...ty.micro, color: t.ink3, flex: 1, textAlign: 'right' }}>Change</Text>
+                          </View>
+                          {rows.map((r) => (
+                            <View key={r.key} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: sp.sm, borderBottomWidth: hairline, borderBottomColor: t.ring }}>
+                              <Text style={{ ...ty.label, color: t.ink2, flex: 1.3 }}>{r.label}</Text>
+                              {/* An unmeasured cell is t.ink3 as well as an
+                                  em-dash: it must not sit in the same weight
+                                  as a figure somebody actually recorded. */}
+                              <Text style={{ ...ty.label, ...numeric, fontWeight: '500', color: r.before === null ? t.ink3 : t.ink, flex: 1, textAlign: 'right' }}>{readingText(r.before, r.unit)}</Text>
+                              <Text style={{ ...ty.label, ...numeric, fontWeight: '500', color: r.after === null ? t.ink3 : t.ink, flex: 1, textAlign: 'right' }}>{readingText(r.after, r.unit)}</Text>
+                              <Text style={{ ...ty.label, ...numeric, color: r.delta === null ? t.ink3 : t.ink2, flex: 1, textAlign: 'right' }}>{deltaText(r.delta, r.unit)}</Text>
+                            </View>
+                          ))}
+                          {/* Which days were scanned, named. A blank column
+                              with no sentence beside it reads as a failure of
+                              the app rather than as a day off the machine. */}
+                          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{compareBasis(rows)}</Text>
+                          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>{COMPARE_DISCLAIMER}</Text>
+                        </View>
+                      );
+                    })()}
                   </View>
                 );
               })()}

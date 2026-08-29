@@ -89,6 +89,9 @@ export const NAV: NavItem[] = [
   // trainer, not the tenant, which is exactly why it is not in the list above.
   { href: '/coach', label: 'My day', roles: ['owner', 'trainer'], context: 'mine' , group: 'My book' },
   { href: '/coach/roster', label: 'My clients', roles: ['owner', 'trainer'], context: 'mine' , group: 'My book' },
+  // Between the roster and earnings because it is the third thing a coach does
+  // with a named client, after seeing them and before being paid for them.
+  { href: '/coach/checklists', label: 'Their checklists', roles: ['owner', 'trainer'], context: 'mine' , group: 'My book' },
   { href: '/coach/earnings', label: 'My earnings', roles: ['owner', 'trainer'], context: 'mine' , group: 'My book' },
   // Beside Door because both are about the building rather than the books:
   // what is in the room, and who is coming through it.

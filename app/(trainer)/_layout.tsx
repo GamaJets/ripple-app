@@ -42,6 +42,7 @@ export default function TrainerLayout() {
       <Tabs.Screen name="explore" options={{ href: null, title: 'Explore' }} />
       <Tabs.Screen name="chat" options={{ href: null, title: 'Chat' }} />
       <Tabs.Screen name="log-session" options={{ href: null, title: 'Log a session' }} />
+      <Tabs.Screen name="checklists" options={{ href: null, title: 'Their checklists' }} />
       <Tabs.Screen name="templates" options={{ href: null, title: 'Program Templates' }} />
       <Tabs.Screen name="feedback" options={{ href: null, title: 'Send Feedback' }} />
       <Tabs.Screen name="billing" options={{ href: null, title: 'Billing & subscription' }} />

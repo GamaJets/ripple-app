@@ -20,6 +20,8 @@ import { Shell } from '@/components/Shell';
 import { DataTable, type Column } from '@/components/DataTable';
 import { money } from '@lib/gymRecord';
 import { COACHED_MODE_SHORT, readCoachedModeOrNull, type CoachedMode } from '@lib/types';
+import { goalLabel, sortGoals, GOAL_METRIC, type GoalTarget, type MeasuredKind } from '@lib/goalTargets';
+import { fmtDay } from '@lib/format';
 
 const DAY = 86400000;
 
@@ -66,6 +68,11 @@ interface Row {
   name: string | null;
   namesKnown: boolean;
   goal: string | null;
+  /** What this client is actually working toward, from `goal_targets` — their
+   *  own targets, which a coach may read (part 59). Distinct from `goal` above,
+   *  which is the coarse three-way direction on `clients`. Empty means they
+   *  have set none; null means the read failed and we must not say either way. */
+  targets: GoalTarget[] | null;
   mode: CoachedMode | null;
   /** When this client joined THIS coach's book, not when they made an account. */
   since: string | null;
@@ -268,7 +275,7 @@ export default function CoachRoster() {
     // one by one: a refused check_ins read must not empty the workouts column,
     // and a refused client_purchases read must never reach the screen as a
     // sessions count of any kind.
-    const [nameRes, woRes, ciRes, scRes, cpRes] = await Promise.allSettled([
+    const [nameRes, woRes, ciRes, scRes, gtRes, cpRes] = await Promise.allSettled([
       ask<{ id: string; full_name: string | null }>(
         supabase.from('profiles').select('id, full_name').in('id', ids),
       ),
@@ -283,6 +290,17 @@ export default function CoachRoster() {
       ask<{ client_id: string; taken_at: string; weight_kg: number | null }>(
         supabase.from('scans').select('client_id, taken_at, weight_kg').in('client_id', ids)
           .order('taken_at', { ascending: true }),
+      ),
+      // What each client is working toward. RLS (goal_targets_coach_read) already
+      // limits this to clients this coach actually coaches, so the `in` is for
+      // the size of the answer rather than for who may see it.
+      ask<{
+        id: string; client_id: string; kind: string; target_value: string | number | null;
+        title: string | null; target_date: string | null; achieved_at: string | null; created_at: string;
+      }>(
+        supabase.from('goal_targets')
+          .select('id, client_id, kind, target_value, title, target_date, achieved_at, created_at')
+          .in('client_id', ids),
       ),
       // Scoped to this coach as well as to these clients: a client may hold
       // packs bought from someone else, and those are not this coach's to spend
@@ -303,7 +321,27 @@ export default function CoachRoster() {
     const workouts = settled(woRes);
     const checkIns = settled(ciRes);
     const scans = settled(scRes);
+    const goalRows = settled(gtRes);
     const purchases = settled(cpRes);
+
+    // Grouped per client. A refused read leaves this map empty AND `goalRows`
+    // null, and the two are read differently below: an empty list for a client
+    // whose read succeeded means they have set no goals, which is worth a coach
+    // knowing. The same empty list after a failure means nothing at all.
+    const goalsBy = new Map<string, GoalTarget[]>();
+    for (const g of goalRows ?? []) {
+      const t: GoalTarget = {
+        id: g.id,
+        kind: g.kind as GoalTarget['kind'],
+        targetValue: g.target_value != null ? Number(g.target_value) : null,
+        title: g.title,
+        targetDateISO: g.target_date,
+        achievedAtISO: g.achieved_at,
+        createdAtISO: g.created_at,
+      };
+      const list = goalsBy.get(g.client_id);
+      if (list) list.push(t); else goalsBy.set(g.client_id, [t]);
+    }
 
     const nameBy = new Map((names ?? []).map((p) => [p.id, (p.full_name ?? '').trim()]));
 
@@ -393,6 +431,7 @@ export default function CoachRoster() {
         name: name ? name : null,
         namesKnown: names !== null,
         goal: cli?.goal ? GOAL[cli.goal] ?? cli.goal : null,
+        targets: goalRows === null ? null : sortGoals(goalsBy.get(id) ?? []),
         // Unclassified stays null rather than defaulting to online: the phone
         // defaults it for its own filter, but here it would tell a coach an
         // in-person client is remote.
@@ -426,6 +465,7 @@ export default function CoachRoster() {
       failure(woRes, 'their logged workouts'),
       failure(ciRes, 'their check-ins'),
       failure(scRes, 'their scans'),
+      failure(gtRes, 'the goals they set'),
       failure(cpRes, 'their session packs'),
     ].filter((s): s is string => s !== null);
     setErr(trouble.length === 0 ? null : trouble.join(' · '));
@@ -523,6 +563,35 @@ export default function CoachRoster() {
       key: 'goal', header: 'Goal',
       value: (r) => r.row.goal,
       render: (r) => r.row.goal ?? <span className="dash">— not set</span>,
+    },
+    {
+      key: 'working', header: 'Working toward',
+      // Sorts on the nearest open target date so a coach can see whose deadline
+      // is closest; undated and achieved goals sort last rather than as a zero.
+      value: (r) => {
+        const open = (r.row.targets ?? []).filter((g) => !g.achievedAtISO && g.targetDateISO);
+        return open.length ? Date.parse(open[0].targetDateISO as string) : Number.MAX_SAFE_INTEGER;
+      },
+      render: (r) => {
+        const ts = r.row.targets;
+        // The read failed. An empty cell here would say "this client has set no
+        // goals", which is a claim about them rather than about our connection.
+        if (ts === null) return <span className="dash">— unreadable</span>;
+        const open = ts.filter((g) => !g.achievedAtISO);
+        if (!open.length) {
+          return <span className="dash">{ts.length ? '— all reached' : '— none set'}</span>;
+        }
+        const lead = open[0];
+        const unit = lead.kind === 'custom' ? '' : GOAL_METRIC[lead.kind as MeasuredKind].unit;
+        const more = open.length - 1;
+        return (
+          <span title={open.map((g) => goalLabel(g) + (g.targetValue != null ? ` ${g.targetValue}` : '')).join(' · ')}>
+            {goalLabel(lead)}{lead.targetValue != null ? ` ${lead.targetValue}${unit}` : ''}
+            {lead.targetDateISO ? <span className="dash"> by {fmtDay(lead.targetDateISO)}</span> : null}
+            {more > 0 ? <span className="dash"> +{more}</span> : null}
+          </span>
+        );
+      },
     },
     {
       key: 'mode', header: 'Mode',
