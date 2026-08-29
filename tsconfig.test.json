@@ -39,6 +39,7 @@
     "src/lib/gymSchedule.ts",
     "src/lib/coverage.test.ts",
     "src/lib/checklist.test.ts",
-    "src/lib/photoCompare.test.ts"
+    "src/lib/photoCompare.test.ts",
+    "src/lib/units.test.ts"
   ]
 }

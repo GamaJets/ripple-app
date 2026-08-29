@@ -19,6 +19,13 @@
 // <BuildInfo/>, which prints the true version. A false version defeats the
 // whole point of the Build section.
 //
+// The Units section was one row that did nothing. `weightUnit` was declared in
+// src/ui/settings.tsx and read by exactly one file — this one, to decide which
+// of the two pills to tint. No screen in the app converted anything, so tapping
+// "lb" was a toggle with no downstream effect at all. TF-37 gives it a second
+// row (height and tape measurements), a conversion module behind both
+// (src/lib/units.ts), and a home on the account rather than on the handset.
+//
 // The "Your data" section reports the CURRENT state of the account, not just the
 // action available on it. web/delete-account.html promises that a deletion
 // request "can be withdrawn until" it is actioned, and a screen that only ever
@@ -39,6 +46,7 @@ import { Rule, Section, SectionHead, ListRow, Ghost, fig } from '../../src/ui/ki
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { Icon } from '../../src/ui/Icon';
 import { useSettings } from '../../src/ui/settings';
+import { convertedNote } from '../../src/lib/units';
 import { useAuth } from '../../src/ui/auth';
 import { useAppLock } from '../../src/ui/appLock';
 import { lockSettingNote } from '../../src/lib/appLock';
@@ -72,6 +80,27 @@ function Row({ t, label, sub, right, first }: { t: Theme; label: string; sub?: s
         {sub ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{sub}</Text> : null}
       </View>
       {right}
+    </View>
+  );
+}
+
+/**
+ * The unit picker, twice — weight and length. Was written inline for weight
+ * alone when the setting did nothing; a second copy for length would be the
+ * moment the two drift apart.
+ */
+function Units<T extends string>({ options, value, onPick, t }: { options: readonly T[]; value: T; onPick: (v: T) => void; t: Theme }) {
+  return (
+    <View style={{ flexDirection: 'row', gap: 6 }}>
+      {options.map((u) => {
+        const on = value === u;
+        return (
+          <Pressable key={u} onPress={() => onPick(u)} accessibilityRole="radio" accessibilityState={{ selected: on }}
+            style={{ paddingHorizontal: sp.lg, paddingVertical: 7, borderRadius: radius.sm, backgroundColor: on ? t.brand : t.surface2 }}>
+            <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{u}</Text>
+          </Pressable>
+        );
+      })}
     </View>
   );
 }
@@ -115,6 +144,14 @@ export default function Settings() {
       { text: 'Sign out', onPress: () => { try { auth.signOut(); router.replace('/welcome'); } catch (e) { reportError('clientSettings.signOut', e); } } },
     ]);
   };
+  // Said under the picker rather than left implied. Repple records weight in
+  // kilograms and lengths in centimetres whatever this is set to; a client who
+  // reads in pounds is reading a conversion, and their scan sheet will say
+  // something that looks different. convertedNote returns null for the metric
+  // options, so the metric majority is not lectured about a conversion that is
+  // not happening.
+  const weightNote = convertedNote(st.weightUnit);
+  const lengthNote = convertedNote(st.lengthUnit);
   const [legal, setLegal] = useState<'privacy' | 'terms' | null>(null);
   const [dataBusy, setDataBusy] = useState(false);
   // null = not read yet · 'failed' = the read itself failed · otherwise the
@@ -235,14 +272,11 @@ export default function Settings() {
 
         <Section>
           <SectionHead title="Units" />
-          <Row t={t} first label="Body weight" right={
-            <View style={{ flexDirection: 'row', gap: 6 }}>
-              {(['kg', 'lb'] as const).map((u) => (
-                <Pressable key={u} onPress={() => st.set({ weightUnit: u })} style={{ paddingHorizontal: sp.lg, paddingVertical: 7, borderRadius: radius.sm, backgroundColor: st.weightUnit === u ? t.brand : t.surface2 }}>
-                  <Text style={{ ...ty.label, fontWeight: st.weightUnit === u ? '600' : '500', color: st.weightUnit === u ? t.brandInk : t.ink2 }}>{u}</Text>
-                </Pressable>
-              ))}
-            </View>
+          <Row t={t} first label="Body weight" sub={weightNote ?? 'Your weight, goals and scans'} right={
+            <Units options={['kg', 'lb']} value={st.weightUnit} onPick={(u) => st.set({ weightUnit: u })} t={t} />
+          } />
+          <Row t={t} label="Height & measurements" sub={lengthNote ?? 'Your height and your tape measurements'} right={
+            <Units options={['cm', 'in']} value={st.lengthUnit} onPick={(u) => st.set({ lengthUnit: u })} t={t} />
           } />
         </Section>
 

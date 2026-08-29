@@ -7,6 +7,13 @@
 // no single live number to lead with), hairline-separated sections instead of
 // seven stacked bordered boxes, and `<ListRow>` for the hub instead of a
 // hand-rolled row for the 3,815th time.
+//
+// TF-37: the edit sheet had its own kg/lb and cm/in toggles, local to the
+// modal and gone the moment it closed, converting through a bare `round1` in
+// both directions — type 180 lb, get 81.6 kg stored, come back to 179.9 lb. The
+// stats line under the name ignored all of it and printed "cm" and "kg"
+// regardless. Both now go through src/lib/units.ts, and the unit itself is the
+// account's (src/ui/settings.tsx), the same one the Settings screen sets.
 import { useState, useRef } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView, Modal, Image, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -20,6 +27,8 @@ import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } f
 import { ageFromDob } from '../../src/lib/age';
 import { macrosFor, applyCoachAdjust } from '../../src/lib/nutrition';
 import { useClientData, type CoachingMode } from '../../src/ui/clientData';
+import { useSettings } from '../../src/ui/settings';
+import { weightIn, weightLabel, weightToKg, heightIn as heightAs, heightParts, heightLabel, heightToCm, plain, convertedNote, type WeightUnit, type LengthUnit } from '../../src/lib/units';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
 import { Icon, type IconName } from '../../src/ui/Icon';
 import { COACHING_MODE_LABEL, COACHING_MODE_NOTE, type Goal, type Diet } from '../../src/lib/types';
@@ -198,34 +207,94 @@ export default function Profile() {
   const [showEdit, setShowEdit] = useState(false);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
-  const [heightUnit, setHeightUnit] = useState<'cm' | 'in'>('cm');
-  const [heightVal, setHeightVal] = useState(cd.heightCm != null ? String(cd.heightCm) : '');
-  const [weightUnit, setWeightUnit] = useState<'kg' | 'lb'>('kg');
-  const [weightVal, setWeightVal] = useState(cd.weightKg != null ? String(round1(cd.weightKg)) : '');
+  // The units this client reads in. These used to be two `useState`s local to
+  // the edit sheet, defaulted to kg and cm, thrown away when the sheet closed —
+  // a preference that did not outlive one modal, sitting beside a Settings
+  // screen with its own kg/lb toggle that nothing read. There is one answer now
+  // and it belongs to the account (TF-37).
+  const st = useSettings();
+  const wu = st.weightUnit;
+  const lu = st.lengthUnit;
+
+  // What the record says, rendered in those units. Never a zero: a client with
+  // no scan and no manual entry has no weight, and `fig` turns that into a dash.
+  const shownWeight = weightIn(cd.weightKg, wu);
+  const shownHeight = lu === 'cm' ? heightAs(cd.heightCm, 'cm') : null;
+  const shownParts = lu === 'in' ? heightParts(cd.heightCm) : null;
+
+  // The sheet's fields, in the client's units. Filled from the record when the
+  // sheet OPENS rather than at mount: the unit preference arrives from the
+  // account a moment after launch, and a field seeded at mount would sit there
+  // holding kilograms under a "lb" label for everyone who reads in pounds —
+  // which is the precise failure this ticket names as the worst outcome.
+  const [weightVal, setWeightVal] = useState('');
+  const [heightVal, setHeightVal] = useState('');    // centimetres, or whole feet
+  const [heightInVal, setHeightInVal] = useState(''); // inches, imperial only
   const [nameVal, setNameVal] = useState(cd.name);
   const [bfVal, setBfVal] = useState(cd.bodyFatPct != null ? String(round1(cd.bodyFatPct)) : '');
   const [saved, setSaved] = useState(false);
 
-  const toggleHeight = (u: string) => {
-    if (u === heightUnit) return;
-    const n = parseFloat(heightVal) || 0;
-    setHeightVal(String(u === 'in' ? round1(n / 2.54) : Math.round(n * 2.54)));
-    setHeightUnit(u as 'cm' | 'in');
-  };
-  const toggleWeight = (u: string) => {
-    if (u === weightUnit) return;
-    const n = parseFloat(weightVal) || 0;
-    setWeightVal(String(u === 'lb' ? round1(n * 2.20462) : round1(n / 2.20462)));
-    setWeightUnit(u as 'kg' | 'lb');
+  const asText = (n: number | null) => (n == null ? '' : plain(n));
+  const openEdit = () => {
+    setNameVal(cd.name);
+    setBfVal(cd.bodyFatPct != null ? String(round1(cd.bodyFatPct)) : '');
+    setWeightVal(asText(shownWeight));
+    if (lu === 'cm') { setHeightVal(asText(heightAs(cd.heightCm, 'cm'))); setHeightInVal(''); }
+    else { const p = heightParts(cd.heightCm); setHeightVal(p ? String(p.feet) : ''); setHeightInVal(p ? String(p.inches) : ''); }
+    setShowEdit(true);
   };
 
-  const heightCm = heightUnit === 'cm' ? parseFloat(heightVal) || 0 : (parseFloat(heightVal) || 0) * 2.54;
-  const weightKg = weightUnit === 'kg' ? parseFloat(weightVal) || 0 : (parseFloat(weightVal) || 0) / 2.20462;
+  // Switching units carries what is already typed across, through the same
+  // conversion the rest of the app uses. The old version did this with a bare
+  // `round1` in both directions, so 180 lb became 81.6 kg became 179.9 lb: the
+  // number the client had typed thirty seconds earlier came back different, and
+  // toggling a few times walked it down further. Both handlers also WRITE the
+  // preference, so a client who picks lb here is not asked again in Settings.
+  const switchWeightUnit = (u: string) => {
+    const next = u as WeightUnit;
+    if (next === wu) return;
+    setWeightVal(asText(weightIn(weightToKg(weightVal, wu), next)));
+    st.set({ weightUnit: next });
+  };
+  const switchLengthUnit = (u: string) => {
+    const next = u as LengthUnit;
+    if (next === lu) return;
+    const cm = heightToCm(heightVal, lu, heightInVal);
+    if (next === 'cm') { setHeightVal(asText(heightAs(cm, 'cm'))); setHeightInVal(''); }
+    else { const p = heightParts(cm); setHeightVal(p ? String(p.feet) : ''); setHeightInVal(p ? String(p.inches) : ''); }
+    st.set({ lengthUnit: next });
+  };
+
+  // What is in the fields right now, back in the metric the record stores.
+  // null means the field is empty or unreadable — NOT zero.
+  const enteredKg = weightToKg(weightVal, wu);
+  const enteredCm = heightToCm(heightVal, lu, heightInVal);
+  // What the two height boxes hold when they are showing the record untouched.
+  const heightFieldOfRecord = lu === 'cm' ? asText(shownHeight) : (shownParts ? String(shownParts.feet) : '');
+  const heightInchFieldOfRecord = lu === 'in' && shownParts ? String(shownParts.inches) : '';
+  // Said once, under the field, when and only when it is true. Repple records
+  // kilograms and centimetres; a client reading pounds is reading a conversion,
+  // and their InBody sheet will say a number that looks different. Without this
+  // the two look like a discrepancy rather than one reading said twice.
+  const weightNote = convertedNote(wu);
+  const lengthNote = convertedNote(lu);
 
   const save = () => {
     cd.setName(nameVal.trim() || cd.name);
-    cd.setHeightCm(round1(heightCm));
-    cd.setWeightKg(round1(weightKg));
+    // Two rules here, and the first one used to be broken outright.
+    //
+    // Nothing empty is written. `parseFloat(weightVal) || 0` stored 0 kg and
+    // 0 cm for anybody who opened this sheet to change their NAME and left the
+    // stat fields alone — and 0 kg is not a light client, it is a client nobody
+    // has weighed. The macro calculator would then build them a day's food out
+    // of it.
+    //
+    // And a field the client did not touch is not an edit. Writing back the
+    // displayed figure would round an 81.63 kg scan reading down to the 81.6 kg
+    // its "180 lb" display converts back to, and would turn a measurement into
+    // a manual override, every time this sheet was opened for any reason.
+    if (enteredKg != null && weightVal !== asText(shownWeight)) cd.setWeightKg(enteredKg);
+    if (enteredCm != null && (heightVal !== heightFieldOfRecord || heightInVal !== heightInchFieldOfRecord)) cd.setHeightCm(enteredCm);
     const bf = parseFloat(bfVal);
     if (!isNaN(bf) && bf > 3 && bf < 70) cd.setBodyFat(round1(bf));
     setSaved(true);
@@ -241,8 +310,10 @@ export default function Profile() {
     : null;
   const _bfPrev = parseFloat(bfVal);
   const _bfForPreview = isNaN(_bfPrev) ? cd.bodyFatPct : _bfPrev;
-  const previewMacros = (weightKg > 0 && _bfForPreview != null)
-    ? macrosFor({ weightKg, bodyFatPct: _bfForPreview, activity: cd.activity, goal: cd.goal, diet: cd.diet })
+  // `enteredKg` is null for an empty field where the old expression produced 0,
+  // so the preview no longer quietly computes a day of food for a 0 kg client.
+  const previewMacros = (enteredKg != null && enteredKg > 0 && _bfForPreview != null)
+    ? macrosFor({ weightKg: enteredKg, bodyFatPct: _bfForPreview, activity: cd.activity, goal: cd.goal, diet: cd.diet })
     : null;
 
   const dobLabel = (() => {
@@ -251,7 +322,12 @@ export default function Profile() {
     return `${dd.getDate()} ${MONTHS[dd.getMonth()]} ${dd.getFullYear()}`;
   })();
 
-  const statsLine = [age != null ? age + ' yrs' : null, cd.heightCm != null ? cd.heightCm + ' cm' : null, cd.weightKg != null ? round1(cd.weightKg) + ' kg' : null]
+  // Height and weight in the client's own units. This line printed "cm" and
+  // "kg" over the stored figures no matter what the Settings screen said,
+  // because nothing in the app read that setting. Each part is dropped rather
+  // than dashed: a line reading "34 yrs · — · —" is noise, and the fallback
+  // sentence below already says what to do about it.
+  const statsLine = [age != null ? age + ' yrs' : null, heightLabel(cd.heightCm, lu), weightLabel(cd.weightKg, wu)]
     .filter(Boolean).join(' · ') || 'Add your height and weight';
   const soloHidden = new Set(['/(client)/messages', '/(client)/checkin']);
   const HUB_KEEP = new Set(['Connect', 'Devices & Media', 'Account']);
@@ -264,7 +340,7 @@ export default function Profile() {
 
         {/* ── header: who you are. No hero — a profile has no live metric ─── */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md, paddingBottom: sp.lg }}>
-          <Pressable onPress={() => setShowEdit(true)} accessibilityRole="button" accessibilityLabel="Edit your profile and stats" style={{ flex: 1 }}>
+          <Pressable onPress={openEdit} accessibilityRole="button" accessibilityLabel="Edit your profile and stats" style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Me</Text>
             {/* An empty name used to render as an empty line under "ME". Say
                 what to do about it instead of showing nothing. */}
@@ -273,7 +349,7 @@ export default function Profile() {
             </Text>
             <Text style={{ ...ty.label, ...numeric, color: t.ink3, marginTop: 3 }}>{statsLine}</Text>
           </Pressable>
-          <Ghost icon="pencil" onPress={() => setShowEdit(true)} />
+          <Ghost icon="pencil" onPress={openEdit} />
           <Pressable onPress={changePhoto} accessibilityRole="button" accessibilityLabel="Change your profile photo">
             {cd.photo ? (
               <Image source={{ uri: cd.photo }} style={{ width: 56, height: 56, borderRadius: radius.pill, backgroundColor: t.surface2 }} />
@@ -393,16 +469,32 @@ export default function Profile() {
             </Pressable>
 
             <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Height</Text>
-            <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.lg }}>
-              <TextInput value={heightVal} onChangeText={setHeightVal} keyboardType="numeric" placeholderTextColor={t.ink3} style={{ flex: 1, ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md }} />
-              <Seg options={['cm', 'in']} value={heightUnit} onChange={toggleHeight} t={t} />
+            <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: lengthNote ? sp.sm : sp.lg }}>
+              {/* Two boxes in imperial, one in metric. A single box asking for
+                  a height "in inches" is a box nobody who thinks in feet knows
+                  how to fill in — they would type 5.10 and mean 5' 10". */}
+              <TextInput value={heightVal} onChangeText={setHeightVal} keyboardType="numeric"
+                accessibilityLabel={lu === 'cm' ? 'Height in centimetres' : 'Height, feet'}
+                placeholder={lu === 'cm' ? 'cm' : 'ft'} placeholderTextColor={t.ink3}
+                style={{ flex: 1, ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md }} />
+              {lu === 'in' ? (
+                <TextInput value={heightInVal} onChangeText={setHeightInVal} keyboardType="numeric"
+                  accessibilityLabel="Height, inches" placeholder="in" placeholderTextColor={t.ink3}
+                  style={{ flex: 1, ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md }} />
+              ) : null}
+              <Seg options={['cm', 'in']} value={lu} onChange={switchLengthUnit} t={t} />
             </View>
+            {lengthNote ? <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>{lengthNote}</Text> : null}
 
             <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Current weight</Text>
-            <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.lg }}>
-              <TextInput value={weightVal} onChangeText={setWeightVal} keyboardType="numeric" placeholderTextColor={t.ink3} style={{ flex: 1, ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md }} />
-              <Seg options={['kg', 'lb']} value={weightUnit} onChange={toggleWeight} t={t} />
+            <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: weightNote ? sp.sm : sp.lg }}>
+              <TextInput value={weightVal} onChangeText={setWeightVal} keyboardType="numeric"
+                accessibilityLabel={wu === 'kg' ? 'Current weight in kilograms' : 'Current weight in pounds'}
+                placeholder={wu} placeholderTextColor={t.ink3}
+                style={{ flex: 1, ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md }} />
+              <Seg options={['kg', 'lb']} value={wu} onChange={switchWeightUnit} t={t} />
             </View>
+            {weightNote ? <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>{weightNote}</Text> : null}
 
             <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Body fat %</Text>
             <TextInput value={bfVal} onChangeText={setBfVal} keyboardType="numeric" placeholder="e.g. 22" placeholderTextColor={t.ink3} style={{ ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md, marginBottom: sp.sm }} />

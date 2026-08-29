@@ -6493,3 +6493,290 @@ comment on column public.clients.step_goal is
   'Daily step target the client set. NULL means they have not set one — never a default.';
 comment on column public.clients.sleep_goal_hours is
   'Nightly sleep target in hours. NULL means they have not set one — never a default.';
+
+-- ▶ unit-preference.sql
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- Which units a client reads their own body in.
+--
+-- TF-37 asked for a default plus real conversion. The conversion is
+-- src/lib/units.ts. This is the half that decides whether the client has to
+-- answer the question again on their next phone.
+--
+-- ── Why it cannot stay on the device ───────────────────────────────────────
+--
+-- The preference lived in AsyncStorage under 'repple.settings', alongside the
+-- two notification toggles, and was written nowhere else. That is the same
+-- shape as the goal target before part 59 and the step goal before part 60, and
+-- it fails the same three ways:
+--
+--   · a reinstall, or a new phone, silently resets it — and unlike a lost
+--     notification toggle, this one changes what every number on screen SAYS.
+--     A client who reads in pounds opens the app on a new handset and their
+--     weight has apparently changed by a factor of 2.2;
+--   · a client with a phone and a tablet gets a different answer on each;
+--   · the coach's console and any coach-facing figure have nothing to read, so
+--     a coach cannot see a client's numbers the way the client sees them.
+--
+-- ── Two columns, not one ───────────────────────────────────────────────────
+--
+-- A single 'metric' / 'imperial' switch is tidier and wrong for the population
+-- this product actually has. A great many people — most of the UK, and a good
+-- share of the UAE's expat residents — think about body weight in one system
+-- and height in the other. Forcing them to pick a side means one of the two
+-- numbers on their profile is always in a unit they have to convert in their
+-- head, which is the thing this ticket is about.
+--
+-- length_unit covers height AND tape measurements together, because those are
+-- the same instrument to the person holding it. Height in 'in' is rendered as
+-- feet and inches; a waist in 'in' is rendered as plain inches. Same stored
+-- centimetres, same column, different presentation — see src/lib/units.ts.
+--
+-- ── Both nullable, with no default ─────────────────────────────────────────
+--
+-- NULL means the client has never touched the setting. It does NOT mean 'kg'.
+-- The app's default is the app's to choose (it chooses metric, in
+-- src/ui/settings.tsx, because this is a UAE-based product and the UAE is
+-- metric), and keeping NULL distinct from a real choice is what lets that
+-- default improve later — a locale-aware first guess, say — without silently
+-- overwriting the answer of every client who deliberately chose kilograms.
+-- Writing 'kg' as a column default would make those two states identical and
+-- that door closes for good.
+-- ─────────────────────────────────────────────────────────────────────────
+
+alter table public.clients
+  add column if not exists weight_unit text;
+
+alter table public.clients
+  add column if not exists length_unit text;
+
+-- The check allows NULL explicitly rather than relying on the fact that NULL
+-- passes an IN test by evaluating to unknown. Stating it is the difference
+-- between "we thought about the unset case" and "we got away with it".
+alter table public.clients drop constraint if exists clients_weight_unit_check;
+alter table public.clients add constraint clients_weight_unit_check
+  check (weight_unit is null or weight_unit in ('kg', 'lb'));
+
+alter table public.clients drop constraint if exists clients_length_unit_check;
+alter table public.clients add constraint clients_length_unit_check
+  check (length_unit is null or length_unit in ('cm', 'in'));
+
+comment on column public.clients.weight_unit is
+  'How this client reads body weight: kg or lb. NULL means they have not chosen — the app applies its own default and does not write one here. Storage is always kilograms; this only changes presentation and entry (src/lib/units.ts).';
+comment on column public.clients.length_unit is
+  'How this client reads height and tape measurements: cm or in. NULL means they have not chosen. Storage is always centimetres.';
+
+-- No policy changes. `clients` already carries the client-owns-their-row and
+-- coach-can-read policies from 08-roster-access.sql / 38-tenant-isolation.sql,
+-- and a unit preference is exactly as sensitive as `diet` sitting beside it.
+--
+-- Trigger functions in this schema are not callable; see 51-advisor-tidy.sql.
+-- Nothing here adds one. `npm run db:build` must be re-run so this part reaches
+-- supabase/setup.sql before the migration is applied.
+
+-- ▶ day-types.sql
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- What kind of day a client INTENDS a date to be.
+--
+-- TF-20: "I want to plan ahead on the calendar." Everything the calendar could
+-- show was retrospective — sessions a coach had opened, workouts already
+-- logged. A client who knows on Sunday that Thursday is a write-off and Friday
+-- is legs had nowhere to put either, so the plan they were actually following
+-- existed only in their head, and their coach — whose whole job is to watch it
+-- — could not see it at all.
+--
+-- ── The vocabulary is the one the app already had ──────────────────────────
+--
+-- `day_type` is not a new set of words. The three buttons on the Nutrition
+-- screen (`DAY_TYPES` in app/(client)/nutrition.tsx) have been training / off /
+-- rest since macro cycling shipped, each with a definition written for a tester
+-- who asked what they meant, and that file says in its own comment that the
+-- wording was chosen to survive exactly this change. 'off' is stored rather
+-- than the prettier 'standard' for the same reason: two spellings of one day
+-- type is how a day planned on the calendar stops matching the day the meal
+-- plan is built for.
+--
+-- 'deload' is the one addition, and it is not a new concept either — the app
+-- has `deloadCheck` (src/lib/training.ts), a 'deload' action on every lift
+-- (src/lib/progression.ts) and a screen that tells clients when a deload week
+-- is due (app/(client)/restday.tsx). Only the planning half was missing.
+--
+-- Refeed days and travel days were asked for and are deliberately NOT types.
+-- Nothing in the product can act on either — the macro engine cycles on
+-- training and rest alone — and a day type that changes nothing anywhere is a
+-- sticker that looks like a setting. They go in `note` until there is something
+-- for them to do, which is what the picker tells the client.
+--
+-- ── This table holds intentions, and nothing else ──────────────────────────
+--
+-- There is no `completed`, no `done` and no `actual_type`, and there must not
+-- be. What happened on a day is in `workouts`, which is the client's own record
+-- of what they did; a second column here saying whether the plan was kept would
+-- be a claim nobody measured. A planned rest day that passes with an empty log
+-- looks identical to a rest day that was taken, to a session that was never
+-- logged, and to a day spent in bed with flu — see planOutcome in
+-- src/lib/dayPlan.ts, which is where that distinction is kept honest.
+--
+-- Nor does the row take a position on the client's PROGRAM. A client marking a
+-- rest day on a Tuesday their plan schedules as Push is a disagreement worth
+-- surfacing to both of them, not something to be silently resolved in either
+-- direction, so nothing here edits `assigned_programs` and nothing there edits
+-- this.
+--
+-- Additive only. Nothing below alters an existing table, and every statement is
+-- guarded so the file is safe to re-run.
+-- ─────────────────────────────────────────────────────────────────────────
+
+create table if not exists public.planned_days (
+  -- `clients.id` IS the auth user id (01-schema.sql), which is what lets the
+  -- policies below read `client_id = auth.uid()` directly, exactly as
+  -- goal_targets does.
+  client_id uuid not null references public.clients(id) on delete cascade,
+
+  -- A calendar day, not an instant. `date` and never `timestamptz`: "Thursday
+  -- is a travel day" is a statement about the client's own Thursday, and
+  -- storing it with a time would make it start and end at different moments for
+  -- a client and a coach in different zones. src/lib/localDate.ts is the two
+  -- bugs this repo has already shipped by reading a bare date as UTC midnight.
+  on_date date not null,
+
+  -- The vocabulary, closed. A build that does not know a value must not guess
+  -- at it, so the app filters unknown types out rather than defaulting them
+  -- (isPlannedDayType, src/lib/dayPlan.ts) — and this constraint is what stops
+  -- an unknown one being written in the first place.
+  day_type text not null check (day_type in ('training','off','rest','deload')),
+
+  -- The client's own words about the day, optional. This is where "flying to
+  -- Berlin" and "refeed" live: it carries no behaviour anywhere in the app, and
+  -- it is bounded because it is rendered on one line under a date. Empty string
+  -- is not a note — the app sends NULL — so the check refuses a blank that
+  -- would render as an empty second line.
+  note text check (note is null or (btrim(note) <> '' and length(note) <= 140)),
+
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+
+  -- One row per client per date. A client cannot intend Thursday to be two
+  -- different kinds of day, and a second row would mean the calendar's answer
+  -- depended on read order. It also makes re-marking a day an upsert rather
+  -- than a delete-then-insert, which is one round trip and cannot half-fail.
+  primary key (client_id, on_date)
+);
+
+-- The client's app reads their whole set on launch and the coach reads one
+-- client's; the primary key already serves both, so there is no second index
+-- to keep in step.
+
+comment on table public.planned_days is
+  'What kind of day a client intends a date to be. An intention, never a record — what happened is in workouts.';
+comment on column public.planned_days.day_type is
+  'The app''s own day-type vocabulary: training / off (Standard) / rest / deload. Matches DAY_TYPES in app/(client)/nutrition.tsx.';
+comment on column public.planned_days.note is
+  'The client''s own words. Where a travel or refeed day goes while the app has no behaviour for either. NULL means none.';
+
+alter table public.planned_days enable row level security;
+
+-- The client owns their plans outright — reading, marking, changing their mind
+-- and unmarking. Same shape as goal_targets: what a person intends to do is
+-- theirs to state.
+drop policy if exists planned_days_own on public.planned_days;
+create policy planned_days_own on public.planned_days for all
+  using (client_id = auth.uid()) with check (client_id = auth.uid());
+
+-- Their coach can READ them, on the same terms as workouts, measurements and
+-- check-ins (`is_my_client`, 02-domain-schema.sql). That predicate rather than
+-- a second hand-written EXISTS is deliberate and is the established idiom here:
+-- two spellings of "my client" that drift apart is how somebody ends up able to
+-- write a row they cannot then read.
+--
+-- Read only, and that is the point of the feature. A coach who could edit these
+-- would be answering a question only the client can answer — the calendar would
+-- stop showing the client what THEY planned and start showing them what they
+-- have been assigned, which is what `assigned_programs` is already for. A coach
+-- who disagrees with a planned rest day has the messaging thread; the app
+-- surfaces the disagreement to both of them rather than settling it.
+drop policy if exists planned_days_coach_read on public.planned_days;
+create policy planned_days_coach_read on public.planned_days for select
+  using (public.is_my_client(client_id));
+
+-- ── updated_at ──────────────────────────────────────────────────────────────
+--
+-- Stamped here rather than trusted from the client, for the reason spelled out
+-- in 58-coach-checklist.sql: "when did they last change their plan" is a thing
+-- a coach's screen will eventually want, and a value the writer supplies is a
+-- value the writer can get wrong. It matters more here than there, because an
+-- upsert on a changed mark is otherwise indistinguishable from the original.
+create or replace function public.touch_planned_day()
+returns trigger language plpgsql
+set search_path = public
+as $$
+begin
+  new.updated_at := now();
+  return new;
+end $$;
+
+drop trigger if exists touch_planned_day_t on public.planned_days;
+create trigger touch_planned_day_t
+  before update on public.planned_days
+  for each row execute function public.touch_planned_day();
+
+-- Trigger functions are reachable by nobody; see 51-advisor-tidy.sql.
+revoke execute on function public.touch_planned_day() from public, anon, authenticated;
+
+-- ▶ clients-schema-drift.sql
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- Five columns production has that this repo never declared.
+--
+-- `clients` is defined in 01-schema.sql with twelve columns, and part 05 adds
+-- `avoid`. Production carries five more that no file here creates:
+--
+--     injuries              text[]
+--     focus_areas           text[]
+--     manual_weight_kg      numeric
+--     manual_body_fat_pct   numeric
+--     manual_at             timestamptz
+--
+-- src/ui/clientData.tsx selects and updates every one of them. They were added
+-- to the live database by hand at some point and the migration was never
+-- written down, which is the same drift that hid `clients.mode` until part 57.
+--
+-- ── Why this is not merely untidy ──────────────────────────────────────────
+--
+-- PostgREST rejects the WHOLE statement for one unknown column. So on any
+-- database built from this repo — a new environment, a staging copy, a local
+-- stack — the profile write in clientData.tsx fails entirely, and it fails
+-- silently in a debounced effect: the client's name, goal, diet, allergens,
+-- injuries, focus areas AND their manually entered weight are all lost
+-- together, having looked saved. That is the identical failure mode as the
+-- 'solo' coaching mode, arrived at from the other end — a constraint refusing
+-- a value there, a column not existing here.
+--
+-- Production is fine and always has been; the columns are there. This closes
+-- the gap so the next environment does not inherit a broken profile save.
+--
+-- ── Types match production exactly ─────────────────────────────────────────
+--
+-- Read back with format_type() rather than guessed. The two numerics carry no
+-- precision or scale, which is what production has — NOT the numeric(5,1) that
+-- `scans.weight_kg` uses. Tightening them here would be a schema change
+-- disguised as a transcription, and an unconstrained numeric already holds
+-- everything the app puts in it.
+-- ─────────────────────────────────────────────────────────────────────────
+
+-- What the client tells us about themselves, alongside what a scan measures.
+alter table public.clients add column if not exists injuries    text[];
+alter table public.clients add column if not exists focus_areas text[];
+
+-- A weight and body fat the client typed, for people without an InBody. Read
+-- in preference to the newest scan only while `manual_at` is more recent than
+-- it — see the `manualIsCurrent` logic in src/ui/clientData.tsx. That is why
+-- the timestamp is a column and not a derived value: without it there is no way
+-- to tell a fresh manual entry from one left over from six months ago.
+alter table public.clients add column if not exists manual_weight_kg    numeric;
+alter table public.clients add column if not exists manual_body_fat_pct numeric;
+alter table public.clients add column if not exists manual_at           timestamptz;
+
+comment on column public.clients.manual_at is
+  'When the manual weight/body-fat were entered. The app prefers them over the newest scan only while this is more recent than that scan.';
