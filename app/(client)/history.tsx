@@ -41,10 +41,10 @@
 // and a zero-height bar is a measurement claim. For the same reason the monthly
 // chart is bars rather than a line — a polyline from February to May paints ink
 // across two months nobody trained and invents a trajectory through them.
-import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
+import { useState, useCallback, useRef, type ReactNode } from 'react';
 import { View, Text, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import Svg, { Rect, Line, Text as SvgText } from 'react-native-svg';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
@@ -241,7 +241,21 @@ export default function History() {
     }
   }, []);
 
-  useEffect(() => { read(); }, [read]);
+  // On focus, not once on mount.
+  //
+  // This screen deliberately runs its own query rather than reading the shared
+  // provider (see the header), which means it holds a snapshot: correct when it
+  // was taken, and stale from the moment anything else changes a workout. Now
+  // that a client can correct an entry from Train's calendar — TF-02 — that is
+  // no longer theoretical. Somebody fixing 8 reps to 10 and coming straight
+  // back here would have been shown the tonnage, the best month and the PR
+  // timeline of the figure they had just corrected, with nothing to say why.
+  //
+  // A stack screen is not unmounted when you navigate away from it, so the
+  // mount effect this replaces would not have run again for the rest of the
+  // session. Re-reading on focus costs one query per visit and is the only way
+  // the long view keeps agreeing with the log it is drawn from.
+  useFocusEffect(useCallback(() => { read(); }, [read]));
 
   const G = layout.gutter;
   const header = (

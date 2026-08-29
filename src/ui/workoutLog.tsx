@@ -38,7 +38,12 @@ interface WorkoutLogValue {
    *  must not tell the user it is saved. */
   addWorkout: (entry: WorkoutEntry) => Promise<boolean>;
   addWorkouts: (entries: WorkoutEntry[]) => Promise<boolean>;
+  /** Correct an entry that is already logged. Resolves true only once the
+   *  server holds the correction, and `log` is left untouched when it does not
+   *  — so the screen never shows a figure the row disagrees with. */
   updateWorkout: (target: WorkoutEntry, next: Partial<WorkoutEntry>) => Promise<boolean>;
+  /** Resolves true only when the row was actually deleted. The entry stays in
+   *  `log` on false, rather than vanishing and returning at the next launch. */
   removeWorkout: (entry: WorkoutEntry) => Promise<boolean>;
   /** Re-run the hydrate. Useful behind a "couldn't load — retry" affordance. */
   reload: () => void;
@@ -130,8 +135,11 @@ export function WorkoutLogProvider({ children }: { children: React.ReactNode }) 
   };
 
   const updateWorkout = async (target: WorkoutEntry, next: Partial<WorkoutEntry>): Promise<boolean> => {
-    setLog((p) => p.map((e) => (e === target || (target.id && e.id === target.id) ? { ...e, ...next } : e)));
-    if (!USE_SUPABASE || !uid) return false;
+    const apply = () => setLog((p) => p.map((e) => (e === target || (target.id && e.id === target.id) ? { ...e, ...next } : e)));
+    // With no backend the in-memory log is the whole record, so applying it here
+    // is the entire write — and still `false`, because it will not survive the
+    // relaunch and the caller must not say "saved".
+    if (!USE_SUPABASE || !uid) { apply(); return false; }
     const patch: Record<string, unknown> = {};
     if ('exercise' in next) patch.exercise = next.exercise;
     if ('t' in next) patch.performed_at = next.t;
@@ -144,8 +152,18 @@ export function WorkoutLogProvider({ children }: { children: React.ReactNode }) 
     // Nothing to send is not a failure — the row already says what was asked.
     if (!Object.keys(patch).length) return true;
     try {
-      const { error } = await matchRow(supabase.from('workouts').update(patch), uid, target);
-      if (error) { reportError('workoutLog.update', error); return false; }
+      // `.select('id')` and a row count, not just `error`. This is the same hole
+      // the header describes, on the correction path: an UPDATE whose filter
+      // matches nothing SUCCEEDS in PostgREST, having changed zero rows — so an
+      // entry the client no longer owns, or one whose id never made it back from
+      // the insert, reported a clean save and reverted at the next launch. See
+      // `setClientMode` in src/ui/roster.tsx, which is where this was found.
+      const { data, error } = await matchRow(supabase.from('workouts').update(patch), uid, target).select('id');
+      if (error || !data || !data.length) { reportError('workoutLog.update', error); return false; }
+      // Applied only now. The calendar's volume, sets and kcal columns are
+      // derived from `log`, so they follow the correction the moment it is real
+      // — and stay on the old figures, correctly, when it is not.
+      apply();
       return true;
     } catch (e) { reportError('workoutLog.update', e); return false; }
   };
@@ -179,21 +197,28 @@ export function WorkoutLogProvider({ children }: { children: React.ReactNode }) 
     setLog((p) => p.map((e) => (e.t === t ? { ...e, sessionMins: v ?? undefined } : e)));
     if (!USE_SUPABASE || !uid) return false;
     try {
-      const { error } = await supabase.from('workouts').update({ session_mins: v })
-        .eq('user_id', uid).eq('performed_at', t);
-      if (error) { reportError('workoutLog.setSessionMins', error); return false; }
+      // Row count again: matching on (user_id, performed_at) is how a session's
+      // rows are found, and a `t` that no longer exists on the server matches
+      // none of them without raising anything.
+      const { data, error } = await supabase.from('workouts').update({ session_mins: v })
+        .eq('user_id', uid).eq('performed_at', t).select('id');
+      if (error || !data || !data.length) { reportError('workoutLog.setSessionMins', error); return false; }
       return true;
     } catch (e) { reportError('workoutLog.setSessionMins', e); return false; }
   };
 
   const removeWorkout = async (entry: WorkoutEntry): Promise<boolean> => {
-    setLog((p) => { const i = p.indexOf(entry); return i >= 0 ? [...p.slice(0, i), ...p.slice(i + 1)] : p.filter((e) => !(e.t === entry.t && e.exercise === entry.exercise)); });
-    if (!USE_SUPABASE || !uid) return false;
+    const drop = () => setLog((p) => { const i = p.indexOf(entry); return i >= 0 ? [...p.slice(0, i), ...p.slice(i + 1)] : p.filter((e) => !(e.t === entry.t && e.exercise === entry.exercise)); });
+    if (!USE_SUPABASE || !uid) { drop(); return false; }
     try {
       // A delete that was refused leaves the row on the server while the screen
-      // shows it gone; it reappears on the next launch with no explanation.
-      const { error } = await matchRow(supabase.from('workouts').delete(), uid, entry);
-      if (error) { reportError('workoutLog.remove', error); return false; }
+      // shows it gone; it reappears on the next launch with no explanation. So
+      // the entry now leaves `log` only once the server confirms — and a DELETE
+      // matching nothing is not an error in PostgREST, it succeeds having
+      // removed zero rows, so the returned rows are what proves it happened.
+      const { data, error } = await matchRow(supabase.from('workouts').delete(), uid, entry).select('id');
+      if (error || !data || !data.length) { reportError('workoutLog.remove', error); return false; }
+      drop();
       return true;
     } catch (e) { reportError('workoutLog.remove', e); return false; }
   };

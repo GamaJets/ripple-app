@@ -38,11 +38,13 @@ import { injuryFlag, areaLabel, type Injury } from '../../src/lib/injuries';
 import { warmupSets, deloadCheck } from '../../src/lib/training';
 import { hrColor, hrZoneNo, zoneOf, zoneKey, emptyZoneSeconds, splatPoints, zoneSecondsTotal, type ZoneSeconds, type ZoneNo } from '../../src/lib/hr';
 import { ZoneNow, ZoneBoard } from '../../src/ui/ZoneBoard';
+import { SessionMusicBar } from '../../src/ui/SessionMusicBar';
 import { SessionHrSheet } from '../../src/ui/SessionHrSheet';
 import { ageFromDob } from '../../src/lib/age';
 import { RECOVERY_ACTIVITIES } from '../../src/lib/recoveryActs';
 import { HIIT_ACTIVITIES, MOBILITY_ACTIVITIES } from '../../src/lib/workoutKind';
 import { attributionLine } from '../../src/lib/workoutAttribution';
+import { dayKeyOf, instantForDay, readWorkoutEdit } from '../../src/lib/entryEdit';
 
 const WEEK = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 // Session catalog. Each activity carries its own MET value, because the two used
@@ -169,13 +171,17 @@ export default function Train() {
 
   const [cardioLog, setCardioLog] = useState<{ type: string; mins: number; dist: number; unit: string; kcal: number | null }[]>([]);
   const [nlw, setNlw] = useState('');
-  const logWorkoutNL = () => {
+  const logWorkoutNL = async () => {
     const lifts = parseWorkoutText(nlw);
     if (!lifts.length) { Alert.alert('Could not read that', 'Try e.g. "bench 3x8 60kg, squat 100kg 5 5 5".'); return; }
     const nowISO = new Date().toISOString();
-    addWorkouts(lifts.map((l) => ({ t: nowISO, exercise: l.exercise, sets: l.sets, kcal: Math.round(l.sets.reduce((a, [r, w]) => a + r * (w || 0), 0) / 60) + l.sets.length * 8 })));
+    const saved = await addWorkouts(lifts.map((l) => ({ t: nowISO, exercise: l.exercise, sets: l.sets, kcal: Math.round(l.sets.reduce((a, [r, w]) => a + r * (w || 0), 0) / 60) + l.sets.length * 8 })));
     setNlw('');
-    Alert.alert('Logged', `${lifts.length} exercise${lifts.length === 1 ? '' : 's'} added to today.`);
+    // "Logged" was said before anybody had asked the server. `addWorkouts`
+    // resolves false on a refused write, and this is the sentence that stops it
+    // being the same event as a successful one.
+    if (saved) Alert.alert('Logged', `${lifts.length} exercise${lifts.length === 1 ? '' : 's'} added to today.`);
+    else Alert.alert('Not saved', 'We could not reach your training log. What you typed is showing on this phone, but it has not been recorded and will be gone when you next open the app.');
   };
   const [swapFor, setSwapFor] = useState<ProgramExercise | null>(null);
   const [videoFor, setVideoFor] = useState<string | null>(null);
@@ -273,7 +279,15 @@ export default function Train() {
     if (!pending.length || importing) return;
     setImporting(true);
     try {
-      addWorkouts(await Promise.all(pending.map(withHr)));
+      const saved = await addWorkouts(await Promise.all(pending.map(withHr)));
+      // Marked imported ONLY once the rows are on the server. This used to mark
+      // them regardless, so a refused write both lost the session and struck it
+      // off the list of things still worth offering — the watch would never
+      // suggest it again, and nothing said why.
+      if (!saved) {
+        Alert.alert('Not imported', 'We could not reach your training log, so nothing was imported. Your watch still has these — try again when you have signal.');
+        return;
+      }
       markImported(pending.map((sm) => sm.id));
       setPending([]);
       tapLight();
@@ -331,12 +345,16 @@ export default function Train() {
     if (Object.keys(logged).length === 0) AsyncStorage.removeItem(draftKey).catch(() => {});
     else AsyncStorage.setItem(draftKey, JSON.stringify(logged)).catch(() => {});
   }, [logged, draftKey, draftLoaded]);
-  const workedDates = new Set(workoutLog.map((l) => dstr(new Date(l.t))));
+  // `dayKeyOf`, not `dstr(new Date(l.t))`. Same answer, one implementation: the
+  // calendar dots, the day list and the day's totals all have to agree on which
+  // day an entry belongs to, and three copies of the arithmetic is how they
+  // stop agreeing. See src/lib/entryEdit.ts.
+  const workedDates = new Set(workoutLog.map((l) => dayKeyOf(l.t)).filter((k): k is string => k != null));
   Object.keys(logged).forEach((k) => { if ((logged[k] || []).length) workedDates.add(dstr(dateFor(parseInt(k.split(':')[0], 10)))); });
   if (cardioLog.length) workedDates.add(dstr(today0));
   // Today's cardio, read from the saved log so it persists across navigation (not just this mount).
   const todayCardio = workoutLog
-    .filter((l) => l.cardio && dstr(new Date(l.t)) === dstr(today0))
+    .filter((l) => l.cardio && dayKeyOf(l.t) === dstr(today0))
     // `?? null`, not `?? 0`. The row below guards on `kcal != null` so it can
     // omit the figure entirely, and `?? 0` defeated that guard — a sauna, which
     // has no derivable burn, would have read "0 kcal". Zero is a measurement.
@@ -347,7 +365,7 @@ export default function Train() {
   const monthLabel = monday0.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
 
   const activeCalDay = selCalDay || dstr(today0);
-  const dayEntries = workoutLog.filter((l) => dstr(new Date(l.t)) === activeCalDay);
+  const dayEntries = workoutLog.filter((l) => dayKeyOf(l.t) === activeCalDay);
   const dayVolume = dayEntries.reduce((a, l) => a + (l.sets ? l.sets.reduce((x: number, s: number[]) => x + (s[0] || 0) * (s[1] || 0), 0) : 0), 0);
   const daySets = dayEntries.reduce((a, l) => a + (l.sets ? l.sets.length : 0), 0);
   const dayKcal = dayEntries.reduce((a, l) => a + (l.kcal || 0), 0);
@@ -441,6 +459,11 @@ export default function Train() {
     ? 'Rest day — nothing scheduled'
     : `~${estMin} min` + (doneCount > 0 ? ` · ${doneCount} of ${exercises.length} done` : '');
   const logSet = (e: ProgramExercise, reps: string, kg: string) => { if (!reps) return; setLogged({ ...logged, [uid(e)]: [...(logged[uid(e)] || []), { reps, kg }] }); tapLight(); };
+  // One tap records the set the plan is asking for — TF-27, "can't tap an
+  // exercise to log it". This function has existed here unreferenced: the only
+  // way to record a set was to expand the row and type the two numbers the app
+  // had already worked out and was showing you. It is offered next to that
+  // suggestion, so the number you tap is the number you are looking at.
   const quickLog = (e: ProgramExercise) => { const sg = suggestForExercise(workoutLog, nameOf(e), e.reps); logSet(e, String(parseInt(e.reps, 10) || 8), sg ? String(sg.weight) : ''); };
   // One write path for every non-strength session, whether it was timed live in
   // the runner below or typed in afterwards. History, the calendar and the
@@ -451,13 +474,13 @@ export default function Train() {
   // The form hides Distance, watts and calories under Recovery, but the fields
   // keep whatever was typed under Cardio before the chip was switched — so
   // without this a sauna could still carry the 5 km from the run before it.
-  const commitSession = (
+  const commitSession = async (
     kind: SessionKind,
     activity: string,
     m: number,
     extra: { dist?: number; unit?: string; watts?: number; kcal?: number | null; zones?: ZoneSeconds } = {},
-  ) => {
-    if (!m) return;
+  ): Promise<boolean> => {
+    if (!m) return false;
     const rec = kind === 'recovery';
     const d = rec ? 0 : (extra.dist || 0);
     const u = extra.unit || unit;
@@ -470,7 +493,7 @@ export default function Train() {
     const kIn = extra.kcal ?? 0;
     const kcal = rec ? null : (kIn > 0 ? kIn : cardioKcal(activity, m, cd.weightKg));
     setCardioLog([{ type: activity, mins: m, dist: d, unit: u, kcal }, ...cardioLog]);
-    addWorkouts([{
+    const saved = await addWorkouts([{
       t: new Date().toISOString(),
       exercise: activity,
       cardio: { mins: m, dist: d, unit: u, ...(wt > 0 ? { watts: wt } : {}) },
@@ -480,12 +503,21 @@ export default function Train() {
       // zero-filled so "no watch" and "no effort" remain different things.
       ...(extra.zones && zoneSecondsTotal(extra.zones) > 0 ? { zones: extra.zones } : {}),
     }]);
+    // A timed session is the one write in this app that cannot be redone from
+    // memory — nobody can retype forty minutes of heart-rate zones — so a
+    // refused write has to be said rather than swallowed.
+    if (!saved) {
+      Alert.alert('Not saved',
+        `Your ${KIND_LABEL[kind].toLowerCase()} session did not reach the server. It is showing below on this phone, but it has not been recorded${extra.zones && zoneSecondsTotal(extra.zones) > 0 ? ', and the heart-rate zones go with it' : ''}.`);
+      return false;
+    }
     tapLight();
+    return true;
   };
 
   const logCardio = () => {
     const m = parseInt(mins, 10) || 0; if (!m) return;
-    commitSession(mode === 'strength' ? 'cardio' : mode, ctype, m, {
+    void commitSession(mode === 'strength' ? 'cardio' : mode, ctype, m, {
       dist: parseFloat(dist) || 0,
       unit,
       watts: parseInt(watts, 10) || 0,
@@ -493,8 +525,17 @@ export default function Train() {
     });
     setMins(''); setDist(''); setWatts(''); setKcalIn('');
   };
-  const saveManual = () => {
-    const nowISO = new Date().toISOString();
+  const saveManual = async () => {
+    // The day the picker is on, not the day it happens to be. This wrote
+    // `new Date().toISOString()` regardless of which weekday was selected, so
+    // somebody catching up on Thursday with Tuesday's session had it recorded
+    // on Thursday: a calendar dot on a day they rested, none on the day they
+    // trained, and a streak counted from the wrong end. `instantForDay` keeps
+    // today's real clock time and stamps any other day at local midday — see
+    // src/lib/entryEdit.ts for why not midnight.
+    const dayISO = instantForDay(dstr(dateFor(dayIdx)));
+    if (!dayISO) return;
+    const nowISO = dayISO;
     let pr = false;
     const entries: WorkoutEntry[] = [...exercises.filter((e) => !isRemovedEx(e)), ...customEx].map((e) => {
       const s = logged[uid(e)] || [];
@@ -505,7 +546,17 @@ export default function Train() {
       return { t: nowISO, exercise: nameOf(e), sets: setPairs, kcal: Math.round(setPairs.reduce((a, [r, kg]) => a + r * kg, 0) / 60) + s.length * 8 };
     }).filter(Boolean) as WorkoutEntry[];
     if (!entries.length) return;
-    addWorkouts(entries);
+    const saved = await addWorkouts(entries);
+    // The draft is cleared only when the session is really on the server. It is
+    // the only other copy of what was typed, and throwing it away on a refused
+    // write is how an hour's training disappears — the exact complaint the
+    // draft was added for.
+    if (!saved) {
+      Alert.alert('Not saved',
+        'We could not reach your training log, so this session has not been recorded. Your sets are still here — leave the screen and come back when you have signal, and save again.',
+        [{ text: 'OK' }]);
+      return;
+    }
     setLogged({}); setCustomEx([]);
     if (pr) setConfetti(true);
     Alert.alert('Workout saved', `${entries.length} exercise${entries.length === 1 ? '' : 's'} logged.${pr ? ' New personal record!' : ''} Your streak and records are updated.`, [{ text: 'Nice' }]);
@@ -679,6 +730,13 @@ export default function Train() {
                                 <Text style={{ ...value(15), color: t.ink }}>{sug.weight} kg</Text>
                                 {sug.up ? <Text style={{ ...ty.label, fontWeight: '500', color: t.brand }}>↑</Text> : null}
                                 <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }} numberOfLines={1}>{sug.reason}</Text>
+                                {/* Tap the suggestion to take it. The row it
+                                    fills in is still below, so a different
+                                    weight is still one edit away. */}
+                                <Pressable accessibilityRole="button" accessibilityLabel={`Log ${e.reps} reps at ${sug.weight} kilos of ${nameOf(e)}`} onPress={() => quickLog(e)}
+                                  style={{ backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: 6 }}>
+                                  <Text style={{ ...ty.caption, fontWeight: '600', color: t.brand }}>Log this</Text>
+                                </Pressable>
                               </View>
                             ) : <View style={{ flex: 1 }} />}
                             {/* Offered for a movement the user typed in themselves too. A
@@ -841,7 +899,17 @@ export default function Train() {
           t={t}
           entry={editEntry}
           onClose={() => setEditEntry(null)}
-          onSave={(patch) => { updateWorkout(editEntry, patch); setEditEntry(null); }}
+          // The sheet closes only once the server has the correction. It used
+          // to close on the tap and drop the boolean, which is this codebase's
+          // defining bug wearing a pencil icon: the calendar redrew with the
+          // corrected sets, the day's volume followed, and the row still said
+          // what it always had. `updateWorkout` now leaves `log` alone on
+          // failure, so the sheet reopening on the old figures is the truth.
+          onSave={async (patch) => {
+            const saved = await updateWorkout(editEntry, patch);
+            if (saved) { setEditEntry(null); tapLight(); }
+            return saved;
+          }}
         />
       ) : null}
 
@@ -962,7 +1030,13 @@ export default function Train() {
                             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
                               <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize', flex: 1 }}>{l.exercise}</Text>
                               <Pressable accessibilityLabel={'Edit ' + l.exercise} onPress={() => setEditEntry(l)} hitSlop={8} style={{ padding: 4, marginRight: sp.sm }}><Icon name="pencil" size={16} color={t.ink3} /></Pressable>
-                              <Pressable accessibilityLabel={'Delete ' + l.exercise} onPress={() => Alert.alert('Delete this entry?', l.exercise + ' will be removed from your log.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Delete', style: 'destructive', onPress: () => removeWorkout(l) }])} hitSlop={8} style={{ padding: 4, marginRight: -4 }}><Icon name="minus" size={16} color={t.crit} /></Pressable>
+                              {/* Confirmed, then verified. The confirm was already
+                                  here; what was missing is that the row left the
+                                  screen whether or not the server had removed it,
+                                  so a refused delete looked done and the session
+                                  was back — with its volume and calories — at the
+                                  next launch. */}
+                              <Pressable accessibilityLabel={'Delete ' + l.exercise} onPress={() => Alert.alert('Delete this entry?', l.exercise + ' will be removed from your log, and this day\'s volume and calories go down by it.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Delete', style: 'destructive', onPress: async () => { if (!(await removeWorkout(l))) Alert.alert('Not deleted', `${l.exercise} is still in your log — we could not reach the server to remove it.`); } }])} hitSlop={8} style={{ padding: 4, marginRight: -4 }}><Icon name="minus" size={16} color={t.crit} /></Pressable>
                             </View>
                             {l.sets ? (
                               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 7 }}>
@@ -1020,7 +1094,7 @@ export default function Train() {
             activity={timed.activity}
             age={ageFromDob(cd.dob)}
             defaultUnit={unit}
-            onSave={(v) => { commitSession(timed.kind, timed.activity, v.mins, v); setTimed(null); }}
+            onSave={(v) => { void commitSession(timed.kind, timed.activity, v.mins, v); setTimed(null); }}
             onClose={() => setTimed(null)}
           />
         ) : null}
@@ -1348,6 +1422,12 @@ function TimedSessionRunner({ t, kind, activity, age, defaultUnit, onSave, onClo
 
         <ZonePanel t={t} liveZone={liveZone} liveSample={liveSample ?? null} zoneSecs={zoneSecs} />
 
+        {/* TF-36 — reachable without leaving the session. It renders nothing
+            but an honest line when Spotify is not connected or the account
+            cannot drive playback, so it costs a disconnected client no space
+            they would resent. */}
+        <SessionMusicBar />
+
         <View style={{ marginTop: sp.xl }}>
           <Cta label="Finish session" wide onPress={finish} />
         </View>
@@ -1516,6 +1596,12 @@ function SessionRunner({ t, exercises, focus, nameOf, age, log, injuries, videos
             is no watch feeding it — see ZonePanel. */}
         <ZonePanel t={t} liveZone={liveZone} liveSample={liveSample ?? null} zoneSecs={zoneSecs} />
 
+        {/* TF-36 — reachable without leaving the session. It renders nothing
+            but an honest line when Spotify is not connected or the account
+            cannot drive playback, so it costs a disconnected client no space
+            they would resent. */}
+        <SessionMusicBar />
+
         {prMsg ? (
           <View style={{ marginTop: sp.xl }}>
             <Notice tone={t.s3} kicker="Personal record" title={prMsg} />
@@ -1621,8 +1707,18 @@ function SessionRunner({ t, exercises, focus, nameOf, age, log, injuries, videos
 //
 // Mounted only while it is open (see the caller) so it always opens on the
 // entry's current values rather than the first one ever edited.
+//
+// What the fields say is read and checked in src/lib/entryEdit.ts rather than
+// here, and two things move out with it. A field that is not a number is now
+// refused instead of becoming 0 — `parseInt('abc', 10) || 0` is what this
+// shipped with, and a mistyped calorie box turning into a confident zero is a
+// fabricated figure sitting in a health record. And the patch it returns cannot
+// carry `t` at all, which makes "a correction does not move the day" a compile
+// error rather than a habit: an entry fixed on Thursday stays on Tuesday, where
+// the calendar dots, the streak, History's monthly bars and the coach's week
+// all read it from.
 function EditEntrySheet({ t, entry, onClose, onSave }: {
-  t: Theme; entry: WorkoutEntry; onClose: () => void; onSave: (patch: Partial<WorkoutEntry>) => void;
+  t: Theme; entry: WorkoutEntry; onClose: () => void; onSave: (patch: Partial<WorkoutEntry>) => Promise<boolean>;
 }) {
   const [name, setName] = useState(entry.exercise);
   const [sets, setSets] = useState<[number, number][]>(entry.sets ? entry.sets.map((s) => [s[0], s[1]] as [number, number]) : []);
@@ -1630,33 +1726,36 @@ function EditEntrySheet({ t, entry, onClose, onSave }: {
   const [dist, setDist] = useState(entry.cardio ? String(entry.cardio.dist) : '');
   const [watts, setWatts] = useState(entry.cardio && entry.cardio.watts ? String(entry.cardio.watts) : '');
   const [kcal, setKcal] = useState(entry.kcal != null ? String(entry.kcal) : '');
+  const [busy, setBusy] = useState(false);
 
   const isCardio = !!entry.cardio;
   const setAt = (i: number, j: 0 | 1, v: string) =>
     setSets((prev) => prev.map((s, k) => (k === i ? (j === 0 ? [parseInt(v, 10) || 0, s[1]] : [s[0], parseFloat(v) || 0]) : s)));
 
-  const save = () => {
-    const patch: Partial<WorkoutEntry> = {};
-    const nm = name.trim();
-    if (nm && nm !== entry.exercise) patch.exercise = nm;
+  // Which day this entry is on, said out loud. A correction never moves it, and
+  // somebody fixing Tuesday's session on a Thursday should be able to see that
+  // rather than take it on trust. Built from the calendar numbers, not from a
+  // second `new Date()`, for the reason src/lib/localDate.ts sets out.
+  const dayLabel = (() => {
+    const key = dayKeyOf(entry.t);
+    if (!key) return null;
+    const [y, m, d] = key.split('-').map(Number);
+    return new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'short' });
+  })();
 
-    if (isCardio) {
-      const m = parseInt(mins, 10) || 0;
-      const d = parseFloat(dist) || 0;
-      const w = parseInt(watts, 10) || 0;
-      patch.cardio = { ...entry.cardio!, mins: m, dist: d, ...(w > 0 ? { watts: w } : {}) };
-      if (w <= 0) delete (patch.cardio as { watts?: number }).watts;
-    } else {
-      const kept = sets.filter((s) => s[0] > 0);
-      patch.sets = kept.length ? kept : undefined;
-      // Perceived effort is recorded per set, so a set that no longer exists
-      // must not keep carrying someone's answer for it.
-      if (entry.feel) patch.feel = kept.length ? entry.feel.slice(0, kept.length) : undefined;
+  const save = async () => {
+    if (busy) return;
+    const read = readWorkoutEdit(entry, { name, sets, mins, dist, watts, kcal });
+    if (!read.ok) { Alert.alert('Check that', read.reason); return; }
+    setBusy(true);
+    const saved = await onSave(read.value);
+    setBusy(false);
+    // Left open on failure with everything still typed in it. The caller has
+    // left the log untouched, so closing here would both throw the correction
+    // away and imply it had been taken.
+    if (!saved) {
+      Alert.alert('Not saved', 'Your correction did not reach the server, so this entry still reads as it did — on this phone as well. Check your connection and save again.');
     }
-
-    // Blank means "no figure", which is not the same as zero.
-    patch.kcal = kcal.trim() === '' ? undefined : (parseInt(kcal, 10) || 0);
-    onSave(patch);
   };
 
   const inp = { color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 10, ...ty.body } as const;
@@ -1669,10 +1768,15 @@ function EditEntrySheet({ t, entry, onClose, onSave }: {
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: sp.lg }}>
           <Pressable onPress={onClose} hitSlop={8}><Text style={{ ...ty.body, fontWeight: '500', color: t.ink3 }}>Cancel</Text></Pressable>
           <Text style={{ ...ty.head, color: t.ink }}>Edit entry</Text>
-          <Pressable onPress={save} hitSlop={8}><Text style={{ ...ty.body, fontWeight: '600', color: t.brand }}>Save</Text></Pressable>
+          <Pressable onPress={save} hitSlop={8} disabled={busy}><Text style={{ ...ty.body, fontWeight: '600', color: busy ? t.ink3 : t.brand }}>{busy ? 'Saving…' : 'Save'}</Text></Pressable>
         </View>
         <Rule />
         <ScrollView contentContainerStyle={{ padding: sp.lg, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+          {dayLabel ? (
+            <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>
+              Logged on {dayLabel}. Correcting it leaves it on that day — your calendar, streak and history all read it from there.
+            </Text>
+          ) : null}
           <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 6 }}>EXERCISE</Text>
           <TextInput value={name} onChangeText={setName} style={inp} placeholder="Exercise" placeholderTextColor={t.ink3} />
 

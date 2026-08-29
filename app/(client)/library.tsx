@@ -22,16 +22,33 @@
 // <ExerciseVideo>, which mints the signed URL and reports its own failure. The
 // web search survives as the fallback for the case where there genuinely is no
 // clip — that one is a real answer, and it is the thing the old copy got right.
+//
+// ── Tapping an exercise records it now (TF-27) ──────────────────────────────
+//
+// A list of exercises, and the one thing you could not do to any of them was
+// log it. Tapping opened the clip and the footer sent you to Train, where you
+// then had to find the same movement again in a plan that may not contain it at
+// all — the library holds everything a coach has ever filmed, today's programme
+// holds six lifts. So somebody who did an extra set of face pulls after their
+// session had nowhere to put it from the screen they were already looking at.
+//
+// The sheet logs it here instead: reps and weight, added set by set, written
+// through <WorkoutLogProvider> like every other entry so it lands in the same
+// `workouts` rows the calendar, the streak, records and the coach all read. The
+// write resolves true only once the server has it, and the sheet says so when
+// it does not, rather than closing on a set that exists on this phone alone.
 import { useEffect, useMemo, useState } from 'react';
-import { View, Text, TextInput, Pressable, ScrollView, Modal, Linking } from 'react-native';
+import { View, Text, TextInput, Pressable, ScrollView, Modal, Linking, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
 import { ExerciseVideo } from '../../src/ui/ExerciseVideo';
 import { useExerciseVideos, type VideoItem } from '../../src/ui/exerciseVideos';
+import { useWorkoutLog } from '../../src/ui/workoutLog';
+import { tapLight, notifySuccess } from '../../src/ui/haptics';
 import { Rule, Section, SectionHead, ListRow, Notice, Cta, Ghost } from '../../src/ui/kit';
-import { sp, layout, radius, elevation, type as ty } from '../../src/theme/scale';
+import { sp, layout, radius, elevation, type as ty, numeric } from '../../src/theme/scale';
 
 export default function Library() {
  const t = useTheme();
@@ -84,8 +101,52 @@ export default function Library() {
  // can use is whose demonstration it is and whether there is one to play at all.
  const rowNote = (v: VideoItem) => `${v.group} · ${v.uploaded ? source(v) : 'No clip yet'}`;
 
+ // ── logging what you just did, from the list you are already looking at ──
+ const { addWorkout } = useWorkoutLog();
+ const [reps, setReps] = useState('');
+ const [kg, setKg] = useState('');
+ // Sets banked in the sheet but not yet written. Held here rather than sent one
+ // row at a time because a `workouts` row IS an exercise with its sets — three
+ // separate rows for three sets of the same lift would read as three exercises
+ // in the calendar and count triple towards the day.
+ const [banked, setBanked] = useState<[number, number][]>([]);
+ const [saving, setSaving] = useState(false);
+ const addSet = () => {
+  const r = parseInt(reps, 10) || 0;
+  if (r <= 0) { Alert.alert('How many reps?', 'A set needs a rep count. The weight can be left blank for a bodyweight movement.'); return; }
+  // Blank weight is 0 and stays 0 — that is a bodyweight set, which is a real
+  // set, and the log already renders a 0 kg set as bodyweight rather than as a
+  // missing figure.
+  setBanked((p) => [...p, [r, parseFloat(kg.replace(',', '.')) || 0]]);
+  setReps(''); setKg('');
+  tapLight();
+ };
+ const logIt = async () => {
+  if (!open || saving) return;
+  // Whatever is still in the fields counts — asking somebody to press "add set"
+  // and then "log" for a single set is how a set gets lost between the two.
+  const pending = (parseInt(reps, 10) || 0) > 0 ? [...banked, [parseInt(reps, 10), parseFloat(kg.replace(',', '.')) || 0] as [number, number]] : banked;
+  if (!pending.length) { Alert.alert('Nothing to log', 'Add a set first — reps, and the weight if there was one.'); return; }
+  setSaving(true);
+  // No `kcal`. Train derives an energy estimate across a whole session's work;
+  // one set logged on its own has no session around it to derive from, and the
+  // log renders an absent figure as a dash rather than as a zero somebody could
+  // read as "this burned nothing".
+  const saved = await addWorkout({ t: new Date().toISOString(), exercise: open.name, sets: pending });
+  setSaving(false);
+  if (!saved) {
+   Alert.alert('Not logged', `${open.name} did not reach your training log. It is showing on this phone, but it has not been recorded and will be gone when you next open the app.`);
+   return;
+  }
+  notifySuccess();
+  const total = pending.length;
+  Alert.alert('Logged', `${total} set${total === 1 ? '' : 's'} of ${open.name} added to today.`);
+  setBanked([]); setReps(''); setKg('');
+  close();
+ };
+
  const G = layout.gutter;
- const show = (v: VideoItem) => { setUnplayable(false); setOpen(v); };
+ const show = (v: VideoItem) => { setUnplayable(false); setBanked([]); setReps(''); setKg(''); setOpen(v); };
  const close = () => { setOpen(null); setUnplayable(false); };
  const searchWeb = () => {
   if (!open) return;
@@ -127,6 +188,9 @@ export default function Library() {
     <Section>
      <SectionHead title={group === 'All' ? 'All exercises' : group}
       note={status === 'ready' && list.length ? `${list.length} exercise${list.length === 1 ? '' : 's'}` : undefined} />
+     {status === 'ready' && list.length ? (
+      <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.xs }}>Tap one to watch it — and to log the sets you just did.</Text>
+     ) : null}
 
      {/* The read failed, so nothing below this line is a statement about what
          the coach has uploaded. Anything the phone already had is still shown
@@ -177,9 +241,10 @@ export default function Library() {
 
    {/* ── the clip, playing here rather than in the browser ───────────────── */}
    <Modal visible={!!open} transparent animationType="slide" onRequestClose={close}>
+    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
     <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={close}
      accessibilityRole="button" accessibilityLabel="Close the clip" />
-    <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30, ...elevation.e2 }}>
+    <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30, maxHeight: '90%', ...elevation.e2 }}>
      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sp.md }}>
       <Text style={{ ...ty.title, color: t.ink, flex: 1 }} numberOfLines={1}>{open?.name}</Text>
       <Pressable onPress={close} hitSlop={8} accessibilityRole="button" accessibilityLabel="Close">
@@ -187,6 +252,9 @@ export default function Library() {
       </Pressable>
      </View>
 
+     {/* Scrolls, because the sheet now carries a player AND a form: on a small
+         phone the "Log to today" button was below the fold and unreachable. */}
+     <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
      {open && open.uploaded ? (
       <View>
        <ExerciseVideo video={open} exerciseName={open.name} onUnavailable={() => setUnplayable(true)} />
@@ -209,10 +277,49 @@ export default function Library() {
       </View>
      ) : null}
 
+     {/* ── log it, from here ────────────────────────────────────────────── */}
+     <Rule />
+     <View>
+      <SectionHead title="Log this exercise" note={banked.length ? `${banked.length} set${banked.length === 1 ? '' : 's'} ready` : undefined} />
+      {banked.length ? (
+       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: sp.md, alignItems: 'center' }}>
+        {banked.map((s, i) => (
+         <Pressable key={i} onPress={() => setBanked((p) => p.filter((_, k) => k !== i))} hitSlop={6}
+          accessibilityRole="button" accessibilityLabel={`Remove set ${i + 1}, ${s[0]} reps at ${s[1]} kilos`}
+          style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 9, paddingVertical: 5, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          {/* 0 kg is a bodyweight set, not a missing weight — so it is named
+              rather than printed as "0kg", which reads like a lost figure. */}
+          <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{s[0]}×{s[1] > 0 ? `${s[1]}kg` : 'bodyweight'}</Text>
+          <Text style={{ ...ty.caption, color: t.ink3 }}>×</Text>
+         </Pressable>
+        ))}
+       </View>
+      ) : null}
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
+       <TextInput value={reps} onChangeText={setReps} keyboardType="numeric" placeholder="Reps" placeholderTextColor={t.ink3}
+        accessibilityLabel="Reps" style={{ flex: 1, ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 10 }} />
+       <Text style={{ ...ty.caption, color: t.ink3 }}>×</Text>
+       <TextInput value={kg} onChangeText={setKg} keyboardType="numeric" placeholder="kg" placeholderTextColor={t.ink3}
+        accessibilityLabel="Weight in kilos, blank for bodyweight" style={{ flex: 1, ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 10 }} />
+       <Pressable onPress={addSet} accessibilityRole="button" accessibilityLabel="Add another set"
+        style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 }}>
+        <Icon name="plus" size={16} color={t.ink2} />
+       </Pressable>
+      </View>
+      <View style={{ marginTop: sp.md }}>
+       <Cta label={saving ? 'Logging…' : 'Log to today'} wide disabled={saving} onPress={logIt} />
+      </View>
+      <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+       Goes into today's log alongside your programme, so your calendar, streak and records all count it. Leave the weight blank for a bodyweight set.
+      </Text>
+     </View>
+
      <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.lg }}>
-      Watch the movement, then head to Train to log your sets. The clip plays here rather than in the browser, so a set you have already typed is still there when you go back. If a lift bothers you, use “Swap” on the workout screen for an alternative.
+      The clip plays here rather than in the browser, so a set you have already typed is still there when you go back. If a lift bothers you, use “Swap” on the workout screen for an alternative.
      </Text>
+     </ScrollView>
     </View>
+    </KeyboardAvoidingView>
    </Modal>
   </SafeAreaView>
  );

@@ -14,6 +14,8 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
+import { reportError } from '../lib/reportError';
+import type { FoodFigures } from '../lib/entryEdit';
 import type { LoadStatus } from './loadStatus';
 import { useAuthRevision } from './authRevision';
 
@@ -33,6 +35,20 @@ interface FoodLogValue {
   /** Resolves true only when the row was actually deleted. A refused delete
    *  brings the food back — and its calories with it — after a relaunch. */
   removeFood: (id: string) => Promise<boolean>;
+  /**
+   * Correct a meal that is already logged — TF-02.
+   *
+   * There was no update path here at all, so a mistyped 1200 kcal could only be
+   * deleted and re-entered, and until somebody did that it went on eating the
+   * day's remaining calories. RLS was never the obstacle: `food_owner` on
+   * `food_logs` is an ALL policy, so the client could always have written this.
+   *
+   * Resolves true only once the corrected row is what the server holds. On
+   * false NOTHING in `entries` has moved — the old figures are still on screen,
+   * still what the server has, and the caller must say the correction did not
+   * save rather than leave a number standing that only this phone believes.
+   */
+  updateFood: (id: string, next: FoodFigures) => Promise<boolean>;
 }
 
 let SEQ = 300;
@@ -105,20 +121,56 @@ export function FoodLogProvider({ children }: { children: ReactNode }) {
   };
 
   const removeFood: FoodLogValue['removeFood'] = async (id) => {
-    setEntries((p) => p.filter((x) => x.id !== id));
     // An 'fl' id is optimistic-only and never reached the server, so dropping it
     // locally is the entire removal.
-    if (id.startsWith('fl')) return true;
+    if (id.startsWith('fl')) { setEntries((p) => p.filter((x) => x.id !== id)); return true; }
     if (!USE_SUPABASE) return false;
     try {
-      const { error } = await supabase.from('food_logs').delete().eq('id', id);
-      return !error;
-    } catch { return false; }
+      // The row leaves the screen only once the server says it has gone. It used
+      // to leave first, which meant a refused delete took the meal's calories
+      // out of the day's rings — the client ate against a total that was wrong
+      // until the next launch put the food back with no explanation.
+      //
+      // Counting the returned rows, not just checking `error`: a DELETE that
+      // matched nothing SUCCEEDS in PostgREST, having removed zero rows.
+      const { data, error } = await supabase.from('food_logs').delete().eq('id', id).select('id');
+      if (error || !data || !data.length) { reportError('foodLog.remove', error); return false; }
+      setEntries((p) => p.filter((x) => x.id !== id));
+      return true;
+    } catch (e) { reportError('foodLog.remove', e); return false; }
   };
 
+  const updateFood: FoodLogValue['updateFood'] = async (id, next) => {
+    // As above: an 'fl' entry exists on this phone and nowhere else, so editing
+    // it here IS the whole edit. `addFood` already told the caller that entry
+    // never saved; the correction is exactly as durable as the thing it corrects.
+    if (id.startsWith('fl')) {
+      setEntries((p) => p.map((x) => (x.id === id ? { ...x, ...next } : x)));
+      return true;
+    }
+    if (!USE_SUPABASE) return false;
+    try {
+      // Nothing is written to `entries` before this lands. The whole point of a
+      // correction is that the figure on screen is the figure of record, and an
+      // optimistic one would put the app straight back into the state this
+      // codebase keeps being reported for: right on screen, wrong in the row.
+      const { data, error } = await supabase.from('food_logs')
+        .update({ name: next.name, kcal: next.kcal, protein: next.protein, carbs: next.carbs, fat: next.fat })
+        .eq('id', id)
+        .select();
+      if (error || !data || !data.length) { reportError('foodLog.update', error); return false; }
+      setEntries((p) => p.map((x) => (x.id === id ? rowToEntry(data[0]) : x)));
+      return true;
+    } catch (e) { reportError('foodLog.update', e); return false; }
+  };
+
+  // Derived from `entries`, so a corrected meal moves the day's totals — and
+  // the "calories remaining" the client eats against — in the same tick the
+  // correction lands. Nothing here caches a total that could outlive the meal
+  // it was added up from.
   const consumed = useMemo(() => entries.reduce((a, f) => ({ kcal: a.kcal + f.kcal, protein: a.protein + f.protein, carbs: a.carbs + f.carbs, fat: a.fat + f.fat }), { kcal: 0, protein: 0, carbs: 0, fat: 0 }), [entries]);
 
-  return <Ctx.Provider value={{ entries, consumed, status, addFood, removeFood }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ entries, consumed, status, addFood, removeFood, updateFood }}>{children}</Ctx.Provider>;
 }
 
 export function useFoodLog(): FoodLogValue {

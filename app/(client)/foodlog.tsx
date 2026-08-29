@@ -29,7 +29,8 @@ import { parseFoodText, foodAIAvailable } from '../../src/lib/foodAI';
 import { searchProducts } from '../../src/lib/openfoodfacts';
 import { BarcodeSheet } from '../../src/ui/BarcodeSheet';
 import { notifySuccess } from '../../src/ui/haptics';
-import { useFoodLog } from '../../src/ui/foodLog';
+import { useFoodLog, type FoodEntry } from '../../src/ui/foodLog';
+import { readFoodEdit, foodChanged } from '../../src/lib/entryEdit';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
 import { useWearables } from '../../src/ui/wearables';
 import { Rule, Section, SectionHead, Hero, Ghost, ListRow, fig } from '../../src/ui/kit';
@@ -130,16 +131,96 @@ export default function FoodLog() {
  const [estN, setEstN] = useState(''); const [estK, setEstK] = useState(''); const [estP, setEstP] = useState(''); const [estC, setEstC] = useState(''); const [estF, setEstF] = useState('');
  const [serv, setServ] = useState(1);
 
- const add = (f: Food, via: string) => fl.addFood({ name: f.n, kcal: f.k, protein: f.p, carbs: f.c, fat: f.f, via: via as any });
+ // Every write in this provider resolves true only once the row is on the
+ // server, and this screen used to throw all of them away. A refused insert and
+ // a stored one looked identical: the food appeared in "Logged today", ate into
+ // the calories remaining, and was gone at the next launch with the day's
+ // figures silently different. So a write that did not land is now said out
+ // loud, in the one place that can say it.
+ const warnUnsaved = (what: string) =>
+  Alert.alert('Not saved',
+   `${what} is on this phone only — we could not reach your food log. It is counting toward today here, but it will be gone when you next open the app.`);
+ const add = async (f: Food, via: string) => {
+  const saved = await fl.addFood({ name: f.n, kcal: f.k, protein: f.p, carbs: f.c, fat: f.f, via: via as any });
+  if (!saved) warnUnsaved(f.n);
+  return saved;
+ };
  const logNL = async () => {
    const text = nl.trim(); if (!text) return;
    setNlBusy(true);
    const items = await parseFoodText(text);
+   if (items && items.length) {
+    // Awaited in sequence and counted, rather than fired off in a forEach: a
+    // description can be four foods, and four separate "not saved" alerts
+    // stacked on top of each other tells somebody nothing they can act on.
+    //
+    // `via: 'manual'`, not the 'ai' this used to send. `food_logs.via` carries a
+    // CHECK constraint listing search / barcode / photo / manual, so every
+    // insert from this box was refused by the database — and because the result
+    // was discarded, the described meal appeared in the list, counted against
+    // the day, and existed nowhere. A person typing here logged it by hand, so
+    // manual is what it is; the reader in rowToEntry already coerces to that.
+    let failed = 0;
+    for (const it of items) {
+     const saved = await fl.addFood({ name: it.name, kcal: it.kcal, protein: it.protein, carbs: it.carbs, fat: it.fat, via: 'manual' });
+     if (!saved) failed++;
+    }
+    setNlBusy(false);
+    setNl('');
+    if (failed) warnUnsaved(failed === items.length ? 'What you described' : `${failed} of the ${items.length} foods`);
+    else notifySuccess();
+    return;
+   }
    setNlBusy(false);
-   if (items && items.length) { items.forEach((it) => add({ n: it.name, k: it.kcal, p: it.protein, c: it.carbs, f: it.fat }, 'ai')); setNl(''); notifySuccess(); }
-   else { Alert.alert('Could not read that', foodAIAvailable() ? 'Try describing it differently, e.g. \"2 eggs, toast and a coffee\".' : 'AI food logging turns on with the AI backend.'); }
+   Alert.alert('Could not read that', foodAIAvailable() ? 'Try describing it differently, e.g. \"2 eggs, toast and a coffee\".' : 'AI food logging turns on with the AI backend.');
  };
- // removal handled via fl.removeFood(id) in the list below
+
+ // ── correcting a meal already logged (TF-02) ────────────────────────────
+ //
+ // There was no way to fix one. A meal typed as 1200 kcal instead of 120 could
+ // only be deleted and entered again, and until somebody did that it went on
+ // eating the day's remaining calories — the one number this screen exists to
+ // show. RLS was never in the way: `food_owner` on food_logs is an ALL policy.
+ const [editing, setEditing] = useState<FoodEntry | null>(null);
+ const [edN, setEdN] = useState(''); const [edK, setEdK] = useState('');
+ const [edP, setEdP] = useState(''); const [edC, setEdC] = useState(''); const [edF, setEdF] = useState('');
+ const [edBusy, setEdBusy] = useState(false);
+ const openEdit = (fe: FoodEntry) => {
+  setEditing(fe);
+  setEdN(fe.name); setEdK(String(fe.kcal)); setEdP(String(fe.protein)); setEdC(String(fe.carbs)); setEdF(String(fe.fat));
+ };
+ const saveEdit = async () => {
+  if (!editing || edBusy) return;
+  const read = readFoodEdit({ name: edN, kcal: edK, protein: edP, carbs: edC, fat: edF });
+  // A typo is refused rather than rounded to zero — see src/lib/entryEdit.ts.
+  if (!read.ok) { Alert.alert('Check that', read.reason); return; }
+  const before = { name: editing.name, kcal: editing.kcal, protein: editing.protein, carbs: editing.carbs, fat: editing.fat };
+  if (!foodChanged(before, read.value)) { setEditing(null); return; }
+  setEdBusy(true);
+  const saved = await fl.updateFood(editing.id, read.value);
+  setEdBusy(false);
+  // On false the store has not moved either, so the figures behind this sheet
+  // are still the ones of record. The sheet stays open with what was typed:
+  // closing it would throw the correction away AND imply it had been taken.
+  if (!saved) {
+   Alert.alert('Not saved', 'Your correction did not reach the server, so the meal still reads as it did. Nothing has been changed on this phone either — check your connection and try again.');
+   return;
+  }
+  setEditing(null);
+  notifySuccess();
+ };
+ const confirmRemove = (fe: FoodEntry) => {
+  Alert.alert('Remove this meal?', `${fe.name} — ${fe.kcal} kcal — comes off today's log, and today's totals go back down by it.`, [
+   { text: 'Cancel', style: 'cancel' },
+   { text: 'Remove', style: 'destructive', onPress: async () => {
+    const gone = await fl.removeFood(fe.id);
+    // The meal is still on screen when this is false, which is the truth: the
+    // row is still there. It used to disappear on the spot and come back at the
+    // next launch with the day's calories quietly different again.
+    if (!gone) Alert.alert('Not removed', `${fe.name} is still in your log — we could not reach the server to remove it. It is still counting toward today.`);
+   } },
+  ]);
+ };
 
  const tot = { k: fl.consumed.kcal, p: fl.consumed.protein, c: fl.consumed.carbs, f: fl.consumed.fat };
  const burned = useWearables().today.activeKcal || 0;
@@ -167,11 +248,13 @@ export default function FoodLog() {
  setReadFailed(true); setReading(false);
  };
 
- const logPhoto = () => {
+ const logPhoto = async () => {
  const k = round((parseFloat(estK) || 0) * serv), p = round((parseFloat(estP) || 0) * serv), c = round((parseFloat(estC) || 0) * serv), f = round((parseFloat(estF) || 0) * serv);
  if (!k) { Alert.alert('Add calories', 'Enter at least a calorie estimate.'); return; }
- add({ n: estN || 'Meal (photo)', k, p, c, f }, 'photo');
- setPhotoUri(null);
+ // The sheet closes only once the meal is stored. `add` has already said if it
+ // was not, and closing over that would throw away the figures somebody just
+ // read off their own plate — the one thing they cannot get back by retrying.
+ if (await add({ n: estN || 'Meal (photo)', k, p, c, f }, 'photo')) setPhotoUri(null);
  };
 
  // Nothing is scanned and nothing is logged — say so instead of inventing a hit.
@@ -320,20 +403,26 @@ export default function FoodLog() {
  <SectionHead title="Logged today" note={`${tot.k} kcal`} />
  {fl.entries.length === 0 ? (
  <Text style={{ ...ty.label, color: t.ink3 }}>Nothing logged yet today.</Text>
- ) : fl.entries.map((fe, i) => (
+ ) : (<>
+ <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.xs }}>Tap a meal to correct what it was worth.</Text>
+ {fl.entries.map((fe, i) => (
  <View key={fe.id}>
  {i > 0 ? <Rule /> : null}
  <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
- <View style={{ flex: 1 }}>
+ <Pressable onPress={() => openEdit(fe)} accessibilityRole="button" accessibilityLabel={'Edit ' + fe.name} style={{ flex: 1 }}>
  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }} numberOfLines={1}>{fe.name}</Text>
  <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{fe.kcal} kcal · P{fe.protein} C{fe.carbs} F{fe.fat}</Text>
- </View>
- <Pressable onPress={() => fl.removeFood(fe.id)} hitSlop={8} accessibilityRole="button" accessibilityLabel={'Remove ' + fe.name}>
+ </Pressable>
+ <Pressable onPress={() => openEdit(fe)} hitSlop={8} accessibilityRole="button" accessibilityLabel={'Edit ' + fe.name}>
+ <Icon name="pencil" size={15} color={t.ink3} />
+ </Pressable>
+ <Pressable onPress={() => confirmRemove(fe)} hitSlop={8} accessibilityRole="button" accessibilityLabel={'Remove ' + fe.name}>
  <Text style={{ ...ty.body, color: t.ink3 }}>×</Text>
  </Pressable>
  </View>
  </View>
  ))}
+ </>)}
  </Section>
 
  </ScrollView>
@@ -389,8 +478,46 @@ export default function FoodLog() {
  </View>
     </KeyboardAvoidingView>
  </Modal>
+ {/* ── correct a logged meal ────────────────────────────────────────── */}
+ <Modal visible={editing != null} transparent animationType="slide" onRequestClose={() => setEditing(null)}>
+   <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+ <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setEditing(null)} accessibilityRole="button" accessibilityLabel="Close" />
+ <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30, ...elevation.e2 }}>
+ <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sp.md }}>
+ <Text style={{ ...ty.title, color: t.ink }}>Correct this meal</Text>
+ <Pressable onPress={() => setEditing(null)} hitSlop={8} accessibilityRole="button" accessibilityLabel="Cancel">
+ <Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>Cancel</Text>
+ </Pressable>
+ </View>
+ <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
+ Today's totals and the calories you have left follow this straight away. It stays on today — correcting a meal does not move it to another day.
+ </Text>
+ <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Meal name</Text>
+ <TextInput value={edN} onChangeText={setEdN} placeholder="What was it?" placeholderTextColor={t.ink3} style={{ ...field, marginBottom: sp.md }} />
+ <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.lg }}>
+ {[['kcal', edK, setEdK], ['P', edP, setEdP], ['C', edC, setEdC], ['F', edF, setEdF]].map(([lbl, val, set]: any) => (
+ <View key={lbl} style={{ flex: 1 }}>
+ <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>{lbl}</Text>
+ <TextInput value={val} onChangeText={set} keyboardType="numeric" style={{ ...field, ...numeric, paddingHorizontal: 10 }} />
+ </View>
+ ))}
+ </View>
+ <Pressable onPress={saveEdit} disabled={edBusy} accessibilityRole="button"
+ style={{ backgroundColor: edBusy ? t.surface2 : t.brand, borderRadius: radius.sm, paddingVertical: 13, alignItems: 'center' }}>
+ {edBusy ? <ActivityIndicator color={t.ink2} /> : <Text style={{ ...ty.body, fontWeight: '600', color: t.brandInk }}>Save the correction</Text>}
+ </Pressable>
+ {/* Deleting is here as well as in the list, because "this was not a meal at
+     all" is the correction somebody arrives at while they have the sheet
+     open, and the confirm is the same one either way. */}
+ <Pressable onPress={() => { const fe = editing; setEditing(null); if (fe) confirmRemove(fe); }} accessibilityRole="button"
+ style={{ paddingVertical: sp.md, alignItems: 'center', marginTop: sp.xs }}>
+ <Text style={{ ...ty.label, fontWeight: '500', color: t.crit }}>Remove this meal</Text>
+ </Pressable>
+ </View>
+   </KeyboardAvoidingView>
+ </Modal>
  <BarcodeSheet visible={bcOpen} onClose={() => setBcOpen(false)}
-   onLogged={(f) => fl.addFood({ ...f, via: 'barcode' })} />
+   onLogged={async (f) => { if (!(await fl.addFood({ ...f, via: 'barcode' }))) warnUnsaved(f.name); }} />
  </SafeAreaView>
  );
 }
