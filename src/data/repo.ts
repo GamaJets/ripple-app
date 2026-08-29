@@ -116,7 +116,7 @@ type SessionRow = {
 function mapScan(r: ScanRow): Scan {
   return {
     id: r.id, clientId: r.client_id, takenAt: r.taken_at, weightKg: Number(r.weight_kg),
-    bodyFatPct: Number(r.body_fat_pct), skeletalMuscleKg: Number(r.skeletal_muscle_kg ?? 0),
+    bodyFatPct: Number(r.body_fat_pct), skeletalMuscleKg: r.skeletal_muscle_kg != null ? Number(r.skeletal_muscle_kg) : null,
     source: r.source ?? 'InBody',
   };
 }
@@ -129,7 +129,10 @@ function mapSession(r: SessionRow): TrainingSession {
 function mapClient(r: ClientRow): MockClient {
   const scans = (r.scans ?? []).map(mapScan).sort((a, b) => a.takenAt.localeCompare(b.takenAt));
   // Derive the body-stat time series from the scan history (matches the prototype).
-  const series = (pick: (s: Scan) => number) => scans.map((s) => ({ t: s.takenAt, v: pick(s) }));
+  // A scan the pick cannot answer for drops out of the series rather than
+  // contributing a zero; see the note on Scan.skeletalMuscleKg.
+  const series = (pick: (s: Scan) => number | null) =>
+    scans.flatMap((s) => { const v = pick(s); return v != null ? [{ t: s.takenAt, v }] : []; });
   const log = (r.workout_logs ?? [])
     .sort((a, b) => b.logged_at.localeCompare(a.logged_at))
     .map((w) => ({

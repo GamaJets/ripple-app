@@ -133,11 +133,7 @@ export default function Scans() {
       date: String(sc.takenAt).slice(0, 10),
       weightKg: Number.isFinite(sc.weightKg) ? sc.weightKg : null,
       bodyFatPct: Number.isFinite(sc.bodyFatPct) ? sc.bodyFatPct : null,
-      // clientData substitutes 0 when scans.skeletal_muscle_kg is null, and
-      // nobody has 0 kg of skeletal muscle. That zero is a reading the scan
-      // never took, so it leaves as an empty cell rather than as a figure a
-      // coach would read as muscle loss.
-      muscleKg: Number.isFinite(sc.skeletalMuscleKg) && sc.skeletalMuscleKg > 0 ? sc.skeletalMuscleKg : null,
+      muscleKg: sc.skeletalMuscleKg,
     }));
 
   const sendPdf = async () => { const rows = exportRows(); const { html, text } = progressDoc(cd.name, rows, appName, t.brand); await shareDoc(html, text, 'My progress'); };
@@ -249,7 +245,12 @@ export default function Scans() {
     }
   };
   const saveScan = () => {
-    const w = parseFloat(wt) || 0, f = parseFloat(bf) || 0, m = parseFloat(sm) || 0;
+    const w = parseFloat(wt) || 0, f = parseFloat(bf) || 0;
+    // Blank means the report did not give one, NOT zero. `parseFloat(sm) || 0`
+    // wrote a 0 kg muscle reading for every client who filled in only the two
+    // figures the form insists on.
+    const mNum = parseFloat(sm);
+    const m = sm.trim() && Number.isFinite(mNum) && mNum > 0 ? mNum : null;
     if (!w || !f) { Alert.alert('Add the numbers', 'Enter at least weight and body-fat % from your InBody report.'); return; }
     const newISO = scanDateISO();
     // The meal plan follows your MOST RECENT-dated scan only. A back-dated scan is
@@ -531,7 +532,7 @@ export default function Scans() {
             onPress={(k) => { if (k.route) router.push(k.route as any); }}
             items={[
               { label: 'Weight', value: cd.weightKg != null ? String(cd.weightKg) : '—', unit: cd.weightKg != null ? 'kg' : undefined, route: '/(client)/measurements', good: !prev || (cd.weightKg != null && cd.weightKg <= prev.weightKg), delta: (cd.weightKg != null ? dlt(cd.weightKg, prev?.weightKg, 'kg') : null) ?? undefined },
-              { label: 'Muscle', value: cd.muscleKg != null ? String(cd.muscleKg) : '—', unit: cd.muscleKg != null ? 'kg' : undefined, route: '/(client)/measurements', good: !prev || (cd.muscleKg != null && cd.muscleKg >= prev.skeletalMuscleKg), delta: (cd.muscleKg != null ? dlt(cd.muscleKg, prev?.skeletalMuscleKg, 'kg') : null) ?? undefined },
+              { label: 'Muscle', value: cd.muscleKg != null ? String(cd.muscleKg) : '—', unit: cd.muscleKg != null ? 'kg' : undefined, route: '/(client)/measurements', good: !prev || prev.skeletalMuscleKg == null || (cd.muscleKg != null && cd.muscleKg >= prev.skeletalMuscleKg), delta: (cd.muscleKg != null ? dlt(cd.muscleKg, prev?.skeletalMuscleKg ?? undefined, 'kg') : null) ?? undefined },
               { label: 'Scans', value: fig(scans.length), delta: latest ? `last ${ago}` : undefined },
             ]}
           />

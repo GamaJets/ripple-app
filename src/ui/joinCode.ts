@@ -9,7 +9,7 @@ import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
 import { joinErrorMessage, normaliseCode } from '../lib/joinCode';
-import { modeForDb, type CoachedMode } from '../lib/types';
+import type { CoachedMode } from '../lib/types';
 
 export type MyCode = { ok: true; code: string } | { ok: false; reason: string };
 
@@ -73,18 +73,16 @@ export type JoinResult =
  * who used an online-only coach's code appeared on an in-person roster for
  * sessions nobody was going to run.
  *
- * 'hybrid' is narrowed to 'inperson' before it is sent. Not for the constraint
- * on coach_requests alone: join_by_code itself reduces its argument with
- * `case when p_mode = 'inperson' then 'inperson' else 'online' end`, so an
- * un-narrowed 'hybrid' would land as 'online' and put a client who trains in
- * the room onto an online-only roster — the exact failure the paragraph above
- * describes, arrived at from the other direction.
+ * It is sent whole. The function used to collapse anything that was not
+ * 'inperson' down to 'online', so a hybrid client landed on the roster as
+ * remote — the same failure as above, arrived at from the other direction.
+ * Part 57 replaced that reduction, so passing 'hybrid' now stores 'hybrid'.
  */
 export async function joinByCode(input: string, mode: CoachedMode = 'online'): Promise<JoinResult> {
   const code = normaliseCode(input);
   if (!USE_SUPABASE) return { ok: false, reason: 'Sign in to Repple first, then enter the code.' };
   try {
-    const { data, error } = await supabase.rpc('join_by_code', { p_code: code, p_mode: modeForDb(mode) });
+    const { data, error } = await supabase.rpc('join_by_code', { p_code: code, p_mode: mode });
     if (error) return { ok: false, reason: joinErrorMessage(error.message) };
     // The RPC RETURNS TABLE, so supabase-js hands back an array. No row means
     // the function did not reach its `return query` — treat it as a failure

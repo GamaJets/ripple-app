@@ -11,6 +11,12 @@ export type Sex = 'f' | 'm';
 // vocabulary now: the type, the words shown for it, and the two questions the
 // rest of the app actually asks of it.
 //
+// All four answers are storable. Every `mode` column was CHECK-constrained to
+// ('online','inperson') until part 57 widened them, and the app spent that
+// period narrowing 'hybrid' to 'inperson' on the way out and reassembling the
+// full answer from device storage on the way back. None of that survives here:
+// what the client chose is what the column holds.
+//
 // The two original values differed only in the noun printed beside them —
 // picking one over the other changed nothing a client could see, which is the
 // first half of TF-30. `booksInPerson` and `coachedRemotely` below are what
@@ -69,39 +75,23 @@ export function coachedRemotely(m: CoachingMode): boolean {
   return m === 'online' || m === 'hybrid';
 }
 
-/** Tolerant read of a `mode` column. Anything unrecognised — including a
- *  'hybrid' written by a newer build against an older database, and the reverse
- *  — settles on 'online', which is the column's own default. */
+/** Tolerant read of a `mode` column, for the surfaces that must show something.
+ *  Anything unrecognised settles on 'online', which is the column's own default. */
 export function readCoachedMode(v: unknown): CoachedMode {
   return v === 'inperson' || v === 'hybrid' ? v : 'online';
+}
+
+/** The same read for surfaces that can say "we do not know". A coach's roster
+ *  is one: reporting an unclassified client as Online tells them somebody is
+ *  remote on the strength of an empty column. */
+export function readCoachedModeOrNull(v: unknown): CoachedMode | null {
+  return v === 'online' || v === 'inperson' || v === 'hybrid' ? v : null;
 }
 
 export function readCoachingMode(v: unknown, fallback: CoachingMode = 'online'): CoachingMode {
   return v === 'online' || v === 'inperson' || v === 'hybrid' || v === 'solo' ? v : fallback;
 }
 
-/**
- * What the database will actually accept in a `mode` column, today.
- *
- * Every `mode` column in the schema is CHECK-constrained to ('online',
- * 'inperson') — clients, coach_clients, coach_invites, coach_requests and
- * coaching_relationships, all five. Sending 'hybrid' does not degrade, it is
- * REFUSED, and for `clients` that refusal takes the whole profile row with it.
- *
- * So 'hybrid' is narrowed to 'inperson' on the way out. That is an incomplete
- * statement rather than a false one: a hybrid client does train in the room,
- * and 'inperson' is the half of the answer with a real-world consequence for
- * the coach — they have to hold the slot. Narrowing to 'online' would drop
- * them off a roster for sessions that genuinely happen.
- *
- * Callers that can keep the full answer on the device do (clientData.tsx and
- * roster.tsx both do), so this is a limit on what the SERVER remembers, not on
- * what the app does. Widening the five constraints deletes this function; the
- * SQL is in the TF-30 report.
- */
-export function modeForDb(m: CoachedMode): 'online' | 'inperson' {
-  return m === 'online' ? 'online' : 'inperson';
-}
 
 export interface Macros {
   kcal: number;
@@ -127,7 +117,13 @@ export interface Scan {
   takenAt: string;   // ISO date
   weightKg: number;
   bodyFatPct: number;
-  skeletalMuscleKg: number;
+  /** null when the scan did not report it. `scans.skeletal_muscle_kg` is the
+   *  one nullable column of the three — a bathroom scale gives weight and body
+   *  fat and no muscle figure at all — and this was read as `?? 0` for a long
+   *  time. Nobody has 0 kg of skeletal muscle, so that zero was a reading
+   *  nobody took, charted as a real point and differenced against the scan
+   *  before it. */
+  skeletalMuscleKg: number | null;
   source: string;
 }
 

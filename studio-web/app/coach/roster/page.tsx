@@ -19,6 +19,7 @@ import { supabase, loadMe, type Me } from '@/lib/supabase';
 import { Shell } from '@/components/Shell';
 import { DataTable, type Column } from '@/components/DataTable';
 import { money } from '@lib/gymRecord';
+import { COACHED_MODE_SHORT, readCoachedModeOrNull, type CoachedMode } from '@lib/types';
 
 const DAY = 86400000;
 
@@ -65,7 +66,7 @@ interface Row {
   name: string | null;
   namesKnown: boolean;
   goal: string | null;
-  mode: 'online' | 'inperson' | null;
+  mode: CoachedMode | null;
   /** When this client joined THIS coach's book, not when they made an account. */
   since: string | null;
 
@@ -395,7 +396,7 @@ export default function CoachRoster() {
         // Unclassified stays null rather than defaulting to online: the phone
         // defaults it for its own filter, but here it would tell a coach an
         // in-person client is remote.
-        mode: rawMode === 'inperson' ? 'inperson' : rawMode === 'online' ? 'online' : null,
+        mode: readCoachedModeOrNull(rawMode),
         since: rel?.created_at ?? null,
         lastMs,
         activityKnown,
@@ -526,8 +527,8 @@ export default function CoachRoster() {
     {
       key: 'mode', header: 'Mode',
       value: (r) => r.row.mode,
-      render: (r) => r.row.mode === 'inperson' ? 'In person'
-        : r.row.mode === 'online' ? 'Online'
+      render: (r) => r.row.mode
+        ? COACHED_MODE_SHORT[r.row.mode]
         : <span className="dash">— not classified</span>,
     },
     {

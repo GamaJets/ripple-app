@@ -35,6 +35,7 @@ import {
 } from '@lib/gymSessions';
 import { money } from '@lib/gymRecord';
 import { isoDate, fmtDay, fmtTime } from '@lib/format';
+import { COACHED_MODE_SHORT, readCoachedMode, type CoachedMode } from '@lib/types';
 
 const DAY = 86400000;
 
@@ -70,7 +71,7 @@ interface CoachRequest {
   id: string;
   clientId: string;
   clientName: string | null;
-  mode: 'online' | 'inperson';
+  mode: CoachedMode;
   /** 'code', 'directory', or null on rows written before the column existed. */
   source: string | null;
   viaCode: string | null;
@@ -143,7 +144,7 @@ async function fetchMyRequests(trainerId: string): Promise<CoachRequest[]> {
     id: r.id,
     clientId: r.client_id,
     clientName: null,
-    mode: r.mode === 'inperson' ? 'inperson' : 'online',
+    mode: readCoachedMode(r.mode),
     source: r.source ?? null,
     viaCode: r.via_code ?? null,
     createdAt: r.created_at,
@@ -655,7 +656,7 @@ function Requests({ requests, unread, names, me, onChange, setErr }: {
       // stops a coach declining somebody because the row looked broken.
       render: (r) => names.get(r.clientId) ?? <span className="dash">name shared once you accept</span> },
     { key: 'mode', header: 'Wants', value: (r) => r.mode,
-      render: (r) => (r.mode === 'inperson' ? 'In person' : 'Online') },
+      render: (r) => COACHED_MODE_SHORT[r.mode] },
     { key: 'via', header: 'Came from', value: (r) => r.source ?? '',
       render: (r) => {
         if (r.source === 'code') return r.viaCode ? <span className="mono">{r.viaCode}</span> : 'your code';

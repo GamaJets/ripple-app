@@ -31,7 +31,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { ScanMetrics } from '../lib/inbodyMetrics';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
-import { readCoachingMode, modeForDb, type CoachingMode, type Goal, type Diet } from '../lib/types';
+import { readCoachingMode, type CoachingMode, type Goal, type Diet } from '../lib/types';
 import type { Allergen } from '../lib/meals';
 import type { Injury } from '../lib/injuries';
 import { reportError } from '../lib/reportError';
@@ -41,7 +41,11 @@ import type { LoadStatus } from './loadStatus';
 // screens branch on; re-exported because every client screen imports it from
 // here and the shape of the union is not this provider's to own.
 export type { CoachingMode };
-export interface ScanRec { id: string; takenAt: string; weightKg: number; bodyFatPct: number; skeletalMuscleKg: number; source: string; image?: string; metrics?: ScanMetrics }
+// `skeletalMuscleKg` is null when the scan did not report one — see the note on
+// `Scan` in src/lib/types.ts. It is not `| undefined`: the difference between
+// "this scan measured no muscle" and "this object has not been filled in" is
+// one the screens need, and a missing key reads as the second.
+export interface ScanRec { id: string; takenAt: string; weightKg: number; bodyFatPct: number; skeletalMuscleKg: number | null; source: string; image?: string; metrics?: ScanMetrics }
 interface Series { t: string; v: number }
 interface Value {
   id: string; name: string; init: string; setName: (v: string) => void;
@@ -90,19 +94,19 @@ const Ctx = createContext<Value | null>(null);
 const KEY = 'repple.profile';
 // The client's own answer to how they are coached, on this device.
 //
-// `clients.mode` is CHECK-constrained to ('online','inperson') and can hold
-// only two of the four answers. Without this key, choosing 'hybrid' comes back
-// as 'inperson' on the next launch and choosing 'solo' comes back as whatever
-// was there before — the setting reverts on its own, which is the complaint
-// TF-30 opens with.
+// `clients.mode` holds all four answers since part 57 widened it, so this is no
+// longer where 'hybrid' and 'solo' live — the column is. What it still does is
+// carry the answers stored on devices during the period when the column could
+// not take them: those clients have a truthful 'hybrid' or 'solo' here and a
+// narrowed one on the server, and the hydrate below promotes the fuller answer
+// once rather than reconciling it on every launch forever.
 //
 // It is deliberately NOT part of the `repple.profile` blob: that blob is
 // deleted on every launch when the backend is on, and a value wiped before it
 // is read is decoration.
 //
 // It never overrides the server, it only fills in what the server cannot say —
-// and only where the server does not contradict it (see the hydrate below).
-// Widening the five CHECK constraints makes it dead code.
+// and only where the server does not contradict it.
 const MODE_KEY = 'repple.coachingMode';
 
 // No name yet means no initial. The old fallback was a hardcoded 'Y' — a
@@ -222,11 +226,11 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
             const stored = readCoachingMode(r.mode);
             const mine = readCoachingMode(await AsyncStorage.getItem(MODE_KEY).catch(() => null));
             const agreed =
-              // 'hybrid' was stored as 'inperson' (modeForDb). Still true of
+              // 'hybrid' was written to the server as 'inperson'. Still true of
               // them while the server still says so; a coach who has since
               // moved them to online overrules it.
               mine === 'hybrid' && stored === 'inperson' ? 'hybrid'
-              // 'solo' was not stored at all — there is no truthful narrowing
+              // 'solo' was not written at all — there was no truthful narrowing
               // for it — so the only corroboration available is that nobody is
               // coaching them. A linked trainer means the server is right and
               // this device is out of date.
@@ -234,6 +238,15 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
               : stored;
             setCoachingMode(agreed);
             if (agreed !== mine) AsyncStorage.setItem(MODE_KEY, agreed).catch(() => {});
+            // Promote it. The column can hold the fuller answer now, and until
+            // it does this device is the only thing that knows: the coach's
+            // roster and the console both read the server, so a hybrid client
+            // reads as in-person to everybody but themselves, and a new phone
+            // would silently take the narrowed value as the truth.
+            if (agreed !== stored) {
+              const { error: mErr } = await supabase.from('clients').update({ mode: agreed }).eq('id', sbUid);
+              if (mErr) reportError('clientData.promoteMode', mErr);
+            }
           }
           if (Array.isArray(r.injuries)) setInjuries(r.injuries);
           if (Array.isArray(r.focus_areas)) setFocusAreas(r.focus_areas);
@@ -278,24 +291,12 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
               height_cm: heightCm,
               goal, diet, avoid,
               meals_per_day: mealsPerDay,
-              // `clients.mode` is CHECK-constrained to ('online','inperson'),
-              // and two of the four answers a client can give have no place in
-              // that vocabulary:
-              //
-              //  · 'hybrid' narrows to 'inperson' — true about them, just
-              //    incomplete — and the full answer is kept in MODE_KEY so the
-              //    next launch restores it.
-              //  · 'solo' has no truthful narrowing: 'online' would assert a
-              //    coach who does not exist. So the column is left out of the
-              //    update rather than sent a value the constraint refuses.
-              //    That refusal used to take the WHOLE row with it, which is
-              //    why a solo client's name, goal, diet, allergens and
-              //    injuries have never saved — one Postgres error, every field
-              //    on the screen lost, reported as "nothing is updated".
-              //
-              // Widening the constraint (SQL in the TF-30 report) makes both
-              // branches unnecessary.
-              ...(coachingMode === 'solo' ? {} : { mode: modeForDb(coachingMode) }),
+              // All four answers, whole. 'solo' used to be left out of this
+              // update entirely: the constraint refused it, and that refusal
+              // took the WHOLE row with it — one Postgres error and the name,
+              // goal, diet, allergens and injuries on the screen were all
+              // lost, reported as "nothing is updated".
+              mode: coachingMode,
               injuries,
               focus_areas: focusAreas,
               manual_weight_kg: manualWeight ?? null,
@@ -333,7 +334,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
         // "not measured yet". Say instead that we do not know.
         if (error) { reportError('clientData.hydrate.scans', error); setScansStatus('error'); return; }
         // Only ever show the user's own real scans — never seed demo scans into a live account.
-        setScans((data || []).map((r: any) => ({ id: r.id, takenAt: r.taken_at, weightKg: Number(r.weight_kg), bodyFatPct: Number(r.body_fat_pct), skeletalMuscleKg: r.skeletal_muscle_kg != null ? Number(r.skeletal_muscle_kg) : 0, source: r.source ?? '', metrics: r.metrics ?? undefined })));
+        setScans((data || []).map((r: any) => ({ id: r.id, takenAt: r.taken_at, weightKg: Number(r.weight_kg), bodyFatPct: Number(r.body_fat_pct), skeletalMuscleKg: r.skeletal_muscle_kg != null ? Number(r.skeletal_muscle_kg) : null, source: r.source ?? '', metrics: r.metrics ?? undefined })));
         setScansStatus('ready');
       } catch (e) { reportError('clientData.hydrate.scans', e); if (!cancelled) setScansStatus('error'); }
     };
@@ -413,7 +414,10 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
     },
     weightSeries: [...sorted.map((s) => ({ t: s.takenAt, v: s.weightKg })), ...(manualIsCurrent && manualWeight != null ? [{ t: manualAt as string, v: manualWeight }] : [])],
     bodyFatSeries: [...sorted.map((s) => ({ t: s.takenAt, v: s.bodyFatPct })), ...(manualIsCurrent && manualBodyFat != null ? [{ t: manualAt as string, v: manualBodyFat }] : [])],
-    muscleSeries: sorted.map((s) => ({ t: s.takenAt, v: s.skeletalMuscleKg })),
+    // Scans that reported no muscle figure contribute no POINT, rather than a
+    // point at zero. A charted zero is not a small reading, it is a cliff: it
+    // dominates the axis and reads as total muscle loss between two scans.
+    muscleSeries: sorted.flatMap((s) => (s.skeletalMuscleKg != null ? [{ t: s.takenAt, v: s.skeletalMuscleKg }] : [])),
     profileStatus, scansStatus, saveFailed,
     // The combined view: 'error' the moment either half failed, because a
     // profile screen shows both at once and cannot honestly present half of it

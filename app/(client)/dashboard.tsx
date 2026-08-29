@@ -158,7 +158,10 @@ export default function Home() {
   const scPrev = scSort.length > 1 ? scSort[scSort.length - 2] : null;
   const scLast = scSort[scSort.length - 1];
   const bfD = scPrev && scLast ? +(scLast.bodyFatPct - scPrev.bodyFatPct).toFixed(1) : 0;
-  const muD = scPrev && scLast ? +(scLast.skeletalMuscleKg - scPrev.skeletalMuscleKg).toFixed(1) : 0;
+  // null unless BOTH scans reported muscle. Read as `?? 0` this used to turn a
+  // scan that measured no muscle into a whole body's worth of change overnight.
+  const muD = scPrev?.skeletalMuscleKg != null && scLast?.skeletalMuscleKg != null
+    ? +(scLast.skeletalMuscleKg - scPrev.skeletalMuscleKg).toFixed(1) : null;
   const wDelta = ws.length > 1 ? +(ws[ws.length - 1] - ws[0]).toFixed(1) : 0;
 
   const now = Date.now();
@@ -321,7 +324,7 @@ export default function Home() {
             items={[
               { label: 'Weight', value: fig(c.weightKg), unit: 'kg', route: '/(client)/scans', good: wDelta <= 0, delta: wDelta !== 0 ? `${wDelta < 0 ? '−' : '+'}${Math.abs(wDelta)} kg` : undefined },
               { label: 'Body fat', value: fig(c.bodyFatPct), unit: '%', route: '/(client)/scans', good: bfD <= 0, delta: bfD !== 0 ? `${bfD < 0 ? '−' : '+'}${Math.abs(bfD)}` : undefined },
-              { label: 'Muscle', value: fig(c.muscleKg), unit: 'kg', route: '/(client)/scans', good: muD >= 0, delta: muD !== 0 ? `${muD < 0 ? '−' : '+'}${Math.abs(muD)}` : undefined },
+              { label: 'Muscle', value: fig(c.muscleKg), unit: 'kg', route: '/(client)/scans', good: muD != null ? muD >= 0 : undefined, delta: muD ? `${muD < 0 ? '−' : '+'}${Math.abs(muD)}` : undefined },
             ]}
           />
         </Section>

@@ -38,6 +38,7 @@ import { caloriesLeft } from './nutrition';
 import { progressChange, progressChangeLines, progressCsv, progressSummary, progressSpanLabel, PROGRESS_CSV_HEADER, type ProgressRow } from './progressExport';
 import { isDelivered, isAwaitingOutcome, isPayable, payrollByTrainer, payrollTotal, settlementBlocker, settleableSessions, settlementAmount, settleBlocker, sessionProfileIds, namesById, PAY_DELIVERED_ONLY, type PtSession } from './gymSessions';
 import { dwellMinutes, averageDwellMinutes, uniqueMembers, summariseVisits, visitsByHour, peakHour, visitsPerDay, lastSeenDays, type Visit } from './gymVisits';
+import { progressOf, projectionOf, startPoint, isMeasured, isOverdue as goalIsOverdue, sortGoals, goalLabel, MEASURED_KINDS, MIN_TREND_DAYS, type GoalTarget, type Point } from './goalTargets';
 import { remainingUses, isExpired, isRedeemable, expiryFor, passRevenueCents, summarisePasses, guestsByHost, passStatus, type GymPass } from './gymPasses';
 import { estimateDish, searchDishes, DISHES } from './restaurant';
 import { normaliseEmail, inviteState, isExpired as inviteExpired, isRedeemable as inviteRedeemable, expiryFor as inviteExpiryFor, daysUntilExpiry, inviteBlocker, screenInvites, summariseInvites, DEFAULT_VALID_DAYS, type MemberInvite } from './memberInvites';
@@ -4397,6 +4398,112 @@ function by2(v: ReturnType<typeof buildStaff>, id: string) {
   ok(/80/.test(single), 'it states the reading instead');
 
   ok(progressSpanLabel([]) !== '' || true, 'an empty span does not throw');
+}
+
+
+// ── Goal targets (TF-28) ───────────────────────────────────────────────────
+//
+// The screen this replaces defaulted every account to a 64 kg target and drew
+// a filled progress bar and a finish date from it. These assertions are mostly
+// about REFUSING to say things: the happy path was never the problem.
+{
+  const day = (n: number) => new Date(Date.UTC(2026, 0, n)).toISOString();
+  const goal = (patch: Partial<GoalTarget> = {}): GoalTarget => ({
+    id: 'g1', kind: 'weight', targetValue: 80, title: null,
+    targetDateISO: null, achievedAtISO: null, createdAtISO: day(10), ...patch,
+  });
+  const pts = (...xs: [number, number][]): Point[] => xs.map(([d, v]) => ({ t: day(d), v }));
+
+  // ── nothing measured, nothing claimed ──
+  ok(progressOf(goal(), []) === null,
+    'a goal with no readings behind it reports no progress at all, not 0%');
+  ok(projectionOf(goal(), [], Date.parse(day(30))) === null,
+    'and no finish date');
+
+  // ── a custom goal is never given a number ──
+  const custom = goal({ kind: 'custom', targetValue: null, title: 'Squat without my knee complaining' });
+  ok(!isMeasured(custom), 'a custom goal is not measured');
+  ok(progressOf(custom, pts([1, 90], [20, 85])) === null,
+    'a free-form goal gets no percentage even when the client has a full weight history');
+  ok(projectionOf(custom, pts([1, 90], [20, 85]), Date.parse(day(30))) === null,
+    'and no projected finish date');
+  ok(goalLabel(custom) === 'Squat without my knee complaining',
+    'a custom goal is labelled with the words the client wrote');
+  ok(goalLabel(goal()) === 'Target weight', 'a measured goal is labelled by its metric');
+
+  // ── progress starts when the GOAL does ──
+  // 90 kg a week before the goal, 88 kg the day it was set, 84 kg since.
+  const history = pts([1, 90], [10, 88], [24, 84]);
+  ok(startPoint(history, day(10))!.v === 88,
+    'the baseline is the reading on the day the goal was set, not the oldest one on file');
+  const p = progressOf(goal(), history)!;
+  ok(p.start === 88, 'progress runs from that baseline');
+  ok(p.pct === 50, `88 → 84 against a target of 80 is half way, got ${p.pct}%`);
+  // Counting from 90 would have made this 75% — credit for weight lost before
+  // the client set the goal, which is the bug this baseline rule prevents.
+  ok(p.pct !== 75, 'and NOT from the oldest reading, which would credit work done before the goal existed');
+  // Signed: negative means the target sits BELOW the current reading, which is
+  // what a weight-loss goal looks like. Screens take the absolute value; the
+  // direction is kept here because a bare 4 cannot say which way to go.
+  ok(p.remaining === -4, `the gap left is signed toward the target, got ${p.remaining}`);
+
+  // ── no reading before the goal: the first one after stands in ──
+  ok(startPoint(pts([20, 84]), day(10))!.v === 84,
+    'a client who set the goal first and weighed in second still gets a baseline');
+
+  // ── moving the wrong way is 0%, never negative ──
+  const worse = progressOf(goal(), pts([10, 88], [24, 92]))!;
+  ok(worse.pct === 0, `gaining weight against a loss target is 0% of the way there, got ${worse.pct}%`);
+  ok(!worse.reached, 'and is not reported as reached');
+
+  // ── crossing the target counts ──
+  ok(progressOf(goal(), pts([10, 88], [24, 78]))!.reached,
+    'aiming at 80 kg and reaching 78 has got there');
+  ok(progressOf(goal({ targetValue: 90 }), pts([10, 88], [24, 93]))!.reached,
+    'and the same holds for a gain target');
+
+  // ── a rate needs a window ──
+  const short = projectionOf(goal(), pts([10, 88], [12, 87.6]), Date.parse(day(12)));
+  ok(short !== null && short.kind === 'tooshort',
+    'two weigh-ins two days apart are not a trend, whatever the difference between them');
+  ok(MIN_TREND_DAYS >= 7, 'and the window is at least a week');
+  const long = projectionOf(goal(), pts([10, 88], [24, 84]), Date.parse(day(24)));
+  ok(long !== null && long.kind === 'eta', 'a fortnight of readings does project');
+  if (long && long.kind === 'eta') {
+    ok(Math.abs(long.weeklyRate + 2) < 0.001, `4 kg over 14 days is −2 kg/wk, got ${long.weeklyRate}`);
+    // 4 kg to go at 2 kg/wk = 2 weeks past day 24.
+    ok(Math.abs(long.etaMs - Date.parse(day(38))) < 86400000,
+      'and the finish date is the gap divided by that rate');
+  }
+
+  // ── a trend pointing away from the target has no finish date ──
+  const away = projectionOf(goal(), pts([10, 88], [24, 92]), Date.parse(day(24)));
+  ok(away !== null && away.kind === 'wrongway',
+    'a client moving away from their target is told so rather than given a date');
+  const flat = projectionOf(goal(), pts([10, 88], [24, 88]), Date.parse(day(24)));
+  ok(flat !== null && flat.kind === 'flat',
+    'and an unchanged reading yields no date either, rather than one infinitely far away');
+
+  // ── overdue ──
+  ok(goalIsOverdue(goal({ targetDateISO: day(20) }), Date.parse(day(25))),
+    'a target date that has gone by is overdue');
+  ok(!goalIsOverdue(goal({ targetDateISO: day(20), achievedAtISO: day(19) }), Date.parse(day(25))),
+    'unless they got there first');
+  ok(!goalIsOverdue(goal({ targetDateISO: null }), Date.parse(day(25))),
+    'and a goal with no date is never overdue — there is no date to have passed');
+
+  // ── ordering ──
+  const ordered = sortGoals([
+    goal({ id: 'done', targetDateISO: day(11), achievedAtISO: day(12) }),
+    goal({ id: 'undated', targetDateISO: null }),
+    goal({ id: 'soon', targetDateISO: day(15) }),
+  ]).map((g) => g.id);
+  ok(ordered[0] === 'soon', 'the next due goal leads');
+  ok(ordered[1] === 'undated', 'a goal with no date sorts after dated ones, not before them as a zero would');
+  ok(ordered[2] === 'done', 'and achieved goals sit at the bottom');
+
+  ok(MEASURED_KINDS.length === 3 && !(MEASURED_KINDS as readonly string[]).includes('custom'),
+    'the measured kinds are the three the app actually records, and custom is not one of them');
 }
 
 if (errors.length) { console.log('COVERAGE FAILURES:\n' + errors.join('\n')); process.exit(1); }

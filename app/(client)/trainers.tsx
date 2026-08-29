@@ -30,7 +30,7 @@ import { notifySuccess } from '../../src/ui/haptics';
 import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
-import { COACHED_MODES, COACHED_MODE_SHORT, COACHING_MODE_NOTE, modeForDb, type CoachedMode } from '../../src/lib/types';
+import { COACHED_MODES, COACHED_MODE_SHORT, COACHING_MODE_NOTE, type CoachedMode } from '../../src/lib/types';
 
 interface Coach {
   id: string;
@@ -192,13 +192,8 @@ export default function FindTrainer() {
       const { data: auth } = await supabase.auth.getUser();
       const uid = auth?.user?.id;
       if (!uid) { Alert.alert('Sign in required', 'Sign in to Repple to request coaching.'); return; }
-      // `coach_requests.mode` is CHECK-constrained to ('online','inperson'), so
-      // a hybrid request is sent as 'inperson' — the half the coach has to make
-      // room for. Un-narrowed it would not degrade, it would be REFUSED, and
-      // the client would be told their request failed for no reason they could
-      // act on. Widening the constraint (SQL in the TF-30 report) removes this.
       const { error } = await supabase.from('coach_requests').insert({
-        client_id: uid, trainer_id: coach.id, mode: modeForDb(mode), status: 'pending',
+        client_id: uid, trainer_id: coach.id, mode, status: 'pending',
       });
       if (error && !/duplicate|unique/i.test(error.message)) {
         Alert.alert('Could not send request', error.message);

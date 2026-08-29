@@ -36,7 +36,7 @@ import { USE_SUPABASE } from '../../src/lib/config';
 import { DidYouKnow } from '../../src/ui/DidYouKnow';
 import { injuryFlag, areaLabel, type Injury } from '../../src/lib/injuries';
 import { warmupSets, deloadCheck } from '../../src/lib/training';
-import { hrColor, hrZoneNo, zoneOf, zoneKey, emptyZoneSeconds, splatPoints, zoneSecondsTotal, type ZoneSeconds } from '../../src/lib/hr';
+import { hrColor, hrZoneNo, zoneOf, zoneKey, emptyZoneSeconds, splatPoints, zoneSecondsTotal, type ZoneSeconds, type ZoneNo } from '../../src/lib/hr';
 import { ZoneNow, ZoneBoard } from '../../src/ui/ZoneBoard';
 import { SessionHrSheet } from '../../src/ui/SessionHrSheet';
 import { ageFromDob } from '../../src/lib/age';
@@ -99,6 +99,12 @@ const SESSION_TYPES: Record<'cardio' | 'hiit' | 'mobility' | 'recovery', string[
   recovery: names(RECOVERY_ACTS),
 };
 const WTYPES = [['strength', 'Program'], ['cardio', 'Cardio'], ['hiit', 'HIIT'], ['mobility', 'Mobility'], ['recovery', 'Recovery']] as const;
+
+/** The four session types that are an activity and a clock rather than a list
+ *  of lifts. Named because both the log form and the live runner below branch
+ *  on it, and recovery has to stay distinguishable from the other three. */
+type SessionKind = 'cardio' | 'hiit' | 'mobility' | 'recovery';
+const KIND_LABEL: Record<SessionKind, string> = { cardio: 'Cardio', hiit: 'HIIT', mobility: 'Mobility', recovery: 'Recovery' };
 
 // Approx METs per activity — kcal = MET x weight(kg) x hours (standard estimate).
 const MET: Record<string, number> = Object.fromEntries(
@@ -195,17 +201,26 @@ export default function Train() {
     return () => { live = false; };
   }, [cd.id]);
   const [session, setSession] = useState(false);
+  // The started cardio / HIIT / mobility / recovery session, or null when none
+  // is running. The kind is captured here rather than read from `mode` while the
+  // modal is open, so a session that began as Recovery is still saved as
+  // recovery even if the chips underneath are touched behind it.
+  const [timed, setTimed] = useState<{ kind: SessionKind; activity: string } | null>(null);
 
-  // While the guided session modal is open, poll local HR sources every 5s instead
+  // While a session modal is open, poll local HR sources every 5s instead
   // of every 60s so the live heart rate actually tracks what you're doing. Cloud
   // vendors stay on the slow cadence — they only return day aggregates and have
   // rate limits. Always turned back off on unmount so a backgrounded app doesn't
   // keep fast-polling.
+  //
+  // Either runner counts: a timed rowing session shows the same live zones as
+  // the guided one, so it needs the same fast cadence feeding it.
   const setLiveMode = w.setLiveMode;
+  const liveRunning = session || timed != null;
   useEffect(() => {
-    setLiveMode(session);
+    setLiveMode(liveRunning);
     return () => setLiveMode(false);
-  }, [session, setLiveMode]);
+  }, [liveRunning, setLiveMode]);
   const [ctype, setCtype] = useState(CARDIO[0]); const [mins, setMins] = useState('');
 
   // Read the param on EVERY arrival, not only the first.
@@ -427,16 +442,56 @@ export default function Train() {
     : `~${estMin} min` + (doneCount > 0 ? ` · ${doneCount} of ${exercises.length} done` : '');
   const logSet = (e: ProgramExercise, reps: string, kg: string) => { if (!reps) return; setLogged({ ...logged, [uid(e)]: [...(logged[uid(e)] || []), { reps, kg }] }); tapLight(); };
   const quickLog = (e: ProgramExercise) => { const sg = suggestForExercise(workoutLog, nameOf(e), e.reps); logSet(e, String(parseInt(e.reps, 10) || 8), sg ? String(sg.weight) : ''); };
-  const logCardio = () => {
-    const m = parseInt(mins, 10) || 0, d = parseFloat(dist) || 0; if (!m) return;
-    const w = parseInt(watts, 10) || 0;
-    const kIn = parseInt(kcalIn, 10) || 0;
+  // One write path for every non-strength session, whether it was timed live in
+  // the runner below or typed in afterwards. History, the calendar and the
+  // trends all read this one shape, so a second writer would only be a second
+  // chance to get it subtly different.
+  //
+  // Recovery is time only, and the guard lives here rather than at each caller.
+  // The form hides Distance, watts and calories under Recovery, but the fields
+  // keep whatever was typed under Cardio before the chip was switched — so
+  // without this a sauna could still carry the 5 km from the run before it.
+  const commitSession = (
+    kind: SessionKind,
+    activity: string,
+    m: number,
+    extra: { dist?: number; unit?: string; watts?: number; kcal?: number | null; zones?: ZoneSeconds } = {},
+  ) => {
+    if (!m) return;
+    const rec = kind === 'recovery';
+    const d = rec ? 0 : (extra.dist || 0);
+    const u = extra.unit || unit;
+    const wt = rec ? 0 : (extra.watts || 0);
     // Null when there is no weight to estimate from, and null is stored rather
     // than a stand-in — an unknown burn is not zero, and it is not 70 kg's.
-    const kcal = kIn > 0 ? kIn : cardioKcal(ctype, m, cd.weightKg);
-    setCardioLog([{ type: ctype, mins: m, dist: d, unit, kcal }, ...cardioLog]);
-    addWorkouts([{ t: new Date().toISOString(), exercise: ctype, cardio: { mins: m, dist: d, unit, ...(w > 0 ? { watts: w } : {}) }, kcal: kcal ?? undefined }]);
-    setMins(''); setDist(''); setWatts(''); setKcalIn(''); tapLight();
+    // `cardioKcal` already returns null for every recovery modality, since none
+    // of them has a MET value to derive one from; `rec` short-circuits it so a
+    // figure the person typed cannot get one in through the side door either.
+    const kIn = extra.kcal ?? 0;
+    const kcal = rec ? null : (kIn > 0 ? kIn : cardioKcal(activity, m, cd.weightKg));
+    setCardioLog([{ type: activity, mins: m, dist: d, unit: u, kcal }, ...cardioLog]);
+    addWorkouts([{
+      t: new Date().toISOString(),
+      exercise: activity,
+      cardio: { mins: m, dist: d, unit: u, ...(wt > 0 ? { watts: wt } : {}) },
+      kcal: kcal ?? undefined,
+      // Attached only when a heart-rate source actually fed the session — see
+      // the note on WorkoutEntry.zones, which stays absent rather than
+      // zero-filled so "no watch" and "no effort" remain different things.
+      ...(extra.zones && zoneSecondsTotal(extra.zones) > 0 ? { zones: extra.zones } : {}),
+    }]);
+    tapLight();
+  };
+
+  const logCardio = () => {
+    const m = parseInt(mins, 10) || 0; if (!m) return;
+    commitSession(mode === 'strength' ? 'cardio' : mode, ctype, m, {
+      dist: parseFloat(dist) || 0,
+      unit,
+      watts: parseInt(watts, 10) || 0,
+      kcal: parseInt(kcalIn, 10) || 0,
+    });
+    setMins(''); setDist(''); setWatts(''); setKcalIn('');
   };
   const saveManual = () => {
     const nowISO = new Date().toISOString();
@@ -667,14 +722,25 @@ export default function Train() {
             </View>
           ) : (
             <View>
-              <Text style={{ ...ty.head, color: t.ink, marginBottom: sp.md }}>Log a {mode === 'hiit' ? 'HIIT' : mode === 'mobility' ? 'mobility' : mode === 'recovery' ? 'recovery' : 'cardio'} session</Text>
+              <Text style={{ ...ty.head, color: t.ink, marginBottom: sp.md }}>{KIND_LABEL[mode as SessionKind]} session</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.md }}>
-                {(SESSION_TYPES[(mode as 'cardio' | 'hiit' | 'mobility' | 'recovery')] || CARDIO).map((ct) => (
+                {(SESSION_TYPES[(mode as SessionKind)] || CARDIO).map((ct) => (
                   <Pressable key={ct} onPress={() => setCtype(ct)} style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: ctype === ct ? t.brand : t.surface2 }}>
                     <Text style={{ ...ty.label, fontWeight: ctype === ct ? '500' : '400', color: ctype === ct ? t.brandInk : t.ink2 }}>{ct}</Text>
                   </Pressable>
                 ))}
               </ScrollView>
+              {/* Start comes before the log fields, and it is the primary
+                  action, because only the Program had one: reported as "there
+                  is no start work out tab for any other workout other than the
+                  Program". It sits here rather than beside the Program's own
+                  Start button at the top of the screen so that the thing it
+                  starts — the chip selected directly above — is on screen with
+                  it; the hero up there is about today's lifting plan and would
+                  make "Start Sauna" underneath it read as part of that. */}
+              <Cta label={`Start ${ctype}`} wide onPress={() => { setTimed({ kind: mode as SessionKind, activity: ctype }); tapLight(); }} />
+              <Text style={{ ...ty.micro, color: t.ink3, marginTop: layout.section, marginBottom: sp.md }}>Or log one you have already done</Text>
+
               {/* Recovery is not cardio, and this form used to treat it as if it
                   were: logging a sauna asked for Distance, km and Avg watts.
                   None of those has a meaning for Breathwork, a Cold Plunge or a
@@ -944,6 +1010,22 @@ export default function Train() {
         <SessionRunner t={t} exercises={planEx.filter((e) => !isInjHidden(e))} focus={workout.focus} nameOf={nameOf} age={ageFromDob(cd.dob)} log={workoutLog} injuries={cd.injuries} videos={exVideos} videoStatus={exVideoStatus} preferTrainerId={coachId} onComplete={addWorkouts} onClose={() => setSession(false)} />
       </Modal>
 
+      {/* Mounted only while a session is running, so its clock starts at zero
+          every time rather than carrying the last one's elapsed time. */}
+      <Modal visible={timed != null} animationType="slide" onRequestClose={() => setTimed(null)}>
+        {timed ? (
+          <TimedSessionRunner
+            t={t}
+            kind={timed.kind}
+            activity={timed.activity}
+            age={ageFromDob(cd.dob)}
+            defaultUnit={unit}
+            onSave={(v) => { commitSession(timed.kind, timed.activity, v.mins, v); setTimed(null); }}
+            onClose={() => setTimed(null)}
+          />
+        ) : null}
+      </Modal>
+
       {/* KeyboardAvoidingView, or the keyboard sits on top of the very fields
           this sheet exists to fill in — and every tap aimed at a covered field
           lands on the backdrop and closes the sheet instead. */}
@@ -992,30 +1074,39 @@ function LogRow({ t, onLog }: { t: Theme; onLog: (reps: string, kg: string) => v
   );
 }
 
-function SessionRunner({ t, exercises, focus, nameOf, age, log, injuries, videos, videoStatus, preferTrainerId, onComplete, onClose }: { t: Theme; exercises: ProgramExercise[]; focus: string; nameOf: (e: ProgramExercise) => string; age: number | null; log: WorkoutEntry[]; injuries: Injury[]; videos: VideoItem[]; videoStatus: LibraryStatus; preferTrainerId: string | null; onComplete: (entries: WorkoutEntry[]) => void; onClose: () => void }) {
-  const insets = useSafeAreaInsets();
-  const topPad = Math.max(insets.top, 44);
+/**
+ * The measured half of a live session: the clock, the current heart rate, the
+ * peak, the watch's calorie delta and the seconds banked in each zone.
+ *
+ * Shared by both runners rather than written out twice, because the rule it
+ * encodes is subtle and getting it wrong was a real bug. `heartRateLatest` is
+ * the most recent SAMPLE and is only ever set by HealthKit (see
+ * appleHealth.ts). Cloud providers leave it null: WHOOP, Oura and Fitbit expose
+ * no intraday samples at all, and WHOOP's `heartRateAvg` is the average across
+ * the whole physiological day.
+ *
+ * So the daily average is kept as a display fallback for the bpm column, but it
+ * must NEVER drive the zone: accumulating time-in-zone against a static
+ * day-average would invent a zone breakdown for a session it never measured — a
+ * WHOOP user would finish and see "42 min in Zone 2" derived from one number
+ * that had nothing to do with the workout.
+ */
+function useLiveVitals(age: number | null) {
   const w = useWearables();
-  // `heartRateLatest` is the most recent SAMPLE and is only ever set by
-  // HealthKit (see appleHealth.ts). Cloud providers leave it null: WHOOP, Oura
-  // and Fitbit expose no intraday samples at all, and WHOOP's `heartRateAvg` is
-  // the average across the whole physiological day.
-  //
-  // So the daily average is kept as a display fallback for the bpm column, but
-  // it must NEVER drive the zone: accumulating time-in-zone against a static
-  // day-average would invent a zone breakdown for a session it never measured —
-  // a WHOOP user would finish and see "42 min in Zone 2" derived from one
-  // number that had nothing to do with the workout.
   const liveSample = w.today.heartRateLatest;          // a real, current reading
   const liveHr = liveSample ?? w.today.heartRateAvg;   // display only
   const startKcalRef = useRef<number | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const [hrPeak, setHrPeak] = useState<number | null>(null);
-  const [finalElapsed, setFinalElapsed] = useState(0);
   if (startKcalRef.current == null && typeof w.today.activeKcal === 'number') startKcalRef.current = w.today.activeKcal;
   const sessionKcal = (typeof w.today.activeKcal === 'number' && startKcalRef.current != null) ? Math.max(0, Math.round(w.today.activeKcal - startKcalRef.current)) : null;
+  // Elapsed is read off the wall clock rather than counted up a tick at a time.
+  // A phone that locks or backgrounds the app stops delivering the interval, so
+  // a counter would silently under-report — and for a timed session that number
+  // is not just a display, it is the duration written to the log.
+  const startedAtRef = useRef(Date.now());
   useEffect(() => {
-    const tick = setInterval(() => setElapsed((e) => e + 1), 1000);
+    const tick = setInterval(() => setElapsed(Math.floor((Date.now() - startedAtRef.current) / 1000)), 1000);
     const q = setInterval(() => w.syncAll(), 10000);
     w.syncAll();
     return () => { clearInterval(tick); clearInterval(q); };
@@ -1037,8 +1128,239 @@ function SessionRunner({ t, exercises, focus, nameOf, age, log, injuries, videos
     return () => clearInterval(z);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [age]);
-  const liveZone = hrZoneNo(liveSample, age);
+
+  return { w, elapsed, liveSample, liveHr, hrPeak, sessionKcal, zoneSecs, liveZone: hrZoneNo(liveSample, age) };
+}
+
+/**
+ * Live effort, drawn the same way in every running session: the zone numeral
+ * leads and colour only confirms it.
+ *
+ * One component rather than a copy per runner, because of what it does when
+ * there is no heart rate. This block used to render NOTHING without a watch —
+ * no zones, and no reason for their absence — so the one screen where live
+ * zones belong looked like it had never been built, which is exactly how it was
+ * reported. A second copy of it would be a second chance to forget that, and
+ * the timed sessions below are the ones most likely to be run without a watch.
+ *
+ * Deliberately not a link to the settings: leaving mid-session to go and pair a
+ * device would abandon the workout being logged.
+ */
+function ZonePanel({ t, liveZone, liveSample, zoneSecs }: {
+  t: Theme; liveZone: ZoneNo | null; liveSample: number | null; zoneSecs: ZoneSeconds;
+}) {
   const hasZones = zoneSecondsTotal(zoneSecs) > 0;
+  if (!liveZone && !hasZones) {
+    return (
+      <View style={{ marginTop: sp.xl, paddingVertical: sp.md, paddingHorizontal: sp.md, backgroundColor: t.surface2, borderRadius: radius.sm }}>
+        <Text style={{ ...ty.label, fontWeight: '600', color: t.ink }}>Heart-rate zones</Text>
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
+          Connect a watch under Train → Watch &amp; devices and your zones appear here live while you train.
+        </Text>
+      </View>
+    );
+  }
+  return (
+    <View style={{ marginTop: sp.xl }}>
+      <ZoneNow zone={liveZone} bpm={liveSample ?? null} compact />
+      {hasZones ? (
+        <View style={{ marginTop: sp.lg }}>
+          <ZoneBoard seconds={zoneSecs} current={liveZone} />
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+/**
+ * A started session for the four types that are an activity and a clock:
+ * cardio, HIIT, mobility and recovery.
+ *
+ * Deliberately NOT SessionRunner. That component is built end to end around
+ * `ProgramExercise[]` — an index into a list of lifts, a per-exercise results
+ * array, rest timers between sets, warm-up ramps, PR detection from estimated
+ * 1RM, and a finish that writes one entry per exercise with `sets`. A sauna or
+ * a rowing piece has none of that, and threading a "there are no sets" flag
+ * through every one of those branches would make the guided session — the flow
+ * that already works — carry the weight of a case it never sees. What the two
+ * genuinely share is the vitals hook and the zone panel above, so those are
+ * shared and the rest is not.
+ */
+function TimedSessionRunner({ t, kind, activity, age, defaultUnit, onSave, onClose }: {
+  t: Theme; kind: SessionKind; activity: string; age: number | null; defaultUnit: string;
+  onSave: (v: { mins: number; dist: number; unit: string; watts: number; kcal: number | null; zones: ZoneSeconds }) => void;
+  onClose: () => void;
+}) {
+  const insets = useSafeAreaInsets();
+  const topPad = Math.max(insets.top, 44);
+  const { w, elapsed, liveSample, liveHr, hrPeak, sessionKcal, zoneSecs, liveZone } = useLiveVitals(age);
+  const [finalElapsed, setFinalElapsed] = useState(0);
+  const [finished, setFinished] = useState(false);
+  const [confetti, setConfetti] = useState(false);
+  // Distance, watts and calories are only ever what the person tells us. The
+  // clock is measured; these are not, so they stay blank until typed and a
+  // blank one is written as "no figure" rather than as a zero.
+  const [dist, setDist] = useState(''); const [unit, setUnit] = useState(defaultUnit);
+  const [watts, setWatts] = useState(''); const [kcalIn, setKcalIn] = useState('');
+  const recovery = kind === 'recovery';
+  const clock = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+
+  // The log stores whole minutes, so anything under thirty seconds rounds to
+  // nothing. Rather than round it up to a minute it never lasted, the save is
+  // withheld and says why — a session too short to record is not a session.
+  const finalMins = Math.round(finalElapsed / 60);
+
+  const finish = () => {
+    setFinalElapsed(elapsed);
+    // The watch's calorie delta across the session is a real measurement, so it
+    // seeds the field instead of the MET estimate — which is only ever a stand-in
+    // for not having measured. It is editable, and it is never offered for
+    // recovery, where a calorie figure is not ours to record at all.
+    if (!recovery && sessionKcal != null && sessionKcal > 0) setKcalIn(String(sessionKcal));
+    setFinished(true);
+    setConfetti(true);
+  };
+
+  const discard = () => {
+    Alert.alert(
+      `Discard this ${KIND_LABEL[kind].toLowerCase()} session?`,
+      `${clock(elapsed)} on the clock. Nothing is written to your log.`,
+      [{ text: 'Keep going', style: 'cancel' }, { text: 'Discard', style: 'destructive', onPress: onClose }],
+    );
+  };
+
+  const inp = { color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 12, flex: 1, ...ty.body } as const;
+
+  if (finished) {
+    const strip: { label: string; value: string; dot?: string }[] = [
+      { label: 'Time', value: clock(finalElapsed) },
+    ];
+    if (hrPeak != null) strip.push({ label: 'Peak bpm', value: fig(hrPeak), dot: hrColor(hrPeak, age) });
+    if (typeof w.today.heartRateAvg === 'number') strip.push({ label: 'Avg bpm', value: fig(w.today.heartRateAvg) });
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
+        <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40, paddingTop: topPad + 10 }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+          <View style={{ alignItems: 'center', marginTop: sp.xl }}><Icon name="trophy" size={40} color={t.brand} /></View>
+          <Text style={{ ...ty.title, color: t.ink, textAlign: 'center', marginTop: sp.md }}>{activity}</Text>
+          <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: sp.xs }}>{KIND_LABEL[kind]} session</Text>
+          <Section>
+            <MetricCols t={t} items={strip} />
+          </Section>
+          <Rule />
+          {zoneSecondsTotal(zoneSecs) > 0 ? (<>
+            <Section>
+              <SectionHead title="Time in zone" note={`${splatPoints(zoneSecs)} splat`} />
+              <ZoneBoard seconds={zoneSecs} showSplat={false} />
+            </Section>
+            <Rule />
+          </>) : null}
+
+          {recovery ? (
+            <Section>
+              <Text style={{ ...ty.caption, color: t.ink3 }}>
+                Recovery records how long it lasted, and nothing else. A sauna raises your heart rate, but the cost is
+                keeping you cool rather than work done, so a distance or a calorie figure here would be made up.
+              </Text>
+            </Section>
+          ) : (
+            <Section>
+              <SectionHead title="Anything to add" />
+              <View style={{ flexDirection: 'row', gap: sp.sm }}>
+                <TextInput value={dist} onChangeText={setDist} keyboardType="numeric" placeholder="Distance" placeholderTextColor={t.ink3} style={inp} />
+                <Pressable onPress={() => setUnit(unit === 'km' ? 'mi' : 'km')} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, justifyContent: 'center' }}>
+                  <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>{unit}</Text>
+                </Pressable>
+              </View>
+              <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm }}>
+                <TextInput value={watts} onChangeText={setWatts} keyboardType="numeric" placeholder="Avg watts (optional)" placeholderTextColor={t.ink3} style={inp} />
+                <TextInput value={kcalIn} onChangeText={setKcalIn} keyboardType="numeric" placeholder="Calories (optional)" placeholderTextColor={t.ink3} style={inp} />
+              </View>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                {sessionKcal != null && sessionKcal > 0
+                  ? 'Calories came from your watch for this session — change them if you would rather use the machine’s figure. Nothing here is required; leave a box empty and it is left out rather than saved as a zero.'
+                  : 'The clock was measured; these were not. Nothing here is required — leave a box empty and it is left out rather than saved as a zero.'}
+              </Text>
+            </Section>
+          )}
+
+          {finalMins > 0 ? (
+            <Cta label="Save to your log" wide onPress={() => onSave({
+              mins: finalMins,
+              dist: parseFloat(dist) || 0,
+              unit,
+              watts: parseInt(watts, 10) || 0,
+              kcal: parseInt(kcalIn, 10) || 0,
+              zones: zoneSecs,
+            })} />
+          ) : (
+            <View>
+              <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginBottom: sp.md }}>
+                Under a minute on the clock — too short to log, and rounding it up to one would be a figure you did not train.
+              </Text>
+              <Cta label="Close" wide onPress={onClose} />
+            </View>
+          )}
+          <View style={{ marginTop: sp.md, alignItems: 'center' }}>
+            {finalMins > 0 ? <Ghost label="Discard" onPress={discard} /> : null}
+          </View>
+        </ScrollView>
+        <Confetti show={confetti} onDone={() => setConfetti(false)} />
+      </SafeAreaView>
+    );
+  }
+
+  // Time is the hero here, so it is not repeated in the strip. Calories are
+  // left out for recovery entirely: the figure would only ever be discarded at
+  // the save, and showing a running total we refuse to record is a promise the
+  // finish screen then breaks.
+  const liveCols: { label: string; value: string; dot?: string }[] = [
+    { label: 'bpm', value: fig(liveHr ?? '–'), dot: liveHr ? hrColor(liveHr, age) : undefined },
+    { label: 'Peak', value: fig(hrPeak ?? '–'), dot: hrPeak ? hrColor(hrPeak, age) : undefined },
+  ];
+  if (!recovery) liveCols.push({ label: 'kcal', value: fig(sessionKcal ?? '–') });
+
+  return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40, paddingTop: topPad + 4 }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sp.lg }}>
+          <Text style={{ ...ty.micro, color: t.ink3 }}>{KIND_LABEL[kind]} session</Text>
+          <Ghost label="Discard" onPress={discard} />
+        </View>
+
+        {/* What is being done and how long it has been going, said plainly and
+            first. The report on the guided session was that a started workout
+            never told you which workout it was. */}
+        <Text style={{ ...ty.title, color: t.ink }}>{activity}</Text>
+        <Text style={{ ...value(56), color: t.ink, marginTop: sp.sm }}>{clock(elapsed)}</Text>
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>Running · finish when you are done and it goes to your log</Text>
+
+        <View style={{ marginTop: sp.xl }}>
+          <MetricCols t={t} items={liveCols} />
+        </View>
+        {liveHr == null ? (
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>Wear your Apple Watch for live heart rate{recovery ? '' : ' & calories'}</Text>
+        ) : liveSample == null ? (
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+            That bpm is today&apos;s average from your connected device, not a live reading — it can&apos;t be used for zones.
+            Live zones need an Apple Watch.
+          </Text>
+        ) : null}
+
+        <ZonePanel t={t} liveZone={liveZone} liveSample={liveSample ?? null} zoneSecs={zoneSecs} />
+
+        <View style={{ marginTop: sp.xl }}>
+          <Cta label="Finish session" wide onPress={finish} />
+        </View>
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+function SessionRunner({ t, exercises, focus, nameOf, age, log, injuries, videos, videoStatus, preferTrainerId, onComplete, onClose }: { t: Theme; exercises: ProgramExercise[]; focus: string; nameOf: (e: ProgramExercise) => string; age: number | null; log: WorkoutEntry[]; injuries: Injury[]; videos: VideoItem[]; videoStatus: LibraryStatus; preferTrainerId: string | null; onComplete: (entries: WorkoutEntry[]) => void; onClose: () => void }) {
+  const insets = useSafeAreaInsets();
+  const topPad = Math.max(insets.top, 44);
+  const { w, elapsed, liveSample, liveHr, hrPeak, sessionKcal, zoneSecs, liveZone } = useLiveVitals(age);
+  const [finalElapsed, setFinalElapsed] = useState(0);
   const [idx, setIdx] = useState(0);
   const [results, setResults] = useState<{ reps: number; kg: number }[][]>(() => exercises.map(() => []));
   const [reps, setReps] = useState(''); const [kg, setKg] = useState('');
@@ -1190,30 +1512,9 @@ function SessionRunner({ t, exercises, focus, nameOf, age, log, injuries, videos
           </Text>
         ) : null}
 
-        {/* Live effort. The zone numeral leads; colour only confirms it. */}
-        {liveZone || hasZones ? (
-          <View style={{ marginTop: sp.xl }}>
-            <ZoneNow zone={liveZone} bpm={liveSample ?? null} compact />
-            {hasZones ? (
-              <View style={{ marginTop: sp.lg }}>
-                <ZoneBoard seconds={zoneSecs} current={liveZone} />
-              </View>
-            ) : null}
-          </View>
-        ) : (
-          /* With no heart-rate source this block used to render NOTHING — no
-             zones, and no reason for their absence. So the one screen where
-             live zones belong looked like it had never been built, which is
-             exactly how it was reported. Say what is missing and where it is
-             turned on. Deliberately not a link: leaving mid-session to go to
-             Settings would abandon the workout being logged. */
-          <View style={{ marginTop: sp.xl, paddingVertical: sp.md, paddingHorizontal: sp.md, backgroundColor: t.surface2, borderRadius: radius.sm }}>
-            <Text style={{ ...ty.label, fontWeight: '600', color: t.ink }}>Heart-rate zones</Text>
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
-              Connect a watch under Train → Watch &amp; devices and your zones appear here live while you train.
-            </Text>
-          </View>
-        )}
+        {/* Live effort, and the same empty state as a timed session when there
+            is no watch feeding it — see ZonePanel. */}
+        <ZonePanel t={t} liveZone={liveZone} liveSample={liveSample ?? null} zoneSecs={zoneSecs} />
 
         {prMsg ? (
           <View style={{ marginTop: sp.xl }}>

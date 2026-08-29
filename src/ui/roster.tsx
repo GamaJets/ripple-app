@@ -24,7 +24,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { RosterClient } from '../lib/trainerMock';
-import { readCoachedMode, modeForDb, type CoachedMode } from '../lib/types';
+import { readCoachedMode, type CoachedMode } from '../lib/types';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import type { LoadStatus } from './loadStatus';
@@ -56,11 +56,13 @@ export function RosterProvider({ children }: { children: ReactNode }) {
   const [roster, setRoster] = useState<RosterClient[]>([]);
   // Trainer-set delivery overrides (persisted). Real DB clients default to
   // 'online'; this lets the coach classify each so the roster filter works for
-  // them. It carries a second job now: every `mode` column is CHECK-constrained
-  // to ('online','inperson'), so a client the coach marks Hybrid is STORED as
-  // 'inperson' (modeForDb) and would read back as In-person on the next launch.
-  // The override is what holds the coach's real answer until the constraints
-  // are widened — on this device, which is where they classified them.
+  // them, and it is the only home a demo or not-yet-synced client has.
+  //
+  // It used to carry a second job — holding 'hybrid', which no `mode` column
+  // would accept — and outlived it when part 57 widened the constraints. What
+  // remains is a local echo, so keep it OUT of the paths the server now
+  // answers for: an override that shadows a mode a coach changed on another
+  // device would be a stale local opinion beating a fresh fact.
   const [modeOverrides, setModeOverrides] = useState<Record<string, CoachedMode>>({});
   const [uid, setUid] = useState<string | null>(null);
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
@@ -177,16 +179,10 @@ export function RosterProvider({ children }: { children: ReactNode }) {
     // Durable: persist to coach_clients so the roster survives restarts/devices.
     if (!USE_SUPABASE || !uid) return false;
     try {
-      // Narrowed on the way out — the column will not take 'hybrid' — and
-      // recorded in full below so the roster still shows what the coach chose.
-      const { data, error } = await supabase.from('coach_clients').insert({ trainer_id: uid, name: n, goal, mode: modeForDb(mode) }).select('id').single();
+      const { data, error } = await supabase.from('coach_clients').insert({ trainer_id: uid, name: n, goal, mode }).select('id').single();
       const sid = data?.id;
       if (error || !sid) return false;
       setRoster((p) => p.map((c) => (c.id === localId ? { ...c, id: sid } : c)));
-      // Against the SERVER id, now that there is one: the insert narrowed
-      // 'hybrid' to 'inperson', and without this the client the coach just
-      // classified as Hybrid comes back as In-person on the next launch.
-      rememberMode(sid, mode);
       return true;
     } catch { return false; }
   };
@@ -211,11 +207,11 @@ export function RosterProvider({ children }: { children: ReactNode }) {
     // these could "succeed" while the classification was stored nowhere.
     // Counting the returned rows is the only way to tell.
     try {
-      const { data, error } = await supabase.from('clients').update({ mode: modeForDb(mode) }).eq('id', id).select('id');
+      const { data, error } = await supabase.from('clients').update({ mode }).eq('id', id).select('id');
       if (!error && data && data.length) return true;
     } catch { /* fall through to the coach_clients attempt */ }
     try {
-      const { data, error } = await supabase.from('coach_clients').update({ mode: modeForDb(mode) }).eq('id', id).select('id');
+      const { data, error } = await supabase.from('coach_clients').update({ mode }).eq('id', id).select('id');
       return !error && !!data && data.length > 0;
     } catch { return false; }
   };
