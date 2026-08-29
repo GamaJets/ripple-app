@@ -318,7 +318,7 @@ export default function Home() {
             <SectionHead title={`Weight · ${ws.length} check-ins`}
               note={`${wDelta > 0 ? '+' : wDelta < 0 ? '−' : ''}${Math.abs(wDelta)} kg`}
               onPress={() => router.push('/(client)/scans')} />
-            <Spark data={ws} />
+            <Spark data={ws} labels={c.weightSeries.map((x) => x.t)} unit=" kg" />
           </Section>
         </>) : null}
 

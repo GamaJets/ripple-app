@@ -6,7 +6,7 @@
 // Chrome recedes — sections are separated by air and a hairline rather than
 // boxed, and a real card is spent only on something you can act on. Accent
 // colour marks the live metric and the primary action, and nothing else.
-import { type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { View, Text, Pressable, type ViewStyle, type StyleProp } from 'react-native';
 import Svg, { Circle, Polyline, Line } from 'react-native-svg';
 import { useTheme } from './components';
@@ -354,8 +354,28 @@ export function Meter({ label, val, target, unit = 'g', dim }: {
  * in the ground colour so it stays legible where it crosses the rule. One
  * series needs no legend — the section title says what is plotted.
  */
-export function Spark({ data, h = 74, w = 320 }: { data: number[]; h?: number; w?: number }) {
+/**
+ * The line chart used across seven screens.
+ *
+ * Touch it and it reads out the point you are on. Before, a chart was shape
+ * only — a member could see weight had gone down and had no way to ask by how
+ * much, or when. It was reported twice, from two different screens: "points on
+ * the graph have a numerical value to use to see how much of a change has
+ * happened" and "should be able to tap on any given chart and see the numerical
+ * value and the date associated with the value".
+ *
+ * `labels` is optional and parallel to `data`. Callers that have dates pass
+ * them and get "72.9 kg · 14 Aug"; callers that do not still get the value.
+ * Every existing call site keeps working untouched.
+ */
+export function Spark({ data, h = 74, w = 320, labels, unit = '' }: {
+  data: number[]; h?: number; w?: number;
+  /** ISO dates (or any short label) parallel to `data`. */
+  labels?: string[];
+  unit?: string;
+}) {
   const t = useTheme();
+  const [sel, setSel] = useState<number | null>(null);
   if (data.length < 2) return null;
   const min = Math.min(...data), max = Math.max(...data), rng = max - min || 1;
   const top = 8, bottom = h - 18;
@@ -363,14 +383,69 @@ export function Spark({ data, h = 74, w = 320 }: { data: number[]; h?: number; w
   const y = (v: number) => bottom - ((v - min) / rng) * (bottom - top);
   const pts = data.map((v, i) => `${x(i)},${y(v)}`).join(' ');
   const lx = x(data.length - 1), ly = y(data[data.length - 1]);
+
+  // The SVG is drawn in viewBox units and stretched to the real width, so a
+  // touch has to be scaled back before it means anything.
+  const [boxW, setBoxW] = useState(w);
+  const pick = (px: number) => {
+    const vx = (px / (boxW || w)) * w;
+    const i = Math.round(((vx - 6) / (w - 12)) * (data.length - 1));
+    setSel(Math.max(0, Math.min(data.length - 1, i)));
+  };
+
+  const at = sel == null ? null : sel;
+  const shown = at == null ? null : data[at];
+  const when = at == null || !labels ? null : sparkLabel(labels[at]);
+
   return (
-    <Svg width="100%" height={h} viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
-      <Line x1={0} y1={h - 8} x2={w} y2={h - 8} stroke={t.ring} strokeWidth={1} />
-      <Polyline points={pts} fill="none" stroke={t.brand} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
-      <Circle cx={lx} cy={ly} r={6} fill={t.bg} />
-      <Circle cx={lx} cy={ly} r={4} fill={t.brand} />
-    </Svg>
+    <View onLayout={(e) => setBoxW(e.nativeEvent.layout.width)}>
+      {/* The readout sits above the line rather than floating on it: a tooltip
+          over a 74px chart covers the thing it is describing. */}
+      <View style={{ height: 16, justifyContent: 'center' }}>
+        {shown != null ? (
+          <Text style={{ ...ty.caption, ...numeric, color: t.ink }}>
+            {Math.round(shown * 10) / 10}{unit}{when ? ` · ${when}` : ''}
+          </Text>
+        ) : (
+          <Text style={{ ...ty.caption, color: t.ink3 }}>
+            {labels ? 'Touch the line for a value and date' : 'Touch the line for a value'}
+          </Text>
+        )}
+      </View>
+      <View
+        accessibilityRole="adjustable"
+        accessibilityLabel="Trend line — touch to read a point"
+        onStartShouldSetResponder={() => true}
+        onMoveShouldSetResponder={() => true}
+        onResponderGrant={(e) => pick(e.nativeEvent.locationX)}
+        onResponderMove={(e) => pick(e.nativeEvent.locationX)}
+        onResponderRelease={() => { /* the reading stays until the next touch */ }}
+      >
+        <Svg width="100%" height={h} viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
+          <Line x1={0} y1={h - 8} x2={w} y2={h - 8} stroke={t.ring} strokeWidth={1} />
+          <Polyline points={pts} fill="none" stroke={t.brand} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+          {at != null ? (
+            <>
+              <Line x1={x(at)} y1={top} x2={x(at)} y2={bottom} stroke={t.ring} strokeWidth={1} />
+              <Circle cx={x(at)} cy={y(data[at])} r={6} fill={t.bg} />
+              <Circle cx={x(at)} cy={y(data[at])} r={4} fill={t.ink} />
+            </>
+          ) : null}
+          <Circle cx={lx} cy={ly} r={6} fill={t.bg} />
+          <Circle cx={lx} cy={ly} r={4} fill={t.brand} />
+        </Svg>
+      </View>
+    </View>
   );
+}
+
+/** "2026-08-14" → "14 Aug". Anything unparseable is shown as given. */
+function sparkLabel(raw: string | undefined): string {
+  if (!raw) return '';
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(raw).trim());
+  const d = m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date(raw);
+  if (isNaN(d.getTime())) return String(raw);
+  return `${d.getDate()} ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()]}`;
 }
 
 /** Seven day-cells; filled ones are days trained. */

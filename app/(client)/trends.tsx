@@ -162,7 +162,7 @@ export default function Trends() {
                   ]} />
                   {series.length >= 2 ? (<>
                     <View style={{ height: sp.lg }} />
-                    <Spark data={series.map((s) => s.v)} />
+                    <Spark data={series.map((s) => s.v)} labels={series.map((s) => s.t)} />
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: sp.sm }}>
                       <Text style={{ ...ty.caption, color: t.ink3 }}>{new Date(series[0].t).getDate()}/{new Date(series[0].t).getMonth() + 1}</Text>
                       <Text style={{ ...ty.caption, color: t.ink3 }}>{new Date(series[series.length - 1].t).getDate()}/{new Date(series[series.length - 1].t).getMonth() + 1}</Text>

@@ -98,7 +98,7 @@ export default function BodyTrends() {
                     )}
                   </View>
                   <View style={{ height: sp.md }} />
-                  <Spark data={vals} />
+                  <Spark data={vals} labels={series.map((p) => p.t)} />
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: sp.sm }}>
                     <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{dm(series[0].t)} · {first} {m.unit}</Text>
                     <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>range {min}–{max} {m.unit}</Text>
