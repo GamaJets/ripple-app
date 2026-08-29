@@ -49,7 +49,7 @@ import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { useClientData } from '../../src/ui/clientData';
 import { useSettings } from '../../src/ui/settings';
-import { weightIn, weightLabel, weightToKg, kgToLb, plain, convertedNote } from '../../src/lib/units';
+import { weightIn, weightLabel, weightToKg, weightDeltaIn, plain, convertedNote } from '../../src/lib/units';
 import { macrosFor } from '../../src/lib/nutrition';
 import { progressDoc, progressCsv, progressSummary, progressSpanLabel, shareDoc, shareText, shareTextFile, pdfExportAvailable, fileExportAvailable, type ProgressRow } from '../../src/lib/exportShare';
 import { useRouter } from 'expo-router';
@@ -152,9 +152,15 @@ export default function Scans() {
       muscleKg: sc.skeletalMuscleKg,
     }));
 
-  const sendPdf = async () => { const rows = exportRows(); const { html, text } = progressDoc(cd.name, rows, appName, t.brand); await shareDoc(html, text, 'My progress'); };
+  // The report and the summary are read by a person, so they go out in the
+  // client's own unit (TF-37) — a pounds reader was sending a coach, or a
+  // story, a metric document about their own body. The CSV is parsed by a
+  // machine and deliberately stays in kilograms; src/lib/progressExport.ts
+  // argues that at PROGRESS_CSV_HEADER, and the dialog below says so before
+  // anybody sends one.
+  const sendPdf = async () => { const rows = exportRows(); const { html, text } = progressDoc(cd.name, rows, appName, t.brand, wu); await shareDoc(html, text, 'My progress'); };
   const sendCsv = async () => { await shareTextFile(progressCsv(exportRows()), 'my-progress.csv', 'text/csv', 'My progress'); };
-  const sendSummary = async () => { await shareText(progressSummary(cd.name, exportRows(), appName), 'My progress'); };
+  const sendSummary = async () => { await shareText(progressSummary(cd.name, exportRows(), appName, wu), 'My progress'); };
 
   const shareProgress = () => {
     const rows = exportRows();
@@ -171,9 +177,13 @@ export default function Scans() {
       return;
     }
     const pdf = pdfExportAvailable();
-    const csvLine = fileExportAvailable()
+    // A pounds reader is told which of the three is not in pounds, and told it
+    // here rather than left to spot it in a column of numbers after the fact.
+    // The columns are named `weight_kg` inside the file for the same reason.
+    const csvUnit = wu === 'lb' ? ' Figures in kg, as the column names say — a spreadsheet is read by another app, so the columns stay in one fixed unit.' : '';
+    const csvLine = (fileExportAvailable()
       ? 'Spreadsheet — a .csv file, one row per scan, for a coach or another app to import.'
-      : 'Spreadsheet — the same rows as text you can paste into a spreadsheet (this build cannot attach a file).';
+      : 'Spreadsheet — the same rows as text you can paste into a spreadsheet (this build cannot attach a file).') + csvUnit;
     const options: { text: string; onPress?: () => void; style?: 'cancel' }[] = [];
     if (pdf) options.push({ text: 'PDF report', onPress: () => { void sendPdf(); } });
     options.push({ text: 'Spreadsheet (CSV)', onPress: () => { void sendCsv(); } });
@@ -518,18 +528,24 @@ export default function Scans() {
   const mInsights = compositionInsights(cd.scans);
   const mByGroup = METRIC_GROUPS.map((g) => ({ group: g, items: mTrends.filter((x) => x.def.group === g) })).filter((g) => g.items.length > 0);
   const wDelta = wsv.length > 1 ? +(wsv[wsv.length - 1] - wsv[0]).toFixed(1) : null;
-  const wDeltaShown = wDelta == null ? null : (wu === 'lb' ? Math.round(kgToLb(wDelta)) : wDelta);
+  const wDeltaShown = weightDeltaIn(wDelta, wu);
   const fmt = (iso: string) => { const d = new Date(iso); return `${d.getDate()}/${d.getMonth() + 1}/${String(d.getFullYear()).slice(2)}`; };
   const daysAgo = latest ? Math.max(0, Math.round((Date.now() - Date.parse(latest.takenAt)) / 86400000)) : 0;
   // A change between two stored weights, in the client's unit. The subtraction
-  // happens in kilograms and the result is converted once: rounding each of the
-  // two readings into whole pounds first and subtracting those would let half a
-  // pound of rounding at each end report a real 0.4 kg change as nothing, or as
-  // two pounds.
+  // happens in kilograms and `weightDeltaIn` converts the span once: rounding
+  // each of the two readings into whole pounds first and subtracting those
+  // would let half a pound of rounding at each end report a real 0.4 kg change
+  // as nothing, or as two pounds. The arrow is taken from the stored change so
+  // a loss too small to move a whole pound still points down rather than
+  // arguing with itself.
   const dlt = (cur: number, was: number | undefined) => {
     if (was == null) return null;
     const d = +(cur - was).toFixed(1);
-    const shown = wu === 'lb' ? Math.round(kgToLb(d)) : d;
+    const shown = weightDeltaIn(d, wu);
+    // Unreachable from two real readings. A dash if it ever is reachable —
+    // this figure is printed under a unit label, and falling back to the
+    // stored kilograms would put the wrong unit on a real number.
+    if (shown == null) return null;
     return `${d < 0 ? '▼' : d > 0 ? '▲' : ''} ${Math.abs(shown)} ${wu}`.trim();
   };
   // Presentation-only helpers: the hero's movement line and a shared "how long ago".
@@ -761,7 +777,7 @@ export default function Scans() {
                     ) : cd.scansStatus === 'loading' ? (
                       <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>Reading the scans from those days…</Text>
                     ) : (() => {
-                      const rows = compareRows(sel.before.takenAt, sel.after.takenAt, scans);
+                      const rows = compareRows(sel.before.takenAt, sel.after.takenAt, scans, wu);
                       return (
                         <View style={{ marginTop: sp.lg }}>
                           <View style={{ flexDirection: 'row', alignItems: 'flex-end', paddingBottom: sp.sm, borderBottomWidth: hairline, borderBottomColor: t.ring }}>

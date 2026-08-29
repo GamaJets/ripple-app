@@ -16,6 +16,9 @@ import { progressChangeLines, progressSpanLabel, progressSummary, figure, dayLab
 // anybody west of Greenwich, and a scan dated the day before it happened is
 // exactly the sort of thing a coach notices and the app never would.
 import { localDate } from './localDate';
+// The client's unit reaches these builders as an argument. Nothing here reads a
+// provider, so a report can be built for whoever's row is in hand.
+import { weightIn, convertedNote, type WeightUnit } from './units';
 
 let Print: any = null;
 let Sharing: any = null;
@@ -144,6 +147,11 @@ export function mealPlanDoc(name: string, targetKcal: number, meals: PlanMealRow
 // All three are built from the same rows so they cannot disagree, and all three
 // are pure: no React, no side effects, nothing read from a provider. The share
 // itself is a separate step.
+//
+// TF-37 added a fourth thing they have in common: the client's weight unit is
+// an argument to the two a person reads, defaulting to kilograms. The CSV is
+// deliberately not among them — progressExport.ts sets out why at the header
+// constant, and the share sheet says so out loud before the file leaves.
 
 // The data half lives in ./progressExport — no react-native, so the suite can
 // assert on it. Re-exported here so no call site had to move.
@@ -153,10 +161,29 @@ export {
 } from './progressExport';
 export type { ProgressRow, ProgressMetric } from './progressExport';
 
-export function progressDoc(name: string, rows: ProgressRow[], brand = 'Repple', accent?: string): { html: string; text: string } {
+/**
+ * The one-page report, in the unit the client reads in (TF-37).
+ *
+ * The unit is a parameter and not a hook for the reason the header of this
+ * section gives: all three builders are pure, and a document builder that
+ * reached into a provider could not be handed a client's row from the coach's
+ * side without dragging their screen's context along with it. `scans.tsx`
+ * passes what `useSettings()` already gave it.
+ *
+ * It defaults to kilograms so that every existing call site — and the node
+ * suite, which asserts on these without a settings provider to give it one —
+ * keeps producing exactly the document it produced before.
+ */
+export function progressDoc(name: string, rows: ProgressRow[], brand = 'Repple', accent?: string, unit: WeightUnit = 'kg'): { html: string; text: string } {
   const first = (name || '').split(' ')[0] || 'Your';
-  const tr = rows.map((r) => `<tr><td>${dayLabel(r.date)}</td><td class="r">${figure(r.weightKg)}</td><td class="r">${figure(r.bodyFatPct, '%')}</td><td class="r">${figure(r.muscleKg)}</td></tr>`).join('');
-  const lines = progressChangeLines(rows);
+  // Point by point, because each cell is a reading rather than a change, and
+  // through weightIn so a missing figure stays missing: `figure()` turns the
+  // null back into the em-dash the caption promises, and never into a 0 kg
+  // scan of somebody nobody weighed that day. Body fat goes past untouched —
+  // a percentage of a body is the same percentage in pounds.
+  const w = (kg: number | null) => figure(weightIn(kg, unit));
+  const tr = rows.map((r) => `<tr><td>${dayLabel(r.date)}</td><td class="r">${w(r.weightKg)}</td><td class="r">${figure(r.bodyFatPct, '%')}</td><td class="r">${w(r.muscleKg)}</td></tr>`).join('');
+  const lines = progressChangeLines(rows, unit);
   // A single scan gets a sentence saying so. The previous version printed a
   // delta line built from `rows[0]` and `rows[last]` being the same row, which
   // reported "weight 0.0kg · body fat 0.0%" — a client's first scan rendered as
@@ -164,11 +191,16 @@ export function progressDoc(name: string, rows: ProgressRow[], brand = 'Repple',
   const note = lines.length ? lines.join(' · ')
     : rows.length ? 'One scan so far — a change needs two.'
     : 'No scans recorded yet.';
+  // Said in the document, not just on the screen that made it. This page is
+  // built to be sent, and the coach who opens it is entitled to know that the
+  // pounds in it were measured in kilograms — otherwise the report and the
+  // client's own scan sheet look like two different readings.
+  const converted = convertedNote(unit);
   const body = `<h2 style="margin-top:20px">${first}'s progress</h2><p style="color:#64748b;margin:0">${note}</p>
-    <p style="color:#94a3b8;margin:6px 0 0;font-size:12px">${progressSpanLabel(rows)}. A dash means that scan did not record the figure.</p>
-    <table><tr><th>Date</th><th class="r">Weight (kg)</th><th class="r">Body fat</th><th class="r">Muscle (kg)</th></tr>${tr}</table>`;
-  const text = progressSummary(name, rows, brand) + '\n\n' +
-    rows.map((r) => `• ${dayLabel(r.date)}: ${figure(r.weightKg, ' kg')} · ${figure(r.bodyFatPct, '%')} BF · ${figure(r.muscleKg, ' kg')} muscle`).join('\n');
+    <p style="color:#94a3b8;margin:6px 0 0;font-size:12px">${progressSpanLabel(rows)}. A dash means that scan did not record the figure.${converted ? ' ' + converted : ''}</p>
+    <table><tr><th>Date</th><th class="r">Weight (${unit})</th><th class="r">Body fat</th><th class="r">Muscle (${unit})</th></tr>${tr}</table>`;
+  const text = progressSummary(name, rows, brand, unit) + '\n\n' +
+    rows.map((r) => `• ${dayLabel(r.date)}: ${figure(weightIn(r.weightKg, unit), ' ' + unit)} · ${figure(r.bodyFatPct, '%')} BF · ${figure(weightIn(r.muscleKg, unit), ' ' + unit)} muscle`).join('\n');
   return { html: page('Progress', body, brand, accent), text };
 }
 

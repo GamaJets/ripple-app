@@ -27,7 +27,7 @@ import { Rule, Section, SectionHead, Hero, KpiRow, Notice, Cta, Ghost, fig } fro
 import { sp, layout, type as ty } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
 import { useSettings } from '../../src/ui/settings';
-import { weightIn, weightLabel, lengthIn, lengthLabel, lengthDeltaIn, kgToLb } from '../../src/lib/units';
+import { weightIn, weightLabel, lengthIn, lengthLabel, lengthDeltaIn, weightDeltaIn } from '../../src/lib/units';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useMeasurements } from '../../src/ui/measurements';
 import { useCheckIns } from '../../src/ui/checkins';
@@ -64,7 +64,8 @@ export default function WeeklyReport() {
   // than as two endpoints rounded and then subtracted — 0.4 kg is 0.88 lb, and
   // rounding the two weigh-ins into pounds first can turn that into either
   // nothing or two pounds depending on where they sat inside the rounding.
-  const wDeltaShown = wu === 'lb' ? Math.round(kgToLb(wDelta)) : wDelta;
+  // Always finite here, so the null branch of weightDeltaIn is unreachable.
+  const wDeltaShown = weightDeltaIn(wDelta, wu) ?? 0;
   const waistDShown = lengthDeltaIn(waistD, lu);
 
   const today = new Date();

@@ -23,7 +23,7 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { useClientData } from '../../src/ui/clientData';
 import { useSettings } from '../../src/ui/settings';
-import { kgToLb } from '../../src/lib/units';
+import { weightDeltaIn, kgToLb } from '../../src/lib/units';
 import { Rule, Section, SectionHead, Ghost, Spark } from '../../src/ui/kit';
 import { sp, layout, type as ty, numeric, value } from '../../src/theme/scale';
 
@@ -102,7 +102,7 @@ export default function BodyTrends() {
             // it as either nothing or two pounds depending on nothing but where
             // the two readings happened to fall.
             const rawDelta = Math.round((series[series.length - 1].v - series[0].v) * 10) / 10;
-            const delta = m.weight && wu === 'lb' ? Math.round(kgToLb(rawDelta)) : rawDelta;
+            const delta = (m.weight ? weightDeltaIn(rawDelta, wu) : rawDelta) ?? rawDelta;
             const improving = m.better === 'up' ? rawDelta >= 0 : rawDelta <= 0;
             return (
               <View key={m.key}>

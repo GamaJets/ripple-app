@@ -27,7 +27,7 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { useClientData } from '../../src/ui/clientData';
 import { useSettings } from '../../src/ui/settings';
-import { kgToLb } from '../../src/lib/units';
+import { weightDeltaIn } from '../../src/lib/units';
 import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, type as ty } from '../../src/theme/scale';
 
@@ -45,7 +45,8 @@ export default function Social() {
  // rounded once at the end — rounding the first and latest scans into pounds
  // and subtracting those would let half a pound of rounding on each end turn a
  // real 0.4 kg loss into nothing, or into two pounds.
- const wtDropShown = wu === 'lb' ? Math.round(kgToLb(wtDrop)) : wtDrop;
+ // Always finite here, so the null branch of weightDeltaIn is unreachable.
+ const wtDropShown = weightDeltaIn(wtDrop, wu) ?? 0;
  // Two scans are the minimum that can describe a change. One (or none) is not
  // progress, and printing a zero here would read as one.
  const measured = cd.scans.length >= 2;

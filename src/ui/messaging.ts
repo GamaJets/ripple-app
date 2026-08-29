@@ -159,13 +159,27 @@ export function useThread(clientId: string | null, role: ChatRole) {
  * naming nobody, because it is a name they recognise.
  *
  * This hook only ever reports a name that came back from a read for the OTHER
- * party's id. When there is none — and for a client there usually is none,
- * since no policy on `profiles` grants client → coach — the caller gets
- * 'withheld' and draws a dash with the reason. See src/lib/threadPeer.ts.
+ * party's id. When there is none the caller gets 'withheld' and draws a dash
+ * with the reason. See src/lib/threadPeer.ts.
+ *
+ * ── Why the client side goes through an RPC ──────────────────────────────
+ *
+ * There is still no policy on `profiles` that runs client → coach, and there
+ * should not be: one wide enough to let a client read their coach's row would
+ * expose the whole row, and writing it as a subquery over `clients` is the
+ * recursion 28-fix-profiles-recursion.sql exists to undo. So a client read of
+ * `profiles` for their coach's id returns nothing, and this hook used to render
+ * a labelled dash for almost every client — honest, and a poor experience in an
+ * app whose premise is that somebody is coaching you.
+ *
+ * `public.my_coach()` (supabase/parts/67) is a security-definer function that
+ * takes no arguments and returns one column for one person. Having no parameter
+ * is what makes it safe: there is nothing to probe, and it can only ever answer
+ * about the coach of whoever is calling it.
  *
  * @param role who I am in this thread.
  * @param clientId the thread key when I am the coach; ignored for a client,
- *        whose coach is resolved from their own `clients` row.
+ *        whose coach comes from my_coach().
  */
 export function useThreadPeerName(role: ChatRole, clientId: string | null): PeerName {
   const authRev = useAuthRevision();
@@ -188,25 +202,32 @@ export function useThreadPeerName(role: ChatRole, clientId: string | null): Peer
         peerId = clientId;
       } else {
         try {
-          const { data: auth, error: authErr } = await supabase.auth.getUser();
+          // One call for the link AND the name. The function requires BOTH
+          // halves of the coach↔client link to be present and active, the same
+          // test fetchMyCoach uses before it will name somebody as able to see
+          // your photographs — so "who is my coach" has one answer across the
+          // app rather than a stricter one for photos and a looser one here.
+          const { data, error } = await supabase.rpc('my_coach');
           if (cancelled) return;
-          // Not knowing who I am is not the same as having no coach.
-          if (authErr || !auth?.user?.id) { setPeer({ kind: 'unknown' }); return; }
-          const { data: row, error } = await supabase.from('clients').select('trainer_id').eq('id', auth.user.id).single();
-          if (cancelled) return;
-          // PGRST116 is "no row", which for `clients` means this account has no
-          // client row at all — genuinely no coach, not a refused read.
-          if (error && (error as any).code !== 'PGRST116') linkFailed = true;
-          else peerId = (row as any)?.trainer_id ?? null;
+          // A refused or failed RPC is not "you have no coach". No rows is.
+          if (error) linkFailed = true;
+          else {
+            // RETURNS TABLE, so supabase-js hands back an array.
+            const row: any = Array.isArray(data) ? data[0] : data;
+            peerId = row?.coach_id ?? null;
+            // Null here means a coach who has not set a name, which is a
+            // different answer from a name we could not read — resolvePeerName
+            // reports the first as 'withheld' only because peerId is present.
+            name = typeof row?.coach_name === 'string' && row.coach_name ? row.coach_name : null;
+          }
         } catch { if (!cancelled) { setPeer({ kind: 'unknown' }); } return; }
       }
 
-      if (!cancelled && peerId && !linkFailed) {
+      // Coach side only. A client's name arrives with the link above, and
+      // reading `profiles` for a coach's id from a client session is refused by
+      // design — asking anyway would cost a round trip to be told no.
+      if (!cancelled && role === 'coach' && peerId && !linkFailed) {
         try {
-          // On the client side a refusal IS the expected answer: no policy on
-          // `profiles` lets a client read their coach's row. The failure this
-          // file is about is not an unread name, it is substituting a readable
-          // one for it, and no branch here can do that.
           // no-error-ok: refused and empty both render as the same labelled dash
           const { data } = await supabase.from('profiles').select('full_name').eq('id', peerId).single();
           if (cancelled) return;

@@ -110,6 +110,26 @@ export function weightLabel(kg: number | null | undefined, unit: WeightUnit): st
 }
 
 /**
+ * A DIFFERENCE between two weights, in the client's unit — the weight twin of
+ * `lengthDeltaIn` below, and it exists for the same reason.
+ *
+ * The span is converted once. Converting the two ENDS and subtracting those is
+ * the bug: 0.4 kg is 0.88 lb, so two weigh-ins a genuine 0.4 kg apart that
+ * happen to straddle a pound boundary report "1 lb" one week and "0 lb" the
+ * next off the back of nothing the client did. Seven screens had each written
+ * this line locally — dashboard, cards, report, social, goal, body-trends and
+ * scans — and one of them getting it wrong later was only a matter of time.
+ *
+ * Whole pounds, like `weightIn`, and for the argument in the header: a tenth
+ * of a kilogram is 0.22 lb, so a tenth of a pound is a digit the reading
+ * underneath cannot support.
+ */
+export function weightDeltaIn(deltaKg: number | null | undefined, unit: WeightUnit): number | null {
+  if (deltaKg == null || !Number.isFinite(deltaKg)) return null;
+  return unit === 'lb' ? Math.round(kgToLb(deltaKg)) : roundTo(deltaKg, 1);
+}
+
+/**
  * A stored height in the client's unit. In centimetres that is a whole number
  * (nobody's height is recorded to the millimetre); in inches it is the total
  * whole inches, which `heightParts` splits into feet and inches for display.

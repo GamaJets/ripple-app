@@ -29,7 +29,7 @@ import { Rule, Section, SectionHead, Hero, Cta, Ghost, Notice, fig } from '../..
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
 import { useSettings } from '../../src/ui/settings';
-import { weightIn, weightToKg, kgToLb, type WeightUnit } from '../../src/lib/units';
+import { weightIn, weightToKg, weightDeltaIn, kgToLb, type WeightUnit } from '../../src/lib/units';
 import { useGoalTracker } from '../../src/ui/goalTracker';
 import {
   progressOf, projectionOf, goalLabel, isMeasured, isOverdue, sortGoals,
@@ -66,8 +66,10 @@ const goalValue = (v: number, k: MeasuredKind, wu: WeightUnit) =>
  * reading that had not really changed. Metric is passed through untouched so
  * that a client reading kilograms sees exactly what they saw before.
  */
+// Body fat is a percentage in every unit system, so only the weight-shaped
+// kinds are converted; the rest pass straight through.
 const goalDelta = (v: number, k: MeasuredKind, wu: WeightUnit) =>
-  weightKind(k) && wu === 'lb' ? Math.round(kgToLb(v)) : v;
+  (weightKind(k) ? weightDeltaIn(v, wu) : v) ?? v;
 
 /** The client's trend, in a sentence, or null when there is no honest one. */
 function projectionLine(goal: GoalTarget, series: Point[], wu: WeightUnit): string | null {

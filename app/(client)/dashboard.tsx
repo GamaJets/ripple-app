@@ -18,7 +18,7 @@ import { macrosFor, applyCoachAdjust } from '../../src/lib/nutrition';
 import { buildProgram } from '../../src/lib/programs';
 import { useClientData } from '../../src/ui/clientData';
 import { useSettings } from '../../src/ui/settings';
-import { weightIn, kgToLb, type WeightUnit } from '../../src/lib/units';
+import { weightIn, weightDeltaIn, kgToLb, type WeightUnit } from '../../src/lib/units';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
 import { useCoachFeedback } from '../../src/ui/feedback';
@@ -41,18 +41,6 @@ import { scheduleLocal, pushAvailable } from '../../src/ui/pushNotifications';
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-/**
- * A CHANGE in weight, in the unit the client reads in (TF-37). The whole span
- * is converted and the result rounded once, rather than each end being rounded
- * into pounds and then subtracted: two readings a genuine 0.4 kg apart can sit
- * either side of a pound boundary, so rounding first turns the same loss into
- * "0 lb" one week and "1 lb" the next off the back of nothing the client did.
- * This is the weight twin of `lengthDeltaIn` in src/lib/units.ts, which cannot
- * hold it because deltas of stored kilograms only ever arise on screens.
- */
-function weightDeltaIn(deltaKg: number, unit: WeightUnit): number {
-  return unit === 'lb' ? Math.round(kgToLb(deltaKg)) : Math.round(deltaKg * 10) / 10;
-}
 
 export default function Home() {
   const t = useTheme();
@@ -192,8 +180,10 @@ export default function Home() {
   // rather than printed as "−0 lb", the fabricated zero this screen already
   // refuses to show elsewhere. `good` deliberately keeps reading the metric
   // value: whether a change is in the right direction does not depend on units.
-  const wDeltaShown = weightDeltaIn(wDelta, wu);
-  const muDShown = muD == null ? null : weightDeltaIn(muD, wu);
+  // wDelta comes off the weight series and is always finite, so the null
+  // branch of weightDeltaIn cannot be reached here.
+  const wDeltaShown = weightDeltaIn(wDelta, wu) ?? 0;
+  const muDShown = weightDeltaIn(muD, wu);
 
   const now = Date.now();
   const nextSession = sessions

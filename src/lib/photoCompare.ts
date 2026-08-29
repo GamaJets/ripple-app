@@ -55,6 +55,11 @@
 // unmeasured rather than falling back to something.
 
 import { dateParts } from './localDate';
+// TF-37: the two mass rows of this table were printed as kilograms whatever the
+// client had chosen, so a pounds reader compared two photographs of themselves
+// against figures in a unit they do not think in. The unit is a parameter and
+// not a hook because this module is pure and asserted against under plain node.
+import { weightIn, weightDeltaIn, type WeightUnit } from './units';
 
 /**
  * The measurement shape this file needs. Deliberately the minimum, so both
@@ -76,6 +81,12 @@ export interface ScanReading {
 export interface CompareRow {
   key: 'weightKg' | 'bodyFatPct' | 'skeletalMuscleKg';
   label: string;
+  /**
+   * The unit the three figures on this row are ALREADY in — the row carries it
+   * so `readingText` and `deltaText` cannot be handed a figure in one unit and
+   * a label in another. The two mass rows follow the client's preference; body
+   * fat is a percentage and is `%` in every unit system.
+   */
   unit: string;
   before: number | null;
   after: number | null;
@@ -154,26 +165,59 @@ export function compareRows(
   beforeISO: string,
   afterISO: string,
   scans: ScanReading[] | null | undefined,
+  unit: WeightUnit = 'kg',
 ): CompareRow[] {
   const b = readingOn(beforeISO, scans);
   const a = readingOn(afterISO, scans);
+  /**
+   * `mass` decides two things at once: which unit the row is labelled with,
+   * and whether its figures are converted at all. Body fat is a proportion of
+   * a body and is the same proportion however that body is weighed — running
+   * it through a weight conversion would turn 24.1% into 53.1%, which reads
+   * like a measurement and is nonsense.
+   */
   const row = (
     key: CompareRow['key'],
     label: string,
-    unit: string,
+    metricUnit: string,
     pick: (s: ScanReading) => number | null,
+    mass: boolean,
   ): CompareRow => {
-    const before = b ? num(pick(b)) : null;
-    const after = a ? num(pick(a)) : null;
-    return { key, label, unit, before, after, delta: compareDelta(before, after) };
+    const beforeKg = b ? num(pick(b)) : null;
+    const afterKg = a ? num(pick(a)) : null;
+    // The change is taken between the two STORED readings and converted once,
+    // as a span. Subtracting the two converted cells instead is the bug
+    // `weightDeltaIn` exists to prevent: it would let half a pound of display
+    // rounding at each end invent or erase a whole pound, so the same real
+    // 0.4 kg loss reports 0 lb one month and 1 lb the next off nothing the
+    // client did.
+    //
+    // The cost is visible here and is accepted with open eyes: this table
+    // prints both ends AND the change, so a pair like 81.4 → 81.6 kg reads
+    // "179 lb → 180 lb, 0 lb". That is three separately correct statements at
+    // whole-pound grain — the two readings are 179.5 and 179.9 lb and the
+    // change really is under half a pound — and the alternative is a Change
+    // column that claims a pound nobody gained. The reading a client acts on
+    // is the change, so the change is the figure kept honest.
+    const deltaKg = compareDelta(beforeKg, afterKg);
+    // Every conversion here is null-in, null-out, so an unscanned day stays an
+    // unscanned day and no amount of unit preference invents a reading for it.
+    return {
+      key,
+      label,
+      unit: mass ? unit : metricUnit,
+      before: mass ? weightIn(beforeKg, unit) : beforeKg,
+      after: mass ? weightIn(afterKg, unit) : afterKg,
+      delta: mass ? weightDeltaIn(deltaKg, unit) : deltaKg,
+    };
   };
   return [
-    row('weightKg', 'Weight', 'kg', (s) => s.weightKg),
-    row('bodyFatPct', 'Body fat', '%', (s) => s.bodyFatPct),
+    row('weightKg', 'Weight', 'kg', (s) => s.weightKg, true),
+    row('bodyFatPct', 'Body fat', '%', (s) => s.bodyFatPct, false),
     // Nullable at source: a bathroom scale reports weight and body fat and no
     // muscle figure at all, and types.ts records that this column was read as
     // `?? 0` for a long time. A 0 kg muscle reading is nobody's body.
-    row('skeletalMuscleKg', 'Skeletal muscle', 'kg', (s) => s.skeletalMuscleKg),
+    row('skeletalMuscleKg', 'Skeletal muscle', 'kg', (s) => s.skeletalMuscleKg, true),
   ];
 }
 

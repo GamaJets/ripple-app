@@ -175,6 +175,82 @@ ok(spanLabel(1) === '1 day apart', 'one day is singular');
 ok(spanLabel(0) === 'Same day', 'two photos from the same day say so');
 ok(spanLabel(null) === '—', 'an unparseable interval is a dash, not "0 days apart"');
 
+/* ── the client's own unit (TF-37) ──────────────────────────────────────── */
+//
+// This panel printed kilograms to everybody, including the clients who had
+// told the app they read pounds. The rows now carry the unit their own figures
+// are in, so `readingText` and `deltaText` cannot be handed a pounds figure
+// and a kg label. The assertions below are about the three ways that could go
+// wrong: a percentage dragged through a weight conversion, a missing reading
+// turned into a number by the conversion, and a change computed from the two
+// rounded cells instead of from the span between the readings.
+
+{
+  // 82.4 kg is 181.65 lb and 80.1 kg is 176.59 lb — 182 and 177 to the pound.
+  const rows = compareRows(PHOTO_A, PHOTO_B, SCANS, 'lb');
+  ok(rows[0].unit === 'lb' && rows[2].unit === 'lb', 'the two mass rows are labelled in the unit the client reads');
+  ok(rows[1].unit === '%', 'and body fat is a percentage, which is not a unit anybody has a preference about');
+  ok(rows[0].before === 182 && rows[0].after === 177, `weight reads in whole pounds, got ${rows[0].before} → ${rows[0].after}`);
+  ok(rows[0].delta === -5, `a 2.3 kg loss is 5 lb, got ${rows[0].delta}`);
+  ok(rows[2].before === 73 && rows[2].after === 75, `skeletal muscle is a mass and converts too, got ${rows[2].before} → ${rows[2].after}`);
+  ok(rows[2].delta === 2, `and its change converts as a span, got ${rows[2].delta}`);
+
+  // The row that must not move. 24.1% run through a weight conversion would
+  // read 53.1%, which looks exactly like a measurement and is arithmetic
+  // nonsense — a client would think their body fat had doubled.
+  const metric = compareRows(PHOTO_A, PHOTO_B, SCANS, 'kg');
+  ok(rows[1].before === 24.1 && rows[1].after === 22.6 && rows[1].delta === -1.5,
+    'body fat is identical in pounds and in kilograms');
+  ok(metric[1].before === rows[1].before && metric[1].delta === rows[1].delta, 'and provably so, side by side');
+
+  // Default unchanged: every existing call site, and the assertions above this
+  // block, must still get exactly the kilograms they got before.
+  const bare = compareRows(PHOTO_A, PHOTO_B, SCANS);
+  ok(bare[0].unit === 'kg' && bare[0].before === 82.4 && bare[0].delta === -2.3,
+    'omitting the unit is metric, unchanged');
+}
+
+// A missing reading survives the conversion as a missing reading. A unit
+// preference is not permitted to fill in a day nobody was scanned on.
+{
+  const rows = compareRows('2026-08-06T10:00:00.000Z', PHOTO_B, SCANS, 'lb');
+  ok(rows.every((r) => r.before === null), 'the unscanned day is still unscanned when read in pounds');
+  ok(rows.every((r) => r.delta === null), 'and still claims no change — null converts to null, never to 0 lb');
+  ok(rows[0].after === 177, 'while the day that WAS scanned still reads');
+
+  const noSmm: ScanReading[] = [scan('2026-08-01', 82.4, 24.1, null), scan('2026-08-11', 80.1, 22.6, null)];
+  const m = compareRows(PHOTO_A, PHOTO_B, noSmm, 'lb')[2];
+  ok(m.before === null && m.after === null && m.delta === null, 'an unreported muscle figure does not become 0 lb');
+}
+
+// The span rule, stated where it is visible. 81.4 kg and 81.6 kg are 179.5 and
+// 179.9 lb: they round to different whole pounds, so subtracting the two CELLS
+// would report a pound of gain that never happened. The change is taken across
+// the stored kilograms and converted once, so it is 0 — the two readings really
+// are less than half a pound apart.
+{
+  const straddle: ScanReading[] = [scan('2026-08-01', 81.4, 24, 30), scan('2026-08-11', 81.6, 24, 30)];
+  const r = compareRows(PHOTO_A, PHOTO_B, straddle, 'lb')[0];
+  ok(r.before === 179 && r.after === 180, `the two cells round to different pounds, got ${r.before} → ${r.after}`);
+  ok(r.delta === 0, `and the change is the converted span, not ${(r.after as number) - (r.before as number)} — got ${r.delta}`);
+  ok(deltaText(r.delta, r.unit) === '0 lb', 'which prints as a measured zero, not as a dash');
+  // The same pair the other way round must not manufacture a loss either.
+  const back = compareRows(PHOTO_B, PHOTO_A, straddle, 'lb')[0];
+  ok(back.delta === 0, 'and reversing the pair gives the same zero rather than −1 lb');
+}
+
+// What reaches the screen, in pounds. `readingText`/`deltaText` need no unit
+// argument of their own — they read it off the row, which is what stops a
+// figure and a label ever disagreeing.
+{
+  const rows = compareRows(PHOTO_A, PHOTO_B, SCANS, 'lb');
+  ok(readingText(rows[0].before, rows[0].unit) === '182 lb', `got "${readingText(rows[0].before, rows[0].unit)}"`);
+  ok(deltaText(rows[0].delta, rows[0].unit) === '-5 lb', `got "${deltaText(rows[0].delta, rows[0].unit)}"`);
+  ok(deltaText(rows[2].delta, rows[2].unit) === '+2 lb', 'a gain still prints with an explicit plus in pounds');
+  ok(readingText(rows[1].before, rows[1].unit) === '24.1 %', 'body fat still carries its own unit through unchanged');
+  ok(!rows.some((r) => r.unit === 'kg'), 'and no row in a pounds reader\'s table is labelled kg');
+}
+
 declare const process: { exit(code: number): void };
 console.log(errors.length ? 'PHOTO COMPARE FAILURES:\n' + errors.join('\n') : 'ALL PHOTO COMPARE TESTS PASSED');
 if (errors.length) process.exit(1);

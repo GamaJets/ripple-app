@@ -24,7 +24,7 @@ import { sp, layout, radius, elevation, type as ty, value } from '../../src/them
 import type { Theme } from '../../src/theme/tokens';
 import { useClientData } from '../../src/ui/clientData';
 import { useSettings } from '../../src/ui/settings';
-import { weightIn, kgToLb } from '../../src/lib/units';
+import { weightIn, weightDeltaIn } from '../../src/lib/units';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useBrand } from '../../src/ui/brand';
 import { currentStreak, longestStreak, personalRecords } from '../../src/lib/streaks';
@@ -67,7 +67,8 @@ export default function Cards() {
   // there are two readings, not whether the converted change is non-zero: a
   // measured half-kilo that rounds to a pound is progress, and the card is
   // allowed to say so.
-  const wDeltaShown = wu === 'lb' ? Math.round(kgToLb(wDelta)) : wDelta;
+  // Always finite here, so the null branch of weightDeltaIn is unreachable.
+  const wDeltaShown = weightDeltaIn(wDelta, wu) ?? 0;
   const hasProgress = w.length > 1;
 
   // Under 'error' the log is empty because it could not be read, not because
