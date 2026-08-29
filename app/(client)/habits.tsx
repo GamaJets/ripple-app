@@ -19,15 +19,26 @@
 //     of you. Under `status === 'error'` that is exactly the lie the provider's
 //     header is about, so the empty state and the notice below say which of the
 //     two it is before the client draws a conclusion about their own day.
-import { View, Text, Pressable, ScrollView } from 'react-native';
+import { useState } from 'react';
+import { View, Text, Pressable, ScrollView, TextInput, Alert } from 'react-native';
 import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Hero, Cta, Ghost, Notice, fig } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { useHabits } from '../../src/ui/habits';
 import { donePercent } from '../../src/lib/checklist';
+import { useClientData } from '../../src/ui/clientData';
+
+// The same bounds clients_step_goal_check and clients_sleep_goal_hours_check
+// enforce (supabase/parts/60). Checked here as well, and not as belt and
+// braces: the profile write is one UPDATE carrying every field on it, so a
+// value the constraint refuses takes the client's name, goal, diet and
+// allergens down with it — silently, in a debounced effect nobody is watching.
+// That is exactly how the 'solo' coaching mode ate whole profile saves.
+const STEP_MIN = 500, STEP_MAX = 100000;
+const SLEEP_MIN = 3, SLEEP_MAX = 14;
 
 export default function Habits() {
   const t = useTheme();
@@ -37,6 +48,9 @@ export default function Habits() {
   // that the client did none of the things asked of them today.
   const pct = donePercent(h.doneCount, h.habits.length);
   const unknown = h.status === 'error';
+  const c = useClientData();
+  const [stepDraft, setStepDraft] = useState('');
+  const [sleepDraft, setSleepDraft] = useState('');
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
@@ -145,6 +159,79 @@ export default function Habits() {
               </Pressable>
             </View>
           ))}
+        </Section>
+
+        <Rule />
+
+        {/* ── your daily targets ──────────────────────────────────────────
+            The two numbers the checklist used to invent. "10,000 steps" and
+            "Sleep 7h+" were compiled into the app, identical for everybody,
+            and no screen could change them — this is that screen. Leaving one
+            blank is a real answer: the list simply carries no row for it. */}
+        <Section>
+          <SectionHead title="Your daily targets" note="Optional" />
+          <Text style={{ ...ty.body, color: t.ink3, marginBottom: sp.md }}>
+            Set either and it joins your list. Leave it blank and nothing is assumed.
+          </Text>
+
+          <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.sm }}>
+            Steps a day{c.stepGoal != null ? ` · now ${c.stepGoal}` : ' · not set'}
+          </Text>
+          <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'center' }}>
+            <TextInput
+              value={stepDraft} onChangeText={setStepDraft} keyboardType="number-pad"
+              placeholder={c.stepGoal != null ? String(c.stepGoal) : 'e.g. 8000'} placeholderTextColor={t.ink3}
+              accessibilityLabel="Daily step goal"
+              style={{ flex: 1, ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md }} />
+            <Cta label="Save" onPress={() => {
+              const n = Math.round(parseFloat(stepDraft));
+              if (!Number.isFinite(n) || n < STEP_MIN || n > STEP_MAX) {
+                Alert.alert('Check that number', `A step goal needs to be between ${STEP_MIN} and ${STEP_MAX}.`);
+                return;
+              }
+              c.setStepGoal(n); setStepDraft('');
+            }} />
+            {c.stepGoal != null ? (
+              <Pressable onPress={() => { c.setStepGoal(null); setStepDraft(''); }} accessibilityRole="button" accessibilityLabel="Clear step goal"
+                style={{ paddingHorizontal: sp.md, paddingVertical: sp.md, borderRadius: radius.sm, backgroundColor: t.surface2 }}>
+                <Text style={{ ...ty.micro, color: t.ink3 }}>Clear</Text>
+              </Pressable>
+            ) : null}
+          </View>
+
+          <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>
+            Sleep a night{c.sleepGoalHours != null ? ` · now ${c.sleepGoalHours}h` : ' · not set'}
+          </Text>
+          <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'center' }}>
+            <TextInput
+              value={sleepDraft} onChangeText={setSleepDraft} keyboardType="decimal-pad"
+              placeholder={c.sleepGoalHours != null ? String(c.sleepGoalHours) : 'e.g. 7.5'} placeholderTextColor={t.ink3}
+              accessibilityLabel="Nightly sleep goal in hours"
+              style={{ flex: 1, ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md }} />
+            <Cta label="Save" onPress={() => {
+              // One decimal, matching numeric(3,1) on the column. Postgres would
+              // round it anyway; doing it here means the number the client sees
+              // afterwards is the number that was stored.
+              const n = Math.round(parseFloat(sleepDraft) * 10) / 10;
+              if (!Number.isFinite(n) || n < SLEEP_MIN || n > SLEEP_MAX) {
+                Alert.alert('Check that number', `A sleep goal needs to be between ${SLEEP_MIN} and ${SLEEP_MAX} hours. If you meant minutes, use hours here — 450 minutes is 7.5.`);
+                return;
+              }
+              c.setSleepGoalHours(n); setSleepDraft('');
+            }} />
+            {c.sleepGoalHours != null ? (
+              <Pressable onPress={() => { c.setSleepGoalHours(null); setSleepDraft(''); }} accessibilityRole="button" accessibilityLabel="Clear sleep goal"
+                style={{ paddingHorizontal: sp.md, paddingVertical: sp.md, borderRadius: radius.sm, backgroundColor: t.surface2 }}>
+                <Text style={{ ...ty.micro, color: t.ink3 }}>Clear</Text>
+              </Pressable>
+            ) : null}
+          </View>
+
+          {c.saveFailed ? (
+            <Text style={{ ...ty.micro, color: t.warn, marginTop: sp.md }}>
+              Your last profile change could not be saved, so this may not have stored either.
+            </Text>
+          ) : null}
         </Section>
       </ScrollView>
     </SafeAreaView>

@@ -200,14 +200,14 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
     waterGoalGlasses: waterGoal,
     proteinTargetG: macros?.protein ?? null,
     kcalTarget: macros?.kcal ?? null,
-    // Nothing in the product sets either of these. They are here so the shape
-    // of the answer is right the day something does; today they are honestly
-    // null and produce no rows. See the header of src/lib/checklist.ts.
-    stepGoal: null,
-    sleepGoalHours: null,
+    // The client's own, from clients.step_goal / clients.sleep_goal_hours
+    // (part 60). Null until they set one, which produces a note rather than a
+    // row — see the header of src/lib/checklist.ts.
+    stepGoal: c.stepGoal,
+    sleepGoalHours: c.sleepGoalHours,
     todaysTrainingFocus: trainingFocus,
     coachItems,
-  }), [waterGoal, macros?.protein, macros?.kcal, trainingFocus, coachItems]);
+  }), [waterGoal, macros?.protein, macros?.kcal, c.stepGoal, c.sleepGoalHours, trainingFocus, coachItems]);
 
   const habits: Habit[] = useMemo(
     () => items.map((i) => ({ id: i.id, label: i.label, icon: i.icon, source: i.source, done: doneIds.has(i.id) })),

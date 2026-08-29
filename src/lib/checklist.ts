@@ -22,13 +22,12 @@
 // is missing and what the client can do about it — a sentence about an absent
 // target is a different statement from a line they are being asked to tick.
 //
-// Steps and sleep are the sharp end of that. The app can READ steps from a
-// connected watch and sleep from the wellness log, but there is no step goal
-// and no sleep goal anywhere in the product — no column, no setting, no screen
-// that sets one. So they are null on every call today and produce nothing: no
-// row, and no "set a step goal" note either, because there is nowhere to go and
-// set one and a note pointing at a screen that does not exist is its own small
-// lie. The moment a goal exists, passing it in here is the whole change.
+// Steps and sleep were the sharp end of that. For a while they produced
+// nothing at all — no row AND no note — because there was no step goal or sleep
+// goal anywhere in the product, and "set a step goal" pointing at a screen that
+// did not exist is its own small lie. `clients.step_goal` and
+// `clients.sleep_goal_hours` exist now (part 60) and the Daily habits screen
+// sets them, so the note has somewhere to send people and is emitted again.
 //
 // ── Ids are storage keys, not labels ────────────────────────────────────────
 //
@@ -67,9 +66,10 @@ export interface ChecklistInput {
   proteinTargetG: number | null;
   /** Same source, same null. */
   kcalTarget: number | null;
-  /** Null on every call today; see the header. */
+  /** `clients.step_goal`. Null means the client has not set one — which is the
+   *  normal state, not an error, and produces a gap note rather than a row. */
   stepGoal: number | null;
-  /** Null on every call today; see the header. */
+  /** `clients.sleep_goal_hours`. Same rule. */
   sleepGoalHours: number | null;
   /** The focus of the plan day scheduled for today ('Push', 'Full body A'), or
    *  null when today is not a training day. Not "the nearest day" — see
@@ -170,10 +170,15 @@ export function buildChecklist(input: ChecklistInput): Checklist {
 
   const steps = target(input.stepGoal);
   if (steps != null) items.push({ id: 'steps', label: `Walk ${thousands(steps)} steps`, icon: '👟', source: 'targets' });
+  // Separate notes, not one covering both, because they are set independently:
+  // telling somebody who has a step goal that they need a step goal is the sort
+  // of thing that teaches people to stop reading these.
+  else gaps.push({ id: 'steps', note: 'Set a step goal below and it joins your list.' });
 
   const sleep = target(input.sleepGoalHours);
   // One decimal at most, and no trailing '.0' — "Sleep 7.5h+" and "Sleep 8h+".
   if (sleep != null) items.push({ id: 'sleep', label: `Sleep ${(Math.round(sleep * 10) / 10)}h+`, icon: '😴', source: 'targets' });
+  else gaps.push({ id: 'sleep', note: 'Set a sleep goal below to track it here.' });
 
   const seen = new Set(items.map((i) => i.id));
   for (const c of input.coachItems) {

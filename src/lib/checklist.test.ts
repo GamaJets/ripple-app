@@ -27,8 +27,17 @@ const labelOf = (i: ChecklistInput, id: string) => buildChecklist(i).items.find(
 const empty = buildChecklist(NOTHING);
 ok(empty.items.length === 0, `a client with no targets must get no checklist rows, got ${empty.items.length}`);
 ok(empty.gaps.some((g) => g.id === 'macros'), 'missing macros should be named as a gap, not silently dropped');
-ok(!empty.gaps.some((g) => g.id === 'steps' || g.id === 'sleep'),
-  'there is nowhere in the app to set a step or sleep goal, so promising one is not a gap we may raise');
+// These two used to raise NO gap, because there was nowhere in the app to set
+// either goal and a note pointing at a screen that did not exist would have
+// been its own small lie. clients.step_goal and clients.sleep_goal_hours exist
+// now (part 60) and the Daily habits screen sets them, so the note is honest.
+ok(empty.gaps.some((g) => g.id === 'steps'), 'an unset step goal is named as a gap now that there is somewhere to set one');
+ok(empty.gaps.some((g) => g.id === 'sleep'), 'and so is an unset sleep goal');
+// Separately, so somebody who has set one is not told to set it.
+ok(!buildChecklist({ ...NOTHING, stepGoal: 8000 }).gaps.some((g) => g.id === 'steps'),
+  'a client who HAS a step goal is not told to set one');
+ok(buildChecklist({ ...NOTHING, stepGoal: 8000 }).gaps.some((g) => g.id === 'sleep'),
+  'and setting the step goal does not silence the sleep note with it');
 
 // ── every derived row states the client's own number ──
 ok(labelOf({ ...NOTHING, proteinTargetG: 152 }, 'protein') === 'Hit 152 g protein', 'protein row must carry the gram figure');

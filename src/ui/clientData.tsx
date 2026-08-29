@@ -62,6 +62,12 @@ interface Value {
   focusAreas: string[]; setFocusAreas: (v: string[]) => void;
   activity: number;
   mealsPerDay: 3 | 4 | 5; setMealsPerDay: (v: 3 | 4 | 5) => void;
+  /** Daily step and nightly sleep targets. null means the client has not set
+   *  one, and it stays null: the checklist renders no row rather than one built
+   *  on a figure nobody chose, which is what "10,000 steps" was for everybody.
+   *  Pass null to either setter to clear it. */
+  stepGoal: number | null; setStepGoal: (v: number | null) => void;
+  sleepGoalHours: number | null; setSleepGoalHours: (v: number | null) => void;
   /** null until there is a scan or a manual entry. These used to fall back to
    *  70 kg / 20% / 0 kg, which the dashboard, profile, scans, report, standards
    *  and the macro calculator all rendered and computed against as though the
@@ -127,6 +133,8 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
   const [injuries, setInjuries] = useState<Injury[]>([]);
   const [focusAreas, setFocusAreas] = useState<string[]>([]);
   const [mealsPerDay, setMealsPerDay] = useState<3 | 4 | 5>(3);
+  const [stepGoal, setStepGoal] = useState<number | null>(null);
+  const [sleepGoalHours, setSleepGoalHours] = useState<number | null>(null);
   const [scans, setScans] = useState<ScanRec[]>([]);
   const [scanMetrics, setScanMetrics] = useState<Record<string, ScanMetrics>>({});
   const [manualWeight, setManualWeight] = useState<number | null>(null);
@@ -162,6 +170,8 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
           if (typeof p.manualAt === 'string') setManualAt(p.manualAt);
           if (typeof p.photo === 'string') setPhoto(p.photo);
           if (p.mealsPerDay === 3 || p.mealsPerDay === 4 || p.mealsPerDay === 5) setMealsPerDay(p.mealsPerDay);
+          if (typeof p.stepGoal === 'number') setStepGoal(p.stepGoal);
+          if (typeof p.sleepGoalHours === 'number') setSleepGoalHours(p.sleepGoalHours);
         }
       }
     } catch {}
@@ -171,8 +181,8 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
   // Persist edits once hydrated (avoids clobbering saved data with defaults on boot).
   useEffect(() => {
     if (!hydrated) return;
-    AsyncStorage.setItem(KEY, JSON.stringify({ name, dob, heightCm, goal, diet, avoid, injuries, focusAreas, coachingMode, mealsPerDay, weightKg: manualWeight, bodyFatPct: manualBodyFat, manualAt, photo })).catch(() => {});
-  }, [hydrated, name, dob, heightCm, goal, diet, avoid, injuries, focusAreas, coachingMode, mealsPerDay, manualWeight, manualBodyFat, manualAt, photo]);
+    AsyncStorage.setItem(KEY, JSON.stringify({ name, dob, heightCm, goal, diet, avoid, injuries, focusAreas, coachingMode, mealsPerDay, stepGoal, sleepGoalHours, weightKg: manualWeight, bodyFatPct: manualBodyFat, manualAt, photo })).catch(() => {});
+  }, [hydrated, name, dob, heightCm, goal, diet, avoid, injuries, focusAreas, coachingMode, mealsPerDay, stepGoal, sleepGoalHours, manualWeight, manualBodyFat, manualAt, photo]);
 
   // Pull the real signed-in user's name from the server BEFORE any push below is
   // allowed to run. This guards against a stale/cross-account name that was
@@ -206,7 +216,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
       try {
         const { data: c, error: cErr } = await supabase
           .from('clients')
-          .select('dob, height_cm, goal, diet, avoid, mode, trainer_id, injuries, focus_areas, manual_weight_kg, manual_body_fat_pct, manual_at, meals_per_day')
+          .select('dob, height_cm, goal, diet, avoid, mode, trainer_id, injuries, focus_areas, manual_weight_kg, manual_body_fat_pct, manual_at, meals_per_day, step_goal, sleep_goal_hours')
           .eq('id', sbUid).single();
         if (cErr) { reportError('clientData.hydrate.clients', cErr); failed = true; }
         if (!cancelled && !cErr && c) {
@@ -254,6 +264,11 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
           if (r.manual_body_fat_pct != null && !Number.isNaN(Number(r.manual_body_fat_pct))) setManualBodyFat(Number(r.manual_body_fat_pct));
           if (typeof r.manual_at === 'string' && r.manual_at) setManualAt(r.manual_at);
           if (r.meals_per_day === 3 || r.meals_per_day === 4 || r.meals_per_day === 5) setMealsPerDay(r.meals_per_day);
+          // A null column is the client's real answer — "I have not set one" —
+          // so it is assigned, not skipped. Skipping it would let a stale value
+          // from the local cache survive a clearing on another device.
+          setStepGoal(r.step_goal != null && Number.isFinite(Number(r.step_goal)) ? Number(r.step_goal) : null);
+          setSleepGoalHours(r.sleep_goal_hours != null && Number.isFinite(Number(r.sleep_goal_hours)) ? Number(r.sleep_goal_hours) : null);
         }
       } catch (e) { reportError('clientData.hydrate.clients', e); failed = true; }
 
@@ -291,6 +306,8 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
               height_cm: heightCm,
               goal, diet, avoid,
               meals_per_day: mealsPerDay,
+              step_goal: stepGoal,
+              sleep_goal_hours: sleepGoalHours,
               // All four answers, whole. 'solo' used to be left out of this
               // update entirely: the constraint refused it, and that refusal
               // took the WHOLE row with it — one Postgres error and the name,
@@ -311,7 +328,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
       })();
     }, 600);
     return () => clearTimeout(timer);
-  }, [name, photo, dob, heightCm, goal, diet, avoid, mealsPerDay, coachingMode, injuries, focusAreas, manualWeight, manualBodyFat, manualAt, sbUid, hydrated, nameSynced]);
+  }, [name, photo, dob, heightCm, goal, diet, avoid, mealsPerDay, stepGoal, sleepGoalHours, coachingMode, injuries, focusAreas, manualWeight, manualBodyFat, manualAt, sbUid, hydrated, nameSynced]);
 
   // Load locally-cached InBody composition metrics (keyed by scan date).
   useEffect(() => { (async () => { try { const raw = await AsyncStorage.getItem('repple.scanMetrics'); if (raw) setScanMetrics(JSON.parse(raw)); } catch { /* ignore */ } })(); }, []);
@@ -383,6 +400,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
     removeInjury: (id) => setInjuries((p) => p.filter((i) => i.id !== id)),
     coachingMode, setCoachingMode,
     activity: 1.5, mealsPerDay, setMealsPerDay,
+    stepGoal, setStepGoal, sleepGoalHours, setSleepGoalHours,
     weightKg, bodyFatPct, muscleKg: latest ? latest.skeletalMuscleKg : null,
     setWeightKg: (v) => { setManualWeight(v); setManualAt(new Date().toISOString()); }, setBodyFat: (v) => { setManualBodyFat(v); setManualAt(new Date().toISOString()); },
     scans: sorted,
