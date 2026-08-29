@@ -46,6 +46,11 @@
 
 import type { ProgressPhoto } from './progressPhotos';
 import { PHOTO_BUCKET } from './progressPhotos';
+// The coach-side read hands its rows out through these rather than as plain
+// strings — see ./photoInbox for why a signed URL is not a photo. This import
+// is one-way on purpose: photoInbox knows nothing about the sharing rule, so
+// the rule cannot be quietly restated over there.
+import { signedLink, newestSharedFirst, type Inbox, type InboxPhoto } from './photoInbox';
 
 /**
  * How long a coach's signed URL lasts. Deliberately short: it is the window in
@@ -409,6 +414,126 @@ export async function fetchPhotosSharedWithMe(clientId: string): Promise<SharedP
     sharedAt: sharedAtByPhoto.get(r.id) ?? r.takenAt,
     url: urlByPath.get(r.path) ?? null,
   })));
+}
+
+/**
+ * COACH SIDE, for a screen that stays open. What one client has sent this
+ * coach, stamped with when that was true and with every link carrying its own
+ * death.
+ *
+ * ── WHY THIS EXISTS BESIDE fetchPhotosSharedWithMe ───────────────────────
+ * That one answers a strip inside a sheet that is opened, glanced at and
+ * dismissed, and it hands back plain `url` strings for it. This one feeds
+ * app/(trainer)/client-photos.tsx, which a coach can leave open on a desk. Over
+ * that span two things stop being true on their own: the signatures lapse, and
+ * — the one that matters — the client may take a photo back. A bare string
+ * survives both silently. So everything here is returned through
+ * src/lib/photoInbox.ts's `SignedLink`, which cannot be rendered without being
+ * asked whether it is still alive.
+ *
+ * ── THE LINK IS ASKED ABOUT EVEN WHEN THERE ARE NO GRANTS ────────────────
+ * `pps_coach_read` already requires `coaching_link_active()`, so a coach who
+ * has been let go reads zero grants — the same zero rows as a client who has
+ * sent nothing. Those are not the same fact and a coach acts differently on
+ * each, so `coaching_link_active` is called whatever the grant read returned
+ * and the answer is carried out for the screen to say. This asks the database
+ * only about a pair the caller is part of, which is what that function permits;
+ * nothing here needs or requests any access the policies do not already give.
+ *
+ * Nothing else about the rule changes: the grants are the coach's own rows,
+ * the photo rows come back only for ids those grants name, and `viewerMaySee`
+ * re-checks each one against the policy in TypeScript before it is returned.
+ *
+ * THROWS on any failed read. A coach must never be told "they have sent you
+ * nothing" on the strength of a read that did not happen.
+ */
+export async function fetchSharedInbox(clientId: string): Promise<Inbox> {
+  const sb = db();
+  const uid = await requireUid(sb);
+
+  // Stamped before the first read rather than after the last. The list is at
+  // least this old by the time it is on screen, and a stamp taken at the end
+  // would under-state its age by however long the round trips took — in the
+  // direction that delays noticing a withdrawal.
+  const readAtMs = Date.now();
+
+  const { data: grantRows, error: gErr } = await sb
+    .from('progress_photo_shares')
+    .select('photo_id, client_id, coach_id, shared_at')
+    .eq('coach_id', uid).eq('client_id', clientId);
+  if (gErr) throw gErr;
+
+  const grants: ShareGrant[] = (grantRows ?? []).map((r: any) => ({
+    photoId: r.photo_id as string,
+    clientId: r.client_id as string,
+    coachId: r.coach_id as string,
+    sharedAt: r.shared_at as string,
+  }));
+
+  const { data: live, error: lErr } = await sb
+    .rpc('coaching_link_active', { p_client: clientId, p_coach: uid });
+  if (lErr) throw lErr;
+  const linkActive = live === true;
+  const links: CoachLink[] = [{ clientId, coachId: uid, active: linkActive }];
+
+  const empty: Inbox = { clientId, coachId: uid, linkActive, photos: [], readAtMs };
+  if (grants.length === 0 || !linkActive) return empty;
+
+  // Four columns, and `weight_kg` / `body_fat_pct` are deliberately not among
+  // them. The policy grants the whole row and 47 says so out loud; that those
+  // two numbers are already visible to a linked coach elsewhere is not a reason
+  // to carry them into a screen about a photograph, where they would turn a
+  // picture somebody chose to send into a body-composition reading beside it.
+  const { data: rows, error: pErr } = await sb
+    .from('progress_photos')
+    .select('id, client_id, taken_at, image_path')
+    .in('id', grants.map((g) => g.photoId));
+  if (pErr) throw pErr;
+
+  const allowed = (rows ?? [])
+    .map((r: any) => ({
+      id: r.id as string,
+      clientId: r.client_id as string,
+      takenAt: r.taken_at as string,
+      path: r.image_path as string,
+    }))
+    .filter((r) => {
+      const may = viewerMaySee(uid, r, grants, links);
+      // Same reasoning as fetchPhotosSharedWithMe: a row the server returned
+      // that this app will not draw is a policy regression, not a normal
+      // outcome, and it has to be legible to a human somewhere.
+      if (!may) report('photoShare.refusedRow', new Error('a row came back that no grant covers'), { photoId: r.id, clientId: r.clientId });
+      return may;
+    });
+  if (allowed.length === 0) return empty;
+
+  // Taken before the request goes out: the signature's clock starts at the
+  // server, so a mint time read after the round trip would credit the link with
+  // life it does not have.
+  const mintedAtMs = Date.now();
+  const { data: signed, error: sErr } = await sb.storage
+    .from(PHOTO_BUCKET)
+    .createSignedUrls(allowed.map((r) => r.path), SHARED_URL_TTL_S);
+  if (sErr) throw sErr;
+
+  const urlByPath = new Map<string, string>();
+  for (const s of signed ?? []) {
+    if (!s.error && s.path && s.signedUrl) urlByPath.set(s.path, s.signedUrl);
+  }
+
+  const sharedAtByPhoto = new Map(grants.map((g) => [g.photoId, g.sharedAt]));
+  const photos: InboxPhoto[] = allowed.map((r) => ({
+    id: r.id,
+    path: r.path,
+    takenAt: r.takenAt,
+    // Falling back to takenAt would print a send date that nothing recorded.
+    // A grant always carries shared_at, so this only fires if the two reads
+    // disagree — in which case the screen shows a dash for the send date.
+    sharedAt: sharedAtByPhoto.get(r.id) ?? '',
+    link: signedLink(urlByPath.get(r.path) ?? null, mintedAtMs, SHARED_URL_TTL_S),
+  }));
+
+  return { clientId, coachId: uid, linkActive, photos: newestSharedFirst(photos), readAtMs };
 }
 
 /** Convenience for the client screen: the photos the coach can currently open,
