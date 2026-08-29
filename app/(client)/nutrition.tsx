@@ -573,7 +573,59 @@ export default function Nutrition() {
       </ScrollView>
 
       {/* ── recipe sheet ─────────────────────────────────────────────────── */}
-      <Modal visible={!!recipe} transparent animationType="slide" onRequestClose={() => setRecipe(null)}>
+      {/* One modal, two faces.
+          Cook mode used to be a SECOND Modal, a sibling of this one, and both
+          were visible at the same time — this one on `!!recipe`, that one on
+          `cook && !!recipe`. iOS presents a modal as a native view controller
+          and will not stack a second one from the same parent, so tapping
+          "Cook mode" did nothing at all: the recipe sheet simply stayed put.
+          Nothing threw and nothing logged, which is why it read as a dead
+          button rather than as a crash.
+
+          Switching the CONTENT of one modal is the shape that works on both
+          platforms. It also fixes the Android back button, which used to
+          dismiss the recipe sheet out from under cook mode. */}
+      <Modal
+        visible={!!recipe}
+        transparent
+        animationType="slide"
+        onRequestClose={() => { if (cook) setCook(false); else setRecipe(null); }}
+      >
+        {cook && recipe && recipe.steps.length > 0 ? (
+
+        <View style={{ flex: 1, backgroundColor: t.bg }}>
+          {recipe && recipe.steps && recipe.steps.length > 0 ? (
+            <View style={{ flex: 1, padding: sp.xl, paddingTop: 60, justifyContent: 'space-between' }}>
+              <View>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sp.xl }}>
+                  <Text style={{ ...ty.label, color: t.ink3, textTransform: 'capitalize', flex: 1 }} numberOfLines={1}>{recipe.n}</Text>
+                  <Pressable onPress={() => setCook(false)} hitSlop={10}><Text style={{ ...ty.label, fontWeight: '600', color: t.ink2 }}>Done</Text></Pressable>
+                </View>
+                <View style={{ flexDirection: 'row', gap: 5, marginBottom: sp.xxl }}>
+                  {recipe.steps.map((_, i) => (
+                    <View key={i} style={{ flex: 1, height: 3, borderRadius: 2, backgroundColor: i <= cookStep ? t.brand : t.surface3 }} />
+                  ))}
+                </View>
+                <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.md }}>Step {cookStep + 1} of {recipe.steps.length}</Text>
+                <Text style={{ ...ty.title, color: t.ink }}>{recipe.steps[cookStep]}</Text>
+              </View>
+              <View style={{ flexDirection: 'row', gap: sp.md, marginBottom: sp.xl }}>
+                <Pressable onPress={() => setCookStep((x) => Math.max(0, x - 1))} disabled={cookStep === 0}
+                  style={{ flex: 1, backgroundColor: t.surface2, borderRadius: radius.sm, paddingVertical: 11, alignItems: 'center', opacity: cookStep === 0 ? 0.4 : 1 }}>
+                  <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>Back</Text>
+                </Pressable>
+                {cookStep < recipe.steps.length - 1 ? (
+                  <View style={{ flex: 2 }}><Cta label="Next step" wide onPress={() => setCookStep((x) => x + 1)} /></View>
+                ) : (
+                  <View style={{ flex: 2 }}><Cta label="Finish" wide onPress={() => setCook(false)} /></View>
+                )}
+              </View>
+            </View>
+          ) : null}
+        </View>
+        ) : (
+          <>
+
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setRecipe(null)} />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, maxHeight: '82%', ...elevation.e2 }}>
           {recipe && (
@@ -613,40 +665,8 @@ export default function Nutrition() {
             </ScrollView>
           )}
         </View>
-      </Modal>
-
-      {/* Cook mode — one step at a time */}
-      <Modal visible={cook && !!recipe} transparent animationType="fade" onRequestClose={() => setCook(false)}>
-        <View style={{ flex: 1, backgroundColor: t.bg }}>
-          {recipe && recipe.steps && recipe.steps.length > 0 ? (
-            <View style={{ flex: 1, padding: sp.xl, paddingTop: 60, justifyContent: 'space-between' }}>
-              <View>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sp.xl }}>
-                  <Text style={{ ...ty.label, color: t.ink3, textTransform: 'capitalize', flex: 1 }} numberOfLines={1}>{recipe.n}</Text>
-                  <Pressable onPress={() => setCook(false)} hitSlop={10}><Text style={{ ...ty.label, fontWeight: '600', color: t.ink2 }}>Done</Text></Pressable>
-                </View>
-                <View style={{ flexDirection: 'row', gap: 5, marginBottom: sp.xxl }}>
-                  {recipe.steps.map((_, i) => (
-                    <View key={i} style={{ flex: 1, height: 3, borderRadius: 2, backgroundColor: i <= cookStep ? t.brand : t.surface3 }} />
-                  ))}
-                </View>
-                <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.md }}>Step {cookStep + 1} of {recipe.steps.length}</Text>
-                <Text style={{ ...ty.title, color: t.ink }}>{recipe.steps[cookStep]}</Text>
-              </View>
-              <View style={{ flexDirection: 'row', gap: sp.md, marginBottom: sp.xl }}>
-                <Pressable onPress={() => setCookStep((x) => Math.max(0, x - 1))} disabled={cookStep === 0}
-                  style={{ flex: 1, backgroundColor: t.surface2, borderRadius: radius.sm, paddingVertical: 11, alignItems: 'center', opacity: cookStep === 0 ? 0.4 : 1 }}>
-                  <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>Back</Text>
-                </Pressable>
-                {cookStep < recipe.steps.length - 1 ? (
-                  <View style={{ flex: 2 }}><Cta label="Next step" wide onPress={() => setCookStep((x) => x + 1)} /></View>
-                ) : (
-                  <View style={{ flex: 2 }}><Cta label="Finish" wide onPress={() => setCook(false)} /></View>
-                )}
-              </View>
-            </View>
-          ) : null}
-        </View>
+          </>
+        )}
       </Modal>
 
       {/* ── grocery sheet ────────────────────────────────────────────────── */}
