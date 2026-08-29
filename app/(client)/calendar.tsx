@@ -70,7 +70,6 @@ import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Hero, KpiRow, Card, ListRow, Cta, Ghost, Notice, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../../src/theme/scale';
 import { useSessions } from '../../src/ui/sessions';
-import { useCoachProfile } from '../../src/ui/coachProfile';
 import { useClientData } from '../../src/ui/clientData';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import type { TrainingSession } from '../../src/lib/types';
@@ -172,7 +171,6 @@ export default function Calendar() {
   // Still the source of the session fee and of the profile fields in the sheet
   // below, all of which come back empty for a client. It is no longer the source
   // of the coach's name or face — see the TF-32 note at the top of this file.
-  const coach = useCoachProfile();
   const peer = useThreadPeerName('client', null);
   const head = peerHeading(peer, 'coach');
   // A name, or null when there is none we may show. Every string on this screen
@@ -838,7 +836,7 @@ export default function Calendar() {
                     client cannot read either, so it was always going to be the
                     "Tap to see their profile" filler here, and a dash with no
                     explanation beside it is the thing this fix exists to avoid. */}
-                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }} numberOfLines={2}>{coachNote ?? (coach.tagline || 'Tap to see their profile')}</Text>
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }} numberOfLines={2}>{coachNote ?? 'Tap to see their profile'}</Text>
               </View>
               <Icon name="chevron" size={16} color={t.ink3} />
             </View>
@@ -948,30 +946,28 @@ export default function Calendar() {
                     the card the reader has just tapped past. The tagline keeps
                     its own line below when there is one to show. */}
                 {coachNote ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{coachNote}</Text> : null}
-                {coach.tagline ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{coach.tagline}</Text> : null}
               </View>
             </View>
-            {coach.specialties.length > 0 && (
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: sp.lg }}>
-                {coach.specialties.map((s, i) => (
-                  <View key={i} style={{ backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: 5 }}>
-                    <Text style={{ ...ty.caption, fontWeight: '500', color: t.ink2 }}>{s}</Text>
-                  </View>
-                ))}
-              </View>
-            )}
-            <Text style={{ ...ty.body, color: t.ink2, marginBottom: sp.lg }}>{coach.bio}</Text>
-            {coach.offers.length > 0 && (
-              <View style={{ marginBottom: sp.lg }}>
-                <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>What I offer</Text>
-                {coach.offers.map((o, i) => (
-                  <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginBottom: 6 }}>
-                    <Icon name="check" size={13} color={t.brand} />
-                    <Text style={{ ...ty.body, color: t.ink }}>{o}</Text>
-                  </View>
-                ))}
-              </View>
-            )}
+
+            {/* The tagline, specialties, bio and "what I offer" used to be read
+                here from the coach-profile provider. Every one of those is a
+                column on `trainers`, and a client has no row in `trainers` — so
+                on this app they were always the empty string and the empty
+                array, and this sheet rendered a coach with no bio, no
+                specialities and nothing on offer. That is the same bug as the
+                name and the photo above it, only quieter, because blank reads
+                as "they never filled it in" rather than as somebody else's
+                details.
+
+                Saying we cannot read them is the honest version until there is
+                a client-readable source. The name comes from my_coach()
+                (supabase/parts/67), which is the pattern the rest of this would
+                follow: one definer function, no arguments, answering only about
+                the caller's own coach. */}
+            <Text style={{ ...ty.body, color: t.ink3, marginBottom: sp.lg }}>
+              Your coach&rsquo;s profile — what they specialise in, how they work, what they
+              offer — isn&rsquo;t shared with this app yet. Ask them, or send them a message.
+            </Text>
             <Rule />
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', paddingTop: sp.lg }}>
               <Text style={{ ...ty.label, color: t.ink3 }}>Session rate</Text>

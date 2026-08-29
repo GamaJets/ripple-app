@@ -18,9 +18,9 @@ import * as ImagePicker from 'expo-image-picker';
 import { ensureMediaPermission } from '../../src/ui/permissions';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
-import { Rule, Section, SectionHead, Card, ListRow, QuickRow, Cta } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Card, ListRow, QuickRow, Cta, Notice } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, value } from '../../src/theme/scale';
-import { useCoachProfile } from '../../src/ui/coachProfile';
+import { useMyTrainerProfile } from '../../src/ui/coachProfile';
 
 function Field({ t, label, value: val, onChangeText, placeholder, multiline, keyboardType }: { t: Theme; label: string; value: string; onChangeText: (v: string) => void; placeholder?: string; multiline?: boolean; keyboardType?: 'default' | 'numeric' }) {
   return (
@@ -65,7 +65,7 @@ function ChipEditor({ t, items, onAdd, onRemove, value: val, setValue, placehold
 export default function CoachProfile() {
   const t = useTheme();
   const router = useRouter();
-  const p = useCoachProfile();
+  const p = useMyTrainerProfile();
   const [newOffer, setNewOffer] = useState('');
   const [newSpec, setNewSpec] = useState('');
   const initials = p.name.replace('Coach ', '').split(' ').map((x) => x[0]).join('').slice(0, 2);
@@ -141,11 +141,32 @@ export default function CoachProfile() {
 
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginTop: sp.lg, paddingTop: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
             <Text style={{ ...ty.caption, color: t.ink3 }}>Session rate</Text>
-            <Text style={{ ...value(20), color: t.ink }}>${p.sessionFee}<Text style={{ ...ty.caption, color: t.ink3 }}> / session</Text></Text>
+            {/* Null is "not set", and 0 is a rate somebody may genuinely charge.
+                They used to be the same value, so an unset rate rendered as a
+                confident "$0 / session" on the coach's own profile — and on the
+                client's calendar as a "$0 late fee". */}
+            {p.sessionFee == null
+              ? <Text style={{ ...ty.body, color: t.ink3 }}>— no rate set</Text>
+              : <Text style={{ ...value(20), color: t.ink }}>${p.sessionFee}<Text style={{ ...ty.caption, color: t.ink3 }}> / session</Text></Text>}
           </View>
         </Card>
 
         <Rule />
+
+        {/* Everything below this line writes to the signed-in user's own
+            `profiles` and `trainers` rows, and the provider refuses to answer —
+            and to write — when it cannot establish that those rows are really
+            theirs. A form that accepts what a coach types and silently drops it
+            is worse than one that is not offered, so when the profile could not
+            be read the editor is withheld and the reason is stated. Account and
+            sign-out sit below this branch and stay reachable. */}
+        {p.access !== 'ok' ? (
+          <Section>
+            <Notice tone={t.warn} kicker="Profile" title="Your profile could not be opened for editing"
+              note={p.accessNote ?? 'We could not confirm this is your own coaching profile, so nothing typed here would be stored.'} />
+          </Section>
+        ) : (
+        <>
 
         {/* ── photo ──────────────────────────────────────────────────────── */}
         <Section>
@@ -181,7 +202,24 @@ export default function CoachProfile() {
 
         <Section>
           <SectionHead title="Session rate" />
-          <Field t={t} label="Session Rate ($)" value={String(p.sessionFee)} onChangeText={(v) => p.setSessionFee(parseInt(v.replace(/[^0-9]/g, ''), 10) || 0)} placeholder="75" keyboardType="numeric" />
+          {/* `String(p.sessionFee)` literally rendered the text "null" into the
+              box. And `|| 0` meant clearing the field set a real rate of zero
+              rather than clearing it, so a coach could not un-set a rate once
+              they had typed one. */}
+          <Field t={t} label="Session Rate ($)"
+            value={p.sessionFee == null ? '' : String(p.sessionFee)}
+            onChangeText={(v) => {
+              const digits = v.replace(/[^0-9]/g, '');
+              const n = parseInt(digits, 10);
+              p.setSessionFee(digits === '' || !Number.isFinite(n) ? null : n);
+            }}
+            placeholder="75" keyboardType="numeric" />
+          {p.sessionFee == null ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+              Leave this empty and nothing quotes a rate for you — your figures show a dash
+              rather than a zero.
+            </Text>
+          ) : null}
         </Section>
 
         <Rule />
@@ -212,6 +250,9 @@ export default function CoachProfile() {
             </View>
           </Pressable>
         </Section>
+
+        </>
+        )}
 
         <Rule />
 

@@ -30,6 +30,8 @@ import { USE_SUPABASE } from '../lib/config';
 import type { LoadStatus } from './loadStatus';
 import { capLimit, capped } from '../lib/rowCap';
 import { useAuthRevision } from './authRevision';
+import { endCoaching } from '../lib/endCoaching';
+import { reportError } from '../lib/reportError';
 
 let SEQ = 900;
 const MODE_KEY = 'repple.clientModes';
@@ -45,8 +47,17 @@ interface RosterValue {
   /** Resolves true only when the client row reached `coach_clients` and will
    *  survive a relaunch. False means it exists on this phone only. */
   addClient: (name: string, goal: string, mode?: CoachedMode) => Promise<boolean>;
-  /** Resolves true only when the row was actually deleted on the server. A
-   *  refused delete leaves the client on the roster after the next launch. */
+  /** Take somebody off the book. The id names a row in one of two different
+   *  tables and the two mean different things — a manually-added
+   *  `coach_clients` row is a note the coach wrote, and is deleted; a linked
+   *  client is a real account with a real person behind it, and the coaching
+   *  relationship is ENDED rather than the person erased. See the comment on
+   *  the implementation.
+   *
+   *  Resolves true only when the server confirmed one of those two. A refused
+   *  removal resolves false AND puts the client back on the roster, because a
+   *  roster that quietly drops somebody the server still has is the same lie
+   *  this file's header is about. */
   removeClient: (id: string) => Promise<boolean>;
   /** Resolves true only when the classification was stored server-side. It is
    *  always kept on this device, so false means "this phone only", not "lost". */
@@ -270,15 +281,67 @@ export function RosterProvider({ children }: { children: ReactNode }) {
       return true;
     } catch { return false; }
   };
+  // ── Removing a client, and the two records that word covers ────────────────
+  //
+  // This used to delete a `coach_clients` row and return true. `coach_clients`
+  // is the MANUALLY-ADDED client table — a name and a goal the coach typed, with
+  // no account behind it — and a client who signed up and linked has no row in
+  // it at all. So for every real client the delete matched nothing, succeeded
+  // (PostgREST does not error on a delete that hits no rows), and returned true.
+  // The coach watched somebody leave the roster, and found them back on it at
+  // the next launch with every workout, scan, measurement and message still
+  // open to them. Nothing in this product could end a coaching relationship.
+  //
+  // Now there are two paths, because there are two records:
+  //
+  //   · a manually-added client IS the coach_clients row. Deleting it is the
+  //     whole removal, and `.select('id')` makes the delete report which rows it
+  //     took — the only way to tell "removed" from "matched nothing".
+  //   · a linked client is a real person. They are not deleted; the RELATIONSHIP
+  //     is ended, by `end_coaching()` (68-end-coaching.sql), which writes both
+  //     halves of the link — coaching_relationships.status and
+  //     clients.trainer_id — or neither. The client keeps their account and
+  //     every row in it; the coach keeps the sessions they delivered.
+  //
+  // The id alone does not say which table it belongs to — both are uuids — so
+  // this asks rather than guesses: delete first, and if nothing was deleted the
+  // id was not a manual client, so try the relationship. `end_coaching()`
+  // returning false is that same question answered from the other side ("no
+  // record of a link with this person"), which is why neither call may be
+  // treated as a success by default.
   const removeClient = async (id: string): Promise<boolean> => {
+    // Where they were, so a removal the server refuses can be undone rather
+    // than leaving a real client invisible until the app is relaunched.
+    const at = roster.findIndex((c) => c.id === id);
+    const removed = at >= 0 ? roster[at] : null;
+    const putBack = () => {
+      if (!removed) return;
+      setRoster((p) => (p.some((c) => c.id === id) ? p : [...p.slice(0, at), removed, ...p.slice(at)]));
+    };
     setRoster((p) => p.filter((c) => c.id !== id));
     // A local id (no dashes) never reached the server, so removing it locally is
     // the whole of the removal and genuinely succeeded.
     if (!USE_SUPABASE || !id.includes('-')) return true;
+
+    // A failure here is NOT the end of the attempt: `coach_clients` is a table
+    // a fresh deployment may not have yet (see the loader above), and a linked
+    // client would then never get as far as the relationship. Remember it, so
+    // the reason survives if the second path also comes up empty.
+    let manualErr: unknown = null;
     try {
-      const { error } = await supabase.from('coach_clients').delete().eq('id', id);
-      return !error;
-    } catch { return false; }
+      const { data, error } = await supabase.from('coach_clients').delete().eq('id', id).select('id');
+      if (error) manualErr = error;
+      else if (data && data.length) return true;
+    } catch (e) { manualErr = e; }
+    if (manualErr) reportError('roster.removeClient.manual', manualErr, { id });
+
+    const ended = await endCoaching(id);
+    if (ended.ok && ended.ended) return true;
+    if (!ended.ok) reportError('roster.removeClient.end', new Error(ended.reason), { id });
+    // Neither table had anything to remove, or the server refused. Either way
+    // nothing was written, so the roster must not go on showing them as gone.
+    putBack();
+    return false;
   };
   const setClientMode = async (id: string, mode: CoachedMode): Promise<boolean> => {
     rememberMode(id, mode);

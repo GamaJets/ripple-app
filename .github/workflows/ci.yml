@@ -85,6 +85,17 @@ jobs:
       - name: Console imports nothing phone-only
         run: npm run check:portal
 
+      # The trainer-profile provider loads the SIGNED-IN user's own rows. Read
+      # from a client screen it returns the reader — which is how a client came
+      # to see their own name and their own face under "Your coach", their own
+      # name written permanently into their real calendar by an ICS export, and
+      # their own name interpolated into a push notification delivered to other
+      # people. The provider refuses to answer off the coach build now; this is
+      # what stops the next person importing it and reasonably assuming it names
+      # a client's coach.
+      - name: Trainer profile is not read where it cannot answer
+        run: npm run check:trainer-profile
+
       # Both directions of schema drift. PostgREST rejects the WHOLE statement
       # for one unknown column, so a column the app writes and the database
       # lacks loses every other field on the row too — silently, inside a

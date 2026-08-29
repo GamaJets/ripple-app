@@ -31,6 +31,11 @@ import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
 import { COACHED_MODES, COACHED_MODE_SHORT, COACHING_MODE_NOTE, type CoachedMode } from '../../src/lib/types';
+// Who coaches you, asked the way the database asks it — BOTH links, so this
+// screen and the photo-sharing screen can never disagree about whether somebody
+// is your coach.
+import { fetchMyCoach, type CoachRef } from '../../src/lib/photoShare';
+import { endCoaching, leaveCoachPrompt, leaveOutcome, coachLabel } from '../../src/lib/endCoaching';
 
 interface Coach {
   id: string;
@@ -66,6 +71,22 @@ export default function FindTrainer() {
   // A code the coach hands over depends on neither.
   const [code, setCode] = useState('');
   const [codeBusy, setCodeBusy] = useState(false);
+  // ── The way out ────────────────────────────────────────────────────────────
+  //
+  // This screen has always been able to START a coaching relationship — an
+  // invitation, a code, a directory request — and until now nothing anywhere in
+  // the product could end one. A client who wanted to leave had no way to, and
+  // their coach kept reading every workout, scan, measurement, check-in and
+  // message indefinitely. It belongs here because this is where every other
+  // transition of the relationship already lives.
+  //
+  // Three states again, and for the same reason as the directory below: `coach
+  // === null` must mean "nobody coaches you", never "we could not find out".
+  // Getting that wrong here would hide the Leave control from somebody who is
+  // being coached and wants out, which is the worst direction to fail in.
+  const [coach, setCoach] = useState<CoachRef | null>(null);
+  const [coachStatus, setCoachStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [leaving, setLeaving] = useState(false);
 
   const submitCode = async () => {
     if (codeBusy || !isPlausibleCode(code)) return;
@@ -89,6 +110,76 @@ export default function FindTrainer() {
         : r.trainerName + ' sees your request in their app and adds you once they accept. Not who you expected? Check the code with them before they do.',
       [{ text: 'OK' }],
     );
+  };
+
+  // Who coaches you. A separate effect from the directory below because the two
+  // answers are independent: the directory failing must not hide your own coach,
+  // and not knowing your coach must not empty the directory.
+  //
+  // `fetchMyCoach()` THROWS on a read failure rather than returning null, which
+  // is the whole reason it can be trusted here — "you have no coach" is a real
+  // state with a real screen behind it and must never be manufactured out of a
+  // refused query.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!USE_SUPABASE) { setCoachStatus('ready'); return; }
+      setCoachStatus('loading');
+      try {
+        // Signed out is a true answer, not a failed check — and fetchMyCoach()
+        // throws when there is no session, which would land in the catch below
+        // and report an error to somebody who is simply not signed in.
+        const { data: sess } = await supabase.auth.getSession();
+        if (cancelled) return;
+        if (!sess?.session) { setCoach(null); setCoachStatus('ready'); return; }
+        const mine = await fetchMyCoach();
+        if (cancelled) return;
+        setCoach(mine);
+        setCoachStatus('ready');
+      } catch (e) {
+        reportError('findTrainer.myCoach', e);
+        if (!cancelled) setCoachStatus('error');
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [attempt]);
+
+  // Ask first, in plain words about what actually changes. The copy is built in
+  // src/lib/endCoaching.ts and asserted on in endCoaching.test.ts rather than
+  // written inline, because the sentence that must never appear — "you have
+  // left" over a call the server refused — is not something a screen can be
+  // trusted to keep out of itself.
+  const confirmLeave = () => {
+    if (!coach || leaving) return;
+    const p = leaveCoachPrompt(coach.name);
+    Alert.alert(p.title, p.body, [
+      { text: p.cancelLabel, style: 'cancel' },
+      { text: p.confirmLabel, style: 'destructive', onPress: () => { void leaveCoach(); } },
+    ]);
+  };
+
+  const leaveCoach = async () => {
+    if (!coach) return;
+    setLeaving(true);
+    const result = await endCoaching(coach.id);
+    setLeaving(false);
+    // Nothing on this screen changes until the server has said what happened.
+    // `ok` covers both true outcomes — the link was ended, or there was never
+    // one to end — and in both the server is certain there is no live link, so
+    // the coach comes off the screen. A refusal changes nothing at all.
+    if (result.ok) {
+      setCoach(null);
+      // Their own answer to how they are coached, kept in step. It was set when
+      // they accepted an invitation (`acceptCoach` below); leaving is the same
+      // fact in reverse, and without this the AI coach would go on being told
+      // there is somebody in the room for their booked sessions.
+      cd.setCoachingMode('solo');
+      // Re-read the pending-request list: leaving does not create one, but the
+      // screen below is now the screen of somebody looking for a coach.
+      setAttempt((n) => n + 1);
+    }
+    const said = leaveOutcome(result, coach.name);
+    Alert.alert(said.title, said.body, [{ text: 'OK' }]);
   };
 
   const acceptCoach = async (id: string, coachName: string | null, mode: string) => {
@@ -233,6 +324,54 @@ export default function FindTrainer() {
           </View>
           <Ghost icon="back" onPress={() => router.back()} />
         </View>
+
+        {/* ── your coach, and the way out ─────────────────────────────────
+            Above the invitations and the directory because it is the fact the
+            rest of this screen is relative to: what a client can usefully do
+            here depends on whether somebody is already coaching them. */}
+        {coachStatus === 'loading' ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, paddingTop: sp.lg }}>
+            <ActivityIndicator color={t.brand} size="small" />
+            <Text style={{ ...ty.caption, color: t.ink3 }}>Checking who coaches you…</Text>
+          </View>
+        ) : coachStatus === 'error' ? (
+          <View style={{ marginTop: sp.lg }}>
+            {/* Not "you have no coach". The read failed, and a client who IS
+                being coached must not read this as confirmation that nobody
+                is — that is the state in which they would stop asking to
+                leave. */}
+            <Notice tone={t.warn} kicker="Your coach" title="We couldn’t check who coaches you"
+              note="This is our end, not an answer about you. Until it loads we can’t show you your coach or let you leave them, so don’t read this as nobody coaching you.">
+              <View style={{ marginTop: sp.lg }}>
+                <Cta label="Try again" wide onPress={() => setAttempt((n) => n + 1)} />
+              </View>
+            </Notice>
+          </View>
+        ) : coach ? (
+          <Section>
+            <SectionHead title="Your coach" />
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+              <View style={{ width: 34, height: 34, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+                {/* A coach who has not set a name is a real state — part 67
+                    returns a row with a null name for exactly that — and a dash
+                    is what the record supports. Never a placeholder that reads
+                    like a name. */}
+                <Text style={{ ...value(13), color: t.brand }}>{coach.name?.trim() ? initials(coach.name) : '—'}</Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{coach.name?.trim() || '—'}</Text>
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                  Sees your workouts, measurements, check-ins, scans and anything you send them.
+                </Text>
+              </View>
+            </View>
+            <View style={{ marginTop: sp.lg }}>
+              {/* Ghost rather than a brand Cta: leaving is not the action this
+                  screen is encouraging, and it asks before it does anything. */}
+              <Ghost label={leaving ? 'Leaving…' : `Leave ${coachLabel(coach.name)}`} onPress={confirmLeave} />
+            </View>
+          </Section>
+        ) : null}
 
         {/* ── invitations: the one thing that needs a decision ────────────── */}
         {received.length > 0 ? (

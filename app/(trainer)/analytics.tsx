@@ -15,7 +15,7 @@ import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Card, Cta, Ghost, Spark, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
-import { useCoachProfile } from '../../src/ui/coachProfile';
+import { useMyTrainerProfile } from '../../src/ui/coachProfile';
 import { atRiskClient } from '../../src/lib/trainerMock';
 import { STATUS_LABEL } from '../../src/lib/status';
 import { useRoster } from '../../src/ui/roster';
@@ -29,7 +29,7 @@ export default function TrainerAnalytics() {
   const t = useTheme();
   const router = useRouter();
   const { roster } = useRoster();
-  const { sessionFee } = useCoachProfile();
+  const { sessionFee } = useMyTrainerProfile();
   const { sessions } = useSessions();
   const atRisk = roster.filter(atRiskClient);
   const clients = roster.length;
@@ -50,10 +50,14 @@ export default function TrainerAnalytics() {
   // subtracted here is gone: nothing charges it, and billing.tsx reports that
   // billing is not switched on while this screen called them a paying Pro
   // customer.
-  const revenue = sessionsMo * sessionFee;
+  // Null, not 0, when no rate is known — the same rule as `valuePerClient`
+  // below, now enforced by the type rather than by remembering to write
+  // `sessionFee > 0`. `sessionFee` used to be a number starting at 0, so every
+  // figure derived from it was silently zero until the profile loaded.
+  const revenue = sessionFee == null ? null : sessionsMo * sessionFee;
   // Null, not 0, with no clients: an average over nobody is undefined, and
   // "$0 / client" reads as a fact about a coaching business that has none.
-  const valuePerClient = clients ? Math.round(revenue / clients) : null;
+  const valuePerClient = revenue != null && clients ? Math.round(revenue / clients) : null;
   // Average over clients who have actually checked in. Averaging a null-as-100
   // default meant a roster of strangers reported 100% adherence.
   const _adhKnown = roster.map((c) => c.adherence).filter((a): a is number => a != null);
@@ -67,7 +71,8 @@ export default function TrainerAnalytics() {
   // Sessions those clients actually took this month, at the trainer's rate -
   // not `at-risk count x rate x 4`, which invented a subscription nobody pays.
   const _atRiskIds = new Set(atRisk.map((c) => c.id));
-  const atRiskRevenue = _deliveredMo.filter((sx) => sx.clientId && _atRiskIds.has(sx.clientId)).length * sessionFee;
+  const _atRiskSessions = _deliveredMo.filter((sx) => sx.clientId && _atRiskIds.has(sx.clientId)).length;
+  const atRiskRevenue = sessionFee == null ? null : _atRiskSessions * sessionFee;
   const { goals, setGoals } = useTrainerGoals();
   const [goalOpen, setGoalOpen] = useState(false);
   const [gRev, setGRev] = useState('');
@@ -76,12 +81,22 @@ export default function TrainerAnalytics() {
   const [digestBusy, setDigestBusy] = useState(false);
   const genDigest = async () => {
     setDigestBusy(true); setDigest('');
-    const ctx = { sessionsDeliveredThisMonth: sessionsMo, revenueAtOwnRateUsd: revenue, clients, avgAdherence: _adhKnown.length ? avgAdh + '%' : 'no check-ins yet', atRiskClients: atRisk.length, onTrack, watch, atRiskLow: riskCount };
+    // The model is told the rate is unset rather than handed a number, because
+    // a null arriving as 0 would come back as a paragraph about a coach who
+    // earned nothing this month.
+    const ctx = { sessionsDeliveredThisMonth: sessionsMo, revenueAtOwnRateUsd: revenue ?? 'unknown — no session rate set', clients, avgAdherence: _adhKnown.length ? avgAdh + '%' : 'no check-ins yet', atRiskClients: atRisk.length, onTrack, watch, atRiskLow: riskCount };
     const reply = await askCoach([{ role: 'user', content: 'You are my fitness-coaching business assistant. Write a short Monday digest (3-4 sentences) from these numbers (revenueAtOwnRateUsd is sessions delivered multiplied by the coach own session rate, in US dollars): one line on revenue and clients, one on roster health (on-track vs at-risk), and one concrete action to grow or retain. Encouraging and specific.' }], ctx);
     setDigestBusy(false);
     setDigest(reply || 'Could not generate the digest right now — the AI backend may be unavailable.');
   };
   const revHist = useMonthlyHistory('repple.trainer.revHistory', revenue);
+  // Only the targets that have both a number to aim at and a number reached so
+  // far. A revenue goal with no session rate has the first and not the second,
+  // and is spoken to separately below rather than drawn as a bar at zero.
+  const goalRows = ([
+    { label: 'Monthly revenue', cur: revenue, goal: goals.revenue, money: true },
+    { label: 'Active clients', cur: clients, goal: goals.clients, money: false },
+  ] as const).filter((g): g is typeof g & { cur: number } => g.goal > 0 && g.cur != null);
   const G = layout.gutter;
 
   return (
@@ -106,10 +121,10 @@ export default function TrainerAnalytics() {
           label="Sessions delivered"
           figure={fig(sessionsMo)}
           unit={sessionsMo === 1 ? 'this month' : 'this month'}
-          note={sessionFee > 0
+          note={revenue != null && sessionFee != null
             ? `$${revenue.toLocaleString()} at your $${sessionFee} session rate — Repple does not process this, so it is your own arithmetic, not a payout.`
             : 'Set a session rate in your profile to see what that is worth.'}
-          arc={goals.revenue > 0 ? goalPct(revenue, goals.revenue) : undefined}
+          arc={revenue != null && goals.revenue > 0 ? goalPct(revenue, goals.revenue) : undefined}
           onPress={() => router.push('/(trainer)/payments')}
         />
 
@@ -131,20 +146,23 @@ export default function TrainerAnalytics() {
         <Section>
           <SectionHead title="Your goals" note="Edit"
             onPress={() => { setGRev(String(goals.revenue)); setGCli(String(goals.clients)); setGoalOpen(true); }} />
-          {[
-            { label: 'Monthly revenue', cur: revenue, goal: goals.revenue, money: true },
-            { label: 'Active clients', cur: clients, goal: goals.clients, money: false },
-          ].filter((g) => g.goal > 0).length === 0 ? (
+          {goals.revenue <= 0 && goals.clients <= 0 ? (
             // Was a heading with nothing under it. A section that renders
             // empty looks broken; this one is simply not set up yet.
             <Text style={{ ...ty.label, color: t.ink3 }}>
               No targets set. Tap Edit to give yourself a monthly revenue or client number to work towards.
             </Text>
           ) : null}
-          {[
-            { label: 'Monthly revenue', cur: revenue, goal: goals.revenue, money: true },
-            { label: 'Active clients', cur: clients, goal: goals.clients, money: false },
-          ].filter((g) => g.goal > 0).map((g) => {
+          {/* A revenue target set with no session rate has a goal but no
+              progress, and drawing that bar at 0% would tell a coach who has
+              delivered a full month of sessions that they are nowhere. The bar
+              is withheld and the reason is given instead. */}
+          {goals.revenue > 0 && revenue == null ? (
+            <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>
+              Monthly revenue target ${goals.revenue.toLocaleString()} — progress needs a session rate in your profile.
+            </Text>
+          ) : null}
+          {goalRows.map((g) => {
             const pc = goalPct(g.cur, g.goal);
             const hit = pc >= 1;
             return (
@@ -178,9 +196,16 @@ export default function TrainerAnalytics() {
               </View>
               <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                 <View style={{ flex: 1 }}>
-                  <Text style={{ ...value(26), color: t.ink }}>~${atRiskRevenue.toLocaleString()}<Text style={{ ...ty.caption, color: t.ink3 }}>/mo</Text></Text>
+                  {/* A dash, not ~$0. The figure is these clients' delivered
+                      sessions priced at the coach's own rate, so with no rate
+                      set there is no figure — and "~$0/mo at risk" is the one
+                      reading that would make this card safe to ignore. */}
+                  <Text style={{ ...value(26), color: t.ink }}>
+                    {atRiskRevenue == null ? '—' : <>~${atRiskRevenue.toLocaleString()}<Text style={{ ...ty.caption, color: t.ink3 }}>/mo</Text></>}
+                  </Text>
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
                     {atRisk.length} client{atRisk.length > 1 ? 's' : ''} slipping — check in before they churn.
+                    {atRiskRevenue == null ? ' Set a session rate in your profile to see what that is worth.' : ''}
                   </Text>
                 </View>
                 <Cta label="Review" onPress={() => router.push('/(trainer)/dashboard')} />
@@ -279,7 +304,9 @@ export default function TrainerAnalytics() {
           <ListRow icon="chart" title="Payments"
             onPress={() => router.push('/(trainer)/payments')} />
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-            Every new client at ${sessionFee}/session adds about ${(sessionFee * 4).toLocaleString()}/mo.
+            {sessionFee == null
+              ? 'Set a session rate in your profile to see what a new client is worth.'
+              : `Every new client at $${sessionFee}/session adds about $${(sessionFee * 4).toLocaleString()}/mo.`}
           </Text>
         </Section>
 

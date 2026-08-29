@@ -19,7 +19,7 @@ import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { Rule, Section, SectionHead, Hero, ListRow, Cta, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, radius, elevation, type as ty, numeric } from '../../src/theme/scale';
-import { useCoachProfile } from '../../src/ui/coachProfile';
+import { useMyTrainerProfile } from '../../src/ui/coachProfile';
 import { cancelSession } from '../../src/lib/booking';
 import { useSessions } from '../../src/ui/sessions';
 import { useAvailability, upcomingDates } from '../../src/ui/availability';
@@ -61,7 +61,7 @@ export default function TrainerSchedule() {
   const router = useRouter();
   const { sessions, addSession, releaseSession, removeSession } = useSessions();
   const { roster } = useRoster();
-  const { sessionFee } = useCoachProfile();
+  const { sessionFee } = useMyTrainerProfile();
   const nameOf = (id: string | null) => roster.find((c) => c.id === id)?.name ?? 'Open slot';
   const [viewYear, setViewYear] = useState(now.getFullYear());
   const [viewMonth, setViewMonth] = useState(now.getMonth());
@@ -136,7 +136,12 @@ export default function TrainerSchedule() {
 
   function doCancel(s: TrainingSession) {
     const others = roster.filter((c) => c.id !== s.clientId).map((c) => c.name);
-    const res = cancelSession(s, sessionFee, roster.map((c) => c.id));
+    // `cancelSession` prices the late-cancel from a plain number, so a rate that
+    // is not known is passed as 0 and the resulting `feeAmount` is not printed —
+    // the sentence below drops out entirely. Quoting "$0" here would be the same
+    // fabrication the client app was making: a figure about money, on the screen
+    // where somebody decides whether a cancellation costs anything.
+    const res = cancelSession(s, sessionFee ?? 0, roster.map((c) => c.id));
     releaseSession(s.id);
     if (s.clientId) sendPush([s.clientId], 'Session cancelled', `Your ${timeLabel(s.startsAt)} session on ${DOW[new Date(s.startsAt).getDay()]} was cancelled.`, { route: '/(client)/calendar' });
     const _openTo = roster.filter((c) => c.id !== s.clientId).map((c) => c.id);
@@ -146,8 +151,14 @@ export default function TrainerSchedule() {
       `${timeLabel(s.startsAt)} with ${nameOf(s.clientId)} was cancelled.\n\n` +
       `${nameOf(s.clientId)} was sent a notification. The slot is open again and ${others.length} other client${others.length === 1 ? '' : 's'} can book it (${others.slice(0, 3).join(', ')}${others.length > 3 ? '…' : ''}) — first to book takes it.` +
       // Repple does not charge anything. This used to say the fee "applies",
-      // which described a charge that no code anywhere makes.
-      (res.charged ? `\n\nInside 24h — your ${sessionFee} late-cancel policy would apply. Repple does not charge it; settle it with the client yourself.` : ''),
+      // which described a charge that no code anywhere makes. It also printed
+      // the rate with no dollar sign in front of it, and printed it whatever it
+      // was — including the 0 that stood in for "not loaded".
+      (res.charged
+        ? (sessionFee == null
+          ? '\n\nInside 24h — your late-cancel policy would apply. Repple does not charge it; settle it with the client yourself.'
+          : `\n\nInside 24h — your $${sessionFee} late-cancel policy would apply. Repple does not charge it; settle it with the client yourself.`)
+        : ''),
       [{ text: 'Done' }]
     );
   }

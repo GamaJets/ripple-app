@@ -42,7 +42,7 @@ import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Card, Cta, Ghost, Notice, fig, Flag as KitFlag } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../../src/theme/scale';
-import { useCoachProfile } from '../../src/ui/coachProfile';
+import { useMyTrainerProfile } from '../../src/ui/coachProfile';
 import { CoachRequests } from '../../src/ui/CoachRequests';
 import { atRiskClient } from '../../src/lib/trainerMock';
 import { METRIC_DEFS, METRIC_GROUPS } from '../../src/lib/inbodyMetrics';
@@ -290,7 +290,7 @@ export default function TrainerClients() {
   const driftFor = (c: RosterClient): Drift | null => (drift ? drift[c.id] ?? null : null);
   const bands = summariseDrift(drift ? roster.map((c) => drift[c.id]).filter((d): d is Drift => !!d) : null);
 
-  const { sessionFee, name: coachName } = useCoachProfile();
+  const { sessionFee, name: coachName } = useMyTrainerProfile();
   const { getFeedback, addFeedback } = useCoachFeedback();
   const { get: getNutri, setAdjust: setNutri, clear: clearNutri } = useCoachNutrition();
   const [mealPick, setMealPick] = useState<{ pos: number; slot: Slot } | null>(null);
@@ -394,7 +394,11 @@ export default function TrainerClients() {
     return () => { cancelled = true; };
   }, [sel]);
   const active = roster.length;
-  const revenue = active * sessionFee * 4;
+  // Null when no session rate is known, and null all the way to the render. The
+  // rate used to be a number that started at 0, so an estimate of "$0/mo"
+  // arrived looking like arithmetic somebody had done rather than a rate nobody
+  // had ever set — see src/lib/trainerProfileAccess.ts.
+  const revenue = sessionFee == null ? null : active * sessionFee * 4;
   const unread = roster.reduce((a, c) => a + c.unread, 0);
   // The legacy signal, kept only for the render where the drift read has not
   // landed. It cannot see the client this whole feature is about: with
@@ -636,7 +640,7 @@ export default function TrainerClients() {
             // A dash, not $0, when no session rate is set: the estimate is
             // unknowable rather than nil, and "$0/mo" reads as a fact about the
             // business. Same rule as the "To contact" figure beside it.
-            { label: 'Est. revenue', value: sessionFee > 0 ? '$' + revenue.toLocaleString() : '—', unit: sessionFee > 0 ? '/mo' : undefined },
+            { label: 'Est. revenue', value: revenue == null ? '—' : '$' + revenue.toLocaleString(), unit: revenue == null ? undefined : '/mo' },
             { label: 'Unread', value: fig(unread) },
             // Null until the record has been read: an em-dash, never a zero
             // that would tell a coach nobody needs them this week.
@@ -645,7 +649,9 @@ export default function TrainerClients() {
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
             {active === 0
               ? 'Revenue estimates once you have clients and a session rate.'
-              : `${active} client${active > 1 ? 's' : ''} × 4 sessions × $${sessionFee}.`}
+              : sessionFee == null
+                ? `${active} client${active > 1 ? 's' : ''} × 4 sessions — set a session rate in your profile to price it.`
+                : `${active} client${active > 1 ? 's' : ''} × 4 sessions × $${sessionFee}.`}
           </Text>
         </Section>
 

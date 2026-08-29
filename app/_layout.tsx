@@ -7,7 +7,7 @@ import { ClientDataProvider } from '../src/ui/clientData';
 import { WearablesProvider } from '../src/ui/wearables';
 import { SessionsProvider } from '../src/ui/sessions';
 import { WorkoutLogProvider } from '../src/ui/workoutLog';
-import { CoachProfileProvider } from '../src/ui/coachProfile';
+import { MyTrainerProfileProvider } from '../src/ui/coachProfile';
 import { RosterProvider } from '../src/ui/roster';
 import { AssignedProgramsProvider } from '../src/ui/assignedPrograms';
 import { CoachFeedbackProvider } from '../src/ui/feedback';
@@ -105,7 +105,7 @@ export default function RootLayout() {
           <WearablesProvider>
             <SessionsProvider>
               <WorkoutLogProvider>
-                <CoachProfileProvider>
+                <MyTrainerProfileProvider>
                   <RosterProvider>
                     <AssignedProgramsProvider>
                     <CoachFeedbackProvider>
@@ -153,7 +153,7 @@ export default function RootLayout() {
                     </CoachFeedbackProvider>
                     </AssignedProgramsProvider>
                   </RosterProvider>
-                </CoachProfileProvider>
+                </MyTrainerProfileProvider>
               </WorkoutLogProvider>
             </SessionsProvider>
           </WearablesProvider>
