@@ -2,6 +2,7 @@
 // Ported verbatim from the validated prototype. Pure functions — no I/O,
 // trivially unit-testable, identical on client and server.
 import type { BodyStats, Macros, Goal, Diet } from './types';
+import { planKcal, type EnergyPlan } from './goalEnergy';
 
 export const GOAL_ADJ: Record<Goal, number> = {
   fatloss: -0.20,
@@ -9,14 +10,62 @@ export const GOAL_ADJ: Record<Goal, number> = {
   muscle: +0.12,
 };
 
-/** Katch–McArdle BMR from lean body mass, goal-adjusted TDEE, macro split. */
-export function macrosFor(s: BodyStats): Macros {
+/**
+ * Grams of protein per kg of lean mass held in a deficit, whatever the client
+ * calls their goal.
+ *
+ * The same 2.2 the 'fatloss' enum already used, promoted to a floor. See the
+ * note in macrosFor: a 'tone' client whose target date puts them in a real
+ * deficit was being fed 1.8, which is the number for somebody who is not
+ * dieting.
+ */
+export const DEFICIT_PROTEIN_PER_KG_LBM = 2.2;
+
+/**
+ * Katch–McArdle: lean mass, resting burn, and maintenance calories.
+ *
+ * Split out of macrosFor because the goal-driven target in ./goalEnergy.ts has
+ * to know maintenance before it can decide how far below it to sit, and a
+ * second copy of this formula living there would be one more place for the two
+ * to drift apart.
+ */
+export function maintenanceFor(s: Pick<BodyStats, 'weightKg' | 'bodyFatPct' | 'activity'>): { lbm: number; bmr: number; tdee: number } {
   const lbm = s.weightKg * (1 - s.bodyFatPct / 100);
   const bmr = 370 + 21.6 * lbm;
-  const tdee = bmr * s.activity;
-  const kcal = Math.round((tdee * (1 + GOAL_ADJ[s.goal])) / 10) * 10;
+  return { lbm, bmr, tdee: bmr * s.activity };
+}
 
-  const proteinPerKg = s.goal === 'muscle' ? 2.0 : s.goal === 'fatloss' ? 2.2 : 1.8;
+/**
+ * Katch–McArdle BMR from lean body mass, goal-adjusted TDEE, macro split.
+ *
+ * `energyPlan` is TF-29. Without it — and with an 'enum' plan, which is what
+ * ./goalEnergy.ts returns when the client has no target, no date or no
+ * readings — every number below is exactly what it has always been. The goal
+ * enum is a three-way switch with no date in it, so it gave a client aiming to
+ * lose 6 kg in twelve weeks and one aiming to lose 6 kg in forty the identical
+ * target; a derived plan replaces the multiplier with the rate their own date
+ * implies, already clamped to something safe by the time it arrives here.
+ *
+ * It is an optional property on the stats object rather than a second argument
+ * so that it survives the trip through `buildPlan` in ./meals.ts, which passes
+ * its input straight down — otherwise the meal plan and the target it is
+ * scaled to would have been built from two different calorie figures.
+ */
+export function macrosFor(s: BodyStats & { energyPlan?: EnergyPlan | null }): Macros {
+  const { lbm, bmr, tdee } = maintenanceFor(s);
+  const plan = s.energyPlan && s.energyPlan.kind === 'derived' ? s.energyPlan : null;
+  const kcal = plan
+    ? planKcal(tdee, plan.plannedRateKg).kcal
+    : Math.round((tdee * (1 + GOAL_ADJ[s.goal])) / 10) * 10;
+
+  // Protein is per kg of LEAN mass, so it never moved with calories — but the
+  // goal it is chosen by did, and that was the hole. A client whose stated goal
+  // is 'tone' (1.8 g/kg) but whose target weight and date put them in a genuine
+  // deficit needs the deficit figure: protein is what decides whether the
+  // weight coming off is fat or the muscle the whole plan is meant to keep.
+  // Raising it here can never lower the number, only hold it up.
+  const enumPerKg = s.goal === 'muscle' ? 2.0 : s.goal === 'fatloss' ? 2.2 : 1.8;
+  const proteinPerKg = plan && plan.kcalDelta < 0 ? Math.max(enumPerKg, DEFICIT_PROTEIN_PER_KG_LBM) : enumPerKg;
   const protein = Math.round(proteinPerKg * lbm);
 
   const fatPct = s.diet === 'keto' ? 0.65 : s.diet === 'paleo' ? 0.40 : 0.27;

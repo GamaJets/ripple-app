@@ -24,6 +24,7 @@ import { sendPush } from './pushNotifications';
 import { useAuthRevision } from './authRevision';
 import type { Message } from '../lib/types';
 import type { LoadStatus } from './loadStatus';
+import { resolvePeerName, type PeerName } from '../lib/threadPeer';
 
 export type ChatRole = 'client' | 'coach';
 
@@ -127,7 +128,13 @@ export function useThread(clientId: string | null, role: ChatRole) {
       setMessages((p) => p.map((m) => (m.id === optimistic.id ? rowToMsg(data) : m)));
       // notify the other side (coach -> client push; client side needs the coach id, skipped)
       if (role === 'coach' && tid.current) sendPush([tid.current], 'New message from your coach', b, { route: '/(client)/messages' });
-      else if (role === 'client' && coachId.current) sendPush([coachId.current], 'New message from your client', b, { route: '/(trainer)/chat' });
+      // The coach's route carries the thread key. It used to be the bare
+      // '/(trainer)/chat', and the tap handler pushes that string straight at
+      // the router — so a coach who opened the notification landed on a chat
+      // with no clientId: an empty thread headed "Client", and a reply that went
+      // nowhere because `send` has no thread to insert into. The client's route
+      // needs no key; their thread is their own id, resolved from auth.
+      else if (role === 'client' && coachId.current && tid.current) sendPush([coachId.current], 'New message from your client', b, { route: '/(trainer)/chat?clientId=' + encodeURIComponent(tid.current) });
       return true;
     } catch {
       setUnsent((p) => [...p, optimistic.id]);
@@ -136,4 +143,94 @@ export function useThread(clientId: string | null, role: ChatRole) {
   };
 
   return { messages, send, ready, status, unsent };
+}
+
+/**
+ * Who the thread is with — for the header, and for nothing else.
+ *
+ * ── TF-32 ────────────────────────────────────────────────────────────────
+ *
+ * The client's Messages screen headed the thread from `useCoachProfile()`,
+ * which is the coach-side provider: it reads `auth.getUser()` and loads THAT
+ * user's own `profiles.full_name`. Signed in as a client, that is the client —
+ * so the thread with your coach was labelled with your own name. The messages
+ * themselves were never misrouted (the thread is `messages.client_id` and RLS
+ * decides who reads it), but a header naming the reader is worse than one
+ * naming nobody, because it is a name they recognise.
+ *
+ * This hook only ever reports a name that came back from a read for the OTHER
+ * party's id. When there is none — and for a client there usually is none,
+ * since no policy on `profiles` grants client → coach — the caller gets
+ * 'withheld' and draws a dash with the reason. See src/lib/threadPeer.ts.
+ *
+ * @param role who I am in this thread.
+ * @param clientId the thread key when I am the coach; ignored for a client,
+ *        whose coach is resolved from their own `clients` row.
+ */
+export function useThreadPeerName(role: ChatRole, clientId: string | null): PeerName {
+  const authRev = useAuthRevision();
+  const [peer, setPeer] = useState<PeerName>(() =>
+    // With no backend there is no coaching link to read and never will be, so
+    // this is settled at 'unlinked' rather than spinning on 'loading' forever.
+    USE_SUPABASE ? { kind: 'loading' } : { kind: 'unlinked' });
+
+  useEffect(() => {
+    if (!USE_SUPABASE) { setPeer({ kind: 'unlinked' }); return; }
+    let cancelled = false;
+    (async () => {
+      let peerId: string | null = null;
+      let linkFailed = false;
+      let name: string | null = null;
+
+      if (role === 'coach') {
+        // The coach's peer is handed in by the roster, so there is no link to
+        // look up; an absent clientId is a thread with nobody in it.
+        peerId = clientId;
+      } else {
+        try {
+          const { data: auth, error: authErr } = await supabase.auth.getUser();
+          if (cancelled) return;
+          // Not knowing who I am is not the same as having no coach.
+          if (authErr || !auth?.user?.id) { setPeer({ kind: 'unknown' }); return; }
+          const { data: row, error } = await supabase.from('clients').select('trainer_id').eq('id', auth.user.id).single();
+          if (cancelled) return;
+          // PGRST116 is "no row", which for `clients` means this account has no
+          // client row at all — genuinely no coach, not a refused read.
+          if (error && (error as any).code !== 'PGRST116') linkFailed = true;
+          else peerId = (row as any)?.trainer_id ?? null;
+        } catch { if (!cancelled) { setPeer({ kind: 'unknown' }); } return; }
+      }
+
+      if (!cancelled && peerId && !linkFailed) {
+        try {
+          // On the client side a refusal IS the expected answer: no policy on
+          // `profiles` lets a client read their coach's row. The failure this
+          // file is about is not an unread name, it is substituting a readable
+          // one for it, and no branch here can do that.
+          // no-error-ok: refused and empty both render as the same labelled dash
+          const { data } = await supabase.from('profiles').select('full_name').eq('id', peerId).single();
+          if (cancelled) return;
+          name = typeof (data as any)?.full_name === 'string' ? (data as any).full_name : null;
+        } catch { /* leaves the name unread, which the resolver reports as withheld */ }
+      }
+
+      // A coach's manually-added client has no profile row — the only record of
+      // their name is the one the coach typed on the roster, which is that
+      // client's name and nobody else's, so it is a legitimate second look.
+      if (!cancelled && role === 'coach' && peerId && !name) {
+        try {
+          // no-error-ok: same as above — a name that does not come back leaves
+          // the header a labelled dash, which is the honest rendering of it.
+          const { data } = await supabase.from('coach_clients').select('name').eq('id', peerId).single();
+          if (cancelled) return;
+          name = typeof (data as any)?.name === 'string' ? (data as any).name : null;
+        } catch { /* as above */ }
+      }
+
+      if (!cancelled) setPeer(resolvePeerName({ settled: true, linkFailed, peerId, name }));
+    })();
+    return () => { cancelled = true; };
+  }, [role, clientId, authRev]);
+
+  return peer;
 }

@@ -1,22 +1,42 @@
-// Client · Lifting tools. Three self-contained calculators: 1RM estimator,
-// barbell plate math, and a macro quick reference. No backend, pure local state.
+// Client · Lifting tools. Three tabs for the gym floor: 1RM estimator, barbell
+// plate math, and the macro targets those lifts are fed by.
 //
 // Rebuilt on the instrument-panel kit (`src/ui/kit`) and the scale
 // (`src/theme/scale`). Same three tabs, same maths, same hooks in the same
 // order — the three bordered panels became hairline-separated sections and the
-// estimated 1RM became the screen's one hero figure. Every number on this screen
-// is computed from what the user typed; nothing is stored or invented.
+// estimated 1RM became the screen's one hero figure.
 //
 // Also fixed: "Closest loadable" was printed in the reserved warn colour. Status
 // colours never colour text — it is now ink text with a coloured mark beside it.
+//
+// ── TF-15: the Macros tab was a page of homework ───────────────────────────
+//
+// The first two tabs answer a question you are holding a barbell while asking.
+// The third printed a textbook table — "1.8–2.2 g/kg lean mass", "~0.8–1 g/kg
+// bodyweight" — and left the reader to find their lean mass, work out the
+// multiplication, and do it on figures this app is already holding. That is why
+// it was the tab nobody opened, and the fix is not another calculator: it is the
+// same two lines of guidance resolved against this client's own recorded weight
+// and body fat, with the table kept underneath as the working.
+//
+// The rest of the screen still computes only from what the user types. This tab
+// is the one that reads: it takes the client's weight and body fat from
+// `clientData` and NOTHING else, and when either is missing it says so and
+// offers the way to record them. It never fills in a body — that fallback (70 kg
+// / 20%) is exactly what `clientData` was changed to stop handing out.
 import { useState } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
-import { Rule, Section, SectionHead, Hero, KpiRow, Ghost, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty, numeric, value } from '../../src/theme/scale';
+import { useClientData } from '../../src/ui/clientData';
+import {
+  liftingMacros, rangeLabel,
+  PROTEIN_G_PER_KG_LEAN, FAT_G_PER_KG_BODYWEIGHT,
+} from '../../src/lib/liftingMacros';
 
 const PLATES = [25, 20, 15, 10, 5, 2.5, 1.25];
 
@@ -130,13 +150,90 @@ function PlateCalc({ t }: { t: Theme }) {
  );
 }
 
+/** One worked target: the grams, and the line of the table it came from. */
+function TargetRow({ t, name, grams, from }: { t: Theme; name: string; grams: string; from: string }) {
+ return (
+ <View style={{ paddingVertical: sp.md }}>
+ <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' }}>
+ <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{name}</Text>
+ <Text style={{ ...ty.body, ...numeric, fontWeight: '600', color: t.ink }}>{grams}</Text>
+ </View>
+ <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{from}</Text>
+ </View>
+ );
+}
+
 function MacroRef({ t }: { t: Theme }) {
- // A reference table — the textbook energy values of each macronutrient, not
- // anything measured about this client.
+ const c = useClientData();
+ const router = useRouter();
+ // The client's own two figures and nothing else. Null all the way through when
+ // either is absent — see src/lib/liftingMacros.ts for why there is no default.
+ const m = liftingMacros(c.weightKg, c.bodyFatPct, c.mealsPerDay);
+ // The energy values are the textbook's and are true of everyone; only the two
+ // g/kg lines are per-person, and those are now worked out above rather than
+ // left as an instruction. The table stays as the working behind them.
  const rows = [['Protein', '4 kcal/g', 'Muscle repair · 1.8–2.2 g/kg lean mass'], ['Carbs', '4 kcal/g', 'Training fuel · fill remaining calories'], ['Fat', '9 kcal/g', 'Hormones · ~0.8–1 g/kg bodyweight'], ['Fibre', '~2 kcal/g', 'Aim 25–35 g/day'], ['Alcohol', '7 kcal/g', 'No nutritional value']];
  return (
+ <View>
+ {m ? (<>
  <Section>
- <SectionHead title="Macro reference" />
+ <SectionHead title="Your figures" note="Your latest scan or measurement" />
+ <KpiRow items={[
+ { label: 'Bodyweight', value: fig(c.weightKg), unit: 'kg' },
+ { label: 'Body fat', value: fig(c.bodyFatPct), unit: '%' },
+ { label: 'Lean mass', value: fig(m.leanMassKg), unit: 'kg' },
+ ]} />
+ </Section>
+
+ <Rule />
+
+ <Section>
+ <SectionHead title="Your daily targets" />
+ <TargetRow t={t} name="Protein" grams={rangeLabel(m.protein)}
+ from={`${PROTEIN_G_PER_KG_LEAN.low}–${PROTEIN_G_PER_KG_LEAN.high} g per kg of your ${fig(m.leanMassKg)} kg lean mass`} />
+ <Rule />
+ {/* Fat is the one taken off TOTAL bodyweight. It is the distinction the
+ table draws and the one that gets lost when somebody does this in
+ their head at the rack. */}
+ <TargetRow t={t} name="Fat" grams={rangeLabel(m.fat)}
+ from={`${FAT_G_PER_KG_BODYWEIGHT.low}–${FAT_G_PER_KG_BODYWEIGHT.high} g per kg of your ${fig(c.weightKg)} kg bodyweight`} />
+ {m.proteinPerMeal ? (<>
+ <Rule />
+ <TargetRow t={t} name="Protein a meal" grams={rangeLabel(m.proteinPerMeal)}
+ from={`The day's protein across your ${c.mealsPerDay} meals`} />
+ </>) : null}
+ <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+ No carbohydrate figure here: carbs fill whatever calories are left once protein and fat are set, and that depends on the goal your meal plan is built to.
+ </Text>
+ <View style={{ marginTop: sp.lg }}>
+ <Cta label="Open your meal plan" wide onPress={() => router.push('/(client)/nutrition')} />
+ </View>
+ </Section>
+ </>) : (
+ <Section>
+ <SectionHead title="Your daily targets" />
+ {/* Three different silences, and they must not read alike: a refused
+ read is not "you have never been measured", and neither is a read
+ still in flight. Only the third offers the way to fix it. */}
+ <Text style={{ ...ty.label, color: t.ink3 }}>
+ {c.status === 'loading'
+ ? 'Reading your measurements…'
+ : c.status === 'error'
+ ? 'We could not read your weight and body fat, so these are not worked out. They are still on your record — we just cannot see them right now.'
+ : 'These are worked out from your weight and body fat, and there is nothing on record yet to work them out from.'}
+ </Text>
+ {c.status === 'ready' ? (
+ <View style={{ marginTop: sp.lg }}>
+ <Cta label="Add your measurements" wide onPress={() => router.push('/(client)/scans')} />
+ </View>
+ ) : null}
+ </Section>
+ )}
+
+ <Rule />
+
+ <Section>
+ <SectionHead title="Macro reference" note={m ? 'Where those figures come from' : undefined} />
  {rows.map(([k, cal, note], i) => (
  <View key={k}>
  {i > 0 ? <Rule /> : null}
@@ -150,6 +247,7 @@ function MacroRef({ t }: { t: Theme }) {
  </View>
  ))}
  </Section>
+ </View>
  );
 }
 

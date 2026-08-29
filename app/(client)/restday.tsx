@@ -133,6 +133,31 @@ export default function RestDay() {
 
         <Rule />
 
+        {/* TF-20 gave this screen somewhere to send people. It has always been
+            able to say "take a rest day" or "time for a deload week" and then
+            leave the client to remember it: the advice arrived on the day it was
+            already too late to arrange. A rest day and a deload day are two of
+            the four types the calendar now takes, so the recommendation above
+            can be turned into a mark on a date.
+
+            Worded as planning, and only as planning. Marking Thursday a rest day
+            is not the same as having rested, and this screen — which reads the
+            training log and nothing else — would be the last place that should
+            blur the two. */}
+        <Section>
+          <SectionHead title="Plan it in" />
+          <Text style={{ ...ty.body, color: t.ink2 }}>
+            {dl.due
+              ? 'A deload is a week, not a mood — mark the days on your calendar and the plan is there when you get to them.'
+              : 'Pick the day now rather than deciding on the morning. Marking a rest day on your calendar records what you intend; what you actually do still comes from your training log.'}
+          </Text>
+          <View style={{ alignSelf: 'flex-start', marginTop: sp.lg }}>
+            <Ghost label="Plan a day" icon="calendar" onPress={() => router.push('/(client)/calendar')} />
+          </View>
+        </Section>
+
+        <Rule />
+
         <Section>
           <Cta label="Open recovery tools" wide onPress={() => router.push('/(client)/recovery')} />
         </Section>

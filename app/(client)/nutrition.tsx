@@ -22,7 +22,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Diet, Goal } from '../../src/lib/types';
 import { useClientData } from '../../src/ui/clientData';
 import { useWearables } from '../../src/ui/wearables';
-import { caloriesLeft, macrosFor, applyCoachAdjust } from '../../src/lib/nutrition';
+import { caloriesLeft, macrosFor, applyCoachAdjust, maintenanceFor } from '../../src/lib/nutrition';
+import { energyPlanFor, observedRateKg, MAX_DEFICIT_FRACTION_OF_TDEE, type EnergyPlan } from '../../src/lib/goalEnergy';
+import { useGoalTracker } from '../../src/ui/goalTracker';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
 import { Icon } from '../../src/ui/Icon';
 import { useRouter } from 'expo-router';
@@ -56,6 +58,76 @@ const DAY_TYPES = [
   { key: 'rest', label: 'Rest day', blurb: 'A full day off training. Fuel comes down, because there is no session to feed.' },
 ] as const;
 
+// ── where the calorie target came from (TF-29) ───────────────────────────────
+//
+// "The client's stated goal should drive their calories, macros and plan." It
+// did not: the target moved by a three-way enum with no date in it, so losing
+// 6 kg by Christmas and losing 6 kg by next summer produced the same number.
+// src/lib/goalEnergy.ts derives it from the client's real target and date now.
+//
+// This block is the other half of that work, and the more important half. A
+// derived number is only honest if the screen can say where it came from — and
+// say so in the two cases that are easy to hide:
+//
+//  · The plan was CLAMPED. Their date needed a rate this app will not build a
+//    plan around, so the plan is slower and lands later than the date they
+//    typed. Showing the slower target under their own deadline, silently, is
+//    the app lying about arithmetic it did itself.
+//  · The plan was NOT derived at all. No target, no date, no weigh-in — the
+//    old enum behaviour, unchanged, but named as such rather than passed off
+//    as goal-driven.
+const kgRate = (n: number) => Math.abs(n).toFixed(2).replace(/0$/, '').replace(/\.$/, '');
+const onDate = (ms: number) => new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+
+/**
+ * One sentence saying what set today's calorie target. Never a figure the plan
+ * did not actually produce — which is why the calorie number quoted here is
+ * the plan's own baseline and not the target shown above it. Those two differ
+ * by the day type and any coach adjustment, each of which is already announced
+ * in its own right further down the screen; attributing their ±250 to the
+ * client's goal rate would make this sentence's arithmetic not add up.
+ */
+function targetBasis(plan: EnergyPlan, goalLabel: string): string {
+  if (plan.kind === 'enum') {
+    switch (plan.reason) {
+      case 'no-goal':
+        return `Based on your general goal (${goalLabel}). Set a target weight and a date under Goals and this is built from those instead — a date is what turns a target into a daily number.`;
+      case 'not-weight':
+        return `Based on your general goal (${goalLabel}). Your goals aren’t about bodyweight, and calories can’t be worked back from those honestly — add a target weight under Goals to drive this.`;
+      case 'no-target-date':
+        return `You’ve set a target weight, but no date. Two people losing the same 6 kg — one by spring, one by next year — don’t eat the same, so this stays on your general goal (${goalLabel}) until there’s a date under Goals.`;
+      case 'no-readings':
+        return `You’ve set a target weight, but there’s no weigh-in to measure from yet. Add one and this is built from your goal; for now it’s your general goal (${goalLabel}).`;
+      case 'date-passed':
+        return `Your goal’s date has gone by, so there’s no time left to spread the remaining kilos over. Set a new date under Goals. Until then this is your general goal (${goalLabel}).`;
+      case 'date-too-soon':
+        return `Your goal’s date is less than a week away — too soon to tell you whether a plan is working before it arrives. This is your general goal (${goalLabel}) instead.`;
+      case 'reached':
+        return `You’ve reached your target weight. Mark it done or set the next one under Goals; this is your general goal (${goalLabel}) in the meantime.`;
+      case 'no-maintenance':
+        return `Based on your general goal (${goalLabel}).`;
+    }
+  }
+  // Under 50 g a week is a target the client is already standing on; calling
+  // that "0.05 kg a week" would dress up a rounding error as a plan.
+  const pace = Math.abs(plan.plannedRateKg) < 0.05
+    ? 'holding you where you are'
+    : `${kgRate(plan.plannedRateKg)} kg a week`;
+  if (plan.onTime) {
+    return `Built from your goal: ${plan.targetKg} kg by ${onDate(plan.targetDateMs)}. From ${plan.currentKg} kg that’s ${pace}, which sets your baseline at ${plan.kcal.toLocaleString()} kcal a day.`;
+  }
+  const why = plan.limitedBy === 'floor'
+    ? `going faster would mean eating more than ${Math.round(MAX_DEFICIT_FRACTION_OF_TDEE * 100)}% below what your body uses in a day`
+    : 'that’s faster than this app will plan for';
+  // Where the plan has no pace at all there is no finish date, and printing
+  // the date they asked for — the one this plan does NOT meet — would be
+  // inventing the very number the sentence exists to correct.
+  const tail = plan.etaMs != null
+    ? ` and gets you there around ${onDate(plan.etaMs)}, later than the ${onDate(plan.targetDateMs)} you set.`
+    : `, which does not reach ${plan.targetKg} kg by ${onDate(plan.targetDateMs)}. There is no pace here to put a finish date on, so that stays a dash.`;
+  return `Your date needs ${kgRate(plan.requiredRateKg)} kg a week, and ${why}. This plan is built on ${pace} instead${tail} Move the date or the target under Goals if you want them to meet.`;
+}
+
 export default function Nutrition() {
   const t = useTheme();
   const c = useClientData();
@@ -63,6 +135,7 @@ export default function Nutrition() {
   const { appName } = useBrand();
   const _adj = useCoachNutrition().get(c.id);
   const coachAdjust = c.coachingMode === 'solo' ? null : _adj;
+  const goals = useGoalTracker().goals;
   // A meal plan is scaled to lean body mass. Without a weight and body fat there
   // is nothing to scale, and the whole screen used to run on a 70 kg / 20%
   // placeholder and present the result as the client's plan. Zeros here are
@@ -126,7 +199,24 @@ export default function Nutrition() {
       : undefined;
   };
   const cyclingAdjust = adjustFor(dayType);
-  const input = { id: c.id, weightKg: w, bodyFatPct: bf, activity: c.activity, goal: c.goal, diet, mealsPerDay: c.mealsPerDay, mealOverride: { ...(coachAdjust?.mealOverride ?? {}), ...override }, coachAdjust: cyclingAdjust, avoid: c.avoid };
+
+  // TF-29. The calorie target is worked back from the client's own target
+  // weight and date where they have set one, and falls back to the goal enum —
+  // unchanged, and named on screen — where they have not. `energyPlan` rides
+  // on the input object rather than being applied here because `buildPlan`
+  // hands its input straight to `macrosFor`: doing it any other way would have
+  // scaled the meals below to one calorie figure while the target above them
+  // showed another, which is the bug at the foot of src/lib/nutrition.ts.
+  const openWeightGoal = goals.find((g) => g.kind === 'weight' && !g.achievedAtISO) ?? null;
+  const energyPlan = energyPlanFor({
+    goal: openWeightGoal,
+    weightSeries: c.weightSeries,
+    tdeeKcal: maintenanceFor({ weightKg: w, bodyFatPct: bf, activity: c.activity }).tdee,
+    nowMs: Date.now(),
+  });
+  const observedPace = observedRateKg(energyPlan);
+
+  const input = { id: c.id, weightKg: w, bodyFatPct: bf, activity: c.activity, goal: c.goal, diet, mealsPerDay: c.mealsPerDay, mealOverride: { ...(coachAdjust?.mealOverride ?? {}), ...override }, coachAdjust: cyclingAdjust, avoid: c.avoid, energyPlan };
   const { plan, target, tot } = buildPlan(input);
   const coachPick = (pos: number) => !!(coachAdjust?.mealOverride && coachAdjust.mealOverride[pos] != null && override[pos] == null);
   const swap = (pos: number, slot: PlannedMeal['slot'], idx: number) => setOverride({ ...override, [pos]: swapIndex(diet, slot, idx) });
@@ -221,6 +311,27 @@ export default function Nutrition() {
           arc={target.kcal ? eaten.kcal / target.kcal : 0}
           onPress={() => router.push('/(client)/foodlog')}
         />
+
+        <Rule />
+
+        {/* ── where that target came from ────────────────────────────────── */}
+        <Section>
+          <SectionHead
+            title="Why this target"
+            note={energyPlan.kind === 'derived' && !energyPlan.onTime ? 'Slower than your date' : undefined}
+          />
+          <Text style={{ ...ty.label, color: t.ink2 }}>{targetBasis(energyPlan, GOAL_LABEL[c.goal])}</Text>
+          {/* Their measured pace, from the same arithmetic the Goals screen
+              uses. Absent — not zero — until their weigh-ins span enough days
+              to be a trend rather than water. */}
+          {observedPace != null ? (
+            <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
+              {Math.abs(observedPace) < 0.05
+                ? 'Your weigh-ins haven’t moved yet.'
+                : `Your weigh-ins are moving at ${kgRate(observedPace)} kg a week ${observedPace < 0 ? 'down' : 'up'}.`}
+            </Text>
+          ) : null}
+        </Section>
 
         <Rule />
 

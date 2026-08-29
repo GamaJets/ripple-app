@@ -80,8 +80,12 @@ export default function CoachChecklists() {
       if (!live) return;
       setMe(who);
       if (!who?.tenantId) return;
-      const { data } = await supabase.from('tenants').select('name').eq('id', who.tenantId).single();
-      if (live) setGymName((data as { name?: string } | null)?.name ?? null);
+      const { data, error } = await supabase.from('tenants').select('name').eq('id', who.tenantId).single();
+      // A refused read and a gym with no name both leave this null, and the
+      // Shell renders the same header for both — so the error is read rather
+      // than discarded, and an unread name stays null instead of being asserted
+      // as absent.
+      if (live) setGymName(error ? null : (data as { name?: string } | null)?.name ?? null);
     })();
     return () => { live = false; };
   }, []);

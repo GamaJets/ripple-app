@@ -40,6 +40,11 @@
     "src/lib/coverage.test.ts",
     "src/lib/checklist.test.ts",
     "src/lib/photoCompare.test.ts",
-    "src/lib/units.test.ts"
+    "src/lib/units.test.ts",
+    "src/lib/goalEnergy.test.ts",
+    "src/lib/spotifyPlayback.test.ts",
+    "src/lib/threadPeer.test.ts",
+    "src/lib/liftingMacros.test.ts",
+    "src/lib/dayPlan.test.ts"
   ]
 }

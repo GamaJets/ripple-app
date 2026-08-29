@@ -1,13 +1,51 @@
 // ── Workout music engine ─────────────────────────────────────────────────────
 // Pure, UI-free. Given a workout's type/intensity/duration it assembles a
-// tempo- and energy-matched playlist. Real Spotify/Apple Music linking (OAuth /
-// MusicKit) lands in the backend phase; this builds the list the AI proposes,
-// which then gets pushed to the client's own service. Track pool is a curated
-// seed — production swaps it for the service's catalog + the user's taste.
+// tempo- and energy-matched playlist from the hard-coded POOL below.
+//
+// Be clear about what POOL is: 106 real songs with hand-entered BPMs, written
+// into this file. It is NOT anybody's library and never was. It is the fallback
+// for a person with no Spotify connection, and the screen now labels it as
+// such — it used to be served under the subtitle "from your Spotify" whenever a
+// live search failed, which is how a curated list ended up presented as the
+// person's own music. Real playlists come from `spotifyMyPlaylists()` in
+// src/lib/spotify.ts.
+//
+// Track pool is a curated seed; the live catalog is reached through search.
 
 export type Service = 'spotify' | 'apple';
+
+/** A pool entry: fully known, because these figures were typed in by hand. */
 export interface Track { title: string; artist: string; bpm: number; energy: 1 | 2 | 3 | 4 | 5; genre: string }
-export interface Playlist { title: string; subtitle: string; minutes: number; tracks: Track[] }
+
+/**
+ * A row in a rendered playlist, which may or may not be a pool entry.
+ *
+ * bpm and energy are nullable and it matters: a track pulled from Spotify has
+ * no BPM we are allowed to know. The Audio Features endpoint that used to
+ * supply it was restricted on 27 Nov 2024 for new apps and for apps in
+ * development mode, which is what this one is. So a Spotify track's tempo
+ * renders as a dash. Filling it with 0 — which the previous version did, then
+ * used `bpm > 0` as a hidden sentinel — puts a figure on screen that no record
+ * supports.
+ */
+export interface PlaylistTrack {
+  title: string;
+  artist: string;
+  bpm: number | null;
+  energy: 1 | 2 | 3 | 4 | 5 | null;
+  genre: string | null;
+  /** Spotify track URI, when the row came from Spotify and can be played directly. */
+  uri?: string | null;
+}
+
+export interface Playlist {
+  title: string;
+  subtitle: string;
+  minutes: number;
+  tracks: PlaylistTrack[];
+  /** Where these rows actually came from. Never guessed at render time. */
+  source: 'curated' | 'spotify';
+}
 
 export interface GenParams {
   mode: 'strength' | 'cardio' | 'hiit' | 'mobility';
@@ -124,6 +162,9 @@ const POOL: Track[] = [
 
 const AVG_TRACK_MIN = 3.5;
 
+/** How many songs the built-in fallback holds, so the UI can say so plainly. */
+export const CURATED_POOL_SIZE = POOL.length;
+
 // target energy band per mode + intensity
 function targetEnergy(p: GenParams): [number, number] {
   if (p.mode === 'mobility') return p.intensity >= 3 ? [2, 3] : [1, 2];
@@ -180,5 +221,6 @@ export function generatePlaylist(p: GenParams, salt = 0): Playlist {
     subtitle: `${tracks.length} tracks · ~${minutes} min · ${intensityWord}, ${lo === hi ? `energy ${lo}` : `energy ${lo}–${hi}`}`,
     minutes,
     tracks,
+    source: 'curated',
   };
 }
