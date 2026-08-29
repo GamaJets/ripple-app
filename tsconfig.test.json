@@ -49,6 +49,7 @@
     "src/lib/sleepMerge.test.ts",
     "src/lib/entryEdit.test.ts",
     "src/lib/vendorSleep.test.ts",
-    "src/lib/sleepAccess.test.ts"
+    "src/lib/sleepAccess.test.ts",
+    "src/lib/clientGoals.test.ts"
   ]
 }

@@ -1160,6 +1160,9 @@ export default function TrainerClients() {
               <ListRow icon="check" title="Their daily checklist" note={`Add lines to ${sel.name.split(' ')[0]}'s list, beside the ones from their own plan`}
                 onPress={() => { setSel(null); router.push('/(trainer)/checklists'); }} />
 
+              <ListRow icon="target" title="What they're working toward" note={`${sel.name.split(' ')[0]}'s own goals — yours to read, not to change`}
+                onPress={() => { const id = sel.id; setSel(null); router.push({ pathname: '/(trainer)/client-goals', params: { clientId: id } }); }} />
+
               <ListRow icon="train" title="Log a session you ran" note={`Goes into ${sel.name.split(' ')[0]}'s own record, marked as logged by you`}
                 onPress={() => { const id = sel.id; const nm = sel.name; setSel(null); router.push({ pathname: '/(trainer)/log-session', params: { clientId: id, name: nm } }); }} />
 
