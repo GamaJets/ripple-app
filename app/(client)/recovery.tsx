@@ -11,7 +11,7 @@
 // rows rendered nothing at all — both drew a star glyph that is no longer in the
 // source, so `<Text>{''.repeat(quality)}</Text>` painted an empty string and the
 // 1–5 selector was invisible and untappable. Quality is now shown as marks.
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -28,16 +28,61 @@ import { useWearables } from '../../src/ui/wearables';
 import { reportError } from '../../src/lib/reportError';
 import { PROVIDERS } from '../../src/lib/wearables/registry';
 import { Rule, Section, SectionHead, Hero, Cta, Ghost, fig } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
+import { localDate } from '../../src/lib/localDate';
 import { Icon } from '../../src/ui/Icon';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { RECOVERY_ACTIVITIES, isRecoveryActivity } from '../../src/lib/recoveryActs';
+import { readSleepFromDevices, connectedProviders } from '../../src/lib/wearables/sleep';
+import { requestHealthAuth } from '../../src/lib/wearables/appleHealth';
+import { mergeSleepNights, recentNights, formatSleepHours, type MergedNight, type SleepRead } from '../../src/lib/sleepMerge';
+import type { LoadStatus } from '../../src/ui/loadStatus';
 
 const MOBILITY = [
  { name: 'Full-body warm-up', dur: '6 min', moves: ['Leg swings ×10/side', 'World’s greatest stretch ×5/side', 'Cat-cow ×10', 'Band pull-aparts ×15', 'Bodyweight squats ×10'] },
  { name: 'Hip & lower-body', dur: '5 min', moves: ['90/90 hip switch ×8', 'Couch stretch 45s/side', 'Ankle rocks ×12/side', 'Glute bridge ×15'] },
  { name: 'Shoulders & upper', dur: '5 min', moves: ['Wall slides ×12', 'Thread the needle ×6/side', 'Doorway pec stretch 30s', 'Scapular push-ups ×12'] },
 ];
+
+/** How many nights of device sleep the screen asks for and lists. */
+const DEVICE_NIGHTS = 7;
+
+/**
+ * The sentence under a night's figure, and the whole point of TF-01.
+ *
+ * A duration on its own is unarguable in the wrong way — the client cannot tell
+ * whether it came from the ring they wore or the watch they left charging, and
+ * that was the complaint. So every figure names its device, and where two
+ * devices disagreed the other number is printed beside it rather than being
+ * quietly dropped or split down the middle.
+ */
+function attribution(n: MergedNight): string {
+  if (n.outcome === 'unknown') return 'We couldn’t read your devices for this night, so it is unknown — that is not the same as no sleep.';
+  if (n.outcome === 'no-record') return 'No device recorded this night.';
+  const src = n.source;
+  if (!src) return 'No device recorded this night.';
+  const head = `from your ${src.sourceName}${src.basis === 'in-bed' ? ' — time in bed, which runs longer than time asleep' : ''}`;
+  const other = n.others[0];
+  if (n.agreement === 'conflicting' && other) {
+    return `${head}. Your ${other.sourceName} has the same night at ${formatSleepHours(other.minutesAsleep)} — ${n.spreadMin} min apart. Both are shown; neither has been averaged into a figure no device reported.`;
+  }
+  if (n.agreement === 'corroborated' && other) {
+    return `${head}, and your ${other.sourceName} agrees to within ${n.spreadMin} min.`;
+  }
+  if (other) {
+    const why = other.family === src.family
+      ? 'the same device reaching us twice'
+      : 'a different measurement';
+    return `${head}. Your ${other.sourceName} has it at ${formatSleepHours(other.minutesAsleep)}, but that is ${why}, so it does not confirm this.`;
+  }
+  return `${head}. Nothing else recorded this night, so nothing corroborates it.`;
+}
+
+/** A night key is a bare calendar date, so it is read locally, never parsed as UTC. */
+function nightLabel(night: string): string {
+  const d = localDate(night);
+  return d ? d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }) : night;
+}
 
 /** Sleep quality 1–5, as marks rather than a glyph the font may not carry. */
 function Quality({ n, of = 5, color, dim }: { n: number; of?: number; color: string; dim: string }) {
@@ -112,6 +157,59 @@ export default function Recovery() {
  const whoopMetrics = wear.metrics?.whoop ?? null;
  const zoneSeconds = hr.source === 'apple' ? null : (whoopMetrics?.zoneSeconds ?? null);
  const hrSource: 'apple' | 'whoop' | null = hr.source === 'apple' ? 'apple' : (zoneSeconds ? 'whoop' : null);
+ // Sleep from the devices, not from one hard-coded source (TF-01).
+ //
+ // The status is the LoadStatus vocabulary on purpose: an empty list under
+ // 'ready' means the devices were readable and recorded nothing, and an empty
+ // list under 'error' means we do not know. The merge below keeps those apart
+ // per night, and the screen prints a different sentence for each — the bug
+ // this app keeps re-reporting is the two of them looking identical.
+ const [sleepReads, setSleepReads] = useState<{ reads: SleepRead[]; status: LoadStatus }>({ reads: [], status: 'loading' });
+ const loadDeviceSleep = useCallback(async () => {
+   setSleepReads((p) => ({ ...p, status: 'loading' }));
+   try {
+     const reads = await readSleepFromDevices(wear.states, DEVICE_NIGHTS);
+     setSleepReads({ reads, status: 'ready' });
+   } catch (e) {
+     // readSleepFromDevices catches per provider, so reaching here means the
+     // walk itself broke. Still not an empty night: still unknown.
+     reportError('recovery.deviceSleep', e);
+     setSleepReads({ reads: [], status: 'error' });
+   }
+ }, [wear.states]);
+ // Keyed on WHICH providers are connected rather than on the states object,
+ // which is replaced on every 60s sync and would re-read the whole week each
+ // time. Connecting or disconnecting a device is the only thing that changes
+ // the answer.
+ const connectedKey = connectedProviders(wear.states).map((p) => p.meta.id).join(',');
+ useEffect(() => { loadDeviceSleep(); }, [connectedKey]);
+
+ const deviceNights = useMemo(
+   () => mergeSleepNights(sleepReads.reads, recentNights(DEVICE_NIGHTS)),
+   [sleepReads],
+ );
+ const lastNight = deviceNights[0] ?? null;
+ const unreadable = sleepReads.reads.filter((r) => r.status === 'error');
+ const cannotReport = sleepReads.reads.filter((r) => r.status === 'unsupported');
+ // Everyone who connected Apple Health before TF-01 was never asked for Sleep,
+ // and HealthKit answers a read it never got permission for with an empty array
+ // rather than an error — so a permanently blank list looks exactly like a
+ // client who never wears their watch. This is the only way out of that.
+ const appleRead = sleepReads.reads.find((r) => r.provider === 'apple');
+ const appleSilent = appleRead?.status === 'ready' && appleRead.readings.length === 0;
+ const [askingHealth, setAskingHealth] = useState(false);
+ const askHealthForSleep = async () => {
+   setAskingHealth(true);
+   try {
+     await requestHealthAuth();
+     await loadDeviceSleep();
+   } catch (e) {
+     reportError('recovery.sleepAuth', e);
+   } finally {
+     setAskingHealth(false);
+   }
+ };
+
  // Empty, not pre-filled. These used to start at 7.5 hours / quality 4, so
  // tapping Log sleep without touching either control filed a night the client
  // never had - which then became their sleep average and fed the readiness
@@ -178,7 +276,77 @@ export default function Recovery() {
 
   {/* ── sleep ───────────────────────────────────────────────────────── */}
   <Section>
-   <SectionHead title="Sleep" note={sleep.length ? `avg ${avgSleep} h` : undefined} />
+   <SectionHead title="Sleep" note={sleep.length ? `avg ${avgSleep} h logged` : undefined} />
+
+   {/* ── what the devices recorded ──────────────────────────────────
+       Kept above and apart from the hand-typed log below, and never
+       averaged into it: a number somebody remembered in the morning and a
+       number a ring measured are not the same kind of fact, and blending
+       them would make both unfalsifiable. */}
+   <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>FROM YOUR DEVICES</Text>
+   {connectedKey === '' ? (
+    <Text style={{ ...ty.label, color: t.ink3 }}>
+     No device connected. Connect a watch or a ring in Watch &amp; devices and your nights appear here, each one labelled with which device recorded it.
+    </Text>
+   ) : sleepReads.status === 'loading' ? (
+    <Text style={{ ...ty.label, color: t.ink3 }}>Reading your devices…</Text>
+   ) : (<>
+    <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.sm }}>
+     <Text style={{ ...value(30), color: lastNight?.outcome === 'measured' ? t.ink : t.ink3 }}>
+      {formatSleepHours(lastNight?.minutesAsleep ?? null)}
+     </Text>
+     <Text style={{ ...ty.caption, color: t.ink3 }}>last night</Text>
+    </View>
+    {lastNight ? <Text style={{ ...ty.label, color: t.ink2, marginTop: 4 }}>{attribution(lastNight)}</Text> : null}
+
+    {deviceNights.slice(1, 5).map((n) => (
+     <View key={n.night} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+       gap: sp.md, paddingVertical: sp.sm, marginTop: sp.sm, borderTopWidth: hairline, borderTopColor: t.ring }}>
+      <Text style={{ ...ty.caption, color: t.ink3 }}>{nightLabel(n.night)}</Text>
+      <View style={{ alignItems: 'flex-end', flex: 1 }}>
+       <Text style={{ ...ty.caption, ...numeric, fontWeight: '500', color: n.outcome === 'measured' ? t.ink2 : t.ink3 }}>
+        {formatSleepHours(n.minutesAsleep)}
+       </Text>
+       {/* Every row says where it came from, or why there is nothing —
+           "not read" and "nothing recorded" are different answers. */}
+       <Text style={{ ...ty.micro, color: t.ink3, marginTop: 2 }} numberOfLines={2}>
+        {n.outcome === 'unknown' ? 'not read'
+         : n.outcome === 'no-record' ? 'nothing recorded'
+         : n.agreement === 'conflicting' && n.others[0]
+         ? `${n.source?.sourceName} · ${n.others[0].sourceName} says ${formatSleepHours(n.others[0].minutesAsleep)}`
+         : n.source?.sourceName}
+       </Text>
+      </View>
+     </View>
+    ))}
+
+    {/* A device that could not be reached is stated, because the dashes
+        above are otherwise read as nights of no sleep. */}
+    {unreadable.map((r) => (
+     <Text key={r.provider} style={{ ...ty.caption, color: t.warn, marginTop: sp.md }}>
+      {r.reason || `${r.provider} could not be read, so any dash above may not mean you did not sleep.`}
+     </Text>
+    ))}
+    {cannotReport.map((r) => (
+     <Text key={r.provider} style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+      {r.reason || `${r.provider} cannot report sleep to Repple yet.`}
+     </Text>
+    ))}
+
+    {appleSilent ? (
+     <View style={{ marginTop: sp.md }}>
+      <Text style={{ ...ty.caption, color: t.ink3 }}>
+       Apple Health returned no sleep at all. If you have been wearing your watch, Repple may never have been granted Sleep — it was asked for after you connected.
+      </Text>
+      <View style={{ alignSelf: 'flex-start', marginTop: sp.sm }}>
+       <Ghost label={askingHealth ? 'Asking…' : 'Allow sleep in Apple Health'} onPress={askHealthForSleep} />
+      </View>
+     </View>
+    ) : null}
+   </>)}
+
+   <View style={{ height: sp.xl }} />
+   <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>LOGGED BY YOU</Text>
    <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'center' }}>
     <TextInput value={hrs} onChangeText={setHrs} keyboardType="numeric" accessibilityLabel="Hours slept"
      style={{ ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 10, width: 78, textAlign: 'center' }} />

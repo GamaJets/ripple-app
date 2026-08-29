@@ -33,7 +33,7 @@ import {
   spotifyMyPlaylists, spotifyPlay, SpotifyError, type PlaylistRef,
 } from '../../src/lib/spotify';
 import { playlistLine } from '../../src/lib/spotifyPlayback';
-import { SessionMusicBar } from '../../src/lib/SessionMusicBar';
+import { SessionMusicBar } from '../../src/ui/SessionMusicBar';
 import { Rule, Section, SectionHead, Cta, Ghost, Notice } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 

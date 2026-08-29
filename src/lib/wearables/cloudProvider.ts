@@ -8,6 +8,7 @@
 import { Platform } from 'react-native';
 import type { WearableProvider, ProviderMeta, DailyMetrics, WorkoutSample } from './types';
 import { emptyMetrics } from './types';
+import type { SleepRead } from '../sleepMerge';
 import { vendorFor, isConfigured } from './oauthConfig';
 import { connectVendor, fetchVendorDay, disconnectVendor, fetchVendorWorkouts } from './oauth';
 
@@ -53,6 +54,36 @@ export function makeCloudProvider(meta: ProviderMeta): WearableProvider {
         maxHr: typeof r.maxHr === 'number' ? r.maxHr : null,
         source: meta.id,
       })).filter((x: WorkoutSample) => x.mins > 0 && !!x.start);
+    },
+    /**
+     * Sleep from a cloud vendor — not available yet, and it says so rather than
+     * reporting an empty night.
+     *
+     * WHOOP, Oura and Fitbit all measure sleep and all expose it, but nothing
+     * in Repple reads it: `wearable-day` (supabase/functions/wearable-day) has
+     * exactly three per-vendor readers — fitbitDay, ouraDay, whoopDay — and none
+     * of them touches a sleep endpoint, so there is no sleep in the payload to
+     * parse. Until a `sleep` action ships there, this returns 'unsupported'.
+     *
+     * It deliberately does NOT call the function on the off-chance. A request
+     * for an action the deployed function does not know falls through to the
+     * daily-metrics reader and comes back with no sleep in it, which is
+     * indistinguishable from "your ring recorded nothing last night" — the
+     * client would be told their Oura had no reading when Repple never asked it
+     * for one. It is also a wasted round trip on every visit, which is the same
+     * mistake the Devices screen already had to have fixed once.
+     *
+     * Writing a parser for the response shape would mean guessing that shape,
+     * since none of these APIs can be exercised without live vendor
+     * credentials. The honest state is: declared, connectable, no sleep.
+     */
+    async fetchSleep(): Promise<SleepRead> {
+      const reason = isHealthConnect
+        ? 'Health Connect sleep arrives with the Android native module.'
+        : vendor?.special === 'partnership'
+        ? `${meta.name} needs an approved partnership before Repple can read anything from it.`
+        : `${meta.name} records sleep, but Repple cannot read it yet — the server-side reader has not shipped. Your ${meta.name} sleep is not missing, it is unread.`;
+      return { provider: meta.id, status: 'unsupported', readings: [], reason };
     },
     async fetchToday(): Promise<DailyMetrics | null> {
       if (isHealthConnect) return null;

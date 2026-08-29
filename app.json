@@ -17,7 +17,7 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.washateria.repple",
       "infoPlist": {
-        "NSHealthShareUsageDescription": "Repple reads your heart rate and calories to log workouts.",
+        "NSHealthShareUsageDescription": "Repple reads your heart rate, calories, steps, workouts and sleep, so your training, recovery and daily targets reflect what you actually did rather than what you remembered to type.",
         "NSCameraUsageDescription": "Repple uses the camera to capture InBody scans and progress photos.",
         "NSPhotoLibraryUsageDescription": "Repple lets you upload InBody scans and progress photos.",
         "ITSAppUsesNonExemptEncryption": false,

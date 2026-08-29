@@ -4,6 +4,7 @@
 // never care which brand they're talking to.
 
 import type { ZoneSeconds } from '../hr';
+import type { SleepRead } from '../sleepMerge';
 
 export type ProviderId = 'apple' | 'whoop' | 'garmin' | 'fitbit' | 'oura' | 'googlefit';
 export type ProviderKind = 'healthkit' | 'health-connect' | 'cloud';
@@ -71,6 +72,14 @@ export interface WearableProvider {
   fetchWorkouts?(sinceDays?: number): Promise<WorkoutSample[]>;
   /** Heart-rate samples between two ISO timestamps (for the zone chart). Optional. */
   fetchHeartRateSeries?(startISO: string, endISO: string): Promise<HrPoint[]>;
+  /**
+   * Recent nights of sleep. Optional, and it returns a SleepRead rather than a
+   * bare list precisely so that "this device recorded nothing" and "we could
+   * not ask this device" arrive as different answers — a provider that resolved
+   * to an empty array for a failed read is how the recurring data-loss bug in
+   * src/ui/loadStatus.ts gets written. It never throws for an ordinary failure.
+   */
+  fetchSleep?(sinceDays?: number): Promise<SleepRead>;
 }
 
 export function emptyMetrics(source: ProviderId): DailyMetrics {

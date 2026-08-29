@@ -11,6 +11,7 @@
 import { Platform, NativeModules } from 'react-native';
 import type { WearableProvider, ProviderMeta, DailyMetrics, WorkoutSample, HrPoint } from './types';
 import { emptyMetrics } from './types';
+import { nightsFromIntervals, type SleepFamily, type SleepInterval, type SleepRead, type SleepReading } from '../sleepMerge';
 
 const meta: ProviderMeta = {
   id: 'apple',
@@ -75,12 +76,20 @@ function read(method: string, options: any): Promise<any> {
  * nothing, indistinguishable from no data. WRITE is different: `getAuthStatus`
  * reports it honestly, which is what lets `writeAuthStatus()` below treat a
  * refusal as its own state rather than as a failure.
+ *
+ * SleepAnalysis joined the read set for TF-01, where sleep has to come from
+ * every device the client has rather than from the number they typed in. It is
+ * also the read type where the "denials are invisible" rule bites hardest: a
+ * client who declined sleep sharing gets exactly the same empty array as one
+ * who simply did not wear the watch, so nothing downstream may turn an empty
+ * sleep read into "you slept 0 hours" — it renders as a dash either way, with a
+ * line pointing at Health ▸ Sharing.
  */
 function permissionSet(k: any) {
   const P = k.Constants.Permissions;
   return {
     permissions: {
-      read: [P.HeartRate, P.RestingHeartRate, P.ActiveEnergyBurned, P.StepCount, P.Workout],
+      read: [P.HeartRate, P.RestingHeartRate, P.ActiveEnergyBurned, P.StepCount, P.Workout, P.SleepAnalysis],
       write: [P.Workout],
     },
   };
@@ -103,6 +112,11 @@ function requestAuth(): Promise<void> {
  * only prompts for types iOS has not yet decided on, so calling it again is
  * silent for everything already granted and raises the sheet for the new one.
  * Without this, an existing user could never reach the feature at all.
+ *
+ * Sleep is now in the same position: everyone who connected before TF-01 was
+ * asked for heart rate, energy, steps and workouts and never for sleep, so
+ * their sleep read comes back empty forever until this is called again. That is
+ * why both screens that show sleep offer a way to trigger it.
  */
 export function requestHealthAuth(): Promise<void> {
   return requestAuth();
@@ -155,6 +169,74 @@ function lastValue(res: any): number | null {
   return Math.round(Number(res[res.length - 1]?.value) || 0);
 }
 
+// ── Sleep ───────────────────────────────────────────────────────────────────
+//
+// HealthKit is not one device. It is the phone's record of whatever every app
+// and watch on this person's account wrote into it, and each sample carries the
+// bundle id and display name of whoever wrote it. A client with an Apple Watch
+// and an Oura ring has BOTH nights sitting in here, disagreeing, under two
+// different sourceIds — which is precisely the TF-01 complaint, and the reason
+// this returns one reading per source rather than one number per night. Picking
+// between them is not this file's job; see src/lib/sleepMerge.ts.
+//
+// The `value` strings below are the ones RCTAppleHealthKit+Queries.m actually
+// emits (INBED, ASLEEP, CORE, DEEP, REM, AWAKE, UNKNOWN) — read out of the
+// installed native module, not assumed.
+//
+// AWAKE and UNKNOWN are excluded deliberately: AWAKE is time in bed not
+// sleeping, and counting it would inflate every night on a watch running
+// watchOS 9 or later while leaving older records alone, so two clients would
+// get differently-defined figures under the same label.
+const ASLEEP_VALUES = new Set(['ASLEEP', 'CORE', 'DEEP', 'REM']);
+const IN_BED_VALUES = new Set(['INBED']);
+
+/**
+ * Best-effort guess at what kind of device wrote a sample.
+ *
+ * Deliberately best-effort: the family decides which of two REAL figures is
+ * shown first and whether two rows are allowed to vouch for each other — never
+ * what a figure is. An unrecognised writer falls to 'unknown', and two unknowns
+ * are treated as one device, so a wrong guess can only ever under-claim
+ * corroboration. Matching on the bundle id and the display name together
+ * because third-party apps are inconsistent about which one carries the brand.
+ */
+function familyOf(sourceId: string, sourceName: string): SleepFamily {
+  const s = `${sourceId} ${sourceName}`.toLowerCase();
+  if (s.includes('oura')) return 'oura';
+  if (s.includes('whoop')) return 'whoop';
+  if (s.includes('fitbit')) return 'fitbit';
+  if (s.includes('garmin')) return 'garmin';
+  if (s.includes('watch')) return 'watch';
+  if (s.includes('iphone')) return 'phone';
+  return 'unknown';
+}
+
+/**
+ * A HealthKit read that can tell the three cases apart.
+ *
+ * The `read()` helper above resolves null for a missing method AND for a failed
+ * query AND has no way to say "it worked and there was nothing", which is fine
+ * for a metric that renders as a dash but not for sleep: an empty night and an
+ * unreadable night are different sentences on the Recovery screen, and merging
+ * them is the bug this whole feature is being fixed for.
+ */
+function readSleepRows(options: any): Promise<{ ok: true; rows: any[] } | { ok: false; missing?: boolean; reason: string }> {
+  return new Promise((resolve) => {
+    const k = hk();
+    if (!k || typeof k.getSleepSamples !== 'function') {
+      return resolve({ ok: false, missing: true, reason: 'This build’s Apple Health module has no sleep reader — a native rebuild adds it.' });
+    }
+    try {
+      k.getSleepSamples(options, (err: any, res: any) => {
+        if (err) return resolve({ ok: false, reason: String(err?.message || err) });
+        resolve({ ok: true, rows: Array.isArray(res) ? res : [] });
+      });
+    } catch (e: any) {
+      resolve({ ok: false, reason: String(e?.message || e) });
+    }
+  });
+}
+
 // Map HealthKit's workout activity names onto Repple's exercise vocabulary so an
 // imported session lines up with the in-app cardio / mobility catalog. Anything we
 // don't recognise keeps its Health label.
@@ -172,15 +254,19 @@ function mapActivity(name: string): string {
   return HK_TO_EXERCISE[name] || name || 'Workout';
 }
 
+// Named rather than inlined on the provider so the sleep reader can give the
+// same sentence when it declines, instead of a second wording for the same
+// situation drifting away from this one.
+function unavailable(): string | null {
+  if (Platform.OS !== 'ios') return 'Apple Health is iPhone-only.';
+  if (nativePresent()) return null;
+  return 'Needs the Repple app build (Apple Health can’t run inside Expo Go).';
+}
+
 export const appleHealth: WearableProvider = {
   meta,
   isAvailable: () => nativePresent(),
-  unavailableReason: () =>
-    Platform.OS !== 'ios'
-      ? 'Apple Health is iPhone-only.'
-      : nativePresent()
-      ? null
-      : 'Needs the Repple app build (Apple Health can’t run inside Expo Go).',
+  unavailableReason: unavailable,
 
   async connect() {
     if (Platform.OS !== 'ios') throw new Error('Apple Health is iPhone-only.');
@@ -256,6 +342,74 @@ export const appleHealth: WearableProvider = {
     }
     out.sort((x, y) => Date.parse(y.start) - Date.parse(x.start));
     return out;
+  },
+
+  // Recent nights, one reading per device that wrote into Health.
+  //
+  // Sources are kept apart rather than pooled. Pooling would union an Oura
+  // night with an Apple Watch night into one longer stretch — a figure neither
+  // device reported and nobody could check — and would also destroy the only
+  // thing the client asked for, which is knowing where the number came from.
+  async fetchSleep(sinceDays = 7): Promise<SleepRead> {
+    if (!nativePresent()) {
+      return { provider: 'apple', status: 'unsupported', readings: [], reason: unavailable() ?? 'Apple Health is not available in this build.' };
+    }
+    const start = new Date();
+    start.setDate(start.getDate() - Math.max(1, sinceDays));
+    start.setHours(0, 0, 0, 0);
+    // Sample reads need an explicit limit or react-native-health returns an
+    // empty array — the same trap fetchToday documents. A week of staged sleep
+    // is a few hundred samples per source; 20000 is far above any real record
+    // and still bounded.
+    const res = await readSleepRows({ startDate: start.toISOString(), endDate: new Date().toISOString(), limit: 20000, ascending: true });
+    if (!res.ok) {
+      return {
+        provider: 'apple',
+        status: res.missing ? 'unsupported' : 'error',
+        readings: [],
+        reason: res.reason,
+      };
+    }
+
+    // Group by writer first, then by what that writer measured. A source that
+    // stages sleep and also writes "in bed" contributes only its staged rows;
+    // one that writes nothing but "in bed" still contributes, marked as such.
+    const bySource = new Map<string, { name: string; asleep: SleepInterval[]; inBed: SleepInterval[] }>();
+    for (const row of res.rows) {
+      const value = String(row?.value ?? '').toUpperCase();
+      const start = row?.startDate ?? row?.start;
+      const end = row?.endDate ?? row?.end;
+      if (!start || !end) continue;
+      const isAsleep = ASLEEP_VALUES.has(value);
+      const isInBed = IN_BED_VALUES.has(value);
+      if (!isAsleep && !isInBed) continue;
+      const sourceId = String(row?.sourceId ?? row?.sourceName ?? 'unknown');
+      const name = String(row?.sourceName ?? sourceId);
+      let bucket = bySource.get(sourceId);
+      if (!bucket) { bucket = { name, asleep: [], inBed: [] }; bySource.set(sourceId, bucket); }
+      (isAsleep ? bucket.asleep : bucket.inBed).push({ start: String(start), end: String(end) });
+    }
+
+    const readings: SleepReading[] = [];
+    for (const [sourceId, bucket] of bySource) {
+      const staged = bucket.asleep.length > 0;
+      const nights = nightsFromIntervals(staged ? bucket.asleep : bucket.inBed);
+      for (const n of nights) {
+        readings.push({
+          provider: 'apple',
+          sourceId,
+          sourceName: bucket.name,
+          family: familyOf(sourceId, bucket.name),
+          basis: staged ? 'asleep' : 'in-bed',
+          night: n.night,
+          minutesAsleep: n.minutesAsleep,
+        });
+      }
+    }
+    // 'ready' with no readings is a real answer — Health was readable and holds
+    // no sleep for this window. It is not the same as the 'error' above, and
+    // the Recovery screen says something different for each.
+    return { provider: 'apple', status: 'ready', readings };
   },
 
   // Heart-rate samples in a window (a workout session, or a whole day) for the

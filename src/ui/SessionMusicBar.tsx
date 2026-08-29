@@ -3,7 +3,7 @@
 // A self-contained control surface for a running workout: what is playing, and
 // previous / play-pause / next. Drop it into any screen with
 //
-//     import { SessionMusicBar } from '../../src/lib/SessionMusicBar';
+//     import { SessionMusicBar } from '../../src/ui/SessionMusicBar';
 //     …
 //     <SessionMusicBar />
 //
@@ -28,8 +28,8 @@ import { sp, radius, hairline, type as ty } from '../theme/scale';
 import {
   spotifyStatus, spotifyNowPlaying, spotifyPlay, spotifyPause, spotifyNext, spotifyPrevious,
   SpotifyError, spotifyConfigured, type NowPlaying,
-} from './spotify';
-import { progressLine } from './spotifyPlayback';
+} from '../lib/spotify';
+import { progressLine } from '../lib/spotifyPlayback';
 
 /** How often the bar re-reads the player. Spotify's own clients poll at about
  *  this rate; faster burns the development-mode quota for no visible gain. */

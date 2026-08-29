@@ -12,7 +12,7 @@
 // rollout". They connect today — `makeCloudProvider` runs the vendor OAuth and
 // reads the day through the edge function, and WHOOP already feeds the workout
 // importer above it. The line described behaviour the code no longer has.
-import { useState, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { View, Text, Pressable, ScrollView, Alert, ActivityIndicator, Modal, TextInput } from 'react-native';
 import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -32,6 +32,8 @@ import {
   type Ledger, type WriteResult,
 } from '../../src/lib/wearables/appleHealthWrite';
 import { reportError } from '../../src/lib/reportError';
+import { readSleepFromDevices } from '../../src/lib/wearables/sleep';
+import { formatSleepHours, recentNights, type SleepRead } from '../../src/lib/sleepMerge';
 import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 
 type MetricKey = 'kcal' | 'hr' | 'steps' | 'source';
@@ -215,6 +217,36 @@ export default function Devices() {
  };
 
  const connected = PROVIDERS.filter((p) => w.states[p.meta.id] === 'connected');
+
+ // Which of the connected devices sleep actually comes from (TF-01).
+ //
+ // This screen is where somebody goes to find out why a figure elsewhere says
+ // what it says, so it states the answer per device rather than implying that
+ // everything listed above feeds everything in the app. A provider that cannot
+ // report sleep says so in its own words; it is not left blank, because blank
+ // reads as "nothing recorded".
+ const [sleepReads, setSleepReads] = useState<SleepRead[] | null>(null);
+ const connectedKey = connected.map((p) => p.meta.id).join(',');
+ useEffect(() => {
+  let cancelled = false;
+  (async () => {
+   try {
+    const reads = await readSleepFromDevices(w.states, 2);
+    if (!cancelled) setSleepReads(reads);
+   } catch (e) {
+    reportError('devices.sleepSources', e);
+    if (!cancelled) setSleepReads([]);
+   }
+  })();
+  return () => { cancelled = true; };
+ }, [connectedKey]);
+ // Last night per device, UNMERGED. This list is about provenance, so each
+ // recorder's own figure sits next to its own name and no precedence is
+ // applied — deciding which one to believe is the Recovery screen's job, and
+ // doing it twice in two places is how the two screens start disagreeing.
+ // Apple Health can contribute several rows here, because it holds whatever
+ // every watch and app on the phone wrote into it.
+ const lastNightKey = recentNights(1)[0];
  const showLive = connected.length > 0 && (w.today.activeKcal != null || w.today.heartRateAvg != null || w.today.steps != null);
 
  const DETAILS: Record<MetricKey, { ico: string; title: string; value: string; blurb: string }> = {
@@ -335,6 +367,51 @@ export default function Devices() {
       <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.lg }}>
        <View style={{ flex: 1 }}><Cta label="Import all" wide onPress={importAll} /></View>
        <View style={{ flex: 1 }}><Ghost label="Refresh" onPress={findWorkouts} /></View>
+      </View>
+     </View>
+    )}
+   </Section>
+  </>) : null}
+
+  {/* ── where sleep comes from ──────────────────────────────────────── */}
+  {connected.length ? (<>
+   <Rule />
+   <Section>
+    <SectionHead title="Sleep sources" note={`last night`} />
+    <Text style={{ ...ty.label, color: t.ink2 }}>
+     Sleep is read from every device you have connected, not from one of them. Where two disagree, Recovery shows the figure one device actually reported and names it — it never averages them into a number no device recorded.
+    </Text>
+    {sleepReads == null ? (
+     <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>Checking your devices…</Text>
+    ) : (
+     <View style={{ marginTop: sp.lg }}>
+      {sleepReads.map((r, i) => {
+       const provider = PROVIDERS.find((p) => p.meta.id === r.provider);
+       const lastNight = r.readings.filter((rd) => rd.night === lastNightKey);
+       return (
+        <View key={r.provider} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+         <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{provider?.meta.name ?? r.provider}</Text>
+         {r.status !== 'ready' ? (
+          // 'error' is louder than 'unsupported' because one of them means we
+          // do not know what happened last night and the other means we never
+          // asked. Both are stated; neither renders as a zero.
+          <Text style={{ ...ty.caption, color: r.status === 'error' ? t.warn : t.ink3, marginTop: 2 }}>
+           {r.reason || (r.status === 'error' ? 'Could not be read just now, so last night is unknown rather than empty.' : 'Cannot report sleep to Repple yet.')}
+          </Text>
+         ) : lastNight.length === 0 ? (
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>Readable — nothing recorded for last night.</Text>
+         ) : (
+          lastNight.map((rd) => (
+           <Text key={rd.sourceId} style={{ ...ty.caption, ...numeric, color: t.ink2, marginTop: 2 }}>
+            {formatSleepHours(rd.minutesAsleep)} · {rd.sourceName}{rd.basis === 'in-bed' ? ' (time in bed)' : ''}
+           </Text>
+          ))
+         )}
+        </View>
+       );
+      })}
+      <View style={{ alignSelf: 'flex-start', marginTop: sp.md }}>
+       <Ghost label="See your nights" onPress={() => router.push('/(client)/recovery')} />
       </View>
      </View>
     )}

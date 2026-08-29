@@ -45,6 +45,7 @@
     "src/lib/spotifyPlayback.test.ts",
     "src/lib/threadPeer.test.ts",
     "src/lib/liftingMacros.test.ts",
-    "src/lib/dayPlan.test.ts"
+    "src/lib/dayPlan.test.ts",
+    "src/lib/sleepMerge.test.ts"
   ]
 }
