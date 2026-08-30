@@ -297,7 +297,13 @@ on conflict (id) do update set
 // deleted. Skipping that is how Elliptical, Treadmill and Upright Bike ended
 // up the only rows in the catalogue with no picture at all.
 const sup = JSON.parse(readFileSync(SUPERSEDED, 'utf8'));
-const pairs = Object.entries(sup.ours_wins || {});
+// Each entry is { repdb_id, repdb_name }. Both are needed: the clean-up below
+// also RE-KEYS RepDB rows to the slug of their name, so a twin that survived an
+// earlier run comes back under a different id — 'squat' becomes
+// 'barbell-back-squat' — and a delete keyed on the id then matches nothing
+// while the duplicate sits in the catalogue. Four survived three rounds of
+// clean-up exactly that way. The name does not move.
+const pairs = Object.entries(sup.ours_wins || {}).map(([ours, v]) => [ours, v.repdb_id, v.repdb_name]);
 const dupes = Object.keys(sup.our_own_duplicates || {});
 const cleanup = `
 -- ─────────────────────────────────────────────────────────────────────────
@@ -334,9 +340,20 @@ set image_paths = coalesce(src.image_paths, tgt.image_paths),
 from m join public.exercises src on src.id = m.theirs
 where tgt.id = m.ours;
 
+-- By id AND by name. The re-key below moves a RepDB row to the slug of its
+-- name, so a twin that outlived an earlier run is no longer sitting at the id
+-- this list knows it by. Matching the name as well catches it wherever it
+-- ended up, and matching the source column keeps the delete off our own rows,
+-- which carry the same movement under our own name.
 delete from public.exercises where id in (
 ${pairs.map(([, b]) => `  ${q(b)}`).concat(dupes.map((d) => `  ${q(d)}`)).join(',\n')}
 );
+
+delete from public.exercises
+where source = 'repdb'
+  and name in (
+${pairs.map(([, , n]) => `  ${q(n)}`).join(',\n')}
+  );
 
 -- Any row still keyed by RepDB's own id rather than by the slug of the name it
 -- displays. Every screen resolves through exerciseSlug(name), so a row keyed

@@ -1,23 +1,69 @@
 {
-  "//": "Our own catalogue rows and the RepDB row each one supersedes. Re-seeding the RepDB catalogue re-inserts every one of these, so the generator emits the clean-up at the end of the same file rather than leaving it to a later migration somebody has to remember. Each pairing was read as a MOVEMENT: similarity offers Hack Squat for Back Squat, because RepDB files Barbell Back Squat under the id 'squat' and no score finds that.",
+  "//": "Our own catalogue rows and the RepDB row each one supersedes. Re-seeding re-inserts every one of these, so the generator emits the clean-up at the end of the same file rather than leaving it to a migration somebody has to remember. Each pairing was read as a MOVEMENT, not as a string.",
   "ours_wins": {
-    "ab-crunch": "crunches",
-    "assisted-pull-up": "assisted-pull-ups",
-    "back-squat": "squat",
-    "bent-over-row": "barbell-row",
-    "cable-crossover": "cable-fly",
-    "calf-raise": "machine-calf-raise",
-    "chest-press": "chest-press-machine",
-    "incline-dumbbell-press": "incline-db-press",
-    "nordic-curl": "nordic-hamstring-curl",
-    "overhead-press": "ohp",
-    "seated-row": "seated-cable-row",
-    "shoulder-press": "dumbbell-shoulder-press",
-    "elliptical": "elliptical-trainer",
-    "treadmill": "treadmill-running",
-    "upright-bike": "stationary-bike"
+    "ab-crunch": {
+      "repdb_id": "crunches",
+      "repdb_name": "Crunches"
+    },
+    "assisted-pull-up": {
+      "repdb_id": "assisted-pull-ups",
+      "repdb_name": "Assisted Pull Ups"
+    },
+    "back-squat": {
+      "repdb_id": "squat",
+      "repdb_name": "Barbell Back Squat"
+    },
+    "bent-over-row": {
+      "repdb_id": "barbell-row",
+      "repdb_name": "Bent-Over Barbell Row"
+    },
+    "cable-crossover": {
+      "repdb_id": "cable-fly",
+      "repdb_name": "Cable Fly"
+    },
+    "calf-raise": {
+      "repdb_id": "machine-calf-raise",
+      "repdb_name": "Machine Calf Raise"
+    },
+    "chest-press": {
+      "repdb_id": "chest-press-machine",
+      "repdb_name": "Machine Chest Press"
+    },
+    "incline-dumbbell-press": {
+      "repdb_id": "incline-db-press",
+      "repdb_name": "Incline Dumbbell Press"
+    },
+    "nordic-curl": {
+      "repdb_id": "nordic-hamstring-curl",
+      "repdb_name": "Nordic Hamstring Curl"
+    },
+    "overhead-press": {
+      "repdb_id": "ohp",
+      "repdb_name": "Barbell Overhead Press"
+    },
+    "seated-row": {
+      "repdb_id": "seated-cable-row",
+      "repdb_name": "Seated Cable Row"
+    },
+    "shoulder-press": {
+      "repdb_id": "dumbbell-shoulder-press",
+      "repdb_name": "Dumbbell Shoulder Press"
+    },
+    "elliptical": {
+      "repdb_id": "elliptical-trainer",
+      "repdb_name": "Elliptical Trainer"
+    },
+    "treadmill": {
+      "repdb_id": "treadmill-running",
+      "repdb_name": "Treadmill Running"
+    },
+    "upright-bike": {
+      "repdb_id": "stationary-bike",
+      "repdb_name": "Stationary Bike"
+    }
   },
   "our_own_duplicates": {
     "triceps-pushdown": "one movement filed twice; src/lib/machines.ts names the singular 'Tricep Pushdown'"
-  }
+  },
+  "//name_matters": "The NAME is recorded alongside the id because the clean-up cannot rely on the id alone. The same file re-keys RepDB rows to the slug of their name, so a twin that survived one run comes back under a DIFFERENT id — 'squat' becomes 'barbell-back-squat' — and a delete keyed on 'squat' then matches nothing while the duplicate sits there. That is how four duplicates survived three rounds of clean-up. A name does not move."
 }

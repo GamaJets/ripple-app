@@ -9473,6 +9473,11 @@ set image_paths = coalesce(src.image_paths, tgt.image_paths),
 from m join public.exercises src on src.id = m.theirs
 where tgt.id = m.ours;
 
+-- By id AND by name. The re-key below moves a RepDB row to the slug of its
+-- name, so a twin that outlived an earlier run is no longer sitting at the id
+-- this list knows it by. Matching the name as well catches it wherever it
+-- ended up, and matching the source column keeps the delete off our own rows,
+-- which carry the same movement under our own name.
 delete from public.exercises where id in (
   'crunches',
   'assisted-pull-ups',
@@ -9491,6 +9496,26 @@ delete from public.exercises where id in (
   'stationary-bike',
   'triceps-pushdown'
 );
+
+delete from public.exercises
+where source = 'repdb'
+  and name in (
+  'Crunches',
+  'Assisted Pull Ups',
+  'Barbell Back Squat',
+  'Bent-Over Barbell Row',
+  'Cable Fly',
+  'Machine Calf Raise',
+  'Machine Chest Press',
+  'Incline Dumbbell Press',
+  'Nordic Hamstring Curl',
+  'Barbell Overhead Press',
+  'Seated Cable Row',
+  'Dumbbell Shoulder Press',
+  'Elliptical Trainer',
+  'Treadmill Running',
+  'Stationary Bike'
+  );
 
 -- Any row still keyed by RepDB's own id rather than by the slug of the name it
 -- displays. Every screen resolves through exerciseSlug(name), so a row keyed
