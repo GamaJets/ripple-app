@@ -102,7 +102,16 @@ for (const r of rows) {
   // Two frames, start and peak. The free tier is stills; the paid tier adds a
   // looping animation, which lands in animation_path and takes precedence
   // over these without anything else changing.
-  const imgs = r.images?.flat ? [r.images.flat.start, r.images.flat.peak].filter(Boolean) : [];
+  // Stills. The free tier ships two SHAPES and only one was handled: 467
+  // exercises give {start, peak} — a movement with two distinct positions —
+  // and 134 give {main}, a single illustration for something that has no two
+  // ends to show (a plank, a carry, a stretch held in place).
+  //
+  // Reading only start/peak left those 134 with no picture, which looked like
+  // RepDB not covering them. It covers all 601; the generator was dropping a
+  // fifth of them on the floor.
+  const flat = r.images?.flat || {};
+  const imgs = [flat.start, flat.peak, flat.main].filter(Boolean);
   out.push({
     id,
     name: r.name_en,
