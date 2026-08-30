@@ -47,8 +47,13 @@ const theirsToOurs = new Map(
 const files = readdirSync(DIR).filter((f) => /\.(webp|mp4|gif|json)$/i.test(f));
 const map = {}; const unmatched = [];
 for (const f of files) {
-  const key = basename(f, extname(f));
-  const rec = byFileKey.get(key);
+  // Stills carry a variant suffix the record id does not: air-bike-main.webp,
+  // arnold-press-start.webp, arnold-press-peak.webp. Animations do not.
+  // Strip a KNOWN suffix only — trimming anything after the last hyphen would
+  // turn 'bench-press' into 'bench' and quietly mis-file it.
+  const stem = basename(f, extname(f));
+  const key = stem.replace(/-(start|peak|main)$/, '');
+  const rec = byFileKey.get(key) || byFileKey.get(stem);
   if (!rec) { unmatched.push(f); continue; }
   // Our own row wins wherever it supersedes the RepDB one.
   map[f] = theirsToOurs.get(rec.id) ?? slug(rec.name_en);

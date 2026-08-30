@@ -53,6 +53,7 @@ import { catalogueValue as cap } from '../../src/lib/format';
 import { Image as ExpoImage } from 'expo-image';
 import { sp, layout, radius, elevation, type as ty, numeric } from '../../src/theme/scale';
 import { frameUrls } from '../../src/lib/exerciseMedia';
+import { signMedia, needsSigning } from '../../src/ui/signedMedia';
 
 export default function Library() {
  const t = useTheme();
@@ -118,6 +119,26 @@ export default function Library() {
   (term === '' || e.name.toLowerCase().includes(term))
  );
  useEffect(() => { setCatShown(50); }, [term, group]);
+
+ // Thumbnails for the page on screen, signed in ONE request.
+ //
+ // The stills are in our own private bucket, so a path is not a URL. Signing
+ // each row on its own would be fifty round trips to draw one screen; the
+ // cache in signedMedia means paging back and forth after that costs nothing.
+ const [thumbs, setThumbs] = useState<Map<string, string>>(new Map());
+ const visiblePaths = catList.slice(0, catShown).map((e) => e.thumbPath).filter((p): p is string => !!p && needsSigning(p));
+ const visibleKey = visiblePaths.join('|');
+ useEffect(() => {
+  let cancelled = false;
+  if (!visiblePaths.length) return;
+  (async () => {
+   const signed = await signMedia(visiblePaths);
+   // Merged rather than replaced: a later page must not blank the rows above
+   // it, which is what a scroll back up would then show.
+   if (!cancelled) setThumbs((prev) => new Map([...prev, ...signed]));
+  })();
+  return () => { cancelled = true; };
+ }, [visibleKey]);
 
  // Whose clip it is, in the same words <ExerciseVideoBlock> uses on the workout
  // screen: one clip described two ways on two screens reads as two facts. A null
@@ -291,7 +312,11 @@ export default function Library() {
         // scans; the illustration is what makes one row findable among the
         // others. One image per row and never the second — a thumbnail has no
         // use for the peak position.
-        const thumb = frameUrls(e.thumbPath ? [e.thumbPath] : null, e.source)[0] ?? null;
+        // Ours if it is in our bucket, the vendor CDN otherwise — the two
+        // catalogues are still mixed while the machine rows have no picture.
+        const thumb = e.thumbPath && needsSigning(e.thumbPath)
+          ? (thumbs.get(e.thumbPath) ?? null)
+          : (frameUrls(e.thumbPath ? [e.thumbPath] : null, e.source)[0] ?? null);
         return (
         <View key={e.id}>
          {i > 0 ? <Rule /> : null}

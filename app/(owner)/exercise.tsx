@@ -31,7 +31,8 @@ import { Rule, Section, SectionHead, Notice, Ghost, Flag } from '../../src/ui/ki
 import { sp, layout, radius, type as ty } from '../../src/theme/scale';
 import { useExerciseDetail } from '../../src/ui/exerciseDetail';
 import { DemoAnimation, FrameLoop } from '../../src/ui/ExerciseDemo';
-import { frameUrls, FRAMES_ARE_UNHOSTED, demoCaption, demoIsShippable, DEMO_BUCKET } from '../../src/lib/exerciseMedia';
+import { FRAMES_ARE_UNHOSTED, demoCaption } from '../../src/lib/exerciseMedia';
+import { useExerciseMedia } from '../../src/ui/useExerciseMedia';
 import { catalogueValue as cap } from '../../src/lib/format';
 import { supabase } from '../../src/lib/supabase';
 import { RepdbInlineCredit } from '../../src/ui/Attribution';
@@ -49,26 +50,10 @@ export default function OwnerExercise() {
   // somebody is deciding whether to buy the pack, and never in a build that
   // reaches a real person. __DEV__ is the only thing that distinguishes them,
   // and it is the one flag that cannot be wrong in a release binary.
-  const mayShowAnimation = demoIsShippable(detail?.demoLicence, !__DEV__);
-  const [animUrl, setAnimUrl] = useState<string | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    const path = detail?.animationPath;
-    if (!path || !mayShowAnimation) { setAnimUrl(null); return; }
-    (async () => {
-      try {
-        const { data, error } = await supabase.storage.from(DEMO_BUCKET).createSignedUrl(path, 60 * 60);
-        if (!cancelled) setAnimUrl(error ? null : (data?.signedUrl ?? null));
-      } catch {
-        // no-error-ok: a clip we could not sign falls through to the reference
-        // frames below, which is a worse demonstration rather than none.
-        if (!cancelled) setAnimUrl(null);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [detail?.animationPath, mayShowAnimation]);
-
-  const frames = useMemo(() => frameUrls(detail?.imagePaths, detail?.source), [detail?.imagePaths, detail?.source]);
+  // The same hook the client screen uses. Three apps showing the same
+  // movement must resolve its pictures the same way, and a picture that fails
+  // to resolve is a silent empty box rather than an error anybody sees.
+  const { frames, animUrl } = useExerciseMedia(detail);
   const caption = demoCaption(detail?.source, frames.length);
 
   const chips = [detail?.equipment, detail?.level, detail?.mechanic, detail?.force]

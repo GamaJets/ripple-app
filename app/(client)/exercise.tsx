@@ -41,6 +41,7 @@ import { frameUrls, FRAMES_ARE_UNHOSTED, demoCaption, demoIsShippable, DEMO_BUCK
 import { supabase } from '../../src/lib/supabase';
 import { useClientData } from '../../src/ui/clientData';
 import { RepdbInlineCredit } from '../../src/ui/Attribution';
+import { useExerciseMedia } from '../../src/ui/useExerciseMedia';
 
 
 export default function ExerciseScreen() {
@@ -65,32 +66,11 @@ export default function ExerciseScreen() {
   // somebody is deciding whether to buy the pack, and never in a build that
   // reaches a real person. __DEV__ is the only thing that distinguishes them,
   // and it is the one flag that cannot be wrong in a release binary.
-  const mayShowAnimation = demoIsShippable(detail?.demoLicence, !__DEV__);
-  const [animUrl, setAnimUrl] = useState<string | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    const path = detail?.animationPath;
-    if (!path || !mayShowAnimation) { setAnimUrl(null); return; }
-    // An evaluation pack is a folder on whoever's machine is judging it, not
-    // something in our bucket — putting it there would be the first step of
-    // forgetting which assets we are licensed to ship. Resolved synchronously
-    // and returned before the signing call, which has nothing to sign.
-    const evalUrl = evalAnimationUrl(path, detail?.demoLicence);
-    if (evalUrl) { setAnimUrl(evalUrl); return; }
-    (async () => {
-      try {
-        const { data, error } = await supabase.storage.from(DEMO_BUCKET).createSignedUrl(path, 60 * 60);
-        if (!cancelled) setAnimUrl(error ? null : (data?.signedUrl ?? null));
-      } catch {
-        // no-error-ok: a clip we could not sign falls through to the reference
-        // frames below, which is a worse demonstration rather than none.
-        if (!cancelled) setAnimUrl(null);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [detail?.animationPath, detail?.demoLicence, mayShowAnimation]);
-
-  const frames = useMemo(() => frameUrls(detail?.imagePaths, detail?.source), [detail?.imagePaths, detail?.source]);
+  // One hook for all three apps. Media resolution lived in each screen and
+  // that is the shape that already produced a client app and a coach app
+  // disagreeing about the name of a muscle — worse here, because a picture
+  // that fails to resolve is an empty box with no error to read.
+  const { frames, animUrl } = useExerciseMedia(detail);
   const caption = demoCaption(detail?.source, frames.length);
 
   const G = layout.gutter;
