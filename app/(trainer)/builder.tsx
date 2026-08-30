@@ -49,6 +49,8 @@ import { useProgramTemplates } from '../../src/ui/programTemplates';
 import { useCoachExercises, mergeExerciseLists } from '../../src/ui/coachExercises';
 import { useExerciseCatalogue } from '../../src/ui/exerciseDetail';
 import { exerciseSlug } from '../../src/lib/exerciseId';
+import { useCatalogueThumbs } from '../../src/ui/useCatalogueThumbs';
+import { ExerciseThumb } from '../../src/ui/ExerciseDemo';
 import { buildProgram, type Program } from '../../src/lib/programs';
 import { guardOverwrite } from '../../src/lib/overwriteGuard';
 import { guardInjuries } from '../../src/lib/injuryGate';
@@ -257,6 +259,28 @@ export default function Builder() {
   const catShownList = cat.rows.filter(
     (e) => !ownSlugs.has(e.id) && (pickTerm === '' || e.name.toLowerCase().includes(pickTerm)),
   );
+
+  // A picture for every movement on this screen: the ones already in the days
+  // being built, and the ones in the picker below. Both in one batch, because
+  // they are on screen at the same moment and two effects would be two waits.
+  //
+  // Reported while looking at a built program — three exercises, three names,
+  // and no way to see any of them. A coach choosing between Hip Thrust and
+  // Barbell Glute Bridge is choosing between two pictures.
+  const catByName = useMemo(() => {
+    const m = new Map<string, typeof cat.rows[number]>();
+    for (const r of cat.rows) m.set(exerciseSlug(r.name), r);
+    return m;
+  }, [cat.rows]);
+  const rowFor = (name: string) => catByName.get(exerciseSlug(name)) ?? null;
+  const thumbRows = useMemo(() => {
+    const inDays = days.flatMap((d) => d.exercises.map((e) => rowFor(e.name))).filter(Boolean);
+    const inPicker = catShownList.slice(0, catShown);
+    return [...inDays, ...inPicker] as { thumbPath: string | null; source?: string | null }[];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [days, catByName, catShownList, catShown]);
+  const thumbFor = useCatalogueThumbs(thumbRows);
+
   // A fresh search starts at the top of the catalogue rather than 300 rows into
   // the last one.
   useEffect(() => { setCatShown(30); }, [pickTerm]);
@@ -472,10 +496,20 @@ export default function Builder() {
               {d.exercises.map((e) => (
                 <View key={e.key} style={{ marginTop: sp.md, paddingTop: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{e.name}</Text>
-                      {e.group ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{e.group}</Text> : null}
-                    </View>
+                    {/* The whole name and picture open the movement, so a coach
+                        can check what they have written down without hunting
+                        for a control. What opens is the same screen the client
+                        gets, which is the point — and it carries Record a clip
+                        for the movements this coach wants in their own words. */}
+                    <Pressable onPress={() => previewExercise(e.name)} accessibilityRole="button"
+                      accessibilityLabel={`What ${e.name} is`}
+                      style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+                      <ExerciseThumb uri={thumbFor(rowFor(e.name) ?? { thumbPath: null })} t={t} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{e.name}</Text>
+                        {e.group ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{e.group}</Text> : null}
+                      </View>
+                    </Pressable>
                     <Pressable onPress={() => removeExercise(di, e.key)} accessibilityRole="button" accessibilityLabel="Remove exercise" hitSlop={8}
                       style={{ paddingHorizontal: sp.sm, paddingVertical: sp.xs }}>
                       <Text style={{ ...ty.head, color: t.ink3 }}>×</Text>

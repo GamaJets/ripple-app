@@ -17,6 +17,8 @@ import { useVideoPlayer, VideoView } from 'expo-video';
 import { HAS_NATIVE_VIDEO, UPDATE_REQUIRED_NOTE } from './nativeModules';
 import { Image as ExpoImage } from 'expo-image';
 import { useTheme } from './components';
+import type { Theme } from '../theme/tokens';
+import { Icon } from './Icon';
 import { radius, sp, type as ty } from '../theme/scale';
 
 /**
@@ -170,6 +172,25 @@ export function FrameLoop({ urls, label }: { urls: string[]; label: string }) {
           <ActivityIndicator />
         </View>
       ) : null}
+    </View>
+  );
+}
+
+/**
+ * A movement's picture at list size.
+ *
+ * The empty state is a marked tile rather than a blank one: a row with no
+ * artwork and a row whose signed URL has not arrived look identical if both
+ * are empty, and one of those is permanent. Sized and rounded here so the
+ * client library, the coach's builder and the coach's picker cannot drift into
+ * three slightly different squares.
+ */
+export function ExerciseThumb({ uri, t, size = 52 }: { uri: string | null; t: Theme; size?: number }) {
+  return (
+    <View style={{ width: size, height: size, borderRadius: radius.sm, backgroundColor: t.surface2, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' }}>
+      {uri
+        ? <ExpoImage source={{ uri }} contentFit="contain" cachePolicy="disk" style={{ width: '100%', height: '100%' }} />
+        : <Icon name="dumbbell" size={Math.round(size * 0.42)} color={t.ink3} />}
     </View>
   );
 }
