@@ -53,6 +53,8 @@
     "src/lib/clientGoals.test.ts",
     "src/lib/photoInbox.test.ts",
     "src/lib/trainerProfileAccess.test.ts",
-    "src/lib/endCoaching.test.ts"
+    "src/lib/endCoaching.test.ts",
+    "src/lib/coachWeek.test.ts",
+    "src/lib/adherence.test.ts"
   ]
 }

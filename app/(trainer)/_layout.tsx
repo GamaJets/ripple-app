@@ -45,6 +45,7 @@ export default function TrainerLayout() {
       <Tabs.Screen name="checklists" options={{ href: null, title: 'Their checklists' }} />
       <Tabs.Screen name="client-goals" options={{ href: null, title: 'Working toward' }} />
       <Tabs.Screen name="client-photos" options={{ href: null, title: 'Progress photos' }} />
+      <Tabs.Screen name="client-week" options={{ href: null, title: 'Their week' }} />
       <Tabs.Screen name="templates" options={{ href: null, title: 'Program Templates' }} />
       <Tabs.Screen name="feedback" options={{ href: null, title: 'Send Feedback' }} />
       <Tabs.Screen name="billing" options={{ href: null, title: 'Billing & subscription' }} />

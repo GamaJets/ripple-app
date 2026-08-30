@@ -17,7 +17,7 @@ import { View, Text, Pressable, ScrollView, TextInput, Alert } from 'react-nativ
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Cta, Ghost } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Cta, Ghost, Notice } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { useClientTags } from '../../src/ui/clientTags';
@@ -28,17 +28,40 @@ import { sendPush } from '../../src/ui/pushNotifications';
 export default function Broadcast() {
   const t = useTheme();
   const router = useRouter();
-  const { roster } = useRoster();
-  const { allTags, tagsFor } = useClientTags();
+  const { roster, status: rosterStatus } = useRoster();
+  const { allTags, tagsFor, status: tagStatus } = useClientTags();
   const [seg, setSeg] = useState<string | null>(null); // null = all
   const [body, setBody] = useState('');
   const [busy, setBusy] = useState(false);
 
   const recipients = useMemo(() => roster.filter((c) => seg === null || tagsFor(c.id).includes(seg)), [roster, seg, tagsFor]);
 
+  // Whether the LIST is trustworthy, as distinct from whether the send worked.
+  // This screen was careful about the write — it counts the rows it managed to
+  // insert and says "Partly sent" — and never asked whether the roster it was
+  // addressing was the whole roster. A refused read leaves it empty and a
+  // truncated one leaves it short, and in both cases a coach is composing to a
+  // list the app cannot vouch for. Since reads are capped now, the short case
+  // is the realistic one: broadcast to the first thousand of twelve hundred and
+  // be told "Sent to 1000 client threads", which sounds complete.
+  const bookUnread = rosterStatus === 'error';
+  const bookShort = rosterStatus === 'partial';
+  // Segments are only as good as the tags behind them. With tags unread, every
+  // tagsFor() comes back empty and a chosen segment matches nobody — which
+  // renders identically to a segment that genuinely has nobody in it.
+  const segUnreliable = seg !== null && (tagStatus === 'error' || tagStatus === 'partial');
+
   const send = async () => {
     const b = body.trim();
     if (!b || !recipients.length || busy) return;
+    // Refuse rather than warn. A broadcast cannot be taken back, and "send to
+    // everybody" written against a list we could not read is not a smaller
+    // version of the thing the coach asked for.
+    if (bookUnread) {
+      Alert.alert('Your client list could not be read',
+        'Nothing was sent. Sending now would go to whoever happens to be loaded rather than to your book — reopen this once you are connected.');
+      return;
+    }
     setBusy(true);
     try {
       let delivered = recipients.length;
@@ -64,11 +87,17 @@ export default function Broadcast() {
       // Partial delivery is reported as partial. Saying "Sent" for a broadcast
       // that reached two thirds of the segment is the failure this screen keeps
       // making in a different way.
+      // Two different incompletenesses, and they need saying separately: some
+      // recipients have no account to write to, and — if the roster came back
+      // short — there are people who were never in the list at all.
+      const shortNote = bookShort
+        ? '\n\nYour roster came back short, so this went to the clients that were loaded and not necessarily to everyone on your book.'
+        : '';
       Alert.alert(
-        delivered === recipients.length ? 'Sent' : 'Partly sent',
-        delivered === recipients.length
+        delivered === recipients.length && !bookShort ? 'Sent' : 'Partly sent',
+        (delivered === recipients.length
           ? `Added to ${delivered} client thread${delivered === 1 ? '' : 's'}${where}.`
-          : `Added to ${delivered} of ${recipients.length} client threads${where}. The rest were added by hand and have no client account to message yet.`,
+          : `Added to ${delivered} of ${recipients.length} client threads${where}. The rest were added by hand and have no client account to message yet.`) + shortNote,
       );
     } catch {
       Alert.alert('Not sent', 'The message could not be written to your clients’ threads. Check your connection and try again.');
@@ -110,10 +139,20 @@ export default function Broadcast() {
 
         {/* ── who that is ────────────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Recipients" note={recipients.length ? `${recipients.length}` : undefined} />
-          {recipients.length === 0 ? (
+          <SectionHead title="Recipients" note={recipients.length && !bookUnread ? `${recipients.length}` : undefined} />
+          {bookUnread ? (
+            <Notice tone={t.warn} kicker="Roster" title="Your client list could not be read"
+              note="Nobody is listed below because the roster did not come back. This is not an empty book, and nothing can be sent until it loads." />
+          ) : bookShort ? (
+            <Notice tone={t.warn} kicker="Roster" title="This is part of your book"
+              note="Your roster came back short, so anyone past the point it stopped is not in this list and would not receive the message." />
+          ) : segUnreliable ? (
+            <Notice tone={t.warn} kicker="Tags" title="This segment may be incomplete"
+              note="Your client tags could not be read in full, so somebody in this segment may be missing from the list below." />
+          ) : null}
+          {recipients.length === 0 && !bookUnread ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>No clients in this segment.</Text>
-          ) : (
+          ) : recipients.length === 0 ? null : (
             <Text style={{ ...ty.body, color: t.ink2 }} numberOfLines={2}>{recipients.map((c) => c.name).join(', ')}</Text>
           )}
         </Section>
