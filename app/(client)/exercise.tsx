@@ -31,6 +31,7 @@ import { useExerciseDetail } from '../../src/ui/exerciseDetail';
 import { useExerciseVideos } from '../../src/ui/exerciseVideos';
 import { ExerciseVideo } from '../../src/ui/ExerciseVideo';
 import { useVideoPlayer, VideoView } from 'expo-video';
+import { Image as ExpoImage } from 'expo-image';
 import { videoForExercise } from '../../src/lib/exerciseId';
 import { frameUrls, FRAMES_ARE_UNHOSTED, demoCaption, demoIsShippable, DEMO_BUCKET } from '../../src/lib/exerciseMedia';
 import { supabase } from '../../src/lib/supabase';
@@ -45,8 +46,22 @@ const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
  * That one is somebody talking through a cue and is worth a play button and
  * sound; this is a diagram that happens to move, and asking a client to press
  * play on a diagram is a step for nothing.
+ *
+ * ── Two renderers, because packs ship two different things ─────────────────
+ *
+ * Vendors deliver either video (MP4/WebM) or an animated image (WebP/GIF), and
+ * the two need completely different players. React Native's own <Image> does
+ * not animate WebP on iOS and expo-video cannot open one at all, so a WebP pack
+ * played through the video path renders a blank box — no error, no log, just an
+ * empty frame where the demonstration should be. That is exactly the class of
+ * bug scripts/check-runtime-traps.mjs exists for, and it would have shipped.
+ *
+ * The extension decides, because it is the one thing about a bought file we
+ * know for certain.
  */
-function DemoAnimation({ uri, label }: { uri: string; label: string }) {
+const ANIMATED_IMAGE = /\.(webp|gif|apng)(\?|$)/i;
+
+function DemoVideo({ uri, label }: { uri: string; label: string }) {
   const t = useTheme();
   const player = useVideoPlayer(uri, (p) => { p.loop = true; p.muted = true; p.play(); });
   return (
@@ -54,6 +69,24 @@ function DemoAnimation({ uri, label }: { uri: string; label: string }) {
       player={player}
       nativeControls={false}
       contentFit="contain"
+      accessibilityLabel={`${label}, looping demonstration`}
+      style={{ width: '100%', aspectRatio: 4 / 3, borderRadius: radius.md, backgroundColor: t.surface2 }}
+    />
+  );
+}
+
+function DemoAnimation({ uri, label }: { uri: string; label: string }) {
+  const t = useTheme();
+  if (!ANIMATED_IMAGE.test(uri)) return <DemoVideo uri={uri} label={label} />;
+  return (
+    <ExpoImage
+      source={{ uri }}
+      contentFit="contain"
+      // expo-image animates WebP and GIF on both platforms; the built-in
+      // <Image> shows only the first frame on iOS, which looks like a still
+      // rather than like a failure.
+      autoplay
+      cachePolicy="disk"
       accessibilityLabel={`${label}, looping demonstration`}
       style={{ width: '100%', aspectRatio: 4 / 3, borderRadius: radius.md, backgroundColor: t.surface2 }}
     />
