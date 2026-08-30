@@ -40,7 +40,7 @@
 // the client's quick-log does — reps and weight are what was recorded, energy
 // was not, and `WorkoutEntry.kcal` left absent renders as a dash everywhere
 // downstream rather than as a fabricated burn in the coach's own history.
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -48,6 +48,10 @@ import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, KpiRow, Cta, Ghost, Notice, PartialRead, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
+import { useExerciseCatalogue, type CatalogueRow } from '../../src/ui/exerciseDetail';
+import { useCatalogueThumbs } from '../../src/ui/useCatalogueThumbs';
+import { ExerciseThumb } from '../../src/ui/ExerciseDemo';
+import { exerciseSlug } from '../../src/lib/exerciseId';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useSettings } from '../../src/ui/settings';
 import { isWhole } from '../../src/ui/loadStatus';
@@ -211,6 +215,41 @@ export default function MyTraining() {
     ]);
   };
 
+  // What the catalogue offers for what has been typed so far. Capped at five:
+
+  // this list sits between the field and the sets, and a long one pushes the
+
+  // rest of the form off the screen while somebody is mid-entry.
+
+  //
+
+  // Hidden once the typed name IS a catalogue movement — the suggestion has
+
+  // been taken, and leaving it there just covers the form.
+
+  const cat = useExerciseCatalogue();
+
+  const exSuggestions = useMemo(() => {
+
+    const q = exercise.trim().toLowerCase();
+
+    if (q.length < 2 || cat.status !== 'ready') return [] as CatalogueRow[];
+
+    const typedSlug = exerciseSlug(exercise);
+
+    if (cat.rows.some((r) => r.id === typedSlug)) return [] as CatalogueRow[];
+
+    const starts = cat.rows.filter((r) => r.name.toLowerCase().startsWith(q));
+
+    const rest = cat.rows.filter((r) => !r.name.toLowerCase().startsWith(q) && r.name.toLowerCase().includes(q));
+
+    return [...starts, ...rest].slice(0, 5);
+
+  }, [exercise, cat.rows, cat.status]);
+
+  const thumbFor = useCatalogueThumbs(exSuggestions);
+
+
   const inp = { ...ty.body, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 };
   const G = layout.gutter;
 
@@ -321,8 +360,33 @@ export default function MyTraining() {
             <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
               For when you would rather not type a sentence. Leave the weight empty for a bodyweight set.
             </Text>
+            {/* Typed OR picked. This field was free text only, which asked a
+                coach to spell from memory a movement the app already holds 604
+                of — and a name that does not slug to a catalogue id gets no
+                illustration and no history that lines up with the same lift
+                logged from anywhere else. The catalogue is right there; the
+                field now offers it.
+
+                Suggestions rather than a required picker: a coach's own
+                training includes movements the catalogue has never heard of,
+                and refusing those would make this screen useless for exactly
+                the people most likely to invent one. */}
             <TextInput value={exercise} onChangeText={setExercise} placeholder="Exercise" placeholderTextColor={t.ink3}
               accessibilityLabel="Exercise name" style={[inp, { marginBottom: sp.sm }]} />
+            {exSuggestions.length ? (
+              <View style={{ marginBottom: sp.sm, backgroundColor: t.surface, borderRadius: radius.sm, overflow: 'hidden' }}>
+                {exSuggestions.map((r: CatalogueRow, i: number) => (
+                  <Pressable key={r.id} onPress={() => setExercise(r.name)}
+                    accessibilityRole="button" accessibilityLabel={`Use ${r.name}`}
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingHorizontal: sp.md, paddingVertical: sp.sm,
+                      borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+                    <ExerciseThumb uri={thumbFor(r)} t={t} size={34} />
+                    <Text style={{ ...ty.body, color: t.ink, flex: 1 }} numberOfLines={1}>{r.name}</Text>
+                    {r.group ? <Text style={{ ...ty.caption, color: t.ink3 }}>{r.group}</Text> : null}
+                  </Pressable>
+                ))}
+              </View>
+            ) : null}
             <View style={{ flexDirection: 'row', gap: sp.sm }}>
               <TextInput value={setCount} onChangeText={setSetCount} keyboardType="numeric" placeholder="Sets"
                 placeholderTextColor={t.ink3} accessibilityLabel="Number of sets" style={[inp, { flex: 1 }]} />
@@ -339,6 +403,10 @@ export default function MyTraining() {
             ) : null}
             <View style={{ marginTop: sp.md }}>
               <Cta wide label={busy ? 'Saving…' : 'Add to My Log'} onPress={logOneLift} disabled={busy} />
+            </View>
+            <View style={{ marginTop: sp.sm }}>
+              <Ghost label="Browse the Exercise Library" icon="grid"
+                onPress={() => router.push('/(trainer)/library')} />
             </View>
           </Section>
 
