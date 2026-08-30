@@ -37,6 +37,7 @@ import { join } from 'node:path';
 const ROOT = process.cwd();
 const SRC = join(ROOT, 'data/repdb-exercises.json');
 const OUT = join(ROOT, 'supabase/parts/74-repdb-catalogue.sql');
+const SUPERSEDED = join(ROOT, 'data/repdb-superseded.json');
 
 const raw = JSON.parse(readFileSync(SRC, 'utf8'));
 const rows = Array.isArray(raw) ? raw : (raw.exercises || Object.values(raw));
@@ -278,6 +279,78 @@ on conflict (id) do update set
   source            = excluded.source;
 `;
 
-writeFileSync(OUT, sql);
+
+// ── the clean-up, emitted into the same file ───────────────────────────────
+//
+// Re-seeding re-inserts every RepDB row, including the fifteen our own
+// catalogue already covers — so "Elliptical" reappears beside "Elliptical
+// Trainer" every single time. That happened three times before this was
+// written, each time caught by hand.
+//
+// A separate migration was the right shape and the wrong ergonomics: it
+// depends on whoever re-seeds remembering to run it. Emitting it at the END of
+// the seed makes the file idempotent on its own terms — insert everything,
+// then leave the catalogue in the state it is supposed to be in.
+//
+// The media transfer comes FIRST and matters: our row keeps its name, so it
+// has to take the refreshed illustration off the twin before the twin is
+// deleted. Skipping that is how Elliptical, Treadmill and Upright Bike ended
+// up the only rows in the catalogue with no picture at all.
+const sup = JSON.parse(readFileSync(SUPERSEDED, 'utf8'));
+const pairs = Object.entries(sup.ours_wins || {});
+const dupes = Object.keys(sup.our_own_duplicates || {});
+const cleanup = `
+-- ─────────────────────────────────────────────────────────────────────────
+-- Clean-up, so this file leaves the catalogue in the state it should be in.
+--
+-- Everything above inserts the whole RepDB catalogue, which includes the
+-- ${pairs.length} movements our own rows already cover under our own names. Without this,
+-- re-seeding puts "Elliptical" back beside "Elliptical Trainer" — which it did
+-- three times before this was written.
+--
+-- Our row wins on NAME, because src/lib/machines.ts resolves a scanned gym
+-- machine by name and src/lib/focus.ts and buildProgram() emit those strings.
+-- It takes the twin's media first: our row keeps its own name, so it has to
+-- inherit the refreshed illustration BEFORE the twin is deleted.
+-- ─────────────────────────────────────────────────────────────────────────
+do $$
+declare refs integer;
+begin
+  select (select count(*) from public.exercise_videos)
+       + (select count(*) from public.workout_logs) into refs;
+  if refs > 0 then
+    raise exception 'Refusing to de-duplicate the catalogue: % rows reference it.', refs;
+  end if;
+end $$;
+
+with m(ours, theirs) as (values
+${pairs.map(([a, b]) => `    (${q(a)}, ${q(b)})`).join(',\n')}
+)
+update public.exercises tgt
+set image_paths = coalesce(src.image_paths, tgt.image_paths),
+    tips        = coalesce(src.tips, tgt.tips),
+    description = coalesce(src.description, tgt.description),
+    instructions = coalesce(src.instructions, tgt.instructions)
+from m join public.exercises src on src.id = m.theirs
+where tgt.id = m.ours;
+
+delete from public.exercises where id in (
+${pairs.map(([, b]) => `  ${q(b)}`).concat(dupes.map((d) => `  ${q(d)}`)).join(',\n')}
+);
+
+-- Any row still keyed by RepDB's own id rather than by the slug of the name it
+-- displays. Every screen resolves through exerciseSlug(name), so a row keyed
+-- otherwise is in the catalogue and unreachable from it.
+update public.exercises e
+set id = t.want
+from (
+  select id, trim(both '-' from regexp_replace(lower(name), '[^a-z0-9]+', '-', 'g')) as want
+  from public.exercises where source = 'repdb'
+) t
+where e.id = t.id and e.id <> t.want and t.want <> ''
+  and not exists (select 1 from public.exercises x where x.id = t.want);
+`;
+
+writeFileSync(OUT, sql + cleanup);
 console.log(`repdb catalogue: ${out.length} rows, ${out.filter((r) => r.description).length} with a description, ${out.filter((r) => r.tips.length).length} with coaching tips, ${out.filter((r) => r.images.length).length} with illustrations`);
 console.log(`  ${OUT.replace(ROOT + '/', '')}`);

@@ -1,0 +1,23 @@
+{
+  "//": "Our own catalogue rows and the RepDB row each one supersedes. Re-seeding the RepDB catalogue re-inserts every one of these, so the generator emits the clean-up at the end of the same file rather than leaving it to a later migration somebody has to remember. Each pairing was read as a MOVEMENT: similarity offers Hack Squat for Back Squat, because RepDB files Barbell Back Squat under the id 'squat' and no score finds that.",
+  "ours_wins": {
+    "ab-crunch": "crunches",
+    "assisted-pull-up": "assisted-pull-ups",
+    "back-squat": "squat",
+    "bent-over-row": "barbell-row",
+    "cable-crossover": "cable-fly",
+    "calf-raise": "machine-calf-raise",
+    "chest-press": "chest-press-machine",
+    "incline-dumbbell-press": "incline-db-press",
+    "nordic-curl": "nordic-hamstring-curl",
+    "overhead-press": "ohp",
+    "seated-row": "seated-cable-row",
+    "shoulder-press": "dumbbell-shoulder-press",
+    "elliptical": "elliptical-trainer",
+    "treadmill": "treadmill-running",
+    "upright-bike": "stationary-bike"
+  },
+  "our_own_duplicates": {
+    "triceps-pushdown": "one movement filed twice; src/lib/machines.ts names the singular 'Tricep Pushdown'"
+  }
+}

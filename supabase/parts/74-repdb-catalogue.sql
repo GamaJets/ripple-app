@@ -938,3 +938,82 @@ on conflict (id) do update set
   goals             = excluded.goals,
   tags              = excluded.tags,
   source            = excluded.source;
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- Clean-up, so this file leaves the catalogue in the state it should be in.
+--
+-- Everything above inserts the whole RepDB catalogue, which includes the
+-- 15 movements our own rows already cover under our own names. Without this,
+-- re-seeding puts "Elliptical" back beside "Elliptical Trainer" — which it did
+-- three times before this was written.
+--
+-- Our row wins on NAME, because src/lib/machines.ts resolves a scanned gym
+-- machine by name and src/lib/focus.ts and buildProgram() emit those strings.
+-- It takes the twin's media first: our row keeps its own name, so it has to
+-- inherit the refreshed illustration BEFORE the twin is deleted.
+-- ─────────────────────────────────────────────────────────────────────────
+do $$
+declare refs integer;
+begin
+  select (select count(*) from public.exercise_videos)
+       + (select count(*) from public.workout_logs) into refs;
+  if refs > 0 then
+    raise exception 'Refusing to de-duplicate the catalogue: % rows reference it.', refs;
+  end if;
+end $$;
+
+with m(ours, theirs) as (values
+    ('ab-crunch', 'crunches'),
+    ('assisted-pull-up', 'assisted-pull-ups'),
+    ('back-squat', 'squat'),
+    ('bent-over-row', 'barbell-row'),
+    ('cable-crossover', 'cable-fly'),
+    ('calf-raise', 'machine-calf-raise'),
+    ('chest-press', 'chest-press-machine'),
+    ('incline-dumbbell-press', 'incline-db-press'),
+    ('nordic-curl', 'nordic-hamstring-curl'),
+    ('overhead-press', 'ohp'),
+    ('seated-row', 'seated-cable-row'),
+    ('shoulder-press', 'dumbbell-shoulder-press'),
+    ('elliptical', 'elliptical-trainer'),
+    ('treadmill', 'treadmill-running'),
+    ('upright-bike', 'stationary-bike')
+)
+update public.exercises tgt
+set image_paths = coalesce(src.image_paths, tgt.image_paths),
+    tips        = coalesce(src.tips, tgt.tips),
+    description = coalesce(src.description, tgt.description),
+    instructions = coalesce(src.instructions, tgt.instructions)
+from m join public.exercises src on src.id = m.theirs
+where tgt.id = m.ours;
+
+delete from public.exercises where id in (
+  'crunches',
+  'assisted-pull-ups',
+  'squat',
+  'barbell-row',
+  'cable-fly',
+  'machine-calf-raise',
+  'chest-press-machine',
+  'incline-db-press',
+  'nordic-hamstring-curl',
+  'ohp',
+  'seated-cable-row',
+  'dumbbell-shoulder-press',
+  'elliptical-trainer',
+  'treadmill-running',
+  'stationary-bike',
+  'triceps-pushdown'
+);
+
+-- Any row still keyed by RepDB's own id rather than by the slug of the name it
+-- displays. Every screen resolves through exerciseSlug(name), so a row keyed
+-- otherwise is in the catalogue and unreachable from it.
+update public.exercises e
+set id = t.want
+from (
+  select id, trim(both '-' from regexp_replace(lower(name), '[^a-z0-9]+', '-', 'g')) as want
+  from public.exercises where source = 'repdb'
+) t
+where e.id = t.id and e.id <> t.want and t.want <> ''
+  and not exists (select 1 from public.exercises x where x.id = t.want);
