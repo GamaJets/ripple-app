@@ -11,8 +11,9 @@
 //   1. the client's OWN coach's clip — a member should see the person who
 //      actually trains them demonstrating the lift;
 //   2. the platform Academy clip;
-//   3. the catalogue's reference frames, looped;
-//   4. a sentence saying there is nothing, and offering to ask their coach.
+//   3. the bought animation for this movement;
+//   4. the catalogue's reference frames, cross-faded;
+//   5. a sentence saying there is nothing, and offering to ask their coach.
 //
 // Rules 1 and 2 come from videoForExercise(), which already refuses to fall
 // back to a stranger's clip. Rule 3 is what this screen adds. Rule 4 is the one
@@ -29,11 +30,35 @@ import { sp, layout, radius, type as ty } from '../../src/theme/scale';
 import { useExerciseDetail } from '../../src/ui/exerciseDetail';
 import { useExerciseVideos } from '../../src/ui/exerciseVideos';
 import { ExerciseVideo } from '../../src/ui/ExerciseVideo';
+import { useVideoPlayer, VideoView } from 'expo-video';
 import { videoForExercise } from '../../src/lib/exerciseId';
-import { frameUrls, FRAME_MS, FRAMES_ARE_UNHOSTED, demoCaption } from '../../src/lib/exerciseMedia';
+import { frameUrls, FRAMES_ARE_UNHOSTED, demoCaption, demoIsShippable, DEMO_BUCKET } from '../../src/lib/exerciseMedia';
+import { supabase } from '../../src/lib/supabase';
 import { useClientData } from '../../src/ui/clientData';
 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+/**
+ * A bought animation, looping.
+ *
+ * Muted and autoplaying, with no controls — the opposite of a coach's clip.
+ * That one is somebody talking through a cue and is worth a play button and
+ * sound; this is a diagram that happens to move, and asking a client to press
+ * play on a diagram is a step for nothing.
+ */
+function DemoAnimation({ uri, label }: { uri: string; label: string }) {
+  const t = useTheme();
+  const player = useVideoPlayer(uri, (p) => { p.loop = true; p.muted = true; p.play(); });
+  return (
+    <VideoView
+      player={player}
+      nativeControls={false}
+      contentFit="contain"
+      accessibilityLabel={`${label}, looping demonstration`}
+      style={{ width: '100%', aspectRatio: 4 / 3, borderRadius: radius.md, backgroundColor: t.surface2 }}
+    />
+  );
+}
 
 /**
  * The catalogue frames as a movement, not a slideshow.
@@ -137,6 +162,32 @@ export default function ExerciseScreen() {
     () => videoForExercise(name, videos, (cd as any).trainerId ?? null),
     [name, videos, cd],
   );
+  // The bought animation, signed like a coach's own clip.
+  //
+  // Gated on the licence recorded against the row, not on anything this screen
+  // knows: an evaluation asset from a CC BY-NC preview bundle renders while
+  // somebody is deciding whether to buy the pack, and never in a build that
+  // reaches a real person. __DEV__ is the only thing that distinguishes them,
+  // and it is the one flag that cannot be wrong in a release binary.
+  const mayShowAnimation = demoIsShippable(detail?.demoLicence, !__DEV__);
+  const [animUrl, setAnimUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const path = detail?.animationPath;
+    if (!path || !mayShowAnimation) { setAnimUrl(null); return; }
+    (async () => {
+      try {
+        const { data, error } = await supabase.storage.from(DEMO_BUCKET).createSignedUrl(path, 60 * 60);
+        if (!cancelled) setAnimUrl(error ? null : (data?.signedUrl ?? null));
+      } catch {
+        // no-error-ok: a clip we could not sign falls through to the reference
+        // frames below, which is a worse demonstration rather than none.
+        if (!cancelled) setAnimUrl(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [detail?.animationPath, mayShowAnimation]);
+
   const frames = useMemo(() => frameUrls(detail?.imagePaths), [detail?.imagePaths]);
   const caption = demoCaption(detail?.source, frames.length);
 
@@ -166,6 +217,15 @@ export default function ExerciseScreen() {
             note="Nothing below is missing because it does not exist — we could not reach the catalogue. Try again once you have signal." />
         ) : clip ? (
           <ExerciseVideo video={clip} exerciseName={detail?.name || name} />
+        ) : animUrl ? (
+          <>
+            <DemoAnimation uri={animUrl} label={detail?.name || name} />
+            {detail?.demoLicence !== 'commercial' ? (
+              <View style={{ marginTop: sp.sm }}>
+                <Flag tone={t.warn}>Evaluation asset — licensed for review only, never for release.</Flag>
+              </View>
+            ) : null}
+          </>
         ) : frames.length ? (
           <>
             <FrameLoop urls={frames} label={detail?.name || name} />

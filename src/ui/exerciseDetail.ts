@@ -25,6 +25,11 @@ export interface ExerciseDetail {
   secondaryMuscles: string[];
   instructions: string[];
   imagePaths: string[];
+  /** Storage key in the exercise-demos bucket, or null. A path, never a URL. */
+  animationPath: string | null;
+  /** 'commercial' once bought, 'evaluation' for a CC BY-NC preview, null when
+   *  there is no animation. An evaluation asset must never reach a release. */
+  demoLicence: string | null;
   source: string | null;
 }
 
@@ -55,7 +60,7 @@ export function useExerciseDetail(name: string | null | undefined) {
     try {
       const { data, error } = await supabase
         .from('exercises')
-        .select('id, name, muscle_group, is_cardio, category, equipment, level, mechanic, force, primary_muscles, secondary_muscles, instructions, image_paths, source')
+        .select('id, name, muscle_group, is_cardio, category, equipment, level, mechanic, force, primary_muscles, secondary_muscles, instructions, image_paths, animation_path, demo_licence, source')
         .eq('id', id)
         .maybeSingle();
       if (error) { reportError('exerciseDetail.read', error, { id }); setDetail(null); setStatus('error'); return; }
@@ -74,6 +79,8 @@ export function useExerciseDetail(name: string | null | undefined) {
         secondaryMuscles: strs(data.secondary_muscles),
         instructions: strs(data.instructions),
         imagePaths: strs(data.image_paths),
+        animationPath: typeof data.animation_path === 'string' && data.animation_path ? data.animation_path : null,
+        demoLicence: typeof data.demo_licence === 'string' && data.demo_licence ? data.demo_licence : null,
         source: data.source ?? null,
       });
       setStatus('ready');

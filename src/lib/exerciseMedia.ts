@@ -61,3 +61,29 @@ export function demoCaption(source: string | null | undefined, frames: number): 
   if (source === 'free-exercise-db') return 'Reference illustration — start and end position.';
   return null;
 }
+
+/** The bucket a bought animation pack is uploaded into. Private: a commercial
+ *  licence permits use inside the app and rarely permits leaving the files
+ *  openly fetchable, so these are signed like a coach's own clip. */
+export const DEMO_BUCKET = 'exercise-demos';
+
+/**
+ * Whether an animation may be shown to a real person in this build.
+ *
+ * A preview bundle is CC BY-NC — fine for deciding whether to buy, never fine
+ * in a product that sells memberships. The realistic failure is not a decision
+ * anybody makes, it is one nobody revisits: the preview gets wired in to look
+ * at, it works, and four builds later it is in an App Store binary that nobody
+ * re-checked. So the licence travels with the row and is asked every time it is
+ * about to render.
+ *
+ * `null` is not permission. An animation whose licence nobody recorded is
+ * treated exactly like an evaluation one, because the reason it is unrecorded
+ * is unknown and the expensive guess is the permissive one.
+ */
+export function demoIsShippable(licence: string | null | undefined, isRelease: boolean): boolean {
+  if (licence === 'commercial') return true;
+  // Evaluation assets, and unlabelled ones, render only in a build that is not
+  // going to anybody — so the pack can actually be judged before it is bought.
+  return !isRelease;
+}

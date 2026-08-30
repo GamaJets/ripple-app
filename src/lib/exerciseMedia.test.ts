@@ -6,7 +6,7 @@
 // "no picture of this movement" — which the screen says out loud — and "a URL
 // we built out of a row we did not understand", which renders as a grey box
 // the client reads as the app being broken.
-import { frameUrls, FRAME_BASE, demoCaption } from './exerciseMedia';
+import { frameUrls, FRAME_BASE, demoCaption, demoIsShippable } from './exerciseMedia';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -50,6 +50,26 @@ const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
   ok(demoCaption('free-exercise-db', 2) !== null, 'an imported illustration is labelled as one');
   ok(demoCaption('free-exercise-db', 0) === null, 'nothing to caption when there are no frames');
   ok(demoCaption('repple', 0) === null, 'nor for our own rows with no frames');
+}
+
+// ── the licence gate ───────────────────────────────────────────────────────
+//
+// A preview bundle is CC BY-NC: fine for deciding whether to buy, never fine in
+// a product that sells memberships. The failure this guards is not a decision
+// anybody makes — it is one nobody revisits. The preview gets wired in to look
+// at, it works, and four builds later it is in a binary nobody re-checked.
+{
+  ok(demoIsShippable('commercial', true), 'a bought pack renders in a release');
+  ok(demoIsShippable('commercial', false), 'and in development');
+  ok(demoIsShippable('evaluation', false), 'a preview renders while it is being judged');
+  // The one that matters.
+  ok(!demoIsShippable('evaluation', true), 'a preview NEVER renders in a release build');
+  // An unlabelled asset is treated as unlicensed, not as permitted: the reason
+  // it is unlabelled is unknown, and the expensive guess is the permissive one.
+  ok(!demoIsShippable(null, true), 'an animation with no recorded licence does not ship');
+  ok(!demoIsShippable(undefined, true), 'nor an undefined one');
+  ok(!demoIsShippable('', true), 'nor an empty one');
+  ok(!demoIsShippable('Commercial', true), 'and the check is exact — not a loose match on the word');
 }
 
 if (errors.length) {
