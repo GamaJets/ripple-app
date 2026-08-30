@@ -97,6 +97,19 @@ export default function Home() {
   const burnedToday = useWearables().today.activeKcal || 0;
 
   const solo = c.coachingMode === 'solo';
+  // Whether to offer a way to FIND a coach. Deliberately not `solo`: that is
+  // what somebody said they wanted, not whether anybody is coaching them, and
+  // gating on it meant the only route to Find a trainer on this screen was
+  // shown exclusively to the people who had said they did not want one.
+  // Reported as "nowhere on the client home screen shows you can find a
+  // trainer" — which was true for every client who chose online, in-person or
+  // hybrid coaching and had not yet been accepted by a coach, i.e. all of them
+  // between signing up and being linked.
+  //
+  // `coachLinked` is null while unread, and that shows the row too: hiding the
+  // way in is the bug, and offering it to somebody who already has a coach
+  // costs them one tap.
+  const needsCoach = c.coachLinked !== true;
   // What the coaching answer actually decides on this screen.
   //
   // It decided nothing before TF-30: `online || inperson` gated the booking row
@@ -454,8 +467,12 @@ export default function Home() {
           <ListRow icon="trophy" title="Challenges" note="Track your progress against the goal"
             onPress={() => router.push('/(client)/challenges')} />
 
-          {solo ? (
-            <ListRow icon="people" title="Work with a coach" note="Enter your coach's code, or browse trainers"
+          {needsCoach ? (
+            <ListRow icon="people"
+              title={solo ? 'Work with a coach' : 'Find your coach'}
+              note={solo
+                ? "Enter your coach's code, or browse trainers"
+                : "You have not been linked to a coach yet — enter their code, accept an invitation, or browse trainers"}
               onPress={() => router.push('/(client)/trainers')} />
           ) : null}
         </Section>

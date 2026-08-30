@@ -57,6 +57,17 @@ interface Value {
   heightCm: number | null; setHeightCm: (v: number) => void;
   goal: Goal; setGoal: (v: Goal) => void;
   coachingMode: CoachingMode; setCoachingMode: (v: CoachingMode) => void;
+  /** Whether a coach is actually LINKED, which is a different question from
+   *  `coachingMode` — that is what the client said they wanted, this is whether
+   *  anybody is coaching them. Screens kept conflating the two: the home screen
+   *  offered "Work with a coach" only to people whose mode was 'solo', so
+   *  somebody who chose online coaching and had not found a coach yet was shown
+   *  no way to find one anywhere on it.
+   *
+   *  null means unread, never "no coach" — under a failed read a screen should
+   *  offer the way in rather than hide it, because hiding it is the failure
+   *  being fixed and showing it to somebody already coached costs them a tap. */
+  coachLinked: boolean | null;
   diet: Diet; setDiet: (v: Diet) => void;
   avoid: Allergen[]; setAvoid: (v: Allergen[]) => void;
   injuries: Injury[]; addInjury: (v: Injury) => void; updateInjury: (id: string, patch: Partial<Injury>) => void; removeInjury: (id: string) => void;
@@ -134,6 +145,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
   const [injuries, setInjuries] = useState<Injury[]>([]);
   const [focusAreas, setFocusAreas] = useState<string[]>([]);
   const [mealsPerDay, setMealsPerDay] = useState<3 | 4 | 5>(3);
+  const [coachLinked, setCoachLinked] = useState<boolean | null>(null);
   const [stepGoal, setStepGoal] = useState<number | null>(null);
   const [sleepGoalHours, setSleepGoalHours] = useState<number | null>(null);
   const [scans, setScans] = useState<ScanRec[]>([]);
@@ -233,6 +245,11 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
           // signed-in uid and can land before a separately-loaded flag has —
           // and a restore that loses that race reverts the setting silently,
           // which is the bug.
+          // `trainer_id` is half of the coach link — the half `is_my_client`
+          // reads, and the one end_coaching() clears — so it is the cheapest
+          // true answer to "is anybody coaching me" and it is already in this
+          // select.
+          setCoachLinked(r.trainer_id != null);
           if (r.mode != null) {
             const stored = readCoachingMode(r.mode);
             const mine = readCoachingMode(await AsyncStorage.getItem(MODE_KEY).catch(() => null));
@@ -407,7 +424,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
     addInjury: (v) => setInjuries((p) => [v, ...p]),
     updateInjury: (id, patch) => setInjuries((p) => p.map((i) => (i.id === id ? { ...i, ...patch } : i))),
     removeInjury: (id) => setInjuries((p) => p.filter((i) => i.id !== id)),
-    coachingMode, setCoachingMode,
+    coachingMode, setCoachingMode, coachLinked,
     activity: 1.5, mealsPerDay, setMealsPerDay,
     stepGoal, setStepGoal, sleepGoalHours, setSleepGoalHours,
     weightKg, bodyFatPct, muscleKg: latest ? latest.skeletalMuscleKg : null,
