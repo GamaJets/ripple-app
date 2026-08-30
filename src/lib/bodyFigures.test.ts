@@ -29,7 +29,7 @@ import {
   STALE_AFTER_DAYS,
   type SeriesPoint,
   type BodyReading,
-} from './bodyFigures';
+ manualBeatsScan } from './bodyFigures';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -185,6 +185,31 @@ eq(
 eq(readingsLabel([{ at: '2026-08-20', value: 82.1, source: 'weigh-in' }]), '1 weigh-in', 'and a weigh-in-only series names weigh-ins');
 
 /* ── report ───────────────────────────────────────────────────────────── */
+
+// ── manualBeatsScan: a measurement beats a typed estimate on the same day ───
+//
+// The bug: `Date.parse(manualAt) >= Date.parse(takenAt)` compared a full
+// timestamp against a DATE column, which parses as midnight UTC. West of
+// Greenwich that made yesterday evening "later" than today.
+{
+  // The reported case: a scan uploaded today, a weight typed this morning.
+  ok(!manualBeatsScan('2026-08-30T09:00:00.000Z', '2026-08-30'),
+    'a figure typed on the morning of a scan dated the same day does NOT win');
+  // The timezone case, which is the one the old comparison got most wrong.
+  // 6pm on the 29th in Los Angeles is 01:00Z on the 30th.
+  ok(!manualBeatsScan('2026-08-30T01:00:00.000Z', '2026-08-30'),
+    'nor does an evening entry that lands after midnight UTC of the scan day');
+  // The case the manual path exists for.
+  ok(manualBeatsScan('2026-08-30T09:00:00.000Z', '2026-08-16'),
+    'a weigh-in a fortnight after the last scan does win');
+  // Absences.
+  ok(!manualBeatsScan(null, '2026-08-30'), 'no manual entry never wins');
+  ok(manualBeatsScan('2026-08-30T09:00:00.000Z', null), 'with no scan, the typed figure is all there is');
+  ok(!manualBeatsScan(null, null), 'and with neither, nothing wins');
+  // An unreadable date must not hand the tie to the estimate.
+  ok(!manualBeatsScan('not-a-date', '2026-08-30'), 'an unreadable manual date leaves the scan standing');
+  ok(!manualBeatsScan('2026-08-30T09:00:00.000Z', 'not-a-date'), 'and an unreadable scan date does the same');
+}
 
 if (errors.length) {
   console.error(`bodyFigures.test: ${errors.length} failure(s)`);

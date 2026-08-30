@@ -264,3 +264,51 @@ export function readingsLabel(readings: BodyReading[]): string {
   if (!scans) return `${logged} weigh-in${logged === 1 ? '' : 's'}`;
   return `${scans} scan${scans === 1 ? '' : 's'} · ${logged} weigh-in${logged === 1 ? '' : 's'}`;
 }
+
+/**
+ * Whether a hand-typed figure should be shown INSTEAD of the latest scan.
+ *
+ * ── The bug this replaces ──────────────────────────────────────────────────
+ *
+ * It was `Date.parse(manualAt) >= Date.parse(latest.takenAt)`. Those two are
+ * not the same kind of value. `scans.taken_at` is a DATE column, so it parses
+ * as midnight UTC; `manualAt` is a full timestamp from
+ * `new Date().toISOString()`. So the comparison was between an instant and the
+ * start of a UTC day, and the typed figure won almost every tie:
+ *
+ *   · a weight typed at 09:00 on the morning of a scan dated the same day beat
+ *     the scan uploaded that afternoon;
+ *   · west of Greenwich it was worse — a weight typed at 6pm YESTERDAY is
+ *     01:00Z today, which is after midnight UTC of a scan dated TODAY, so
+ *     yesterday's estimate beat today's measurement.
+ *
+ * Reported as "your stats should pull from the latest inbody scan that was
+ * uploaded".
+ *
+ * ── The rule ───────────────────────────────────────────────────────────────
+ *
+ * Compare CALENDAR DAYS in the reader's own timezone, and let the scan take
+ * the tie. A scan is a measurement somebody stood on a machine for; a manual
+ * figure is what they remembered or estimated. On the day they happen to share,
+ * the measurement is the better answer — and it is also the one the person just
+ * went to the trouble of uploading.
+ *
+ * Only a manual entry from a STRICTLY LATER day wins, which is the case it
+ * exists for: the scan is a fortnight old and they weighed themselves this
+ * morning.
+ */
+export function manualBeatsScan(
+  manualAt: string | null | undefined,
+  scanTakenAt: string | null | undefined,
+): boolean {
+  if (!manualAt) return false;
+  // No scan at all: anything typed is the only figure there is.
+  if (!scanTakenAt) return true;
+  const m = dateParts(manualAt);
+  const s = dateParts(scanTakenAt);
+  // An unreadable date is not a reason to prefer the typed figure. If we cannot
+  // tell which is newer, the measurement stands.
+  if (!m || !s) return false;
+  const key = (p: [number, number, number]) => p[0] * 10000 + p[1] * 100 + p[2];
+  return key(m) > key(s);
+}

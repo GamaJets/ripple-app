@@ -29,6 +29,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { ScanMetrics } from '../lib/inbodyMetrics';
+import { manualBeatsScan } from '../lib/bodyFigures';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { readCoachingMode, type CoachingMode, type Goal, type Diet } from '../lib/types';
@@ -451,8 +452,11 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
   // to show. The old fallback object handed out 70 kg and 20% body fat, and
   // every downstream calculation treated them as measurements.
   const latest = sorted[sorted.length - 1] ?? null;
-  // Single source of truth: the most RECENT of {manual edit, latest scan} wins.
-  const manualIsCurrent = manualAt != null && (latest == null || Date.parse(manualAt) >= Date.parse(latest.takenAt));
+  // Single source of truth: the most RECENT of {manual edit, latest scan} wins,
+  // compared by CALENDAR DAY with the scan taking the tie. See manualBeatsScan
+  // — the previous comparison put a full timestamp against a date column, so a
+  // figure typed yesterday evening beat a scan dated today.
+  const manualIsCurrent = manualBeatsScan(manualAt, latest?.takenAt ?? null);
   const weightKg = (manualWeight != null && manualIsCurrent) ? manualWeight : (latest ? latest.weightKg : null);
   const bodyFatPct = (manualBodyFat != null && manualIsCurrent) ? manualBodyFat : (latest ? latest.bodyFatPct : null);
 
