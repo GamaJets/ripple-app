@@ -159,6 +159,19 @@ export default function ExerciseScreen() {
         {/* ── what it is ────────────────────────────────────────────────── */}
         {detail ? (
           <>
+            {/* The description leads, above the attribute chips. Somebody who
+                does not know a movement needs to be told what it is before
+                being told that it is compound and intermediate — and this was
+                the one thing the original request asked for that the previous
+                dataset had no field for at all. */}
+            {detail.description ? (
+              <>
+                <Rule />
+                <Section>
+                  <Text style={{ ...ty.body, color: t.ink }}>{detail.description}</Text>
+                </Section>
+              </>
+            ) : null}
             <Rule />
             <Section>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
@@ -221,6 +234,60 @@ export default function ExerciseScreen() {
                 </Section>
               </>
             ) : null}
+          </>
+        ) : null}
+
+        {/* ── coaching cues ──────────────────────────────────────────────
+            Kept apart from the numbered steps rather than appended to them. A
+            client following the sequence needs it in order; a client who
+            already knows the movement wants the cue, and a cue buried at step
+            six is a cue they have stopped reading before they reach. */}
+        {detail && detail.tips.length ? (
+          <>
+            <Rule />
+            <Section>
+              <SectionHead title="Tips" note={`${detail.tips.length}`} />
+              {detail.tips.map((tip, n) => (
+                <View key={n} style={{ flexDirection: 'row', gap: sp.md, marginBottom: sp.sm }}>
+                  <Text style={{ ...ty.body, color: t.brand }}>·</Text>
+                  <Text style={{ ...ty.body, color: t.ink2, flex: 1 }}>{tip}</Text>
+                </View>
+              ))}
+            </Section>
+          </>
+        ) : null}
+
+        {/* What the movement is FOR, and how it is filed. Last, because it is
+            the least useful thing to somebody standing in front of the bar. */}
+        {detail && (detail.goals.length || detail.tags.length) ? (
+          <>
+            <Rule />
+            <Section>
+              {detail.goals.length ? (
+                <>
+                  <SectionHead title="Good For" />
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginBottom: detail.tags.length ? sp.lg : 0 }}>
+                    {detail.goals.map((g) => (
+                      <View key={g} style={{ backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: 5 }}>
+                        <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>{cap(g.replace(/_/g, ' '))}</Text>
+                      </View>
+                    ))}
+                  </View>
+                </>
+              ) : null}
+              {detail.tags.length ? (
+                <>
+                  <SectionHead title="Tags" />
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
+                    {detail.tags.map((g) => (
+                      <View key={g} style={{ backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: 5 }}>
+                        <Text style={{ ...ty.caption, color: t.ink3 }}>{g.replace(/_/g, ' ')}</Text>
+                      </View>
+                    ))}
+                  </View>
+                </>
+              ) : null}
+            </Section>
           </>
         ) : null}
 

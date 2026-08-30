@@ -28,6 +28,10 @@ export interface ExerciseDetail {
   primaryMuscles: string[];
   secondaryMuscles: string[];
   instructions: string[];
+  /** Coaching cues — what to watch while doing it, not the ordered steps. */
+  tips: string[];
+  goals: string[];
+  tags: string[];
   imagePaths: string[];
   /** Storage key in the exercise-demos bucket, or null. A path, never a URL. */
   animationPath: string | null;
@@ -64,7 +68,7 @@ export function useExerciseDetail(name: string | null | undefined) {
     try {
       const { data, error } = await supabase
         .from('exercises')
-        .select('id, name, muscle_group, is_cardio, description, category, equipment, level, mechanic, force, primary_muscles, secondary_muscles, instructions, image_paths, animation_path, demo_licence, source')
+        .select('id, name, muscle_group, is_cardio, description, category, equipment, level, mechanic, force, primary_muscles, secondary_muscles, instructions, tips, goals, tags, image_paths, animation_path, demo_licence, source')
         .eq('id', id)
         .maybeSingle();
       if (error) { reportError('exerciseDetail.read', error, { id }); setDetail(null); setStatus('error'); return; }
@@ -83,6 +87,9 @@ export function useExerciseDetail(name: string | null | undefined) {
         primaryMuscles: strs(data.primary_muscles),
         secondaryMuscles: strs(data.secondary_muscles),
         instructions: strs(data.instructions),
+        tips: strs(data.tips),
+        goals: strs(data.goals),
+        tags: strs(data.tags),
         imagePaths: strs(data.image_paths),
         animationPath: typeof data.animation_path === 'string' && data.animation_path ? data.animation_path : null,
         demoLicence: typeof data.demo_licence === 'string' && data.demo_licence ? data.demo_licence : null,

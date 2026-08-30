@@ -117,6 +117,10 @@ for (const r of rows) {
     primary: (r.primary_muscles || []).map(readable),
     secondary: (r.secondary_muscles || []).map(readable),
     instructions: r.instructions_en || [],
+    // What a coach would say while watching, as distinct from the ordered
+    // steps. Kept apart from instructions on purpose: a cue buried in the
+    // middle of a numbered list is a cue nobody reads.
+    tips: r.tips_en || [],
     images: imgs,
     met: r.met ?? null,
     goals: r.goals || [],
@@ -131,7 +135,7 @@ if (collisions.length) {
 const values = out.map((r) =>
   `  (${q(r.id)}, ${q(r.name)}, ${q(r.group)}, ${r.cardio}, ${q(r.description)}, ${q(r.category)}, `
   + `${q(r.equipment)}, ${q(r.level)}, ${q(r.mechanic)}, ${q(r.force)}, ${arr(r.primary)}, ${arr(r.secondary)}, `
-  + `${arr(r.instructions)}, ${arr(r.images)}, ${num(r.met)}, ${arr(r.goals)}, ${arr(r.tags)}, 'repdb')`,
+  + `${arr(r.instructions)}, ${arr(r.tips)}, ${arr(r.images)}, ${num(r.met)}, ${arr(r.goals)}, ${arr(r.tags)}, 'repdb')`,
 ).join(',\n');
 
 /**
@@ -219,6 +223,9 @@ alter table public.exercises add column if not exists description text;
 alter table public.exercises add column if not exists met         numeric(4,1);
 alter table public.exercises add column if not exists goals       text[];
 alter table public.exercises add column if not exists tags        text[];
+-- Coaching cues, kept apart from the ordered steps in instructions: a cue
+-- buried in the middle of a numbered list is a cue nobody reads.
+alter table public.exercises add column if not exists tips        text[];
 
 comment on column public.exercises.description is
   'What the movement IS, in one sentence — distinct from instructions, which are how to perform it. Null on rows that predate RepDB; a screen must say nothing rather than invent one.';
@@ -240,7 +247,7 @@ ${renameSql}
 
 insert into public.exercises
   (id, name, muscle_group, is_cardio, description, category, equipment, level, mechanic, force,
-   primary_muscles, secondary_muscles, instructions, image_paths, met, goals, tags, source) values
+   primary_muscles, secondary_muscles, instructions, tips, image_paths, met, goals, tags, source) values
 ${values}
 on conflict (id) do update set
   -- name and muscle_group deliberately untouched: an existing row is referenced
@@ -254,6 +261,7 @@ on conflict (id) do update set
   primary_muscles   = excluded.primary_muscles,
   secondary_muscles = excluded.secondary_muscles,
   instructions      = excluded.instructions,
+  tips              = excluded.tips,
   image_paths       = excluded.image_paths,
   met               = excluded.met,
   goals             = excluded.goals,
@@ -262,5 +270,5 @@ on conflict (id) do update set
 `;
 
 writeFileSync(OUT, sql);
-console.log(`repdb catalogue: ${out.length} rows, ${out.filter((r) => r.description).length} with a description, ${out.filter((r) => r.images.length).length} with illustrations`);
+console.log(`repdb catalogue: ${out.length} rows, ${out.filter((r) => r.description).length} with a description, ${out.filter((r) => r.tips.length).length} with coaching tips, ${out.filter((r) => r.images.length).length} with illustrations`);
 console.log(`  ${OUT.replace(ROOT + '/', '')}`);
