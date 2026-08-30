@@ -116,6 +116,12 @@ export interface CatalogueRow {
    *  claim that the exercise needs no kit. */
   equipment: string | null;
   hasDemo: boolean;
+  /** The first still, for the row's thumbnail. One path per row, not the whole
+   *  array — a list of 601 needs one picture each and never the second. */
+  thumbPath: string | null;
+  /** Which catalogue the thumbnail belongs to, so it resolves against the
+   *  right host. Same reason frameUrls takes it. */
+  source: string | null;
 }
 
 /**
@@ -146,7 +152,7 @@ export function useExerciseCatalogue() {
     try {
       const { data, error } = await supabase
         .from('exercises')
-        .select('id, name, muscle_group, equipment, image_paths')
+        .select('id, name, muscle_group, equipment, image_paths, source')
         .order('name', { ascending: true })
         .limit(capLimit());
       if (error) { reportError('exerciseCatalogue.read', error); setStatus('error'); return; }
@@ -157,6 +163,8 @@ export function useExerciseCatalogue() {
         group: r.muscle_group ?? null,
         equipment: r.equipment ?? null,
         hasDemo: Array.isArray(r.image_paths) && r.image_paths.length > 0,
+        thumbPath: Array.isArray(r.image_paths) && r.image_paths.length ? String(r.image_paths[0]) : null,
+        source: r.source ?? null,
       })));
       // 'partial' rather than 'ready': the catalogue is 917 rows against a cap
       // of 1000, so this is quiet today and will not be forever. A list that

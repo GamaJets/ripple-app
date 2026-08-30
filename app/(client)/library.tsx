@@ -49,7 +49,10 @@ import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { tapLight, notifySuccess } from '../../src/ui/haptics';
 import { Rule, Section, SectionHead, ListRow, Notice, Cta, Ghost, PartialRead } from '../../src/ui/kit';
 import { useExerciseCatalogue } from '../../src/ui/exerciseDetail';
+import { catalogueValue as cap } from '../../src/lib/format';
+import { Image as ExpoImage } from 'expo-image';
 import { sp, layout, radius, elevation, type as ty, numeric } from '../../src/theme/scale';
+import { frameUrls } from '../../src/lib/exerciseMedia';
 
 export default function Library() {
  const t = useTheme();
@@ -282,17 +285,43 @@ export default function Library() {
      ) : (
       <>
        {cat.status === 'partial' ? <PartialRead what="exercises" shown={cat.rows.length} /> : null}
-       {catList.slice(0, catShown).map((e, i) => (
+       {catList.slice(0, catShown).map((e, i) => {
+        // The picture of the movement, not a generic glyph. A list of 601 rows
+        // reading "Cable Bent-Over Row · Back" over and over is a list nobody
+        // scans; the illustration is what makes one row findable among the
+        // others. One image per row and never the second — a thumbnail has no
+        // use for the peak position.
+        const thumb = frameUrls(e.thumbPath ? [e.thumbPath] : null, e.source)[0] ?? null;
+        return (
         <View key={e.id}>
          {i > 0 ? <Rule /> : null}
-         <ListRow
-          icon={e.hasDemo ? 'play' : 'dumbbell'}
-          title={e.name}
-          note={[e.group, e.hasDemo ? 'demo' : null].filter(Boolean).join(' · ')}
+         <Pressable
           onPress={() => router.push({ pathname: '/(client)/exercise', params: { name: e.name } })}
-         />
+          accessibilityRole="button"
+          accessibilityLabel={e.name}
+          style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}
+         >
+          <View style={{ width: 52, height: 52, borderRadius: radius.sm, backgroundColor: t.surface2, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' }}>
+           {thumb ? (
+            <ExpoImage source={{ uri: thumb }} contentFit="contain" cachePolicy="disk"
+             style={{ width: '100%', height: '100%' }} />
+           ) : (
+            // No picture is said with the generic glyph rather than an empty
+            // square, which reads as an image that failed to load.
+            <Icon name="dumbbell" size={18} color={t.ink3} />
+           )}
+          </View>
+          <View style={{ flex: 1 }}>
+           <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }} numberOfLines={1}>{e.name}</Text>
+           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }} numberOfLines={1}>
+            {[e.group, e.equipment ? cap(e.equipment) : null].filter(Boolean).join(' · ')}
+           </Text>
+          </View>
+          <Icon name="chevron" size={15} color={t.ink3} />
+         </Pressable>
         </View>
-       ))}
+        );
+       })}
        {catList.length > catShown ? (
         <View style={{ marginTop: sp.md }}>
          {/* A count, not a bare "Show more". The number is the point: it says
