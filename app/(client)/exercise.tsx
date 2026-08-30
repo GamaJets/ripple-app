@@ -19,7 +19,7 @@
 // that must never be dressed up as rule 3: a placeholder silhouette shown where
 // we have no picture is a lie a client acts on under load.
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, ScrollView, Image, Pressable, ActivityIndicator } from 'react-native';
+import { View, Text, ScrollView, Image, Pressable, ActivityIndicator, Animated, Easing } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -35,44 +35,82 @@ import { useClientData } from '../../src/ui/clientData';
 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
-/** The two catalogue frames, alternated. A start position and an end position
- *  toggled at the tempo of a controlled rep — which is also the tempo the
- *  client should be copying. Both are preloaded before the loop starts, or the
- *  first cycle is a flash of empty space. */
+/**
+ * The catalogue frames as a movement, not a slideshow.
+ *
+ * ── Why this is a cross-fade and not a swap ────────────────────────────────
+ *
+ * The first version toggled opacity between two mounted images every 900ms.
+ * Two photographs are a start position and an end position, so that is a hard
+ * cut between two quite different pictures, six or seven times a minute —
+ * which reads as a strobe rather than as a repetition. Reported as "the video
+ * is very choppy".
+ *
+ * Fading between them does not invent any motion that was not photographed,
+ * and it is honest about that: what it removes is the JOLT. The eye reads a
+ * dissolve between two postures as one movement passing through them, which is
+ * what the client is being asked to copy.
+ *
+ * ── Why Animated with the native driver ────────────────────────────────────
+ *
+ * setInterval driving React state re-renders the whole screen on every tick,
+ * on the JS thread, competing with a scroll. Animated.loop with
+ * useNativeDriver hands the opacity curve to the UI thread once and never
+ * touches JS again — so the fade holds 60fps even while the list below it is
+ * being scrolled, and it costs nothing when the screen is idle.
+ *
+ * A two-frame set can never be smooth in the way a licensed animation is. This
+ * is the most that two photographs can honestly be made to look like.
+ */
+const HOLD_MS = 620;   // long enough to read the posture
+const FADE_MS = 420;   // long enough to dissolve rather than cut
+
 function FrameLoop({ urls, label }: { urls: string[]; label: string }) {
   const t = useTheme();
-  const [i, setI] = useState(0);
   const [ready, setReady] = useState(false);
-  const timer = useRef<ReturnType<typeof setInterval> | null>(null);
+  // 0 → first frame, 1 → second. Everything else is interpolated from it.
+  const progress = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     let live = true;
     Promise.all(urls.map((u) => Image.prefetch(u).catch(() => false)))
       .then(() => { if (live) setReady(true); })
-      // A prefetch that fails is not a reason to show nothing: <Image> will
-      // still try, and one frame arriving is better than a permanent spinner.
       .catch(() => { if (live) setReady(true); });
     return () => { live = false; };
   }, [urls.join('|')]);
 
   useEffect(() => {
     if (!ready || urls.length < 2) return;
-    timer.current = setInterval(() => setI((n) => (n + 1) % urls.length), FRAME_MS);
-    return () => { if (timer.current) clearInterval(timer.current); };
-  }, [ready, urls.length]);
+    progress.setValue(0);
+    // Ease in and out of each fade. A linear dissolve still reads as mechanical;
+    // easing makes the hold at each end feel like the pause at the top and
+    // bottom of a rep.
+    const leg = (to: number) => Animated.timing(progress, {
+      toValue: to, duration: FADE_MS, easing: Easing.inOut(Easing.quad), useNativeDriver: true,
+    });
+    const wait = (d: number) => Animated.delay(d);
+    const anim = Animated.loop(Animated.sequence([wait(HOLD_MS), leg(1), wait(HOLD_MS), leg(0)]));
+    anim.start();
+    return () => anim.stop();
+  }, [ready, urls.length, progress]);
+
+  // Opposed opacities from ONE value, so the two never both dim mid-fade and
+  // show the container through the gap.
+  const first = progress.interpolate({ inputRange: [0, 1], outputRange: [1, 0] });
+  const second = progress;
 
   return (
     <View style={{ width: '100%', aspectRatio: 4 / 3, borderRadius: radius.md, backgroundColor: t.surface2, overflow: 'hidden' }}>
-      {/* Both frames are mounted and cross-faded by opacity rather than swapping
-          one source. Swapping the uri makes iOS tear the image down and decode
-          the next one, which reads as a blink every 900ms. */}
-      {urls.map((u, n) => (
-        <Image
+      {urls.slice(0, 2).map((u, n) => (
+        <Animated.Image
           key={u}
           source={{ uri: u }}
           accessibilityLabel={n === 0 ? `${label}, start position` : `${label}, end position`}
           resizeMode="contain"
-          style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, opacity: i === n ? 1 : 0 }}
+          style={{
+            position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+            opacity: urls.length < 2 ? 1 : (n === 0 ? first : second),
+          }}
         />
       ))}
       {!ready ? (
