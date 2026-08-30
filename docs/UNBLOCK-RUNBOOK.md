@@ -326,6 +326,25 @@ To hand an already-built artifact to Apple without rebuilding:
 That command sets the credential up on first run and then submits, so it does
 both jobs at once.
 
+### `build --auto-submit` and `submit` do not resolve the key the same way
+
+Observed on 30 Aug 2026, and worth knowing because it looks like a
+contradiction:
+
+  · the FIRST app needs the interactive run — there is no key on the account
+    yet, and nothing non-interactive can create one;
+  · once ANY app has one, `eas submit --latest --non-interactive` finds and
+    reuses it for the other apps with no prompting. The owner app was submitted
+    that way without a single question being asked;
+  · but `eas build --auto-submit --non-interactive` still fails its credential
+    pre-check for an app that has never submitted, even with a usable key on the
+    account. It fails BEFORE the build it already queued has finished.
+
+So the reliable order for an app that has not submitted before is: build
+without `--auto-submit`, then `eas submit --latest`. Or let the auto-submit
+fail, leave the build running, and submit it afterwards — which costs nothing
+and is what actually happened here for both the coach and the owner app.
+
 ### Why this is not fixed in eas.json
 
 `eas.json` accepts `ascApiKeyPath` / `ascApiKeyId` / `ascApiKeyIssuerId`. Using
