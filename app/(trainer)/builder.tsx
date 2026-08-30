@@ -50,6 +50,7 @@ import { useCoachExercises, mergeExerciseLists } from '../../src/ui/coachExercis
 import { useExerciseCatalogue } from '../../src/ui/exerciseDetail';
 import { exerciseSlug } from '../../src/lib/exerciseId';
 import { useCatalogueThumbs } from '../../src/ui/useCatalogueThumbs';
+import { ensureCatalogueRow } from '../../src/ui/customExercise';
 import { ExerciseThumb } from '../../src/ui/ExerciseDemo';
 import { buildProgram, type Program } from '../../src/lib/programs';
 import { guardOverwrite } from '../../src/lib/overwriteGuard';
@@ -690,6 +691,16 @@ export default function Builder() {
                 // convenience, and a failed write must not hold up the sheet or
                 // lose the name the coach just entered.
                 void coachEx.remember(nm);
+                // And into the shared library, so the movement a coach invented
+                // gains an id every later reference resolves to — a search
+                // entry, a place for an illustration, and a history that lines
+                // up with the same lift logged from anywhere else. Marked as
+                // the coach's own, never as a curated catalogue row: it has a
+                // name and nothing else, and the library says so.
+                //
+                // Not awaited, for the same reason as remember() above: the
+                // exercise belongs to the program the moment it is typed.
+                void ensureCatalogueRow(nm);
                 setCustom('');
                 setPickerDay(null);
               }

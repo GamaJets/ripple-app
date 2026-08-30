@@ -221,27 +221,6 @@ export default function TrainerSchedule() {
 
         <Rule />
 
-        {/* ── the things you do from here ─────────────────────────────────── */}
-        <Section>
-          <SectionHead title="Manage" />
-          <ListRow icon="plus" title="Add a Session"
-            note={`Book a client or open a slot on ${DOW[selDate.getDay()]} ${selD} ${MON[selM].slice(0, 3)}`}
-            onPress={() => { setAddClient(null); setAddOpen(true); }} />
-          <ListRow icon="clock" title="Weekly Availability"
-            note={availSlots.length
-              ? `${availSlots.length} weekly slot${availSlots.length === 1 ? '' : 's'} · generate the next 4 weeks`
-              : 'Set the times you offer every week'}
-            onPress={() => setAvailOpen(true)} />
-          <ListRow icon="people" title="Group Classes" note="Schedule & fill classes across branches"
-            onPress={() => router.push('/(trainer)/classes')} />
-          {booked.length > 0 ? (
-            <ListRow icon="share" title="Export Schedule" note="Send your booked sessions to your calendar app"
-              onPress={exportSchedule} />
-          ) : null}
-        </Section>
-
-        <Rule />
-
         {/* ── month grid ─────────────────────────────────────────────────── */}
         <Section>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: sp.lg }}>
@@ -296,6 +275,33 @@ export default function TrainerSchedule() {
               <Text style={{ ...ty.caption, color: t.ink3 }}>Open</Text>
             </View>
           </View>
+        </Section>
+
+        <Rule />
+
+        {/* ── the things you do from here ─────────────────────────────────
+            Below the calendar, not above it. Two of these read the SELECTED
+            DATE — "Add a Session" is captioned with it and books into it — so
+            above the grid they asked a coach to act before choosing the day
+            they were acting on, and the caption named whatever date happened
+            to be selected already. The order now matches the order of the
+            decision: pick the day, then do the thing. */}
+        <Section>
+          <SectionHead title="Manage" />
+          <ListRow icon="plus" title="Add a Session"
+            note={`Book a client or open a slot on ${DOW[selDate.getDay()]} ${selD} ${MON[selM].slice(0, 3)}`}
+            onPress={() => { setAddClient(null); setAddOpen(true); }} />
+          <ListRow icon="clock" title="Weekly Availability"
+            note={availSlots.length
+              ? `${availSlots.length} weekly slot${availSlots.length === 1 ? '' : 's'} · generate the next 4 weeks`
+              : 'Set the times you offer every week'}
+            onPress={() => setAvailOpen(true)} />
+          <ListRow icon="people" title="Group Classes" note="Schedule & fill classes across branches"
+            onPress={() => router.push('/(trainer)/classes')} />
+          {booked.length > 0 ? (
+            <ListRow icon="share" title="Export Schedule" note="Send your booked sessions to your calendar app"
+              onPress={exportSchedule} />
+          ) : null}
         </Section>
 
         <Rule />

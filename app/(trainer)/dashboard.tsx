@@ -1237,6 +1237,19 @@ export default function TrainerClients() {
                 note="How they are doing, and the way in to their goals, week, checklist, photos, program, sessions and thread"
                 onPress={() => { const id = sel.id; const nm = sel.name; setSel(null); router.push({ pathname: '/(trainer)/client', params: { clientId: id, name: nm } }); }} />
 
+              {/* Logging a session was FOUR taps from here — this sheet, then
+                  Open, then the client screen, then the row on it — and it is
+                  the thing a coach does immediately after finishing with
+                  somebody, often standing on the gym floor. It is the one
+                  action worth putting beside Open rather than behind it.
+
+                  Same destination and same params as the client screen's own
+                  row, so there is one log-session path and not two that can
+                  drift. */}
+              <ListRow icon="train" title="Log a Session You Ran"
+                note={`Goes into ${sel.name.split(' ')[0]}'s own record, marked as logged by you.`}
+                onPress={() => { const id = sel.id; const nm = sel.name; setSel(null); router.push({ pathname: '/(trainer)/log-session', params: { clientId: id, name: nm } }); }} />
+
               {/* Stays here rather than moving: it writes a message, which is
                   the same kind of thing as the feedback box and the private
                   notes above it, and the client screen is read-only by

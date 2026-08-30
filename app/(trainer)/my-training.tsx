@@ -52,6 +52,7 @@ import { useExerciseCatalogue, type CatalogueRow } from '../../src/ui/exerciseDe
 import { useCatalogueThumbs } from '../../src/ui/useCatalogueThumbs';
 import { ExerciseThumb } from '../../src/ui/ExerciseDemo';
 import { exerciseSlug } from '../../src/lib/exerciseId';
+import { ensureCatalogueRow } from '../../src/ui/customExercise';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useSettings } from '../../src/ui/settings';
 import { isWhole } from '../../src/ui/loadStatus';
@@ -132,7 +133,13 @@ export default function MyTraining() {
     setText('');
     if (saved) {
       notifySuccess();
-      Alert.alert('Logged', `${lifts.length} exercise${lifts.length === 1 ? '' : 's'} added to your own training for today.`);
+      // Only AFTER the log landed. Minting a catalogue row for a movement whose
+      // workout was refused would put a name in the library that nothing
+      // references — the library is shared, so its rows should be earned.
+      const minted = await mintAll(lifts.map((l) => l.exercise));
+      Alert.alert('Logged',
+        `${lifts.length} exercise${lifts.length === 1 ? '' : 's'} added to your own training for today.`
+        + (minted.length ? `\n\n${listNames(minted)} ${minted.length === 1 ? 'was' : 'were'} not in the exercise library, so ${minted.length === 1 ? 'it has' : 'they have'} been added to it.` : ''));
     } else {
       // `addWorkouts` resolves false when the row never reached the server. The
       // entry is on screen and on this phone only, and saying "logged" here
@@ -162,6 +169,32 @@ export default function MyTraining() {
    * coach is actually typing in — a blank box stays blank and means a
    * bodyweight set, not a load of nothing.
    */
+  /**
+   * Put any of these movements the catalogue does not have into it, and return
+   * the ones that were genuinely new.
+   *
+   * Asked for: a coach saving an exercise the library does not list should see
+   * it added. Until now a typed name stayed a string on one workout row, so
+   * the same movement logged twice was two unrelated records and never gained
+   * a search entry, an illustration or a history.
+   *
+   * Sequential rather than parallel, and deliberately: two of the same new
+   * name in one typed session would otherwise race each other to insert the
+   * same id.
+   */
+  const mintAll = async (names: string[]): Promise<string[]> => {
+    const made: string[] = [];
+    for (const n of [...new Set(names.map((x) => x.trim()).filter(Boolean))]) {
+      const { created } = await ensureCatalogueRow(n);
+      if (created) made.push(n);
+    }
+    return made;
+  };
+
+  /** "Zercher squat", or "A, B and C" — a list a person reads, not an array. */
+  const listNames = (n: string[]): string =>
+    (n.length <= 1 ? n[0] : `${n.slice(0, -1).join(', ')} and ${n[n.length - 1]}`) ?? '';
+
   const logOneLift = async () => {
     setProblem(null);
     const name = exercise.trim();
@@ -187,7 +220,9 @@ export default function MyTraining() {
     if (saved) {
       notifySuccess();
       setExercise(''); setSetCount(''); setReps(''); setLoad('');
-      Alert.alert('Logged', `${name} added to your own training for today.`);
+      const minted = await mintAll([name]);
+      Alert.alert('Logged', `${name} added to your own training for today.`
+        + (minted.length ? '\n\nIt was not in the exercise library, so it has been added to it.' : ''));
     } else {
       // The boxes are deliberately NOT cleared. What was typed is the only copy
       // of it that exists, and emptying the form would take that away on the
