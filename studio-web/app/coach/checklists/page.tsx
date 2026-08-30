@@ -32,6 +32,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase, loadMe, type Me } from '@/lib/supabase';
 import { Shell } from '@/components/Shell';
+import {
+  recentWindow, summariseAdherence, setItemLine, dayLabel,
+  type DayWindow, type TickRow, type AdherenceSummary,
+} from '@lib/adherence';
 
 /** One row of coach_checklist_items, as this screen holds it. */
 interface Item {
@@ -40,7 +44,15 @@ interface Item {
   icon: string;
   active: boolean;
   sort: number;
+  // Read because the adherence figures cannot be honest without them. An item's
+  // created_at bounds how far back it could possibly have been ticked, so a
+  // line added on Thursday reads "1 of 3" and never "1 of 28"; `active` is what
+  // says the days after it came off are not the client's to answer for.
+  created_at: string;
+  updated_at: string;
 }
+
+const COLS = 'id, label, icon, active, sort, created_at, updated_at';
 
 interface Client {
   id: string;
@@ -72,6 +84,12 @@ export default function CoachChecklists() {
   // from itemsErr: a failed read and a failed save send a coach to do different
   // things, and one message for both would send them to the wrong one.
   const [writeErr, setWriteErr] = useState<string | null>(null);
+
+  // The window and the rows it was read over travel together. Held as one value
+  // because a summary built from this load's ticks and the previous load's
+  // dates is arithmetic over two different months and looks entirely fine.
+  const [ticks, setTicks] = useState<{ window: DayWindow; rows: TickRow[] } | null>(null);
+  const [ticksErr, setTicksErr] = useState<string | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -123,7 +141,7 @@ export default function CoachChecklists() {
     setWriteErr(null);
     const { data, error } = await supabase
       .from('coach_checklist_items')
-      .select('id, label, icon, active, sort')
+      .select(COLS)
       .eq('coach_id', coachId)
       .eq('client_id', clientId)
       .order('sort', { ascending: true })
@@ -132,11 +150,52 @@ export default function CoachChecklists() {
     setItems((data ?? []) as unknown as Item[]);
   }, []);
 
+  /**
+   * The client's ticks for the window — every habit, not only this coach's.
+   *
+   * All of them, because a tick against the client's OWN targets is the only
+   * evidence here that they opened the app on a given day, and that is what
+   * separates a line they saw and left from a line nobody was ever shown.
+   * src/lib/adherence.ts is where that distinction is made and defended.
+   */
+  const loadTicks = useCallback(async (clientId: string) => {
+    setTicksErr(null);
+    const w = recentWindow();
+    const { data, error } = await supabase
+      .from('habit_logs')
+      .select('habit, done_on')
+      .eq('user_id', clientId)
+      .gte('done_on', w.start)
+      .lte('done_on', w.end)
+      .order('done_on', { ascending: false });
+    if (error) {
+      // Null, never []. An empty tick list reads as "they did none of it",
+      // which is the single most damaging thing this screen could say wrongly.
+      setTicks(null);
+      setTicksErr(error.message);
+      return;
+    }
+    setTicks({ window: w, rows: (data ?? []) as unknown as TickRow[] });
+  }, []);
+
   useEffect(() => { if (me?.id) void loadClients(me.id); }, [me?.id, loadClients]);
   useEffect(() => {
     if (me?.id && picked) void loadItems(me.id, picked);
     else setItems(null);
   }, [me?.id, picked, loadItems]);
+
+  useEffect(() => {
+    if (picked) void loadTicks(picked);
+    else { setTicks(null); setTicksErr(null); }
+  }, [picked, loadTicks]);
+
+  // Only computed when BOTH reads landed. A summary over a full tick list and a
+  // short item list would put confident fractions against some of a coach's
+  // lines and quietly omit the rest.
+  const adherence: AdherenceSummary | null = useMemo(
+    () => (ticks && items ? summariseAdherence({ window: ticks.window, ticks: ticks.rows, items }) : null),
+    [ticks, items],
+  );
 
   const add = async () => {
     if (!me?.id || !picked || busy) return;
@@ -154,7 +213,7 @@ export default function CoachChecklists() {
     const { data, error } = await supabase
       .from('coach_checklist_items')
       .insert({ coach_id: me.id, client_id: picked, label, icon: icon.trim(), sort: nextSort })
-      .select('id, label, icon, active, sort')
+      .select(COLS)
       .single();
     setBusy(false);
     if (error || !data) {
@@ -170,7 +229,7 @@ export default function CoachChecklists() {
     setBusy(true); setWriteErr(null);
     const { data, error } = await supabase
       .from('coach_checklist_items').update({ active }).eq('id', it.id)
-      .select('id, label, icon, active, sort');
+      .select(COLS);
     setBusy(false);
     // Counting the rows is the point. An update matching nothing is not an
     // error in PostgREST — it succeeds having changed nothing at all.
@@ -318,11 +377,31 @@ export default function CoachChecklists() {
             </p>
           ) : null}
 
+          {/* What the ticks can and cannot account for, before any figure is
+              read. The silent days are the honest limit of all of this: a day
+              with no tick of anything is a day the client missed the line and a
+              day their phone stayed in a drawer, and nothing here can tell the
+              two apart. Saying so once, up front, is what stops the fractions
+              below reading as a scoreboard. */}
+          {ticksErr ? (
+            <p className="dash" style={{ marginTop: 12 }}>
+              Could not read their ticks: {ticksErr}. The list is below without figures — an
+              absent number here is our connection, not their week.
+            </p>
+          ) : adherence && adherence.silentDays > 0 ? (
+            <p className="dash" style={{ marginTop: 12 }}>
+              Nothing at all was logged on {adherence.silentDays} of the last {adherence.window.days} days.
+              Those days are not counted as misses anywhere below: from here a day nobody logged
+              looks the same whether they skipped the line or never opened the app.
+            </p>
+          ) : null}
+
           {shown && shown.length > 0 ? (
             <table className="ts" style={{ marginTop: 12, width: '100%', maxWidth: 720 }}>
               <thead>
                 <tr>
                   <th style={{ textAlign: 'left' }}>Line</th>
+                  <th style={{ textAlign: 'left', width: 240 }}>What came of it</th>
                   <th style={{ textAlign: 'left', width: 90 }}>On their list</th>
                   <th style={{ width: 130 }} />
                 </tr>
@@ -331,6 +410,19 @@ export default function CoachChecklists() {
                 {shown.map((it, i) => (
                   <tr key={it.id} style={{ opacity: it.active ? 1 : 0.55 }}>
                     <td>{it.icon ? `${it.icon} ` : ''}{it.label}</td>
+                    {/* setItemLine is deliberately the only thing that phrases
+                        this. The same two numbers can be put to a coach as a
+                        fraction of the days a line was on the list, which is
+                        what they are, or as a score, which invites reading a
+                        person's character off a table of ticks. */}
+                    <td className="dash" style={{ fontSize: 12, lineHeight: 1.45 }}>
+                      {adherence
+                        ? (() => {
+                            const a = adherence.set.find((x) => x.id === it.id);
+                            return a ? setItemLine(a) : '— not in the window read';
+                          })()
+                        : ticksErr ? '— ticks unread' : '— reading…'}
+                    </td>
                     <td>
                       <button style={cellBtn} disabled={busy} onClick={() => setActive(it, !it.active)}>
                         {it.active ? 'Showing' : 'Off'}
@@ -345,6 +437,37 @@ export default function CoachChecklists() {
                 ))}
               </tbody>
             </table>
+          ) : null}
+
+          {/* Their own lines, discovered from the ticks — the coach never set
+              these and has no other sight of them. A count and never a rate:
+              the client's app rebuilds this half of the list every morning from
+              their targets, their goals and whichever day their plan schedules,
+              and none of that is recorded per day, so there is no denominator
+              anywhere to divide by. A target never once ticked cannot appear
+              here at all, which is why the sentence says what it says. */}
+          {adherence && adherence.derived.length > 0 ? (
+            <div style={{ marginTop: 26, maxWidth: 720 }}>
+              <p className="eyebrow" style={{ marginBottom: 8 }}>Their own lines</p>
+              <p className="dash" style={{ marginBottom: 10, fontSize: 12 }}>
+                Worked out from their plan and targets, not set by you. Ticks only — the app
+                rebuilds this half of their list each morning, so there is no run of days to
+                count them against. Anything never ticked is not listed rather than shown as none.
+              </p>
+              <table className="ts" style={{ width: '100%' }}>
+                <tbody>
+                  {adherence.derived.map((d) => (
+                    <tr key={d.id}>
+                      <td>{d.label}</td>
+                      <td className="dash" style={{ fontSize: 12 }}>
+                        ticked on {d.ticked} {d.ticked === 1 ? 'day' : 'days'}
+                        {d.lastTicked ? ` · last ${dayLabel(d.lastTicked)}` : ''}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           ) : null}
 
           <div style={{ marginTop: 22, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>

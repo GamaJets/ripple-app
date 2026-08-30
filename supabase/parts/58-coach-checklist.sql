@@ -59,7 +59,9 @@
 -- four-week window and states only what those rows can support
 -- (app/(trainer)/checklists.tsx, and src/lib/adherence.ts for the arithmetic
 -- and for the several things it deliberately refuses to say). The console's
--- editor at /coach/checklists has not caught up yet.
+-- editor at /coach/checklists reads the same window through the same module,
+-- so the two cannot drift into telling a coach different things about the same
+-- client.
 -- ─────────────────────────────────────────────────────────────────────────
 
 create table if not exists public.coach_checklist_items (

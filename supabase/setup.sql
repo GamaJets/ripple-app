@@ -6243,7 +6243,26 @@ end; $function$;
 -- There is no `done` column and there must not be one: the tick belongs to the
 -- client, in `habit_logs`, where the client's own policy governs it. A coach
 -- column saying "done" would be a second answer to a question only one person
--- can answer, and the coach dashboard already reads the client's real ticks.
+-- can answer.
+--
+-- ── A correction to the sentence that used to end that paragraph ───────────
+--
+-- It read "and the coach dashboard already reads the client's real ticks". No
+-- such reader existed. `habit_logs_coach_read` in 02-domain-schema.sql has
+-- granted it all along — `for select using (is_my_client(user_id))` — and not
+-- one query in either app or the console used the grant, so an item went onto
+-- a client's list and nothing on the coach's side could say whether any of it
+-- was ever done. The decision above stands on its own and did not need the
+-- reassurance; what the reassurance did was describe a screen that was not
+-- there, which is the most expensive shape a comment can take, because it is
+-- the reason nobody went looking for the gap. The read exists now, on the
+-- coach's checklist screen in the phone app: it reads `habit_logs` over a
+-- four-week window and states only what those rows can support
+-- (app/(trainer)/checklists.tsx, and src/lib/adherence.ts for the arithmetic
+-- and for the several things it deliberately refuses to say). The console's
+-- editor at /coach/checklists reads the same window through the same module,
+-- so the two cannot drift into telling a coach different things about the same
+-- client.
 -- ─────────────────────────────────────────────────────────────────────────
 
 create table if not exists public.coach_checklist_items (
