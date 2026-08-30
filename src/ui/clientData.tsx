@@ -74,12 +74,20 @@ interface Value {
   focusAreas: string[]; setFocusAreas: (v: string[]) => void;
   activity: number;
   mealsPerDay: 3 | 4 | 5; setMealsPerDay: (v: 3 | 4 | 5) => void;
-  /** Daily step and nightly sleep targets. null means the client has not set
-   *  one, and it stays null: the checklist renders no row rather than one built
-   *  on a figure nobody chose, which is what "10,000 steps" was for everybody.
-   *  Pass null to either setter to clear it. */
+  /** Daily step, nightly sleep and daily water targets. null means the client
+   *  has not set one, and it stays null: the checklist renders no row rather
+   *  than one built on a figure nobody chose, which is what "10,000 steps" was
+   *  for everybody — and "8 glasses", which outlived the other two because it
+   *  was a lone constant in the habits provider rather than a line in the seed
+   *  list. Pass null to any setter to clear it.
+   *
+   *  Water is read further than the other two: the checklist states it, the
+   *  Recovery hero draws an arc against it and readinessScore divides by it, so
+   *  a null has to survive all the way out to those screens rather than being
+   *  softened into a number on the way. */
   stepGoal: number | null; setStepGoal: (v: number | null) => void;
   sleepGoalHours: number | null; setSleepGoalHours: (v: number | null) => void;
+  waterGoalGlasses: number | null; setWaterGoalGlasses: (v: number | null) => void;
   /** null until there is a scan or a manual entry. These used to fall back to
    *  70 kg / 20% / 0 kg, which the dashboard, profile, scans, report, standards
    *  and the macro calculator all rendered and computed against as though the
@@ -148,6 +156,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
   const [coachLinked, setCoachLinked] = useState<boolean | null>(null);
   const [stepGoal, setStepGoal] = useState<number | null>(null);
   const [sleepGoalHours, setSleepGoalHours] = useState<number | null>(null);
+  const [waterGoalGlasses, setWaterGoalGlasses] = useState<number | null>(null);
   const [scans, setScans] = useState<ScanRec[]>([]);
   const [scanMetrics, setScanMetrics] = useState<Record<string, ScanMetrics>>({});
   const [manualWeight, setManualWeight] = useState<number | null>(null);
@@ -185,6 +194,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
           if (p.mealsPerDay === 3 || p.mealsPerDay === 4 || p.mealsPerDay === 5) setMealsPerDay(p.mealsPerDay);
           if (typeof p.stepGoal === 'number') setStepGoal(p.stepGoal);
           if (typeof p.sleepGoalHours === 'number') setSleepGoalHours(p.sleepGoalHours);
+          if (typeof p.waterGoalGlasses === 'number') setWaterGoalGlasses(p.waterGoalGlasses);
         }
       }
     } catch {}
@@ -194,8 +204,8 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
   // Persist edits once hydrated (avoids clobbering saved data with defaults on boot).
   useEffect(() => {
     if (!hydrated) return;
-    AsyncStorage.setItem(KEY, JSON.stringify({ name, dob, heightCm, goal, diet, avoid, injuries, focusAreas, coachingMode, mealsPerDay, stepGoal, sleepGoalHours, weightKg: manualWeight, bodyFatPct: manualBodyFat, manualAt, photo })).catch(() => {});
-  }, [hydrated, name, dob, heightCm, goal, diet, avoid, injuries, focusAreas, coachingMode, mealsPerDay, stepGoal, sleepGoalHours, manualWeight, manualBodyFat, manualAt, photo]);
+    AsyncStorage.setItem(KEY, JSON.stringify({ name, dob, heightCm, goal, diet, avoid, injuries, focusAreas, coachingMode, mealsPerDay, stepGoal, sleepGoalHours, waterGoalGlasses, weightKg: manualWeight, bodyFatPct: manualBodyFat, manualAt, photo })).catch(() => {});
+  }, [hydrated, name, dob, heightCm, goal, diet, avoid, injuries, focusAreas, coachingMode, mealsPerDay, stepGoal, sleepGoalHours, waterGoalGlasses, manualWeight, manualBodyFat, manualAt, photo]);
 
   // Pull the real signed-in user's name from the server BEFORE any push below is
   // allowed to run. This guards against a stale/cross-account name that was
@@ -229,7 +239,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
       try {
         const { data: c, error: cErr } = await supabase
           .from('clients')
-          .select('dob, height_cm, goal, diet, avoid, mode, trainer_id, injuries, focus_areas, manual_weight_kg, manual_body_fat_pct, manual_at, meals_per_day, step_goal, sleep_goal_hours')
+          .select('dob, height_cm, goal, diet, avoid, mode, trainer_id, injuries, focus_areas, manual_weight_kg, manual_body_fat_pct, manual_at, meals_per_day, step_goal, sleep_goal_hours, water_goal_glasses')
           .eq('id', sbUid).single();
         if (cErr) { reportError('clientData.hydrate.clients', cErr); failed = true; }
         if (!cancelled && !cErr && c) {
@@ -287,6 +297,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
           // from the local cache survive a clearing on another device.
           setStepGoal(r.step_goal != null && Number.isFinite(Number(r.step_goal)) ? Number(r.step_goal) : null);
           setSleepGoalHours(r.sleep_goal_hours != null && Number.isFinite(Number(r.sleep_goal_hours)) ? Number(r.sleep_goal_hours) : null);
+          setWaterGoalGlasses(r.water_goal_glasses != null && Number.isFinite(Number(r.water_goal_glasses)) ? Number(r.water_goal_glasses) : null);
         }
       } catch (e) { reportError('clientData.hydrate.clients', e); failed = true; }
 
@@ -326,6 +337,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
               meals_per_day: mealsPerDay,
               step_goal: stepGoal,
               sleep_goal_hours: sleepGoalHours,
+              water_goal_glasses: waterGoalGlasses,
               // All four answers, whole. 'solo' used to be left out of this
               // update entirely: the constraint refused it, and that refusal
               // took the WHOLE row with it — one Postgres error and the name,
@@ -346,7 +358,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
       })();
     }, 600);
     return () => clearTimeout(timer);
-  }, [name, photo, dob, heightCm, goal, diet, avoid, mealsPerDay, stepGoal, sleepGoalHours, coachingMode, injuries, focusAreas, manualWeight, manualBodyFat, manualAt, sbUid, hydrated, nameSynced]);
+  }, [name, photo, dob, heightCm, goal, diet, avoid, mealsPerDay, stepGoal, sleepGoalHours, waterGoalGlasses, coachingMode, injuries, focusAreas, manualWeight, manualBodyFat, manualAt, sbUid, hydrated, nameSynced]);
 
   // Load locally-cached InBody composition metrics (keyed by scan date).
   useEffect(() => { (async () => { try { const raw = await AsyncStorage.getItem('repple.scanMetrics'); if (raw) setScanMetrics(JSON.parse(raw)); } catch { /* ignore */ } })(); }, []);
@@ -426,7 +438,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
     removeInjury: (id) => setInjuries((p) => p.filter((i) => i.id !== id)),
     coachingMode, setCoachingMode, coachLinked,
     activity: 1.5, mealsPerDay, setMealsPerDay,
-    stepGoal, setStepGoal, sleepGoalHours, setSleepGoalHours,
+    stepGoal, setStepGoal, sleepGoalHours, setSleepGoalHours, waterGoalGlasses, setWaterGoalGlasses,
     weightKg, bodyFatPct, muscleKg: latest ? latest.skeletalMuscleKg : null,
     setWeightKg: (v) => { setManualWeight(v); setManualAt(new Date().toISOString()); }, setBodyFat: (v) => { setManualBodyFat(v); setManualAt(new Date().toISOString()); },
     scans: sorted,

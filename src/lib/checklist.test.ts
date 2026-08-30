@@ -33,6 +33,11 @@ ok(empty.gaps.some((g) => g.id === 'macros'), 'missing macros should be named as
 // now (part 60) and the Daily habits screen sets them, so the note is honest.
 ok(empty.gaps.some((g) => g.id === 'steps'), 'an unset step goal is named as a gap now that there is somewhere to set one');
 ok(empty.gaps.some((g) => g.id === 'sleep'), 'and so is an unset sleep goal');
+// Water arrived as a constant 8 from every caller until part 70, so this was
+// the one target that always had a row and could never raise a note.
+ok(empty.gaps.some((g) => g.id === 'water'), 'an unset water goal is named as a gap, not filled in with eight glasses');
+ok(!buildChecklist({ ...NOTHING, waterGoalGlasses: 8 }).gaps.some((g) => g.id === 'water'),
+  'a client who HAS a water goal is not told to set one');
 // Separately, so somebody who has set one is not told to set it.
 ok(!buildChecklist({ ...NOTHING, stepGoal: 8000 }).gaps.some((g) => g.id === 'steps'),
   'a client who HAS a step goal is not told to set one');
@@ -57,6 +62,7 @@ ok(lean !== bulk, 'two clients with different protein targets must not read iden
 ok(!ids({ ...NOTHING, kcalTarget: 2140, proteinTargetG: 152 }).includes('steps'),
   'no step goal must mean no step row — never a fallback 10,000');
 ok(!ids({ ...NOTHING, kcalTarget: 2140 }).includes('sleep'), 'no sleep goal must mean no sleep row');
+ok(!ids({ ...NOTHING, kcalTarget: 2140 }).includes('water'), 'no water goal must mean no water row — never a fallback 8');
 ok(!ids({ ...NOTHING, waterGoalGlasses: 8 }).includes('protein'), 'no macro target must mean no protein row');
 // A zero, a NaN and a negative are all "not set", however they got here.
 for (const bad of [0, NaN, -3] as number[]) {

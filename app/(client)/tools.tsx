@@ -24,7 +24,7 @@
 // `clientData` and NOTHING else, and when either is missing it says so and
 // offers the way to record them. It never fills in a body — that fallback (70 kg
 // / 20%) is exactly what `clientData` was changed to stop handing out.
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -258,10 +258,33 @@ export default function Tools() {
  // landing that reader on the 1RM estimator is how "why is tapping macros
  // sending you to lifting tools?" got reported — the destination was right and
  // the tab was not, which reads as being sent somewhere unrelated.
+ //
+ // ── Why the param needs an effect and not just an initial value ───────────
+ //
+ // Reading `wanted` into useState looked like the whole fix and was not. This
+ // screen is a Tabs.Screen (href: null), so it MOUNTS ONCE and stays mounted
+ // for the life of the app — a useState initialiser runs on that first mount
+ // and never again. Anybody who had already opened Lifting Tools once, by any
+ // route, had `tab` sitting at '1rm' already, and every later
+ // `push({ tab: 'macros' })` changed the URL and nothing else. Reported a
+ // second time, correctly, as still landing on 1RM.
  const { tab: wanted } = useLocalSearchParams<{ tab?: string }>();
  const [tab, setTab] = useState<'1rm' | 'plates' | 'macros'>(
    wanted === 'macros' || wanted === 'plates' || wanted === '1rm' ? wanted : '1rm',
  );
+ // Consumed and then cleared, which is what makes a REPEAT visit work. Left in
+ // place, the param stays 'macros'; the client taps 1RM, comes back through the
+ // same shortcut, and this effect sees no change to react to — so the screen
+ // would honour the link exactly once per app launch. Clearing it returns
+ // `wanted` to undefined, so the next tap is a real transition again.
+ //
+ // An absent param deliberately does nothing: arriving here from anywhere else
+ // must leave the client on whichever tab they last chose, not haul them back.
+ useEffect(() => {
+   if (wanted !== 'macros' && wanted !== 'plates' && wanted !== '1rm') return;
+   setTab(wanted);
+   router.setParams({ tab: undefined });
+ }, [wanted]);
  const G = layout.gutter;
  return (
  <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>

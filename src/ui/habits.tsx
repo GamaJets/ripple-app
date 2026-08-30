@@ -76,7 +76,12 @@ interface HabitsValue {
   gaps: ChecklistGap[];
   doneCount: number;
   water: number;          // glasses today
-  waterGoal: number;
+  /** The client's own daily goal, in glasses, or null when they have not set
+   *  one. Null is not "no water tracked": the count above is still real and
+   *  still worth showing. What is absent is the thing to measure it against, so
+   *  a screen must not divide by this, fill a row of that many glasses, or
+   *  print it — see the four callers, all of which now branch on it. */
+  waterGoal: number | null;
   addWater: () => void;
   removeWater: () => void;
 }
@@ -113,12 +118,15 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
   // into one flag meant a working read could be reported as broken (and the
   // reverse) depending on which query happened to fail.
   const [coachStatus, setCoachStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
-  // The app's hydration goal. Still a platform constant rather than this
-  // client's own answer — nothing in the product sets a per-person one — but it
-  // is the figure the water tracker draws, the home screen counts against and
-  // readinessScore divides by, so the checklist stating it invents nothing. A
-  // per-client goal, when there is one, replaces this line and nothing else.
-  const waterGoal = 8;
+  // The client's own hydration goal, from clients.water_goal_glasses (part 70).
+  //
+  // It was `const waterGoal = 8;` — the last of the invented daily figures, and
+  // the furthest-travelled: the checklist stated it as a target, Recovery drew
+  // an arc against it, the home screen counted "3 of 8" and readinessScore
+  // divided by it, all from a literal nobody had chosen. Null now, until they
+  // set one on the Daily habits screen, and null all the way out: no caller
+  // substitutes a figure for it.
+  const waterGoal = c.waterGoalGlasses;
   useEffect(() => { AsyncStorage.getItem('repple.water:' + today()).then((r) => { const n = r ? parseInt(r, 10) : 0; if (Number.isFinite(n) && n > 0) setWater(n); setWHydrated(true); }); }, []);
   useEffect(() => { if (!wHydrated) return; AsyncStorage.setItem('repple.water:' + today(), String(water)).catch(() => {}); }, [water, wHydrated]);
 
@@ -275,9 +283,23 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
     setDoneIds((p) => { const n = new Set(p); n.add('water'); return n; });
     void persist('water', true);
   };
+  // A sanity ceiling on the counter, not a goal. It was a bare 20, which was
+  // above the old constant 8 and below the 30 the column now permits — so a
+  // client who set a 25-glass goal could log 20 and never reach it, and the
+  // Recovery hero would have sat at 80% for the rest of their life. It tracks
+  // clients_water_goal_glasses_check (part 70): whatever goal the database will
+  // accept must be reachable here.
+  const WATER_CAP = 30;
   const addWater = () => {
-    setWater((w) => Math.min(w + 1, 20));
-    if (water + 1 >= waterGoal) markWaterDone();
+    setWater((w) => Math.min(w + 1, WATER_CAP));
+    // No goal means there is nothing to complete. Without this the comparison
+    // coerces the null to 0, so the very first glass reads as hitting the goal.
+    // markWaterDone would currently refuse it — there is no 'water' row on a
+    // list built from a null goal — but that is the wrong reason to be safe:
+    // the guard there is about a row the coach or a read took away, and leaning
+    // on it here means a change to it silently starts ticking a target nobody
+    // set. The condition says what it means.
+    if (waterGoal != null && water + 1 >= waterGoal) markWaterDone();
   };
   const removeWater = () => setWater((w) => Math.max(0, w - 1));
   // Counted over today's list, not over doneIds: a tick against an item the

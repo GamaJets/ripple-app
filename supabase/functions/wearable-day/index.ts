@@ -261,6 +261,25 @@ async function whoopWorkouts(token: string, sinceDays: number) {
 // every night, which the client has no use for. They are a subset of the
 // vendor's fields under the vendor's own names, never a rename.
 
+/**
+ * A body measurement the vendor holds: what the client weighs, how tall they
+ * are, and the max heart rate the vendor uses for its own zone maths.
+ *
+ * Deliberately NOT a scan. `scans` requires body_fat_pct, and WHOOP measures no
+ * body fat — writing one of these in as a scan would mean inventing that
+ * figure, and it would then sit in the body-fat trend as though somebody had
+ * measured it. This is a weight reading with a device's name on it, offered to
+ * the client, and nothing writes it anywhere on its own.
+ *
+ * Every field is independently nullable: WHOOP returns the record with only
+ * the fields the client has actually set, so a missing height is a height
+ * nobody entered, not a height of zero.
+ */
+type VendorBody =
+  | { ok: true; weightKg: number | null; heightM: number | null; maxHeartRate: number | null }
+  | { ok: false; notConnected: true; reason: string }
+  | { ok: false; reason: string };
+
 /** Three distinguishable outcomes, never collapsed: read, dead token, failure. */
 type VendorSleep =
   | { ok: true; records: any[] }
@@ -285,7 +304,12 @@ function sleepWindow(sinceDays: unknown) {
 // 401 and 403 mean the stored token no longer speaks for this user, which the
 // client turns into "reconnect your device" rather than "you did not sleep".
 // Any other non-2xx is a failure of ours or theirs, and the night is unknown.
-const notConnected = (v: string): VendorSleep => ({ ok: false, notConnected: true, reason: `${v}_unauthorized` });
+// The dead-token outcome, shared by every reader. Typed as the failure arm
+// alone rather than as VendorSleep: it says nothing about sleep, and typing it
+// to one reader's result meant the body reader could not return the very shape
+// its own union already declared.
+const notConnected = (v: string): { ok: false; notConnected: true; reason: string } =>
+  ({ ok: false, notConnected: true, reason: `${v}_unauthorized` });
 
 /**
  * Oura sleep periods for the window.
@@ -459,6 +483,58 @@ async function fitbitSleep(token: string, sinceDays: unknown): Promise<VendorSle
   return { ok: true, records };
 }
 
+/**
+ * WHOOP's stored body measurement.
+ *
+ * One record, not a series — WHOOP holds the CURRENT values, overwritten when
+ * the client updates them, with no history and no timestamp. So this cannot
+ * build a trend and must not pretend to: it answers "what does WHOOP think you
+ * weigh right now", and the client decides whether to record it.
+ *
+ * Needs the `read:body_measurement` scope. It is requested alongside the others
+ * in src/lib/wearables/oauthConfig.ts, but as with read:sleep before it, adding
+ * a scope only affects NEW grants — anybody already connected keeps the token
+ * they authorised and gets a 403 here until they re-authorise once. That is why
+ * a 403 returns notConnected with a reason rather than an empty reading.
+ */
+async function whoopBody(token: string): Promise<VendorBody> {
+  const h = { Authorization: 'Bearer ' + token };
+  let res: Response;
+  try {
+    res = await fetch('https://api.prod.whoop.com/developer/v2/user/measurement/body', { headers: h });
+  } catch {
+    return { ok: false, reason: 'WHOOP could not be reached.' };
+  }
+  if (res.status === 401 || res.status === 403) return notConnected('whoop');
+  if (!res.ok) return { ok: false, reason: `WHOOP answered ${res.status}.` };
+  let data: any;
+  try {
+    data = await res.json();
+  } catch {
+    return { ok: false, reason: 'WHOOP sent a response Repple could not read.' };
+  }
+  // A figure that is not a positive finite number is absent, not zero. WHOOP
+  // returns the field as null when the client has never set it, and a zero-kilo
+  // body offered as "your WHOOP weight" is worse than offering nothing.
+  const pos = (v: unknown): number | null => {
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  };
+  return {
+    ok: true,
+    weightKg: pos(data?.weight_kilogram),
+    heightM: pos(data?.height_meter),
+    maxHeartRate: pos(data?.max_heart_rate),
+  };
+}
+
+async function readVendorBody(provider: string, token: string): Promise<VendorBody> {
+  if (provider === 'whoop') return await whoopBody(token);
+  // Fitbit and Oura both hold a weight, but neither is wired here yet and an
+  // empty reading would be indistinguishable from "they weigh nothing".
+  return { ok: false, reason: 'unsupported' };
+}
+
 async function readVendorSleep(provider: string, token: string, sinceDays: unknown): Promise<VendorSleep> {
   if (provider === 'fitbit') return await fitbitSleep(token, sinceDays);
   if (provider === 'oura') return await ouraSleep(token, sinceDays);
@@ -540,6 +616,16 @@ Deno.serve(async (req) => {
       return json({ metrics: null, connected: false, reason: (res as any).reason });
     }
     return json({ sleep: res, connected: true });
+  }
+
+  // Same three outcomes as sleep, for the same reason: a body measurement that
+  // could not be read must not arrive looking like a client with no weight.
+  if (String(body.action || '') === 'body') {
+    const res = await readVendorBody(provider, access);
+    if (!res.ok && (res as any).notConnected) {
+      return json({ metrics: null, connected: false, reason: (res as any).reason });
+    }
+    return json({ body: res, connected: true });
   }
 
   const metrics = await readVendor(provider, access);

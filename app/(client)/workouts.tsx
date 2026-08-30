@@ -1022,13 +1022,29 @@ export default function Train() {
         {/* ── the rest: navigational, deliberately quiet ──────────────────── */}
         <Section>
           <SectionHead title="Go to" />
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm }}>
-            {([['camera', 'Scan machine', '/(client)/scan-machine'], ['clock', 'History', '/(client)/activity'], ['chart', 'Trends', '/(client)/trends'], ['trending', 'Targets', '/(client)/progression'], ['calendar', 'This Week', '/(client)/week'], ['trophy', 'Records', '/(client)/records'], ['water', 'Recovery', '/(client)/recovery'], ['moon', 'Rest & deload', '/(client)/restday'], ['heart', 'Watch & devices', '/(client)/devices'], ['video', 'Library', '/(client)/library'], ['settings', 'Tools', '/(client)/tools']] as const).map(([ic, label, route]) => (
+          {/* Wrapped, not scrolled sideways.
+              This was a horizontal ScrollView, which put roughly seven of the
+              twelve destinations off the right edge with nothing to indicate
+              they were there — no scrollbar, no cut-off pill. Music & Playlists
+              was reported missing from Train while it sat in that row's tail,
+              and the same was true of Library, Tools, Watch & devices and Rest
+              & deload. A row you have to discover by dragging is a row most
+              people never read, so all twelve now wrap onto three lines and are
+              simply visible. */}
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
+            {/* Playlists leads deliberately. Music & Playlists existed the whole
+                time and was reachable from exactly one place — Me → Music &
+                Playlists — so the person who wants it is the person about to
+                train, on the one tab that never mentioned it: "how do i access
+                music playlist for my work out in the train tab? there is no
+                such feature there." Reading order still carries meaning now the
+                row wraps, and this is the one you reach for before a session. */}
+            {([['play', 'Playlists', '/(client)/music'], ['camera', 'Scan machine', '/(client)/scan-machine'], ['clock', 'History', '/(client)/activity'], ['chart', 'Trends', '/(client)/trends'], ['trending', 'Targets', '/(client)/progression'], ['calendar', 'This Week', '/(client)/week'], ['trophy', 'Records', '/(client)/records'], ['water', 'Recovery', '/(client)/recovery'], ['moon', 'Rest & deload', '/(client)/restday'], ['heart', 'Watch & devices', '/(client)/devices'], ['video', 'Library', '/(client)/library'], ['settings', 'Tools', '/(client)/tools']] as const).map(([ic, label, route]) => (
               <Pressable key={route} onPress={() => router.push(route as any)} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: sp.sm }}>
                 <Icon name={ic} size={14} color={t.ink2} /><Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>{label}</Text>
               </Pressable>
             ))}
-          </ScrollView>
+          </View>
         </Section>
 
       </ScrollView>

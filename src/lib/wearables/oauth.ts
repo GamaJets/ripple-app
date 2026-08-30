@@ -247,6 +247,76 @@ export async function fetchVendorSleep(id: ProviderId, sinceDays = 7): Promise<V
 }
 
 /**
+ * What a vendor holds for the client's body, or why it could not be read.
+ *
+ * `refused` carries the same meaning it does for sleep: the endpoint answered
+ * "no" on a token that is otherwise fine, which is a missing scope and is fixed
+ * by re-authorising — not by anything the client can do to their watch.
+ */
+export type VendorBodyResult =
+  | { ok: true; weightKg: number | null; heightM: number | null; maxHeartRate: number | null }
+  | { ok: false; refused?: boolean; reason: string };
+
+/**
+ * Ask the server what a connected vendor holds for this client's body.
+ *
+ * Built on exactly the same three-outcome discipline as `fetchVendorSleep`, for
+ * the same reason: a weight we could not read must never arrive looking like a
+ * client who weighs nothing. `metric: 'body'` keeps its verdict separate in the
+ * link ledger, so a refused body endpoint cannot make a working WHOOP look
+ * disconnected — which is the exact bug read:sleep caused on build 35.
+ */
+export async function fetchVendorBody(id: ProviderId): Promise<VendorBodyResult> {
+  let payload: any;
+  try {
+    const { data, error } = await supabase.functions.invoke('wearable-day', {
+      body: { provider: id, action: 'body' },
+    });
+    if (error) {
+      reportError('wearables.fetchBody.invoke', error, { provider: id });
+      return { ok: false, reason: 'Repple could not reach the server to read this device.' };
+    }
+    payload = data;
+  } catch (e) {
+    reportError('wearables.fetchBody.invoke', e, { provider: id });
+    return { ok: false, reason: 'Repple could not reach the server to read this device.' };
+  }
+  if (payload?.connected === false) {
+    const refusal = classifyRefusal(payload?.reason, accountProvenAlive(id));
+    if (refusal.level === 'metric') {
+      reportError('wearables.bodyScopeRefused', payload?.reason || 'body endpoint refused', { provider: id });
+      noteMetric(id, 'body', { kind: 'refused', at: Date.now() });
+      return { ok: false, refused: true, reason: String(payload?.reason || 'body endpoint refused') };
+    }
+    reportError('wearables.notConnected', payload?.reason || 'no usable token', { provider: id });
+    noteTokenDead(id, refusal.why);
+    throw new WearableNotConnectedError(id, payload?.reason);
+  }
+  const body = payload?.body;
+  // An older deploy does not know the 'body' action and answers with the daily
+  // roll-up, which has no `body` key. Reading that as "no weight recorded"
+  // would tell the client their watch holds nothing when it was never asked.
+  if (!body || typeof body !== 'object') {
+    return { ok: false, reason: 'The server did not answer with a body measurement for this device.' };
+  }
+  if (body.ok === true) {
+    noteTokenAlive(id);
+    noteMetric(id, 'body', { kind: 'ok', at: Date.now() });
+    const num = (v: unknown): number | null => {
+      const n = Number(v);
+      return Number.isFinite(n) && n > 0 ? n : null;
+    };
+    return {
+      ok: true,
+      weightKg: num(body.weightKg),
+      heightM: num(body.heightM),
+      maxHeartRate: num(body.maxHeartRate),
+    };
+  }
+  return { ok: false, reason: String(body.reason || 'unknown') };
+}
+
+/**
  * Actually drop the stored token. This used to be a no-op with a comment claiming
  * revocation happened server-side; nothing deleted the row, so "disconnect" only
  * cleared a local flag and the dead token lingered forever.

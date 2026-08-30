@@ -29,6 +29,13 @@
 // `clients.sleep_goal_hours` exist now (part 60) and the Daily habits screen
 // sets them, so the note has somewhere to send people and is emitted again.
 //
+// Water was the one that got away. It kept its row throughout, because the
+// caller had a number to pass — `const waterGoal = 8`, a platform constant, the
+// same eight glasses for everybody. It reads exactly like the client's own
+// target on this list, which is what made it worse than a missing row rather
+// than better. `clients.water_goal_glasses` (part 70) replaces it, and it
+// follows the same rule as the other two: null in, no row, one note.
+//
 // ── Ids are storage keys, not labels ────────────────────────────────────────
 //
 // A tick is a row in `habit_logs` keyed (user_id, habit, done_on), so the id is
@@ -58,8 +65,11 @@ export interface ChecklistGap { id: string; note: string }
 export interface CoachChecklistItem { id: string; label: string; icon?: string | null }
 
 export interface ChecklistInput {
-  /** Glasses/day. Today this is the app's own hydration goal, which the water
-   *  tracker and the home screen already draw and count against. */
+  /** `clients.water_goal_glasses`, in glasses/day. Same rule as steps and
+   *  sleep: null is the normal state for a client who has not set one, and it
+   *  produces a note rather than a row. It used to arrive as a constant 8 from
+   *  every caller, which is why this is the one target that has always had a
+   *  row and has never had a note. */
   waterGoalGlasses: number | null;
   /** Grams, from macrosFor() + the coach's adjustment. Null when there is no
    *  weight and body-fat to compute from — the macro engine needs both. */
@@ -167,6 +177,10 @@ export function buildChecklist(input: ChecklistInput): Checklist {
 
   const water = target(input.waterGoalGlasses);
   if (water != null) items.push({ id: 'water', label: `Drink ${thousands(water)} glasses of water`, icon: '💧', source: 'targets' });
+  // Its own note, for the same reason steps and sleep have separate ones: the
+  // three are set independently, and the client can set this one on the screen
+  // that shows the note.
+  else gaps.push({ id: 'water', note: 'Set a water goal below and your glasses count towards it.' });
 
   const steps = target(input.stepGoal);
   if (steps != null) items.push({ id: 'steps', label: `Walk ${thousands(steps)} steps`, icon: '👟', source: 'targets' });

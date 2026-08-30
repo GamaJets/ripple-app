@@ -244,7 +244,13 @@ export default function Recovery() {
  const [openRoutine, setOpenRoutine] = useState<number | null>(0);
 
  const avgSleep = sleep.length ? (sleep.reduce((a, s) => a + s.hours, 0) / sleep.length).toFixed(1) : '—';
- const pct = Math.min(100, Math.round((cups / goalCups) * 100));
+ // Null when the client has not set a goal, because there is no percentage of
+ // a goal that does not exist. Left as it was, `cups / goalCups` coerces the
+ // null to 0: any glass logged divides by zero and gives Infinity, which
+ // Math.min clamps to a confident 100% — a full ring and "Goal met today —
+ // nice." to somebody who has never set a goal — and zero glasses gives NaN,
+ // which the arc draws from.
+ const pct = goalCups != null ? Math.min(100, Math.round((cups / goalCups) * 100)) : null;
  const G = layout.gutter;
 
  return (
@@ -264,9 +270,12 @@ export default function Recovery() {
   <Hero
    label="Hydration"
    figure={fig(cups)}
-   unit={`of ${goalCups} glasses`}
-   arc={pct / 100}
-   note={cups >= goalCups ? 'Goal met today — nice.' : `${goalCups - cups} more to hit today's goal.`}
+   unit={goalCups != null ? `of ${goalCups} glasses` : cups === 1 ? 'glass today' : 'glasses today'}
+   arc={pct == null ? undefined : pct / 100}
+   note={goalCups == null
+    ? 'No daily goal set — set one on Daily habits and this fills against it.'
+    : cups >= goalCups ? 'Goal met today — nice.' : `${goalCups - cups} more to hit today's goal.`}
+   onPress={goalCups == null ? () => router.push('/(client)/habits') : undefined}
   />
   <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, paddingBottom: layout.section }}>
    <Ghost icon="minus" onPress={removeCup} />

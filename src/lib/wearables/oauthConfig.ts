@@ -91,7 +91,11 @@ export const OAUTH_VENDORS: Partial<Record<ProviderId, OAuthVendor>> = {
     // until they re-authorise once. That is why the state machine has a
     // 'metric-blocked' state that says so plainly and offers the re-auth,
     // instead of calling their working WHOOP disconnected.
-    scopes: ['read:recovery', 'read:cycles', 'read:sleep', 'read:workout', 'read:profile', 'offline'],
+    // 'read:body_measurement' is what lets Repple offer the client the weight
+    // their own watch already holds instead of asking them to type it again.
+    // The same re-authorisation caveat above applies to it: existing grants do
+    // not gain it on refresh.
+    scopes: ['read:recovery', 'read:cycles', 'read:sleep', 'read:workout', 'read:profile', 'read:body_measurement', 'offline'],
     clientId: env('EXPO_PUBLIC_WHOOP_CLIENT_ID'),
     usePKCE: false,
     note: 'Register at developer.whoop.com → set EXPO_PUBLIC_WHOOP_CLIENT_ID and WHOOP_CLIENT_SECRET.',

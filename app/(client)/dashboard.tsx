@@ -80,6 +80,12 @@ export default function Home() {
   // `?? 0` was the bug: no sleep logged became zero hours slept, which scored 20
   // and read as 'Under-recovered'. Nulls now travel as nulls, and readinessScore
   // returns null rather than a number nobody's data supports.
+  //
+  // Hydration is the same shape since part 70. Null goal, null hydration input. readinessScore drops hydration from the
+  // scale entirely when it is null and rescales the rest (see its header), which
+  // is the right answer for a client who has not set a goal — the alternative,
+  // `water / 8`, scored them against a figure nobody chose, and `?? 0` would
+  // score them as having drunk nothing.
   const readiness = readinessScore({
     avgSleepHours: _avgSleep,
     hydrationPct: waterGoal ? water / waterGoal : null,
@@ -416,8 +422,20 @@ export default function Home() {
               <Text style={{ ...ty.micro, color: t.ink3 }}>Water</Text>
               <View style={{ flexDirection: 'row', alignItems: 'baseline', marginTop: 5 }}>
                 <Text style={{ ...value(22), color: t.ink }}>{water}</Text>
-                <Text style={{ ...ty.caption, color: t.ink3, marginLeft: 3 }}>of {waterGoal} glasses</Text>
+                {/* "of 8 glasses" was a platform constant read as this client's
+                    own target. With no goal set there is no denominator to
+                    print — not "of null glasses", and not a fallback eight —
+                    so the count stands on its own and the line below offers
+                    the screen that sets one. */}
+                <Text style={{ ...ty.caption, color: t.ink3, marginLeft: 3 }}>
+                  {waterGoal != null ? `of ${waterGoal} glasses` : water === 1 ? 'glass today' : 'glasses today'}
+                </Text>
               </View>
+              {waterGoal == null ? (
+                <Pressable onPress={() => router.push('/(client)/habits')} hitSlop={8} accessibilityRole="button" accessibilityLabel="Set a daily water goal">
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>Set a daily goal ›</Text>
+                </Pressable>
+              ) : null}
             </View>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
               <Pressable accessibilityLabel="Remove a glass of water" accessibilityRole="button" onPress={removeWater}

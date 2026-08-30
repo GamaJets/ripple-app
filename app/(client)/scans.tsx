@@ -50,6 +50,8 @@ import type { Theme } from '../../src/theme/tokens';
 import { useClientData } from '../../src/ui/clientData';
 import { useSettings } from '../../src/ui/settings';
 import { weightIn, weightLabel, weightToKg, weightDeltaIn, plain, convertedNote } from '../../src/lib/units';
+import { readBodyFromDevices, hasBodyFigure, type BodyRead } from '../../src/lib/wearables/body';
+import { useWearables } from '../../src/ui/wearables';
 import { macrosFor } from '../../src/lib/nutrition';
 import { progressDoc, progressCsv, progressSummary, progressSpanLabel, shareDoc, shareText, shareTextFile, pdfExportAvailable, fileShareBlocker, type ProgressRow } from '../../src/lib/exportShare';
 // Where each body figure came from, when it was measured, and how stale that
@@ -264,6 +266,36 @@ export default function Scans() {
   const [cmp, setCmp] = useState<string[]>([]);
   const [reading, setReading] = useState(false);
   const [ocrMsg, setOcrMsg] = useState<string | null>(null);
+
+  // What the client's own watch already holds for their weight.
+  //
+  // Offered, never applied. It fills the weight box when they tap it and says
+  // where the number came from — the same shape the scan reader uses, for the
+  // same reason: a figure that arrives in a field without being asked for is
+  // one nobody notices is wrong. It also cannot save on its own, because a scan
+  // row needs a body-fat percentage and WHOOP does not measure one.
+  const _wear = useWearables();
+  const [devBody, setDevBody] = useState<BodyRead[] | null>(null);
+  const _connectedKey = Object.keys(_wear.states).filter((k) => _wear.states[k] === 'connected').sort().join(',');
+  useEffect(() => {
+    let cancelled = false;
+    if (!_connectedKey) { setDevBody(null); return; }
+    (async () => {
+      try {
+        const reads = await readBodyFromDevices(_wear.states);
+        if (!cancelled) setDevBody(reads);
+      } catch {
+        // Left null: nothing is offered. An empty offer is correct here — the
+        // client can always type the number, and a failed read must not put a
+        // weight of zero in front of them.
+        if (!cancelled) setDevBody(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [_connectedKey]);
+  // The first connected device that actually answered with a weight.
+  const devWeight = (devBody ?? []).find((r) => hasBodyFigure(r) && r.weightKg != null) ?? null;
+
   const [mxOpen, setMxOpen] = useState<string | null>(null);
   const [scanMx, setScanMx] = useState<ScanMetrics | null>(null);
   const [showAdd, setShowAdd] = useState(false);
@@ -1065,6 +1097,19 @@ export default function Scans() {
             <Pressable onPress={() => setShowDate(true)} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md, marginBottom: sp.md, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
               <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{scanDateLabel()}</Text><Icon name="calendar" size={15} color={t.ink3} />
             </Pressable>
+            {devWeight?.weightKg != null && (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Use the weight from your ${devWeight.providerName}, ${weightLabel(devWeight.weightKg, wu)}`}
+                onPress={() => { setWt(fieldFromKg(devWeight.weightKg)); setOcrMsg(null); }}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md, marginBottom: sp.md }}
+              >
+                <Icon name="scale" size={15} color={t.ink2} />
+                <Text style={{ ...ty.caption, color: t.ink2, flex: 1 }}>
+                  {devWeight.providerName} has you at {weightLabel(devWeight.weightKg, wu)} — tap to use it
+                </Text>
+              </Pressable>
+            )}
             <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.lg }}>
               <TextInput value={wt} onChangeText={setWt} keyboardType="numeric" placeholder={`Weight ${wu}`} placeholderTextColor={t.ink3}
                 accessibilityLabel={wu === 'kg' ? 'Weight in kilograms' : 'Weight in pounds'} style={input} />

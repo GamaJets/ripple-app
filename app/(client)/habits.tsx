@@ -31,14 +31,16 @@ import { useHabits } from '../../src/ui/habits';
 import { donePercent } from '../../src/lib/checklist';
 import { useClientData } from '../../src/ui/clientData';
 
-// The same bounds clients_step_goal_check and clients_sleep_goal_hours_check
-// enforce (supabase/parts/60). Checked here as well, and not as belt and
-// braces: the profile write is one UPDATE carrying every field on it, so a
-// value the constraint refuses takes the client's name, goal, diet and
-// allergens down with it — silently, in a debounced effect nobody is watching.
-// That is exactly how the 'solo' coaching mode ate whole profile saves.
+// The same bounds clients_step_goal_check, clients_sleep_goal_hours_check
+// (supabase/parts/60) and clients_water_goal_glasses_check (part 70) enforce.
+// Checked here as well, and not as belt and braces: the profile write is one
+// UPDATE carrying every field on it, so a value the constraint refuses takes
+// the client's name, goal, diet and allergens down with it — silently, in a
+// debounced effect nobody is watching. That is exactly how the 'solo' coaching
+// mode ate whole profile saves.
 const STEP_MIN = 500, STEP_MAX = 100000;
 const SLEEP_MIN = 3, SLEEP_MAX = 14;
+const WATER_MIN = 1, WATER_MAX = 30;
 
 export default function Habits() {
   const t = useTheme();
@@ -51,6 +53,7 @@ export default function Habits() {
   const c = useClientData();
   const [stepDraft, setStepDraft] = useState('');
   const [sleepDraft, setSleepDraft] = useState('');
+  const [waterDraft, setWaterDraft] = useState('');
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
@@ -80,12 +83,22 @@ export default function Habits() {
 
         {/* ── water ──────────────────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Water" note={`${h.water} / ${h.waterGoal} glasses`} />
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginBottom: sp.lg }}>
-            {Array.from({ length: h.waterGoal }).map((_, i) => (
+          {/* With no goal there is no "/ 8" to write and no eight empty glasses
+              to draw: `Array.from({ length: null })` is a zero-length array, so
+              the row silently vanished rather than saying anything. The count
+              they have drunk is still true and still theirs, so it leads, and
+              the row draws exactly the glasses they logged. */}
+          <SectionHead title="Water" note={h.waterGoal != null ? `${h.water} / ${h.waterGoal} glasses` : `${h.water} ${h.water === 1 ? 'glass' : 'glasses'}`} />
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginBottom: h.waterGoal == null ? sp.md : sp.lg }}>
+            {Array.from({ length: h.waterGoal ?? h.water }).map((_, i) => (
               <View key={i} style={{ width: 24, height: 32, borderRadius: radius.sm, borderWidth: hairline, borderColor: i < h.water ? t.brand : t.ring, backgroundColor: i < h.water ? t.brand : 'transparent', opacity: i < h.water ? 0.9 : 1 }} />
             ))}
           </View>
+          {h.waterGoal == null ? (
+            <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>
+              No daily goal yet — set one under Your daily targets below and these glasses count towards it.
+            </Text>
+          ) : null}
           <View style={{ flexDirection: 'row', gap: sp.md, alignItems: 'center' }}>
             <Pressable accessibilityLabel="Remove a glass of water" accessibilityRole="button" onPress={h.removeWater}
               style={{ width: 38, height: 38, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
@@ -164,14 +177,17 @@ export default function Habits() {
         <Rule />
 
         {/* ── your daily targets ──────────────────────────────────────────
-            The two numbers the checklist used to invent. "10,000 steps" and
-            "Sleep 7h+" were compiled into the app, identical for everybody,
-            and no screen could change them — this is that screen. Leaving one
-            blank is a real answer: the list simply carries no row for it. */}
+            The three numbers the checklist used to invent. "10,000 steps",
+            "Sleep 7h+" and "8 glasses" were compiled into the app, identical
+            for everybody, and no screen could change them — this is that
+            screen. Leaving one blank is a real answer: the list simply carries
+            no row for it. Water was the last to arrive because it was the one
+            that never looked broken — it had a row, a hero arc and a readiness
+            score built on it, all from a literal. */}
         <Section>
           <SectionHead title="Your daily targets" note="Optional" />
           <Text style={{ ...ty.body, color: t.ink3, marginBottom: sp.md }}>
-            Set either and it joins your list. Leave it blank and nothing is assumed.
+            Set any of these and it joins your list. Leave one blank and nothing is assumed.
           </Text>
 
           <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.sm }}>
@@ -221,6 +237,31 @@ export default function Habits() {
             }} />
             {c.sleepGoalHours != null ? (
               <Pressable onPress={() => { c.setSleepGoalHours(null); setSleepDraft(''); }} accessibilityRole="button" accessibilityLabel="Clear sleep goal"
+                style={{ paddingHorizontal: sp.md, paddingVertical: sp.md, borderRadius: radius.sm, backgroundColor: t.surface2 }}>
+                <Text style={{ ...ty.micro, color: t.ink3 }}>Clear</Text>
+              </Pressable>
+            ) : null}
+          </View>
+
+          <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>
+            Water a day{c.waterGoalGlasses != null ? ` · now ${c.waterGoalGlasses} glasses` : ' · not set'}
+          </Text>
+          <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'center' }}>
+            <TextInput
+              value={waterDraft} onChangeText={setWaterDraft} keyboardType="number-pad"
+              placeholder={c.waterGoalGlasses != null ? String(c.waterGoalGlasses) : 'e.g. 8'} placeholderTextColor={t.ink3}
+              accessibilityLabel="Daily water goal in glasses"
+              style={{ flex: 1, ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md }} />
+            <Cta label="Save" onPress={() => {
+              const n = Math.round(parseFloat(waterDraft));
+              if (!Number.isFinite(n) || n < WATER_MIN || n > WATER_MAX) {
+                Alert.alert('Check that number', `A water goal needs to be between ${WATER_MIN} and ${WATER_MAX} glasses. If you meant millilitres, use glasses here — a glass is about 250 ml.`);
+                return;
+              }
+              c.setWaterGoalGlasses(n); setWaterDraft('');
+            }} />
+            {c.waterGoalGlasses != null ? (
+              <Pressable onPress={() => { c.setWaterGoalGlasses(null); setWaterDraft(''); }} accessibilityRole="button" accessibilityLabel="Clear water goal"
                 style={{ paddingHorizontal: sp.md, paddingVertical: sp.md, borderRadius: radius.sm, backgroundColor: t.surface2 }}>
                 <Text style={{ ...ty.micro, color: t.ink3 }}>Clear</Text>
               </Pressable>
