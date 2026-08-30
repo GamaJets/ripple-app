@@ -4,6 +4,7 @@
 // re-syncs available ones on launch.
 import { createContext, useContext, useEffect, useState, useCallback, useRef, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { supabase } from '../lib/supabase';
 import { PROVIDERS, providerById } from '../lib/wearables/registry';
 import type { ConnectionState, DailyMetrics, ProviderId } from '../lib/wearables/types';
 import { WearableNotConnectedError } from '../lib/wearables/oauth';
@@ -100,19 +101,61 @@ export function WearablesProvider({ children }: { children: ReactNode }) {
     await forgetRemembered(id);
   }, []);
 
-  // On launch: restore remembered connections and sync the ones that can run here.
+  // On launch: restore connections and sync the ones that can run here.
+  //
+  // ── The server is asked FIRST, and it is the one that knows ───────────────
+  //
+  // A connection is a row in wearable_tokens keyed by user_id: it belongs to
+  // the ACCOUNT. AsyncStorage belongs to the HANDSET. Restoring from the
+  // handset alone meant a client who connected WHOOP on their phone and then
+  // reinstalled, changed device or took a new build opened Recovery to "No
+  // device connected" — while the server held a live, unexpired token. Every
+  // sleep read was then skipped, because the reader deliberately never asks a
+  // provider it believes is disconnected. That is the whole bug: the token was
+  // fine and the app had forgotten it was there.
+  //
+  // my_wearable_providers() returns names and expiry only, never token
+  // material — the client has no business reading its own OAuth tokens, and
+  // this is a question about which devices exist, not about their secrets.
+  //
+  // The two sources are UNIONED rather than the server replacing local. A
+  // provider that runs on the handset itself (HealthKit) has no server row at
+  // all, so taking the server as the whole truth would disconnect it.
   useEffect(() => {
     (async () => {
+      const ids = new Set<string>();
       try {
         const remembered = await AsyncStorage.getItem(STORE_KEY);
-        const ids: string[] = remembered ? JSON.parse(remembered) : [];
-        for (const id of ids) {
-          const p = providerById(id as ProviderId);
-          if (!p) continue;
-          setState(id, 'connected');
-          if (p.isAvailable()) sync(id as ProviderId);
+        for (const id of (remembered ? JSON.parse(remembered) : []) as string[]) ids.add(id);
+      } catch {
+        // no-error-ok: an unreadable cache is not a reason to ignore the
+        // server, which is the better answer anyway.
+      }
+      try {
+        const { data, error } = await supabase.rpc('my_wearable_providers');
+        if (error) {
+          // Not a reason to forget what the handset remembers. Reported rather
+          // than swallowed, because silently falling back to local is how this
+          // bug looked from the outside for weeks.
+          reportError('wearables.restore.rpc', error);
+        } else if (Array.isArray(data)) {
+          for (const row of data) {
+            const id = String((row as any)?.provider || '');
+            if (id) ids.add(id);
+          }
+          // Write the server's answer back, so the next launch is right even
+          // offline.
+          try { await AsyncStorage.setItem(STORE_KEY, JSON.stringify([...ids])); } catch { /* cache only */ }
         }
-      } catch {}
+      } catch (e) {
+        reportError('wearables.restore.rpc', e);
+      }
+      for (const id of ids) {
+        const p = providerById(id as ProviderId);
+        if (!p) continue;
+        setState(id, 'connected');
+        if (p.isAvailable()) sync(id as ProviderId);
+      }
     })();
   }, [sync]);
 

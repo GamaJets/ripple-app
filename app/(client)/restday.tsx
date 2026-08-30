@@ -159,7 +159,7 @@ export default function RestDay() {
         <Rule />
 
         <Section>
-          <Cta label="Open recovery tools" wide onPress={() => router.push('/(client)/recovery')} />
+          <Cta label="Open Recovery Tools" wide onPress={() => router.push('/(client)/recovery')} />
         </Section>
       </ScrollView>
     </SafeAreaView>
