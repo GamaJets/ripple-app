@@ -65,6 +65,8 @@
     "src/lib/bodyFigures.test.ts",
     "src/lib/wearableLink.test.ts",
     "src/lib/backTo.test.ts",
-    "src/lib/injuryGate.test.ts"
+    "src/lib/injuryGate.test.ts",
+    "src/lib/videoCoverage.test.ts",
+    "src/lib/foodSearch.test.ts"
   ]
 }

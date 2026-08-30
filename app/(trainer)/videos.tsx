@@ -59,7 +59,7 @@
 //     not "nobody". Drawing every toggle off over a failed read invites a
 //     trainer to share a clip a second time, or to swear they never shared one
 //     they did — so a failed read draws no toggles at all, and says why.
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, Pressable, ScrollView, Alert, Modal, TextInput, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
 import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -74,6 +74,9 @@ import { ExerciseVideo } from '../../src/ui/ExerciseVideo';
 import { useProgramTemplates } from '../../src/ui/programTemplates';
 import { useAuth } from '../../src/ui/auth';
 import { coverageFor, coverageLine } from '../../src/lib/videoCoverage';
+import { useExerciseCatalogue } from '../../src/ui/exerciseDetail';
+import { exerciseSlug } from '../../src/lib/exerciseId';
+import { num } from '../../src/lib/format';
 import { isAcademyClip } from '../../src/lib/exerciseId';
 import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
@@ -304,10 +307,22 @@ export default function TrainerVideos() {
   // it. Null while the library has not been read: a coverage claim built on a
   // failed read would tell a coach they have nothing filmed when they may have
   // filmed everything.
+  // What the CATALOGUE can illustrate, which since the bought pack landed is
+  // most of it. Null under anything but a whole read: an empty set would say
+  // "nothing is illustrated", and telling a coach that while their clients
+  // watch animations is exactly the claim this screen got wrong.
+  const cat = useExerciseCatalogue();
+  const illustratedSlugs = useMemo(
+    () => (cat.status === 'ready'
+      ? new Set(cat.rows.filter((r) => r.hasDemo).map((r) => exerciseSlug(r.name)))
+      : null),
+    [cat.status, cat.rows],
+  );
   const coverage = status === 'error' || status === 'loading' ? null : coverageFor(
     templates.flatMap((tpl) => tpl.program.days.flatMap((d) => d.exercises.map((e) => e.name))),
     vids,
     auth.user?.id ?? null,
+    illustratedSlugs,
   );
   const [linkOpen, setLinkOpen] = useState(false);
   const [lName, setLName] = useState('');
@@ -498,7 +513,7 @@ export default function TrainerVideos() {
           <>
             <Section>
               <SectionHead title="What Your Programmes Need"
-                note={coverage.missing.length ? `${coverage.missing.length} to film` : undefined} />
+                note={coverage.missing.length ? `${num(coverage.missing.length)} to film` : undefined} />
               <Text style={{ ...ty.label, color: t.ink2 }}>{coverageLine(coverage)}</Text>
 
               {coverage.missing.length ? (
@@ -508,7 +523,7 @@ export default function TrainerVideos() {
                       paddingVertical: sp.sm, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                       <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn }} />
                       <Text style={{ ...ty.body, color: t.ink, flex: 1 }}>{nm}</Text>
-                      <Text style={{ ...ty.caption, color: t.ink3 }}>no clip</Text>
+                      <Text style={{ ...ty.caption, color: t.ink3 }}>nothing to show</Text>
                     </View>
                   ))}
                   {coverage.missing.length > 8 ? (
@@ -553,6 +568,15 @@ export default function TrainerVideos() {
         <Rule />
 
         <Section>
+          {/* The way into the catalogue, from the one screen where a coach is
+              already thinking about movements. Until this row existed the 600
+              exercises a coach can programme were reachable only from inside
+              the builder's "Add Exercise" sheet — so looking one up, or seeing
+              which of them nobody has filmed, meant opening a programme you
+              did not want to write. */}
+          <ListRow icon="grid" title="Browse the Exercise Library" note="Every movement you can programme, and whether you have filmed it"
+            onPress={() => router.push('/(trainer)/library')} />
+          <Rule />
           <ListRow icon="share" title="Broadcast a Session to Social" note="Share a session from your library"
             onPress={() => router.push('/(trainer)/broadcast-session')} />
         </Section>

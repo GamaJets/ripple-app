@@ -27,7 +27,10 @@ import { useClientData } from '../../src/ui/clientData';
 import { Icon } from '../../src/ui/Icon';
 import { analyzeMeal, visionAvailable } from '../../src/lib/vision';
 import { parseFoodText, foodAIAvailable } from '../../src/lib/foodAI';
-import { searchProducts } from '../../src/lib/openfoodfacts';
+import { searchProducts, type OffProduct } from '../../src/lib/openfoodfacts';
+import { searchCommonFoods } from '../../src/lib/foods';
+import { searchDishes } from '../../src/lib/restaurant';
+import { mergeFoodResults } from '../../src/lib/foodSearch';
 import { BarcodeSheet } from '../../src/ui/BarcodeSheet';
 import { notifySuccess } from '../../src/ui/haptics';
 import { useFoodLog, type FoodEntry } from '../../src/ui/foodLog';
@@ -39,16 +42,11 @@ import { sp, layout, radius, elevation, type as ty, numeric } from '../../src/th
 
 type Food = { n: string; k: number; p: number; c: number; f: number };
 type Logged = Food & { via: string };
-// A reference food table — a lookup vocabulary the client searches, not a record
-// of anything they ate. Nothing here is logged until they tap it.
-const FOOD_DB: Food[] = [
- { n: 'Chicken Breast (150g)', k: 250, p: 47, c: 0, f: 5 }, { n: 'Greek Yogurt (200g)', k: 130, p: 20, c: 9, f: 4 },
- { n: 'Banana', k: 105, p: 1, c: 27, f: 0 }, { n: 'Oats (60g)', k: 230, p: 8, c: 40, f: 5 },
- { n: 'Salmon Fillet (160g)', k: 300, p: 34, c: 0, f: 18 }, { n: 'White Rice (1 cup)', k: 205, p: 4, c: 45, f: 0 },
- { n: 'Whey Shake', k: 160, p: 30, c: 5, f: 2 }, { n: 'Avocado (half)', k: 160, p: 2, c: 9, f: 15 },
- { n: 'Eggs (2)', k: 140, p: 12, c: 1, f: 10 }, { n: 'Almonds (30g)', k: 175, p: 6, c: 6, f: 15 },
- { n: 'Sweet Potato (200g)', k: 180, p: 4, c: 41, f: 0 }, { n: 'Broccoli (150g)', k: 51, p: 4, c: 10, f: 0 },
-];
+// The twelve-row FOOD_DB that used to sit here is gone, into `src/lib/foods.ts`
+// as ~90 COMMON_FOODS. It held chicken breast, oats and a banana, and it was
+// the ONLY answer this screen had for a food without a barcode — so "rice",
+// "lentils" and "toast" all fell through it into a packaged-goods index and
+// came back with somebody's brand of microwave rice or nothing at all.
 // No baseline estimate. This used to be
 //   const PHOTO_GUESS: Food = { n: 'Meal (photo estimate)', k: 520, p: 40, c: 50, f: 16 };
 // filled in after a simulated 900ms "Reading Your Meal…" delay whenever the vision
@@ -73,26 +71,34 @@ export default function FoodLog() {
  const [nl, setNl] = useState(''); const [nlBusy, setNlBusy] = useState(false);
  // ── Search foods ────────────────────────────────────────────────────────
  //
- // This used to be `FOOD_DB.filter(...)` and nothing else: a 113-row table
- // hardcoded above, holding chicken breast, oats and banana. It matched almost
- // nothing anybody actually buys, which is why it was reported as not working —
- // it was working, against a list that could never contain the answer. Two
- // buttons away, the barcode path was already reading Open Food Facts.
+ // One search, three sources, every row labelled with which one answered.
  //
- // The local table stays, first and instant, because it is the fast path for
- // exactly the generic staples people log most. Open Food Facts follows behind
- // it for everything else — UK imports and Gulf brands alike.
- const [remote, setRemote] = useState<Food[]>([]);
+ // This used to be `FOOD_DB.filter(...)` plus Open Food Facts: twelve generic
+ // staples and a BRANDED index. Neither could answer "chicken breast" — the
+ // twelve-row table because it was twelve rows, the branded index because a
+ // chicken breast has no barcode. Meanwhile 41 restaurant dishes sat behind the
+ // "Eating Out?" row above and were unreachable from this box, so somebody
+ // logging last night's pad thai had to know a second screen existed.
+ //
+ // The two local tables are instant and offline. Open Food Facts is debounced
+ // behind them and is allowed to fail. `mergeFoodResults` ranks and labels the
+ // three; the ranking rule is written down in src/lib/foodSearch.ts.
+ const [remote, setRemote] = useState<OffProduct[]>([]);
  const [searching, setSearching] = useState(false);
  // Distinct from "no matches": the lookup is free and rate-limited, and it
  // answers 503 when busy. Saying "nothing found" to that would tell somebody
  // their food does not exist because a server was throttling us.
  const [searchDown, setSearchDown] = useState(false);
 
- const local = useMemo(
-   () => (q.trim() ? FOOD_DB.filter((f) => f.n.toLowerCase().includes(q.trim().toLowerCase())) : []),
-   [q],
- );
+ // Both local searches are pure and cheap, so they run on every keystroke —
+ // they are the reason the list is never empty while the remote one is in
+ // flight, and the reason it is never empty when the remote one never lands.
+ const localCommon = useMemo(() => searchCommonFoods(q.trim(), 12), [q]);
+ // Capped shorter than the other two on purpose: one common word matches a
+ // third of the 41 dishes — "rice" alone hits six — and a search list is not a
+ // menu. Left uncapped, an evening's worth of restaurant food buries the
+ // branded product somebody may actually be holding.
+ const localDishes = useMemo(() => (q.trim() ? searchDishes(q.trim(), 8) : []), [q]);
 
  useEffect(() => {
    const term = q.trim();
@@ -108,21 +114,22 @@ export default function FoodLog() {
        setSearching(false);
        if (!res.ok) { setSearchDown(true); setRemote([]); return; }
        setSearchDown(false);
-       setRemote(res.products.map((x) => ({
-         // Say what the numbers are FOR. A per-100g figure logged as if it were
-         // a portion is the kind of quiet wrongness this app is built to avoid.
-         n: x.serving ? `${x.name} (${x.serving})` : x.name,
-         k: x.kcal, p: x.protein, c: x.carbs, f: x.fat,
-       })));
+       // Stored as they came back. Naming a product after the basis its macros
+       // are for is the merge's job now, so the screen and the test cannot
+       // disagree about what a branded row is called.
+       setRemote(res.products);
      });
    }, 350);
    return () => { ctrl.abort(); clearTimeout(timer); };
  }, [q]);
 
- const results = useMemo(() => {
-   const seen = new Set(local.map((f) => f.n.toLowerCase()));
-   return [...local, ...remote.filter((f) => !seen.has(f.n.toLowerCase()))];
- }, [local, remote]);
+ // A failed remote search arrives here as an empty `remote` and removes nothing:
+ // the local rows are still the answer, and `searchDown` says the branded half
+ // is missing rather than letting a shorter list pass for the whole one.
+ const results = useMemo(
+   () => mergeFoodResults(q, { common: localCommon, restaurant: localDishes, branded: remote }),
+   [q, localCommon, localDishes, remote],
+ );
 
  // photo estimate modal state
  const [photoUri, setPhotoUri] = useState<string | null>(null);
@@ -366,20 +373,34 @@ export default function FoodLog() {
  title="Search Foods"
  note={!q.trim() ? undefined
    : searching ? 'searching…'
-   : searchDown ? 'search unavailable'
+   : searchDown ? (results.length ? `${results.length} local · branded search down` : 'branded search down')
    : `${results.length} match${results.length === 1 ? '' : 'es'}`} />
  <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md }}>
  <Icon name="search" size={16} color={t.ink3} />
- <TextInput value={q} onChangeText={setQ} placeholder="Chicken, oats, banana…" placeholderTextColor={t.ink3}
+ <TextInput value={q} onChangeText={setQ} placeholder="Chicken, pad thai, a brand…" placeholderTextColor={t.ink3}
  style={{ flex: 1, ...ty.body, color: t.ink, paddingVertical: 11 }} />
  </View>
+ {/* Why every row carries a source. A Common or Restaurant figure is a typical
+     value for the portion named, not a measurement of the food in front of
+     this person; a Branded figure is the product's own label. Rendering the
+     two identically is how a generic average comes to be read as somebody's
+     own packet, so the difference is said once here and shown on each row. */}
+ <Text style={{ ...ty.caption, color: t.ink3, paddingTop: sp.xs }}>
+ Common and restaurant figures are typical portions, not a measurement of yours.
+ A branded row is the product's own label — use it when there is one.
+ </Text>
  {q.trim().length > 0 && q.trim().length < 3 ? (
  <Text style={{ ...ty.label, color: t.ink3, paddingTop: sp.md }}>Keep typing — three letters or more.</Text>
  ) : null}
- {q.trim().length >= 3 && !searching && searchDown && results.length === 0 ? (
+ {/* Said whether or not local rows came back. The old version showed this only
+     when the list was empty, so a throttled branded search with a couple of
+     common foods behind it looked like the whole answer. A shorter list is not
+     allowed to pass for a complete one. */}
+ {q.trim().length >= 3 && !searching && searchDown ? (
  <Text style={{ ...ty.label, color: t.ink3, paddingTop: sp.md }}>
- Food search could not be reached just now — this says nothing about whether
- the food is in there. Scan the barcode or describe it below in the meantime.
+ {results.length
+   ? "Branded products could not be reached just now, so these are the common foods and restaurant dishes only. Scan the barcode for a packet's own figures."
+   : 'Food search could not be reached just now — this says nothing about whether the food is in there. Scan the barcode or describe it below in the meantime.'}
  </Text>
  ) : null}
  {q.trim().length >= 3 && !searching && !searchDown && results.length === 0 ? (
@@ -387,13 +408,17 @@ export default function FoodLog() {
  Nothing found. Try the brand name, scan the barcode, or describe it below.
  </Text>
  ) : null}
- {results.map((f, i) => (
- <View key={f.n}>
+ {results.map((r, i) => (
+ <View key={r.key}>
  {i > 0 ? <Rule /> : null}
- <Pressable onPress={() => { add(f, 'search'); setQ(''); }} accessibilityRole="button" accessibilityLabel={'Log ' + f.n}
+ <Pressable onPress={() => { add({ n: r.name, k: r.kcal, p: r.protein, c: r.carbs, f: r.fat }, 'search'); setQ(''); }}
+ accessibilityRole="button" accessibilityLabel={`Log ${r.name} — ${r.label}`}
  style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
- <Text style={{ ...ty.body, color: t.ink, flex: 1 }}>{f.n}</Text>
- <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{f.k} kcal</Text>
+ <View style={{ flex: 1 }}>
+ <Text style={{ ...ty.body, color: t.ink }} numberOfLines={2}>{r.name}</Text>
+ <Text style={{ ...ty.micro, color: t.ink3, marginTop: 2 }}>{r.label}</Text>
+ </View>
+ <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{num(r.kcal)} kcal</Text>
  <Icon name="plus" size={16} color={t.brand} />
  </Pressable>
  </View>

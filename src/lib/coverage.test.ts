@@ -1682,7 +1682,14 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
       { exerciseId: 'deadlift', name: 'Deadlift', trainerId: 'other-coach' },
     ];
     const programmed = ['Back Squat', 'Bench Press', 'Deadlift', 'Hip Thrust', 'back squat'];
-    const r = coverageFor(programmed, vids, 'me');
+    // An EMPTY set, not the default. coverageFor's fourth argument is the
+    // slugs the catalogue can illustrate, and null there means "the catalogue
+    // was not read" — under which nothing may be called missing, because it
+    // may well be illustrated. These assertions are about the classification
+    // of CLIPS, so they state the catalogue read happened and found nothing,
+    // which is what this block always meant.
+    const NONE_ILLUSTRATED = new Set<string>();
+    const r = coverageFor(programmed, vids, 'me', NONE_ILLUSTRATED);
 
     ok(r.all.length === 4,
        'the same movement written twice is one job, however it was cased');
@@ -1692,12 +1699,12 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
     ok(r.missing.join() === 'Deadlift,Hip Thrust',
        'and what nobody has filmed. Another coach\u2019s clip does NOT count as covered, because the client will never be shown it');
 
-    ok(coverageLine(coverageFor([], vids, 'me')) === null,
+    ok(coverageLine(coverageFor([], vids, 'me', NONE_ILLUSTRATED)) === null,
        'a coach who has programmed nothing gets no claim about coverage either way');
     const line = coverageLine(r);
     ok(line !== null && line.includes('2 of the 4') && line.includes('Academy'),
        'the line names both jobs: what is missing, and what is only the Academy');
-    const done = coverageLine(coverageFor(['Back Squat'], vids, 'me'));
+    const done = coverageLine(coverageFor(['Back Squat'], vids, 'me', NONE_ILLUSTRATED));
     ok(done !== null && done.startsWith('Every movement you programme has your own clip'),
        'and says so plainly when there is nothing left to film');
   }

@@ -19,6 +19,17 @@ eq(backDestination('clientLibrary'), '/(client)/library', 'the client library re
 eq(backDestination('clientWorkouts'), '/(client)/workouts', 'the workout program resolves to its route');
 eq(backDestination('ownerLibrary'), '/(owner)/library', 'the owner library resolves to its route');
 eq(backDestination('trainerBuilder'), '/(trainer)/builder', 'the trainer builder resolves to its route');
+eq(backDestination('trainerLibrary'), '/(trainer)/library', 'the coach library resolves to its route');
+
+// Three apps ship a screen called "library" and all three open the same kind of
+// detail row. They are separate files in separate groups, so the keys must not
+// collapse onto one path — a coach sent to '/(client)/library' by a shared key
+// would land in a portal their build does not even contain.
+ok(new Set(Object.values(BACK_TO)).size === Object.keys(BACK_TO).length,
+  'no two origins name the same route');
+ok(backDestination('trainerLibrary') !== backDestination('clientLibrary')
+  && backDestination('trainerLibrary') !== backDestination('ownerLibrary'),
+  'the three libraries are three different routes');
 
 // Every key in the table resolves, and to a route in the group it names. A key
 // added later with a typo'd or cross-app path fails here rather than sending a
@@ -105,6 +116,11 @@ eq(previousNonDetailRouteName(undefined), null, 'an unreadable state resolves to
 
 eq(routeNameOf('/(client)/library'), 'library', 'the client library is the "library" route');
 eq(routeNameOf('/(trainer)/builder'), 'builder', 'the trainer builder is the "builder" route');
+// The coach's library is the "library" route of the trainer navigator, which is
+// a different navigator from the client's. useBackTo compares the destination's
+// bare route name against the tab history of the group it is already in, so the
+// shared name is only safe because the destination carries its group with it.
+eq(routeNameOf('/(trainer)/library'), 'library', 'the coach library is the "library" route');
 // Every destination we send must name a route, or the comparison in useBackTo
 // never matches and Back always navigates instead of going back.
 for (const route of Object.values(BACK_TO)) {

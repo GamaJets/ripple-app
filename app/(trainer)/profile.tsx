@@ -14,11 +14,13 @@ import { View, Text, Pressable, ScrollView, TextInput, Image, Alert } from 'reac
 import { Icon, type IconName } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { useAuth } from '../../src/ui/auth';
+import { reportError } from '../../src/lib/reportError';
 import * as ImagePicker from 'expo-image-picker';
 import { ensureMediaPermission } from '../../src/ui/permissions';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
-import { Rule, Section, SectionHead, Card, ListRow, QuickRow, Cta, Notice } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Card, ListRow, QuickRow, Cta, Notice, Ghost } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, value } from '../../src/theme/scale';
 import { useMyTrainerProfile } from '../../src/ui/coachProfile';
 import { RepdbAttribution } from '../../src/ui/Attribution';
@@ -66,6 +68,15 @@ function ChipEditor({ t, items, onAdd, onRemove, value: val, setValue, placehold
 export default function CoachProfile() {
   const t = useTheme();
   const router = useRouter();
+  const auth = useAuth();
+  /** Confirmed, because signing out of a coach account on a shared gym tablet
+   *  by mis-tapping is a nuisance nobody can undo without the password. */
+  const signOut = () => {
+    Alert.alert('Sign out of Repple Coach?', 'You will need your password to sign back in.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Sign out', style: 'destructive', onPress: () => { try { auth.signOut(); router.replace('/welcome'); } catch (e) { reportError('trainerProfile.signOut', e); } } },
+    ]);
+  };
   const p = useMyTrainerProfile();
   const [newOffer, setNewOffer] = useState('');
   const [newSpec, setNewSpec] = useState('');
@@ -264,14 +275,33 @@ export default function CoachProfile() {
           <SectionHead title="Account" />
           <ListRow icon="settings" title="Settings" note="Who you are signed in as, your data, and deleting your account"
             onPress={() => router.push('/(trainer)/settings')} />
+          {/* Reported as "there is no sign out button on the coach app". There
+              was one — three levels down, at the foot of Settings, which is the
+              same as not having one. Signing out is the single control people
+              expect to find on a profile screen without hunting, so it is on
+              the profile screen. Settings keeps its copy; this is a second way
+              in, not a move, because somebody who has learned the old path
+              should not find it gone. */}
+          <View style={{ marginTop: sp.md }}>
+            <Ghost label="Sign Out" onPress={signOut} />
+          </View>
+        </Section>
+
+        <Rule />
+
+        <Section>
+          {/* The User Guide was filed under "Money", which it is not. A heading
+              that does not describe the rows beneath it is worse than none —
+              somebody looking for help does not read a section called Money. */}
+          <SectionHead title="Help" />
+          <ListRow icon="search" title="User Guide" note="What each tab does, any time"
+            onPress={() => router.push('/guide')} />
         </Section>
 
         <Rule />
 
         <Section>
           <SectionHead title="Money" />
-          <ListRow icon="search" title="User Guide" note="What each tab does, any time"
-            onPress={() => router.push('/guide')} />
           <ListRow icon="people" title="Payments" note="Get paid by clients — memberships & packs"
             onPress={() => router.push('/(trainer)/payments')} />
           <ListRow icon="chart" title="Billing & Subscription" note="Your plan, payment method & invoices"

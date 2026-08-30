@@ -31,6 +31,7 @@ export const BACK_TO = {
   clientWorkouts: '/(client)/workouts',
   ownerLibrary: '/(owner)/library',
   trainerBuilder: '/(trainer)/builder',
+  trainerLibrary: '/(trainer)/library',
 } as const;
 
 export type BackToKey = keyof typeof BACK_TO;

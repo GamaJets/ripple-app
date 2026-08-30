@@ -50,6 +50,7 @@ export default function TrainerLayout() {
       <Tabs.Screen name="client-body" options={{ href: null, title: 'Body Composition' }} />
       <Tabs.Screen name="templates" options={{ href: null, title: 'Program Templates' }} />
       <Tabs.Screen name="exercise" options={{ href: null, title: 'Exercise' }} />
+      <Tabs.Screen name="library" options={{ href: null, title: 'Exercise Library' }} />
       <Tabs.Screen name="feedback" options={{ href: null, title: 'Send Feedback' }} />
       <Tabs.Screen name="billing" options={{ href: null, title: 'Billing & Subscription' }} />
       <Tabs.Screen name="payments" options={{ href: null, title: 'Payments' }} />

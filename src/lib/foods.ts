@@ -147,19 +147,41 @@ export const COMMON_FOODS: CommonFood[] = [
  * every food with those letters somewhere inside it. Matches earlier in the
  * name rank higher, so typing "chicken" leads with Chicken Breast rather than
  * whatever happens to be first in the table.
+ *
+ * ── Every word typed has to land ──────────────────────────────────────────
+ *
+ * The query is split on the same boundaries as the name, and each word must
+ * prefix-match a word of the food. This started as a single-token match against
+ * the whole trimmed string, which meant no word in any name began with
+ * "chicken breast" — a space cannot be inside a word — so the two most obvious
+ * queries a person types, "chicken breast" and "greek yogurt", matched nothing
+ * at all and fell through to a packaged-goods index. A single-word query scores
+ * exactly as it did before; a phrase is now a narrower question rather than an
+ * unanswerable one.
  */
 export function searchCommonFoods(query: string, limit = 12): CommonFood[] {
-  const q = (query || '').trim().toLowerCase();
-  if (!q) return [];
+  const terms = (query || '').trim().toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  if (!terms.length) return [];
   const scored: { f: CommonFood; score: number }[] = [];
   for (const f of COMMON_FOODS) {
     const name = f.n.toLowerCase();
     const hay = `${name} ${f.alias ?? ''}`;
     const words = hay.split(/[^a-z0-9]+/).filter(Boolean);
-    const at = words.findIndex((w) => w.startsWith(q));
-    if (at === -1) continue;
+    // Where the FIRST word typed landed decides how early the match is; the
+    // rest only have to land somewhere, because people type the qualifier in
+    // whatever order they think of it ("yogurt greek" is the same question).
+    let at = -1;
+    let whole = true;
+    let all = true;
+    for (const term of terms) {
+      const i = words.findIndex((w) => w.startsWith(term));
+      if (i === -1) { all = false; break; }
+      if (words[i] !== term) whole = false;
+      if (at === -1) at = i;
+    }
+    if (!all) continue;
     // Earlier word wins; a whole-word match beats a prefix of a longer word.
-    scored.push({ f, score: at * 10 + (words[at] === q ? 0 : 1) });
+    scored.push({ f, score: at * 10 + (whole ? 0 : 1) });
   }
   scored.sort((a, b) => a.score - b.score || a.f.n.localeCompare(b.f.n));
   return scored.slice(0, limit).map((s) => s.f);
