@@ -43,6 +43,7 @@ import { useTheme } from '../../src/ui/components';
 import { BuildInfo } from '../../src/ui/BuildInfo';
 import type { Theme } from '../../src/theme/tokens';
 import { Rule, Section, SectionHead, ListRow, Ghost, fig } from '../../src/ui/kit';
+import { RepdbAttribution } from '../../src/ui/Attribution';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { Icon } from '../../src/ui/Icon';
 import { useSettings } from '../../src/ui/settings';
@@ -351,6 +352,20 @@ export default function Settings() {
             <Row t={t} label="Terms of Service" right={<Text style={{ ...ty.body, color: t.ink3 }}>{legal === 'terms' ? '▾' : '›'}</Text>} />
           </Pressable>
           {legal === 'terms' ? <Text style={{ ...ty.label, color: t.ink3, paddingVertical: sp.sm }}>Repple provides fitness and nutrition guidance for general wellness and is not a substitute for medical advice. Consult a physician before starting any program. Coaching is delivered by independent trainers on the platform; billing terms are shown at checkout.</Text> : null}
+        </Section>
+
+        <Rule />
+
+        {/* ── Credits ────────────────────────────────────────────────────────
+            Its own section above Build, not a grey line beneath it. Every
+            exercise description, illustration and muscle list in Repple is
+            licensed from RepDB under a free tier whose one condition is a
+            visible credit — that is the whole price of 601 illustrated
+            movements, and it is cheap. scripts/check-attribution.mjs fails the
+            build if this stops being rendered. */}
+        <Section>
+          <SectionHead title="Credits" />
+          <RepdbAttribution />
         </Section>
 
         <Rule />

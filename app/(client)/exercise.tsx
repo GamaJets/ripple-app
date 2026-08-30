@@ -36,6 +36,7 @@ import { videoForExercise } from '../../src/lib/exerciseId';
 import { frameUrls, FRAMES_ARE_UNHOSTED, demoCaption, demoIsShippable, DEMO_BUCKET } from '../../src/lib/exerciseMedia';
 import { supabase } from '../../src/lib/supabase';
 import { useClientData } from '../../src/ui/clientData';
+import { RepdbInlineCredit } from '../../src/ui/Attribution';
 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
@@ -265,6 +266,10 @@ export default function ExerciseScreen() {
             {caption ? (
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: 6 }}>{caption}</Text>
             ) : null}
+            {/* Beside the artwork, not two screens away. The licence asks for
+                one visible credit and the Credits card in settings is it; this
+                costs a line and is worth more where somebody is looking. */}
+            {detail?.source === 'repdb' ? <RepdbInlineCredit /> : null}
           </>
         ) : (
           // No clip and no frames. Said plainly, with the one action that
