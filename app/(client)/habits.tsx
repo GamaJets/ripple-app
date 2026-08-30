@@ -74,6 +74,7 @@ export default function Habits() {
           figure={fig(pct)}
           unit={pct == null ? undefined : '%'}
           arc={pct == null ? undefined : pct / 100}
+          arcLabel="of today's habits done"
           note={pct == null
             ? (unknown ? 'We could not load today’s list' : 'Nothing on today’s list yet')
             : `${h.doneCount} of ${h.habits.length} done`}

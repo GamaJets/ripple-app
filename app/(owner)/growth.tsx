@@ -12,6 +12,7 @@
 // one hero figure plus hairline-separated sections, and the Georgia serif
 // header is gone.
 import { useState } from 'react';
+import { num } from '../../src/lib/format';
 import { View, Text, ScrollView, Pressable, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
@@ -159,7 +160,7 @@ export default function OwnerGrowth() {
           {loading ? <Text style={{ ...ty.label, color: t.ink3 }}>Reading your roster…</Text>
             : coh.length === 0 ? <Text style={{ ...ty.label, color: t.ink3 }}>No signups to group yet.</Text> : null}
           {coh.map((c) => (
-            <Bar key={c.label} label={c.label} right={`${c.pct}% · ${c.active}/${c.total}`} pct={c.pct} dim={c.pct < 60} />
+            <Bar key={c.label} label={c.label} right={`${c.pct}% · ${num(c.active)}/${num(c.total)}`} pct={c.pct} dim={c.pct < 60} />
           ))}
         </Section>
 

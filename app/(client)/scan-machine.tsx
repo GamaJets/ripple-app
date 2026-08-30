@@ -18,6 +18,7 @@
 // reported it — while the copy right above it promised the estimate came from
 // watts. Now the entry simply carries no calorie figure.
 import { useMemo, useState } from 'react';
+import { num } from '../../src/lib/format';
 import { View, Text, Pressable, TextInput, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -275,7 +276,7 @@ export default function ScanMachine() {
 
             {cardio ? (
               <Section>
-                <SectionHead title="Your Effort" note={kcalNow != null ? `${kcalNow} kcal` : undefined} />
+                <SectionHead title="Your Effort" note={kcalNow != null ? `${num(kcalNow)} kcal` : undefined} />
                 <View style={{ flexDirection: 'row', gap: sp.sm }}>
                   <TextInput value={mins} onChangeText={setMins} keyboardType="numeric" placeholder="minutes" placeholderTextColor={t.ink3} style={inp} />
                   <TextInput value={dist} onChangeText={setDist} keyboardType="numeric" placeholder={'distance (' + unit + ')'} placeholderTextColor={t.ink3} style={inp} />
@@ -315,7 +316,7 @@ export default function ScanMachine() {
                         </Pressable>
                       ))}
                     </View>
-                    <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: sp.sm }}>≈ {strengthKcal} kcal, estimated from your total volume.</Text>
+                    <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: sp.sm }}>≈ {num(strengthKcal)} kcal, estimated from your total volume.</Text>
                   </View>
                 ) : null}
               </Section>

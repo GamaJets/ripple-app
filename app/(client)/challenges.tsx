@@ -8,6 +8,7 @@
 // preserved — only the presentation changed: hairline-separated rows and a 3px
 // meter instead of three bordered cards with their own progress bars.
 import { useState } from 'react';
+import { num } from '../../src/lib/format';
 import { View, Text, Pressable, ScrollView, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -64,7 +65,7 @@ export default function Challenges() {
                   <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: sp.lg }}>
                     <Pressable onPress={() => setOpen(c)} hitSlop={8} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
                       <Icon name="trophy" size={14} color={t.ink3} />
-                      <Text style={{ ...ty.label, color: t.ink2 }} numberOfLines={1}>{!joined ? 'View progress' : total > 1 ? `You're #${rank} of ${total}` : `${my} of ${c.goal} ${c.unit}`}</Text>
+                      <Text style={{ ...ty.label, color: t.ink2 }} numberOfLines={1}>{!joined ? 'View progress' : total > 1 ? `You're #${rank} of ${num(total)}` : `${my} of ${c.goal} ${c.unit}`}</Text>
                     </Pressable>
                     <View style={{ flexDirection: 'row', gap: sp.md, alignItems: 'center' }}>
                       <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{c.endsInDays}-day</Text>

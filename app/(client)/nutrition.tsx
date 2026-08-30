@@ -13,6 +13,7 @@
 // logged now — the app says it could not read the photo rather than making a
 // number up.
 import { useState, useEffect } from 'react';
+import { num } from '../../src/lib/format';
 import { View, Text, Pressable, ScrollView, Modal, TextInput, Alert, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
@@ -22,7 +23,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Diet, Goal } from '../../src/lib/types';
 import { useClientData } from '../../src/ui/clientData';
 import { useWearables } from '../../src/ui/wearables';
-import { caloriesLeft, macrosFor, applyCoachAdjust, maintenanceFor } from '../../src/lib/nutrition';
+import { caloriesLeft, caloriesNote, budgetedActiveKcal, macrosFor, applyCoachAdjust, maintenanceFor } from '../../src/lib/nutrition';
 import { energyPlanFor, observedRateKg, MAX_DEFICIT_FRACTION_OF_TDEE, type EnergyPlan } from '../../src/lib/goalEnergy';
 import { useGoalTracker } from '../../src/ui/goalTracker';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
@@ -140,6 +141,13 @@ export default function Nutrition() {
   // is nothing to scale, and the whole screen used to run on a 70 kg / 20%
   // placeholder and present the result as the client's plan. Zeros here are
   // never rendered — `hasBody` swaps the screen for a prompt below.
+  //
+  // Which is only true once the profile has actually been READ. While it is
+  // loading, weightKg is null for the same reason it is null for somebody who
+  // has never been scanned, and the screen was telling a client with five
+  // scans behind them that they had no measurements and should go and add
+  // some. Not knowing yet is not the same answer as none.
+  const bodyKnown = c.status === 'ready' || c.status === 'partial';
   const hasBody = c.weightKg != null && c.bodyFatPct != null;
   const w = c.weightKg ?? 0;
   const bf = c.bodyFatPct ?? 0;
@@ -247,16 +255,16 @@ export default function Nutrition() {
 
   const G = layout.gutter;
   const eaten = fl.consumed;
-  // One sum, shared with the Food Log. This was `Math.max(0, target - eaten)`:
-  // it ignored calories burned, so the two screens differed by exactly the day's
-  // activity — 3,948 on one and 2,860 on the other, reported twice. The clamp
-  // was the worse half: this hero could never say a person was OVER, it showed
-  // zero left, which reads as "exactly on target" at the moment that is untrue.
+  // One sum, shared with the Food Log, so the two cannot drift apart again.
+  // The budget argument is what stops a day's movement being counted twice:
+  // this target is bmr * activity, so the multiplier has already paid for an
+  // ordinary day and only the excess over it is new food. See caloriesLeft().
   const burnedKcal = useWearables().today.activeKcal || 0;
-  const cal = caloriesLeft(target.kcal, eaten.kcal, burnedKcal);
+  const cal = caloriesLeft(target.kcal, eaten.kcal, burnedKcal, budgetedActiveKcal(target));
   const cycleNote = dayType === 'training' ? `+${CYCLE_KCAL} kcal, more carbs` : dayType === 'rest' ? `−${CYCLE_KCAL} kcal, fewer carbs` : undefined;
 
   if (!hasBody) {
+    const looking = !bodyKnown;
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
         <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
@@ -264,13 +272,23 @@ export default function Nutrition() {
             <View style={{ flex: 1 }}>
               <Text style={{ ...ty.micro, color: t.ink3 }}>Nutrition</Text>
               <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Meals</Text>
-              <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>Your targets and meal plan are scaled to your body, so they need a weight and body fat to work from.</Text>
+              <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>{looking
+                ? 'Reading your latest measurements…'
+                : c.status === 'error'
+                  ? 'Your measurements could not be read just now, so the targets below them cannot be worked out. This is a connection problem, not a missing scan.'
+                  : 'Your targets and meal plan are scaled to your body, so they need a weight and body fat to work from.'}</Text>
             </View>
             <Ghost icon="back" onPress={() => router.back()} />
           </View>
           <Rule />
           <Section>
-            <Cta label="Add Your Measurements" wide onPress={() => router.push('/(client)/scans')} />
+            {/* No button on the error path. "Add Your Measurements" is the
+                wrong thing to offer somebody whose measurements exist and
+                could not be fetched — it invites them to type in a duplicate
+                of a scan they already have. */}
+            {looking ? <ActivityIndicator color={t.brand} />
+              : c.status === 'error' ? null
+              : <Cta label="Add Your Measurements" wide onPress={() => router.push('/(client)/scans')} />}
           </Section>
         </ScrollView>
       </SafeAreaView>
@@ -307,8 +325,11 @@ export default function Nutrition() {
           label={cal.net >= 0 ? 'Calories Left' : 'Calories Over'}
           figure={Math.abs(cal.net).toLocaleString()}
           unit="kcal"
-          note={`${cal.eaten.toLocaleString()} of ${cal.target.toLocaleString()} kcal eaten${cal.burned ? ` · ${cal.burned.toLocaleString()} kcal burned` : ''}`}
-          arc={target.kcal ? eaten.kcal / target.kcal : 0}
+          note={caloriesNote(cal)}
+          // undefined, not 0: an empty ring drawn for a target we do not have
+          // is a figure invented to fill a slot.
+          arc={target.kcal ? eaten.kcal / target.kcal : undefined}
+          arcLabel="of today's calories eaten"
           onPress={() => router.push('/(client)/foodlog')}
         />
 
@@ -429,7 +450,7 @@ export default function Nutrition() {
                   {i > 0 ? <Rule /> : null}
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
                     <Text style={{ ...ty.body, color: t.ink2, flex: 1 }} numberOfLines={1}>{fe.name}</Text>
-                    <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{fe.kcal} kcal</Text>
+                    <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{num(fe.kcal)} kcal</Text>
                     <Pressable onPress={() => fl.removeFood(fe.id)} hitSlop={8} accessibilityRole="button" accessibilityLabel={'Remove ' + fe.name}>
                       <Text style={{ ...ty.body, color: t.ink3 }}>×</Text>
                     </Pressable>

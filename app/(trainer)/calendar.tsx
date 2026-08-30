@@ -216,6 +216,7 @@ export default function TrainerSchedule() {
             ? 'Nothing scheduled yet — add a session or set your weekly availability.'
             : `${open.length} open slot${open.length === 1 ? '' : 's'} · ${Math.round((booked.length / totalSlots) * 100)}% of your slots are filled`}
           arc={totalSlots ? booked.length / totalSlots : undefined}
+          arcLabel="of today's slots booked"
         />
 
         <Rule />

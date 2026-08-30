@@ -247,6 +247,7 @@ export default function Financials() {
               unit="/100"
               note={`Grade ${r.grade} · ${money(r.netProfit)} net profit on a ${r.marginPct.toFixed(0)}% margin`}
               arc={r.score / 100}
+              arcLabel="health score"
             />
 
             {/* The score is built on what was typed. If the register disagrees,

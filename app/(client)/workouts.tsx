@@ -6,6 +6,7 @@
 // only on the live metric and the primary action.
 // Guided session runner, cardio logging & month calendar preserved.
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { num } from '../../src/lib/format';
 import { View, Text, TextInput, Pressable, ScrollView, Modal, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -691,6 +692,7 @@ export default function Train() {
           unit={exercises.length === 1 ? 'exercise' : 'exercises'}
           note={heroNote}
           arc={exercises.length > 0 ? doneCount / exercises.length : undefined}
+          arcLabel="of today's exercises done"
           onPress={() => router.push('/(client)/week')}
         />
         {mode === 'strength' && exercises.length > 0 ? (
@@ -936,7 +938,7 @@ export default function Train() {
                       {i > 0 ? <Rule /> : null}
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: sp.md, paddingVertical: sp.md }}>
                         <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{c.type}</Text>
-                        <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{[`${c.mins} min`, c.dist > 0 ? `${c.dist} ${c.unit}` : null, c.watts > 0 ? `${c.watts} W` : null, c.kcal != null ? `${c.kcal} kcal` : null].filter(Boolean).join(' · ')}</Text>
+                        <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{[`${c.mins} min`, c.dist > 0 ? `${c.dist} ${c.unit}` : null, c.watts > 0 ? `${c.watts} W` : null, c.kcal != null ? `${num(c.kcal)} kcal` : null].filter(Boolean).join(' · ')}</Text>
                       </View>
                     </View>
                   ))
@@ -1196,7 +1198,7 @@ export default function Train() {
                             ) : l.cardio ? (
                               <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 5 }}>{[`${l.cardio.mins} min`, l.cardio.dist > 0 ? `${l.cardio.dist} ${l.cardio.unit}` : null, l.cardio.watts && l.cardio.watts > 0 ? `${l.cardio.watts} W` : null, l.cardio.hrAvg ? `♥ ${l.cardio.hrAvg} avg / ${l.cardio.hrHigh ?? l.cardio.hrAvg} hi` : null].filter(Boolean).join(' · ')}</Text>
                             ) : null}
-                            {l.kcal ? <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 6 }}>{l.kcal} kcal</Text> : null}
+                            {l.kcal ? <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 6 }}>{num(l.kcal)} kcal</Text> : null}
                             {/* Who put this in the log. Absent when you did it
                                 yourself, which is almost always — so the line
                                 only appears when it is telling you something.

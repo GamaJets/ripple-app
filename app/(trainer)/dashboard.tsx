@@ -25,6 +25,7 @@
 // Both providers are still mounted (they are shared context) but nothing on this
 // screen renders one person's data as another's.
 import { useEffect, useState } from 'react';
+import { num } from '../../src/lib/format';
 import { fetchAwaitingOutcome } from '../../src/lib/gymSessions';
 import {
   assessDrift, fetchClientActivity, compareDrift, summariseDrift, bandTitle, bandNote,
@@ -1142,7 +1143,7 @@ export default function TrainerClients() {
                   {clientMeals.map((m, i) => (
                     <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: sp.sm, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                       <Text style={{ ...ty.label, color: t.ink2, flex: 1 }} numberOfLines={1}>{m.name}</Text>
-                      <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginLeft: sp.sm }}>{m.kcal} kcal · {m.via}</Text>
+                      <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginLeft: sp.sm }}>{num(m.kcal)} kcal · {m.via}</Text>
                     </View>
                   ))}
                 </View>

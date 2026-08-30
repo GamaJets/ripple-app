@@ -203,6 +203,7 @@ export default function Goal() {
                   figure={fig(goalValue(leadProgress.current, lead.kind as MeasuredKind, wu))}
                   unit={goalUnit(lead.kind as MeasuredKind, wu)}
                   arc={leadProgress.pct / 100}
+                  arcLabel="of the way to your goal"
                   note={`${leadProgress.pct}% of the way · ${Math.abs(goalDelta(leadProgress.remaining, lead.kind as MeasuredKind, wu))} ${goalUnit(lead.kind as MeasuredKind, wu)} to go`}
                 />
                 {projectionLine(lead, seriesFor(lead.kind as MeasuredKind), wu) ? (

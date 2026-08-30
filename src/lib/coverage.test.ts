@@ -35,7 +35,7 @@ import { payroll30For, payrollBlocker, type GymTrainer } from './gymTrainers';
 import { gymRollup, trainerHealth } from './ownerAnalytics';
 import { ROW_CAP, capLimit, capped, assertWhole, isTruncated, TruncatedRead } from './rowCap';
 import { isWhole, worstStatus } from '../ui/loadStatus';
-import { caloriesLeft } from './nutrition';
+import { caloriesLeft, caloriesNote, budgetedActiveKcal } from './nutrition';
 import { progressChange, progressChangeLines, progressCsv, progressSummary, progressSpanLabel, PROGRESS_CSV_HEADER, type ProgressRow } from './progressExport';
 import { isDelivered, isAwaitingOutcome, isPayable, payrollByTrainer, payrollTotal, settlementBlocker, settleableSessions, settlementAmount, settleBlocker, sessionProfileIds, namesById, PAY_DELIVERED_ONLY, type PtSession } from './gymSessions';
 import { dwellMinutes, averageDwellMinutes, uniqueMembers, summariseVisits, visitsByHour, peakHour, visitsPerDay, lastSeenDays, type Visit } from './gymVisits';
@@ -4391,7 +4391,7 @@ function by2(v: ReturnType<typeof buildStaff>, id: string) {
 // target" at the one moment that is untrue.
 {
   const c = caloriesLeft(2860, 0, 1088);
-  ok(c.net === 3948, 'burned calories count toward what is left, on every screen that asks');
+  ok(c.net === 2860, 'burned calories never inflate what is left — the target already bought them');
   ok(c.target === 2860 && c.eaten === 0 && c.burned === 1088,
     'and the parts stay available, so a screen can show its working');
 
@@ -4406,10 +4406,72 @@ function by2(v: ReturnType<typeof buildStaff>, id: string) {
     'and exactly on target is the only case that reads as zero');
 
   // rounding and rubbish in
-  ok(caloriesLeft(2000.4, 500.6, 100.5).net === 1600,
-    'figures are whole calories — a hero showing 1600.3 kcal is not a hero');
+  ok(caloriesLeft(2000.4, 500.6, 100.5).net === 1499,
+    'figures are whole calories — a hero showing 1499.8 kcal is not a hero');
+  ok(caloriesLeft(2000.4, 500.6, 100.5).burned === 101,
+    'and the burn is rounded too, even though it is only ever displayed');
   ok(caloriesLeft(-5, -5, -5).net === 0, 'negative inputs are floored rather than propagated');
   ok(caloriesLeft(NaN as any, NaN as any).net === 0, 'and a missing target is 0, not NaN on the screen');
+}
+
+// ── the day's movement is not paid for twice ──────────────────────────────
+//
+// Reported as "these numbers don't make sense": a 2,040 kcal target, nothing
+// eaten, 1,276 kcal burned, and the hero offering 3,316 kcal — more than the
+// whole day's target, before breakfast. macrosFor builds the target from
+// `bmr * activity`, so the multiplier has already bought an ordinary day's
+// movement; adding a watch's active calories on top spends it again and hands
+// a fat-loss client their entire deficit back.
+//
+// Adding only the excess over the budget was the next attempt and drew the
+// same objection — "how can I have 2,425 kcal remaining of 2,040?" A day's
+// allowance that exceeds the day's target is not actionable whatever the
+// arithmetic. The allowance is target − eaten; the burn lives in the sentence.
+{
+  // A 1,620 bmr on a 1.55 multiplier budgets 891 kcal of movement, so the
+  // reported 1,276 burned is 385 more than the target assumed.
+  const budget = budgetedActiveKcal({ bmr: 1620, tdee: Math.round(1620 * 1.55) });
+  ok(budget === 891, 'the budgeted movement is tdee minus bmr, which is what the multiplier bought');
+
+  const day = caloriesLeft(2040, 0, 1276, budget);
+  ok(day.net === 2040, 'the whole target is left, and not one calorie more');
+  ok(day.net <= day.target, 'what is left can never exceed the target — the reported nonsense');
+  ok(day.extraBurned === 385, 'how much bigger than usual the day was is still named');
+  ok(day.burned === 1276 && day.budgetedActive === 891,
+    'both halves stay available — what was measured and what was already paid for');
+
+  // Whatever the wearable says, the allowance is the same figure.
+  for (const burned of [0, 400, 891, 1276, 5000]) {
+    ok(caloriesLeft(2040, 500, burned, budget).net === 1540,
+      `${burned} kcal burned does not move what is left to eat`);
+  }
+  ok(caloriesLeft(2040, 500, 1276, budget).net === caloriesLeft(2040, 500).net,
+    'a wearable and no wearable give the same allowance');
+
+  // extraBurned is context, and floors at zero: partway through a day a person
+  // has not done the day's movement yet, and a negative would read as a debt.
+  ok(caloriesLeft(2040, 0, 0, budget).extraBurned === 0, 'a shortfall is not a negative bonus');
+  ok(caloriesLeft(2040, 0, 700, budget).extraBurned === 0, 'a day inside the budget is not above usual');
+
+  // Being over is still reported as over.
+  const past = caloriesLeft(2040, 2600, 700, budget);
+  ok(past.net === -560 && past.over === 560, 'over target is still over');
+
+  // The wording. A burn figure printed beside a number it was NOT added to is
+  // what made the old screen unreadable — it looked like it had been.
+  ok(caloriesNote(day).includes('above a usual day'), 'a bigger day says how far above usual it was');
+  ok(!caloriesNote(day).includes('already in your target'), 'and does not also claim it was ordinary');
+  const ordinary = caloriesLeft(2040, 0, 700, budget);
+  ok(caloriesNote(ordinary).includes('already in your target'),
+    'an ordinary day says the burn was already in the target rather than leaving it unexplained');
+  ok(!caloriesNote(caloriesLeft(2040, 0, 0, budget)).includes('burned'),
+    'with no burn at all, the note does not mention burning');
+  ok(caloriesNote(day).startsWith('0 of 2,040 kcal eaten'), 'the note still opens with eaten of target');
+
+  // budgetedActiveKcal itself: rubbish in must not become a negative budget,
+  // which would turn an ordinary day into one "above usual".
+  ok(budgetedActiveKcal({ bmr: 2000, tdee: 1500 }) === 0, 'a tdee below bmr budgets nothing, never a negative');
+  ok(budgetedActiveKcal({ bmr: 0, tdee: 0 }) === 0, 'and no stats budget nothing');
 }
 
 

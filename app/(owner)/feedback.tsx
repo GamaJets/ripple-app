@@ -79,6 +79,7 @@ export default function OwnerFeedback() {
           figure={avg ? avg.toFixed(1) : '—'}
           unit={avg ? '/ 5' : undefined}
           arc={avg ? avg / 5 : undefined}
+          arcLabel="of five stars"
           note={loading ? 'Loading…' : unread ? 'Could not be read' : rows.length === 0 ? 'No submissions yet' : `${rows.length} submission${rows.length === 1 ? '' : 's'}`}
         />
 

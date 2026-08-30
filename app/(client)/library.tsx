@@ -50,7 +50,7 @@ import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { tapLight, notifySuccess } from '../../src/ui/haptics';
 import { Rule, Section, SectionHead, ListRow, Notice, Cta, Ghost, PartialRead } from '../../src/ui/kit';
 import { useExerciseCatalogue } from '../../src/ui/exerciseDetail';
-import { catalogueValue as cap } from '../../src/lib/format';
+import { catalogueValue as cap, num } from '../../src/lib/format';
 import { Image as ExpoImage } from 'expo-image';
 import { sp, layout, radius, elevation, type as ty, numeric } from '../../src/theme/scale';
 import { frameUrls } from '../../src/lib/exerciseMedia';
@@ -191,7 +191,7 @@ export default function Library() {
   }
   notifySuccess();
   const total = pending.length;
-  Alert.alert('Logged', `${total} set${total === 1 ? '' : 's'} of ${open.name} added to today.`);
+  Alert.alert('Logged', `${num(total)} set${total === 1 ? '' : 's'} of ${open.name} added to today.`);
   setBanked([]); setReps(''); setKg('');
   close();
  };

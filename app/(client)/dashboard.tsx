@@ -333,6 +333,7 @@ export default function Home() {
                   ? 'No sleep on record for the last three nights yet.'
                   : 'Log a night of sleep, or connect a watch, to see your readiness.'}
           arc={readiness != null ? readiness.score / 100 : undefined}
+          arcLabel="readiness"
           tone={readiness != null ? readinessColor : undefined}
           onPress={() => router.push('/(client)/recovery')}
         />

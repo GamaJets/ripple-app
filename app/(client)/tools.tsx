@@ -25,6 +25,7 @@
 // offers the way to record them. It never fills in a body — that fallback (70 kg
 // / 20%) is exactly what `clientData` was changed to stop handing out.
 import { useState, useEffect } from 'react';
+import { num } from '../../src/lib/format';
 import { View, Text, Pressable, ScrollView, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';

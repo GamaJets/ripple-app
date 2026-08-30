@@ -194,33 +194,90 @@ export function buildMealPlan(
  * other said 2,860 — reported twice, as "calories left doesn't match the
  * calories on the other tab" and "these numbers don't match the meal tab".
  *
- * Two separate faults, and the clamp is the worse of them: `max(0, …)` meant
- * the Meals tab could never say a person was over their target. It showed zero
- * left and stopped, which reads as "you are exactly on target" at the precise
- * moment that is untrue.
+ * The clamp was the worse of the two: `max(0, …)` meant the Meals tab could
+ * never say a person was over their target. It showed zero left and stopped,
+ * which reads as "you are exactly on target" at the precise moment that is
+ * untrue.
  *
- * Burned calories count. That is the same choice the Food Log already made and
- * the one a person expects when their watch is feeding the app; what mattered
- * was that both screens make it.
+ * ── Why burned calories are not added at all ─────────────────────────────
+ *
+ * Reconciling the two screens onto `target + burned - eaten` made them agree
+ * on a number that was wrong. Reported as "these numbers don't make sense": a
+ * 2,040 kcal target, nothing eaten, 1,276 kcal burned, and the screen offering
+ * 3,316 kcal to eat — more than the whole day's target, before breakfast.
+ *
+ * The target is not a resting figure with exercise left to add on. macrosFor()
+ * builds it from `bmr * activity`, goal-adjusted: the activity multiplier IS
+ * the day's expected movement, already inside the 2,040. Adding a watch's
+ * active calories on top counts every session twice, and on a fat-loss target
+ * it hands back the entire deficit and then some.
+ *
+ * Adding only the EXCESS over what the multiplier budgeted was the next
+ * attempt, and it was still wrong for the reader: "how can I have 2,425 kcal
+ * remaining of 2,040?" A day's allowance that can exceed the day's target is
+ * not a number anybody can act on, however defensible the arithmetic behind
+ * it. So the allowance is simply `target - eaten`, and it can never exceed the
+ * target.
+ *
+ * Burn is not discarded, it is DEMOTED — from the sum to the sentence
+ * underneath, where it says whether the day was ordinary or genuinely bigger
+ * than the target assumed (see caloriesNote). A client who trains far beyond
+ * their usual week needs their activity level changed, or their coach's
+ * adjustment, not a silent bump that quietly cancels their deficit on the days
+ * they earned it.
+ *
+ * This is the same default Cronometer ships, and for the same reason: a target
+ * built from an activity multiplier has already been paid.
  */
 export interface CaloriesLeft {
-  /** target + burned − eaten. Negative means over, and is meant to be shown. */
+  /** target − eaten. Negative means over, and is meant to be shown. */
   net: number;
   /** How far over, or 0. Convenience for a screen that words the two cases. */
   over: number;
   target: number;
   eaten: number;
+  /** What the wearable measured. Shown, never spent. */
   burned: number;
+  /** The non-resting energy the target already assumed: tdee − bmr. */
+  budgetedActive: number;
+  /** burned − budgetedActive, floored at 0. How much bigger than usual the
+   *  day was — context for the reader, not calories to eat. */
+  extraBurned: number;
 }
 
 export function caloriesLeft(
   targetKcal: number,
   eatenKcal: number,
   burnedKcal: number = 0,
+  budgetedActiveKcal: number = 0,
 ): CaloriesLeft {
   const target = Math.max(0, Math.round(targetKcal || 0));
   const eaten = Math.max(0, Math.round(eatenKcal || 0));
   const burned = Math.max(0, Math.round(burnedKcal || 0));
-  const net = target + burned - eaten;
-  return { net, over: net < 0 ? -net : 0, target, eaten, burned };
+  const budgetedActive = Math.max(0, Math.round(budgetedActiveKcal || 0));
+  const extraBurned = Math.max(0, burned - budgetedActive);
+  const net = target - eaten;
+  return { net, over: net < 0 ? -net : 0, target, eaten, burned, budgetedActive, extraBurned };
+}
+
+/**
+ * The line under the hero figure, worded the same on every screen that shows
+ * it.
+ *
+ * Naming the burn without saying what became of it is what made the old screen
+ * unreadable: 1,276 kcal burned sat beside a number it had silently been added
+ * to, with no way to tell. It is never added now, so the sentence says so —
+ * and on a day that genuinely outran the target it says that too, which is the
+ * signal a coach acts on.
+ */
+export function caloriesNote(cal: CaloriesLeft): string {
+  const head = `${cal.eaten.toLocaleString()} of ${cal.target.toLocaleString()} kcal eaten`;
+  if (!cal.burned) return head;
+  if (cal.extraBurned > 0) return `${head} · ${cal.burned.toLocaleString()} burned, ${cal.extraBurned.toLocaleString()} above a usual day`;
+  return `${head} · ${cal.burned.toLocaleString()} burned, already in your target`;
+}
+
+/** The non-resting energy a target built from an activity multiplier assumed. */
+export function budgetedActiveKcal(m: Pick<Macros, 'bmr' | 'tdee'>): number {
+  return Math.max(0, Math.round((m.tdee || 0) - (m.bmr || 0)));
 }

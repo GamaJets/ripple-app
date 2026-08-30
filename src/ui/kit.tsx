@@ -69,11 +69,23 @@ export function SectionHead({ title, note, onPress }: { title: string; note?: st
  * The single number a screen leads with. One per screen — a second hero means
  * neither is the hero. `arc` draws the value as a ring at 0..1.
  */
+/** A 0–1 arc as a whole percentage, clamped — 103% of a target is still a
+ *  full ring, and the figure beside it already says how far over. */
+function arcPct(arc: number): number {
+  return Math.round(Math.max(0, Math.min(1, arc)) * 100);
+}
+
 export function Hero({
-  label, figure, unit, note, arc, tone, onPress,
+  label, figure, unit, note, arc, arcLabel, tone, onPress,
 }: {
   label: string; figure: string; unit?: string; note?: string;
-  arc?: number; tone?: string; onPress?: () => void;
+  arc?: number;
+  /** What the ring measures, as it would be read aloud after the percentage:
+   *  "of today's calories eaten". The component cannot know — on the Meals
+   *  hero the figure counts DOWN as the ring fills up — and a sentence guessed
+   *  from `label` would confidently say the wrong thing. */
+  arcLabel?: string;
+  tone?: string; onPress?: () => void;
 }) {
   const t = useTheme();
   const mark = tone || t.brand;
@@ -95,12 +107,27 @@ export function Hero({
         ) : null}
       </View>
       {arc != null ? (
-        <Svg width={72} height={72} viewBox="0 0 72 72">
-          <Circle cx="36" cy="36" r={R} fill="none" stroke={t.surface3} strokeWidth={3} />
-          <Circle cx="36" cy="36" r={R} fill="none" stroke={mark} strokeWidth={3} strokeLinecap="round"
-            strokeDasharray={C} strokeDashoffset={C * (1 - Math.max(0, Math.min(1, arc)))}
-            transform="rotate(-90 36 36)" />
-        </Svg>
+        // The ring is how far through the figure above you are, and it used to
+        // say so nowhere: asked outright, "what does the circle do or what is
+        // it for?". At 0% it is an empty grey track and reads as decoration,
+        // which is the moment it most needs to be legible. The percentage sits
+        // inside it, and screen readers get the same sentence rather than an
+        // unlabelled graphic.
+        <View
+          accessible
+          accessibilityRole="progressbar"
+          accessibilityLabel={arcLabel ? `${arcPct(arc)}% ${arcLabel}` : `${arcPct(arc)}%`}
+          accessibilityValue={{ min: 0, max: 100, now: arcPct(arc) }}
+          style={{ width: 72, height: 72, alignItems: 'center', justifyContent: 'center' }}
+        >
+          <Svg width={72} height={72} viewBox="0 0 72 72" style={{ position: 'absolute' }}>
+            <Circle cx="36" cy="36" r={R} fill="none" stroke={t.surface3} strokeWidth={3} />
+            <Circle cx="36" cy="36" r={R} fill="none" stroke={mark} strokeWidth={3} strokeLinecap="round"
+              strokeDasharray={C} strokeDashoffset={C * (1 - Math.max(0, Math.min(1, arc)))}
+              transform="rotate(-90 36 36)" />
+          </Svg>
+          <Text style={{ ...ty.caption, ...numeric, fontWeight: '600', color: t.ink2 }}>{arcPct(arc)}%</Text>
+        </View>
       ) : null}
     </Pressable>
   );

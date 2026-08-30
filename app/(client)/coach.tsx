@@ -6,6 +6,7 @@
 // conversation, so the bubbles carry the ink and the chrome recedes to a
 // hairline. Every provider, conditional and route is unchanged.
 import { useState, useRef, useEffect } from 'react';
+import { num } from '../../src/lib/format';
 import { View, Text, TextInput, Pressable, ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
 import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -95,7 +96,7 @@ export default function Coach() {
       : `${Math.round(_sleepFor.avgHours * 10) / 10}h average over ${_sleepFor.nights.length} night${_sleepFor.nights.length === 1 ? '' : 's'}`
         + `, ${_sleepFor.fromDevice ? `${_sleepFor.fromDevice} measured by a device` : 'none measured by a device'}`
         + `${_sleepFor.fromTyped ? `, ${_sleepFor.fromTyped} logged by hand` : ''}`,
-    eatenToday: macros ? `${consumed.kcal}/${macros.kcal} kcal, protein ${consumed.protein}/${macros.protein}g` : `${consumed.kcal} kcal eaten, no target set`,
+    eatenToday: macros ? `${num(consumed.kcal)}/${num(macros.kcal)} kcal, protein ${consumed.protein}/${macros.protein}g` : `${num(consumed.kcal)} kcal eaten, no target set`,
     streak: _streak,
     lastTrained: _lastEx || undefined,
     nextLift: _prog ? `${_prog.exercise}: ${_prog.nextWeight}kg x ${_prog.nextReps} (${_prog.action})` : undefined,

@@ -20,6 +20,7 @@
 // in the unit the account reads in. Body fat does not: it is a percentage, and
 // a percentage does not have a unit system.
 import { View, Text, ScrollView } from 'react-native';
+import { num } from '../../src/lib/format';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -75,7 +76,7 @@ export default function WeeklyReport() {
   const comp = compositionInsights(c.scans);
   const factLines = [
     `Trained ${wk.workouts} time(s) across ${wk.days} active day(s).`,
-    `Volume ${(wk.volumeKg / 1000).toFixed(1)} tonnes, ~${wk.kcal} kcal.`,
+    `Volume ${(wk.volumeKg / 1000).toFixed(1)} tonnes, ~${num(wk.kcal)} kcal.`,
     `Streak ${streak} day(s).`,
     // These lines are the summariser's only source of fact, so they carry the
     // client's own units: a model handed "82 kg" writes back "you're at 82 kg"

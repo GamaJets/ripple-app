@@ -78,6 +78,7 @@ export default function Achievements() {
           figure={logKnown ? fig(earnedCount) : fig(null)}
           unit={`of ${badges.length}`}
           arc={logKnown ? earnedCount / badges.length : undefined}
+          arcLabel="of badges earned"
           note={!logKnown ? 'We couldn’t read your training log — badges you have earned are not shown below.'
             : earnedCount === 0 ? 'Log a workout to unlock your first badge' : `${badges.length - earnedCount} left to earn`}
         />

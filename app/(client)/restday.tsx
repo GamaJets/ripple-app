@@ -89,6 +89,7 @@ export default function RestDay() {
           figure={known ? fig(wk.days) : fig(null)}
           unit={known ? (wk.days === 1 ? 'day' : 'days') : undefined}
           arc={known ? wk.days / 7 : undefined}
+          arcLabel="of the week trained"
           tone={tone}
           note={known ? `${dl.hardWeeks} consecutive hard week${dl.hardWeeks === 1 ? '' : 's'} behind you` : 'Nothing read — an empty ring here is not an empty week.'}
         />

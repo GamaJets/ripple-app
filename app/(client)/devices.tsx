@@ -13,6 +13,7 @@
 // reads the day through the edge function, and WHOOP already feeds the workout
 // importer above it. The line described behaviour the code no longer has.
 import { useState, useEffect, useCallback } from 'react';
+import { num } from '../../src/lib/format';
 import { View, Text, Pressable, ScrollView, Alert, ActivityIndicator, Modal, TextInput } from 'react-native';
 import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -49,9 +50,6 @@ function ago(ts?: number): string {
  const m = Math.floor(s / 60); if (m < 60) return m + 'm ago';
  const h = Math.floor(m / 60); if (h < 24) return h + 'h ago';
  return Math.floor(h / 24) + 'd ago';
-}
-function num(n: number | null | undefined, dashes = '—'): string {
- return typeof n === 'number' ? n.toLocaleString() : dashes;
 }
 function wkDate(iso: string): string {
  const d = new Date(iso);
@@ -376,7 +374,7 @@ export default function Devices() {
         }}>
          <View style={{ flex: 1 }}>
           <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{sm.activity}</Text>
-          <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{[wkDate(sm.start), `${sm.mins} min`, sm.distanceKm ? `${sm.distanceKm} km` : null, sm.kcal ? `${sm.kcal} kcal` : null].filter(Boolean).join(' · ')}</Text>
+          <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{[wkDate(sm.start), `${sm.mins} min`, sm.distanceKm ? `${sm.distanceKm} km` : null, sm.kcal ? `${num(sm.kcal)} kcal` : null].filter(Boolean).join(' · ')}</Text>
          </View>
          {done ? (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }} accessibilityLabel={'Already in log: ' + sm.activity}>
@@ -491,7 +489,7 @@ export default function Devices() {
          <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>
           {[sessionWhen(p.t), `${fig(Math.round(p.seconds / 60))} min`,
             p.distanceMeters != null ? `${(p.distanceMeters / 1000).toFixed(2)} km` : null,
-            p.kcal != null ? `${p.kcal} kcal` : null,
+            p.kcal != null ? `${num(p.kcal)} kcal` : null,
            ].filter(Boolean).join(' · ')}
          </Text>
          {/* A measured 47 minutes and a typed 45 must not look the same. */}
@@ -651,7 +649,7 @@ export default function Devices() {
          if (!m) return <Text style={{ ...ty.caption, color: t.ink3 }}>Connected. Tap Sync — no data for today yet.</Text>;
          return (
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.lg }}>
-           {m.activeKcal != null ? <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{m.activeKcal} kcal</Text> : null}
+           {m.activeKcal != null ? <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{num(m.activeKcal)} kcal</Text> : null}
            {m.heartRateAvg != null ? <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{m.heartRateAvg} bpm avg</Text> : null}
            {m.heartRateResting != null ? <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{m.heartRateResting} resting</Text> : null}
            {m.steps != null ? <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{m.steps.toLocaleString()} steps</Text> : null}

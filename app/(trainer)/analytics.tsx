@@ -208,6 +208,7 @@ export default function TrainerAnalytics() {
               ? `$${revenue.toLocaleString()} at your $${sessionFee} session rate — Repple does not process this, so it is your own arithmetic, not a payout.`
               : 'Set a session rate in your profile to see what that is worth.'}
           arc={revenue != null && goals.revenue > 0 ? goalPct(revenue, goals.revenue) : undefined}
+          arcLabel="of the revenue goal"
           onPress={() => router.push('/(trainer)/payments')}
         />
 

@@ -272,6 +272,7 @@ export default function Recovery() {
    figure={fig(cups)}
    unit={goalCups != null ? `of ${goalCups} glasses` : cups === 1 ? 'glass today' : 'glasses today'}
    arc={pct == null ? undefined : pct / 100}
+   arcLabel="recovered"
    note={goalCups == null
     ? 'No daily goal set — set one on Daily habits and this fills against it.'
     : cups >= goalCups ? 'Goal met today — nice.' : `${goalCups - cups} more to hit today's goal.`}

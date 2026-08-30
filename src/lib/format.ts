@@ -42,3 +42,27 @@ export function catalogueValue(s: string | null | undefined): string {
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
     .join(' ');
 }
+
+/**
+ * A figure as a person reads it: thousands separated.
+ *
+ * Reported as "when you have more than 3 digits in a number add a comma."
+ * Half the screens already called toLocaleString and half printed the raw
+ * number, so the same day's calories appeared as 2,860 on the Meals hero and
+ * 2860 four lines down. A helper rather than a habit, so the two cannot drift.
+ *
+ * Rounds first: a hero showing 1,499.8 kcal is not a hero, and separators on a
+ * fractional number look like a bug even when the number is right. Anything
+ * that is not a number renders as a dash — never as 0, and never as "NaN".
+ */
+export function num(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return '—';
+  return Math.round(n).toLocaleString('en-GB');
+}
+
+/** The same, keeping one decimal — for weights and other measured figures
+ *  where the tenth is the point (73.5 kg, 1,204.5 kg lifted). */
+export function num1(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return '—';
+  return n.toLocaleString('en-GB', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+}

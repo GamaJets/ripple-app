@@ -11,6 +11,7 @@
 // a lookup vocabulary, not a record of anything the client ate — so it stays.
 // Nothing is logged until they pick a dish, a portion, and tap Add.
 import { useMemo, useState } from 'react';
+import { num } from '../../src/lib/format';
 import { View, Text, Pressable, ScrollView, TextInput, Modal, Alert } from 'react-native';
 import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -40,7 +41,7 @@ export default function Restaurant() {
     if (!est) return;
     fl.addFood({ name: est.name, kcal: est.kcal, protein: est.protein, carbs: est.carbs, fat: est.fat, via: 'manual' });
     setSel(null); setPortion(1);
-    Alert.alert('Logged', `${est.name} · ${est.kcal} kcal added to today.`);
+    Alert.alert('Logged', `${est.name} · ${num(est.kcal)} kcal added to today.`);
   };
 
   const G = layout.gutter;
@@ -96,7 +97,7 @@ export default function Restaurant() {
                   <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{d.name}</Text>
                   <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{d.cuisine} · P{d.protein} C{d.carbs} F{d.fat}</Text>
                 </View>
-                <Text style={{ ...value(18), color: t.ink }}>{d.kcal}</Text>
+                <Text style={{ ...value(18), color: t.ink }}>{num(d.kcal)}</Text>
                 <Text style={{ ...ty.caption, color: t.ink3 }}>kcal</Text>
               </Pressable>
             </View>

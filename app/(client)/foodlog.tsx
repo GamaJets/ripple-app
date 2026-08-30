@@ -14,6 +14,7 @@
 // looked up: every scan produced the same invented protein bar. The button now
 // says nothing was logged and points at the real Open Food Facts lookup.
 import { useState, useEffect, useMemo } from 'react';
+import { num } from '../../src/lib/format';
 import { View, Text, TextInput, Pressable, ScrollView, Alert, Modal, Image, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -21,7 +22,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { ensureMediaPermission } from '../../src/ui/permissions';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { useTheme } from '../../src/ui/components';
-import { caloriesLeft, macrosFor, applyCoachAdjust } from '../../src/lib/nutrition';
+import { caloriesLeft, budgetedActiveKcal, macrosFor, applyCoachAdjust } from '../../src/lib/nutrition';
 import { useClientData } from '../../src/ui/clientData';
 import { Icon } from '../../src/ui/Icon';
 import { analyzeMeal, visionAvailable } from '../../src/lib/vision';
@@ -210,7 +211,7 @@ export default function FoodLog() {
   notifySuccess();
  };
  const confirmRemove = (fe: FoodEntry) => {
-  Alert.alert('Remove this meal?', `${fe.name} — ${fe.kcal} kcal — comes off today's log, and today's totals go back down by it.`, [
+  Alert.alert('Remove this meal?', `${fe.name} — ${num(fe.kcal)} kcal — comes off today's log, and today's totals go back down by it.`, [
    { text: 'Cancel', style: 'cancel' },
    { text: 'Remove', style: 'destructive', onPress: async () => {
     const gone = await fl.removeFood(fe.id);
@@ -225,7 +226,7 @@ export default function FoodLog() {
  const tot = { k: fl.consumed.kcal, p: fl.consumed.protein, c: fl.consumed.carbs, f: fl.consumed.fat };
  const burned = useWearables().today.activeKcal || 0;
  // Same function the Meals tab calls, so the two cannot drift apart again.
- const remK = target ? caloriesLeft(target.kcal, tot.k, burned).net : 0;
+ const remK = target ? caloriesLeft(target.kcal, tot.k, burned, budgetedActiveKcal(target)).net : 0;
 
  const fillEst = (n: string, k: number, p: number, c: number, f: number) => { setEstN(n); setEstK(String(k)); setEstP(String(p)); setEstC(String(c)); setEstF(String(f)); setReadFailed(false); setReading(false); };
  const takeMealPhoto = async (fromCamera: boolean) => {
@@ -298,8 +299,9 @@ export default function FoodLog() {
  label={remK >= 0 ? 'Calories Remaining' : 'Calories Over'}
  figure={fig(Math.abs(remK))}
  unit="kcal"
- note={target ? `${tot.k} of ${target.kcal} kcal eaten${burned ? ` · ${burned} kcal burned` : ''}` : `${tot.k} kcal eaten${burned ? ` · ${burned} kcal burned` : ''} · add your weight for a target`}
+ note={target ? `${num(tot.k)} of ${num(target.kcal)} kcal eaten${burned ? ` · ${num(burned)} kcal burned` : ''}` : `${num(tot.k)} kcal eaten${burned ? ` · ${num(burned)} kcal burned` : ''} · add your weight for a target`}
  arc={target && target.kcal ? tot.k / target.kcal : undefined}
+ arcLabel="of today's calories eaten"
  tone={remK < 0 ? t.crit : undefined}
  />
 
@@ -411,7 +413,7 @@ export default function FoodLog() {
  <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
  <Pressable onPress={() => openEdit(fe)} accessibilityRole="button" accessibilityLabel={'Edit ' + fe.name} style={{ flex: 1 }}>
  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }} numberOfLines={1}>{fe.name}</Text>
- <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{fe.kcal} kcal · P{fe.protein} C{fe.carbs} F{fe.fat}</Text>
+ <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{num(fe.kcal)} kcal · P{fe.protein} C{fe.carbs} F{fe.fat}</Text>
  </Pressable>
  <Pressable onPress={() => openEdit(fe)} hitSlop={8} accessibilityRole="button" accessibilityLabel={'Edit ' + fe.name}>
  <Icon name="pencil" size={15} color={t.ink3} />

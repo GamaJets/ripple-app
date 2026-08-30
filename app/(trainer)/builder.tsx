@@ -35,6 +35,7 @@
 // builder stays empty, says why, and the Assign control is held. See
 // src/lib/overwriteGuard.ts.
 import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
+import { num } from '../../src/lib/format';
 import { View, Text, Pressable, ScrollView, TextInput, Modal, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
@@ -411,7 +412,7 @@ export default function Builder() {
         {/* ── days ───────────────────────────────────────────────────────── */}
         <Section>
           <SectionHead title="Training Days"
-            note={days.length ? `${days.length} day${days.length === 1 ? '' : 's'} · ${totalExercises} exercises` : undefined} />
+            note={days.length ? `${days.length} day${days.length === 1 ? '' : 's'} · ${num(totalExercises)} exercises` : undefined} />
 
           {days.length === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>
@@ -489,7 +490,7 @@ export default function Builder() {
               training programme this screen never read — no undo, no history
               row, and nothing that tells the client their sessions changed. */}
           <View style={{ opacity: canAssign && planGuard.allowed ? 1 : 0.4 }} pointerEvents={canAssign && planGuard.allowed ? 'auto' : 'none'}>
-            <Cta wide label={planGuard.label ?? `Assign to ${client?.name ?? 'client'} · ${totalExercises} exercises`} onPress={assign} />
+            <Cta wide label={planGuard.label ?? `Assign to ${client?.name ?? 'client'} · ${num(totalExercises)} exercises`} onPress={assign} />
           </View>
           {!planGuard.allowed ? (
             <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.sm }}>
@@ -730,7 +731,7 @@ export default function Builder() {
         <View style={sheet}>
           <Text style={{ ...ty.title, color: t.ink }}>Save as Template</Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>
-            Reuse this program with other clients — {totalExercises} exercises across {days.filter((d) => d.exercises.length).length} days.
+            Reuse this program with other clients — {num(totalExercises)} exercises across {days.filter((d) => d.exercises.length).length} days.
           </Text>
           <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Template name</Text>
           <TextInput value={tplName} onChangeText={setTplName} placeholder="e.g. Push · Pull · Legs" placeholderTextColor={t.ink3}

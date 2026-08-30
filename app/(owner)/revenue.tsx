@@ -12,6 +12,7 @@
 // lifespan" — a measured-looking unit economic derived from a magic number.
 // With no churn signal there is no lifespan and no LTV; the screen says so.
 import { View, Text, ScrollView } from 'react-native';
+import { num } from '../../src/lib/format';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -148,7 +149,7 @@ export default function OwnerRevenue() {
 
         {/* ── revenue by plan ────────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Sessions by Trainer" note={byTrainer.length > 0 ? `${trainerTotal} in 30d` : undefined} />
+          <SectionHead title="Sessions by Trainer" note={byTrainer.length > 0 ? `${num(trainerTotal)} in 30d` : undefined} />
           {loading ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Reading your roster…</Text>
           ) : byTrainer.length === 0 ? (

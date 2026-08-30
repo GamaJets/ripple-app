@@ -496,6 +496,7 @@ export default function ClientGoals() {
                           figure={fig(goalValue(lead.prog.current, lead.kind, wu))}
                           unit={goalUnit(lead.kind, wu)}
                           arc={lead.prog.pct / 100}
+                          arcLabel="of the way to the goal"
                           note={`${lead.prog.pct}% of the way · ${fig(Math.abs(goalDelta(lead.prog.remaining, lead.kind, wu)))} ${goalUnit(lead.kind, wu)} to go`}
                         />
                         <Rule />
