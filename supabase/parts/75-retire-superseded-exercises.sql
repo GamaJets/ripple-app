@@ -59,10 +59,13 @@ where e.source is distinct from 'repdb'
 -- Nordic Curl for Nordic Curl, which trains the quadriceps rather than the
 -- hamstrings. Our name and group survive; only content crosses.
 --
--- Three are deliberately left bare. Cable Machine and Smith Machine are pieces
--- of equipment rather than movements and probably should never have been rows.
--- Ski Erg is genuinely absent from RepDB, and an empty row is the honest answer
--- for a movement nobody has illustrated.
+-- Three are deliberately left bare, and NOT because they are mistakes. Cable
+-- Machine, Smith Machine and Ski Erg are all entries in src/lib/machines.ts,
+-- the list the "Scan machine" feature resolves a photographed machine against.
+-- Deleting them would leave scanning a Smith Machine naming a movement the app
+-- cannot open — the feature failing silently rather than loudly. RepDB
+-- describes movements and not machines, so they carry no description, which is
+-- the honest answer rather than a gap to fill.
 with m(ours, theirs) as (values
     ('ab-crunch','crunches'),
     ('assisted-pull-up','assisted-pull-ups'),
