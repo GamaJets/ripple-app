@@ -21,6 +21,7 @@ import type { Theme } from '../../src/theme/tokens';
 import { Rule, Section, SectionHead, Card, ListRow, QuickRow, Cta, Notice } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, value } from '../../src/theme/scale';
 import { useMyTrainerProfile } from '../../src/ui/coachProfile';
+import { RepdbAttribution } from '../../src/ui/Attribution';
 
 function Field({ t, label, value: val, onChangeText, placeholder, multiline, keyboardType }: { t: Theme; label: string; value: string; onChangeText: (v: string) => void; placeholder?: string; multiline?: boolean; keyboardType?: 'default' | 'numeric' }) {
   return (
@@ -275,6 +276,23 @@ export default function CoachProfile() {
             onPress={() => router.push('/(trainer)/payments')} />
           <ListRow icon="chart" title="Billing & subscription" note="Your plan, payment method & invoices"
             onPress={() => router.push('/(trainer)/billing')} />
+        </Section>
+
+        <Rule />
+
+        {/* ── credits ────────────────────────────────────────────────────── */}
+        {/* Its own section with its own heading, not a grey line at the foot of
+            the screen. The exercise catalogue this app now searches — every
+            description, every illustration, the naming itself — is licensed
+            under a free tier whose one condition is a visible credit, and a
+            credit nobody can find is not one. scripts/check-attribution.mjs
+            fails the build if the coach app reads the catalogue and this is not
+            on screen, because the way this term gets breached is nobody
+            deciding to: somebody rewrites a settings screen and it goes with
+            it, and no test notices because nothing is broken. */}
+        <Section>
+          <SectionHead title="Credits" />
+          <RepdbAttribution />
         </Section>
 
         <Rule />

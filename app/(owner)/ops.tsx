@@ -92,6 +92,8 @@ export default function OwnerOps() {
             onPress={() => router.push('/(owner)/rota')} />
           <ListRow icon="wrench" title="Equipment register" note="What the gym owns, and what is due a service"
             onPress={() => router.push('/(owner)/equipment')} />
+          <ListRow icon="dumbbell" title="Exercise library" note="Every movement the app can teach, and the kit each one needs"
+            onPress={() => router.push('/(owner)/library')} />
           <ListRow icon="clock" title="Deletion requests" note="Members who asked to be erased, and the 30-day clock"
             onPress={() => router.push('/(owner)/deletions')} />
           <ListRow icon="settings" title="Settings" note="Who you are signed in as, your data, and deleting your account"

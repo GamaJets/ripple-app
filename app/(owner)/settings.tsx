@@ -38,6 +38,7 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { Rule, Section, SectionHead, ListRow, Ghost, fig } from '../../src/ui/kit';
+import { RepdbAttribution } from '../../src/ui/Attribution';
 import { sp, layout, hairline, type as ty, radius } from '../../src/theme/scale';
 import { BuildInfo } from '../../src/ui/BuildInfo';
 import { useAuth } from '../../src/ui/auth';
@@ -364,6 +365,22 @@ export default function OwnerSettings() {
           <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{ownersLine()}</Text>
           <ListRow icon="clock" title="Deletion requests" note="The queue, and the 30-day clock running on it"
             onPress={() => router.push('/(owner)/deletions')} />
+        </Section>
+
+        <Rule />
+
+        {/* Credits — a licence term, not a courtesy.
+            The owner app now renders the RepDB catalogue on /(owner)/library and
+            /(owner)/exercise. The free tier that pays for those illustrations and
+            descriptions costs nothing and asks for one visible credit, so this
+            card is the price of the whole exercise library in this binary.
+            scripts/check-attribution.mjs fails the build without it, because the
+            way this term gets breached is nobody deciding to: somebody rewrites a
+            settings screen, the credit goes with it, and nothing is broken enough
+            for a test to notice. */}
+        <Section>
+          <SectionHead title="Credits" />
+          <RepdbAttribution />
         </Section>
 
         <Rule />

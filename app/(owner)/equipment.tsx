@@ -22,7 +22,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, Flag } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Cta, Ghost, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import type { Theme } from '../../src/theme/tokens';
 import { useTenant } from '../../src/ui/tenant';
@@ -199,6 +199,21 @@ export default function OwnerEquipment() {
               rather than reporting a confident zero.
             </Text>
           ) : null}
+        </Section>
+
+        <Rule />
+
+        {/* The catalogue hangs off the register rather than off the dashboard
+            because the two answer one question from opposite sides: this screen
+            is the kit the gym owns, and the library is what the platform can
+            teach on it. An owner standing in front of a rack of kettlebells and
+            wondering what their members will actually be shown for it is one
+            tap away here, and would be nowhere from a revenue roll-up. */}
+        <Section>
+          <SectionHead title="What the platform can teach on it" />
+          <ListRow icon="dumbbell" title="Exercise library"
+            note="Every movement in the catalogue, filtered by the equipment it needs"
+            onPress={() => router.push('/(owner)/library')} />
         </Section>
 
         <Rule />
