@@ -16,10 +16,23 @@
 // ── Frames are sub-rectangles, which is why this is not a one-liner ───────
 //
 // An animated WebP stores each frame as a cropped rectangle with its own x/y
-// offset, so frames cannot simply be extracted and reassembled — they have to
-// be composited back onto the full canvas first, or the movement drifts around
-// the frame. webpmux -get frame gives the sub-rectangle; -frame puts it back
-// with its offset intact, which is the part that keeps the figure still.
+// offset — 81% of the frames in this pack have one — so frames cannot simply
+// be extracted and reassembled. webpmux -get frame hands back the bare
+// sub-rectangle, and -frame puts it back WITH its offset, which is the part
+// that keeps the figure where the illustrator drew it. Lose the offsets and
+// every clip stacks its figure into the top-left corner of the canvas.
+//
+// ── Why every output frame clears the canvas behind it ────────────────────
+//
+// Thinning breaks dispose chains: a frame that relied on the one before it
+// for the pixels outside its own rectangle now has a different frame before
+// it. Rather than track that, every kept frame is written dispose=background
+// over a transparent bgcolor, so the canvas is empty before each one draws
+// and each frame stands alone. That is only faithful because no frame in the
+// pack blends (blend is 'no' on all 35,736 of them) and the full-canvas
+// keyframes are opaque only inside the same band as the sub-rectangles — so
+// there is never residue outside the current frame to preserve. Both facts
+// are asserted below rather than assumed.
 import { readdirSync, statSync, mkdirSync, existsSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join, basename } from 'node:path';
@@ -36,14 +49,35 @@ mkdirSync(OUT, { recursive: true });
 
 const sh = (cmd, a) => execFileSync(cmd, a, { stdio: ['ignore', 'pipe', 'pipe'] }).toString();
 
-/** The frame table from webpmux -info: one row per frame, carrying its size,
- *  offset and duration. Counting 'ANMF' in webpinfo output overshot by one —
- *  the word appears in the summary header as well as per frame, and asking
- *  webpmux for a frame that does not exist is a hard failure rather than a
- *  short read. The rows ARE the frames, so they are the count. */
+/** The frame table from webpmux -info, one object per frame:
+ *
+ *    No.: width height alpha x_offset y_offset duration dispose blend size compression
+ *      1:   844   311   yes       62      350       51    none    no  30382       lossy
+ *
+ *  Counting 'ANMF' in webpinfo output overshot by one — the word appears in
+ *  the summary header as well as per frame — so the rows themselves are the
+ *  count. Columns are split rather than pattern-matched: a regex over mixed
+ *  number/word columns is exactly what silently returned null here before,
+ *  and a null that falls back to a default offset is invisible until someone
+ *  opens the app. A row that will not parse throws. */
 function frameRows(file) {
   const info = sh('webpmux', ['-info', file]);
-  return info.split('\n').filter((l) => /^\s*\d+:\s+\d+/.test(l));
+  const rows = [];
+  for (const line of info.split('\n')) {
+    const m = line.match(/^\s*(\d+):\s+(.*\S)\s*$/);
+    if (!m) continue;
+    const c = m[2].split(/\s+/);
+    if (c.length < 8) throw new Error(`unreadable frame row: ${line.trim()}`);
+    const row = { n: Number(m[1]), w: +c[0], h: +c[1], x: c[3], y: c[4], dur: Number(c[5]), dispose: c[6], blend: c[7] };
+    if (!Number.isFinite(row.dur) || !/^\d+$/.test(row.x) || !/^\d+$/.test(row.y)) {
+      throw new Error(`unreadable frame row: ${line.trim()}`);
+    }
+    // Standing alone per frame is only faithful when nothing blends.
+    if (row.blend !== 'no') throw new Error(`frame ${row.n} blends; thinning would change it`);
+    rows.push(row);
+  }
+  if (!rows.length) throw new Error('no frame rows in webpmux -info');
+  return rows;
 }
 
 const files = readdirSync(SRC).filter((f) => f.endsWith('.webp'));
@@ -61,19 +95,31 @@ for (const f of todo) {
       sh('cp', [src, dst]); before += statSync(src).size; after += statSync(dst).size; done++; continue;
     }
     mkdirSync(tmp, { recursive: true });
-    // -get frame N keeps the sub-rectangle; the +offsets are read back from
-    // webpmux -info so the figure lands in the same place on the canvas.
     const parts = [];
-    for (let i = 1; i <= n; i += KEEP) {
-      const fr = join(tmp, `f${i}.webp`);
-      sh('webpmux', ['-get', 'frame', String(i), src, '-o', fr]);
-      const row = rows[i - 1] || '';
-      const m = row.match(/(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\w+)\s+(\w+)/);
-      const xo = m ? m[3] : '0', yo = m ? m[4] : '0';
-      const dur = m ? Number(m[5]) * KEEP : 100;   // hold each kept frame longer
-      parts.push('-frame', fr, `+${dur}+${xo}+${yo}+1+b`);
+    for (let i = 0; i < n; i += KEEP) {
+      const row = rows[i];
+      const fr = join(tmp, `f${row.n}.webp`);
+      sh('webpmux', ['-get', 'frame', String(row.n), src, '-o', fr]);
+      // Hold this frame for as long as the frames it replaces did, so the
+      // loop takes exactly as long as the original.
+      const dur = rows.slice(i, i + KEEP).reduce((t, r) => t + r.dur, 0);
+      // +duration+x+y+dispose, then blend: 1 = clear to bgcolor after,
+      // -b = overwrite rather than blend.
+      parts.push('-frame', fr, `+${dur}+${row.x}+${row.y}+1-b`);
     }
     sh('webpmux', [...parts, '-loop', '0', '-bgcolor', '0,0,0,0', '-o', dst]);
+
+    // The offsets are the whole point, so prove they survived rather than
+    // trusting that they did.
+    const outRows = frameRows(dst);
+    const kept = rows.filter((_, i) => i % KEEP === 0);
+    if (outRows.length !== kept.length) throw new Error(`wrote ${outRows.length} frames, expected ${kept.length}`);
+    outRows.forEach((r, i) => {
+      if (r.x !== kept[i].x || r.y !== kept[i].y || r.w !== kept[i].w || r.h !== kept[i].h) {
+        throw new Error(`frame ${i + 1} landed at ${r.x},${r.y} ${r.w}x${r.h}, source has ${kept[i].x},${kept[i].y} ${kept[i].w}x${kept[i].h}`);
+      }
+    });
+
     before += statSync(src).size; after += statSync(dst).size; done++;
   } catch (e) {
     failed.push(`${f}: ${String(e.message || e).split('\n')[0]}`);
@@ -88,4 +134,5 @@ console.log(`  before ${(before / 1e6).toFixed(0)} MB → after ${(after / 1e6).
 if (failed.length) {
   console.error(`${failed.length} failed:`);
   for (const f of failed.slice(0, 8)) console.error('  ' + f);
+  process.exit(1);
 }
