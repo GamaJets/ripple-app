@@ -21,3 +21,24 @@ export function seriesDelta(values: number[]): number {
   if (values.length < 2) return 0;
   return +(values[values.length - 1] - values[0]).toFixed(1);
 }
+
+/**
+ * Title case for a value the exercise catalogue stores in lower snake case.
+ *
+ * A muscle, a goal and a tag are NAMES — "Rectus Abdominis", "Hypertrophy",
+ * "Requires Bench". Capitalising only the first letter produced "Rectus
+ * abdominis", which reads like a sentence someone cut off.
+ *
+ * Shared rather than copied. It existed four times — once per screen that
+ * renders a catalogue value — and three of those copies still capitalised only
+ * the first letter after the fourth was fixed, which is how the client app and
+ * the coach app came to disagree about the name of a muscle.
+ */
+export function catalogueValue(s: string | null | undefined): string {
+  return String(s || '')
+    .replace(/_/g, ' ')
+    .split(' ')
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+}

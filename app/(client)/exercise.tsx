@@ -36,12 +36,12 @@ import { ExerciseVideo } from '../../src/ui/ExerciseVideo';
 // up seeing two different pieces of artwork.
 import { DemoAnimation, FrameLoop } from '../../src/ui/ExerciseDemo';
 import { videoForExercise } from '../../src/lib/exerciseId';
+import { catalogueValue as cap } from '../../src/lib/format';
 import { frameUrls, FRAMES_ARE_UNHOSTED, demoCaption, demoIsShippable, DEMO_BUCKET, evalAnimationUrl } from '../../src/lib/exerciseMedia';
 import { supabase } from '../../src/lib/supabase';
 import { useClientData } from '../../src/ui/clientData';
 import { RepdbInlineCredit } from '../../src/ui/Attribution';
 
-const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 export default function ExerciseScreen() {
   const t = useTheme();
@@ -269,7 +269,7 @@ export default function ExerciseScreen() {
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginBottom: detail.tags.length ? sp.lg : 0 }}>
                     {detail.goals.map((g) => (
                       <View key={g} style={{ backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: 5 }}>
-                        <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>{cap(g.replace(/_/g, ' '))}</Text>
+                        <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>{cap(g)}</Text>
                       </View>
                     ))}
                   </View>
@@ -281,7 +281,7 @@ export default function ExerciseScreen() {
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
                     {detail.tags.map((g) => (
                       <View key={g} style={{ backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: 5 }}>
-                        <Text style={{ ...ty.caption, color: t.ink3 }}>{g.replace(/_/g, ' ')}</Text>
+                        <Text style={{ ...ty.caption, color: t.ink3 }}>{cap(g)}</Text>
                       </View>
                     ))}
                   </View>

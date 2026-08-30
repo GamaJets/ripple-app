@@ -32,10 +32,10 @@ import { sp, layout, radius, type as ty } from '../../src/theme/scale';
 import { useExerciseDetail } from '../../src/ui/exerciseDetail';
 import { DemoAnimation, FrameLoop } from '../../src/ui/ExerciseDemo';
 import { frameUrls, FRAMES_ARE_UNHOSTED, demoCaption, demoIsShippable, DEMO_BUCKET } from '../../src/lib/exerciseMedia';
+import { catalogueValue as cap } from '../../src/lib/format';
 import { supabase } from '../../src/lib/supabase';
 import { RepdbInlineCredit } from '../../src/ui/Attribution';
 
-const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 export default function OwnerExercise() {
   const t = useTheme();

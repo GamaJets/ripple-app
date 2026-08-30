@@ -39,12 +39,12 @@ import { useExerciseVideos } from '../../src/ui/exerciseVideos';
 import { ExerciseVideo } from '../../src/ui/ExerciseVideo';
 import { DemoAnimation, FrameLoop } from '../../src/ui/ExerciseDemo';
 import { videoForExercise } from '../../src/lib/exerciseId';
+import { catalogueValue as cap } from '../../src/lib/format';
 import { frameUrls, FRAMES_ARE_UNHOSTED, demoCaption, demoIsShippable, DEMO_BUCKET } from '../../src/lib/exerciseMedia';
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/ui/auth';
 import { RepdbInlineCredit } from '../../src/ui/Attribution';
 
-const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 export default function TrainerExercise() {
   const t = useTheme();

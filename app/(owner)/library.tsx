@@ -34,8 +34,8 @@ import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Notice, Ghost, PartialRead } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty } from '../../src/theme/scale';
 import { useExerciseCatalogue, type CatalogueRow } from '../../src/ui/exerciseDetail';
+import { catalogueValue as cap } from '../../src/lib/format';
 
-const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 /** The equipment chip standing for rows where the catalogue records none.
  *
