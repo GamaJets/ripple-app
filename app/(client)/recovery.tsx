@@ -25,6 +25,8 @@ import { useClientData } from '../../src/ui/clientData';
 import { HrZoneChart } from '../../src/ui/HrZoneChart';
 import { ageFromDob, type HrSample } from '../../src/lib/hr';
 import { useWearables } from '../../src/ui/wearables';
+import { useDeviceSleep } from '../../src/ui/deviceSleep';
+import { connectedProviders } from '../../src/lib/wearables/sleep';
 import { reportError } from '../../src/lib/reportError';
 import { PROVIDERS } from '../../src/lib/wearables/registry';
 import { Rule, Section, SectionHead, Hero, Cta, Ghost, fig } from '../../src/ui/kit';
@@ -33,7 +35,6 @@ import { localDate } from '../../src/lib/localDate';
 import { Icon } from '../../src/ui/Icon';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { RECOVERY_ACTIVITIES, isRecoveryActivity } from '../../src/lib/recoveryActs';
-import { readSleepFromDevices, connectedProviders } from '../../src/lib/wearables/sleep';
 // The same connection answer Watch & devices shows. This screen used to reach
 // its own conclusion about whether a device was connected, from a different
 // piece of evidence, and print it in the same words — see
@@ -50,7 +51,6 @@ const MOBILITY = [
 ];
 
 /** How many nights of device sleep the screen asks for and lists. */
-const DEVICE_NIGHTS = 7;
 
 /**
  * The sentence under a night's figure, and the whole point of TF-01.
@@ -173,36 +173,27 @@ export default function Recovery() {
  // list under 'error' means we do not know. The merge below keeps those apart
  // per night, and the screen prints a different sentence for each — the bug
  // this app keeps re-reporting is the two of them looking identical.
- const [sleepReads, setSleepReads] = useState<{ reads: SleepRead[]; status: LoadStatus }>({ reads: [], status: 'loading' });
- const loadDeviceSleep = useCallback(async () => {
-   setSleepReads((p) => ({ ...p, status: 'loading' }));
-   try {
-     const reads = await readSleepFromDevices(wear.states, DEVICE_NIGHTS);
-     setSleepReads({ reads, status: 'ready' });
-   } catch (e) {
-     // readSleepFromDevices catches per provider, so reaching here means the
-     // walk itself broke. Still not an empty night: still unknown.
-     reportError('recovery.deviceSleep', e);
-     setSleepReads({ reads: [], status: 'error' });
-   }
- }, [wear.states]);
- // Keyed on WHICH providers are connected rather than on the states object,
- // which is replaced on every 60s sync and would re-read the whole week each
- // time. Connecting or disconnecting a device is the only thing that changes
- // the answer.
- const connectedKey = connectedProviders(wear.states).map((p) => p.meta.id).join(',');
- // `linkRev` is the second half of that key, and its absence was a bug in its
- // own right. Reconnecting a device that was ALREADY in this list does not
- // change the list, so the effect never re-ran and the "needs reconnecting"
- // sentence outlived the reconnect that fixed it — until the app was
- // relaunched. That is report three, verbatim: "Reconnected whoop and it says
- // need to connect whoop."
- useEffect(() => { loadDeviceSleep(); }, [connectedKey, linkRev]);
+ // One loader, shared with Home. Recovery used to own this outright, which is
+ // how the two screens came to disagree about whether any sleep existed at all:
+ // this one showed the week and Home said there was none. The provider keeps
+ // the two things that were bugs in their own right — keying on WHICH providers
+ // are connected rather than the states object, and on linkRev so a reconnect
+ // re-reads. See src/ui/deviceSleep.tsx.
+ const deviceSleep = useDeviceSleep();
+ const sleepReads: { reads: SleepRead[]; status: LoadStatus } = { reads: deviceSleep.reads, status: deviceSleep.status };
+ const loadDeviceSleep = deviceSleep.refresh;
+ // The read, its key, and the merge all live in DeviceSleepProvider now —
+ // including the two things that were bugs here: keying on WHICH providers are
+ // connected rather than on the states object (replaced every 60s), and on
+ // linkRev, without which reconnecting an already-listed device never re-ran
+ // the read and the stale "needs reconnecting" outlived the reconnect that
+ // fixed it. Re-merging here would put this screen and Home back on separate
+ // arithmetic over the same nights, which is the whole reason it moved.
+ const deviceNights = deviceSleep.nights;
 
- const deviceNights = useMemo(
-   () => mergeSleepNights(sleepReads.reads, recentNights(DEVICE_NIGHTS)),
-   [sleepReads],
- );
+ // Still needed here, for the sentence below that names having no device at
+ // all — a different thing from having devices that recorded nothing.
+ const connectedKey = connectedProviders(wear.states).map((p: { meta: { id: string } }) => p.meta.id).join(',');
  const lastNight = deviceNights[0] ?? null;
  const unreadable = sleepReads.reads.filter((r) => r.status === 'error');
  const cannotReport = sleepReads.reads.filter((r) => r.status === 'unsupported');

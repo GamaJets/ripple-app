@@ -5,6 +5,7 @@ import { addNotificationTapListener } from '../src/ui/pushNotifications';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ClientDataProvider } from '../src/ui/clientData';
 import { WearablesProvider } from '../src/ui/wearables';
+import { DeviceSleepProvider } from '../src/ui/deviceSleep';
 import { SessionsProvider } from '../src/ui/sessions';
 import { WorkoutLogProvider } from '../src/ui/workoutLog';
 import { MyTrainerProfileProvider } from '../src/ui/coachProfile';
@@ -103,6 +104,7 @@ export default function RootLayout() {
         <TenantProvider>
         <ClientDataProvider>
           <WearablesProvider>
+                  <DeviceSleepProvider>
             <SessionsProvider>
               <WorkoutLogProvider>
                 <MyTrainerProfileProvider>
@@ -156,7 +158,8 @@ export default function RootLayout() {
                 </MyTrainerProfileProvider>
               </WorkoutLogProvider>
             </SessionsProvider>
-          </WearablesProvider>
+          </DeviceSleepProvider>
+                  </WearablesProvider>
         </ClientDataProvider>
         </TenantProvider>
         </AuthProvider>

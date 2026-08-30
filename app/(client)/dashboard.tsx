@@ -26,7 +26,8 @@ import { useCoachNutrition } from '../../src/ui/coachNutrition';
 import { useAnnouncements } from '../../src/ui/announcements';
 import { useHabits } from '../../src/ui/habits';
 import { useWellness } from '../../src/ui/wellness';
-import { readinessScore } from '../../src/lib/readiness';
+import { readinessScore, readinessSleep } from '../../src/lib/readiness';
+import { useDeviceSleep } from '../../src/ui/deviceSleep';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ONBOARD_KEY } from './onboarding';
 import { useSessions } from '../../src/ui/sessions';
@@ -63,19 +64,24 @@ export default function Home() {
   const ann = useAnnouncements().latest;
   const { water, waterGoal, addWater, removeWater } = useHabits();
   const { sleep } = useWellness();
-  const _recentSleep = sleep.slice(0, 3);
+  // Sleep a device measured, then the wellness log for nights it did not.
+  // Readiness used to read the typed log ALONE, so a client with WHOOP
+  // connected and a week of nights recorded was told to log a night of sleep —
+  // while Recovery, one tap away, was showing them. See readinessSleep.
+  const devSleep = useDeviceSleep();
+  const _sleepFor = readinessSleep(devSleep.nights, sleep, 3);
   // No sleep logged means no readiness score. This used to fall back to 7 hours,
   // which awards 43.75 of the 50 sleep points - so a brand-new account with zero
   // inputs opened on ~64/100 'Moderately recovered' and a tip telling them how to
   // train, all of it computed from a literal.
-  const _avgSleep = _recentSleep.length ? _recentSleep.reduce((a, x) => a + x.hours, 0) / _recentSleep.length : null;
+  const _avgSleep = _sleepFor.avgHours;
   const _since2d = Date.now() - 2 * 86400000;
   const _load2d = new Set(log.filter((e) => Date.parse(e.t) >= _since2d).map((e) => e.t.slice(0, 10))).size;
   // `?? 0` was the bug: no sleep logged became zero hours slept, which scored 20
   // and read as 'Under-recovered'. Nulls now travel as nulls, and readinessScore
   // returns null rather than a number nobody's data supports.
   const readiness = readinessScore({
-    avgSleepHours: _avgSleep ?? null,
+    avgSleepHours: _avgSleep,
     hydrationPct: waterGoal ? water / waterGoal : null,
     workoutsLast2Days: _load2d,
   });
@@ -307,7 +313,19 @@ export default function Home() {
           label="Readiness"
           figure={readiness != null ? String(readiness.score) : '—'}
           unit={readiness != null ? '/100' : undefined}
-          note={readiness != null ? readiness.tip : 'Log a night of sleep to see your readiness.'}
+          note={readiness != null
+            ? readiness.tip
+            // Three different reasons there is no score, and they ask the
+            // reader for three different things. "Log a night of sleep" to
+            // somebody whose watch is connected and syncing is the complaint
+            // this fixed — it asks them to type what the device already knows.
+            : devSleep.status === 'loading'
+              ? 'Reading last night from your devices…'
+              : devSleep.status === 'error'
+                ? 'We could not read your devices just now, so there is no readiness to show — it does not mean you slept badly.'
+                : devSleep.nights.some((n) => n.outcome === 'measured')
+                  ? 'No sleep on record for the last three nights yet.'
+                  : 'Log a night of sleep, or connect a watch, to see your readiness.'}
           arc={readiness != null ? readiness.score / 100 : undefined}
           tone={readiness != null ? readinessColor : undefined}
           onPress={() => router.push('/(client)/recovery')}

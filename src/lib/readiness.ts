@@ -66,3 +66,93 @@ export function readinessScore(i: ReadinessInput): Readiness | null {
   }
   return { score, label, tip, tone };
 }
+
+// ── Which sleep readiness is allowed to use ────────────────────────────────
+//
+// The home screen computed readiness from `useWellness().sleep` alone — the
+// hand-typed wellness log — and nothing else. Sleep read from a watch or a ring
+// went to the Recovery screen and stopped there, so a client with WHOOP
+// connected, the sleep scope granted and a full week of nights recorded opened
+// the app to "Log a night of sleep to see your readiness." Reported exactly
+// that way: "whoop is connected and sleep is also there. its not updating the
+// repple app."
+//
+// A measured night beats a typed one for the same date. Not because somebody
+// typing is careless, but because the device recorded when they actually fell
+// asleep and the person is recalling it in the morning — and when both exist
+// the device is the one with a time behind it.
+//
+// It does not average a measured night with a typed one, and it does not fill a
+// gap with either. A night nobody recorded contributes nothing and shortens the
+// window instead, because readiness over a shorter run of real nights is a
+// smaller claim, and readiness over an invented one is a wrong claim.
+
+export interface ReadinessNight {
+  night: string;
+  hours: number;
+  from: 'device' | 'typed';
+}
+
+export interface ReadinessSleep {
+  /** Mean of the nights that were actually recorded, or null when none were. */
+  avgHours: number | null;
+  /** The nights behind it, newest first — so a screen can say how many. */
+  nights: ReadinessNight[];
+  fromDevice: number;
+  fromTyped: number;
+}
+
+/**
+ * The nights readiness may score, newest first, at most `count` of them.
+ *
+ * `deviceNights` are merged nights from src/lib/sleepMerge — only `measured`
+ * ones carry a figure. `typed` are wellness-log entries, dated by the local day
+ * they were logged for.
+ */
+export function readinessSleep(
+  deviceNights: readonly { night: string; outcome: string; minutesAsleep: number | null }[],
+  typed: readonly { at: string; hours: number }[],
+  count = 3,
+): ReadinessSleep {
+  const byNight = new Map<string, ReadinessNight>();
+
+  for (const d of deviceNights) {
+    if (d.outcome !== 'measured') continue;
+    const m = d.minutesAsleep;
+    if (m == null || !Number.isFinite(m) || m <= 0) continue;
+    if (!byNight.has(d.night)) byNight.set(d.night, { night: d.night, hours: m / 60, from: 'device' });
+  }
+
+  for (const e of typed) {
+    const h = Number(e.hours);
+    if (!Number.isFinite(h) || h <= 0) continue;
+    // The wellness log stores an instant; the night it belongs to is the local
+    // day of that instant. Slicing the ISO string would take the UTC day and
+    // file a 9pm entry under tomorrow for anybody west of Greenwich.
+    const night = localDay(e.at);
+    if (!night) continue;
+    // Only where no device measured it. A device figure already present is not
+    // replaced — see the header.
+    if (!byNight.has(night)) byNight.set(night, { night, hours: h, from: 'typed' });
+  }
+
+  const nights = [...byNight.values()]
+    .sort((a, b) => (a.night < b.night ? 1 : a.night > b.night ? -1 : 0))
+    .slice(0, Math.max(0, count));
+
+  if (!nights.length) return { avgHours: null, nights: [], fromDevice: 0, fromTyped: 0 };
+  return {
+    avgHours: nights.reduce((a, n) => a + n.hours, 0) / nights.length,
+    nights,
+    fromDevice: nights.filter((n) => n.from === 'device').length,
+    fromTyped: nights.filter((n) => n.from === 'typed').length,
+  };
+}
+
+/** The local calendar day of an instant, as YYYY-MM-DD, or null if unreadable. */
+function localDay(iso: string): string | null {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
