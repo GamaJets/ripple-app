@@ -47,7 +47,8 @@ import { ExerciseVideo } from '../../src/ui/ExerciseVideo';
 import { useExerciseVideos, type VideoItem } from '../../src/ui/exerciseVideos';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { tapLight, notifySuccess } from '../../src/ui/haptics';
-import { Rule, Section, SectionHead, ListRow, Notice, Cta, Ghost } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, ListRow, Notice, Cta, Ghost, PartialRead } from '../../src/ui/kit';
+import { useExerciseCatalogue } from '../../src/ui/exerciseDetail';
 import { sp, layout, radius, elevation, type as ty, numeric } from '../../src/theme/scale';
 
 export default function Library() {
@@ -56,6 +57,14 @@ export default function Library() {
  const [q, setQ] = useState('');
  const [group, setGroup] = useState('All');
  const { videos, status, reload } = useExerciseVideos();
+ // The catalogue, which is a different thing from the clips and was never on
+ // this screen. 917 movements exist; nought clips do. A screen called Exercise
+ // Library that could only ever show the second was empty for every client on
+ // the platform, and said "No clips yet" as though that were the whole story.
+ const cat = useExerciseCatalogue();
+ // Rendered in pages. 917 <ListRow>s mounted at once is a visibly janky scroll
+ // on an older phone, and nobody reads past the first screenful anyway.
+ const [catShown, setCatShown] = useState(50);
  const [open, setOpen] = useState<VideoItem | null>(null);
  // Set when the player reports that the clip it was handed cannot be resolved —
  // a share the coach revoked, or a file the signing call could not reach. That
@@ -68,14 +77,22 @@ export default function Library() {
  // so a clip filed under "legs", "Glutes", or the "Uncategorised" default sat in
  // the list under "All" and under nothing else — invisible to the one control on
  // the screen whose job is finding it.
+ //
+ // Drawn from the catalogue as well as the clips. Derived from clips alone the
+ // row was a single 'All' chip, because there are no clips — so the twelve
+ // muscle groups the catalogue is organised by could not be selected at all.
  const groups = useMemo(() => {
   const seen = new Map<string, string>(); // lowercased key → the spelling to show
   for (const v of videos) {
    const g = (v.group || '').trim();
    if (g && !seen.has(g.toLowerCase())) seen.set(g.toLowerCase(), g);
   }
+  for (const e of cat.rows) {
+   const g = (e.group || '').trim();
+   if (g && !seen.has(g.toLowerCase())) seen.set(g.toLowerCase(), g);
+  }
   return ['All', ...[...seen.values()].sort((a, b) => a.localeCompare(b))];
- }, [videos]);
+ }, [videos, cat.rows]);
 
  // A derived chip can vanish underneath the selection — the coach deletes their
  // only Hamstrings clip while the client is standing on that chip. Left alone,
@@ -90,6 +107,14 @@ export default function Library() {
   (term === '' || v.name.toLowerCase().includes(term))
  );
  const filtering = term !== '' || group !== 'All';
+ // The same search box and the same chips drive both lists, so a client typing
+ // 'squat' filters what we can show them AND what they can read about, rather
+ // than filtering one and leaving the other showing everything.
+ const catList = cat.rows.filter((e) =>
+  (group === 'All' || (e.group || '').trim().toLowerCase() === group.toLowerCase()) &&
+  (term === '' || e.name.toLowerCase().includes(term))
+ );
+ useEffect(() => { setCatShown(50); }, [term, group]);
 
  // Whose clip it is, in the same words <ExerciseVideoBlock> uses on the workout
  // screen: one clip described two ways on two screens reads as two facts. A null
@@ -235,6 +260,50 @@ export default function Library() {
        <ListRow icon="video" title={v.name} note={rowNote(v)} onPress={() => show(v)} />
       </View>
      ))}
+    </Section>
+
+    {/* ── every movement we know, clip or no clip ────────────────────────── */}
+    <Rule />
+    <Section>
+     <SectionHead
+      title="All exercises"
+      note={cat.status === 'ready' || cat.status === 'partial' ? `${catList.length} of ${cat.rows.length}` : undefined}
+     />
+     {cat.status === 'loading' ? (
+      <Text style={{ ...ty.label, color: t.ink3 }}>Reading the exercise catalogue…</Text>
+     ) : cat.status === 'error' ? (
+      // Not "no exercises". We have 917 of them; we could not read them.
+      <Notice tone={t.warn} kicker="Catalogue" title="The exercise list could not be read"
+       note="This is our end, not yours — the movements are still there. Try again once you have signal." />
+     ) : catList.length === 0 ? (
+      <Text style={{ ...ty.label, color: t.ink3 }}>
+       {filtering ? `No movement matches ${term ? `“${q.trim()}”` : `${group}`}.` : 'The catalogue is empty.'}
+      </Text>
+     ) : (
+      <>
+       {cat.status === 'partial' ? <PartialRead what="exercises" shown={cat.rows.length} /> : null}
+       {catList.slice(0, catShown).map((e, i) => (
+        <View key={e.id}>
+         {i > 0 ? <Rule /> : null}
+         <ListRow
+          icon={e.hasDemo ? 'play' : 'dumbbell'}
+          title={e.name}
+          note={[e.group, e.hasDemo ? 'demo' : null].filter(Boolean).join(' · ')}
+          onPress={() => router.push({ pathname: '/(client)/exercise', params: { name: e.name } })}
+         />
+        </View>
+       ))}
+       {catList.length > catShown ? (
+        <View style={{ marginTop: sp.md }}>
+         {/* A count, not a bare "Show more". The number is the point: it says
+             how much of the catalogue is still below, which is the thing a
+             client scrolling a list of names actually wants to know. */}
+         <Ghost label={`Show ${Math.min(50, catList.length - catShown)} more of ${catList.length - catShown}`}
+          onPress={() => setCatShown((n) => n + 50)} />
+        </View>
+       ) : null}
+      </>
+     )}
     </Section>
 
    </ScrollView>

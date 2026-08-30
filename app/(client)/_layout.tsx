@@ -46,6 +46,7 @@ export default function ClientLayout() {
       <Tabs.Screen name="devices" options={{ href: null, title: "Watch & Devices" }} />
       <Tabs.Screen name="foodlog" options={{ href: null, title: "Food Log" }} />
       <Tabs.Screen name="library" options={{ href: null, title: "Exercise Library" }} />
+      <Tabs.Screen name="exercise" options={{ href: null, title: "Exercise" }} />
       <Tabs.Screen name="social" options={{ href: null, title: "Share & Social" }} />
       <Tabs.Screen name="appearance" options={{ href: null, title: "Appearance" }} />
       <Tabs.Screen name="coach" options={{ href: null, title: "AI Coach" }} />

@@ -51,6 +51,7 @@
     "src/lib/entryEdit.test.ts",
     "src/lib/vendorSleep.test.ts",
     "src/lib/vendorBody.test.ts",
+    "src/lib/exerciseMedia.test.ts",
     "src/lib/sleepAccess.test.ts",
     "src/lib/clientGoals.test.ts",
     "src/lib/photoInbox.test.ts",
