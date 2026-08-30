@@ -596,7 +596,7 @@ export default function TrainerClients() {
                   note="Accept to join the platform as a trainer and set up your coaching profile.">
                   <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.lg }}>
                     <View style={{ flex: 1 }}><Ghost label="Decline" onPress={() => declineTrainerInvite(iv.id)} /></View>
-                    <View style={{ flex: 2 }}><Cta label="Accept & set up profile" wide onPress={() => acceptJoin(iv.id, iv.ownerName)} /></View>
+                    <View style={{ flex: 2 }}><Cta label="Accept & Set Up Profile" wide onPress={() => acceptJoin(iv.id, iv.ownerName)} /></View>
                   </View>
                 </Notice>
               ))}
@@ -723,14 +723,14 @@ export default function TrainerClients() {
                 don't see a trainer's code", which is the only reasonable
                 reading of that pair. The sheet's own failure text already
                 called it "Invite a client"; the button label had drifted. */}
-            <View style={{ flex: 1 }}><Ghost label="Invite a client" onPress={async () => {
+            <View style={{ flex: 1 }}><Ghost label="Invite a Client" onPress={async () => {
                 setInvEmail(''); setInvMode('online'); setInvOpen(true);
                 setMyCode(null); setMyCodeErr(null);
                 const r = await fetchMyJoinCode();
                 if (r.ok) setMyCode(r.code); else setMyCodeErr(r.reason);
                 setCodeStats(await fetchJoinCodeStats());
               }} /></View>
-            <View style={{ flex: 1 }}><Cta label="Add client" wide onPress={async () => {
+            <View style={{ flex: 1 }}><Cta label="Add Client" wide onPress={async () => {
                 setNewName(''); setNewEmail(''); setNewGoal('Fat loss'); setNewMode('online'); setAddOpen(true);
                 // The code is needed by the alert at the end of THIS flow, so
                 // it has to be loaded on this path too. It was only ever
@@ -761,7 +761,7 @@ export default function TrainerClients() {
           {seg !== 'all' && shownRoster.length > 0 ? (
             <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.md }}>
               <View style={{ flex: 1 }}><Ghost icon="message" label={`Message ${shownRoster.length}`} onPress={bulkMessage} /></View>
-              <View style={{ flex: 1 }}><Ghost icon="grid" label="Assign program" onPress={() => setBulkTplOpen(true)} /></View>
+              <View style={{ flex: 1 }}><Ghost icon="grid" label="Assign Program" onPress={() => setBulkTplOpen(true)} /></View>
             </View>
           ) : null}
 
@@ -1248,7 +1248,7 @@ export default function TrainerClients() {
             <View style={{ flexDirection: 'row', gap: sp.md }}>
               <View style={{ flex: 1 }}><Ghost label="Cancel" onPress={() => setAddOpen(false)} /></View>
               <View style={{ flex: 2 }}>
-                <Cta label="Add client" wide onPress={async () => {
+                <Cta label="Add Client" wide onPress={async () => {
                   if (!newName.trim()) { Alert.alert('Add a name', 'Enter the client name.'); return; }
                   addClient(newName, newGoal, newMode);
                   const em = newEmail.trim();
@@ -1311,7 +1311,7 @@ export default function TrainerClients() {
                 not, and now says so. */}
             <Text style={{ ...ty.label, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>Pins a note on your own dashboard. It is not delivered to your clients — use Broadcast for that.</Text>
             <TextInput value={bcText} onChangeText={setBcText} placeholder="Your announcement…" placeholderTextColor={t.ink3} multiline style={{ ...field(t, 90), marginBottom: sp.lg }} />
-            <Cta label="Pin on my dashboard" wide onPress={() => { if (!bcText.trim()) { Alert.alert('Write something', 'Enter your announcement.'); return; } addAnnouncement(bcText); setBcOpen(false); Alert.alert('Pinned', 'Kept on this device only — your clients have not been sent it. To reach them, use Broadcast, which writes to each client’s message thread.', [{ text: 'Open Broadcast', onPress: () => router.push('/(trainer)/broadcast') }, { text: 'Done', style: 'cancel' }]); }} />
+            <Cta label="Pin on My Dashboard" wide onPress={() => { if (!bcText.trim()) { Alert.alert('Write something', 'Enter your announcement.'); return; } addAnnouncement(bcText); setBcOpen(false); Alert.alert('Pinned', 'Kept on this device only — your clients have not been sent it. To reach them, use Broadcast, which writes to each client’s message thread.', [{ text: 'Open Broadcast', onPress: () => router.push('/(trainer)/broadcast') }, { text: 'Done', style: 'cancel' }]); }} />
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -1364,7 +1364,7 @@ export default function TrainerClients() {
                         ? 'Nobody has used it yet.'
                         : `${codeStats.joined} joined with it${codeStats.pending ? ` · ${codeStats.pending} waiting on you` : ''}.`}
                     </Text>
-                    <Ghost label="New code" onPress={() => {
+                    <Ghost label="New Code" onPress={() => {
                       Alert.alert(
                         'Issue a new code?',
                         'Your current code stops working straight away. Anyone you have already given it to will not be able to use it, and clients who already joined are unaffected.',
@@ -1397,7 +1397,7 @@ export default function TrainerClients() {
             <View style={{ flexDirection: 'row', gap: sp.md }}>
               <View style={{ flex: 1 }}><Ghost label="Cancel" onPress={() => setInvOpen(false)} /></View>
               <View style={{ flex: 2 }}>
-                <Cta label="Send invite" wide onPress={async () => {
+                <Cta label="Send Invite" wide onPress={async () => {
                   const e = invEmail.trim();
                   if (!e || !e.includes('@')) { Alert.alert('Enter an email', 'Add a valid client email address.'); return; }
                   const ok = await sendInvite(e, invMode);
@@ -1466,7 +1466,7 @@ export default function TrainerClients() {
               <View style={{ flexDirection: 'row', gap: sp.sm }}>
                 <Ghost icon="sparkle" label="Redraft" onPress={() => draftNudge(draftClient)} />
                 <View style={{ flex: 1 }}>
-                  <Cta label="Send check-in" wide onPress={sendDraft} />
+                  <Cta label="Send Check-in" wide onPress={sendDraft} />
                 </View>
               </View>
               <Pressable onPress={() => setDraftClient(null)} style={{ paddingVertical: sp.md, alignItems: 'center' }}>

@@ -241,7 +241,7 @@ export default function OwnerLibrary() {
             <Notice tone={t.warn} kicker="Catalogue" title="The exercise list could not be read"
               note="This is our end, not yours — the movements are still there. Nothing below this line is a statement about what the platform covers.">
               <View style={{ marginTop: sp.lg }}>
-                <Ghost label="Try again" onPress={() => { reload(); }} />
+                <Ghost label="Try Again" onPress={() => { reload(); }} />
               </View>
             </Notice>
           ) : (
@@ -252,7 +252,7 @@ export default function OwnerLibrary() {
                   <Text style={{ ...ty.label, color: t.ink3 }}>{emptyLine()}</Text>
                   {filtering ? (
                     <View style={{ flexDirection: 'row', marginTop: sp.md }}>
-                      <Ghost label="Clear filters" onPress={() => { setQ(''); setGroup(ALL); setKit(ALL); }} />
+                      <Ghost label="Clear Filters" onPress={() => { setQ(''); setGroup(ALL); setKit(ALL); }} />
                     </View>
                   ) : null}
                 </View>

@@ -134,7 +134,7 @@ export default function Restaurant() {
                 { label: 'Fat', value: fig(est.fat), unit: 'g' },
               ]} />
               <View style={{ height: sp.xl }} />
-              <Cta label="Add to today" wide onPress={logIt} />
+              <Cta label="Add to Today" wide onPress={logIt} />
               <View style={{ height: sp.sm }} />
               <Ghost label="Cancel" onPress={() => setSel(null)} />
             </>

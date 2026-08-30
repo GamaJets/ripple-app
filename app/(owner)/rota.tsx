@@ -380,7 +380,7 @@ export default function OwnerRota() {
         ) : null}
 
         <View style={{ marginTop: sp.lg }}>
-          <Cta label="Add a shift" wide
+          <Cta label="Add a Shift" wide
             onPress={() => { setDay(days[0] ?? week); setAddOpen(true); }} />
         </View>
       </ScrollView>

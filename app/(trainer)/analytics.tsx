@@ -466,7 +466,7 @@ export default function TrainerAnalytics() {
           <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Client target</Text>
           <TextInput value={gCli} onChangeText={setGCli} keyboardType="number-pad" placeholder="12" placeholderTextColor={t.ink3}
             style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 11, marginBottom: sp.xl }} />
-          <Cta label="Save goals" wide onPress={() => { setGoals({ revenue: parseInt(gRev, 10) || 0, clients: parseInt(gCli, 10) || 0 }); setGoalOpen(false); }} />
+          <Cta label="Save Goals" wide onPress={() => { setGoals({ revenue: parseInt(gRev, 10) || 0, clients: parseInt(gCli, 10) || 0 }); setGoalOpen(false); }} />
           <View style={{ height: sp.sm }} />
           <Ghost label="Cancel" onPress={() => setGoalOpen(false)} />
         </View>

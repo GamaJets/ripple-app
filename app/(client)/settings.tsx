@@ -247,7 +247,7 @@ export default function Settings() {
           <Line t={t} first label="Name" value={auth.loading ? 'Checking\u2026' : fig(auth.user?.name)} />
           <Line t={t} label="Email" value={auth.loading ? 'Checking\u2026' : fig(auth.user?.email)} />
           <View style={{ flexDirection: 'row', marginTop: sp.md }}>
-            <Ghost label="Sign out" onPress={signOut} />
+            <Ghost label="Sign Out" onPress={signOut} />
           </View>
         </Section>
 

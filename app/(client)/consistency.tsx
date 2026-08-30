@@ -80,7 +80,7 @@ export default function Consistency() {
             <Notice tone={t.warn} kicker="Consistency" title="We couldn’t read your training log"
               note="Your streak and your history are intact — this screen just can't see them right now. The blank weeks below are ours, not yours.">
               <View style={{ marginTop: sp.lg }}>
-                <Cta label="Try again" wide onPress={reload} />
+                <Cta label="Try Again" wide onPress={reload} />
               </View>
             </Notice>
           </View>

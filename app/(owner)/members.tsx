@@ -321,7 +321,7 @@ export default function OwnerMembers() {
         </Section>
 
         <View style={{ marginTop: sp.lg }}>
-          <Cta label="Open a membership" wide onPress={() => { setAddOpen(true); setSearch(''); setFound(null); setSearchFailed(false); setPicked(null); }} />
+          <Cta label="Open a Membership" wide onPress={() => { setAddOpen(true); setSearch(''); setFound(null); setSearchFailed(false); setPicked(null); }} />
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm, textAlign: 'center' }}>
             For someone who already has a Repple account. Inviting a brand-new member is not built yet.
           </Text>

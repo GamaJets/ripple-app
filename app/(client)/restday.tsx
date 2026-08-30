@@ -152,7 +152,7 @@ export default function RestDay() {
               : 'Pick the day now rather than deciding on the morning. Marking a rest day on your calendar records what you intend; what you actually do still comes from your training log.'}
           </Text>
           <View style={{ alignSelf: 'flex-start', marginTop: sp.lg }}>
-            <Ghost label="Plan a day" icon="calendar" onPress={() => router.push('/(client)/calendar')} />
+            <Ghost label="Plan a Day" icon="calendar" onPress={() => router.push('/(client)/calendar')} />
           </View>
         </Section>
 

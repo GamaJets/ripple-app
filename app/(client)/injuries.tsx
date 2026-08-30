@@ -52,7 +52,7 @@ export default function Injuries() {
       {nt ? <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>{nt}</Text> : null}
       <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
         {status === 'active' ? (
-          <Ghost label="Mark recovered" icon="check" onPress={() => c.updateInjury(id, { status: 'recovered' })} />
+          <Ghost label="Mark Recovered" icon="check" onPress={() => c.updateInjury(id, { status: 'recovered' })} />
         ) : (
           <Ghost label="Reactivate" onPress={() => c.updateInjury(id, { status: 'active' })} />
         )}
@@ -77,7 +77,7 @@ export default function Injuries() {
           note="For pain, a new injury, or a diagnosis, see a doctor or physio before training." />
 
         <View style={{ marginTop: sp.md }}>
-          <Cta label="Disclose an injury" onPress={() => setOpen(true)} wide />
+          <Cta label="Disclose an Injury" onPress={() => setOpen(true)} wide />
         </View>
 
         {active.length > 0 ? (

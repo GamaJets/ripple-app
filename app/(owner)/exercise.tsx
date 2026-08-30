@@ -217,7 +217,7 @@ export default function OwnerExercise() {
 
         <Rule />
         <Section>
-          <Ghost label="Exercise library" icon="dumbbell" onPress={() => router.push('/(owner)/library')} />
+          <Ghost label="Exercise Library" icon="dumbbell" onPress={() => router.push('/(owner)/library')} />
         </Section>
       </ScrollView>
     </SafeAreaView>

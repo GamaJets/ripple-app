@@ -95,7 +95,7 @@ export default function BroadcastSession() {
             </Text>
           </Card>
           <View style={{ alignItems: 'center', marginTop: sp.md }}>
-            <Ghost label="Or record now" onPress={() => pick(true)} />
+            <Ghost label="Or Record Now" onPress={() => pick(true)} />
           </View>
         </Section>
 

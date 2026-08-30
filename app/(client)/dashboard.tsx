@@ -266,7 +266,7 @@ export default function Home() {
             <Notice tone={t.crit} kicker="From your coach" title="Your plan is adjusted for your injury"
               note={`I've eased off ${sevInj.groups.join(' & ').toLowerCase()} while your ${sevInj.areas.join(' & ').toLowerCase()} ${sevInj.areas.length > 1 ? 'are' : 'is'} severe — risky moves are swapped or paused. Let's train safely around it.`}>
               <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.lg }}>
-                <View style={{ flex: 2 }}><Cta label="Get a safe plan" wide onPress={() => router.push('/(client)/coach?ask=injury')} /></View>
+                <View style={{ flex: 2 }}><Cta label="Get a Safe Plan" wide onPress={() => router.push('/(client)/coach?ask=injury')} /></View>
                 <View style={{ flex: 1 }}><Ghost label="Update" onPress={() => router.push('/(client)/injuries')} /></View>
               </View>
             </Notice>
@@ -280,8 +280,8 @@ export default function Home() {
                 ? `${freezes} freeze${freezes > 1 ? 's' : ''} in reserve — tonight is covered, but training keeps it growing.`
                 : 'Log one session today to keep it alive.'}>
               <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.lg }}>
-                <View style={{ flex: 1 }}><Cta label="Start now" wide onPress={() => router.push('/(client)/workouts')} /></View>
-                {pushAvailable() ? <View style={{ flex: 1 }}><Ghost label="Remind me tonight" onPress={remindTonight} /></View> : null}
+                <View style={{ flex: 1 }}><Cta label="Start Now" wide onPress={() => router.push('/(client)/workouts')} /></View>
+                {pushAvailable() ? <View style={{ flex: 1 }}><Ghost label="Remind Me Tonight" onPress={remindTonight} /></View> : null}
               </View>
             </Notice>
           ) : null}

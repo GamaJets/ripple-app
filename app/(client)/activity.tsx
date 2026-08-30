@@ -131,10 +131,10 @@ export default function Activity() {
                         <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{timeLabel(e.at)}</Text>
                         <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
                           {e.route ? (
-                            <Ghost label="View details" onPress={() => router.push(e.route as any)} />
+                            <Ghost label="View Details" onPress={() => router.push(e.route as any)} />
                           ) : null}
                           {e.hr ? (
-                            <Ghost label="Heart rate" icon="heart" onPress={() => setHrFor(e.hr!)} />
+                            <Ghost label="Heart Rate" icon="heart" onPress={() => setHrFor(e.hr!)} />
                           ) : null}
                         </View>
                       </View>

@@ -270,7 +270,7 @@ export default function Nutrition() {
           </View>
           <Rule />
           <Section>
-            <Cta label="Add your measurements" wide onPress={() => router.push('/(client)/scans')} />
+            <Cta label="Add Your Measurements" wide onPress={() => router.push('/(client)/scans')} />
           </Section>
         </ScrollView>
       </SafeAreaView>
@@ -623,7 +623,7 @@ export default function Nutrition() {
                   <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>Back</Text>
                 </Pressable>
                 {cookStep < recipe.steps.length - 1 ? (
-                  <View style={{ flex: 2 }}><Cta label="Next step" wide onPress={() => setCookStep((x) => x + 1)} /></View>
+                  <View style={{ flex: 2 }}><Cta label="Next Step" wide onPress={() => setCookStep((x) => x + 1)} /></View>
                 ) : (
                   <View style={{ flex: 2 }}><Cta label="Finish" wide onPress={() => setCook(false)} /></View>
                 )}
@@ -641,7 +641,7 @@ export default function Nutrition() {
               <Text style={{ ...ty.micro, color: t.ink3 }}>{recipe.slot}</Text>
               <Text style={{ ...ty.title, color: t.ink, textTransform: 'capitalize', marginTop: 4 }}>{recipe.n}</Text>
               <Text style={{ ...ty.label, ...numeric, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>{Math.round(recipe.K * batch)} kcal · P{Math.round(recipe.P * batch)} / C{Math.round(recipe.C * batch)} / F{Math.round(recipe.F * batch)}{batch > 1 ? '  · ' + batch + ' servings' : ''}</Text>
-              <Ghost label="Swap this meal" icon="swap" onPress={() => { swap(recipe.pos, recipe.slot, recipe.idx); setRecipe(null); }} />
+              <Ghost label="Swap This Meal" icon="swap" onPress={() => { swap(recipe.pos, recipe.slot, recipe.idx); setRecipe(null); }} />
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginTop: sp.lg, marginBottom: sp.lg }}>
                 <Text style={{ ...ty.label, color: t.ink2 }}>Servings</Text>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.sm, paddingVertical: 4 }}>
@@ -650,7 +650,7 @@ export default function Nutrition() {
                   <Pressable accessibilityLabel="More servings" accessibilityRole="button" onPress={() => setBatch((b) => Math.min(8, b + 1))} style={{ width: 30, height: 30, alignItems: 'center', justifyContent: 'center' }}><Icon name="plus" size={15} color={t.ink} /></Pressable>
                 </View>
                 {recipe.steps && recipe.steps.length > 0 ? (
-                  <View style={{ flex: 1 }}><Cta label="Cook mode" wide onPress={() => { setCookStep(0); setCook(true); }} /></View>
+                  <View style={{ flex: 1 }}><Cta label="Cook Mode" wide onPress={() => { setCookStep(0); setCook(true); }} /></View>
                 ) : null}
               </View>
               <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Ingredients</Text>
@@ -706,7 +706,7 @@ export default function Nutrition() {
               </View>
             ))}
             <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.sm }}>
-              <View style={{ flex: 1 }}><Cta label="Share list" wide onPress={shareGrocery} /></View>
+              <View style={{ flex: 1 }}><Cta label="Share List" wide onPress={shareGrocery} /></View>
               <View style={{ flex: 1 }}><Ghost label="Close" onPress={() => setShowGrocery(false)} /></View>
             </View>
           </ScrollView>

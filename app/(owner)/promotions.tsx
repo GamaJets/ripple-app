@@ -135,7 +135,7 @@ export default function Promotions() {
           <View pointerEvents={busy ? 'none' : 'auto'} style={{ opacity: busy ? 0.6 : 1 }}>
             <Cta label={busy ? 'Working…' : 'Create & push to members'} wide onPress={() => create(true)} />
             <View style={{ height: sp.sm }} />
-            <Ghost label="Save without pushing" onPress={() => create(false)} />
+            <Ghost label="Save Without Pushing" onPress={() => create(false)} />
           </View>
         </Section>
 

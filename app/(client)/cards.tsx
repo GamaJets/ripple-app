@@ -126,7 +126,7 @@ export default function Cards() {
           <ShareCard t={t} appName={appName} kicker={card.kicker} big={card.big} unit={card.unit} sub={card.sub} />
 
           <View style={{ marginTop: layout.section }}>
-            <Cta label="Share this card" wide disabled={!card.available} onPress={shareCard} />
+            <Cta label="Share This Card" wide disabled={!card.available} onPress={shareCard} />
           </View>
           <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.md }}>
             {card.available ? 'Tip: screenshot the card above to post the visual too.'

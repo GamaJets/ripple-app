@@ -206,7 +206,7 @@ function MacroRef({ t }: { t: Theme }) {
  No carbohydrate figure here: carbs fill whatever calories are left once protein and fat are set, and that depends on the goal your meal plan is built to.
  </Text>
  <View style={{ marginTop: sp.lg }}>
- <Cta label="Open your meal plan" wide onPress={() => router.push('/(client)/nutrition')} />
+ <Cta label="Open Your Meal Plan" wide onPress={() => router.push('/(client)/nutrition')} />
  </View>
  </Section>
  </>) : (
@@ -224,7 +224,7 @@ function MacroRef({ t }: { t: Theme }) {
  </Text>
  {c.status === 'ready' ? (
  <View style={{ marginTop: sp.lg }}>
- <Cta label="Add your measurements" wide onPress={() => router.push('/(client)/scans')} />
+ <Cta label="Add Your Measurements" wide onPress={() => router.push('/(client)/scans')} />
  </View>
  ) : null}
  </Section>

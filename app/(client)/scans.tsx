@@ -783,7 +783,7 @@ export default function Scans() {
           <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.lg }}>
             <View style={{ flex: 1 }}><Ghost label="Upload" onPress={() => { if (!photoBusy) addPhoto(false); }} /></View>
             <View style={{ flex: 1 }}><Ghost label="Photo" onPress={() => { if (!photoBusy) addPhoto(true); }} /></View>
-            <View style={{ flex: 1 }}><Cta label="AI check" wide disabled={photoBusy} onPress={() => physiqueCheck(false)} /></View>
+            <View style={{ flex: 1 }}><Cta label="AI Check" wide disabled={photoBusy} onPress={() => physiqueCheck(false)} /></View>
           </View>
           {photoBusy ? <Text style={{ ...ty.caption, fontWeight: '500', color: t.ink2, marginBottom: sp.md }}>Saving to your account…</Text> : null}
           {shareBusy ? <Text style={{ ...ty.caption, fontWeight: '500', color: t.ink2, marginBottom: sp.md }}>Updating what your coach can see…</Text> : null}
@@ -804,7 +804,7 @@ export default function Scans() {
                 <Flag tone={t.warn}>
                   {sharesErr} Nothing has changed either way — this screen just could not read the list, so it will not tell you these are private.
                 </Flag>
-                <View style={{ alignSelf: 'flex-start', marginTop: sp.sm }}><Ghost label="Try again" onPress={loadShares} /></View>
+                <View style={{ alignSelf: 'flex-start', marginTop: sp.sm }}><Ghost label="Try Again" onPress={loadShares} /></View>
               </View>
             ) : shares === null ? (
               <Text style={{ ...ty.label, color: t.ink3 }}>Checking what your coach can see…</Text>
@@ -848,7 +848,7 @@ export default function Scans() {
                 <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
                   {photosErr} Nothing has been deleted — this screen only failed to read the list, so it cannot tell you what is there.
                 </Text>
-                <View style={{ alignSelf: 'flex-start' }}><Ghost label="Try again" onPress={loadPhotos} /></View>
+                <View style={{ alignSelf: 'flex-start' }}><Ghost label="Try Again" onPress={loadPhotos} /></View>
               </View>
             ) : (
               <Text style={{ ...ty.label, color: t.ink3 }}>Loading your photos…</Text>
@@ -1119,7 +1119,7 @@ export default function Scans() {
                 accessibilityLabel={wu === 'kg' ? 'Skeletal muscle in kilograms' : 'Skeletal muscle in pounds'} style={input} />
             </View>
             {weightNote ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: -sp.md, marginBottom: sp.lg }}>{weightNote}</Text> : null}
-            <Cta label="Save scan & update profile" wide onPress={saveScan} />
+            <Cta label="Save Scan & Update Profile" wide onPress={saveScan} />
 
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginTop: sp.xl, marginBottom: sp.sm }}>
               <Text style={{ ...ty.micro, color: t.ink3 }}>Scan history</Text><Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{scans.length} scans</Text>
@@ -1194,7 +1194,7 @@ export default function Scans() {
                   ) : null}
                   {focusToGroups(phys.focusAreas).length > 0 ? (
                     <View style={{ marginTop: sp.lg }}>
-                      <Cta label="Emphasise these in my plan" wide onPress={() => { cd.setFocusAreas(focusToGroups(phys.focusAreas)); setPhysOpen(false); Alert.alert('Plan updated', 'Your Train tab now emphasises ' + focusToGroups(phys.focusAreas).join(', ') + ' — those exercises are tagged and prioritised until your next photo.'); }} />
+                      <Cta label="Emphasise These in My Plan" wide onPress={() => { cd.setFocusAreas(focusToGroups(phys.focusAreas)); setPhysOpen(false); Alert.alert('Plan updated', 'Your Train tab now emphasises ' + focusToGroups(phys.focusAreas).join(', ') + ' — those exercises are tagged and prioritised until your next photo.'); }} />
                     </View>
                   ) : null}
                 </View>

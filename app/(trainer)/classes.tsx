@@ -203,7 +203,7 @@ export default function TrainerClasses() {
           {status === 'error' ? (
             <Notice tone={t.warn} kicker="Timetable" title="Your schedule could not be read"
               note="Nothing is listed below because the classes did not come back — it does not mean nothing is scheduled. Anything you add here may duplicate a class that is already on the timetable, so check again once you have signal.">
-              <View style={{ marginTop: sp.md }}><Ghost label="Try again" onPress={refresh} /></View>
+              <View style={{ marginTop: sp.md }}><Ghost label="Try Again" onPress={refresh} /></View>
             </Notice>
           ) : status === 'partial' ? (
             <PartialRead what="classes on your timetable" shown={upcoming.length} onPress={refresh} />
@@ -229,7 +229,7 @@ export default function TrainerClasses() {
                   </View>
                   <Text style={{ ...ty.caption, color: t.ink3 }}>{!countsKnown ? 'capacity' : full ? 'full' : 'booked'}</Text>
                 </View>
-                <Ghost label="Check in" onPress={() => router.push({ pathname: '/(trainer)/class-checkin', params: { id: c.id, title: c.title, branch: c.branch } })} />
+                <Ghost label="Check In" onPress={() => router.push({ pathname: '/(trainer)/class-checkin', params: { id: c.id, title: c.title, branch: c.branch } })} />
               </View>
             );
           })}

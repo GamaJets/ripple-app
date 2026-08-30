@@ -375,7 +375,7 @@ export default function TrainerSchedule() {
             <Ghost label={`Add ${DOW[avDow]} ${avHour % 12 || 12}${avHour >= 12 ? 'pm' : 'am'}`} icon="plus" onPress={() => addAvail(avDow, avHour, 60)} />
           </ScrollView>
           <View style={{ height: sp.lg }} />
-          <Cta label="Generate open slots · next 4 weeks" wide onPress={generateSlots} />
+          <Cta label="Generate Open Slots · Next 4 Weeks" wide onPress={generateSlots} />
           <View style={{ height: sp.sm }} />
           <Ghost label="Done" onPress={() => setAvailOpen(false)} />
         </View>

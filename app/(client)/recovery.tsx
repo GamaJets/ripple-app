@@ -279,7 +279,7 @@ export default function Recovery() {
   />
   <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, paddingBottom: layout.section }}>
    <Ghost icon="minus" onPress={removeCup} />
-   <View style={{ flex: 1 }}><Cta label="Add a glass" wide onPress={addCup} /></View>
+   <View style={{ flex: 1 }}><Cta label="Add a Glass" wide onPress={addCup} /></View>
   </View>
 
   <Rule />
@@ -399,7 +399,7 @@ export default function Recovery() {
     ))}
    </View>
    <View style={{ height: sp.md }} />
-   <Cta label="Log sleep" wide disabled={!(parseFloat(hrs) > 0) || q < 1} onPress={() => { addSleep(parseFloat(hrs) || 0, q); setHrs(''); setQ(0); }} />
+   <Cta label="Log Sleep" wide disabled={!(parseFloat(hrs) > 0) || q < 1} onPress={() => { addSleep(parseFloat(hrs) || 0, q); setHrs(''); setQ(0); }} />
    {sleep.length === 0 ? (
     <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.lg }}>No nights logged yet — log one above and your average appears here.</Text>
    ) : null}
@@ -447,7 +447,7 @@ export default function Recovery() {
         for one. The Train screen reads `mode` in an effect rather than in a
         useState initialiser, because a tab stays mounted and an initialiser
         runs once in the life of the app. */}
-    <Ghost label="Log a recovery session"
+    <Ghost label="Log a Recovery Session"
       onPress={() => router.push({ pathname: '/(client)/workouts', params: { mode: 'recovery' } })} />
    </View>
   </Section>

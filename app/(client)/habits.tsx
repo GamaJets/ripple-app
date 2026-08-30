@@ -105,7 +105,7 @@ export default function Habits() {
               <Icon name="minus" size={16} color={t.ink2} />
             </Pressable>
             <View style={{ flex: 1 }}>
-              <Cta label="Add a glass" wide onPress={h.addWater} />
+              <Cta label="Add a Glass" wide onPress={h.addWater} />
             </View>
           </View>
         </Section>

@@ -148,7 +148,7 @@ export default function ResetPassword() {
               <Text style={{ ...ty.body, color: t.ink3, marginBottom: sp.xl }}>
                 This link is invalid or has expired. Request a new one and use it within an hour.
               </Text>
-              <Cta wide label="Request a new link" onPress={() => router.replace('/forgot-password')} />
+              <Cta wide label="Request a New Link" onPress={() => router.replace('/forgot-password')} />
             </>
           ) : null}
 

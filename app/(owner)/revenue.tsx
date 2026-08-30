@@ -177,7 +177,7 @@ export default function OwnerRevenue() {
             <Notice tone={t.warn} kicker="Needs a look" title={`${roll.atRiskCount} trainer${roll.atRiskCount === 1 ? '' : 's'} flagged`}
               note={`${roll.atRiskClients} client${roll.atRiskClients === 1 ? '' : 's'} are with them.`}>
               <View style={{ marginTop: sp.lg }}>
-                <Cta label="Review trainers" wide onPress={() => router.push('/(owner)/trainers')} />
+                <Cta label="Review Trainers" wide onPress={() => router.push('/(owner)/trainers')} />
               </View>
             </Notice>
           ) : (<>

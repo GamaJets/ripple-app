@@ -70,7 +70,7 @@ export default function ForgotPassword() {
           ) : null}
 
           {sent ? (
-            <Cta wide label="Back to sign in" onPress={() => router.back()} />
+            <Cta wide label="Back to Sign In" onPress={() => router.back()} />
           ) : (
             <>
               <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Email</Text>

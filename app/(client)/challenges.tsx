@@ -116,9 +116,9 @@ export default function Challenges() {
               ))}
               <View style={{ marginTop: sp.xl }}>
                 {ch.isJoined(open.id) ? (
-                  <Ghost label="Leave challenge" onPress={() => { const c = open; ch.toggle(c.id); }} />
+                  <Ghost label="Leave Challenge" onPress={() => { const c = open; ch.toggle(c.id); }} />
                 ) : (
-                  <Cta label="Join challenge" wide onPress={() => { const c = open; ch.toggle(c.id); }} />
+                  <Cta label="Join Challenge" wide onPress={() => { const c = open; ch.toggle(c.id); }} />
                 )}
               </View>
               <Pressable onPress={() => setOpen(null)} style={{ paddingVertical: sp.md, alignItems: 'center', marginTop: sp.sm }}>

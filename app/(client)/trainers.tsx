@@ -343,7 +343,7 @@ export default function FindTrainer() {
             <Notice tone={t.warn} kicker="Your coach" title="We couldn’t check who coaches you"
               note="This is our end, not an answer about you. Until it loads we can’t show you your coach or let you leave them, so don’t read this as nobody coaching you.">
               <View style={{ marginTop: sp.lg }}>
-                <Cta label="Try again" wide onPress={() => setAttempt((n) => n + 1)} />
+                <Cta label="Try Again" wide onPress={() => setAttempt((n) => n + 1)} />
               </View>
             </Notice>
           </View>
@@ -383,7 +383,7 @@ export default function FindTrainer() {
                 note={`${COACHED_MODE_SHORT[iv.mode]} coaching. ${COACHING_MODE_NOTE[iv.mode]} Accept to connect — their program, feedback and messaging turn on for you.`}>
                 <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.lg }}>
                   <View style={{ flex: 1 }}><Ghost label="Decline" onPress={() => declineInvite(iv.id)} /></View>
-                  <View style={{ flex: 2 }}><Cta label="Accept invitation" wide onPress={() => acceptCoach(iv.id, iv.coachName, iv.mode)} /></View>
+                  <View style={{ flex: 2 }}><Cta label="Accept Invitation" wide onPress={() => acceptCoach(iv.id, iv.coachName, iv.mode)} /></View>
                 </View>
               </Notice>
             ))}
@@ -441,7 +441,7 @@ export default function FindTrainer() {
             <Notice tone={t.warn} kicker="Directory" title="We couldn’t load the directory"
               note="This is our end, not an empty directory. Until it loads we can't tell you who is coaching on Repple.">
               <View style={{ marginTop: sp.lg }}>
-                <Cta label="Try again" wide onPress={() => setAttempt((n) => n + 1)} />
+                <Cta label="Try Again" wide onPress={() => setAttempt((n) => n + 1)} />
               </View>
             </Notice>
           ) : null}

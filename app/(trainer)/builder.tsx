@@ -379,7 +379,7 @@ export default function Builder() {
         {/* ── templates ──────────────────────────────────────────────────── */}
         <Section>
           <SectionHead title="Templates" note="Save as template" onPress={() => { setTplName(title); setSaveOpen(true); }} />
-          <Ghost label="Start from a template" icon="grid" onPress={() => setTplPick(true)} />
+          <Ghost label="Start From a Template" icon="grid" onPress={() => setTplPick(true)} />
         </Section>
 
         <Rule />
@@ -469,13 +469,13 @@ export default function Builder() {
               ))}
 
               <View style={{ marginTop: sp.lg }}>
-                <Ghost label="Add exercise" icon="plus" onPress={() => { setCustom(''); setPickerDay(di); }} />
+                <Ghost label="Add Exercise" icon="plus" onPress={() => { setCustom(''); setPickerDay(di); }} />
               </View>
             </View>
           ))}
 
           <View style={{ marginTop: days.length ? sp.xl : 0 }}>
-            <Ghost label="Add training day" icon="calendar" onPress={addDay} />
+            <Ghost label="Add Training Day" icon="calendar" onPress={addDay} />
           </View>
         </Section>
 
@@ -502,7 +502,7 @@ export default function Builder() {
           ) : null}
           {assignedNow ? (
             <View style={{ marginTop: sp.md }}>
-              <Ghost label="Revert to auto-generated program" onPress={revert} />
+              <Ghost label="Revert to Auto-generated Program" onPress={revert} />
             </View>
           ) : null}
         </Section>
@@ -718,7 +718,7 @@ export default function Builder() {
             })}
           </ScrollView>
           <View style={{ marginTop: sp.lg }}>
-            <Ghost label="Manage all templates" onPress={() => { setTplPick(false); router.push('/(trainer)/templates'); }} />
+            <Ghost label="Manage All Templates" onPress={() => { setTplPick(false); router.push('/(trainer)/templates'); }} />
           </View>
         </View>
       </Modal>
@@ -735,7 +735,7 @@ export default function Builder() {
           <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Template name</Text>
           <TextInput value={tplName} onChangeText={setTplName} placeholder="e.g. Push · Pull · Legs" placeholderTextColor={t.ink3}
             style={[inp, { marginBottom: sp.xl }]} />
-          <Cta label="Save template" wide onPress={doSaveTemplate} />
+          <Cta label="Save Template" wide onPress={doSaveTemplate} />
           <View style={{ height: sp.sm }} />
           <Ghost label="Cancel" onPress={() => setSaveOpen(false)} />
         </View>

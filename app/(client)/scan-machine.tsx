@@ -197,7 +197,7 @@ export default function ScanMachine() {
               <Notice kicker="Camera" title="Camera access"
                 note="Repple reads the code on a machine, then names the exercise and muscle group for you.">
                 <View style={{ marginTop: sp.lg }}>
-                  <Cta label="Allow camera" wide onPress={requestPermission} />
+                  <Cta label="Allow Camera" wide onPress={requestPermission} />
                 </View>
               </Notice>
             ) : (
@@ -215,10 +215,10 @@ export default function ScanMachine() {
               {reading ? (
                 <Text style={{ ...ty.label, color: t.ink2 }}>Identifying the machine from your photo…</Text>
               ) : (
-                <Ghost label="Identify by photo" icon="camera" onPress={identifyByPhoto} />
+                <Ghost label="Identify by Photo" icon="camera" onPress={identifyByPhoto} />
               )}
               <View style={{ height: sp.sm }} />
-              <Ghost label="No code? Pick the machine yourself" onPress={() => { setManual(true); setNeedsPick(true); setExercise(''); }} />
+              <Ghost label="No Code? Pick the Machine Yourself" onPress={() => { setManual(true); setNeedsPick(true); setExercise(''); }} />
             </Section>
           </View>
         ) : (
@@ -302,7 +302,7 @@ export default function ScanMachine() {
                 <View style={{ flexDirection: 'row', gap: sp.sm }}>
                   <TextInput value={reps} onChangeText={setReps} keyboardType="numeric" placeholder="reps" placeholderTextColor={t.ink3} style={inp} />
                   <TextInput value={kg} onChangeText={setKg} keyboardType="numeric" placeholder="kg" placeholderTextColor={t.ink3} style={inp} />
-                  <Ghost label="Add set" onPress={addSet} />
+                  <Ghost label="Add Set" onPress={addSet} />
                 </View>
                 {sets.length > 0 ? (
                   <View style={{ marginTop: sp.md }}>
@@ -324,9 +324,9 @@ export default function ScanMachine() {
             <Rule />
 
             <Section>
-              <Cta label="Save to workout log" wide onPress={save} />
+              <Cta label="Save to Workout Log" wide onPress={save} />
               <View style={{ height: sp.sm }} />
-              <Ghost label="Scan another machine" onPress={rescan} />
+              <Ghost label="Scan Another Machine" onPress={rescan} />
             </Section>
           </View>
         )}

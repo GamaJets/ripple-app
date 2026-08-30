@@ -78,7 +78,7 @@ export default function Referral() {
               </View>
             ) : null}
             <View style={{ marginTop: sp.lg }}>
-              <Cta label="Share my invite" wide onPress={invite} />
+              <Cta label="Share My Invite" wide onPress={invite} />
             </View>
           </Card>
         </Section>

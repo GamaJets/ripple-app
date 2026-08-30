@@ -224,7 +224,7 @@ export default function Library() {
       <Notice tone={t.warn} kicker="Library" title="We couldn’t load your clips"
        note="This is our end, not your coach's. Until the library loads we can't tell you what they have uploaded.">
        <View style={{ marginTop: sp.lg }}>
-        <Cta label="Try again" wide onPress={() => { reload(); }} />
+        <Cta label="Try Again" wide onPress={() => { reload(); }} />
        </View>
       </Notice>
      ) : null}
@@ -249,7 +249,7 @@ export default function Library() {
         </Text>
         {videos.length > 0 && filtering ? (
          <View style={{ marginTop: sp.md }}>
-          <Ghost label="Clear filters" onPress={() => { setQ(''); setGroup('All'); }} />
+          <Ghost label="Clear Filters" onPress={() => { setQ(''); setGroup('All'); }} />
          </View>
         ) : null}
        </View>
@@ -341,7 +341,7 @@ export default function Library() {
          from the better answer. */}
      {open && (!open.uploaded || unplayable) ? (
       <View style={{ marginTop: sp.lg }}>
-       <Cta label="Look it up on the web" wide onPress={searchWeb} />
+       <Cta label="Look It Up on the Web" wide onPress={searchWeb} />
        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>Opens a YouTube search for {open.name}.</Text>
       </View>
      ) : null}

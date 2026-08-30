@@ -360,7 +360,7 @@ export default function Music() {
  }} />
  </View>
  <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm }}>
- <View style={{ flex: 1 }}><Ghost label="Save to account" onPress={push} /></View>
+ <View style={{ flex: 1 }}><Ghost label="Save to Account" onPress={push} /></View>
  <Ghost label="Harder" onPress={() => { const ni = (intensity < 3 ? intensity + 1 : intensity) as 1 | 2 | 3; setIntensity(ni); generate(salt + 1, ni); }} />
  </View>
  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>

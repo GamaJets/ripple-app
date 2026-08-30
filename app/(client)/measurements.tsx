@@ -185,7 +185,7 @@ export default function Measurements() {
    ))}
    {note ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{note}</Text> : null}
    <View style={{ height: sp.sm }} />
-   <Cta label="Save entry" wide onPress={save} />
+   <Cta label="Save Entry" wide onPress={save} />
   </Section>
 
   <Rule />

@@ -127,12 +127,12 @@ export default function Bookings() {
         {/* ── book something ─────────────────────────────────────────────── */}
         <Section>
           <View style={{ flexDirection: 'row', gap: sp.md }}>
-            <View style={{ flex: 1 }}><Cta label="Book a class" wide onPress={() => router.push('/(client)/classes')} /></View>
+            <View style={{ flex: 1 }}><Cta label="Book a Class" wide onPress={() => router.push('/(client)/classes')} /></View>
             <View style={{ flex: 1 }}><Ghost label="Book PT" onPress={() => router.push('/(client)/calendar')} /></View>
           </View>
           {items.length > 0 ? (
             <View style={{ marginTop: sp.md }}>
-              <Ghost icon="calendar" label="Add to calendar" onPress={addToCalendar} />
+              <Ghost icon="calendar" label="Add to Calendar" onPress={addToCalendar} />
             </View>
           ) : null}
         </Section>

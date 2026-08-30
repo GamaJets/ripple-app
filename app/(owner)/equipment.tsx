@@ -299,7 +299,7 @@ export default function OwnerEquipment() {
         </Section>
 
         <View style={{ marginTop: sp.lg }}>
-          <Cta label="Add equipment" wide onPress={() => setAddOpen(true)} />
+          <Cta label="Add Equipment" wide onPress={() => setAddOpen(true)} />
         </View>
       </ScrollView>
 

@@ -72,7 +72,7 @@ export default function Progression() {
                 ? 'The targets below come from what this phone had before the read failed, so they may not include your last session. Check them against what you actually lifted.'
                 : 'Targets are worked out from your logged lifts, and we couldn’t read them. This is not a sign you haven’t lifted.'}>
               <View style={{ marginTop: sp.lg }}>
-                <Cta label="Try again" wide onPress={reload} />
+                <Cta label="Try Again" wide onPress={reload} />
               </View>
             </Notice>
           </Section>
@@ -89,7 +89,7 @@ export default function Progression() {
             <Text style={{ ...ty.body, color: t.ink2 }}>Log a few weighted sets and your progression targets will appear here.</Text>
             <View style={{ height: sp.lg }} />
             <View style={{ alignSelf: 'flex-start' }}>
-              <Cta label="Log a workout" onPress={() => router.push('/(client)/workouts')} />
+              <Cta label="Log a Workout" onPress={() => router.push('/(client)/workouts')} />
             </View>
           </Section>
           )

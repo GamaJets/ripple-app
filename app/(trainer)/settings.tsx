@@ -227,7 +227,7 @@ export default function TrainerSettings() {
           <Line t={t} label="Role" value={auth.loading ? 'Checking…' : fig(auth.user ? ROLE_LABEL[auth.user.role] ?? auth.user.role : null)} />
           <Line t={t} label="Gym" value={tenantLoading ? 'Checking…' : fig(tenant?.name)} />
           <View style={{ flexDirection: 'row', marginTop: sp.md }}>
-            <Ghost label="Sign out" onPress={signOut} />
+            <Ghost label="Sign Out" onPress={signOut} />
           </View>
 
           {/* A phone left on a bench is a phone left on a bench, whichever of

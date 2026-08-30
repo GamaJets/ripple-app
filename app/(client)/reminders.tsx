@@ -146,14 +146,14 @@ export default function Reminders() {
             <TextInput value={sm} onChangeText={setSm} keyboardType="number-pad" style={num} />
           </View>
           <View style={{ marginTop: sp.md, alignItems: 'flex-start' }}>
-            <Ghost label="Add reminder" icon="plus" onPress={addSupp} />
+            <Ghost label="Add Reminder" icon="plus" onPress={addSupp} />
           </View>
         </Section>
 
         <Rule />
 
         <View style={{ marginTop: layout.section }}>
-          <Cta label="Save & schedule" onPress={saveAndSchedule} wide />
+          <Cta label="Save & Schedule" onPress={saveAndSchedule} wide />
         </View>
       </ScrollView>
     </SafeAreaView>

@@ -215,7 +215,7 @@ export default function Financials() {
                         {note}
                       </Text>
                       {val != null ? (
-                        <Ghost label="Use it" onPress={() => setDraft((d) => ({ ...d, [f.key]: String(val) }))} />
+                        <Ghost label="Use It" onPress={() => setDraft((d) => ({ ...d, [f.key]: String(val) }))} />
                       ) : null}
                     </View>
                   );
@@ -223,7 +223,7 @@ export default function Financials() {
               </View>
             ))}
             <View style={{ height: sp.sm }} />
-            <Cta label="Save & review" wide onPress={save} />
+            <Cta label="Save & Review" wide onPress={save} />
             <View style={{ height: sp.sm }} />
             <Ghost label="Cancel" onPress={() => setEditing(false)} />
           </Section>
@@ -236,7 +236,7 @@ export default function Financials() {
               numbers. Nothing is shown until it comes from you.
             </Text>
             <View style={{ height: sp.lg }} />
-            <Cta label="Enter my figures" wide onPress={openEditor} />
+            <Cta label="Enter My Figures" wide onPress={openEditor} />
           </Section>
         ) : r ? (
           <>
@@ -300,9 +300,9 @@ export default function Financials() {
             <Rule />
 
             <Section>
-              <Cta label="Create a promotion" wide onPress={() => router.push('/(owner)/promotions')} />
+              <Cta label="Create a Promotion" wide onPress={() => router.push('/(owner)/promotions')} />
               <View style={{ height: sp.sm }} />
-              <Ghost label="Update my figures" onPress={openEditor} />
+              <Ghost label="Update My Figures" onPress={openEditor} />
               <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.md }}>
                 Review is generated from the figures you entered — not financial advice.
               </Text>

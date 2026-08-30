@@ -509,7 +509,7 @@ export default function Calendar() {
           ]} />
           {mine.length > 0 ? (
             <View style={{ alignSelf: 'flex-start', marginTop: sp.lg }}>
-              <Ghost label="Add to calendar" icon="calendar"
+              <Ghost label="Add to Calendar" icon="calendar"
                 onPress={async () => {
                   // These two strings leave the app and stay in the client's
                   // real calendar for as long as the events do, where nothing
@@ -642,7 +642,7 @@ export default function Calendar() {
             <Notice tone={t.warn} kicker="This day" title="We couldn’t read your training log"
               note="Sessions with your coach are still shown below, but workouts you logged yourself are not — and the coloured dots are missing from the grid above for the same reason. Nothing has been lost.">
               <View style={{ marginTop: sp.lg }}>
-                <Cta label="Try again" wide onPress={reloadLog} />
+                <Cta label="Try Again" wide onPress={reloadLog} />
               </View>
             </Notice>
           ) : null}
@@ -654,7 +654,7 @@ export default function Calendar() {
             <Notice tone={t.warn} kicker="Planned days" title="We couldn’t read what you’ve planned"
               note="Days you marked ahead are not shown, on this day or on the grid. Nothing you planned has been lost — and nothing here should be read as an unplanned day.">
               <View style={{ marginTop: sp.lg }}>
-                <Cta label="Try again" wide onPress={() => setPlanReload((n) => n + 1)} />
+                <Cta label="Try Again" wide onPress={() => setPlanReload((n) => n + 1)} />
               </View>
             </Notice>
           ) : null}
@@ -691,7 +691,7 @@ export default function Calendar() {
             </View>
           ) : planStatus === 'ready' && canPlan(selISO, todayISO) ? (
             <View style={{ alignSelf: 'flex-start', paddingVertical: sp.md }}>
-              <Ghost label="Plan this day" icon="calendar" onPress={() => openPlanner(selISO)} />
+              <Ghost label="Plan This Day" icon="calendar" onPress={() => openPlanner(selISO)} />
             </View>
           ) : null}
 
@@ -764,7 +764,7 @@ export default function Calendar() {
                 );
               })}
               <View style={{ alignSelf: 'flex-start', marginTop: sp.sm }}>
-                <Ghost label="All activity" onPress={() => router.push('/(client)/activity')} />
+                <Ghost label="All Activity" onPress={() => router.push('/(client)/activity')} />
               </View>
             </View>
           ) : null}
@@ -919,7 +919,7 @@ export default function Calendar() {
             </View>
             {planFor && plans.some((p) => p.dateISO === planFor) ? (
               <View style={{ alignSelf: 'center', marginTop: sp.md }}>
-                <Ghost label="Remove the plan" onPress={removePlan} />
+                <Ghost label="Remove the Plan" onPress={removePlan} />
               </View>
             ) : null}
             <View style={{ alignSelf: 'center', marginTop: sp.md }}>

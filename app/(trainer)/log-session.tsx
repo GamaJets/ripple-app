@@ -193,7 +193,7 @@ export default function LogSession() {
             ))}
 
             <View style={{ marginTop: sp.md }}>
-              <Ghost label="Add exercise" onPress={() => setPicker(true)} />
+              <Ghost label="Add Exercise" onPress={() => setPicker(true)} />
             </View>
           </Section>
 

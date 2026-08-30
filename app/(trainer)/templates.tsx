@@ -95,7 +95,7 @@ export default function Templates() {
         </Text>
 
         <Section>
-          <Cta label="Build a new program" wide onPress={() => router.push('/(trainer)/builder')} />
+          <Cta label="Build a New Program" wide onPress={() => router.push('/(trainer)/builder')} />
         </Section>
 
         <Rule />
@@ -135,7 +135,7 @@ export default function Templates() {
                 </View>
               </View>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.md }}>
-                <View style={{ flex: 1 }}><Cta label="Assign to clients" wide onPress={() => openAssign(tpl)} /></View>
+                <View style={{ flex: 1 }}><Cta label="Assign to Clients" wide onPress={() => openAssign(tpl)} /></View>
                 <Ghost label="Edit" onPress={() => router.push({ pathname: '/(trainer)/builder', params: { templateId: tpl.id } })} />
                 {/* `removeTemplate` resolves false when the delete never
                     reached the server, and the row disappears from this list
@@ -216,7 +216,7 @@ export default function Templates() {
                 );
               })}
               <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.lg }}>
-                <Ghost label="Select all" onPress={() => setPicked(Object.fromEntries(roster.map((c) => [c.id, true])))} />
+                <Ghost label="Select All" onPress={() => setPicked(Object.fromEntries(roster.map((c) => [c.id, true])))} />
                 <View style={{ flex: 1 }}>
                   {/* Withheld, not warned about. One tap here writes over as
                       many training programmes as there are ticks, with no undo

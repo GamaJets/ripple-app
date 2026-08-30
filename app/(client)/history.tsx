@@ -305,7 +305,7 @@ export default function History() {
           {load.reason} Nothing has been lost — this screen only failed to read what is there, so it
           cannot tell you what is in it either way.
         </Text>
-        <View style={{ alignSelf: 'flex-start' }}><Ghost label="Try again" onPress={read} /></View>
+        <View style={{ alignSelf: 'flex-start' }}><Ghost label="Try Again" onPress={read} /></View>
       </Section></>
     );
   }
@@ -323,7 +323,7 @@ export default function History() {
           {historyNote(log)} Log one session and this page starts keeping the score for you —
           month by month, for as long as you train.
         </Text>
-        <Cta label="Log a workout" wide onPress={() => router.push('/(client)/workouts')} />
+        <Cta label="Log a Workout" wide onPress={() => router.push('/(client)/workouts')} />
       </Section></>
     );
   }

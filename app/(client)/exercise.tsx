@@ -226,7 +226,7 @@ export default function ExerciseScreen() {
 
         <Rule />
         <Section>
-          <Ghost label="Exercise library" icon="video" onPress={() => router.push('/(client)/library')} />
+          <Ghost label="Exercise Library" icon="video" onPress={() => router.push('/(client)/library')} />
         </Section>
       </ScrollView>
     </SafeAreaView>

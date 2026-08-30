@@ -56,7 +56,7 @@ export default function Records() {
     <Notice tone={t.warn} kicker="Records" title="We couldn’t read your training log"
      note="Your records are safe — this screen can't see them right now. Nothing has been reset.">
      <View style={{ marginTop: sp.lg }}>
-      <Cta label="Try again" wide onPress={reload} />
+      <Cta label="Try Again" wide onPress={reload} />
      </View>
     </Notice>
    </Section>

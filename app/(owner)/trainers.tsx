@@ -72,7 +72,7 @@ export default function OwnerTrainers() {
             { label: 'Need a look', value: loading ? '—' : String(roll.atRiskCount) },
           ]} />
           <View style={{ marginTop: sp.xl }}>
-            <Cta label="Invite a trainer by email" wide onPress={() => { setInvEmail(''); setInvOpen(true); }} />
+            <Cta label="Invite a Trainer by Email" wide onPress={() => { setInvEmail(''); setInvOpen(true); }} />
           </View>
         </Section>
 
@@ -141,7 +141,7 @@ export default function OwnerTrainers() {
               autoCapitalize="none" keyboardType="email-address" style={input} />
             <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.lg }}>
               <View style={{ flex: 1 }}><Ghost label="Cancel" onPress={() => setInvOpen(false)} /></View>
-              <View style={{ flex: 1 }}><Cta label="Send invite" wide onPress={async () => { await sendTrainerInvite(invEmail); setInvOpen(false); }} /></View>
+              <View style={{ flex: 1 }}><Cta label="Send Invite" wide onPress={async () => { await sendTrainerInvite(invEmail); setInvOpen(false); }} /></View>
             </View>
           </View>
         </KeyboardAvoidingView>

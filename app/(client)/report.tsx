@@ -200,7 +200,7 @@ export default function WeeklyReport() {
         <Rule />
 
         <View style={{ marginTop: layout.section }}>
-          <Cta label="Share my progress" onPress={() => router.push('/(client)/social')} wide />
+          <Cta label="Share My Progress" onPress={() => router.push('/(client)/social')} wide />
         </View>
       </ScrollView>
     </SafeAreaView>

@@ -67,7 +67,7 @@ export default function ClientPackages() {
                   for is still yours — it just is not readable right now.
                 </Text>
                 <View style={{ marginTop: sp.lg }}>
-                  <Ghost label="Try again" onPress={load} />
+                  <Ghost label="Try Again" onPress={load} />
                 </View>
               </View>
             ) : (rows ?? []).length === 0 ? (
@@ -76,7 +76,7 @@ export default function ClientPackages() {
                 <Text style={{ ...ty.head, color: t.ink, marginTop: sp.md }}>No purchases yet</Text>
                 <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: 4, maxWidth: 300 }}>When your coach offers memberships or session packs, buy them from their profile and they'll show up here.</Text>
                 <View style={{ marginTop: sp.lg }}>
-                  <Ghost label="Browse coaches" onPress={() => router.push('/(client)/trainers')} />
+                  <Ghost label="Browse Coaches" onPress={() => router.push('/(client)/trainers')} />
                 </View>
               </View>
             ) : (

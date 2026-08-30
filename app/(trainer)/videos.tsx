@@ -236,7 +236,7 @@ function SharedWith({ video, people, peopleStatus, handAdded, grants, busyKey, o
             Your client list could not be read, so there is nobody to show here. Anyone you have already shared this clip with still has it.
           </Text>
           <View style={{ height: sp.md }} />
-          <Ghost label="Try again" a11yLabel="Try reading your client list again" onPress={onRetryPeople} />
+          <Ghost label="Try Again" a11yLabel="Try reading your client list again" onPress={onRetryPeople} />
         </View>
       ) : null}
 
@@ -246,7 +246,7 @@ function SharedWith({ video, people, peopleStatus, handAdded, grants, busyKey, o
             We could not read who “{video.name}” is shared with, so we are not going to show you a list. This is not a list of nobody — check before you share it again.
           </Text>
           <View style={{ height: sp.md }} />
-          <Ghost label="Try again" a11yLabel={`Try reading who ${video.name} is shared with again`} onPress={onRetryGrants} />
+          <Ghost label="Try Again" a11yLabel={`Try reading who ${video.name} is shared with again`} onPress={onRetryGrants} />
         </View>
       ) : null}
 
@@ -546,7 +546,7 @@ export default function TrainerVideos() {
           <Cta label="Record" wide onPress={() => upload(true)} />
           <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm }}>
             <View style={{ flex: 1 }}><Ghost label="Upload" icon="plus" onPress={() => upload(false)} /></View>
-            <View style={{ flex: 1 }}><Ghost label="Add link" icon="share" onPress={() => { setLName(''); setLGroup(''); setLUrl(''); setLinkOpen(true); }} /></View>
+            <View style={{ flex: 1 }}><Ghost label="Add Link" icon="share" onPress={() => { setLName(''); setLGroup(''); setLUrl(''); setLinkOpen(true); }} /></View>
           </View>
         </Section>
 
@@ -574,7 +574,7 @@ export default function TrainerVideos() {
                 {vids.length ? ' What follows is only what is saved on this phone.' : ''}
               </Text>
               <View style={{ height: sp.md }} />
-              <Ghost label="Try again" onPress={() => { reload(); }} />
+              <Ghost label="Try Again" onPress={() => { reload(); }} />
             </View>
           ) : null}
 
@@ -680,7 +680,7 @@ export default function TrainerVideos() {
           <TextInput value={lName} onChangeText={setLName} placeholder="Exercise name (e.g. Front Squat)" placeholderTextColor={t.ink3} style={input} />
           <TextInput value={lGroup} onChangeText={setLGroup} placeholder="Muscle group (e.g. Legs)" placeholderTextColor={t.ink3} style={input} />
           <TextInput value={lUrl} onChangeText={setLUrl} placeholder="https://…" placeholderTextColor={t.ink3} autoCapitalize="none" keyboardType="url" style={[input, { marginBottom: sp.lg }]} />
-          <Cta label="Add to library" wide onPress={() => { if (!lName.trim()) { Alert.alert('Name needed', 'Give the exercise a name.'); return; } addVideo({ name: lName, group: lGroup, url: lUrl }); setLinkOpen(false); Alert.alert('Added', lName + ' is in the exercise library.'); }} />
+          <Cta label="Add to Library" wide onPress={() => { if (!lName.trim()) { Alert.alert('Name needed', 'Give the exercise a name.'); return; } addVideo({ name: lName, group: lGroup, url: lUrl }); setLinkOpen(false); Alert.alert('Added', lName + ' is in the exercise library.'); }} />
           <View style={{ height: sp.sm }} />
           <Ghost label="Cancel" onPress={() => setLinkOpen(false)} />
         </View>

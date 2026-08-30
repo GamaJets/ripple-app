@@ -111,7 +111,7 @@ export function WhatsNewSheet({ visible, force, onClose }: { visible: boolean; f
             ) : <Body releases={unseen} />}
           </ScrollView>
           <View style={{ marginTop: sp.lg }}>
-            <Cta label="Got it" wide onPress={dismiss} />
+            <Cta label="Got It" wide onPress={dismiss} />
           </View>
         </View>
       </View>

@@ -664,10 +664,10 @@ export default function Train() {
         </View>
         <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.lg }}>
           <View style={{ flex: 1 }}>
-            <Ghost label="Month calendar" icon="calendar" onPress={() => { setSelCalDay(dstr(dateFor(dayIdx))); setShowCal(true); }} />
+            <Ghost label="Month Calendar" icon="calendar" onPress={() => { setSelCalDay(dstr(dateFor(dayIdx))); setShowCal(true); }} />
           </View>
           <View style={{ flex: 1 }}>
-            <Ghost label="Book session" icon="plus" onPress={() => router.push('/(client)/calendar')} />
+            <Ghost label="Book Session" icon="plus" onPress={() => router.push('/(client)/calendar')} />
           </View>
         </View>
 
@@ -695,7 +695,7 @@ export default function Train() {
           onPress={() => router.push('/(client)/week')}
         />
         {mode === 'strength' && exercises.length > 0 ? (
-          <Cta label="Start workout" wide onPress={() => setSession(true)} />
+          <Cta label="Start Workout" wide onPress={() => setSession(true)} />
         ) : null}
 
         <Rule />
@@ -752,7 +752,7 @@ export default function Train() {
                           <Text style={{ ...ty.body, fontWeight: '500', color: t.ink3, textDecorationLine: 'line-through' }} numberOfLines={1}>{e.name}</Text>
                           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>Hidden to protect your {inj ? areaLabel(inj.injury.area).toLowerCase() : 'injury'} (severe) — no safe swap in your plan.</Text>
                         </View>
-                        <Ghost label="Show anyway" onPress={() => setInjRevealed((prev) => [...prev, _id])} />
+                        <Ghost label="Show Anyway" onPress={() => setInjRevealed((prev) => [...prev, _id])} />
                       </View>
                     </View>
                   );
@@ -855,7 +855,7 @@ export default function Train() {
 
               {exercises.length > 0 || customEx.length > 0 ? (
                 <View style={{ marginTop: sp.lg }}>
-                  <Ghost label="Add an exercise you did" icon="plus" onPress={() => { setEditingKey(null); setAddOpen(true); }} />
+                  <Ghost label="Add an Exercise You Did" icon="plus" onPress={() => { setEditingKey(null); setAddOpen(true); }} />
                   {removedEx.filter((u) => u.indexOf(dayIdx + ':') === 0).length > 0 ? (
                     <Ghost label={`Put back ${removedEx.filter((u) => u.indexOf(dayIdx + ':') === 0).length} removed`} icon="swap" onPress={() => { setRemovedEx((prev) => prev.filter((u) => u.indexOf(dayIdx + ':') !== 0)); tapLight(); }} />
                   ) : null}
@@ -864,7 +864,7 @@ export default function Train() {
 
               {Object.keys(logged).some((k) => k.indexOf(dayIdx + ':') === 0 && (logged[k] || []).length > 0) ? (
                 <View style={{ marginTop: sp.md }}>
-                  <Cta label="Save workout to log" wide onPress={saveManual} />
+                  <Cta label="Save Workout to Log" wide onPress={saveManual} />
                 </View>
               ) : null}
             </View>
@@ -1559,7 +1559,7 @@ function TimedSessionRunner({ t, kind, activity, age, defaultUnit, onSave, onClo
           )}
 
           {finalMins > 0 ? (
-            <Cta label="Save to your log" wide onPress={() => onSave({
+            <Cta label="Save to Your Log" wide onPress={() => onSave({
               mins: finalMins,
               dist: parseFloat(dist) || 0,
               unit,
@@ -1630,7 +1630,7 @@ function TimedSessionRunner({ t, kind, activity, age, defaultUnit, onSave, onClo
         <SessionMusicBar />
 
         <View style={{ marginTop: sp.xl }}>
-          <Cta label="Finish session" wide onPress={finish} />
+          <Cta label="Finish Session" wide onPress={finish} />
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -2132,7 +2132,7 @@ function EditEntrySheet({ t, unit, entry, suggestions, onClose, onSave }: {
                       readWorkoutEdit refuses that and names the delete button,
                       because an entry with nothing in it still counts as a
                       session in the calendar and the streak. */}
-                  <Ghost label="Clear the sets and retype them" onPress={() => { setRows([{ reps: '', load: '' }]); tapLight(); }} />
+                  <Ghost label="Clear the Sets and Retype Them" onPress={() => { setRows([{ reps: '', load: '' }]); tapLight(); }} />
                 </View>
               ) : null}
             </View>
@@ -2165,7 +2165,7 @@ function EditEntrySheet({ t, unit, entry, suggestions, onClose, onSave }: {
                   </Pressable>
                 </View>
               ))}
-              <Ghost label="Add set" onPress={() => setRows((p) => [...p, { reps: '', load: p.length ? p[p.length - 1].load : '' }])} />
+              <Ghost label="Add Set" onPress={() => setRows((p) => [...p, { reps: '', load: p.length ? p[p.length - 1].load : '' }])} />
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
                 Leave a load empty for a bodyweight set — it is recorded as no external load rather than as zero.
               </Text>

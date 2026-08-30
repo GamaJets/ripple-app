@@ -527,7 +527,7 @@ export function PartialRead({ what, shown, onPress }: {
       title={shown != null ? `Showing the first ${shown.toLocaleString()}` : 'Showing part of the list'}
       note={`There are more ${what} than fit in one read. What is listed is real and current. The rest are on the server and not on this screen, so anything here that looks like a total is not one.`}
     >
-      {onPress ? <View style={{ marginTop: sp.md }}><Ghost label="Try again" onPress={onPress} /></View> : null}
+      {onPress ? <View style={{ marginTop: sp.md }}><Ghost label="Try Again" onPress={onPress} /></View> : null}
     </Notice>
   );
 }

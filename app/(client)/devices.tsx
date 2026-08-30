@@ -362,7 +362,7 @@ export default function Devices() {
     {wk == null ? (
      wkBusy
       ? <View style={{ alignSelf: 'flex-start', paddingVertical: sp.md }}><ActivityIndicator color={t.brand} /></View>
-      : <View style={{ alignSelf: 'flex-start' }}><Cta label="Find my workouts" onPress={findWorkouts} /></View>
+      : <View style={{ alignSelf: 'flex-start' }}><Cta label="Find My Workouts" onPress={findWorkouts} /></View>
     ) : wk.length === 0 ? (
      <Text style={{ ...ty.label, color: t.ink3 }}>No workouts found in the last {lookbackLabel(lookback)}.</Text>
     ) : (
@@ -390,7 +390,7 @@ export default function Devices() {
        );
       })}
       <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.lg }}>
-       <View style={{ flex: 1 }}><Cta label="Import all" wide onPress={importAll} /></View>
+       <View style={{ flex: 1 }}><Cta label="Import All" wide onPress={importAll} /></View>
        <View style={{ flex: 1 }}><Ghost label="Refresh" onPress={findWorkouts} /></View>
       </View>
      </View>
@@ -436,7 +436,7 @@ export default function Devices() {
        );
       })}
       <View style={{ alignSelf: 'flex-start', marginTop: sp.md }}>
-       <Ghost label="See your nights" onPress={() => router.push('/(client)/recovery')} />
+       <Ghost label="See Your Nights" onPress={() => router.push('/(client)/recovery')} />
       </View>
      </View>
     )}
@@ -471,7 +471,7 @@ export default function Devices() {
      <View style={{ alignSelf: 'flex-start', marginTop: sp.lg }}>
       {hkBusy
        ? <ActivityIndicator color={t.brand} />
-       : <Cta label="See what's ready" onPress={reviewHk} />}
+       : <Cta label="See What's Ready" onPress={reviewHk} />}
      </View>
     ) : hkPlan.writable.length === 0 && hkPlan.skipped.length === 0 ? (
      <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.lg }}>
@@ -528,7 +528,7 @@ export default function Devices() {
            }}
           />
           <Text style={{ ...ty.caption, color: t.ink3 }}>min</Text>
-          <Ghost label="Save length" onPress={() => saveSessionMins(sk.t, sk.key)} />
+          <Ghost label="Save Length" onPress={() => saveSessionMins(sk.t, sk.key)} />
          </View>
         </View>
        ))}
@@ -660,7 +660,7 @@ export default function Devices() {
          );
         })()}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginTop: sp.md }}>
-         <Ghost label="Sync now" onPress={() => { tapLight(); w.sync(p.meta.id); }} />
+         <Ghost label="Sync Now" onPress={() => { tapLight(); w.sync(p.meta.id); }} />
          {w.lastSync[p.meta.id] ? <Text style={{ ...ty.caption, color: t.ink3 }}>Synced {ago(w.lastSync[p.meta.id])}</Text> : null}
         </View>
        </View>

@@ -82,7 +82,7 @@ export default function OwnerBrand() {
 
         <Section>
           <View style={{ alignSelf: 'flex-start' }}>
-            <Ghost label="Reset to default branding"
+            <Ghost label="Reset to Default Branding"
               onPress={() => { setAccent(null); setPalette('teal'); setAppName('Repple'); Alert.alert('Reset', 'Branding restored to Repple defaults.'); }} />
           </View>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
