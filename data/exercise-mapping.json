@@ -1,0 +1,46 @@
+{
+  "//": "Confirmed exercise mappings — our catalogue id → the dataset name whose illustration and instructions describe the SAME movement. Each was decided by reading both names against the movement they describe, not by string similarity: similarity paired Back Squat with Hack Squat at 0.90 and Hip Abduction with Cable Hip Adduction, the opposite movement. Our name and muscle group always win; only the media and the written steps come across. An entry absent from this file stays unmapped and shows no demonstration, which is the correct outcome for a movement nobody has confirmed.",
+  "mappings": {
+    "ab-crunch": "Crunches",
+    "assisted-pull-up": "Band Assisted Pull-Up",
+    "back-extension": "Hyperextensions (Back Extensions)",
+    "back-squat": "Barbell Squat",
+    "bench-press": "Barbell Bench Press - Medium Grip",
+    "bent-over-row": "Bent Over Barbell Row",
+    "bicep-curl": "Dumbbell Bicep Curl",
+    "cable-kickback": "One-Legged Cable Kickback",
+    "calf-raise": "Standing Calf Raises",
+    "chest-press": "Leverage Chest Press",
+    "deadlift": "Barbell Deadlift",
+    "front-squat": "Front Barbell Squat",
+    "glute-bridge": "Butt Lift (Bridge)",
+    "hammer-curl": "Hammer Curls",
+    "hip-abduction": "Thigh Abductor",
+    "hip-thrust": "Barbell Hip Thrust",
+    "lat-pulldown": "Wide-Grip Lat Pulldown",
+    "lateral-raise": "Side Lateral Raise",
+    "leg-curl": "Lying Leg Curls",
+    "leg-extension": "Leg Extensions",
+    "overhead-press": "Standing Military Press",
+    "overhead-tricep-extension": "Cable Rope Overhead Triceps Extension",
+    "pec-deck": "Butterfly",
+    "pull-up": "Pullups",
+    "push-up": "Pushups",
+    "rear-delt-fly": "Reverse Flyes",
+    "seated-row": "Seated Cable Rows",
+    "shoulder-press": "Dumbbell Shoulder Press",
+    "standing-calf-raise": "Standing Calf Raises",
+    "tricep-pushdown": "Triceps Pushdown",
+    "walking-lunge": "Bodyweight Walking Lunge"
+  },
+  "deliberately_unmapped": {
+    "bulgarian-split-squat": "The dataset has 'Split Squat with Dumbbells' and 'Suspended Split Squat'. Neither is a Bulgarian split squat, which is defined by the rear foot being elevated on a bench. Close is not the same movement.",
+    "nordic-curl": "Not in the dataset in any form.",
+    "cable-machine": "Not a movement — it is a piece of equipment, and should probably not be a catalogue row at all.",
+    "smith-machine": "Same: equipment, not a movement."
+  },
+  "duplicates_found": {
+    "tricep-pushdown / triceps-pushdown": "Two rows for one movement, both 'Arms'. Both now map to the dataset's 'Triceps Pushdown' so neither is blank, but one should be retired once nothing references it.",
+    "calf-raise / standing-calf-raise": "The generic 'Calf Raise' IS the standing calf raise. Both map to the same illustration for the same reason."
+  }
+}

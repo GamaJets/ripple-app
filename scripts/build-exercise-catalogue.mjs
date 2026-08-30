@@ -35,6 +35,7 @@ const SRC = join(ROOT, 'data/free-exercise-db.json');
 const OUT_SQL = join(ROOT, 'supabase/parts/71-exercise-catalogue.sql');
 const OUT_REVIEW = join(ROOT, 'docs/exercise-mapping-review.tsv');
 const SEED_49 = join(ROOT, 'supabase/parts/49-exercise-video-library.sql');
+const MAPPING = join(ROOT, 'data/exercise-mapping.json');
 
 /** Mirrors exerciseSlug() in src/lib/exerciseId.ts. The two MUST agree: it is
  *  the only thing that ties a program's exercise name to a catalogue row, and
@@ -103,8 +104,47 @@ for (const x of src) {
   });
 }
 
-// Our rows the dataset does not contain stay exactly as they are, with no
-// media and no instructions. That is an honest gap, not a row to invent.
+// ── the confirmed mappings ──────────────────────────────────────────────────
+//
+// Decided by a person reading both names against the movement they describe,
+// and recorded as data in data/exercise-mapping.json rather than as logic here.
+// That file is the reviewable artefact: a wrong line in it is a wrong picture
+// in front of a client, and it should be possible to check it without reading
+// JavaScript.
+//
+// Our NAME and GROUP still win — only the media and the written steps come
+// across. A mapping naming a movement the dataset does not have is a hard
+// error, because the alternative is a row that silently stays blank while this
+// file claims it was mapped.
+const mapCfg = JSON.parse(readFileSync(MAPPING, 'utf8'));
+const byName = new Map(src.map((x) => [x.name, x]));
+const badMappings = [];
+let mapped = 0;
+for (const [id, sourceName] of Object.entries(mapCfg.mappings || {})) {
+  const was = existing.get(id);
+  if (!was) { badMappings.push(`${id} is not in the catalogue`); continue; }
+  const x = byName.get(sourceName);
+  if (!x) { badMappings.push(`${id} → "${sourceName}" — no dataset entry by that name`); continue; }
+  if (rows.has(id) && rows.get(id).source === 'free-exercise-db') continue; // already exact-matched
+  mapped++;
+  rows.set(id, {
+    id, name: was.name, group: was.group, cardio: was.cardio,
+    category: x.category ?? null, equipment: x.equipment ?? null, level: x.level ?? null,
+    mechanic: x.mechanic ?? null, force: x.force ?? null,
+    primaryMuscles: x.primaryMuscles || [], secondaryMuscles: x.secondaryMuscles || [],
+    instructions: x.instructions || [], images: x.images || [],
+    source: 'repple+free-exercise-db',
+  });
+}
+if (badMappings.length) {
+  console.error(`build-exercise-catalogue: ${badMappings.length} bad mappings in data/exercise-mapping.json:`);
+  for (const b of badMappings) console.error('  ' + b);
+  process.exit(1);
+}
+
+// Our rows the dataset does not contain, and the ones nobody has confirmed,
+// stay exactly as they are — no media and no instructions. That is an honest
+// gap, not a row to invent.
 let kept = 0;
 for (const [id, was] of existing) {
   if (rows.has(id)) continue;
@@ -122,7 +162,11 @@ if (collisions.length) {
 }
 
 // ── the review file: what a human still has to decide ───────────────────────
-const unlinked = [...existing.values()].filter((e) => !linked.some((l) => l.id === e.id) && !e.cardio);
+const confirmed = new Set(Object.keys(mapCfg.mappings || {}));
+const declined = new Set(Object.keys(mapCfg.deliberately_unmapped || {}));
+const unlinked = [...existing.values()].filter(
+  (e) => !linked.some((l) => l.id === e.id) && !e.cardio && !confirmed.has(e.id) && !declined.has(e.id),
+);
 const norm = (s) => s.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
 const score = (a, b) => {
   const A = new Set(norm(a).split(' ')), B = new Set(norm(b).split(' '));
@@ -234,7 +278,7 @@ writeFileSync(join(ROOT, 'data/exercise-catalogue.json'), JSON.stringify(ordered
 
 console.log(
   `exercise catalogue: ${ordered.length} rows (was ${existing.size}) — `
-  + `${linked.length} of ours enriched by an exact slug match, ${kept} left as they were, `
+  + `${linked.length} exact-matched, ${mapped} confirmed by hand, ${kept} left as they were, `
   + `${ordered.length - existing.size} new.\n`
   + `  ${OUT_SQL.replace(ROOT + '/', '')}\n`
   + `  ${OUT_REVIEW.replace(ROOT + '/', '')} — ${review.length - 1} mappings for a human to confirm`,
