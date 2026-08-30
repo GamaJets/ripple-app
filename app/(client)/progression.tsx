@@ -15,6 +15,8 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
+import { useSettings } from '../../src/ui/settings';
+import { liftIn, liftLabel, liftDeltaIn, convertedNote } from '../../src/lib/units';
 import { suggestProgression, type ProgressAction } from '../../src/lib/progression';
 import { Rule, Section, SectionHead, KpiRow, Notice, Cta, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
@@ -30,6 +32,14 @@ export default function Progression() {
   const t = useTheme();
   const router = useRouter();
   const { log, status: logStatus, reload } = useWorkoutLog();
+  // This screen tells somebody what to load on a bar, so it is the one place
+  // in the app where reading the wrong unit is not a cosmetic problem. The
+  // double-progression arithmetic stays in kilograms — its 2.5 kg step is a
+  // pair of 1.25 kg plates, not a rounded pound figure — and the targets are
+  // read out at the half-pound `liftIn` uses, which is what an imperial rack
+  // of 1.25 lb fractionals can actually make.
+  const wu = useSettings().weightUnit;
+  const unitNote = convertedNote(wu);
   const tips = suggestProgression(log);
   const G = layout.gutter;
 
@@ -48,7 +58,7 @@ export default function Progression() {
 
         <Rule />
 
-        {/* This screen prescribes a load in kilograms, and every target is
+        {/* This screen prescribes a load, and every target is
             anchored to the most recent set it can see. With the read failed
             that anchor is either missing entirely — "log a few weighted sets",
             said to someone who has logged hundreds — or it is whatever this
@@ -90,6 +100,13 @@ export default function Progression() {
               const m = META[tip.action];
               const c = m.color(t);
               const bump = tip.nextWeight - tip.lastWeight;
+              // The jump is converted as a SPAN. The commonest one this
+              // screen produces is 2.5 kg, which is 5.5 lb — and subtracting
+              // the two loads AFTER rounding each to the half-pound gives 5.0
+              // or 5.5 depending on where the last session's load happened to
+              // sit, so the same two plates would be described differently
+              // from one week to the next.
+              const bumpShown = liftDeltaIn(bump, wu);
               return (
                 <View key={tip.exercise} style={{ paddingVertical: sp.lg, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
@@ -98,7 +115,7 @@ export default function Progression() {
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{tip.exercise}</Text>
-                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>Last: {tip.lastWeight}kg × {tip.lastReps}</Text>
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>Last: {fig(liftLabel(tip.lastWeight, wu))} × {tip.lastReps}</Text>
                     </View>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                       <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: c }} />
@@ -108,9 +125,9 @@ export default function Progression() {
                   <View style={{ height: sp.md }} />
                   <KpiRow items={[
                     {
-                      label: 'Target load', value: fig(tip.nextWeight), unit: 'kg',
+                      label: 'Target load', value: fig(liftIn(tip.nextWeight, wu)), unit: wu,
                       good: bump >= 0,
-                      delta: bump !== 0 ? `${bump > 0 ? '+' : '−'}${Math.abs(bump)} kg` : 'same weight',
+                      delta: bump !== 0 && bumpShown != null ? `${bumpShown > 0 ? '+' : '−'}${Math.abs(bumpShown)} ${wu}` : 'same weight',
                     },
                     { label: 'Target reps', value: fig(tip.nextReps) },
                   ]} />
@@ -125,6 +142,11 @@ export default function Progression() {
           <Rule />
           <Section>
             <Text style={{ ...ty.caption, color: t.ink3 }}>Double-progression: clear the top of the rep range on every working set, then the weight goes up and reps reset. These are guidance — log what you actually lift.</Text>
+            {/* The targets are worked out on metric plates and read out in
+                pounds, so an imperial rack will not always have the exact
+                figure above. Saying so is the difference between a target and
+                an instruction nobody can follow. */}
+            {unitNote ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{unitNote} Load the nearest thing your gym has.</Text> : null}
           </Section>
         </>) : null}
       </ScrollView>

@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Your coach invited you — Repple</title>
+  <link rel="canonical" href="https://www.repplefitness.com/join">
+<meta name="description" content="Someone invited you to train with them on Repple. Get the app and enter their code.">
+<meta name="robots" content="noindex">
+<link rel="stylesheet" href="styles.css?v=276220735b">
+<link rel="icon" href="favicon.png">
+<script>
+/* The phone header. Links collapse behind one button; without JavaScript they
+   simply stay in the bar and wrap, which is why the collapsed state is gated on
+   the js-nav class rather than being the default. */
+document.documentElement.classList.add('js-nav');
+addEventListener('DOMContentLoaded', function () {
+  var nav = document.querySelector('nav.site');
+  var btn = nav && nav.querySelector('.nav-toggle');
+  if (!btn) return;
+  function shut() {
+    nav.classList.remove('open');
+    btn.setAttribute('aria-expanded', 'false');
+    btn.setAttribute('aria-label', 'Open menu');
+  }
+  btn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    var open = nav.classList.toggle('open');
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    btn.setAttribute('aria-label', open ? 'Close menu' : 'Open menu');
+  });
+  document.addEventListener('click', function (e) { if (!nav.contains(e.target)) shut(); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') shut(); });
+  addEventListener('resize', shut);
+});
+</script>
+</head>
+<body>
+
+<!--
+  THE LANDING PAGE FOR A COACH'S INVITE LINK.
+
+  A coach shares "join me, my code is E32ZMZ" into WhatsApp. The message is
+  composed on the COACH's phone and read on somebody else's, so the sending
+  device says nothing about which store the reader needs — the link has to
+  resolve itself when it is opened. That is what this page is for, and it is why
+  there is a page at all rather than a store URL in the message.
+
+  On a phone it redirects to that phone's store after a beat. On a desktop it
+  does not — neither store app is there and a bounce helps nobody. The other
+  store stays on the page either way: user agents lie, iPads report as Macs, and
+  a reader on a laptop is on neither store, so nobody is left without a way
+  through.
+
+  The store addresses are the canonical ones, same as /download — they start
+  working by themselves the moment each listing is published. Checked 30 Aug
+  2026: both still 404, which is why the callout below says so rather than
+  letting a reader tap a badge into a dead page. Delete that callout when the
+  listings are live; nothing else here changes.
+
+  The code is rendered from ?c= and is shown BEFORE any of that, because it is
+  the one thing that must survive: a reader who cannot install today still
+  leaves with the code their coach sent.
+-->
+
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="/">
+      <span class="mark">
+        <svg width="22" height="22" viewBox="0 0 100 100" aria-hidden="true">
+          <g fill="none" stroke="#04211d" stroke-width="8"><circle cx="50" cy="50" r="32" opacity=".45"/><circle cx="50" cy="50" r="20" opacity=".75"/></g>
+          <circle cx="50" cy="50" r="8.5" fill="#04211d"/>
+        </svg>
+      </span>
+      Repple
+    </a>
+    <nav class="site">
+      <div class="nav-links" id="site-menu">
+      <a href="/client">Members</a>
+      <a href="/trainer">Coaches</a>
+      <a href="/studio">Gyms</a>
+      <a href="/support">Support</a>
+      <a class="get" href="/download"><svg class="getico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="6.6" y="2.5" width="10.8" height="19" rx="2.6"/><path d="M12 8.6v6.2"/><path d="M9.5 12.3 12 14.8l2.5-2.5"/></svg>Get the app</a>
+      </div>
+      <a class="cta" href="/signup">Create account</a>
+      <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-menu" aria-label="Open menu">
+        <svg class="ico-open" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+        <svg class="ico-close" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="page">
+
+    <p class="eyebrow">You have been invited</p>
+    <h1 class="display">Train with your coach on Repple</h1>
+    <p class="lede" id="who">Someone has invited you to train with them. Get the app, then enter
+       their code when it asks.</p>
+
+    <div class="callout" id="codebox" hidden>
+      <p class="eyebrow">Their code</p>
+      <p class="mono" id="code" style="font-size:30px;letter-spacing:.14em;margin:6px 0 10px"></p>
+      <button class="btn" type="button" id="copy">Copy code</button>
+      <p class="compare-note" id="copied" hidden>Copied.</p>
+    </div>
+
+    <div class="callout">
+      <p><strong>Being released now.</strong> Repple is in its first release and the store listings
+         are still going live. The buttons below are the real App Store and Google Play addresses
+         and will open the listing the moment it is published &mdash; if one does not open yet,
+         that app has not finished going out.</p>
+      <p>You do not have to wait to be useful to your coach: email
+         <a href="mailto:support@repplefitness.com">support@repplefitness.com</a> with the code
+         above and whether you are on iPhone or Android, and we will get you onto the test build.</p>
+    </div>
+
+    <h2 class="hd" id="storehd">Get Repple</h2>
+    <div class="btn-row" id="stores">
+      <a class="store" id="ios" href="https://apps.apple.com/app/id6790096518"><img class="apple on-light" src="badges/app-store.svg" alt="Download on the App Store" width="120" height="40"><img class="apple on-dark" src="badges/app-store-white.svg" alt="Download on the App Store" width="120" height="40"></a>
+      <a class="store" id="android" href="https://play.google.com/store/apps/details?id=com.washateria.repple"><img class="play" src="badges/google-play.png" alt="Get it on Google Play" width="646" height="250"></a>
+    </div>
+    <p class="compare-note" id="other"></p>
+
+    <h2 class="hd">Once it is installed</h2>
+    <div class="rows">
+      <div class="row"><span class="node">1</span><span>Open Repple and create your account.</span></div>
+      <div class="row"><span class="node">2</span><span>Tap <strong>Find a trainer</strong>.</span></div>
+      <div class="row"><span class="node">3</span><span>Enter the code above. Your coach gets the request and accepts it.</span></div>
+    </div>
+
+    <p class="compare-note" style="margin-top:22px">Looking for the coach or gym app instead?
+       <a href="/download">All three are here</a>.</p>
+
+  </div>
+</main>
+
+<footer class="site">
+  <div class="wrap">
+    <span>© 2026 Repple</span>
+    <span>
+      <a href="/support">Support</a> ·
+      <a href="/privacy">Privacy</a> ·
+      <a href="/security">Security</a> ·
+      <a href="/terms">Terms</a>
+    </span>
+  </div>
+</footer>
+
+<script>
+(function () {
+  // The code the coach shared. Read from the query string and shown before
+  // anything else — a reader who cannot install today still leaves with it.
+  // Rendered with textContent, never innerHTML: this value arrives from a URL
+  // anybody can edit, and it is drawn on a page we serve.
+  var code = '';
+  try {
+    code = (new URLSearchParams(location.search).get('c') || '').trim();
+  } catch (e) { code = ''; }
+  // The codes this app issues are short and alphanumeric. Anything else is not
+  // a code, and showing it back would let a stranger put their own words on a
+  // Repple page and send the link on.
+  if (/^[A-Za-z0-9]{4,12}$/.test(code)) {
+    var up = code.toUpperCase();
+    var el = document.getElementById('code');
+    el.textContent = up;
+    document.getElementById('codebox').hidden = false;
+    document.getElementById('who').textContent =
+      'Someone has invited you to train with them. Get the app, then enter the code below when it asks.';
+    var btn = document.getElementById('copy');
+    btn.addEventListener('click', function () {
+      try {
+        navigator.clipboard.writeText(up);
+        document.getElementById('copied').hidden = false;
+      } catch (e) { /* no clipboard: the code is on screen to be typed */ }
+    });
+  }
+
+  // Send them to their own store.
+  //
+  // REDIRECT is what the owner asked for, and this is the switch. Set false and
+  // the page renders with the right store button first instead — no other
+  // change. It is a constant rather than a build flag so that flipping it is a
+  // one-word edit somebody can make under pressure.
+  //
+  // Checked 30 Aug 2026: BOTH listings return 404. iOS is TestFlight-only and
+  // Android is on an internal track, so until each listing is published this
+  // redirect lands an invited client on Apple's or Google's "not available"
+  // page. The store addresses are the permanent ones, so the day a listing goes
+  // live this starts working with no edit here.
+  //
+  // The code is read and shown BEFORE this runs, and the redirect is deferred a
+  // beat, so a reader who lands on a store that is not there yet has still seen
+  // the code their coach sent and can come back to this page for it.
+  var REDIRECT = true;
+  var REDIRECT_AFTER_MS = 1200;
+
+  var ua = navigator.userAgent || '';
+  var isAndroid = /Android/i.test(ua);
+  var isIOS = /iPad|iPhone|iPod/i.test(ua)
+    || (/Macintosh/.test(ua) && typeof document.ontouchstart !== 'undefined');
+  var stores = document.getElementById('stores');
+  var other = document.getElementById('other');
+  if (isAndroid) {
+    stores.insertBefore(document.getElementById('android'), document.getElementById('ios'));
+    other.textContent = 'On an iPhone instead? The App Store link is beside it.';
+  } else if (isIOS) {
+    other.textContent = 'On Android instead? The Google Play link is beside it.';
+  } else {
+    document.getElementById('storehd').textContent = 'Get Repple on your phone';
+    other.textContent = 'Repple is a phone app — open this link on the phone you train with.';
+  }
+
+  // Desktop is never redirected: neither store app exists there, and a reader on
+  // a laptop needs the page, not a bounce.
+  if (REDIRECT && (isAndroid || isIOS)) {
+    var target = document.getElementById(isAndroid ? 'android' : 'ios').href;
+    var note = document.getElementById('other');
+    note.textContent = 'Taking you to the ' + (isAndroid ? 'Google Play Store' : 'App Store') + '…';
+    // A link, not a replace: leaving this page in history means a client who
+    // arrives at a store listing that is not published yet can press Back and
+    // still have the code and the email route. history.replaceState would take
+    // that away at exactly the moment they need it.
+    setTimeout(function () { location.href = target; }, REDIRECT_AFTER_MS);
+  }
+})();
+</script>
+</body>
+</html>

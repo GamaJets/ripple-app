@@ -12,6 +12,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
+import { useSettings } from '../../src/ui/settings';
+import { est1RMIn, liftLabel, convertedNote } from '../../src/lib/units';
 import { personalRecords } from '../../src/lib/streaks';
 import { Rule, Section, SectionHead, Hero, Ghost, Notice, Cta, fig } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty, numeric, value } from '../../src/theme/scale';
@@ -20,6 +22,12 @@ export default function Records() {
  const t = useTheme();
  const router = useRouter();
  const { log, status: logStatus, reload } = useWorkoutLog();
+ const wu = useSettings().weightUnit;
+ const note = convertedNote(wu);
+ // Ranked in the kilograms the board is stored in, and only then read out. The
+ // order would come out the same either way today, but an estimate rounded to
+ // the whole pound can tie two lifts that are a kilogram apart, and a board
+ // sorted on the rounded figure would then order those two arbitrarily.
  const prs = [...personalRecords(log)].sort((a, b) => b.est1RM - a.est1RM);
  const top = prs[0];
  const dstr = (iso: string) => new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
@@ -67,10 +75,15 @@ export default function Records() {
    {/* ── the hero: the heaviest thing you have lifted ────────────────── */}
    <Hero
     label="Heaviest lift"
-    figure={fig(top.est1RM)}
-    unit="kg est. 1RM"
-    note={`${top.exercise} · best set ${top.weight} kg × ${top.reps} on ${dstr(top.at)}`}
+    figure={fig(est1RMIn(top.est1RM, wu))}
+    unit={`${wu} est. 1RM`}
+    note={`${top.exercise} · best set ${fig(liftLabel(top.weight, wu))} × ${top.reps} on ${dstr(top.at)}`}
    />
+   {/* The board is kept in kilograms and read out in pounds, so the figures
+       here and the ones on a coach's console are the same lifts said twice
+       rather than a discrepancy. Absent for a metric reader, who is being
+       shown the record itself. */}
+   {note ? <Text style={{ ...ty.caption, color: t.ink3 }}>{note}</Text> : null}
 
    <Rule />
 
@@ -81,11 +94,11 @@ export default function Records() {
       <Text style={{ ...ty.caption, ...numeric, color: t.ink3, width: 18 }}>{i + 1}</Text>
       <View style={{ flex: 1 }}>
        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{pr.exercise}</Text>
-       <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>Best set {pr.weight} kg × {pr.reps} · {dstr(pr.at)}</Text>
+       <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>Best set {fig(liftLabel(pr.weight, wu))} × {pr.reps} · {dstr(pr.at)}</Text>
       </View>
       <View style={{ alignItems: 'flex-end' }}>
-       <Text style={{ ...value(17), color: t.ink }}>{pr.est1RM}</Text>
-       <Text style={{ ...ty.caption, color: t.ink3 }}>est 1RM</Text>
+       <Text style={{ ...value(17), color: t.ink }}>{fig(est1RMIn(pr.est1RM, wu))}</Text>
+       <Text style={{ ...ty.caption, color: t.ink3 }}>est 1RM · {wu}</Text>
       </View>
      </View>
     ))}

@@ -45,6 +45,8 @@ import { RECOVERY_ACTIVITIES } from '../../src/lib/recoveryActs';
 import { HIIT_ACTIVITIES, MOBILITY_ACTIVITIES } from '../../src/lib/workoutKind';
 import { attributionLine } from '../../src/lib/workoutAttribution';
 import { dayKeyOf, instantForDay, readWorkoutEdit } from '../../src/lib/entryEdit';
+import { useSettings } from '../../src/ui/settings';
+import { liftIn, liftLabel, readLift, plain, volumeHeadline, convertedNote, type WeightUnit } from '../../src/lib/units';
 
 const WEEK = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 // Session catalog. Each activity carries its own MET value, because the two used
@@ -156,6 +158,14 @@ export default function Train() {
   const coachProgram = cd.coachingMode === 'solo' ? null : _cp;
   const w = useWearables();
   const { log: workoutLog, addWorkouts, updateWorkout, removeWorkout } = useWorkoutLog();
+  // The unit the member reads a LOAD in. Deliberately left out of TF-37 —
+  // barbell plates are metric hardware and tools.tsx does its plate maths
+  // against a metric rack — and asked for since: "Need to be able to select kg
+  // or pounds". Nothing below is stored in it. Every load reaching the log is
+  // kilograms; this converts at the two edges, what is printed and what is
+  // typed, through src/lib/units.ts.
+  const wu = useSettings().weightUnit;
+  const loadNote = convertedNote(wu);
   const program = coachProgram ?? buildProgram(cd.goal, cd.bodyFatPct);
   const jsToMon = (new Date().getDay() + 6) % 7;
   const [dayIdx, setDayIdx] = useState(jsToMon);
@@ -167,13 +177,22 @@ export default function Train() {
     .find((m) => m === modeParam) ?? 'strength';
   const [mode, setMode] = useState<'strength' | 'cardio' | 'hiit' | 'mobility' | 'recovery'>(startMode);
   const [swaps, setSwaps] = useState<Record<string, string>>({});
+  // `kg` is KILOGRAMS, whatever unit the member typed it in. The conversion
+  // happens once, in `LogRow` at the keyboard, rather than being deferred to
+  // the save — so a draft written in pounds and reopened after the setting is
+  // changed still means the weight that was actually lifted, and `quickLog`
+  // (whose suggestion is already metric) can hand a number straight in without
+  // being converted a second time.
   const [logged, setLogged] = useState<Record<string, { reps: string; kg: string }[]>>({});
 
   const [cardioLog, setCardioLog] = useState<{ type: string; mins: number; dist: number; unit: string; kcal: number | null }[]>([]);
   const [nlw, setNlw] = useState('');
   const logWorkoutNL = async () => {
     const lifts = parseWorkoutText(nlw);
-    if (!lifts.length) { Alert.alert('Could not read that', 'Try e.g. "bench 3x8 60kg, squat 100kg 5 5 5".'); return; }
+    // The example is written in the member's own unit. parseWorkoutText reads
+    // "60kg" and "135lb" but takes a bare number as kilograms, so telling a
+    // pounds member to type "100kg" is the one hint that would mislead them.
+    if (!lifts.length) { Alert.alert('Could not read that', wu === 'lb' ? 'Try e.g. "bench 3x8 135lb, squat 225lb 5 5 5".' : 'Try e.g. "bench 3x8 60kg, squat 100kg 5 5 5".'); return; }
     const nowISO = new Date().toISOString();
     const saved = await addWorkouts(lifts.map((l) => ({ t: nowISO, exercise: l.exercise, sets: l.sets, kcal: Math.round(l.sets.reduce((a, [r, w]) => a + r * (w || 0), 0) / 60) + l.sets.length * 8 })));
     setNlw('');
@@ -364,11 +383,22 @@ export default function Train() {
   const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
   const monthLabel = monday0.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
 
+  // What is ALREADY in the log for the weekday the strip is on.
+  //
+  // "No way to edit or delete an exercise that has been entered." Both have
+  // existed since TF-02 — but only inside the month-calendar modal, three taps
+  // from here, on a day you have to find and tap first. A member looking at
+  // Train saw the plan and the draft they were typing and nothing they had
+  // already saved, so the entry they wanted to fix was not on screen and
+  // neither was any way to fix it. It is on screen now.
+  const stripDay = dstr(dateFor(dayIdx));
+  const stripEntries = workoutLog.filter((l) => dayKeyOf(l.t) === stripDay);
   const activeCalDay = selCalDay || dstr(today0);
   const dayEntries = workoutLog.filter((l) => dayKeyOf(l.t) === activeCalDay);
   const dayVolume = dayEntries.reduce((a, l) => a + (l.sets ? l.sets.reduce((x: number, s: number[]) => x + (s[0] || 0) * (s[1] || 0), 0) : 0), 0);
   const daySets = dayEntries.reduce((a, l) => a + (l.sets ? l.sets.length : 0), 0);
   const dayKcal = dayEntries.reduce((a, l) => a + (l.kcal || 0), 0);
+  const dayHeadline = volumeHeadline(dayVolume, wu);
   const prettyDay = (ds: string) => { const [y, m, d] = ds.split('-').map(Number); return new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' }); };
 
   const programDays = Array.isArray(program && program.days) ? program.days : [];
@@ -400,6 +430,55 @@ export default function Train() {
   const planEx = orderedExercises.filter((e) => !isRemovedEx(e));
 
   const isCustomEx = (e: ProgramExercise) => e.key.indexOf('custom-') === 0;
+
+  /**
+   * Delete something already in the log. Confirmed first, and believed only
+   * when the server says the row is gone.
+   *
+   * The confirm was always here; what was missing is that the row left the
+   * screen whether or not the delete landed, so a refused one looked done and
+   * the session — with its volume and its calories — was back at the next
+   * launch. `removeWorkout` resolves false in that case and leaves `log`
+   * alone, and this says so rather than swallowing it.
+   */
+  const deleteEntry = (l: WorkoutEntry) => {
+    Alert.alert(
+      'Delete this entry?',
+      `${l.exercise} will be removed from your log, and this day's volume and calories go down by it.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete', style: 'destructive', onPress: async () => {
+          if (!(await removeWorkout(l))) {
+            Alert.alert('Not deleted', `${l.exercise} is still in your log — we could not reach the server to remove it.`);
+          }
+        } },
+      ],
+    );
+  };
+
+  /**
+   * Movements to offer when somebody is replacing a logged exercise.
+   *
+   * Today's plan and its catalogue alternatives first — a mis-tapped lift is
+   * almost always one of the movements sitting next to it — then everything
+   * the member has ever logged a weighted set against, which is the only list
+   * that knows what they actually do. Deduplicated case-insensitively, because
+   * "Back Squat" and "back squat" are one exercise everywhere else in this app
+   * and offering both would let somebody split their own PR history in two.
+   */
+  const knownExercises = (() => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    const add = (n?: string | null) => {
+      const v = (n ?? '').trim();
+      const k = v.toLowerCase();
+      if (v && !seen.has(k)) { seen.add(k); out.push(v); }
+    };
+    for (const e of exercises) { add(e.name); for (const a of e.alternatives || []) add(a); }
+    for (const e of customEx) add(e.name);
+    for (const l of workoutLog) if (l.sets && l.sets.length) add(l.exercise);
+    return out;
+  })();
 
   /** Take an exercise off today. Confirmed, because any sets already logged
    *  against it go with it. */
@@ -458,13 +537,13 @@ export default function Train() {
   const heroNote = exercises.length === 0
     ? 'Rest day — nothing scheduled'
     : `~${estMin} min` + (doneCount > 0 ? ` · ${doneCount} of ${exercises.length} done` : '');
-  const logSet = (e: ProgramExercise, reps: string, kg: string) => { if (!reps) return; setLogged({ ...logged, [uid(e)]: [...(logged[uid(e)] || []), { reps, kg }] }); tapLight(); };
+  const logSet = (e: ProgramExercise, reps: string, kg: number | null) => { if (!reps) return; setLogged({ ...logged, [uid(e)]: [...(logged[uid(e)] || []), { reps, kg: kg == null ? '' : String(kg) }] }); tapLight(); };
   // One tap records the set the plan is asking for — TF-27, "can't tap an
   // exercise to log it". This function has existed here unreferenced: the only
   // way to record a set was to expand the row and type the two numbers the app
   // had already worked out and was showing you. It is offered next to that
   // suggestion, so the number you tap is the number you are looking at.
-  const quickLog = (e: ProgramExercise) => { const sg = suggestForExercise(workoutLog, nameOf(e), e.reps); logSet(e, String(parseInt(e.reps, 10) || 8), sg ? String(sg.weight) : ''); };
+  const quickLog = (e: ProgramExercise) => { const sg = suggestForExercise(workoutLog, nameOf(e), e.reps); logSet(e, String(parseInt(e.reps, 10) || 8), sg ? sg.weight : null); };
   // One write path for every non-strength session, whether it was timed live in
   // the runner below or typed in afterwards. History, the calendar and the
   // trends all read this one shape, so a second writer would only be a second
@@ -540,6 +619,8 @@ export default function Train() {
     const entries: WorkoutEntry[] = [...exercises.filter((e) => !isRemovedEx(e)), ...customEx].map((e) => {
       const s = logged[uid(e)] || [];
       if (!s.length) return null;
+      // Already kilograms — `LogRow` converted at the keyboard. Converting
+      // again here would multiply a pounds member's load by 0.45 twice.
       const setPairs = s.map((x) => [parseInt(x.reps, 10) || 0, parseFloat(x.kg) || 0] as [number, number]);
       const bestE1 = Math.max(0, ...setPairs.map(([r, kg]) => (r && kg ? est1RM(kg, r) : 0)));
       if (bestE1 > priorBest1RM(workoutLog, nameOf(e))) pr = true;
@@ -634,6 +715,12 @@ export default function Train() {
 
           {mode === 'strength' ? (
             <View>
+              {/* Loads on this screen are typed and read in the member's unit
+                  and stored in kilograms, so their coach's console and this
+                  will show the same set two different ways. Said once, here,
+                  rather than beside every figure — and not at all for the
+                  metric majority, who are reading the record itself. */}
+              {loadNote ? <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>{loadNote}</Text> : null}
               {deload.due && !deloadDismiss ? (
                 <Notice tone={t.s3} kicker="Recovery" title="Time for a deload week"
                   note={`${deload.reason} Drop to ~60% of your usual sets or weight this week.`}>
@@ -692,7 +779,7 @@ export default function Train() {
                             ) : null}
                             {flag ? <Icon name="heart" size={13} color={t.s3} /> : null}
                           </View>
-                          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{e.group} · {sets.length}/{e.sets} sets{!open && sug ? ' · ' + sug.weight + 'kg' : ''}</Text>
+                          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{e.group} · {sets.length}/{e.sets} sets{!open && sug ? ' · ' + fig(liftLabel(sug.weight, wu)) : ''}</Text>
                         </View>
                         <Pressable accessibilityRole="button" accessibilityLabel={'Remove ' + nameOf(e)} onPress={() => removeExercise(e)} hitSlop={8} style={{ padding: 4 }}><Icon name="minus" size={16} color={t.ink3} /></Pressable>
                         <View style={{ transform: [{ rotate: open ? '90deg' : '0deg' }] }}><Icon name="chevron" size={16} color={t.ink3} /></View>
@@ -701,7 +788,9 @@ export default function Train() {
                         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: sp.md, alignItems: 'center' }}>
                           {sets.map((s, i) => (
                             <View key={i} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 9, paddingVertical: 5 }}>
-                              <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{s.reps}×{s.kg || '–'}kg</Text>
+                              {/* A blank load is a bodyweight set, and stays a
+                                  dash rather than becoming "0" — see readLift. */}
+                              <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{s.reps}×{fig(liftIn(s.kg === '' ? null : Number(s.kg), wu))} {wu}</Text>
                             </View>
                           ))}
                           <Pressable onPress={() => setLogged((prev) => { const n = { ...prev }; delete n[_id]; return n; })} hitSlop={6} style={{ paddingHorizontal: 4 }}>
@@ -727,13 +816,13 @@ export default function Train() {
                             {sug ? (
                               <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 7 }}>
                                 <Icon name="target" size={14} color={t.brand} />
-                                <Text style={{ ...value(15), color: t.ink }}>{sug.weight} kg</Text>
+                                <Text style={{ ...value(15), color: t.ink }}>{fig(liftLabel(sug.weight, wu))}</Text>
                                 {sug.up ? <Text style={{ ...ty.label, fontWeight: '500', color: t.brand }}>↑</Text> : null}
                                 <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }} numberOfLines={1}>{sug.reason}</Text>
                                 {/* Tap the suggestion to take it. The row it
                                     fills in is still below, so a different
                                     weight is still one edit away. */}
-                                <Pressable accessibilityRole="button" accessibilityLabel={`Log ${e.reps} reps at ${sug.weight} kilos of ${nameOf(e)}`} onPress={() => quickLog(e)}
+                                <Pressable accessibilityRole="button" accessibilityLabel={`Log ${e.reps} reps at ${fig(liftLabel(sug.weight, wu))} of ${nameOf(e)}`} onPress={() => quickLog(e)}
                                   style={{ backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: 6 }}>
                                   <Text style={{ ...ty.caption, fontWeight: '600', color: t.brand }}>Log this</Text>
                                 </Pressable>
@@ -747,7 +836,7 @@ export default function Train() {
                             <Pressable accessibilityLabel={'Watch a demonstration of ' + nameOf(e)} accessibilityRole="button" onPress={() => setVideoFor(nameOf(e))} style={{ width: 38, height: 38, backgroundColor: t.surface2, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' }}><Icon name="video" size={15} color={t.ink2} /></Pressable>
                             <Pressable accessibilityRole="button" accessibilityLabel={isCustom ? 'Edit ' + nameOf(e) : 'Swap ' + nameOf(e)} onPress={() => replaceExercise(e)} style={{ width: 38, height: 38, backgroundColor: t.surface2, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' }}><Icon name={isCustom ? 'pencil' : 'swap'} size={15} color={flag ? t.s3 : t.ink2} /></Pressable>
                           </View>
-                          <LogRow t={t} onLog={(reps, kg) => logSet(e, reps, kg)} />
+                          <LogRow t={t} unit={wu} onLog={(reps, kg) => logSet(e, reps, kg)} />
                         </View>
                       ) : null}
                     </View>
@@ -853,6 +942,50 @@ export default function Train() {
           )}
         </Section>
 
+        {/* ── what is already in the log for this day ─────────────────────── */}
+        {/*
+            Reported as "No way to edit or delete an exercise that has been
+            entered." Both actions existed, behind the month calendar; nothing
+            on the screen a member logs from ever showed them what they had
+            already saved, so there was nothing to tap. This is that list, on
+            the day the strip is on, with both actions on every row.
+        */}
+        {stripEntries.length > 0 ? (<>
+          <Rule />
+          <Section>
+            <SectionHead title="Already in your log" note={prettyDay(stripDay)} />
+            {stripEntries.map((l, i) => (
+              <View key={l.id ?? `${l.t}-${l.exercise}-${i}`}>
+                {i > 0 ? <Rule /> : null}
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }} numberOfLines={1}>{l.exercise}</Text>
+                    <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }} numberOfLines={1}>
+                      {l.sets && l.sets.length
+                        ? l.sets.map((st) => `${st[0]}×${fig(liftIn(st[1] || null, wu))}`).join('  ') + ` ${wu}`
+                        : l.cardio
+                        ? [`${l.cardio.mins} min`, l.cardio.dist > 0 ? `${l.cardio.dist} ${l.cardio.unit}` : null].filter(Boolean).join(' · ')
+                        : 'Logged'}
+                    </Text>
+                  </View>
+                  <Pressable accessibilityRole="button" accessibilityLabel={'Edit or replace ' + l.exercise} onPress={() => { tapLight(); setEditEntry(l); }} hitSlop={8}
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: 7 }}>
+                    <Icon name="pencil" size={14} color={t.ink2} />
+                    <Text style={{ ...ty.caption, fontWeight: '500', color: t.ink }}>Edit</Text>
+                  </Pressable>
+                  <Pressable accessibilityRole="button" accessibilityLabel={'Delete ' + l.exercise} onPress={() => deleteEntry(l)} hitSlop={8} style={{ padding: 4 }}>
+                    <Icon name="minus" size={16} color={t.crit} />
+                  </Pressable>
+                </View>
+              </View>
+            ))}
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+              Edit lets you fix the sets or swap the movement for the right one — the sets come with it, so you do not have to
+              type them again. Deleting asks first, and only reports it done once the server has actually removed it.
+            </Text>
+          </Section>
+        </>) : null}
+
         <Rule />
 
         {/* ── log by text ────────────────────────────────────────────────── */}
@@ -869,7 +1002,12 @@ export default function Train() {
                 Scrolling to the end on focus puts it above the keyboard. The
                 frame of delay is for the inset to be applied first; scrolling
                 before that lands short by the height of the keyboard. */}
-            <TextInput value={nlw} onChangeText={setNlw} placeholder='"bench 3x8 60kg, squat 5 5 5 100kg"' placeholderTextColor={t.ink3}
+            {/* The unit is written into the example on purpose. parseWorkoutText
+                reads "60kg" and "135lb", but a BARE number — "bench 3x8 @135" —
+                it takes as kilograms, and it has no way to know who is typing.
+                Showing a pounds member an example that carries "lb" is what
+                stops a 135 lb bench being recorded as a 135 kg one. */}
+            <TextInput value={nlw} onChangeText={setNlw} placeholder={wu === 'lb' ? '"bench 3x8 135lb, squat 5 5 5 225lb"' : '"bench 3x8 60kg, squat 5 5 5 100kg"'} placeholderTextColor={t.ink3}
               onFocus={() => { setTimeout(() => pageScroll.current?.scrollToEnd({ animated: true }), 120); }}
               onSubmitEditing={logWorkoutNL} returnKeyType="done" style={inp} />
             <Pressable onPress={logWorkoutNL} disabled={!nlw.trim()} accessibilityRole="button" accessibilityLabel="Log workout from text" style={{ backgroundColor: nlw.trim() ? t.brand : t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, justifyContent: 'center' }}>
@@ -897,6 +1035,8 @@ export default function Train() {
       {editEntry ? (
         <EditEntrySheet
           t={t}
+          unit={wu}
+          suggestions={knownExercises}
           entry={editEntry}
           onClose={() => setEditEntry(null)}
           // The sheet closes only once the server has the correction. It used
@@ -1019,7 +1159,11 @@ export default function Train() {
                     <KpiRow items={[
                       { label: 'Exercises', value: fig(dayEntries.length) },
                       { label: 'Sets', value: fig(daySets) },
-                      { label: 'Volume', value: dayVolume ? `${(dayVolume / 1000).toFixed(1)}t` : '—' },
+                      // Tonnes for a metric reader; pounds for an imperial
+                      // one, because the tonne has no imperial counterpart
+                      // safe to print in a column this narrow — see
+                      // volumeHeadline in src/lib/units.ts.
+                      { label: 'Volume', value: dayVolume ? `${dayHeadline!.figure.toLocaleString()}${dayHeadline!.unit === 't' ? 't' : ''}` : '—', unit: dayHeadline?.unit === 'lb' ? 'lb' : undefined },
                       { label: 'kcal', value: fig(dayKcal) },
                     ]} />
                     <View style={{ marginTop: sp.lg }}>
@@ -1036,11 +1180,11 @@ export default function Train() {
                                   so a refused delete looked done and the session
                                   was back — with its volume and calories — at the
                                   next launch. */}
-                              <Pressable accessibilityLabel={'Delete ' + l.exercise} onPress={() => Alert.alert('Delete this entry?', l.exercise + ' will be removed from your log, and this day\'s volume and calories go down by it.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Delete', style: 'destructive', onPress: async () => { if (!(await removeWorkout(l))) Alert.alert('Not deleted', `${l.exercise} is still in your log — we could not reach the server to remove it.`); } }])} hitSlop={8} style={{ padding: 4, marginRight: -4 }}><Icon name="minus" size={16} color={t.crit} /></Pressable>
+                              <Pressable accessibilityLabel={'Delete ' + l.exercise} onPress={() => deleteEntry(l)} hitSlop={8} style={{ padding: 4, marginRight: -4 }}><Icon name="minus" size={16} color={t.crit} /></Pressable>
                             </View>
                             {l.sets ? (
                               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 7 }}>
-                                {l.sets.map((s: number[], j: number) => { const _f = (l.feel || [])[j]; const _fc = _f === 'easy' ? t.good : _f === 'hard' ? t.crit : null; return <View key={j} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 9, paddingVertical: 5, flexDirection: 'row', alignItems: 'center', gap: 5 }}>{_fc ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: _fc }} /> : null}<Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{s[0]}×{s[1]}kg</Text></View>; })}
+                                {l.sets.map((s: number[], j: number) => { const _f = (l.feel || [])[j]; const _fc = _f === 'easy' ? t.good : _f === 'hard' ? t.crit : null; return <View key={j} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 9, paddingVertical: 5, flexDirection: 'row', alignItems: 'center', gap: 5 }}>{_fc ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: _fc }} /> : null}<Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{s[0]}×{fig(liftIn(s[1] || null, wu))} {wu}</Text></View>; })}
                               </View>
                             ) : l.cardio ? (
                               <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 5 }}>{[`${l.cardio.mins} min`, l.cardio.dist > 0 ? `${l.cardio.dist} ${l.cardio.unit}` : null, l.cardio.watts && l.cardio.watts > 0 ? `${l.cardio.watts} W` : null, l.cardio.hrAvg ? `♥ ${l.cardio.hrAvg} avg / ${l.cardio.hrHigh ?? l.cardio.hrAvg} hi` : null].filter(Boolean).join(' · ')}</Text>
@@ -1081,7 +1225,7 @@ export default function Train() {
       </Modal>
 
       <Modal visible={session} animationType="slide" onRequestClose={() => setSession(false)}>
-        <SessionRunner t={t} exercises={planEx.filter((e) => !isInjHidden(e))} focus={workout.focus} nameOf={nameOf} age={ageFromDob(cd.dob)} log={workoutLog} injuries={cd.injuries} videos={exVideos} videoStatus={exVideoStatus} preferTrainerId={coachId} onComplete={addWorkouts} onClose={() => setSession(false)} />
+        <SessionRunner t={t} unit={wu} exercises={planEx.filter((e) => !isInjHidden(e))} focus={workout.focus} nameOf={nameOf} age={ageFromDob(cd.dob)} log={workoutLog} injuries={cd.injuries} videos={exVideos} videoStatus={exVideoStatus} preferTrainerId={coachId} onComplete={addWorkouts} onClose={() => setSession(false)} />
       </Modal>
 
       {/* Mounted only while a session is running, so its clock starts at zero
@@ -1134,14 +1278,34 @@ export default function Train() {
   );
 }
 
-function LogRow({ t, onLog }: { t: Theme; onLog: (reps: string, kg: string) => void }) {
+/**
+ * The two boxes that record one set.
+ *
+ * The load is read through `readLift` rather than `parseFloat(kg) || 0`, which
+ * is what this shipped with: a fat-fingered load became a confident 0, and a
+ * 0 in a set row is a BODYWEIGHT set as far as the volume, the estimated 1RM
+ * and next session's target are concerned. A typo is not a claim that the bar
+ * was empty, so it is refused instead — and the bound in that refusal is
+ * stated in the unit on the keyboard, because telling somebody typing pounds
+ * that 1,000 is impossible would be wrong.
+ *
+ * What leaves here is kilograms. The unit is a reading and typing convention;
+ * the record is metric, and the coach's console reads the same row.
+ */
+function LogRow({ t, unit, onLog }: { t: Theme; unit: WeightUnit; onLog: (reps: string, kg: number | null) => void }) {
   const [reps, setReps] = useState(''); const [kg, setKg] = useState('');
   const inp = { color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 9, flex: 1, ...ty.body } as const;
   return (
     <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
       <TextInput value={reps} onChangeText={setReps} keyboardType="numeric" placeholder="reps" placeholderTextColor={t.ink3} style={inp} />
-      <TextInput value={kg} onChangeText={setKg} keyboardType="numeric" placeholder="kg" placeholderTextColor={t.ink3} style={inp} />
-      <Pressable onPress={() => { onLog(reps, kg); setReps(''); setKg(''); }} style={{ backgroundColor: t.brand, borderRadius: radius.sm, paddingHorizontal: sp.lg, justifyContent: 'center' }}>
+      <TextInput value={kg} onChangeText={setKg} keyboardType="numeric" placeholder={unit} placeholderTextColor={t.ink3} style={inp} />
+      <Pressable onPress={() => {
+        const read = readLift(kg, unit);
+        // Left in the box on a refusal, with the reason said, rather than
+        // cleared — the number was typed once and the app has no better guess.
+        if (!read.ok) { Alert.alert('Check that load', read.reason); return; }
+        onLog(reps, read.kg); setReps(''); setKg('');
+      }} style={{ backgroundColor: t.brand, borderRadius: radius.sm, paddingHorizontal: sp.lg, justifyContent: 'center' }}>
         <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>Log set</Text>
       </Pressable>
     </View>
@@ -1436,14 +1600,19 @@ function TimedSessionRunner({ t, kind, activity, age, defaultUnit, onSave, onClo
   );
 }
 
-function SessionRunner({ t, exercises, focus, nameOf, age, log, injuries, videos, videoStatus, preferTrainerId, onComplete, onClose }: { t: Theme; exercises: ProgramExercise[]; focus: string; nameOf: (e: ProgramExercise) => string; age: number | null; log: WorkoutEntry[]; injuries: Injury[]; videos: VideoItem[]; videoStatus: LibraryStatus; preferTrainerId: string | null; onComplete: (entries: WorkoutEntry[]) => void; onClose: () => void }) {
+function SessionRunner({ t, unit, exercises, focus, nameOf, age, log, injuries, videos, videoStatus, preferTrainerId, onComplete, onClose }: { t: Theme; unit: WeightUnit; exercises: ProgramExercise[]; focus: string; nameOf: (e: ProgramExercise) => string; age: number | null; log: WorkoutEntry[]; injuries: Injury[]; videos: VideoItem[]; videoStatus: LibraryStatus; preferTrainerId: string | null; onComplete: (entries: WorkoutEntry[]) => void; onClose: () => void }) {
   const insets = useSafeAreaInsets();
   const topPad = Math.max(insets.top, 44);
   const { w, elapsed, liveSample, liveHr, hrPeak, sessionKcal, zoneSecs, liveZone } = useLiveVitals(age);
   const [finalElapsed, setFinalElapsed] = useState(0);
   const [idx, setIdx] = useState(0);
   const [results, setResults] = useState<{ reps: number; kg: number }[][]>(() => exercises.map(() => []));
-  const [reps, setReps] = useState(''); const [kg, setKg] = useState('');
+  // `load` is TEXT in the member's own unit; `results` is kilograms. The
+  // conversion happens at this one keyboard, so everything downstream of the
+  // runner — the PR check, the warm-up ramp, the entries written to the log —
+  // goes on working in the metric the rest of the app is built on.
+  const [reps, setReps] = useState(''); const [load, setLoad] = useState('');
+  const showLoad = (kg: number) => (kg ? plain(liftIn(kg, unit) ?? 0) : '');
   const [rest, setRest] = useState(0);
   // Whether the demonstration is on screen for the current exercise.
   //
@@ -1468,7 +1637,7 @@ function SessionRunner({ t, exercises, focus, nameOf, age, log, injuries, videos
 
   useEffect(() => {
     const sug = suggestForExercise(log, nameOf(exercises[idx]), exercises[idx].reps);
-    setKg(sug ? String(sug.weight) : '');
+    setLoad(sug ? showLoad(sug.weight) : '');
     setReps('');
     setPrMsg(null);
     setPendingFeel(null);
@@ -1480,24 +1649,35 @@ function SessionRunner({ t, exercises, focus, nameOf, age, log, injuries, videos
   const done = results[idx] || [];
   const logSet = () => {
     const r = parseInt(reps, 10) || 0; if (!r) return;
-    const wkg = parseFloat(kg) || 0;
+    // Refused rather than coerced: `parseFloat(kg) || 0` is what this shipped
+    // with, and a mistyped load silently becoming 0 records a bodyweight set
+    // in the middle of a session and drags the volume, the PR check and the
+    // next session's target down with it.
+    const read = readLift(load, unit);
+    if (!read.ok) { Alert.alert('Check that load', read.reason); return; }
+    const wkg = read.kg ?? 0;
     const name = nameOf(exercises[idx]);
     const newE1 = wkg && r ? est1RM(wkg, r) : 0;
     const priorBest = Math.max(priorBest1RM(log, name), ...done.map((s) => (s.kg && s.reps ? est1RM(s.kg, s.reps) : 0)), 0);
-    if (newE1 > 0 && newE1 > priorBest) { setPrMsg(`New PR on ${name}! ${wkg}kg × ${r}`); setConfetti(true); }
+    if (newE1 > 0 && newE1 > priorBest) { setPrMsg(`New PR on ${name}! ${fig(liftLabel(wkg, unit))} × ${r}`); setConfetti(true); }
     setResults((prev) => { const n = prev.map((a) => [...a]); n[idx].push({ reps: r, kg: wkg }); return n; });
     // Only after the first set of an exercise. By set three they have done the
     // movement three times and do not need it offered again.
     if (done.length === 0) setDemoOpen(true);
     setReps(''); setRest(90); setPendingFeel(wkg);
   };
+  // Kilograms, in both unit systems, and deliberately. This is the same
+  // increment ladder `suggestForExercise` and the Targets screen work in, and
+  // giving the runner an imperial ladder of its own would be a second
+  // progression model quietly disagreeing with the first about how much to add.
+  // What the member reads is the converted result, not a different decision.
   const feelStep = (base: number) => (base >= 60 ? 5 : base >= 20 ? 2.5 : base > 0 ? 1 : 0);
   const chooseFeel = (f: 'easy' | 'ok' | 'hard') => {
     setRpes((prev) => { const n = prev.map((a) => [...a]); n[idx].push(f); return n; });
     const base = pendingFeel || 0;
     const st = feelStep(base);
     const nextKg = f === 'easy' ? base + st : f === 'hard' ? Math.max(0, base - st) : base;
-    setKg(nextKg ? String(nextKg) : '');
+    setLoad(showLoad(nextKg));
     setPendingFeel(null);
     tapLight();
   };
@@ -1541,7 +1721,10 @@ function SessionRunner({ t, exercises, focus, nameOf, age, log, injuries, videos
             <KpiRow items={[
               { label: 'Exercises', value: `${exDone}/${exercises.length}` },
               { label: 'Sets', value: fig(totalSets) },
-              { label: 'Volume', value: `${(volume / 1000).toFixed(1)}t` },
+              // See volumeHeadline: tonnes for a metric reader, pounds for an imperial
+      // one, because a short ton is 10% off a tonne and would read as the same
+      // unit to anybody comparing this with a coach's console.
+      { label: 'Volume', value: `${volumeHeadline(volume, unit)!.figure.toLocaleString()}${unit === 'kg' ? 't' : ''}`, unit: unit === 'lb' ? 'lb' : undefined },
             ]} />
           </Section>
           <Rule />
@@ -1654,24 +1837,27 @@ function SessionRunner({ t, exercises, focus, nameOf, age, log, injuries, videos
 
         {done.length > 0 ? (
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.xl }}>
-            {done.map((s, i) => { const f = (rpes[idx] || [])[i]; const fc = f === 'easy' ? t.good : f === 'hard' ? t.crit : t.ink3; return (<View key={i} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 11, paddingVertical: 7, flexDirection: 'row', alignItems: 'center', gap: 6 }}>{f ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: fc }} /> : null}<Text style={{ ...ty.label, ...numeric, fontWeight: '500', color: t.ink2 }}>Set {i + 1}: {s.reps}×{s.kg || '–'}kg</Text></View>); })}
+            {done.map((s, i) => { const f = (rpes[idx] || [])[i]; const fc = f === 'easy' ? t.good : f === 'hard' ? t.crit : t.ink3; return (<View key={i} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 11, paddingVertical: 7, flexDirection: 'row', alignItems: 'center', gap: 6 }}>{f ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: fc }} /> : null}<Text style={{ ...ty.label, ...numeric, fontWeight: '500', color: t.ink2 }}>Set {i + 1}: {s.reps}×{fig(liftIn(s.kg || null, unit))} {unit}</Text></View>); })}
           </View>
         ) : null}
 
-        {done.length === 0 ? (() => { const wu = warmupSets(parseFloat(kg) || 0); return wu.length ? (
+        {/* The ramp is worked out from the working load in kilograms — its
+            percentages are of the bar, not of a converted figure — and each
+            rung is read out in the member's unit. */}
+        {done.length === 0 ? (() => { const readTop = readLift(load, unit); const wu = warmupSets(readTop.ok ? (readTop.kg ?? 0) : 0); return wu.length ? (
           <View style={{ marginTop: sp.xl }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: sp.sm }}><Icon name="flame" size={14} color={t.s3} /><Text style={{ ...ty.micro, color: t.ink3 }}>Warm-up ramp</Text></View>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
-              {wu.map((ws, i) => <View key={i} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 10, paddingVertical: 6 }}><Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{ws.kg}kg × {ws.reps}</Text></View>)}
+              {wu.map((ws, i) => <View key={i} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 10, paddingVertical: 6 }}><Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{fig(liftLabel(ws.kg, unit))} × {ws.reps}</Text></View>)}
             </View>
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>Ramp up first — these don't count as working sets.</Text>
           </View>
         ) : null; })() : null}
 
-        <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.xl, marginBottom: sp.sm }}>Log set {done.length + 1}</Text>
+        <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.xl, marginBottom: sp.sm }}>Log set {done.length + 1} · reps × {unit}</Text>
         <View style={{ flexDirection: 'row', gap: sp.md }}>
           <TextInput value={reps} onChangeText={setReps} keyboardType="numeric" placeholder="reps" placeholderTextColor={t.ink3} style={inp} />
-          <TextInput value={kg} onChangeText={setKg} keyboardType="numeric" placeholder="kg" placeholderTextColor={t.ink3} style={inp} />
+          <TextInput value={load} onChangeText={setLoad} keyboardType="numeric" placeholder={unit} placeholderTextColor={t.ink3} style={inp} />
           <Pressable accessibilityLabel="Log set" accessibilityRole="button" onPress={logSet} style={{ backgroundColor: t.brand, borderRadius: radius.sm, paddingHorizontal: 22, justifyContent: 'center' }}><Icon name="check" size={18} color={t.brandInk} /></Pressable>
         </View>
 
@@ -1701,9 +1887,53 @@ function SessionRunner({ t, exercises, focus, nameOf, age, log, injuries, videos
   );
 }
 
-// Edit one logged entry. Until now the only thing you could do to a mistake was
-// delete it and log the whole thing again, which also lost the heart-rate zones
-// recorded against it.
+// Edit, and now REPLACE, one logged entry.
+//
+// ── What was already here, and what the report actually asked for ──────────
+//
+// Editing shipped with TF-02: this sheet, `readWorkoutEdit` in
+// src/lib/entryEdit.ts, and a delete beside it. Two reports came back on it.
+//
+// "No way to edit or delete an exercise that has been entered" is a
+// discoverability report, not a missing feature — both actions lived only
+// inside the month-calendar modal, and Train showed a member nothing they had
+// already saved. The fix for that is the "Already in your log" section on the
+// screen itself, not here.
+//
+// "You have the option to delete the exercise but not able to replace with" is
+// the real gap, and it is the more useful of the two. Somebody who logged five
+// sets of Front Squat when they did Back Squat could only delete the entry and
+// type all five again — losing the reps and loads they had just entered to
+// correct a single word. The name was editable as free text, but nothing on
+// screen said so, nothing offered the movement they meant, and nothing said
+// what would happen to the sets. All three are answered below.
+//
+// ── What happens to the sets, and to a PR ─────────────────────────────────
+//
+// The sets stay with the entry and move to the new movement. That is what the
+// report is asking for — a wrong label on the right work — and it is also the
+// only reading that keeps the record honest: the reps and the load happened,
+// and it is the name attached to them that was wrong.
+//
+// A personal record follows them, and nothing has to be done to make it. There
+// is no PR table: `personalRecords` in src/lib/streaks.ts and `prTimeline` in
+// src/lib/longView.ts both derive the board from the log by exercise name every
+// time they are called. So the moment the row's `exercise` changes, the best
+// set counts towards the new movement and the old one falls back to whatever
+// else is logged against it — which is the truth. A PR credited to Front Squat
+// off a set of Back Squats is a record nobody set.
+//
+// "Unless the person says otherwise" is the "Clear the sets" action: it empties
+// the rows for retyping rather than saving an entry with nothing in it, because
+// `readWorkoutEdit` refuses that and names the delete button, and an entry with
+// no sets is a ghost in the calendar that cannot be corrected either.
+//
+// ── The unit ───────────────────────────────────────────────────────────────
+//
+// The loads are shown and typed in the member's own unit and stored in
+// kilograms, through `readLift`/`liftIn`. The rows hold TEXT rather than
+// numbers so that typing "137.5" is not re-rendered halfway through as "13" by
+// a controlled input converting every keystroke and back.
 //
 // Mounted only while it is open (see the caller) so it always opens on the
 // entry's current values rather than the first one ever edited.
@@ -1717,20 +1947,44 @@ function SessionRunner({ t, exercises, focus, nameOf, age, log, injuries, videos
 // error rather than a habit: an entry fixed on Thursday stays on Tuesday, where
 // the calendar dots, the streak, History's monthly bars and the coach's week
 // all read it from.
-function EditEntrySheet({ t, entry, onClose, onSave }: {
-  t: Theme; entry: WorkoutEntry; onClose: () => void; onSave: (patch: Partial<WorkoutEntry>) => Promise<boolean>;
+function EditEntrySheet({ t, unit, entry, suggestions, onClose, onSave }: {
+  t: Theme; unit: WeightUnit; entry: WorkoutEntry; suggestions: string[];
+  onClose: () => void; onSave: (patch: Partial<WorkoutEntry>) => Promise<boolean>;
 }) {
   const [name, setName] = useState(entry.exercise);
-  const [sets, setSets] = useState<[number, number][]>(entry.sets ? entry.sets.map((s) => [s[0], s[1]] as [number, number]) : []);
+  // Reps and load as TEXT, in the member's unit, converted once on the way in
+  // and once on the way out. A blank load is a bodyweight set and stays blank.
+  const [rows, setRows] = useState<{ reps: string; load: string }[]>(() =>
+    (entry.sets ?? []).map(([r, kg]) => ({
+      reps: r ? String(r) : '',
+      load: kg ? plain(liftIn(kg, unit) ?? 0) : '',
+    })));
   const [mins, setMins] = useState(entry.cardio ? String(entry.cardio.mins) : '');
   const [dist, setDist] = useState(entry.cardio ? String(entry.cardio.dist) : '');
   const [watts, setWatts] = useState(entry.cardio && entry.cardio.watts ? String(entry.cardio.watts) : '');
   const [kcal, setKcal] = useState(entry.kcal != null ? String(entry.kcal) : '');
   const [busy, setBusy] = useState(false);
+  const [picking, setPicking] = useState(false);
 
   const isCardio = !!entry.cardio;
-  const setAt = (i: number, j: 0 | 1, v: string) =>
-    setSets((prev) => prev.map((s, k) => (k === i ? (j === 0 ? [parseInt(v, 10) || 0, s[1]] : [s[0], parseFloat(v) || 0]) : s)));
+  const trimmed = name.trim();
+  // Case-insensitive, because everything else that groups by exercise name is:
+  // re-saving "back squat" as "Back Squat" is a capitalisation, not a swap, and
+  // announcing a replacement for it would be nonsense.
+  const replacing = trimmed !== '' && trimmed.toLowerCase() !== entry.exercise.trim().toLowerCase();
+  const setAt = (i: number, key: 'reps' | 'load', v: string) =>
+    setRows((prev) => prev.map((r, k) => (k === i ? { ...r, [key]: v } : r)));
+
+  // What to offer. Narrowed by whatever has been typed — but only once the
+  // name has actually been changed. Filtering on the untouched name would open
+  // the picker on the one list guaranteed to be useless: the movements whose
+  // names contain the movement being replaced. The entry's own current name is
+  // never offered as a replacement for itself either way.
+  const q = replacing ? trimmed.toLowerCase() : '';
+  const matches = suggestions
+    .filter((n) => n.toLowerCase() !== entry.exercise.trim().toLowerCase())
+    .filter((n) => q === '' || n.toLowerCase().includes(q))
+    .slice(0, 20);
 
   // Which day this entry is on, said out loud. A correction never moves it, and
   // somebody fixing Tuesday's session on a Thursday should be able to see that
@@ -1745,6 +1999,15 @@ function EditEntrySheet({ t, entry, onClose, onSave }: {
 
   const save = async () => {
     if (busy) return;
+    // The loads go back to kilograms here, one row at a time, so a refusal can
+    // name the row it came from. `readLift` states its bound in the unit on the
+    // keyboard, and a blank box is a bodyweight set rather than a refusal.
+    const sets: [number, number][] = [];
+    for (let i = 0; i < rows.length; i++) {
+      const read = readLift(rows[i].load, unit);
+      if (!read.ok) { Alert.alert(`Check set ${i + 1}`, read.reason); return; }
+      sets.push([parseInt(rows[i].reps, 10) || 0, read.kg ?? 0]);
+    }
     const read = readWorkoutEdit(entry, { name, sets, mins, dist, watts, kcal });
     if (!read.ok) { Alert.alert('Check that', read.reason); return; }
     setBusy(true);
@@ -1759,6 +2022,7 @@ function EditEntrySheet({ t, entry, onClose, onSave }: {
   };
 
   const inp = { color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 10, ...ty.body } as const;
+  const setCount = rows.filter((r) => (parseInt(r.reps, 10) || 0) > 0).length;
 
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
@@ -1778,7 +2042,64 @@ function EditEntrySheet({ t, entry, onClose, onSave }: {
             </Text>
           ) : null}
           <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 6 }}>EXERCISE</Text>
-          <TextInput value={name} onChangeText={setName} style={inp} placeholder="Exercise" placeholderTextColor={t.ink3} />
+          <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'center' }}>
+            <TextInput value={name} onChangeText={setName} style={{ ...inp, flex: 1 }} placeholder="Exercise" placeholderTextColor={t.ink3} />
+            {/* The affordance the report was missing. The field underneath has
+                always accepted a different name; nothing said so, and nobody
+                types a movement they can be offered. */}
+            <Pressable accessibilityRole="button" accessibilityLabel={picking ? 'Hide the list of movements' : 'Replace with another movement'}
+              onPress={() => { setPicking((v) => !v); tapLight(); }}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 }}>
+              <Icon name="swap" size={14} color={t.ink2} />
+              <Text style={{ ...ty.caption, fontWeight: '600', color: t.ink }}>Replace</Text>
+            </Pressable>
+          </View>
+
+          {picking ? (
+            matches.length ? (
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.md }}>
+                {matches.map((n) => (
+                  <Pressable key={n} accessibilityRole="button" accessibilityLabel={`Replace with ${n}`}
+                    onPress={() => { setName(n); setPicking(false); tapLight(); }}
+                    style={{ backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: 7 }}>
+                    <Text style={{ ...ty.caption, fontWeight: '500', color: t.ink2, textTransform: 'capitalize' }}>{n}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            ) : (
+              // Never a silent empty list: the field above still takes anything
+              // typed, and saying so is the difference between "no matches" and
+              // "you cannot do this here".
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                Nothing in today's plan or your history matches that. Type the movement in full above — anything you type is accepted.
+              </Text>
+            )
+          ) : null}
+
+          {replacing ? (
+            <View style={{ marginTop: sp.md, backgroundColor: t.surface2, borderRadius: radius.sm, padding: sp.md }}>
+              <Text style={{ ...ty.caption, color: t.ink2 }}>
+                Replacing {entry.exercise} with {trimmed}.
+              </Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 6 }}>
+                {isCardio
+                  ? 'The minutes, distance and the heart-rate zones recorded against it stay — nobody can retype a heart rate, and they were measured whatever the session was called.'
+                  : setCount > 0
+                  ? `The ${setCount} set${setCount === 1 ? '' : 's'} below come with it, so you do not have to type them again. Your best one counts towards ${trimmed} from now on, and ${entry.exercise} falls back to whatever else you have logged against it — a record set on this work belongs to the movement you actually did.`
+                  : 'There are no sets on this entry to move.'}
+              </Text>
+              {!isCardio && rows.length > 0 ? (
+                <View style={{ alignSelf: 'flex-start', marginTop: sp.md }}>
+                  {/* "Unless the person says otherwise". This empties the rows
+                      for retyping rather than saving an entry with none —
+                      readWorkoutEdit refuses that and names the delete button,
+                      because an entry with nothing in it still counts as a
+                      session in the calendar and the streak. */}
+                  <Ghost label="Clear the sets and retype them" onPress={() => { setRows([{ reps: '', load: '' }]); tapLight(); }} />
+                </View>
+              ) : null}
+            </View>
+          ) : null}
 
           {isCardio ? (
             <View style={{ marginTop: sp.xl }}>
@@ -1791,19 +2112,26 @@ function EditEntrySheet({ t, entry, onClose, onSave }: {
             </View>
           ) : (
             <View style={{ marginTop: sp.xl }}>
-              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 6 }}>SETS</Text>
-              {sets.map((s, i) => (
+              {/* The unit is named in the heading rather than left to the
+                  placeholder, which disappears the moment a row has a number
+                  in it — and a column of loads with no unit over it is exactly
+                  how somebody types pounds into a kilogram field. */}
+              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 6 }}>SETS · REPS × {unit.toUpperCase()}</Text>
+              {rows.map((r, i) => (
                 <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginBottom: sp.sm }}>
                   <Text style={{ ...ty.caption, color: t.ink3, width: 22 }}>{i + 1}</Text>
-                  <TextInput value={s[0] ? String(s[0]) : ''} onChangeText={(v) => setAt(i, 0, v)} keyboardType="numeric" placeholder="Reps" placeholderTextColor={t.ink3} style={{ ...inp, flex: 1 }} />
+                  <TextInput value={r.reps} onChangeText={(v) => setAt(i, 'reps', v)} keyboardType="numeric" placeholder="Reps" placeholderTextColor={t.ink3} style={{ ...inp, flex: 1 }} />
                   <Text style={{ ...ty.caption, color: t.ink3 }}>×</Text>
-                  <TextInput value={s[1] ? String(s[1]) : ''} onChangeText={(v) => setAt(i, 1, v)} keyboardType="numeric" placeholder="kg" placeholderTextColor={t.ink3} style={{ ...inp, flex: 1 }} />
-                  <Pressable accessibilityLabel={`Remove set ${i + 1}`} hitSlop={8} onPress={() => setSets((p) => p.filter((_, k) => k !== i))} style={{ padding: 4 }}>
+                  <TextInput value={r.load} onChangeText={(v) => setAt(i, 'load', v)} keyboardType="numeric" placeholder={unit} placeholderTextColor={t.ink3} style={{ ...inp, flex: 1 }} />
+                  <Pressable accessibilityLabel={`Remove set ${i + 1}`} hitSlop={8} onPress={() => setRows((p) => p.filter((_, k) => k !== i))} style={{ padding: 4 }}>
                     <Icon name="minus" size={16} color={t.crit} />
                   </Pressable>
                 </View>
               ))}
-              <Ghost label="Add set" onPress={() => setSets((p) => [...p, [0, p.length ? p[p.length - 1][1] : 0]])} />
+              <Ghost label="Add set" onPress={() => setRows((p) => [...p, { reps: '', load: p.length ? p[p.length - 1].load : '' }])} />
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                Leave a load empty for a bodyweight set — it is recorded as no external load rather than as zero.
+              </Text>
             </View>
           )}
 

@@ -14,6 +14,7 @@ import {
   heightIn, heightParts, heightLabel, heightToCm,
   lengthIn, lengthLabel, lengthToCm, lengthDeltaIn, weightDeltaIn,
   kgToLb, lbToKg, cmToIn, inToCm, convertedNote, plain,
+  liftIn, liftLabel, liftToKg, liftDeltaIn, est1RMIn, volumeIn, volumeHeadline, readLift,
 } from './units';
 // The documents a client SHARES are the last thing TF-37 reached, and they are
 // asserted here rather than in a file of their own because what is being
@@ -244,6 +245,137 @@ ok(typeof convertedNote('in') === 'string', 'so are inches');
   ok(cells.includes('81.6'), 'the cells hold the kilograms the header promises, not converted pounds');
   ok(!cells.includes('180'), 'and specifically NOT pounds under a header that says kg');
   ok(/,,/.test(cells), 'a missing body fat is still an empty cell, never a zero');
+}
+
+/* ── the weight a person LIFTS ───────────────────────────────────────────── */
+//
+// TF-37 stopped short of the training log on purpose and the tester asked for
+// it anyway: "Need to be able to select kg or pounds". The assertions here are
+// the same shape as the body-weight ones above — sweep the round trip, not a
+// sample — but the grain is different and these are what pin that difference
+// down. If somebody ever "tidies" liftIn into weightIn, this section goes red.
+
+// A lifted load is not a body weight. 42.5 kg is a bar with a pair of 1.25 kg
+// fractionals on it, and whole pounds cannot hold it: 93.7 lb rounds to 94,
+// and 94 lb is 42.64 kg. Half a pound can.
+ok(liftIn(42.5, 'lb') === 93.5, `42.5 kg is 93.5 lb at the half-pound, got ${liftIn(42.5, 'lb')}`);
+ok(weightIn(42.5, 'lb') === 94, 'while a BODY weight of 42.5 kg still reads as a whole 94 lb');
+ok(liftIn(42.5, 'kg') === 42.5, 'a metric lifter sees exactly what they loaded');
+ok(liftIn(61.25, 'kg') === 61.25, 'including a quarter-kilo microplate load');
+ok(liftLabel(60, 'kg') === '60 kg', `60 kg reads as "60 kg", got "${liftLabel(60, 'kg')}"`);
+ok(liftLabel(liftToKg('137.5', 'lb'), 'lb') === '137.5 lb',
+  `typing 137.5 lb must read back as "137.5 lb", got "${liftLabel(liftToKg('137.5', 'lb'), 'lb')}"`);
+
+// THE round trip, imperial. Every half pound a barbell can hold — the grain
+// 1.25 lb fractional plates actually produce — through storage and back.
+for (let half = 2; half <= 1400; half++) {
+  const lb = half / 2;
+  const kg = liftToKg(String(lb), 'lb');
+  ok(kg != null, `${lb} lb must parse`);
+  const back = liftIn(kg, 'lb');
+  ok(back === lb, `${lb} lb stored as ${kg} kg came back as ${back} lb — the number changed under the lifter`);
+}
+// And metric, at the hundredth the store holds, so the finer grain was not
+// bought by breaking the readers it was already right for.
+for (let hundredths = 25; hundredths <= 30000; hundredths += 25) {
+  const kg = hundredths / 100;
+  ok(liftIn(liftToKg(String(kg), 'kg'), 'kg') === kg,
+    `${kg} kg came back as ${liftIn(liftToKg(String(kg), 'kg'), 'kg')} kg`);
+}
+// The 2.5 kg dumbbell rack and the plates either side of it, spelled out.
+ok(liftIn(2.5, 'lb') === 5.5, `2.5 kg is 5.5 lb, got ${liftIn(2.5, 'lb')}`);
+ok(liftIn(20, 'lb') === 44, `a 20 kg bar is 44 lb, got ${liftIn(20, 'lb')}`);
+ok(liftIn(100, 'lb') === 220.5, `100 kg is 220.5 lb, got ${liftIn(100, 'lb')}`);
+
+// A bodyweight set logs no load, and that stays absent rather than becoming 0.
+ok(liftIn(0, 'kg') === 0, 'a load that was genuinely recorded as 0 is still 0 — the screens dash it themselves');
+ok(liftIn(null, 'lb') === null, 'but no load at all is not 0 lb');
+ok(liftToKg('', 'lb') === null, 'an empty load box is not 0 lb');
+ok(liftToKg('abc', 'kg') === null, 'letters are not a load');
+ok(liftToKg('102,5', 'kg') === 102.5, 'a comma decimal is a decimal here too');
+
+// ── the delta, converted as a span ──
+// The report's own example: a PR improvement of 2.5 kg must read the same
+// every time, not 5 lb one week and 6 lb the next off where the ends sat.
+ok(liftDeltaIn(2.5, 'lb') === 5.5, `a 2.5 kg jump is 5.5 lb, got ${liftDeltaIn(2.5, 'lb')}`);
+ok(liftDeltaIn(-2.5, 'lb') === -5.5, 'and a drop keeps its sign');
+ok(liftDeltaIn(0, 'kg') === 0, 'no change is a change of zero');
+ok(liftDeltaIn(null, 'lb') === null, 'no previous load means no change to report');
+ok(liftDeltaIn(NaN, 'lb') === null, 'NaN is not a change');
+{
+  // The same span from every starting load reads the same. Converting the two
+  // ends instead gives 5.0 or 5.5 depending on the starting weight, which is
+  // the bug: a lifter adding the same two plates twice would be told they had
+  // added different amounts.
+  const seen = new Set<number>();
+  for (let hundredths = 2000; hundredths <= 20000; hundredths += 25) {
+    seen.add(liftDeltaIn(2.5, 'lb') as number);
+    const from = hundredths / 100;
+    const ends = (liftIn(from + 2.5, 'lb') as number) - (liftIn(from, 'lb') as number);
+    if (Math.abs(ends - 5.5) > 1e-9) seen.add(-1); // an ends-first answer that disagrees
+  }
+  ok(seen.has(5.5) && seen.size === 2,
+    'a span converted once is one answer; converting the ends first is demonstrably not — which is why liftDeltaIn exists');
+}
+
+// ── an estimate does not get precision it never had ──
+// est1RM in src/lib/streaks.ts rounds to whole kilograms before this sees it.
+ok(est1RMIn(102, 'lb') === 225, `102 kg estimated is 225 lb, got ${est1RMIn(102, 'lb')}`);
+ok(est1RMIn(102, 'kg') === 102, 'and the kilogram reader sees the kilograms the formula produced');
+ok(Number.isInteger(est1RMIn(97, 'lb') as number), 'a converted estimate is whole pounds — never a half');
+ok(est1RMIn(null, 'lb') === null, 'no best set produces no estimate');
+{
+  // No estimate is ever printed at a finer grain than the load it came from.
+  let fine = 0;
+  for (let kg = 20; kg <= 400; kg++) if (!Number.isInteger(est1RMIn(kg, 'lb') as number)) fine++;
+  ok(fine === 0, `${fine} estimated maxima printed a fraction of a pound the formula never had`);
+}
+
+// ── volume, which is a sum and carries no fraction ──
+ok(volumeIn(12480, 'kg') === 12480, 'a metric total is the kilograms themselves');
+ok(volumeIn(12480, 'lb') === 27514, `12,480 kg is 27,514 lb, got ${volumeIn(12480, 'lb')}`);
+ok(Number.isInteger(volumeIn(9876.4, 'lb') as number), 'a total is whole units — a tenth of a pound in five figures is noise');
+ok(volumeIn(null, 'kg') === null, 'a week nobody lifted in has no tonnage, and is not 0');
+ok(volumeIn(0, 'kg') === 0, 'while a week that was read and held no weighted sets is a real 0');
+
+// The compact form, which is asymmetric on purpose — see volumeHeadline.
+{
+  const t1 = volumeHeadline(152340, 'kg');
+  ok(t1 != null && t1.unit === 't' && t1.figure === 152.3, `152,340 kg is 152.3 t, got ${JSON.stringify(t1)}`);
+  const l1 = volumeHeadline(152340, 'lb');
+  ok(l1 != null && l1.unit === 'lb' && l1.figure === 335852, `and 335,852 lb, got ${JSON.stringify(l1)}`);
+  ok(l1 != null && l1.unit !== 't', 'an imperial reader is never shown a "t" — a short ton is 10% off a tonne and would read as the same unit');
+  ok(volumeHeadline(null, 'lb') === null, 'and an unknown total stays unknown');
+  // Agrees with longView.tonnes, which is the other implementation of the
+  // metric half and the one History's hero has always used.
+  const viaLongView = (kg: number) => Math.round(kg / 100) / 10;
+  for (let kg = 0; kg <= 400000; kg += 137) {
+    ok(volumeHeadline(kg, 'kg')!.figure === viaLongView(kg), `tonnes disagree at ${kg} kg`);
+  }
+}
+
+// ── what a person types into a set row ──
+ok(readLift('', 'kg').ok && (readLift('', 'kg') as { kg: number | null }).kg === null,
+  'an empty load box is a bodyweight set, not a refusal and not a zero');
+{
+  const r = readLift('225', 'lb');
+  ok(r.ok && r.kg === 102.06, `225 lb stores as 102.06 kg, got ${r.ok ? r.kg : r.reason}`);
+  ok(liftIn(r.ok ? r.kg : null, 'lb') === 225, 'and reads straight back out as 225 lb');
+}
+ok(!readLift('abc', 'kg').ok, 'text that is not a number is refused, never quietly turned into 0');
+ok(!readLift('-5', 'kg').ok, 'a negative load is refused');
+// The bound is checked in the unit being typed. 1,000 is an ordinary bench
+// press in pounds and an impossible one in kilograms, and the app must not
+// tell a pounds reader their own number is wrong.
+ok(readLift('1000', 'lb').ok, '1,000 lb is a heavy but real lift and is accepted');
+ok(!readLift('1000', 'kg').ok, 'while 1,000 kg is not, and is refused');
+{
+  const refused = readLift('1000', 'kg');
+  ok(!refused.ok && refused.reason.includes('kg') && !refused.reason.includes('lb'),
+    `the refusal names the unit on screen, got "${refused.ok ? '' : refused.reason}"`);
+  const refusedLb = readLift('2000', 'lb');
+  ok(!refusedLb.ok && refusedLb.reason.includes('lb'),
+    `and a pounds reader is refused in pounds, got "${refusedLb.ok ? '' : refusedLb.reason}"`);
 }
 
 if (errors.length) {

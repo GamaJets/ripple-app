@@ -57,6 +57,9 @@
     "src/lib/coachWeek.test.ts",
     "src/lib/adherence.test.ts",
     "src/lib/clientBrief.test.ts",
-    "src/lib/overwriteGuard.test.ts"
+    "src/lib/overwriteGuard.test.ts",
+    "src/lib/clientBody.test.ts",
+    "src/lib/bodyFigures.test.ts",
+    "src/lib/wearableLink.test.ts"
   ]
 }

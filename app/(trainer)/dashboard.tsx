@@ -66,6 +66,7 @@ import { useClientTags } from '../../src/ui/clientTags';
 import { useProgramTemplates } from '../../src/ui/programTemplates';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
 import { fetchPhotosSharedWithMe, missingSharedFiles, SHARED_URL_TTL_S, type SharedPhoto } from '../../src/lib/photoShare';
+import { inviteMessage } from '../../src/lib/joinCode';
 
 /* ── local presentation ───────────────────────────────────────────────────── */
 
@@ -1276,7 +1277,7 @@ export default function TrainerClients() {
                     buttons.unshift({
                       text: 'Share code',
                       onPress: () => Share.share({
-                        message: 'Join me on Repple — open the app, tap Find a trainer, and enter my code: ' + myCode,
+                        message: inviteMessage(myCode),
                       }).catch(() => {}),
                     });
                   }
@@ -1338,7 +1339,7 @@ export default function TrainerClients() {
                       // would need a new binary before any coach could use this.
                       // Share is core React Native, and is what a coach actually
                       // does with a code — sends it to the person standing there.
-                      Share.share({ message: `Join me on Repple — open the app, tap Find a trainer, and enter my code: ${myCode}` })
+                      Share.share({ message: inviteMessage(myCode) })
                         .catch(() => { /* dismissing the sheet is not a failure; the code is on screen */ });
                     }}
                     accessibilityRole="button"

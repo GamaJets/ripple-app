@@ -1,6 +1,6 @@
-// Client · Body composition trends. Graphs every InBody metric over your scan
-// history — weight, body fat %, skeletal muscle, and InBody score — so you can see
-// the direction of travel, not just the latest numbers. Reads the scan store.
+// Client · Body composition trends. Graphs every body metric over your history
+// — weight, body fat %, skeletal muscle, and InBody score — so you can see the
+// direction of travel, not just the latest numbers.
 //
 // Rebuilt on the instrument-panel kit (`src/ui/kit`) and the scale
 // (`src/theme/scale`). Every provider, conditional and route from the previous
@@ -16,6 +16,36 @@
 // InBody score is a score, and neither has a unit system to be converted into.
 // Which is which is declared on the metric itself rather than guessed from the
 // key name, so a metric added later has to say what it is.
+//
+// ── TF build 35: "the numbers on the body page" ─────────────────────────────
+//
+// A tester reported that Progress and this screen showed different figures for
+// the same person on the same day. They did, and the cause was here: this
+// screen read `cd.scans` and graphed the InBody scans alone, while Progress
+// showed `cd.weightKg` — which clientData derives as the most RECENT of {a
+// weigh-in logged on the check-in screen, the newest scan}. A client who
+// weighed in on Tuesday saw Tuesday's figure on Progress and last month's scan
+// here, both labelled "Weight".
+//
+// Three changes, and none of them is rounding the two into looking alike:
+//
+//   · weight, body fat and skeletal muscle are read from the series clientData
+//     already publishes (`weightSeries`, `bodyFatSeries`, `muscleSeries`), so
+//     the trailing figure is the same value Progress shows by construction;
+//   · every figure says WHAT measured it and WHEN, through
+//     src/lib/bodyFigures.ts, so the differences that remain — which are
+//     differences of date, and legitimate — read as two measurements rather
+//     than as the app contradicting itself;
+//   · the counts say "3 scans · 1 weigh-in" rather than "4 scans", because a
+//     count that names the wrong instrument is the same defect as a figure
+//     that does.
+//
+// The InBody score is the one metric still read straight off the scans, and
+// that is correct: no bathroom scale produces one.
+//
+// Dates go through src/lib/localDate.ts. `scans.taken_at` is a bare postgres
+// DATE, and the axis labels here used to be `new Date(iso).getDate()` — UTC
+// midnight, which is the day before for every client west of Greenwich.
 import { useMemo } from 'react';
 import { View, Text, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -23,7 +53,11 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { useClientData } from '../../src/ui/clientData';
 import { useSettings } from '../../src/ui/settings';
-import { weightDeltaIn, kgToLb } from '../../src/lib/units';
+import { weightDeltaIn, weightIn } from '../../src/lib/units';
+import {
+  bodyReadings, measuredNote, stalenessNote, mixedSourceNote, readingsLabel,
+  shortDayLabel, dayLabel, todayISO, type BodyReading,
+} from '../../src/lib/bodyFigures';
 import { Rule, Section, SectionHead, Ghost, Spark } from '../../src/ui/kit';
 import { sp, layout, type as ty, numeric, value } from '../../src/theme/scale';
 
@@ -32,21 +66,22 @@ interface MetricDef {
   /** True when the stored figure is a mass in kilograms, and so is read in the
    *  client's weight unit. False for anything that is not a weight at all. */
   weight?: boolean;
+  /**
+   * Which published series this metric's readings come from.
+   *
+   * Named on the metric rather than switched on `key` further down, so that a
+   * metric added later cannot quietly fall through to re-deriving itself from
+   * `cd.scans` — which is the exact shape of the bug that made this screen and
+   * Progress disagree.
+   */
+  from: 'weight' | 'bodyFat' | 'muscle' | 'score';
 }
 const METRICS: MetricDef[] = [
-  { key: 'weightKg', label: 'Weight', unit: 'kg', better: 'down', weight: true },
-  { key: 'bodyFatPct', label: 'Body fat', unit: '%', better: 'down' },
-  { key: 'skeletalMuscleKg', label: 'Skeletal muscle', unit: 'kg', better: 'up', weight: true },
-  { key: 'inbodyScore', label: 'InBody score', unit: 'pts', better: 'up' },
+  { key: 'weightKg', label: 'Weight', unit: 'kg', better: 'down', weight: true, from: 'weight' },
+  { key: 'bodyFatPct', label: 'Body fat', unit: '%', better: 'down', from: 'bodyFat' },
+  { key: 'skeletalMuscleKg', label: 'Skeletal muscle', unit: 'kg', better: 'up', weight: true, from: 'muscle' },
+  { key: 'inbodyScore', label: 'InBody score', unit: 'pts', better: 'up', from: 'score' },
 ];
-
-function valOf(scan: any, key: string): number | undefined {
-  if (key === 'inbodyScore') return scan?.metrics?.inbodyScore;
-  const v = scan?.[key];
-  return typeof v === 'number' ? v : undefined;
-}
-
-const dm = (iso: string) => `${new Date(iso).getDate()}/${new Date(iso).getMonth() + 1}`;
 
 export default function BodyTrends() {
   const t = useTheme();
@@ -54,7 +89,36 @@ export default function BodyTrends() {
   const cd = useClientData();
   const wu = useSettings().weightUnit;
   const scans = useMemo(() => [...(cd.scans || [])].sort((a, b) => Date.parse(a.takenAt) - Date.parse(b.takenAt)), [cd.scans]);
+  const today = todayISO();
   const G = layout.gutter;
+
+  // clientData appends the logged weigh-in past the last scan, so the number of
+  // scans is what separates the two kinds of point. It is read from the same
+  // provider in the same render as the series themselves, so the two cannot
+  // drift apart between here and there.
+  const scanCount = cd.scans.length;
+  const readingsFor = (m: MetricDef): BodyReading[] => {
+    switch (m.from) {
+      case 'weight': return bodyReadings(cd.weightSeries, scanCount);
+      case 'bodyFat': return bodyReadings(cd.bodyFatSeries, scanCount);
+      case 'muscle': return bodyReadings(cd.muscleSeries, scanCount);
+      // The one metric no weigh-in can produce. A scan with no score
+      // contributes no point rather than a zero — a charted zero is not a low
+      // score, it is a cliff that flattens every real reading beside it.
+      case 'score': return scans.flatMap((s) => (
+        typeof s.metrics?.inbodyScore === 'number'
+          ? [{ value: s.metrics.inbodyScore, at: s.takenAt, source: 'scan' as const }]
+          : []
+      ));
+    }
+  };
+
+  const byMetric = METRICS.map((m) => ({ m, readings: readingsFor(m) }));
+  // The screen's own summary line, and it must not say "scans" — most clients'
+  // weight series is a mixture and a few clients' is weigh-ins only.
+  const allLatest = byMetric.map(({ readings }) => (readings.length ? readings[readings.length - 1] : null));
+  const headNote = mixedSourceNote(allLatest);
+  const anyTrend = byMetric.some(({ readings }) => readings.length > 1);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
@@ -63,52 +127,80 @@ export default function BodyTrends() {
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
           <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Every InBody metric across {scans.length} scan{scans.length === 1 ? '' : 's'}</Text>
+            <Text style={{ ...ty.micro, color: t.ink3 }}>
+              Every body metric across {scans.length} scan{scans.length === 1 ? '' : 's'}
+              {cd.weightSeries.length > scanCount ? ' and your latest weigh-in' : ''}
+            </Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Composition trends</Text>
           </View>
           <Ghost icon="back" onPress={() => router.back()} />
         </View>
 
+        {/* Said once, at the top, and only when the figures below genuinely do
+            come from different instruments or different days. This is the
+            sentence that turns "these two screens disagree" into "these two
+            figures were measured on different days", which is a fact about the
+            client's month rather than a fault in the app. */}
+        {headNote ? (
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{headNote}</Text>
+        ) : null}
+
         <Rule />
 
-        {scans.length < 2 ? (
+        {!anyTrend ? (
           <Section>
-            <SectionHead title="Not enough scans yet" />
+            <SectionHead title="Not enough readings yet" />
             <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>Add another scan to see trends</Text>
-            <Text style={{ ...ty.label, color: t.ink3, marginTop: 4 }}>Once you've logged two or more InBody scans, each metric graphs here so you can watch it move over time.</Text>
+            <Text style={{ ...ty.label, color: t.ink3, marginTop: 4 }}>Once you've logged two or more readings, each metric graphs here so you can watch it move over time.</Text>
           </Section>
         ) : (
-          METRICS.map((m, mi) => {
-            const series = scans.map((s) => ({ t: s.takenAt, v: valOf(s, m.key) })).filter((p) => typeof p.v === 'number') as { t: string; v: number }[];
-            if (series.length < 2) return (
+          byMetric.map(({ m, readings }, mi) => {
+            if (readings.length < 2) return (
               <View key={m.key}>
                 {mi > 0 ? <Rule /> : null}
                 <Section>
-                  <SectionHead title={m.label} />
-                  <Text style={{ ...ty.label, color: t.ink3 }}>{m.key === 'inbodyScore' ? 'InBody score reads from your scan once the AI reader is connected.' : 'Not enough data yet.'}</Text>
+                  <SectionHead title={m.label} note={readings.length ? readingsLabel(readings) : undefined} />
+                  {/* One reading is a reading, not a trend — so it is printed
+                      with its date rather than withheld. A client who has been
+                      scanned once has a real figure, and telling them there is
+                      "not enough data" without showing it reads as though the
+                      app has lost it. */}
+                  {readings.length === 1 ? (
+                    <Text style={{ ...ty.label, color: t.ink3 }}>
+                      One reading so far — {m.weight ? weightIn(readings[0].value, wu) : readings[0].value}
+                      {m.weight ? ` ${wu}` : ` ${m.unit}`} · {measuredNote(readings[0], today)}. A trend needs two.
+                    </Text>
+                  ) : (
+                    <Text style={{ ...ty.label, color: t.ink3 }}>{m.from === 'score' ? 'InBody score reads from your scan once the AI reader is connected.' : 'Not enough data yet.'}</Text>
+                  )}
                 </Section>
               </View>
             );
-            // A single point read out in the client's unit. Only the two mass
-            // metrics move; the percentage and the score pass straight through.
-            const show = (v: number) => (m.weight && wu === 'lb' ? Math.round(kgToLb(v)) : v);
+            // A single point read out in the client's unit, through the same
+            // `weightIn` every other screen uses. This screen used to round
+            // pounds locally and leave kilograms unrounded, so a stored 84.25 kg
+            // printed as 84.3 on Progress and 84.25 here — a second, quieter way
+            // for the two screens to disagree.
+            const show = (v: number) => (m.weight ? (weightIn(v, wu) ?? v) : v);
             const unit = m.weight ? wu : m.unit;
-            const vals = series.map((p) => show(p.v));
+            const vals = readings.map((r) => show(r.value));
             const min = Math.min(...vals), max = Math.max(...vals);
             const first = vals[0], last = vals[vals.length - 1];
+            const now = readings[readings.length - 1];
+            const stale = stalenessNote(now, today);
             // The change is taken across the STORED figures and converted once,
             // not read off the two converted endpoints: a 0.4 kg gain is 0.88 lb,
             // and endpoints rounded into pounds before subtracting would report
             // it as either nothing or two pounds depending on nothing but where
             // the two readings happened to fall.
-            const rawDelta = Math.round((series[series.length - 1].v - series[0].v) * 10) / 10;
+            const rawDelta = Math.round((readings[readings.length - 1].value - readings[0].value) * 10) / 10;
             const delta = (m.weight ? weightDeltaIn(rawDelta, wu) : rawDelta) ?? rawDelta;
             const improving = m.better === 'up' ? rawDelta >= 0 : rawDelta <= 0;
             return (
               <View key={m.key}>
                 {mi > 0 ? <Rule /> : null}
                 <Section>
-                  <SectionHead title={m.label} note={`${series.length} scans`} />
+                  <SectionHead title={m.label} note={readingsLabel(readings)} />
                   <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.md }}>
                     <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
                       <Text style={{ ...value(26), color: t.ink }}>{last}</Text>
@@ -117,18 +209,26 @@ export default function BodyTrends() {
                     {delta !== 0 ? (
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                         <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: improving ? t.brand : t.ink3 }} />
-                        <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{delta > 0 ? '+' : '−'}{Math.abs(delta)} {unit} since your first scan</Text>
+                        {/* "since your first scan" was wrong the moment the
+                            first point was a weigh-in. The date it is actually
+                            measured from is printed instead of guessed at. */}
+                        <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{delta > 0 ? '+' : '−'}{Math.abs(delta)} {unit} since {dayLabel(readings[0].at)}</Text>
                       </View>
                     ) : (
-                      <Text style={{ ...ty.caption, color: t.ink3 }}>No change since your first scan</Text>
+                      <Text style={{ ...ty.caption, color: t.ink3 }}>No change since {dayLabel(readings[0].at)}</Text>
                     )}
                   </View>
+                  {/* The date and instrument behind the big number above it.
+                      "Need to see the dates the weight was measured as well" —
+                      this is that line, on every metric on the screen. */}
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>{measuredNote(now, today)}</Text>
+                  {stale ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{stale}</Text> : null}
                   <View style={{ height: sp.md }} />
-                  <Spark data={vals} labels={series.map((p) => p.t)} />
+                  <Spark data={vals} labels={readings.map((r) => r.at)} unit={` ${unit}`} />
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: sp.sm }}>
-                    <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{dm(series[0].t)} · {first} {unit}</Text>
+                    <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{shortDayLabel(readings[0].at)} · {first} {unit}</Text>
                     <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>range {min}–{max} {unit}</Text>
-                    <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{dm(series[series.length - 1].t)}</Text>
+                    <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{shortDayLabel(readings[readings.length - 1].at)}</Text>
                   </View>
                 </Section>
               </View>

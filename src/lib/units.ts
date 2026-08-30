@@ -183,7 +183,195 @@ export function lengthDeltaIn(deltaCm: number | null | undefined, unit: LengthUn
   return roundTo(unit === 'in' ? cmToIn(deltaCm) : deltaCm, 1);
 }
 
+// ── the weight a person LIFTS ──────────────────────────────────────────────
+//
+// Deliberately left out of TF-37 and asked for since: "Don't have choice of
+// units for exercise / weights being used." It was left out because barbell
+// plates are metric hardware and app/(client)/tools.tsx does plate maths
+// against a metric rack, so converting a lifted load looked like a judgement
+// call rather than a sweep. It is a judgement call, and this is it.
+//
+// ── A lifted weight is not a body weight, and needs a finer grain ──────────
+//
+// Everything above prints whole pounds, because the reading underneath is a
+// scan or a bathroom scale stored to 0.1 kg and a tenth of a kilogram is
+// 0.22 lb — a tenth of a pound there would be a digit the measurement cannot
+// support. None of that argument survives the move to lifted load:
+//
+//   · `workouts.sets` is jsonb, not numeric(_,1). There is no database grain
+//     imposing a floor, so nothing forces the coarse display the body-weight
+//     figures were reasoned into.
+//   · The number is not a measurement with slop in it. It is what somebody
+//     typed, or what they loaded on a bar, and it is exact.
+//   · The hardware does not land on whole pounds in either direction. A pair
+//     of 1.25 kg fractional plates is a 2.5 kg jump; a pair of 1.25 lb
+//     fractionals is a 2.5 lb jump, and the 47.5 lb and 52.5 lb bars that
+//     produces are ordinary gym numbers. Whole pounds would print a 47.5 lb
+//     bench as "48 lb" and hand it back changed to the person who typed it —
+//     which is TF-37's original complaint, arriving on a different screen.
+//
+// So:
+//
+//   stored                  displayed metric   displayed imperial
+//   kg, 2 dp  (lifted)      the stored kg      0.5 lb
+//   kg, whole (volume)      whole kg           whole lb
+//   kg, whole (est. 1RM)    whole kg           whole lb
+//
+// Two decimal places of storage is what makes the imperial trip lossless: an
+// entry rounded to the hundredth of a kilogram is at most 0.005 kg = 0.011 lb
+// away from what was typed, and a half-pound rounding needs 0.25 lb of error
+// before it moves. Metric is exact by construction — the stored number IS what
+// a kilogram reader typed. units.test.ts sweeps both rather than trusting this.
+//
+// The metric side prints the stored hundredths rather than rounding to a gym
+// increment on purpose. A load entered as 225 lb is 102.06 kg and there is no
+// honest way to show a kilogram reader "102" — the coach's console reads the
+// same row, and the two have to agree.
+
+/** The finest grain a lifted load is stored at. See the header above. */
+const LIFT_STORED_DP = 2;
+
+/** Half a pound: the grain imperial fractional plates actually produce. */
+const LB_LIFT_STEP = 0.5;
+
+/**
+ * Above any lift a human has recorded, stated separately in each unit rather
+ * than converted. 600 kg converts to 1,322.77 lb, and a message reading "over
+ * 1,322 lb" looks like a bug in the app rather than a bound on the number —
+ * so each unit gets a round figure of its own.
+ */
+const LIFT_MAX: Record<WeightUnit, number> = { kg: 600, lb: 1300 };
+
+const roundToStep = (n: number, step: number) => Math.round((n + Number.EPSILON) / step) * step;
+
+/**
+ * A stored lifted load in the client's unit. null in, null out — and a 0 is
+ * kept, because a set logged at 0 is a bodyweight set and the screens render
+ * that as a dash of their own rather than as "0 kg".
+ */
+export function liftIn(kg: number | null | undefined, unit: WeightUnit): number | null {
+  if (kg == null || !Number.isFinite(kg)) return null;
+  return unit === 'lb' ? roundToStep(kgToLb(kg), LB_LIFT_STEP) : roundTo(kg, LIFT_STORED_DP);
+}
+
+/** A lifted load with its unit attached: `60 kg`, `137.5 lb`. */
+export function liftLabel(kg: number | null | undefined, unit: WeightUnit): string | null {
+  const v = liftIn(kg, unit);
+  return v == null ? null : `${plain(v)} ${unit}`;
+}
+
+/**
+ * A DIFFERENCE between two lifted loads — a progression bump, a jump between
+ * sessions — converted once, at the grain the loads themselves carry.
+ *
+ * The half-pound matters more here than anywhere. 2.5 kg is the commonest
+ * progression step in the app (see `suggestForExercise`'s default increment)
+ * and it is 5.51 lb: at whole pounds it reads "+6 lb", which is further from
+ * the truth than the "+5.5 lb" the plates actually justify.
+ *
+ * The span is converted, not the two ends, for the reason `weightDeltaIn`
+ * gives — so a 2.5 kg bump reads the same every week rather than alternating
+ * between 5 and 6 depending on where the two loads sat inside their rounding.
+ */
+export function liftDeltaIn(deltaKg: number | null | undefined, unit: WeightUnit): number | null {
+  if (deltaKg == null || !Number.isFinite(deltaKg)) return null;
+  return unit === 'lb' ? roundToStep(kgToLb(deltaKg), LB_LIFT_STEP) : roundTo(deltaKg, LIFT_STORED_DP);
+}
+
+/**
+ * An estimated 1-rep max in the client's unit.
+ *
+ * Coarser than `liftIn`, and that is the whole point: `est1RM` in
+ * src/lib/streaks.ts is Epley's formula wrapped in `Math.round`, so what
+ * arrives here is already whole kilograms. Reading that out at the half-pound
+ * would print a figure to 0.5 lb off an input that only distinguished one
+ * kilogram from the next — 2.2 lb of grain dressed up as 0.5. A derived
+ * number does not get more precision than the number it was derived from.
+ */
+export function est1RMIn(kg: number | null | undefined, unit: WeightUnit): number | null {
+  if (kg == null || !Number.isFinite(kg)) return null;
+  return Math.round(unit === 'lb' ? kgToLb(kg) : kg);
+}
+
+/**
+ * A total tonnage in the client's unit.
+ *
+ * Whole units, in both. A volume is Σ reps × load over a week or a month, so
+ * it runs to five and six figures — and it is a sum of many loads, each with
+ * its own rounding, which means a tenth of a unit on the total is noise
+ * dressed as precision. Nobody compares two training weeks to the pound.
+ */
+export function volumeIn(kg: number | null | undefined, unit: WeightUnit): number | null {
+  if (kg == null || !Number.isFinite(kg)) return null;
+  return Math.round(unit === 'lb' ? kgToLb(kg) : kg);
+}
+
+/**
+ * The same total where the screen has room for one short figure — a hero, a
+ * KPI column — and six digits will not fit.
+ *
+ * Asymmetric on purpose. A metric reader gets tonnes, which is what
+ * `tonnes()` in src/lib/longView.ts already computes and what History's hero
+ * has always shown. An imperial reader gets the pounds themselves, because the
+ * tonne has no imperial counterpart worth printing: the choices are short
+ * tons, which differ from a tonne by 10% and would be read as the same unit,
+ * or nothing. app/(client)/report.tsx reached that conclusion first and wrote
+ * it down; this is the same decision, made once so the screens share it.
+ */
+export function volumeHeadline(
+  kg: number | null | undefined,
+  unit: WeightUnit,
+): { figure: number; unit: 't' | 'lb' } | null {
+  if (kg == null || !Number.isFinite(kg)) return null;
+  // Matches longView.tonnes exactly — one decimal place of a tonne. Written
+  // out rather than imported so this module keeps depending on nothing.
+  if (unit === 'kg') return { figure: Math.round(kg / 100) / 10, unit: 't' };
+  return { figure: Math.round(kgToLb(kg)), unit: 'lb' };
+}
+
 // ── taking what the client typed back to metric ────────────────────────────
+
+/**
+ * A lifted load the client typed, as kilograms to store.
+ *
+ * Separate from `weightToKg` because the storage grain is: a body weight is
+ * stored to the tenth its column can hold, and a lift to the hundredth that
+ * makes 225 lb come back as 225 lb rather than 225.5.
+ */
+export function liftToKg(text: string | number | null | undefined, unit: WeightUnit): number | null {
+  const n = parse(text);
+  if (n == null) return null;
+  return roundTo(unit === 'lb' ? lbToKg(n) : n, LIFT_STORED_DP);
+}
+
+/** Either the load in kilograms, or the sentence to show whoever typed it. */
+export type LiftRead = { ok: true; kg: number | null } | { ok: false; reason: string };
+
+/**
+ * Read a load out of a set row, with the bounds stated in the unit being
+ * typed.
+ *
+ * A blank box is `kg: null`, not a refusal and not a zero: a set of pull-ups
+ * carries no external load, and the log renders that absence as a dash. What
+ * is refused is text that is not a number — `parseFloat(x.kg) || 0` is what
+ * the set rows shipped with, and a fat-fingered load silently becoming 0 puts
+ * a bodyweight set in the record where a 100 kg one belongs, which then drags
+ * down the volume, the estimated 1RM and next session's target.
+ *
+ * The bound is checked and NAMED in the unit on screen. Refusing "1000" typed
+ * by somebody in pounds with a sentence about 600 kg would be telling them
+ * their own number is wrong in a unit they do not use.
+ */
+export function readLift(text: string | number | null | undefined, unit: WeightUnit): LiftRead {
+  if (text == null || String(text).trim() === '') return { ok: true, kg: null };
+  const n = parse(text);
+  if (n == null) return { ok: false, reason: 'That load is not a number. Leave it empty for a bodyweight set.' };
+  if (n < 0) return { ok: false, reason: 'A load cannot be negative.' };
+  if (n > LIFT_MAX[unit]) {
+    return { ok: false, reason: `${plain(n)} ${unit} is heavier than anyone has lifted — check that figure.` };
+  }
+  return { ok: true, kg: roundTo(unit === 'lb' ? lbToKg(n) : n, LIFT_STORED_DP) };
+}
 
 /**
  * What the client typed in their own unit, as kilograms to store — or null if

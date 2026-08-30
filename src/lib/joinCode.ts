@@ -39,6 +39,27 @@ export function normaliseCode(input: string): string {
  * authority on whether a code exists, and a client-side rule that is stricter
  * than the generator would reject valid codes forever with no way to appeal.
  */
+/**
+ * Where a coach's invite link points.
+ *
+ * A store address cannot go straight into the message. It is composed on the
+ * COACH's phone and read on somebody else's, so the sending device says nothing
+ * about which store the reader needs — iPhone and Android are sent the same
+ * text and one of them would always be wrong. The page resolves it when it is
+ * opened, which is the only moment the answer is knowable, and it carries the
+ * code so a reader who cannot install yet still lands somewhere that shows them
+ * what their coach sent.
+ */
+export const JOIN_LINK_BASE = 'https://www.repplefitness.com/join';
+
+/** The invite a coach shares. One place, so the two share buttons on the coach
+ *  dashboard cannot drift into saying different things. */
+export function inviteMessage(code: string): string {
+  const c = normaliseCode(code);
+  return `Join me on Repple — get the app here: ${JOIN_LINK_BASE}?c=${encodeURIComponent(c)}\n\n`
+    + `Then tap Find a trainer and enter my code: ${c}`;
+}
+
 export function isPlausibleCode(input: string): boolean {
   const c = normaliseCode(input);
   return c.length === CODE_LENGTH && [...c].every((ch) => CODE_ALPHABET.includes(ch));

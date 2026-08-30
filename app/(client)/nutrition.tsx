@@ -472,7 +472,15 @@ export default function Nutrition() {
           <QuickRow items={[
             { icon: 'meals', label: 'Food Log', onPress: () => router.push('/(client)/foodlog') },
             { icon: 'water', label: 'Recovery', onPress: () => router.push('/(client)/recovery') },
-            { icon: 'settings', label: 'Macros', onPress: () => router.push('/(client)/tools') },
+            // Reported as "why is tapping macros sending you to lifting tools?".
+            // The macro reference does live on that screen — it works protein
+            // and fat out of this client's own recorded weight and body fat —
+            // but it is the third tab of a screen called Lifting Tools, and a
+            // shortcut on the MEALS tab labelled only "Macros" promised the
+            // targets this screen is already showing. It now says where it
+            // goes, and lands on the tab it meant rather than the 1RM
+            // estimator.
+            { icon: 'settings', label: 'Macro guide', onPress: () => router.push({ pathname: '/(client)/tools', params: { tab: 'macros' } }) },
           ]} />
         </Section>
 

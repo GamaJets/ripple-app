@@ -75,6 +75,7 @@ import { recentWindow, summariseAdherence, type ChecklistRow, type TickRow } fro
 import { fetchSharedInbox } from '../../src/lib/photoShare';
 import { type Inbox } from '../../src/lib/photoInbox';
 import { weightDeltaIn } from '../../src/lib/units';
+import { bodyLine } from '../../src/lib/clientBody';
 import { COACHED_MODE_SHORT } from '../../src/lib/types';
 import {
   lastSeenLine, goalsLine, weekLine, photosLine, listLine, programmeLine,
@@ -323,6 +324,43 @@ export default function ClientScreen() {
     return () => { live = false; };
   }, [canRead, id]);
 
+  /* ── whether there is a body-composition trend to look at ───────────────── */
+
+  // Two rows, deliberately, and not a capped read of the set. All this screen
+  // has to say is whether there is anything worth opening — when they were last
+  // scanned, and whether there is an earlier scan to measure it against — and
+  // the screen that draws the trend reads the history properly with `capLimit()`
+  // and owns every figure taken off it. Asking for a thousand rows to render one
+  // sentence would be a worse answer to the same question, and a count computed
+  // here would be a second place that could disagree with client-body.tsx about
+  // how many scans somebody has.
+  const [scanTop, setScanTop] = useState<{ newestISO: string | null; hasEarlier: boolean } | null>(null);
+  const [scansFailed, setScansFailed] = useState(false);
+  useEffect(() => {
+    if (!canRead || !id) return;
+    let live = true;
+    setScanTop(null); setScansFailed(false);
+    (async () => {
+      // `taken_at` is a DATE and nothing stops two scans sharing one, so the id
+      // settles the ties — otherwise which of them is "the newest" can change
+      // between reads, and so can the date printed under this client's name.
+      const { data, error } = await supabase.from('scans').select('taken_at')
+        .eq('client_id', id)
+        .order('taken_at', { ascending: false }).order('id', { ascending: false })
+        .limit(2);
+      if (!live) return;
+      if (error) {
+        // Null, never an empty answer. A refused read must not tell a coach
+        // their client has never been scanned.
+        reportError('client.scans', error);
+        setScanTop(null); setScansFailed(true); return;
+      }
+      const rows = (data ?? []) as { taken_at: string }[];
+      setScanTop({ newestISO: rows[0]?.taken_at ?? null, hasEarlier: rows.length > 1 });
+    })();
+    return () => { live = false; };
+  }, [canRead, id]);
+
   /* ── the briefing ───────────────────────────────────────────────────────── */
 
   const nowMs = Date.now();
@@ -498,6 +536,22 @@ export default function ClientScreen() {
             note={unasked ?? goalsLine(goalStatus, board, who, nowMs)}
             tone={goalStatus === 'error' ? t.warn : undefined}
             onPress={go('/(trainer)/client-goals')} />
+
+          {/* Directly under the goals, because the scans on the other side of
+              this row are what two of the three measured goal kinds are held
+              against — and because "how is this person actually going" is the
+              same question asked twice. */}
+          <ListRow icon="chart" title="Their body composition"
+            note={unasked ?? bodyLine(
+              scansFailed,
+              scanTop == null && !scansFailed,
+              scanTop?.newestISO ?? null,
+              scanTop?.hasEarlier ?? false,
+              todayISO,
+              who,
+            )}
+            tone={scansFailed ? t.warn : undefined}
+            onPress={go('/(trainer)/client-body')} />
 
           <ListRow icon="calendar" title="The week they've planned"
             note={unasked ?? weekLine(weekStatus, week, who)}

@@ -33,6 +33,10 @@ import {
 } from '../../src/lib/wearables/appleHealthWrite';
 import { reportError } from '../../src/lib/reportError';
 import { readSleepFromDevices } from '../../src/lib/wearables/sleep';
+// One answer to "is this connected", shared with Recovery. See
+// src/lib/wearableLink.ts — this screen and that one used to compute it
+// separately and contradict each other in front of the same client.
+import { forgetLink, linkFor, useLinkRevision } from '../../src/lib/wearableLinkLedger';
 import { formatSleepHours, recentNights, type SleepRead } from '../../src/lib/sleepMerge';
 import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 
@@ -65,6 +69,11 @@ export default function Devices() {
  const t = useTheme();
  const router = useRouter();
  const w = useWearables();
+ // Re-render whenever the server proves something new about any device — a
+ // token dying, a scope being refused, or a reconnect clearing both. Without
+ // this the screen would go on showing whatever it decided on mount, which is
+ // half of why reconnecting appeared to do nothing.
+ const linkRev = useLinkRevision();
  const [detail, setDetail] = useState<MetricKey | null>(null);
  const { log, addWorkouts, setSessionMins } = useWorkoutLog();
  const apple = PROVIDERS.find((p) => p.meta.id === 'apple');
@@ -216,7 +225,20 @@ export default function Devices() {
  }
  };
 
- const connected = PROVIDERS.filter((p) => w.states[p.meta.id] === 'connected');
+ // Disconnecting has to drop what the server proved about the token as well as
+ // the token itself. A verdict left behind outlives its subject, and would put
+ // "reconnect WHOOP" in front of somebody who has just removed WHOOP on
+ // purpose. `disconnectVendor` does this for the cloud providers; Apple Health
+ // does not go through it, so it is done here for all of them.
+ const onDisconnect = async (p: WearableProvider) => {
+  await w.disconnect(p.meta.id);
+  forgetLink(p.meta.id);
+ };
+
+ // Connected means the shared state machine says so — never the remembered flag
+ // on its own. A device whose token the server has told us is dead does not
+ // belong in this list, however firmly AsyncStorage remembers connecting it.
+ const connected = PROVIDERS.filter((p) => linkFor(p.meta.id, p.meta.name, w.states[p.meta.id] || 'disconnected').connected);
 
  // Which of the connected devices sleep actually comes from (TF-01).
  //
@@ -239,7 +261,10 @@ export default function Devices() {
    }
   })();
   return () => { cancelled = true; };
- }, [connectedKey]);
+  // `linkRev` alongside the provider list, because reconnecting an
+  // already-connected device does not change WHICH devices are connected — and
+  // that is exactly why the old sentence survived the reconnect that fixed it.
+ }, [connectedKey, linkRev]);
  // Last night per device, UNMERGED. This list is about provenance, so each
  // recorder's own figure sits next to its own name and no precedence is
  // applied — deciding which one to believe is the Recovery screen's job, and
@@ -558,7 +583,12 @@ export default function Devices() {
    <SectionHead title="Available devices" note={connected.length ? `${connected.length} connected` : undefined} />
    {PROVIDERS.map((p, i) => {
     const st = w.states[p.meta.id] || 'disconnected';
-    const on = st === 'connected';
+    // The account question and the sleep question, asked separately and
+    // answered by the same function. Asking them separately is the fix: the
+    // second one used to be allowed to change the answer to the first.
+    const link = linkFor(p.meta.id, p.meta.name, st);
+    const sleepLink = linkFor(p.meta.id, p.meta.name, st, 'sleep');
+    const on = link.connected;
     const busy = !!w.busy[p.meta.id];
     const reason = p.unavailableReason();
     const blocked = !p.isAvailable() && !on;
@@ -580,14 +610,39 @@ export default function Devices() {
        </View>
        {busy ? (
         <ActivityIndicator color={t.brand} />
+       ) : link.action === 'reconnect' ? (
+        // Offered as the primary control, because it is the one thing that
+        // fixes this and the client has to be able to find it. It is offered
+        // ONLY where re-authorising genuinely helps: a gap in this build
+        // ('metric-blocked' with no action) does not get a button, because
+        // pressing it changes nothing and pressing it repeatedly is what this
+        // tester spent four reports doing.
+        <Cta label="Reconnect" onPress={() => onConnect(p)} />
        ) : on || blocked ? (
-        <Ghost label={on ? 'Connected' : 'Unavailable'} onPress={() => (on ? w.disconnect(p.meta.id) : onConnect(p))} />
+        <Ghost label={on ? 'Connected' : 'Unavailable'} onPress={() => (on ? onDisconnect(p) : onConnect(p))} />
        ) : (
         <Cta label="Connect" onPress={() => onConnect(p)} />
        )}
       </View>
 
       {blocked && reason ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{reason}</Text> : null}
+
+      {/* The state in words, wherever it is not simply working.
+          'live' says nothing here — the figures below it are the evidence, and
+          a line saying "connected" over a row of live numbers is noise. Every
+          other state gets its full sentence, because the complaint was one word
+          standing in for four different situations. */}
+      {link.state !== 'live' && link.state !== 'never' ? (
+       <Text style={{ ...ty.caption, color: link.tone === 'warn' ? t.warn : t.ink3, marginTop: sp.sm }}>{link.detail}</Text>
+      ) : null}
+
+      {/* And the metric-level answer, kept visibly separate from the account
+          one. This is the line that used to be absent here and present on
+          Recovery as "needs reconnecting", which is how the two screens came to
+          disagree about the same device in the same session. */}
+      {sleepLink.state === 'metric-blocked' ? (
+       <Text style={{ ...ty.caption, color: sleepLink.tone === 'warn' ? t.warn : t.ink3, marginTop: sp.sm }}>{sleepLink.detail}</Text>
+      ) : null}
 
       {on ? (
        <View style={{ marginTop: sp.md }}>

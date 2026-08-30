@@ -15,6 +15,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
+import { useSettings } from '../../src/ui/settings';
+import { volumeIn, est1RMIn, weightDeltaIn, convertedNote } from '../../src/lib/units';
 import { est1RM } from '../../src/lib/streaks';
 import type { WorkoutEntry } from '../../src/lib/mockData';
 import { Rule, Section, SectionHead, Hero, KpiRow, Ghost, Spark, fig } from '../../src/ui/kit';
@@ -30,6 +32,14 @@ export default function Trends() {
   const t = useTheme();
   const router = useRouter();
   const { log, status: logStatus } = useWorkoutLog();
+  // Every figure on this screen is a lifted load or a sum of them, and the
+  // tester's report was about exactly these: "Don't have choice of units for
+  // exercise / weights being used." The arithmetic below stays in the
+  // kilograms the log is stored in — a chart drawn from converted values would
+  // have a different shape for a pounds reader — and only the printed figures
+  // convert, at the edge, in src/lib/units.ts.
+  const wu = useSettings().weightUnit;
+  const unitNote = convertedNote(wu);
   // Under 'error' the log is empty because it could not be read, so every
   // tonnage below reduces to zero and gets printed with a thousands separator
   // and a unit — the full costume of a measured figure. "Best week" is the
@@ -72,6 +82,10 @@ export default function Trends() {
   const first = series.length ? series[0].v : 0;
   const last = series.length ? series[series.length - 1].v : 0;
   const delta = last - first;
+  // The span, converted once. Null only if the series is empty, which the
+  // `series.length >= 2` guard below already excludes — so the KPI is never
+  // handed a stand-in zero for a change nobody measured.
+  const deltaShown = weightDeltaIn(delta, wu);
 
   // Presentation-only: this week is the last bucket; a flat run of zeros is not
   // a trend, so the chart only draws once something has actually been lifted.
@@ -96,19 +110,24 @@ export default function Trends() {
         {/* ── the hero: this week's tonnage ──────────────────────────────── */}
         <Hero
           label="Lifted this week"
-          figure={logKnown ? Math.round(thisWeek.vol).toLocaleString() : fig(null)}
-          unit={logKnown ? 'kg' : undefined}
+          figure={logKnown ? fig(volumeIn(thisWeek.vol, wu)?.toLocaleString()) : fig(null)}
+          unit={logKnown ? wu : undefined}
           note={!logKnown ? 'We couldn’t read your training log — this is not a week with nothing in it.'
             : thisWeek.sessions
             ? `${thisWeek.sessions} training day${thisWeek.sessions === 1 ? '' : 's'} since Monday`
             : 'No sessions logged this week yet.'}
         />
 
+        {/* Said once, under the hero, rather than beside each figure: a pounds
+            reader is reading kilograms converted, and their coach's console is
+            not, so the two disagreeing is worth explaining before it is seen. */}
+        {unitNote ? <Text style={{ ...ty.caption, color: t.ink3 }}>{unitNote}</Text> : null}
+
         <Rule />
 
         {/* ── weekly volume ──────────────────────────────────────────────── */}
         <Section>
-          <SectionHead title={`Weekly volume · last ${WEEKS} weeks`} note="Total kg lifted" />
+          <SectionHead title={`Weekly volume · last ${WEEKS} weeks`} note={`Total ${wu} lifted`} />
           {anyVolume ? (
             <Spark data={weeks.map((w) => w.vol)} />
           ) : (
@@ -120,9 +139,9 @@ export default function Trends() {
           )}
           <View style={{ height: sp.lg }} />
           <KpiRow items={[
-            { label: 'This week', value: logKnown ? Math.round(thisWeek.vol).toLocaleString() : fig(null), unit: logKnown ? 'kg' : undefined },
+            { label: 'This week', value: logKnown ? fig(volumeIn(thisWeek.vol, wu)?.toLocaleString()) : fig(null), unit: logKnown ? wu : undefined },
             { label: 'Training days', value: logKnown ? fig(thisWeek.sessions) : fig(null) },
-            { label: 'Best week', value: logKnown ? Math.round(bestWeek.vol).toLocaleString() : fig(null), unit: logKnown ? 'kg' : undefined, delta: logKnown && anyVolume ? `w/c ${bestWeek.label}` : undefined },
+            { label: 'Best week', value: logKnown ? fig(volumeIn(bestWeek.vol, wu)?.toLocaleString()) : fig(null), unit: logKnown ? wu : undefined, delta: logKnown && anyVolume ? `w/c ${bestWeek.label}` : undefined },
           ]} />
         </Section>
 
@@ -153,11 +172,18 @@ export default function Trends() {
                 <>
                   <KpiRow items={[
                     {
-                      label: 'Est. 1RM', value: fig(last), unit: 'kg',
+                      // The change is `weightDeltaIn`, not the difference of the
+                      // two converted ends. Both ends are estimates already
+                      // rounded to whole kilograms, so subtracting their rounded
+                      // pound readings lets a pound of rounding at each end move
+                      // the answer — an unchanged 1RM could report a pound of
+                      // progress, and a genuine 2.5 kg gain could read as 5 lb
+                      // one session and 6 lb the next.
+                      label: 'Est. 1RM', value: fig(est1RMIn(last, wu)), unit: wu,
                       good: delta >= 0,
-                      delta: series.length >= 2 ? `${delta >= 0 ? '+' : '−'}${Math.abs(delta)} kg` : undefined,
+                      delta: series.length >= 2 && deltaShown != null ? `${deltaShown >= 0 ? '+' : '−'}${Math.abs(deltaShown)} ${wu}` : undefined,
                     },
-                    { label: 'Best', value: fig(maxE), unit: 'kg' },
+                    { label: 'Best', value: fig(est1RMIn(maxE, wu)), unit: wu },
                     { label: 'Sessions', value: fig(series.length) },
                   ]} />
                   {series.length >= 2 ? (<>

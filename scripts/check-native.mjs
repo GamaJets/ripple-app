@@ -53,6 +53,15 @@ const NATIVE = [
   'expo-camera', 'expo-image-picker', 'expo-video', 'expo-notifications',
   'expo-local-authentication', 'expo-secure-store', 'expo-dev-client',
   'expo-updates', 'react-native-health', 'react-native-svg',
+  // Added after the PDF export was found never to have worked in ANY build.
+  // src/lib/exportShare.ts requires both inside a try/catch, which Metro treats
+  // as an optional dependency: an unresolvable one throws at runtime into the
+  // catch rather than failing the bundle. Neither was ever in package.json, so
+  // `Print` and `Sharing` were always null and the button was never offered.
+  // Nothing caught it — a typecheck does not see an untyped require, and this
+  // list only ever contained modules somebody had already declared, so a module
+  // nobody declared could not be missed from it.
+  'expo-print', 'expo-sharing',
 ];
 
 const deps = JSON.parse(readFileSync('package.json', 'utf8')).dependencies ?? {};

@@ -27,7 +27,7 @@
 import { useState } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, fig } from '../../src/ui/kit';
@@ -254,7 +254,14 @@ function MacroRef({ t }: { t: Theme }) {
 export default function Tools() {
  const t = useTheme();
  const router = useRouter();
- const [tab, setTab] = useState<'1rm' | 'plates' | 'macros'>('1rm');
+ // A caller can name the tab. Meals links here for the macro reference, and
+ // landing that reader on the 1RM estimator is how "why is tapping macros
+ // sending you to lifting tools?" got reported — the destination was right and
+ // the tab was not, which reads as being sent somewhere unrelated.
+ const { tab: wanted } = useLocalSearchParams<{ tab?: string }>();
+ const [tab, setTab] = useState<'1rm' | 'plates' | 'macros'>(
+   wanted === 'macros' || wanted === 'plates' || wanted === '1rm' ? wanted : '1rm',
+ );
  const G = layout.gutter;
  return (
  <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>

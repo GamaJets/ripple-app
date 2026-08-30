@@ -54,12 +54,14 @@ import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
+import { useSettings } from '../../src/ui/settings';
+import { volumeIn, volumeHeadline, est1RMIn, liftLabel, weightDeltaIn, convertedNote, type WeightUnit } from '../../src/lib/units';
 import { rowToEntry, type WorkoutRow } from '../../src/lib/workoutRow';
 import type { WorkoutEntry } from '../../src/lib/mockData';
 import {
   monthlyHistory, monthLabel, yearRows, peakVolume, intensity, bestMonth, trainedMonths,
   gaps, longestGap, monthsSinceLast, historySpan, stageOf, historyNote, lifetimeTotals,
-  prTimeline, volumeArc, tonnes, MAX_MONTHS, MONTH_LABELS,
+  prTimeline, volumeArc, MAX_MONTHS, MONTH_LABELS,
   type MonthCell, type YearRow,
 } from '../../src/lib/longView';
 
@@ -76,11 +78,14 @@ type Load =
  * distinguish "nothing logged" from "nothing lifted" from "not your history".
  */
 
-/** How one month reads aloud, and in the legend. */
-function describeMonth(c: MonthCell): string {
+/** How one month reads aloud, and in the legend. Takes the reader's unit
+ *  because this string is the ONLY form of the chart a screen reader gets —
+ *  leaving it in kilograms would convert the picture and not the description
+ *  of it, which is the one place the two must not disagree. */
+function describeMonth(c: MonthCell, unit: WeightUnit): string {
   if (!c.trained) return 'no sessions logged';
   if (c.volumeKg == null) return 'trained, no weights logged';
-  return `${c.volumeKg.toLocaleString()} kg over ${c.sessions} session${c.sessions === 1 ? '' : 's'}`;
+  return `${volumeIn(c.volumeKg, unit)!.toLocaleString()} ${unit} over ${c.sessions} session${c.sessions === 1 ? '' : 's'}`;
 }
 
 /**
@@ -88,13 +93,13 @@ function describeMonth(c: MonthCell): string {
  * An untrained month gets a short mark ON the baseline — visible, so the break
  * is not silently skipped over, but carrying no height, so it makes no claim.
  */
-function MonthBars({ cells, t }: { cells: MonthCell[]; t: Theme }) {
+function MonthBars({ cells, t, unit }: { cells: MonthCell[]; t: Theme; unit: WeightUnit }) {
   const peak = peakVolume(cells);
   const W = 320, H = 112, top = 10, base = H - 10;
   const slot = W / Math.max(1, cells.length);
   const barW = Math.max(3, Math.min(24, slot * 0.62));
   const label = 'Training volume by month. '
-    + cells.map((c) => `${monthLabel(c.key)}, ${describeMonth(c)}`).join('. ') + '.';
+    + cells.map((c) => `${monthLabel(c.key)}, ${describeMonth(c, unit)}`).join('. ') + '.';
   return (
     <Svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none"
       accessible accessibilityRole="image" accessibilityLabel={label}>
@@ -130,7 +135,7 @@ function MonthBars({ cells, t }: { cells: MonthCell[]; t: Theme }) {
  * not a month they failed to train; it is a month before they started, and
  * drawing it as an empty box would be eleven accusations on a beginner's page.
  */
-function YearGrid({ rows, peak, t }: { rows: YearRow[]; peak: number | null; t: Theme }) {
+function YearGrid({ rows, peak, t, unit }: { rows: YearRow[]; peak: number | null; t: Theme; unit: WeightUnit }) {
   const CELL = 17, GAP = 4;
   const W = 12 * CELL + 11 * GAP;
   const xOf = (m: number) => m * (CELL + GAP);
@@ -150,7 +155,7 @@ function YearGrid({ rows, peak, t }: { rows: YearRow[]; peak: number | null; t: 
       </View>
       {rows.map((row) => {
         const spoken = `${row.year}. ` + row.cells
-          .map((c, m) => (c ? `${MONTH_LABELS[m]}, ${describeMonth(c)}` : null))
+          .map((c, m) => (c ? `${MONTH_LABELS[m]}, ${describeMonth(c, unit)}` : null))
           .filter(Boolean).join('. ') + '.';
         return (
           <View key={row.year} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.sm }}>
@@ -201,6 +206,12 @@ export default function History() {
   const t = useTheme();
   const router = useRouter();
   const { log: localLog } = useWorkoutLog();
+  // Every figure below is a lifted load or a sum of them. The bars, the grid
+  // shading and the "then and now" percentage are all ratios and stay in the
+  // kilograms the log holds — converting them would redraw the same history
+  // in a different shape. Only the printed figures move.
+  const wu = useSettings().weightUnit;
+  const unitNote = convertedNote(wu);
 
   // Read through a ref so the fetch is not re-created (and re-run) every time
   // the shared log changes underneath the screen.
@@ -328,17 +339,22 @@ export default function History() {
   const arc = volumeArc(cells);
   const records = prTimeline(log).slice().reverse().slice(0, 12);
   const rows = yearRows(cells);
+  const headline = volumeHeadline(life.volumeKg, wu);
   const earlier = span.months - cells.length;      // months clipped by MAX_MONTHS
   const dstr = (iso: string) => new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
 
   return frame(<>
     {/* ── the hero: everything you have ever lifted ───────────────────────── */}
+    {/* Tonnes for a metric reader — the figure runs to six digits in
+        kilograms — and pounds for an imperial one, because the tonne has no
+        imperial counterpart that is safe to print here. See volumeHeadline. */}
     <Hero
       label={`Lifted since ${monthLabel(cells[0].key)}`}
-      figure={fig(tonnes(life.volumeKg)?.toLocaleString())}
-      unit="tonnes"
+      figure={fig(headline?.figure.toLocaleString())}
+      unit={headline ? (headline.unit === 't' ? 'tonnes' : headline.unit) : undefined}
       note={historyNote(log)}
     />
+    {unitNote ? <Text style={{ ...ty.caption, color: t.ink3 }}>{unitNote}</Text> : null}
 
     <Rule />
 
@@ -356,7 +372,7 @@ export default function History() {
         </Text>
       </>) : (<>
         <SectionHead title="Your years" note={`${active} month${active === 1 ? '' : 's'} trained`} />
-        <YearGrid rows={rows} peak={peak} t={t} />
+        <YearGrid rows={rows} peak={peak} t={t} unit={wu} />
         <GridLegend t={t} />
       </>)}
     </Section>
@@ -365,9 +381,9 @@ export default function History() {
 
     {/* ── month by month ─────────────────────────────────────────────────── */}
     <Section>
-      <SectionHead title="Month by month" note="Total kg lifted" />
+      <SectionHead title="Month by month" note={`Total ${wu} lifted`} />
       {peak != null ? (<>
-        <MonthBars cells={cells} t={t} />
+        <MonthBars cells={cells} t={t} unit={wu} />
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: sp.sm }}>
           <Text style={{ ...ty.caption, color: t.ink3 }}>{monthLabel(cells[0].key)}</Text>
           <Text style={{ ...ty.caption, color: t.ink3 }}>{monthLabel(cells[cells.length - 1].key)}</Text>
@@ -385,7 +401,7 @@ export default function History() {
       <View style={{ height: sp.lg }} />
       <KpiRow items={[
         { label: 'Sessions', value: fig(life.sessions), delta: `${fig(life.days)} day${life.days === 1 ? '' : 's'}` },
-        { label: 'Best month', value: fig(best?.volumeKg?.toLocaleString()), unit: best?.volumeKg != null ? 'kg' : undefined, delta: best ? monthLabel(best.key) : undefined },
+        { label: 'Best month', value: fig(volumeIn(best?.volumeKg, wu)?.toLocaleString()), unit: best?.volumeKg != null ? wu : undefined, delta: best ? monthLabel(best.key) : undefined },
         { label: 'Lifts', value: fig(life.lifts), delta: 'with weights' },
       ]} />
       {earlier > 0 ? (
@@ -404,13 +420,13 @@ export default function History() {
         <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: sp.lg }}>
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.caption, color: t.ink3 }}>{monthLabel(arc.fromKey)}</Text>
-            <Text style={{ ...value(22), color: t.ink, marginTop: 4 }}>{arc.fromVolumeKg.toLocaleString()}</Text>
-            <Text style={{ ...ty.caption, color: t.ink3 }}>kg</Text>
+            <Text style={{ ...value(22), color: t.ink, marginTop: 4 }}>{fig(volumeIn(arc.fromVolumeKg, wu)?.toLocaleString())}</Text>
+            <Text style={{ ...ty.caption, color: t.ink3 }}>{wu}</Text>
           </View>
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.caption, color: t.ink3 }}>{monthLabel(arc.toKey)}</Text>
-            <Text style={{ ...value(22), color: t.ink, marginTop: 4 }}>{arc.toVolumeKg.toLocaleString()}</Text>
-            <Text style={{ ...ty.caption, color: t.ink3 }}>kg</Text>
+            <Text style={{ ...value(22), color: t.ink, marginTop: 4 }}>{fig(volumeIn(arc.toVolumeKg, wu)?.toLocaleString())}</Text>
+            <Text style={{ ...ty.caption, color: t.ink3 }}>{wu}</Text>
           </View>
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.caption, color: t.ink3 }}>Change</Text>
@@ -471,15 +487,22 @@ export default function History() {
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{m.exercise}</Text>
             <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>
-              {m.weight} kg × {m.reps} · {dstr(m.at)}
+              {fig(liftLabel(m.weight, wu))} × {m.reps} · {dstr(m.at)}
             </Text>
           </View>
           <View style={{ alignItems: 'flex-end' }}>
-            <Text style={{ ...value(17), color: t.ink }}>{fig(m.est1RM)}</Text>
+            <Text style={{ ...value(17), color: t.ink }}>{fig(est1RMIn(m.est1RM, wu))}</Text>
             {/* prev is null for a first-ever record. "+93 kg" there would be an
-                improvement over a best that never existed. */}
+                improvement over a best that never existed.
+
+                The improvement is `weightDeltaIn` — the span converted once —
+                and not the difference of the two converted estimates. Both
+                ends are already rounded to whole kilograms, so subtracting
+                their pound readings would let half a pound of rounding at each
+                end turn the same 2.5 kg PR into 5 lb one month and 6 lb the
+                next, off nothing the lifter did. */}
             <Text style={{ ...ty.caption, color: t.ink3 }}>
-              {m.prev != null ? `+${m.est1RM - m.prev} kg on your last best` : 'first on record'}
+              {m.prev != null ? `+${fig(weightDeltaIn(m.est1RM - m.prev, wu))} ${wu} on your last best` : 'first on record'}
             </Text>
           </View>
         </View>

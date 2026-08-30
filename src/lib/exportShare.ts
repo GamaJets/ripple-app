@@ -1,7 +1,12 @@
-// Share/export helpers. Generates a branded PDF when the native modules are
-// present (expo-print / expo-sharing, after the next build); otherwise falls
-// back to the built-in Share sheet with a formatted text version — so this works
-// TODAY over-the-air and upgrades to real PDFs automatically once rebuilt.
+// Share/export helpers. Builds a branded PDF, a CSV file and a plain-text
+// summary out of one set of rows, and hands whichever the client picked to the
+// phone's share sheet.
+//
+// This header used to promise that the PDF would "upgrade automatically once
+// rebuilt". It has not, through thirty-five builds, and the section below
+// headed "Why the file share degrades" is the post-mortem of why not. Read it
+// before changing anything here: the answer is not what the previous comment
+// assumed, and half of it is a probe that has been asking the wrong question.
 import { Share } from 'react-native';
 // The CSV writer is not written again here. gymExport.ts already quotes on
 // every delimiter src/lib/csv.ts is willing to sniff — not just the comma — so
@@ -20,38 +25,138 @@ import { localDate } from './localDate';
 // provider, so a report can be built for whoever's row is in hand.
 import { weightIn, convertedNote, type WeightUnit } from './units';
 
+// ── Why the file share degrades, and what it takes to stop it ───────────────
+//
+// TestFlight, build 35: "Why can't it share it?", over a screenshot of the
+// share sheet reading "this build cannot attach a file". The sentence was true.
+// It was true for TWO separate reasons, and only one of them was the one
+// everybody assumed.
+//
+//   1. expo-print and expo-sharing are not dependencies of this app. Not in
+//      package.json, not in node_modules, not in ios/Podfile.lock. Every
+//      `require` below has therefore always thrown, `Print` and `Sharing` have
+//      always been null, and the PDF button has never once been offered to
+//      anybody. Nothing caught it, and each thing that might have has a reason:
+//      Metro marks a `require` inside a `try/catch` as an OPTIONAL dependency,
+//      so an unresolvable one throws at runtime into the catch instead of
+//      failing the bundle; the typecheck never sees an untyped `require`; and
+//      scripts/check-native.mjs lists the native modules the app DEPENDS on,
+//      which a module nobody ever declared is not on the list to be missed by.
+//      The pattern reads as "not built in YET", and this file was written on
+//      the expectation of a rebuild that then never happened.
+//
+//   2. The capability probe was wrong for the version of expo-file-system that
+//      IS in the binary. That module ships transitively with `expo` and is in
+//      Podfile.lock at 57.0.5, so the file system has been present all along —
+//      but SDK 54 replaced `FileSystem.cacheDirectory` and
+//      `writeAsStringAsync` with `Paths.cache` and `new File().write()`, and
+//      left the old names on the module as stubs that THROW when called.
+//      `!!FileSystem?.cacheDirectory` therefore reads false against a module
+//      that is present and working. Even once expo-sharing lands, the old probe
+//      would keep answering "this build cannot attach a file" — the fallback
+//      firing when it should not, on top of the module that genuinely is not
+//      there.
+//
+// So both generations of the file-system API are handled below, the probe asks
+// a question the installed version actually answers, and the reason a file
+// cannot be attached is a value the screen can print rather than a fixed
+// parenthetical apology.
+//
+// What is still needed from the release: `expo-print` and `expo-sharing` as
+// dependencies, and a new native binary. Neither reaches a phone over the air.
+
 let Print: any = null;
 let Sharing: any = null;
-try { Print = require('expo-print'); } catch { /* not in this build yet */ }
-try { Sharing = require('expo-sharing'); } catch { /* optional */ }
+try { Print = require('expo-print'); } catch { /* not a dependency of this app — see the note above */ }
+try { Sharing = require('expo-sharing'); } catch { /* likewise */ }
 
-export const pdfExportAvailable = () => !!Print;
+// Ships transitively with `expo` and is in the binary today. What changed under
+// it is the API, not its presence.
+let FileSystem: any = null;
+try { FileSystem = require('expo-file-system'); } catch { /* would be a broken install */ }
+
+export const pdfExportAvailable = () => !!Print?.printToFileAsync;
+
+/**
+ * Whether this build can write a file at all, either way round.
+ *
+ * `Paths.cache` is the SDK 54+ answer and `cacheDirectory` the one before it.
+ * Asking for both is not defensiveness for its own sake: the old names survive
+ * on the new module as throwing stubs, so a probe that names only one of them
+ * gets a confident wrong answer rather than an error anybody would notice.
+ */
+const fileSystemWritable = (): boolean =>
+  !!(FileSystem?.Paths?.cache && FileSystem?.File) || !!(FileSystem?.cacheDirectory && FileSystem?.writeAsStringAsync);
+
+/**
+ * Write `content` into the cache directory and return its `file://` URI.
+ *
+ * Throws rather than returning null on failure, so a caller cannot mistake "the
+ * write failed" for "there was nothing to write" — the share paths below turn
+ * the throw into the text fallback, which is the only place that decision
+ * belongs.
+ */
+async function writeCacheFile(content: string, filename: string): Promise<string> {
+  if (FileSystem?.Paths?.cache && FileSystem?.File) {
+    // Synchronous by design in the new API — `write` returns void, not a
+    // promise, so there is nothing here to await and awaiting it would silently
+    // succeed on a failed write.
+    const f = new FileSystem.File(FileSystem.Paths.cache, filename);
+    // A cached export from a previous share is still sitting there, and
+    // `create()` refuses an existing path without this.
+    f.create({ overwrite: true, intermediates: true });
+    f.write(content);
+    return f.uri;
+  }
+  // The pre-SDK-54 path, kept for anybody still on an older binary. It is a
+  // promise and must stay awaited: handing the share sheet a URI before the
+  // bytes are on disk attaches an empty file, which looks to whoever receives
+  // it like a client with no history rather than like a race.
+  const uri = FileSystem.cacheDirectory + filename;
+  await FileSystem.writeAsStringAsync(uri, content, { encoding: FileSystem.EncodingType?.UTF8 ?? 'utf8' });
+  return uri;
+}
+
+/**
+ * Whether a real file can be written AND handed to the share sheet.
+ *
+ * The companion of pdfExportAvailable, and it exists for the same reason: a
+ * button that offers "CSV" and then shares a wall of comma-separated text has
+ * told the user the wrong thing about what they just sent. A screen can ask
+ * first and word itself honestly.
+ */
+export const fileExportAvailable = () => !!(fileSystemWritable() && Sharing?.shareAsync);
+
+/**
+ * Why not — in a sentence a person can act on, or null when a file can be sent.
+ *
+ * The build 35 wording was "(this build cannot attach a file)", which is a
+ * parenthetical apology: it names no cause, gives the client nothing to do, and
+ * leaves them to conclude the export is broken rather than that this particular
+ * copy of the app is behind. The client cannot fix either cause — but they can
+ * update the app, and they can stop waiting for a file that is not coming.
+ */
+export function fileShareBlocker(): string | null {
+  if (!Sharing?.shareAsync) {
+    return 'This version of the app can’t attach files — the part that hands a file to your phone’s share sheet isn’t in it yet. Update to the next release and the file itself will send. The rows below go as text in the meantime, and nothing is missing from them.';
+  }
+  if (!fileSystemWritable()) {
+    return 'This version of the app can’t save the file to your phone before sending it. Update to the next release and the file itself will send. The rows below go as text in the meantime, and nothing is missing from them.';
+  }
+  return null;
+}
 
 // ── Calendar (.ics) export ───────────────────────────────────────────────────
 // Standards-compliant iCalendar so a client/coach can drop their sessions into
-// Apple Calendar, Google Calendar, etc. Writes a real .ics file when the native
-// file-system module is present (after a rebuild); otherwise falls back to the
-// Share sheet with the calendar text, so it works over-the-air today.
-let FileSystem: any = null;
-try { FileSystem = require('expo-file-system'); } catch { /* lights up after a rebuild */ }
-
-/**
- * Whether a real file can be written and handed to the share sheet.
- *
- * The companion of pdfExportAvailable, and it exists for the same reason: a
- * button that offers "CSV" and then shares a wall of comma-separated text
- * because this build has no expo-file-system has told the user the wrong thing
- * about what they just sent. A screen can ask first and word itself honestly.
- */
-export const fileExportAvailable = () => !!(FileSystem?.cacheDirectory && Sharing?.shareAsync);
-
+// Apple Calendar, Google Calendar, etc. Writes a real .ics file when the share
+// sheet can take one; otherwise falls back to the Share sheet with the calendar
+// text, which every calendar app can still be pasted into.
 export { buildIcs, type IcsEvent } from './ics';
 
 export async function shareTextFile(content: string, filename: string, mime: string, title: string): Promise<'file' | 'text'> {
-  if (FileSystem?.cacheDirectory && Sharing?.shareAsync) {
+  if (fileExportAvailable()) {
     try {
-      const uri = FileSystem.cacheDirectory + filename;
-      await FileSystem.writeAsStringAsync(uri, content, { encoding: FileSystem.EncodingType?.UTF8 ?? 'utf8' });
+      const uri = await writeCacheFile(content, filename);
       const ok = Sharing.isAvailableAsync ? await Sharing.isAvailableAsync() : true;
       if (ok) { await Sharing.shareAsync(uri, { mimeType: mime, dialogTitle: title }); return 'file'; }
     } catch { /* fall through */ }
@@ -61,10 +166,9 @@ export async function shareTextFile(content: string, filename: string, mime: str
 }
 
 export async function shareIcs(ics: string, filename: string, title: string): Promise<'file' | 'text'> {
-  if (FileSystem?.cacheDirectory && Sharing?.shareAsync) {
+  if (fileExportAvailable()) {
     try {
-      const uri = FileSystem.cacheDirectory + filename;
-      await FileSystem.writeAsStringAsync(uri, ics, { encoding: FileSystem.EncodingType?.UTF8 ?? 'utf8' });
+      const uri = await writeCacheFile(ics, filename);
       const ok = Sharing.isAvailableAsync ? await Sharing.isAvailableAsync() : true;
       if (ok) { await Sharing.shareAsync(uri, { mimeType: 'text/calendar', dialogTitle: title, UTI: 'com.apple.ical.ics' }); return 'file'; }
     } catch { /* fall through to text */ }

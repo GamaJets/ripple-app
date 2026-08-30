@@ -34,6 +34,11 @@ import { Icon } from '../../src/ui/Icon';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { RECOVERY_ACTIVITIES, isRecoveryActivity } from '../../src/lib/recoveryActs';
 import { readSleepFromDevices, connectedProviders } from '../../src/lib/wearables/sleep';
+// The same connection answer Watch & devices shows. This screen used to reach
+// its own conclusion about whether a device was connected, from a different
+// piece of evidence, and print it in the same words — see
+// src/lib/wearableLink.ts for the four reports that came of it.
+import { linkFor, useLinkRevision } from '../../src/lib/wearableLinkLedger';
 import { requestHealthAuth } from '../../src/lib/wearables/appleHealth';
 import { mergeSleepNights, recentNights, formatSleepHours, type MergedNight, type SleepRead } from '../../src/lib/sleepMerge';
 import type { LoadStatus } from '../../src/ui/loadStatus';
@@ -102,6 +107,10 @@ export default function Recovery() {
  const { water: cups, waterGoal: goalCups, addWater: addCup, removeWater: removeCup } = useHabits();
  const cd = useClientData();
  const wear = useWearables();
+ // Bumped whenever the server proves something new about a device — including
+ // by a reconnect started on the other screen. It is both a re-render trigger
+ // and an effect key below.
+ const linkRev = useLinkRevision();
  const { log: workoutLog, status: logStatus } = useWorkoutLog();
  // Sauna, cold plunge and the rest are logged on Train like every other
  // session. They belong on this screen too — a member who logs a sauna looks
@@ -182,7 +191,13 @@ export default function Recovery() {
  // time. Connecting or disconnecting a device is the only thing that changes
  // the answer.
  const connectedKey = connectedProviders(wear.states).map((p) => p.meta.id).join(',');
- useEffect(() => { loadDeviceSleep(); }, [connectedKey]);
+ // `linkRev` is the second half of that key, and its absence was a bug in its
+ // own right. Reconnecting a device that was ALREADY in this list does not
+ // change the list, so the effect never re-ran and the "needs reconnecting"
+ // sentence outlived the reconnect that fixed it — until the app was
+ // relaunched. That is report three, verbatim: "Reconnected whoop and it says
+ // need to connect whoop."
+ useEffect(() => { loadDeviceSleep(); }, [connectedKey, linkRev]);
 
  const deviceNights = useMemo(
    () => mergeSleepNights(sleepReads.reads, recentNights(DEVICE_NIGHTS)),
@@ -191,6 +206,17 @@ export default function Recovery() {
  const lastNight = deviceNights[0] ?? null;
  const unreadable = sleepReads.reads.filter((r) => r.status === 'error');
  const cannotReport = sleepReads.reads.filter((r) => r.status === 'unsupported');
+ // Devices the client can actually fix, and the route to fixing them.
+ //
+ // The reason sentences above name the fix but this screen has no OAuth flow on
+ // it, so a client reading "reconnect WHOOP" here had nowhere to go except back
+ // to Watch & devices — where the same device said, in one word, Connected.
+ // That round trip is the first report. The link is offered only where the
+ // state machine says a re-authorisation genuinely resolves it; a gap in this
+ // build offers nothing, because nothing the client does closes it.
+ const needsReauth = connectedProviders(wear.states)
+   .map((p) => linkFor(p.meta.id, p.meta.name, wear.states[p.meta.id] ?? 'connected', 'sleep'))
+   .filter((l) => l.action === 'reconnect');
  // Everyone who connected Apple Health before TF-01 was never asked for Sleep,
  // and HealthKit answers a read it never got permission for with an empty array
  // rather than an error — so a permanently blank list looks exactly like a
@@ -340,6 +366,13 @@ export default function Recovery() {
       {r.reason || `${r.provider} cannot report sleep to Repple yet.`}
      </Text>
     ))}
+
+    {/* The way out, on the screen that raised the problem. */}
+    {needsReauth.length ? (
+     <View style={{ alignSelf: 'flex-start', marginTop: sp.md }}>
+      <Ghost label={'Fix in Watch & devices'} onPress={() => router.push('/(client)/devices')} />
+     </View>
+    ) : null}
 
     {appleSilent ? (
      <View style={{ marginTop: sp.md }}>

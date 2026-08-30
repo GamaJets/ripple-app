@@ -12,6 +12,7 @@ import type { SleepRead } from '../sleepMerge';
 import { parseVendorSleep, vendorReadsSleep } from '../vendorSleep';
 import { vendorFor, isConfigured } from './oauthConfig';
 import { connectVendor, fetchVendorDay, disconnectVendor, fetchVendorWorkouts, fetchVendorSleep } from './oauth';
+import { linkFor, noteMetric } from '../wearableLinkLedger';
 
 export function makeCloudProvider(meta: ProviderMeta): WearableProvider {
   const isHealthConnect = meta.kind === 'health-connect';
@@ -72,26 +73,45 @@ export function makeCloudProvider(meta: ProviderMeta): WearableProvider {
      * night is a LOCAL calendar day and the edge function runs in UTC.
      */
     async fetchSleep(sinceDays = 7): Promise<SleepRead> {
+      // The four gaps below are all facts about REPPLE, not about the person's
+      // device or their connection, so each is recorded as a metric-level
+      // absence. That is what stops any of them being read one layer up as the
+      // account being disconnected — and it is why the sentence they produce
+      // opens by saying the device is connected and working.
+      const absent = (why: string): SleepRead => {
+        noteMetric(meta.id, 'sleep', { kind: 'absent', why });
+        return { provider: meta.id, status: 'unsupported', readings: [], reason: why };
+      };
       if (isHealthConnect) {
-        return { provider: meta.id, status: 'unsupported', readings: [], reason: 'Health Connect sleep arrives with the Android native module.' };
+        return absent('Health Connect sleep arrives with the Android native module.');
       }
       if (vendor?.special === 'partnership') {
-        return { provider: meta.id, status: 'unsupported', readings: [], reason: `${meta.name} needs an approved partnership before Repple can read anything from it.` };
+        return absent(`${meta.name} needs an approved partnership before Repple can read anything from it.`);
       }
       if (!isConfigured(meta.id)) {
-        return { provider: meta.id, status: 'unsupported', readings: [], reason: `${meta.name} is not set up yet, so there is nothing to read.` };
+        return absent(`${meta.name} is not set up yet, so there is nothing to read.`);
       }
       if (!vendorReadsSleep(meta.id)) {
-        return { provider: meta.id, status: 'unsupported', readings: [], reason: `${meta.name} does not publish a sleep endpoint Repple can read.` };
+        return absent(`${meta.name} does not publish a sleep endpoint Repple can read.`);
       }
       const res = await fetchVendorSleep(meta.id, sinceDays);
       if (!res.ok) {
-        return {
-          provider: meta.id,
-          status: 'error',
-          readings: [],
-          reason: `${meta.name} could not be read just now, so these nights are unknown rather than empty.`,
-        };
+        // A refusal is not a failure to reach the vendor, and must not borrow
+        // that sentence. The endpoint answered — it answered "no" — because
+        // this build never asked for the scope, and the only thing that changes
+        // it is the person re-authorising. The wording comes from the shared
+        // state machine so that this list, Watch & devices and Recovery all say
+        // the same thing about the same device.
+        //
+        // The status stays 'error' regardless, and deliberately: whichever of
+        // the two it was, we do not know what the person slept. 'unsupported'
+        // would let the night render as "no device recorded this" — which is
+        // false, since WHOOP recorded it perfectly well and simply will not
+        // show us.
+        const reason = res.refused
+          ? linkFor(meta.id, meta.name, 'connected', 'sleep').detail
+          : `${meta.name} could not be read just now, so these nights are unknown rather than empty.`;
+        return { provider: meta.id, status: 'error', readings: [], reason };
       }
       // meta.name rather than the vendor's own label, so the sentence on the
       // screen names the device the way the person connected it.

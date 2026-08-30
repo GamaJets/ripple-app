@@ -20,9 +20,19 @@ import { PROVIDERS } from './registry';
 import type { ConnectionState, ProviderId } from './types';
 import type { SleepRead } from '../sleepMerge';
 import { WearableNotConnectedError } from './oauth';
+import { linkFor, noteMetric } from '../wearableLinkLedger';
 import { reportError } from '../reportError';
 
-/** Providers the client has connected, in registry (display) order. */
+/**
+ * Providers the client has connected, in registry (display) order.
+ *
+ * Deliberately the app's own remembered flag and not the link state. This
+ * answers "which devices are we meant to be reading", which is a wider set than
+ * "which are working" — a WHOOP whose token has died still belongs in the list,
+ * because dropping it silently would replace a sentence telling the client to
+ * reconnect with a screen implying they never owned the thing. Whether each one
+ * can actually be read is settled per provider below, and said out loud.
+ */
 export function connectedProviders(states: Record<string, ConnectionState>) {
   return PROVIDERS.filter((p) => states[p.meta.id] === 'connected');
 }
@@ -41,13 +51,31 @@ export async function readSleepFromDevices(
   return Promise.all(connected.map(async (p): Promise<SleepRead> => {
     const id = p.meta.id as ProviderId;
     const fetchSleep = p.fetchSleep?.bind(p);
+    // Both of these are gaps in Repple rather than in the person's device, so
+    // they are recorded as metric-level absences. Left unrecorded they would be
+    // invisible to the connection state machine, and Watch & devices would go
+    // on describing the device as plainly "connected" while this list said it
+    // could not be read — the same two-screens-disagree shape as the WHOOP bug.
     if (!fetchSleep) {
-      return { provider: id, status: 'unsupported', readings: [], reason: `${p.meta.name} does not report sleep.` };
+      const why = `${p.meta.name} does not report sleep.`;
+      noteMetric(id, 'sleep', { kind: 'absent', why });
+      return { provider: id, status: 'unsupported', readings: [], reason: why };
     }
     // A provider that cannot run in this binary at all — HealthKit outside a
     // real build — has not failed to read; there was nothing to read it with.
     if (!p.isAvailable()) {
-      return { provider: id, status: 'unsupported', readings: [], reason: p.unavailableReason() ?? `${p.meta.name} is not available on this device.` };
+      const why = p.unavailableReason() ?? `${p.meta.name} is not available on this device.`;
+      noteMetric(id, 'sleep', { kind: 'absent', why });
+      return { provider: id, status: 'unsupported', readings: [], reason: why };
+    }
+    // A token the server has already told us is dead will refuse this read too,
+    // so the round trip is skipped and the answer is given straight from the
+    // verdict. Not an optimisation: it guarantees this list and Watch & devices
+    // print the identical sentence from the identical fact, instead of racing
+    // to discover it separately and momentarily disagreeing.
+    const known = linkFor(id, p.meta.name, states[id] ?? 'connected', 'sleep');
+    if (known.state === 'expired') {
+      return { provider: id, status: 'error', readings: [], reason: known.detail };
     }
     try {
       return await fetchSleep(sinceDays);
@@ -55,8 +83,19 @@ export async function readSleepFromDevices(
       // A dead token is still an error for THIS read: we do not know what the
       // client slept. Clearing the connection is the wearables context's job on
       // its own sync, not a side effect of drawing a sleep list.
+      //
+      // The wording is no longer written here. It used to be a sentence unique
+      // to this file — "needs reconnecting — Repple no longer has permission to
+      // read it" — which is how one screen came to contradict another about the
+      // same device. `linkFor` reads the verdict that `fetchVendorSleep` has
+      // just recorded, so this list says exactly what Watch & devices says.
+      //
+      // Note what can no longer reach this branch: a sleep endpoint refusing a
+      // token that is otherwise working. That now returns a refusal rather than
+      // throwing, so a missing scope can never again be announced here as the
+      // whole device having lost its connection.
       const reason = e instanceof WearableNotConnectedError
-        ? `${p.meta.name} needs reconnecting — Repple no longer has permission to read it.`
+        ? linkFor(id, p.meta.name, 'connected', 'sleep').detail
         : `${p.meta.name} could not be read just now. This is our end, not your device.`;
       reportError('wearables.fetchSleep', e, { provider: id });
       return { provider: id, status: 'error', readings: [], reason };

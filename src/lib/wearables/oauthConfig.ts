@@ -66,7 +66,25 @@ export const OAUTH_VENDORS: Partial<Record<ProviderId, OAuthVendor>> = {
     // 'offline' is required for WHOOP to issue a refresh_token at all. Without
     // it the connection dies silently ~1h after connecting, with no way to
     // recover except reconnecting by hand.
-    scopes: ['read:recovery', 'read:cycles', 'read:workout', 'read:profile', 'offline'],
+    //
+    // 'read:sleep' is the fix for build 35's four TestFlight reports. WHOOP
+    // gates `/v2/activity/sleep` behind its own scope, and this list has never
+    // asked for it — which did not matter until the sleep reader shipped and
+    // started calling that endpoint. WHOOP answered 403, the `wearable-day`
+    // edge function turns 401/403 into `connected: false`, and Recovery
+    // rendered that as "WHOOP needs reconnecting" while Watch & devices still
+    // said Connected — because every other WHOOP endpoint was working fine on
+    // the very same token. Reconnecting re-requested the same four scopes and
+    // hit the same 403, so the loop had no exit: "Reconnected whoop and it says
+    // need to connect whoop."
+    //
+    // NOTE FOR ANYONE READING THIS AFTER A DEPLOY: adding the scope here fixes
+    // new connections only. A refresh reissues the grant the user originally
+    // gave, so everybody already connected keeps a token with no sleep scope
+    // until they re-authorise once. That is why the state machine has a
+    // 'metric-blocked' state that says so plainly and offers the re-auth,
+    // instead of calling their working WHOOP disconnected.
+    scopes: ['read:recovery', 'read:cycles', 'read:sleep', 'read:workout', 'read:profile', 'offline'],
     clientId: env('EXPO_PUBLIC_WHOOP_CLIENT_ID'),
     usePKCE: false,
     note: 'Register at developer.whoop.com → set EXPO_PUBLIC_WHOOP_CLIENT_ID and WHOOP_CLIENT_SECRET.',

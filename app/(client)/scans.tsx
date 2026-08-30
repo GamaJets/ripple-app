@@ -51,7 +51,14 @@ import { useClientData } from '../../src/ui/clientData';
 import { useSettings } from '../../src/ui/settings';
 import { weightIn, weightLabel, weightToKg, weightDeltaIn, plain, convertedNote } from '../../src/lib/units';
 import { macrosFor } from '../../src/lib/nutrition';
-import { progressDoc, progressCsv, progressSummary, progressSpanLabel, shareDoc, shareText, shareTextFile, pdfExportAvailable, fileExportAvailable, type ProgressRow } from '../../src/lib/exportShare';
+import { progressDoc, progressCsv, progressSummary, progressSpanLabel, shareDoc, shareText, shareTextFile, pdfExportAvailable, fileShareBlocker, type ProgressRow } from '../../src/lib/exportShare';
+// Where each body figure came from, when it was measured, and how stale that
+// makes it. This screen and app/(client)/body-trends.tsx were showing different
+// numbers under the same word because one read the derived current body and the
+// other re-derived its own from the scans alone; they now read the same series
+// through the same module, and each figure says which instrument produced it.
+// See the header of src/lib/bodyFigures.ts for the full account.
+import { bodyReadings, latestBodyReading, measuredNote, stalenessNote, mixedSourceNote, readingsLabel, dayLabel as bodyDayLabel, agoLabel, todayISO, type BodyReading } from '../../src/lib/bodyFigures';
 import { useRouter } from 'expo-router';
 import { useBrand } from '../../src/ui/brand';
 import { Rule, Section, SectionHead, Hero, KpiRow, ActionCard, Cta, Ghost, Spark, fig, Flag } from '../../src/ui/kit';
@@ -181,9 +188,16 @@ export default function Scans() {
     // here rather than left to spot it in a column of numbers after the fact.
     // The columns are named `weight_kg` inside the file for the same reason.
     const csvUnit = wu === 'lb' ? ' Figures in kg, as the column names say — a spreadsheet is read by another app, so the columns stay in one fixed unit.' : '';
-    const csvLine = (fileExportAvailable()
-      ? 'Spreadsheet — a .csv file, one row per scan, for a coach or another app to import.'
-      : 'Spreadsheet — the same rows as text you can paste into a spreadsheet (this build cannot attach a file).') + csvUnit;
+    // TF build 35, "Why can't it share it?": this line used to end
+    // "(this build cannot attach a file)", which named no cause and gave the
+    // client nothing to do about it. `fileShareBlocker()` returns the actual
+    // reason and the actual remedy — the file share is missing a native module
+    // that only a new release can carry, and saying "update the app" is a
+    // sentence somebody can act on where a parenthetical apology is not.
+    const blocker = fileShareBlocker();
+    const csvLine = (blocker
+      ? 'Spreadsheet — the same rows, sent as text you can paste into a spreadsheet. ' + blocker
+      : 'Spreadsheet — a .csv file, one row per scan, for a coach or another app to import.') + csvUnit;
     const options: { text: string; onPress?: () => void; style?: 'cancel' }[] = [];
     if (pdf) options.push({ text: 'PDF report', onPress: () => { void sendPdf(); } });
     options.push({ text: 'Spreadsheet (CSV)', onPress: () => { void sendCsv(); } });
@@ -197,7 +211,14 @@ export default function Scans() {
     Alert.alert(
       'Share your progress',
       `${progressSpanLabel(rows)}.\n\n`
-      + (pdf ? 'PDF report — a one-page document with every scan and the change since your first.\n' : '')
+      // The PDF is not offered on a build that cannot make one, and until now
+      // it was not MENTIONED either — so a client who had been told the app
+      // exports a report found two options where three were promised and no
+      // word about the third. Silence about a missing feature reads as the
+      // feature having been taken away. Said once, and only while it is true.
+      + (pdf
+        ? 'PDF report — a one-page document with every scan and the change since your first.\n'
+        : 'PDF report — not in this version of the app. It arrives with the next release; the two below work now.\n')
       + csvLine + '\n'
       + 'Short summary — a few lines of text for a message, a story or a post.\n\n'
       + `Whichever you pick opens your phone's share sheet, so it can go to your coach, Instagram, WhatsApp, anywhere. ${appName} posts nothing on its own.`,
@@ -518,19 +539,62 @@ export default function Scans() {
 
   const chrono = [...scans].sort((a, b) => Date.parse(a.takenAt) - Date.parse(b.takenAt));
   const latest = chrono[chrono.length - 1];
-  const prev = chrono.length > 1 ? chrono[chrono.length - 2] : null;
   const wsv = cd.weightSeries.map((x) => x.v);
-  // The same series in the client's unit, converted point by point because each
-  // point is a reading rather than a change. The filter only satisfies the null
-  // contract of `weightIn`; a series entry is always a number.
-  const wsvShown = wsv.map((v) => weightIn(v, wu)).filter((v): v is number => v != null);
   const mTrends = metricTrends(cd.scans);
   const mInsights = compositionInsights(cd.scans);
   const mByGroup = METRIC_GROUPS.map((g) => ({ group: g, items: mTrends.filter((x) => x.def.group === g) })).filter((g) => g.items.length > 0);
   const wDelta = wsv.length > 1 ? +(wsv[wsv.length - 1] - wsv[0]).toFixed(1) : null;
   const wDeltaShown = weightDeltaIn(wDelta, wu);
-  const fmt = (iso: string) => { const d = new Date(iso); return `${d.getDate()}/${d.getMonth() + 1}/${String(d.getFullYear()).slice(2)}`; };
-  const daysAgo = latest ? Math.max(0, Math.round((Date.now() - Date.parse(latest.takenAt)) / 86400000)) : 0;
+  // `scans.taken_at` is a bare postgres DATE, and this used to be
+  // `new Date(iso)` — UTC midnight, which is the previous day for every client
+  // west of Greenwich, so a scan taken on the 1st was captioned "31/7" in New
+  // York and dated correctly in Dubai. Read through localDate instead, which is
+  // what the rest of the app already does with this column.
+  const fmt = bodyDayLabel;
+  const today = todayISO();
+
+  // ── where each figure came from, and when ────────────────────────────────
+  //
+  // TF build 35: "Progress numbers say something different than the numbers on
+  // the body page this needs to be synced." They did. This screen showed
+  // `cd.weightKg`, which is the most recent of {a weigh-in logged on the
+  // check-in screen, the newest InBody scan}; body-trends.tsx re-derived its
+  // own figure from `cd.scans` alone and so always showed the scan. Both now
+  // read the same published series through the same module, so the current
+  // figure is the same value by construction — and each one says which
+  // instrument measured it, which is the half that stops the remaining, real
+  // differences of DATE from reading as a contradiction.
+  const scanCount = cd.scans.length;
+  const wReads = bodyReadings(cd.weightSeries, scanCount);
+  const bfReads = bodyReadings(cd.bodyFatSeries, scanCount);
+  const mReads = bodyReadings(cd.muscleSeries, scanCount);
+  // Each metric is compared against its OWN previous reading. This screen used
+  // to compare everything against the second-newest SCAN — including figures
+  // that were not scans, and including muscle, whose previous reading is often
+  // several scans back because not every scan records it.
+  const priorOf = (r: BodyReading[]) => (r.length > 1 ? r[r.length - 2] : null);
+  const wNow = latestBodyReading(cd.weightSeries, scanCount);
+  const bfNow = latestBodyReading(cd.bodyFatSeries, scanCount);
+  // Deliberately the newest scan that RECORDED muscle, rather than
+  // `cd.muscleKg`, which is the newest scan's muscle and therefore null
+  // whenever that one scan happened not to report it. A gym scale reports
+  // weight and body fat and no skeletal muscle at all, so that null is common —
+  // and a dash where a real, dated reading exists is as much a wrong answer as
+  // a zero. It is only safe to reach back like this because the figure now
+  // carries its own date; without one it would be last month's muscle presented
+  // as today's.
+  const mNow = latestBodyReading(cd.muscleSeries, scanCount);
+  const wWas = priorOf(wReads), bfWas = priorOf(bfReads), mWas = priorOf(mReads);
+  // The same weight series in the client's unit, converted point by point
+  // because each point is a reading rather than a change. Taken from `wReads`
+  // rather than from the raw series so the chart and the date labels beside it
+  // are the same list — a point dropped from one and not the other would put
+  // every date on the wrong reading.
+  const wsvShown = wReads.map((r) => weightIn(r.value, wu)).filter((v): v is number => v != null);
+  // Said once above the row rather than three times inside it, and only when
+  // the figures genuinely have different dates or different instruments behind
+  // them — a client whose every number came off one scan is told nothing.
+  const bodyMixNote = mixedSourceNote([wNow, bfNow, mNow]);
   // A change between two stored weights, in the client's unit. The subtraction
   // happens in kilograms and `weightDeltaIn` converts the span once: rounding
   // each of the two readings into whole pounds first and subtracting those
@@ -548,9 +612,17 @@ export default function Scans() {
     if (shown == null) return null;
     return `${d < 0 ? '▼' : d > 0 ? '▲' : ''} ${Math.abs(shown)} ${wu}`.trim();
   };
-  // Presentation-only helpers: the hero's movement line and a shared "how long ago".
-  const bfMove = (prev && cd.bodyFatPct != null) ? +(cd.bodyFatPct - prev.bodyFatPct).toFixed(1) : null;
-  const ago = daysAgo === 0 ? 'today' : daysAgo + ' days ago';
+  // The hero's movement line, measured between the two most recent body-fat
+  // READINGS rather than between the current figure and the second-newest scan.
+  // The old line subtracted `prev.bodyFatPct` — a scan two steps back — from
+  // whatever `cd.bodyFatPct` currently was, and then captioned the result
+  // "since your previous scan". When the current figure came from a logged
+  // weigh-in that sentence named the wrong instrument, the wrong two readings
+  // and the wrong interval, all at once.
+  const bfMove = (bfNow && bfWas) ? +(bfNow.value - bfWas.value).toFixed(1) : null;
+  // How long ago the newest SCAN was — used only where the subject really is
+  // the scan itself. Every figure below carries its own date instead.
+  const ago = latest ? (agoLabel(latest.takenAt, today) ?? 'on an unreadable date') : null;
 
   const input = { flex: 1, ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 } as const;
   const G = layout.gutter;
@@ -573,15 +645,28 @@ export default function Scans() {
         {/* ── the hero: one number leads the screen ───────────────────────── */}
         <Hero
           label="Body fat"
-          figure={cd.bodyFatPct != null ? String(cd.bodyFatPct) : '—'}
-          unit={cd.bodyFatPct != null ? '%' : undefined}
-          note={latest && bfMove !== null
-            ? `${bfMove <= 0 ? '−' : '+'}${Math.abs(bfMove)}% since your previous scan · scanned ${ago}`
-            : latest
-            ? `First InBody scan · ${ago}`
+          figure={bfNow ? String(bfNow.value) : '—'}
+          unit={bfNow ? '%' : undefined}
+          // The date is not an ornament under the hero: this is the figure the
+          // whole screen leads with, and until build 35 it carried a caption
+          // that said "scanned N days ago" whatever had actually measured it.
+          // `measuredNote` names the instrument, the day and the age, in that
+          // order, and the movement clause names the day it is measured FROM
+          // rather than saying "your previous scan" and hoping.
+          note={bfNow
+            ? (bfMove !== null && bfWas
+                ? `${bfMove <= 0 ? '−' : '+'}${Math.abs(bfMove)}% since ${bodyDayLabel(bfWas.at)} · `
+                : 'First reading · ') + measuredNote(bfNow, today)
             : 'No scans yet — add your InBody report to start tracking.'}
-          onPress={() => router.push('/(client)/measurements')}
+          onPress={() => router.push('/(client)/body-trends')}
         />
+        {/* Where a figure is stale, how stale — said under the figure itself,
+            because the client is the only person who can judge whether a scan
+            from eleven weeks ago still describes them, and they can only judge
+            it if they are given the eleven weeks. */}
+        {stalenessNote(bfNow, today) ? (
+          <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>{stalenessNote(bfNow, today)}</Text>
+        ) : null}
 
         <Rule />
 
@@ -589,8 +674,13 @@ export default function Scans() {
         <Section>
           <ActionCard
             title={latest ? 'Latest InBody scan' : 'Add your first InBody scan'}
+            // The scan's OWN figures and the scan's OWN date. This card is the
+            // one place on the screen whose subject really is the scan, so it
+            // may differ from the Weight tile below — and it now says the date
+            // out loud so that difference reads as two measurements on two days
+            // rather than as the app contradicting itself.
             note={latest
-              ? `${fig(weightLabel(latest.weightKg, wu))} · ${latest.bodyFatPct}% BF · ${ago}`
+              ? `${fig(weightLabel(latest.weightKg, wu))} · ${latest.bodyFatPct}% BF · ${bodyDayLabel(latest.takenAt)}${ago ? ` · ${ago}` : ''}`
               : 'Snap or upload your report — the numbers are read for you.'}
             cta={latest ? 'Add scan' : 'Start'}
             onPress={() => setShowAdd(true)}
@@ -605,11 +695,22 @@ export default function Scans() {
           <KpiRow
             onPress={(k) => { if (k.route) router.push(k.route as any); }}
             items={[
-              { label: 'Weight', value: fig(weightIn(cd.weightKg, wu)), unit: cd.weightKg != null ? wu : undefined, route: '/(client)/measurements', good: !prev || (cd.weightKg != null && cd.weightKg <= prev.weightKg), delta: (cd.weightKg != null ? dlt(cd.weightKg, prev?.weightKg) : null) ?? undefined },
-              { label: 'Muscle', value: fig(weightIn(cd.muscleKg, wu)), unit: cd.muscleKg != null ? wu : undefined, route: '/(client)/measurements', good: !prev || prev.skeletalMuscleKg == null || (cd.muscleKg != null && cd.muscleKg >= prev.skeletalMuscleKg), delta: (cd.muscleKg != null ? dlt(cd.muscleKg, prev?.skeletalMuscleKg ?? undefined) : null) ?? undefined },
-              { label: 'Scans', value: fig(scans.length), delta: latest ? `last ${ago}` : undefined },
+              { label: 'Weight', value: fig(weightIn(wNow?.value, wu)), unit: wNow ? wu : undefined, route: '/(client)/body-trends', good: !wWas || (!!wNow && wNow.value <= wWas.value), delta: (wNow && wWas ? dlt(wNow.value, wWas.value) : null) ?? undefined },
+              { label: 'Muscle', value: fig(weightIn(mNow?.value, wu)), unit: mNow ? wu : undefined, route: '/(client)/body-trends', good: !mWas || (!!mNow && mNow.value >= mWas.value), delta: (mNow && mWas ? dlt(mNow.value, mWas.value) : null) ?? undefined },
+              { label: 'Scans', value: fig(scans.length), delta: ago ?? undefined },
             ]}
           />
+          {/* "Need to see the dates the weight was measured as well." Here they
+              are, one line per figure, naming the instrument as well as the day
+              — because the two can be different instruments, and that is the
+              whole of why this screen and the composition screen looked as
+              though they disagreed. */}
+          <View style={{ marginTop: sp.md }}>
+            <Text style={{ ...ty.caption, color: t.ink3 }}>Weight · {measuredNote(wNow, today)}</Text>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>Muscle · {mNow ? measuredNote(mNow, today) : 'no scan has recorded skeletal muscle yet.'}</Text>
+            {bodyMixNote ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{bodyMixNote}</Text> : null}
+            {stalenessNote(wNow, today) ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{stalenessNote(wNow, today)}</Text> : null}
+          </View>
         </Section>
 
         <Rule />
@@ -617,10 +718,20 @@ export default function Scans() {
         {/* ── weight trend ───────────────────────────────────────────────── */}
         <Section>
           {wsv.length > 1 ? (<>
-            <SectionHead title={`Weight · ${wsv.length} check-ins`}
+            {/* "N check-ins" was wrong in both directions — most of these points
+                are InBody scans, and the ones that are not are weigh-ins.
+                `readingsLabel` counts each kind and names it. */}
+            <SectionHead title={`Weight · ${readingsLabel(wReads)}`}
               note={wDeltaShown !== null ? `${wDeltaShown > 0 ? '+' : wDeltaShown < 0 ? '−' : ''}${Math.abs(wDeltaShown)} ${wu}` : undefined}
-              onPress={() => router.push('/(client)/measurements')} />
-            <Spark data={wsvShown} unit={` ${wu}`} />
+              onPress={() => router.push('/(client)/body-trends')} />
+            {/* `labels` is what puts a DATE on the readout when the client
+                touches the line. Without it the chart answered "what did I
+                weigh" and refused to answer "when", which is exactly what the
+                third report asked for. Spark reads a bare date safely. */}
+            <Spark data={wsvShown} unit={` ${wu}`} labels={wReads.map((r) => r.at)} />
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+              First {bodyDayLabel(wReads[0].at)} · latest {measuredNote(wNow, today)}
+            </Text>
           </>) : (<>
             <SectionHead title="Weight" note="Measurements" onPress={() => router.push('/(client)/measurements')} />
             <Text style={{ ...ty.label, color: t.ink3 }}>No weight history yet — the trend charts from your second check-in.</Text>
