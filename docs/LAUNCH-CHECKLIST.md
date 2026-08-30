@@ -386,6 +386,33 @@ sample data — no sign-up needed", which handed a reviewer the whole app withou
 a password. That entry point was removed on 30 Aug 2026 and the sample data
 with it. Every screen in all three apps is now behind a login.
 
+### The accounts to give them — one per app, and they are NOT interchangeable
+
+| App | Account | Role |
+| --- | --- | --- |
+| Repple (`com.washateria.repple`) | `flyguy2006@gmail.com` | client |
+| Repple Coach (`com.washateria.repple.coach`) | `washareria.stl@gmail.com` | trainer |
+| Repple Studio (`com.washateria.repple.studio`) | `timothy@passionjet.com` | owner |
+
+All three were verified on 30 Aug 2026: correct `profiles.role`, a `tenant_id`,
+the backing `clients`/`trainers` row their app needs, and `email_confirmed_at`
+already set — so item 1 can be turned back on without stranding them.
+
+**Why one per app and not one account for all three.** The apps route by BUILD
+— each binary contains only its own route group — but the data is gated by
+ROLE. A client account signed into Repple Coach lands on the coach dashboard
+and every read is refused: no `trainers` row means no roster, no profile, and a
+header reading "Your Studio" instead of a name. A reviewer handed the wrong one
+sees an app that looks broken, and reports it as broken.
+
+This is not hypothetical. It happened repeatedly during development, because
+the trainer and client accounts differ by two transposed letters —
+`washaREria` against `washaTEria`. Copy them from this table rather than
+typing them.
+
+The passwords are not written down here and must not be: put them straight
+into App Store Connect and Play Console.
+
 **Why it was removed.** It signed nobody in. With no Supabase session the
 exercise catalogue's `to authenticated` read policy returned zero rows and no
 error, so the demo showed an app with no exercises at all — sitting beside 604
