@@ -13,6 +13,11 @@ import {
   type GoalRow, type ScanRow, type WeighInRow,
 } from './clientGoals';
 import { progressOf, projectionOf, type GoalTarget } from './goalTargets';
+import {
+  readMeasurements, measureBoard, unmeasuredSites, siteChangeCm, siteChangeLine,
+  siteAgeDays, siteAgeLine, isSiteStale, MEASURE_SITES, DIRECTION_CAVEAT,
+  type MeasurementRow,
+} from './clientMeasurements';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -136,6 +141,136 @@ ok(goalValue(24, 'bodyfat', 'lb') === 24, 'and a body-fat figure is never conver
 // "2 lb to go" flicker to "3 lb" on a reading that had not really moved.
 ok(goalDelta(-0.4, 'weight', 'lb') === -1, `0.4 kg to go is 1 lb, got ${goalDelta(-0.4, 'weight', 'lb')}`);
 ok(goalDelta(-0.4, 'weight', 'kg') === -0.4, 'and in kilograms it is the tenth the reading supports');
+
+// ══ tape measurements, read for their coach ════════════════════════════════
+//
+// The third coach-read policy nothing used. Same file as the goals above rather
+// than a new one, because a new *.test.ts is not in tsconfig.test.json's files
+// list or in `npm test` and would therefore never run — and a test that never
+// runs is worse than no test, because the next person believes it.
+//
+// Everything below is above the `process.exit(1)` guard on purpose. Assertions
+// placed after it still execute and still print, and can never fail the suite;
+// this repo has shipped that mistake twice.
+
+const M_TODAY = '2026-08-30';
+
+const mRow = (kind: string, taken_at: string, value: number | string | null): MeasurementRow =>
+  ({ kind, taken_at, value });
+
+// A believable client: a waist measured often and recently, a chest measured
+// twice in the spring and not since, a thigh someone took down once.
+const mRead = readMeasurements([
+  mRow('waist', '2026-08-23', 84),
+  mRow('waist', '2026-07-26', 86),
+  mRow('chest', '2026-05-01', 100),
+  mRow('chest', '2026-03-01', '102.0'),
+  mRow('thigh', '2026-08-20', 58),
+]);
+const siteFor = (k: string) => mRead.sites.find((s) => s.key === k) ?? null;
+
+ok(mRead.sites.length === 3, `three sites have readings, got ${mRead.sites.length}`);
+ok(mRead.sites.map((s) => s.key).join(',') === 'waist,chest,thigh',
+  'and they come back in the order the client’s own screen lists them, so the two people are reading the same body down the same list');
+ok(siteFor('chest')?.previous?.cm === 102,
+  'a numeric column delivered as a string is a number here too');
+
+// ── rows this build cannot use are dropped and counted ─────────────────────
+
+const mJunk = readMeasurements([
+  mRow('waist', '2026-08-23', 84),
+  mRow('calf', '2026-08-23', 38),
+  mRow('waist', '2026-08-23', 0),
+  mRow('waist', 'not a date', 84),
+  mRow('waist', '2026-08-23', null),
+]);
+ok(mJunk.sites.length === 1, 'only the readable site is drawn');
+ok(mJunk.skipped === 4,
+  `a site this build cannot name, a 0 cm reading, an unreadable date and a null are counted rather than swallowed, got ${mJunk.skipped}`);
+
+// ── one reading is a number, not a trend ───────────────────────────────────
+
+const thigh = siteFor('thigh');
+ok(thigh?.previous === null, 'a site measured once has no previous reading');
+ok(siteChangeCm(thigh!) === null, 'and no change — null, never 0, which would read as "held steady"');
+ok(siteChangeLine(thigh!, 'cm').includes('nothing yet to compare'),
+  `a single reading says so in words, got "${siteChangeLine(thigh!, 'cm')}"`);
+ok(!/^[+−-]?0(\.0)?\s/.test(siteChangeLine(thigh!, 'cm')),
+  'and never opens with a zero');
+
+// Two rows for the same site on the same day are reachable — the table has no
+// unique constraint — and they are a correction, not a change over time.
+const sameDay = readMeasurements([
+  mRow('waist', '2026-08-23', 84),
+  mRow('waist', '2026-08-23', 85),
+]);
+ok(sameDay.sites[0].previous === null,
+  'a second row on the same day is not a previous reading, because no time passed between them');
+
+// ── a change converts as a span, rounded once ──────────────────────────────
+
+const spanCase = readMeasurements([
+  mRow('thigh', '2026-08-01', 61.1),
+  mRow('thigh', '2026-07-01', 60),
+]);
+ok(siteChangeCm(spanCase.sites[0]) != null
+  && Math.abs(siteChangeCm(spanCase.sites[0])! - 1.1) < 1e-9,
+  'the change is held in centimetres, as stored');
+// 60.0 → 61.1 cm is +0.4 in taken as one span. Converting the ENDS first gives
+// 23.6 → 24.1 = +0.5 in, a tenth of an inch the tape never measured. This is
+// the exact pair that separates the two, which is why it is here and not a
+// round number.
+ok(siteChangeLine(spanCase.sites[0], 'in').includes('+0.4 in'),
+  `a span converts once: expected +0.4 in, got "${siteChangeLine(spanCase.sites[0], 'in')}"`);
+
+// ── each site carries its own date, and says how stale it is ───────────────
+
+ok(siteAgeDays(siteFor('waist')!, M_TODAY) === 7, 'the waist was measured a week ago');
+ok(siteAgeDays(siteFor('chest')!, M_TODAY) === 121, 'and the chest four months ago');
+ok(!isSiteStale(siteFor('waist')!, M_TODAY) && isSiteStale(siteFor('chest')!, M_TODAY),
+  'sites go stale one at a time — a fresh waist does not make a four-month-old chest current, and one screen-level "last measured" date would have said it did');
+ok(siteAgeLine(siteFor('chest')!, M_TODAY).includes('121 days ago'),
+  `a stale reading says exactly how stale, got "${siteAgeLine(siteFor('chest')!, M_TODAY)}"`);
+ok(siteAgeLine(siteFor('waist')!, M_TODAY).includes('7 days ago')
+  && !siteAgeLine(siteFor('waist')!, M_TODAY).includes('training block'),
+  'and a current one still carries its age, without being scolded for it');
+
+// ── direction is reported, not judged ──────────────────────────────────────
+
+// The same fall, at two sites where it means opposite things. If the wording
+// ever acquires a valence — "good", "on track", "well done" — these two stop
+// matching, which is the point: the tape does not know what the client wants.
+const falling = (site: string) => readMeasurements([
+  mRow(site, '2026-08-20', 84),
+  mRow(site, '2026-07-20', 86),
+]).sites[0];
+ok(siteChangeLine(falling('waist'), 'cm') === siteChangeLine(falling('arm'), 'cm'),
+  'a waist and an arm falling by the same amount are described in the same words');
+ok(siteChangeLine(falling('waist'), 'cm').startsWith('−2 cm'),
+  `the sign carries the direction and nothing else, got "${siteChangeLine(falling('waist'), 'cm')}"`);
+ok(!/good|great|progress|on track|well done|improved/i.test(siteChangeLine(falling('waist'), 'cm')),
+  'and no change line congratulates anybody on a number it cannot interpret');
+ok(DIRECTION_CAVEAT.includes('waist') && DIRECTION_CAVEAT.includes('arm'),
+  'the caveat names the two sites that make the point, rather than gesturing at it');
+
+const flat = readMeasurements([
+  mRow('waist', '2026-08-20', 84),
+  mRow('waist', '2026-07-20', 84),
+]).sites[0];
+ok(siteChangeLine(flat, 'cm').startsWith('Unchanged'),
+  'a reading that has not moved says so, rather than printing a signed zero');
+
+// ── the three states a coach must be able to tell apart ────────────────────
+
+ok(measureBoard(null).state === 'unreadable',
+  'a read that did not come back is unreadable — never a client who has never picked up a tape');
+ok(measureBoard([]).state === 'none', 'a read that came back empty is a client with nothing recorded');
+ok(measureBoard(mRead.sites).state === 'measured', 'and readings are readings');
+
+ok(unmeasuredSites(mRead.sites).join(',') === 'Arm,Hips',
+  `the sites nobody has measured are named, got "${unmeasuredSites(mRead.sites).join(',')}"`);
+ok(unmeasuredSites([]).length === MEASURE_SITES.length,
+  'and a client with nothing recorded has not measured any of them');
 
 declare const process: { exit(code: number): void };
 console.log(errors.length ? 'CLIENT-GOALS FAILURES:\n' + errors.join('\n') : 'ALL CLIENT-GOALS TESTS PASSED');

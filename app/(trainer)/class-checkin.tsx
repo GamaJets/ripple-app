@@ -67,6 +67,12 @@ export default function ClassCheckin() {
     return () => { on = false; };
   }, [classId]);
 
+  // Whether there is a roster to count at all. Without this the two counts
+  // below are computed over `[]` and come out as 0 — and the hero then prints a
+  // confident "0 / 0" over a sentence explaining that it is not a count. The
+  // house rule is a dash with a reason, never a zero: a coach glancing at the
+  // figure and not the note reads an unread class as an empty one.
+  const counted = !unlinked && !readFailed && roster !== null;
   const present = useMemo(() => (roster ?? []).filter((m) => m.attended).length, [roster]);
   const booked = useMemo(() => (roster ?? []).filter((m) => m.status === 'booked').length, [roster]);
   const pay = Math.round((parseFloat(rate) || 0) * present);
@@ -104,10 +110,10 @@ export default function ClassCheckin() {
         {/* ── the hero: the count payroll is built from ───────────────────── */}
         <Hero
           label="Checked in"
-          figure={fig(present)}
-          unit={'/ ' + booked}
-          note={unlinked ? 'No class was passed to this screen — this is not a count.' : readFailed ? 'The roster could not be read — this is not a count of zero.' : booked === 0 ? 'No bookings on this class yet.' : present === booked ? 'Everyone booked is here.' : `${booked - present} still to arrive`}
-          arc={unlinked || readFailed || booked === 0 ? undefined : present / booked}
+          figure={fig(counted ? present : null)}
+          unit={counted ? '/ ' + booked : undefined}
+          note={unlinked ? 'No class was passed to this screen — this is not a count.' : loading ? 'Still reading the roster.' : !counted ? 'The roster could not be read — this is not a count of zero.' : booked === 0 ? 'No bookings on this class yet.' : present === booked ? 'Everyone booked is here.' : `${booked - present} still to arrive`}
+          arc={!counted || booked === 0 ? undefined : present / booked}
         />
 
         <Rule />
@@ -118,8 +124,19 @@ export default function ClassCheckin() {
           <Text style={{ ...ty.caption, color: t.ink3, marginBottom: 6 }}>Rate per attendee</Text>
           <TextInput value={rate} onChangeText={setRate} keyboardType="numeric" placeholder="Your rate" placeholderTextColor={t.ink3}
             style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 }} />
-          {rate.trim() ? (
+          {/* The arithmetic needs a real check-in count. With the roster unread
+              `present` is 0, and this line rendered "25 × 0 checked in = 0" —
+              a payout figure for a class the screen never managed to look at,
+              in the one place on the trainer's phone that talks about money. */}
+          {rate.trim() && counted ? (
             <Text style={{ ...ty.label, ...numeric, color: t.ink2, marginTop: sp.md }}>{rate.trim()} × {present} checked in = {pay}</Text>
+          ) : rate.trim() ? (
+            <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>
+              {unlinked
+                ? 'No class was passed to this screen, so there is nobody checked in to multiply by.'
+                : loading ? 'Waiting on the roster before this is worth anything.'
+                : 'The roster could not be read, so there is no check-in count to multiply — this is not zero attendees.'}
+            </Text>
           ) : null}
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
             Your own arithmetic — Repple is not told your rate and does not process this payment. Your gym owner pays from the attendance below.

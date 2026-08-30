@@ -106,7 +106,13 @@ export default function LogSession() {
     }
     const coachId = auth.user?.id;
     if (!coachId) {
-      setFailure('You are not signed in, so this cannot reach your client.');
+      // A session still being restored is not a signed-out coach, and telling
+      // somebody they are signed out sends them to sign in again and lose the
+      // sets they have just typed. `auth.loading` is the difference between the
+      // two, and this screen used to fold them into one sentence.
+      setFailure(auth.loading
+        ? 'Still checking your sign-in — nothing has been saved yet. Try again in a moment.'
+        : 'You are not signed in, so this cannot reach your client.');
       return;
     }
     setBusy(true);
@@ -224,6 +230,14 @@ export default function LogSession() {
               <Text style={{ ...ty.caption, color: t.ink2, marginBottom: sp.md }}>
                 Your saved exercises could not be read, so only the built-in ones are listed. That is not
                 the same as having none saved.
+              </Text>
+            ) : coachEx.status === 'partial' ? (
+              // 'partial' arrived with the row-cap work and this branch did not
+              // exist for it, so a coach whose saved list came back short saw a
+              // picker missing names with nothing to say why — and retyped one
+              // they had already saved.
+              <Text style={{ ...ty.caption, color: t.ink2, marginBottom: sp.md }}>
+                Your saved exercises came back short — there are more of them than are listed here.
               </Text>
             ) : null}
             <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">

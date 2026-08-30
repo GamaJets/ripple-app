@@ -12,13 +12,23 @@
 // Dubai locations a real gym may not have. The chips under it are only the
 // branches this gym has itself used (`branchesFrom`), and a class still cannot
 // be added without one.
+//
+// Two things this screen used to get wrong about its own reads:
+//
+//   · it took `classes` from `useClasses()` and ignored the `status` beside it,
+//     so a refused read drew an empty week under the words "No classes yet".
+//     This screen is a timetable; an empty timetable is a coach's plan for
+//     their week, and they act on it by not turning up.
+//   · `addClass` resolves false when the insert never reached `gym_classes`,
+//     and the alert said "Class added" either way. A class that exists on the
+//     coach's phone alone is on nobody's timetable and cannot be booked.
 import { useMemo, useState } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Cta, Ghost } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Cta, Ghost, Notice, PartialRead } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, value } from '../../src/theme/scale';
 import { useClasses } from '../../src/ui/classes';
 import { CLASS_KINDS, branchesFrom, type GymClass } from '../../src/lib/classesMock';
@@ -30,7 +40,12 @@ const dayShort = (iso: string) => { const d = new Date(iso); const t = new Date(
 export default function TrainerClasses() {
   const t = useTheme();
   const router = useRouter();
-  const { classes, addClass, countsKnown } = useClasses();
+  // `status` alongside the rows, because this screen draws a timetable and an
+  // empty timetable is a sentence: nothing is scheduled. Under 'error' the list
+  // is empty because the read did not come back, and a coach who reads that as
+  // a free week does not turn up to teach. Under 'partial' the classes shown
+  // are real but the far end of the schedule is missing.
+  const { classes, addClass, countsKnown, status, refresh } = useClasses();
 
   const [title, setTitle] = useState('');
   const [kind, setKind] = useState<string>(CLASS_KINDS[0]);
@@ -51,14 +66,38 @@ export default function TrainerClasses() {
 
   const startIso = () => { const d = new Date(); d.setDate(d.getDate() + dayOff); d.setHours(hour, 0, 0, 0); return d.toISOString(); };
   const canAdd = title.trim().length > 0 && branch.trim().length > 0;
+  // `addClass` resolves false when the insert did not reach `gym_classes`, and
+  // this used to discard that and announce "Class added" either way. A class
+  // that exists on the coach's phone alone is on nobody's timetable and cannot
+  // be booked — the members it was scheduled for never see it, and the coach has
+  // been told it is up. What is reported now is what the server actually took.
   const submit = async () => {
     if (!canAdd || busy) return;
     setBusy(true);
     try {
       const base = new Date(startIso());
-      for (let w = 0; w < weeks; w++) { const d = new Date(base.getTime() + w * 7 * 86400000); await addClass({ title: title.trim(), kind, instructor: instructor.trim() || 'Coach', branch: branch.trim(), room: room.trim(), startsAt: d.toISOString(), durationMin: dur, capacity: cap }); }
-      setTitle(''); setRoom('');
-      Alert.alert(weeks > 1 ? 'Classes added' : 'Class added', weeks > 1 ? `${weeks} weekly ${title.trim()} classes at ${branch.trim()}, starting ${dayShort(startIso())} ${timeLabel(startIso())}.` : `${title.trim()} · ${branch.trim()} · ${dayShort(startIso())} ${timeLabel(startIso())}`);
+      const nm = title.trim(); const br = branch.trim();
+      const when = `${dayShort(startIso())} ${timeLabel(startIso())}`;
+      let saved = 0;
+      for (let w = 0; w < weeks; w++) {
+        const d = new Date(base.getTime() + w * 7 * 86400000);
+        if (await addClass({ title: nm, kind, instructor: instructor.trim() || 'Coach', branch: br, room: room.trim(), startsAt: d.toISOString(), durationMin: dur, capacity: cap })) saved++;
+      }
+      // The form is only cleared on a clean save. Clearing it after a refusal
+      // throws away everything the coach typed and leaves them nothing to
+      // retry from.
+      if (saved === weeks) { setTitle(''); setRoom(''); }
+      if (saved === weeks) {
+        Alert.alert(weeks > 1 ? 'Classes added' : 'Class added', weeks > 1
+          ? `${weeks} weekly ${nm} classes at ${br}, starting ${when}.`
+          : `${nm} · ${br} · ${when}`);
+      } else if (saved === 0) {
+        Alert.alert('Not on the timetable', weeks > 1
+          ? `None of the ${weeks} ${nm} classes reached the server, so they are on this phone only and nobody can book them. They will be gone when you reopen the app — try again once you have signal.`
+          : `${nm} did not reach the server, so it is on this phone only and nobody can book it. It will be gone when you reopen the app — try again once you have signal.`);
+      } else {
+        Alert.alert('Partly added', `${saved} of ${weeks} ${nm} classes reached the server. The other ${weeks - saved} are on this phone only and cannot be booked — add them again once you have signal.`);
+      }
     } finally { setBusy(false); }
   };
 
@@ -151,7 +190,25 @@ export default function TrainerClasses() {
 
         {/* ── the schedule ───────────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Upcoming" note={upcoming.length ? String(upcoming.length) : undefined} />
+          {/* The count is withheld unless the read was whole. Under 'partial'
+              `upcoming.length` is the size of the page that arrived, and
+              printing it beside "Upcoming" states it as the number of classes
+              the gym has scheduled — which is the one figure a truncated read
+              does not know. PartialRead below says "the first N" instead. */}
+          <SectionHead title="Upcoming" note={status === 'ready' && upcoming.length ? String(upcoming.length) : undefined} />
+
+          {/* An unread timetable is not an empty week. Without this the screen
+              shows a coach with forty classes on the books a blank schedule and
+              the words "No classes yet", and they plan their week around it. */}
+          {status === 'error' ? (
+            <Notice tone={t.warn} kicker="Timetable" title="Your schedule could not be read"
+              note="Nothing is listed below because the classes did not come back — it does not mean nothing is scheduled. Anything you add here may duplicate a class that is already on the timetable, so check again once you have signal.">
+              <View style={{ marginTop: sp.md }}><Ghost label="Try again" onPress={refresh} /></View>
+            </Notice>
+          ) : status === 'partial' ? (
+            <PartialRead what="classes on your timetable" shown={upcoming.length} onPress={refresh} />
+          ) : null}
+
           {upcoming.map((c: GymClass, i) => {
             // Unknown is not "not full". Without the counts, `booked` is 0
             // for every class and nothing would ever read as full.
@@ -176,8 +233,13 @@ export default function TrainerClasses() {
               </View>
             );
           })}
-          {upcoming.length === 0 ? (
+          {/* Only a settled, whole read may claim the gym has no classes. Under
+              'error' the Notice above has already said we do not know, and under
+              'loading' nobody has been asked yet. */}
+          {upcoming.length === 0 && status === 'ready' ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>No classes yet — add your first above.</Text>
+          ) : upcoming.length === 0 && status === 'loading' ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>Reading your timetable…</Text>
           ) : null}
         </Section>
 

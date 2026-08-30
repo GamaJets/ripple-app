@@ -55,6 +55,8 @@
     "src/lib/trainerProfileAccess.test.ts",
     "src/lib/endCoaching.test.ts",
     "src/lib/coachWeek.test.ts",
-    "src/lib/adherence.test.ts"
+    "src/lib/adherence.test.ts",
+    "src/lib/clientBrief.test.ts",
+    "src/lib/overwriteGuard.test.ts"
   ]
 }

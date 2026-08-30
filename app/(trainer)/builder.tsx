@@ -19,19 +19,35 @@
 // their client and shipped with the assigned program. The note now starts empty
 // unless a human wrote one. (The exercise library below is kept: it is a
 // vocabulary of movement names, not invented client content.)
+//
+// ── The Assign button is now withheld, not warned about ────────────────────
+//
+// This screen consumed four providers and read one of their statuses. The one
+// that mattered was `useAssignedPrograms`: `getProgram` returns null both for a
+// client with no coach-assigned programme and for a client whose row could not
+// be read, and the builder answered that null by loading the generic auto plan
+// and presenting it as what the client is on. Assign then wrote it over the
+// bespoke programme the screen had never seen — no undo, no history row, and
+// nothing that tells the client their next session changed.
+//
+// A banner would not have stopped that, because the banner is not what the
+// thumb lands on. So until the current programme has actually been read the
+// builder stays empty, says why, and the Assign control is held. See
+// src/lib/overwriteGuard.ts.
 import { useEffect, useState, useRef } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, Modal, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Cta, Ghost } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Cta, Ghost, Notice, PartialRead } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, value } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
 import { useProgramTemplates } from '../../src/ui/programTemplates';
 import { useCoachExercises, mergeExerciseLists } from '../../src/ui/coachExercises';
 import { buildProgram, type Program } from '../../src/lib/programs';
+import { guardOverwrite } from '../../src/lib/overwriteGuard';
 import type { Goal } from '../../src/lib/types';
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -65,9 +81,20 @@ function goalToEnum(g: string): Goal {
 
 export default function Builder() {
   const t = useTheme();
-  const { roster } = useRoster();
-  const { getProgram, assignProgram, clearProgram } = useAssignedPrograms();
-  const { templates, saveTemplate } = useProgramTemplates();
+  // Every one of these carries a status and this screen used none of them.
+  //
+  // The one that matters is `programStatus`. `getProgram` returns null both for
+  // a client who has never been assigned anything and for a client whose row
+  // could not be read, and this screen answered that null by loading the
+  // generic auto-generated plan and presenting it as what they are on. The
+  // Assign button underneath then wrote that plan over the bespoke programme
+  // the screen had never seen — no undo, no history, and no notice to the
+  // client, who simply found a different session waiting for them. That is the
+  // meal-plan-chip bug in the most expensive place it can happen, which is
+  // somebody's training.
+  const { roster, status: rosterStatus } = useRoster();
+  const { getProgram, assignProgram, clearProgram, status: programStatus } = useAssignedPrograms();
+  const { templates, saveTemplate, status: tplStatus } = useProgramTemplates();
   const router = useRouter();
 
   const params = useLocalSearchParams();
@@ -83,7 +110,15 @@ export default function Builder() {
   const [tplName, setTplName] = useState('');
 
   const client = roster.find((c) => c.id === clientId);
-  const assignedNow = !!getProgram(clientId);
+  // Only a whole read of `assigned_programs` can tell us this. Under any other
+  // status a null from getProgram means "we did not find out", so saying "on
+  // their auto-generated program" — and offering a Revert for a programme we
+  // cannot see — would both be assertions this screen has no basis for.
+  const assignedNow = programStatus === 'ready' && !!getProgram(clientId);
+  const planGuard = guardOverwrite(
+    programStatus,
+    client ? `the programme ${client.name.split(' ')[0]} is currently on` : "this client's current programme",
+  );
 
   const loadFrom = (p: Program) => {
     setTitle(p.title);
@@ -95,14 +130,23 @@ export default function Builder() {
   };
 
   // Load the client's current program (assigned if any, else their auto plan)
-  // whenever the selected client changes.
+  // whenever the selected client changes — but only once we actually know what
+  // they are on.
+  //
+  // Filling the builder from an unread record is how the wrong programme gets
+  // written. The days below would show the auto plan, the section head would
+  // count its exercises, and nothing on the page would distinguish that from
+  // the coach's own work — so the coach tweaks it and assigns it, over the top
+  // of whatever was really there. Blank is the honest state for "we do not
+  // know yet", and the Program section says so in words.
   useEffect(() => {
     if (!clientId) return;
+    if (programStatus !== 'ready') { setTitle(''); setNote(''); setDays([]); return; }
     const existing = getProgram(clientId);
     if (existing) loadFrom(existing);
     else loadFrom(buildProgram(goalToEnum(client?.goal ?? ''), 25));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clientId]);
+  }, [clientId, programStatus]);
 
   // If opened from the template library with a templateId, load it once.
   const loadedTplRef = useRef<string | null>(null);
@@ -146,14 +190,28 @@ export default function Builder() {
       exercises: d.exercises.map((e, i) => ({ key: d.day + '-' + i, name: e.name, group: e.group || '', sets: e.sets, reps: e.reps || '8-12', alternatives: [] })),
     })),
   });
-  const doSaveTemplate = () => {
+  // `saveTemplate` resolves false when the insert never reached
+  // `program_templates`, and this used to discard that and say "Template
+  // saved". The template then sat in the library for the rest of the session
+  // and was gone at the next launch, so the coach's evidence that their work
+  // was saved was a sentence this screen made up.
+  const doSaveTemplate = async () => {
     if (totalExercises === 0) { Alert.alert('Nothing to save', 'Add at least one exercise first.'); return; }
-    saveTemplate(tplName.trim() || title.trim() || 'Untitled template', composeProgram());
+    const nm = tplName.trim() || title.trim() || 'Untitled template';
+    const saved = await saveTemplate(nm, composeProgram());
     setSaveOpen(false); setTplName('');
-    Alert.alert('Template saved', 'It is in your Program Templates — assign it to as many clients as you like.');
+    Alert.alert(
+      saved ? 'Template saved' : 'Saved on this device only',
+      saved
+        ? 'It is in your Program Templates — assign it to as many clients as you like.'
+        : `“${nm}” did not reach the server, so it is in your library on this phone only and will be gone when you reopen the app. Save it again once you have signal.`,
+    );
   };
   const assign = async () => {
-    if (!canAssign) return;
+    // Belt as well as braces: the control is withheld above, and the handler
+    // refuses too. An overwrite of somebody's training must not be one stray
+    // render away from happening.
+    if (!canAssign || !planGuard.allowed) return;
     const program: Program = {
       title: title.trim() || 'Custom program',
       focus: ['Coach-assigned', 'Personalised for you'],
@@ -170,8 +228,17 @@ export default function Builder() {
       [{ text: 'Done' }]);
   };
 
-  const revert = () => {
-    clearProgram(clientId);
+  // `clearProgram` resolves false when the delete never reached the server, and
+  // the old version announced the revert regardless. A client left on a
+  // programme their coach believes they took away is the same lie as one moved
+  // off a programme the coach believes they still have — so the builder is only
+  // put back on the auto plan when the server confirmed the removal.
+  const revert = async () => {
+    const cleared = await clearProgram(clientId);
+    if (!cleared) {
+      Alert.alert('Not reverted', `${client?.name ?? 'Your client'} is still on their coach-assigned program — the removal did not reach the server. Reopen this screen once you have signal and try again.`);
+      return;
+    }
     loadFrom(buildProgram(goalToEnum(client?.goal ?? ''), 25));
     Alert.alert('Reverted to auto', `${client?.name ?? 'Your client'} is back on their auto-generated program.`);
   };
@@ -195,12 +262,27 @@ export default function Builder() {
 
         {/* ── client ─────────────────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Client" note={roster.length ? `${roster.length} in roster` : undefined} />
-          {roster.length === 0 ? (
+          {/* The roster count is a count, so it waits for a whole read. Under
+              'partial' `roster.length` is the size of the page that came back,
+              not the size of the book. */}
+          <SectionHead title="Client" note={rosterStatus === 'ready' && roster.length ? `${roster.length} in roster` : undefined} />
+
+          {/* An unread roster is not an empty one. Without this a coach with a
+              full book is told they have no clients and sent to add one. */}
+          {rosterStatus === 'error' ? (
+            <Notice tone={t.warn} kicker="Roster" title="Your clients could not be read"
+              note="Nobody is listed below because the roster did not come back — it does not mean you have no clients. Reopen this screen once you have signal." />
+          ) : rosterStatus === 'partial' ? (
+            <PartialRead what="clients on your book" shown={roster.length} />
+          ) : null}
+
+          {roster.length === 0 && rosterStatus === 'ready' ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>
               No clients yet — add a client from your dashboard and they'll appear here to build for.
             </Text>
-          ) : (
+          ) : roster.length === 0 && rosterStatus === 'loading' ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>Reading your roster…</Text>
+          ) : roster.length === 0 ? null : (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingRight: sp.lg }}>
               {roster.map((c) => {
                 const on = c.id === clientId;
@@ -220,8 +302,18 @@ export default function Builder() {
           {client ? (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.md }}>
               <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: assignedNow ? t.brand : t.ink3 }} />
+              {/* "is on their auto-generated program" is a statement about what
+                  this person trains, and it used to be printed off a null that
+                  meant nothing more than "the read failed". A coach reading it
+                  concludes there is no bespoke plan to preserve. */}
               <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }}>
-                {assignedNow ? 'Currently on a coach-assigned program' : `${client.name.split(' ')[0]} is on their auto-generated program`} · goal: {client.goal ?? '—'}
+                {programStatus === 'loading'
+                  ? `Reading what ${client.name.split(' ')[0]} is currently on`
+                  : programStatus !== 'ready'
+                  ? `What ${client.name.split(' ')[0]} is currently on could not be read`
+                  : assignedNow
+                    ? 'Currently on a coach-assigned program'
+                    : `${client.name.split(' ')[0]} is on their auto-generated program`} · goal: {client.goal ?? '—'}
               </Text>
             </View>
           ) : null}
@@ -240,6 +332,17 @@ export default function Builder() {
         {/* ── the program itself ─────────────────────────────────────────── */}
         <Section>
           <SectionHead title="Program" />
+
+          {/* Why the builder below is empty. Without this the coach sees a
+              blank program with no explanation and starts typing one, which is
+              the same trap by a different door: the work is real, the save at
+              the bottom is what has to be held. */}
+          {planGuard.allowed ? null : (
+            <Notice tone={t.warn} kicker={programStatus === 'loading' ? 'Reading' : 'Programme'}
+              title={programStatus === 'loading' ? 'Reading their current programme' : 'What they are on could not be read'}
+              note={`${planGuard.reason} Nothing has been loaded into the builder, because an empty builder is not this client's plan.`} />
+          )}
+
           <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Program name</Text>
           <TextInput value={title} onChangeText={setTitle} placeholder="e.g. Push · Pull · Legs" placeholderTextColor={t.ink3}
             style={[inp, { marginBottom: sp.lg }]} />
@@ -325,10 +428,19 @@ export default function Builder() {
 
         {/* ── assign ─────────────────────────────────────────────────────── */}
         <Section>
-          <View style={{ opacity: canAssign ? 1 : 0.4 }} pointerEvents={canAssign ? 'auto' : 'none'}>
-            <Cta wide label={`Assign to ${client?.name ?? 'client'} · ${totalExercises} exercises`} onPress={assign} />
+          {/* The control itself is withheld, not merely annotated. A banner
+              over a live Assign button does not stop a thumb, and what is on
+              the other side of that thumb is an irreversible write over a
+              training programme this screen never read — no undo, no history
+              row, and nothing that tells the client their sessions changed. */}
+          <View style={{ opacity: canAssign && planGuard.allowed ? 1 : 0.4 }} pointerEvents={canAssign && planGuard.allowed ? 'auto' : 'none'}>
+            <Cta wide label={planGuard.label ?? `Assign to ${client?.name ?? 'client'} · ${totalExercises} exercises`} onPress={assign} />
           </View>
-          {!canAssign ? (
+          {!planGuard.allowed ? (
+            <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.sm }}>
+              {planGuard.reason}
+            </Text>
+          ) : !canAssign ? (
             <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.sm }}>
               {clientId ? 'Add at least one exercise to assign this program.' : 'Pick a client first.'}
             </Text>
@@ -371,6 +483,13 @@ export default function Builder() {
                 Your saved exercises could not be read, so only the built-in ones are listed. That is
                 not the same as having none saved — try again in a moment.
               </Text>
+            ) : coachEx.status === 'partial' ? (
+              // 'partial' arrived with the row-cap work and this branch was
+              // written before it existed, so a short read of the coach's own
+              // names fell through to silence.
+              <Text style={{ ...ty.caption, color: t.ink2, marginBottom: sp.md }}>
+                Your saved exercises came back short — there are more of them than are listed here.
+              </Text>
             ) : null}
             {mergeExerciseLists(coachEx.saved, LIB).map((x, i) => (
               <Pressable key={x.name} onPress={() => { if (pickerDay !== null) { addExercise(pickerDay, x.name, x.group); setPickerDay(null); } }}
@@ -396,7 +515,21 @@ export default function Builder() {
             Loads into the builder for {client?.name ?? 'this client'} — tweak, then assign.
           </Text>
           <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
-            {templates.length === 0 ? (
+            {/* The library is seeded with three built-in starters, so a failed
+                read of the coach's own templates leaves a picker that looks
+                perfectly healthy and is missing everything they ever built.
+                Nothing in the list itself marks the difference. */}
+            {tplStatus === 'error' ? (
+              <Text style={{ ...ty.caption, color: t.ink2, marginBottom: sp.md }}>
+                Your saved templates could not be read, so only the built-in starters are listed below.
+                That is not the same as having none saved.
+              </Text>
+            ) : tplStatus === 'partial' ? (
+              <Text style={{ ...ty.caption, color: t.ink2, marginBottom: sp.md }}>
+                Your library came back short — there are more saved templates than are listed here.
+              </Text>
+            ) : null}
+            {templates.length === 0 && tplStatus === 'ready' ? (
               <Text style={{ ...ty.label, color: t.ink3 }}>No templates saved yet.</Text>
             ) : null}
             {templates.map((tpl, i) => {

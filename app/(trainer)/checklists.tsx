@@ -51,7 +51,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, ScrollView, TextInput, Pressable, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Cta, Ghost, Notice, PartialRead } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
@@ -85,7 +85,13 @@ export default function CoachChecklists() {
   const router = useRouter();
   const r = useRoster();
 
-  const [picked, setPicked] = useState<string | null>(null);
+  // Arrives from the client screen, so a coach already looking at somebody
+  // lands on that person rather than on a picker they have to search. This
+  // screen ignored the param until now, which made the route work and the
+  // journey through it not — the sort of gap that reads as the app forgetting
+  // who you were looking at.
+  const { clientId } = useLocalSearchParams<{ clientId?: string }>();
+  const [picked, setPicked] = useState<string | null>(clientId ?? null);
   const [items, setItems] = useState<Item[] | null>(null);
   const [status, setStatus] = useState<LoadStatus>('ready');
   // The window and the rows it was read over travel together. Held as one value

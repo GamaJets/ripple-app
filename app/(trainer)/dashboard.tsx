@@ -1180,26 +1180,29 @@ export default function TrainerClients() {
                 </View>
               </View>
 
+              {/* ── the way out of this sheet ────────────────────────────────
+                  Eight rows stood here: their checklist, what they're working
+                  toward, the week they've planned, the photos they sent, log a
+                  session, message, the program builder — each one a destination
+                  added on the day its screen was built, and each one a line of
+                  static text that could not say whether there was anything
+                  behind it. A coach reading "Progress photos they sent you"
+                  could not tell it from "they have sent you none".
+                  They are now one route, to app/(trainer)/client.tsx, which
+                  reads each of those screens' own sources and puts a live line
+                  under every destination — plus the thing this sheet never had:
+                  when this person was last seen at all. Nothing has been taken
+                  away; the same seven screens are one tap further on and one
+                  sentence better described. */}
+              <ListRow icon="people" title={`Open ${sel.name.split(' ')[0]}`}
+                note="How they are doing, and the way in to their goals, week, checklist, photos, program, sessions and thread"
+                onPress={() => { const id = sel.id; const nm = sel.name; setSel(null); router.push({ pathname: '/(trainer)/client', params: { clientId: id, name: nm } }); }} />
+
+              {/* Stays here rather than moving: it writes a message, which is
+                  the same kind of thing as the feedback box and the private
+                  notes above it, and the client screen is read-only by
+                  construction. */}
               <ListRow icon="bell" title="Send a check-in nudge" note={'A quick "how is it going?" message'} onPress={() => sendNudge(sel)} />
-              <ListRow icon="chat" title={`Message ${sel.name.split(' ')[0]}`} note="Open your chat thread"
-                onPress={() => { const id = sel.id; const nm = sel.name; setSel(null); router.push({ pathname: '/(trainer)/chat', params: { clientId: id, name: nm } }); }} />
-              <ListRow icon="grid" title="Open program builder" note={`Edit sets, reps & exercises for ${sel.name.split(' ')[0]}`}
-                onPress={() => { const id = sel.id; setSel(null); router.push({ pathname: '/(trainer)/builder', params: { clientId: id } }); }} />
-
-              <ListRow icon="check" title="Their daily checklist" note={`Add lines to ${sel.name.split(' ')[0]}'s list, beside the ones from their own plan`}
-                onPress={() => { setSel(null); router.push('/(trainer)/checklists'); }} />
-
-              <ListRow icon="target" title="What they're working toward" note={`${sel.name.split(' ')[0]}'s own goals — yours to read, not to change`}
-                onPress={() => { const id = sel.id; setSel(null); router.push({ pathname: '/(trainer)/client-goals', params: { clientId: id } }); }} />
-
-              <ListRow icon="calendar" title="The week they've planned" note={`Days ${sel.name.split(' ')[0]} has marked ahead — theirs to set, yours to read`}
-                onPress={() => { const id = sel.id; setSel(null); router.push({ pathname: '/(trainer)/client-week', params: { clientId: id } }); }} />
-
-              <ListRow icon="camera" title="Progress photos they sent you" note={`Only the ones ${sel.name.split(' ')[0]} sent — they can take any back`}
-                onPress={() => { const id = sel.id; setSel(null); router.push({ pathname: '/(trainer)/client-photos', params: { clientId: id } }); }} />
-
-              <ListRow icon="train" title="Log a session you ran" note={`Goes into ${sel.name.split(' ')[0]}'s own record, marked as logged by you`}
-                onPress={() => { const id = sel.id; const nm = sel.name; setSel(null); router.push({ pathname: '/(trainer)/log-session', params: { clientId: id, name: nm } }); }} />
 
               <Pressable
                 onPress={() => { const s = sel; Alert.alert('Remove client?', `Remove ${s.name} from your roster?`, [{ text: 'Keep', style: 'cancel' }, { text: 'Remove', style: 'destructive', onPress: () => { removeClient(s.id); setSel(null); } }]); }}

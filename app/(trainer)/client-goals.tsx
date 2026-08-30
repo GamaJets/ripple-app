@@ -32,16 +32,32 @@
 // coach's cue to get them on the scales — and it is a different sentence from
 // "their scans could not be read just now". Neither is ever a 0%.
 //
+// ── And the readings the scale cannot take ─────────────────────────────────
+//
+// `measurements` — the tape: waist, chest, arm, thigh, hips — was the third
+// table carrying a coach-read policy that nothing in the product used. It has
+// granted `measurements_coach_read` since supabase/parts/02 and no coach-side
+// query existed. So a coach could see everything a machine says about a client
+// (weight, body fat, skeletal muscle, all above) and not one thing a tape says,
+// which is the half of the record that moves when body composition changes and
+// the scale does not. Six weeks of "no change" on the scales and two
+// centimetres off the waist is the conversation this screen was missing.
+//
+// It is on this screen rather than its own because it answers the same question
+// — how is this person actually going — and because a coach who has to open a
+// second screen to find out will compare the two from memory.
+//
 // The arithmetic is entirely src/lib/goalTargets.ts and the wire-reading is
-// src/lib/clientGoals.ts, both pure and both tested. Nothing on this screen
-// works out a percentage or a finish date of its own.
+// src/lib/clientGoals.ts and src/lib/clientMeasurements.ts, all pure and all
+// tested. Nothing on this screen works out a percentage, a finish date or a
+// change of its own.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Hero, Ghost, Notice, Flag, fig } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { useSettings } from '../../src/ui/settings';
 import { supabase } from '../../src/lib/supabase';
@@ -58,11 +74,18 @@ import {
   readGoals, seriesFrom, seriesFor, goalBoard, goalUnit, goalValue, goalDelta,
   type ClientSeries, type GoalRow, type ScanRow, type WeighInRow,
 } from '../../src/lib/clientGoals';
-import { kgToLb, type WeightUnit } from '../../src/lib/units';
+import {
+  readMeasurements, measureBoard, unmeasuredSites, siteChangeLine, siteAgeLine,
+  isSiteStale, DIRECTION_CAVEAT,
+  type MeasurementRow, type SiteHistory,
+} from '../../src/lib/clientMeasurements';
+import { isoToday } from '../../src/lib/dayPlan';
+import { kgToLb, lengthLabel, type WeightUnit } from '../../src/lib/units';
 
 const GOAL_COLS = 'id, kind, target_value, title, target_date, achieved_at, created_at';
 const SCAN_COLS = 'taken_at, weight_kg, body_fat_pct, skeletal_muscle_kg';
 const CHECKIN_COLS = 'at, weight_kg';
+const MEAS_COLS = 'taken_at, kind, value';
 
 const EMPTY_SERIES: ClientSeries = { weight: [], bodyfat: [], muscle: [] };
 
@@ -111,6 +134,15 @@ export default function ClientGoals() {
   // printed — but printing a kilogram figure to a coach who reads pounds is a
   // wrong number, not a stylistic one.
   const wu = useSettings().weightUnit;
+  // Likewise the coach's own length unit, for the same reason and by the same
+  // argument: tape readings are stored in centimetres (TF-37) whichever unit
+  // the client typed them in, so this changes only what is printed — and a
+  // coach who thinks in inches reading "84" off a client's waist will read it
+  // as inches. Deliberately NOT the client's `length_unit`: this screen already
+  // prints their weight in the coach's unit two inches further up, and one
+  // screen carrying two people's unit preferences at once is a screen where
+  // nobody can tell which number belongs to which system.
+  const lu = useSettings().lengthUnit;
 
   const [picked, setPicked] = useState<string | null>(clientId ?? null);
 
@@ -123,6 +155,13 @@ export default function ClientGoals() {
   const [series, setSeries] = useState<ClientSeries>(EMPTY_SERIES);
   const [scanStatus, setScanStatus] = useState<LoadStatus>('ready');
   const [weighStatus, setWeighStatus] = useState<LoadStatus>('ready');
+  const [sites, setSites] = useState<SiteHistory[] | null>(null);
+  const [unreadableMeas, setUnreadableMeas] = useState(0);
+  const [measStatus, setMeasStatus] = useState<LoadStatus>('ready');
+  // Fixed at the moment of the read rather than recomputed on every render, so
+  // a screen left open over midnight cannot quietly age a reading under the
+  // coach's eyes while they are looking at it. Same as client-week.tsx.
+  const [todayISO, setTodayISO] = useState<string>(() => isoToday(new Date()));
 
   // The client whose reads are allowed to reach the screen. Tapping through a
   // book of clients starts a read per tap and they do not come back in order,
@@ -134,21 +173,37 @@ export default function ClientGoals() {
   const load = useCallback(async (id: string) => {
     wanted.current = id;
     setGoalStatus('loading'); setScanStatus('loading'); setWeighStatus('loading');
+    setMeasStatus('loading');
     setGoals(null); setUnreadableGoals(0); setSeries(EMPTY_SERIES);
+    setSites(null); setUnreadableMeas(0);
+    const today = isoToday(new Date());
 
-    // RLS already limits all three of these to clients this coach actually
+    // RLS already limits all four of these to clients this coach actually
     // coaches (goal_targets_coach_read, scans_trainer_read,
-    // checkins_trainer_read), so the filter below is about which client is on
-    // screen rather than about who may be seen.
-    const [goalRes, scanRes, ciRes] = await Promise.all([
+    // checkins_trainer_read, measurements_coach_read), so the filter below is
+    // about which client is on screen rather than about who may be seen.
+    const [goalRes, scanRes, ciRes, measRes] = await Promise.all([
       supabase.from('goal_targets').select(GOAL_COLS)
         .eq('client_id', id).order('created_at', { ascending: false }).limit(capLimit()),
       supabase.from('scans').select(SCAN_COLS)
         .eq('client_id', id).order('taken_at', { ascending: true }).limit(capLimit()),
       supabase.from('check_ins').select(CHECKIN_COLS)
         .eq('user_id', id).order('at', { ascending: true }).limit(capLimit()),
+      // Newest-first, unlike the two above, because what this one is for is the
+      // latest reading at each site and the one before it — so if the cap bites,
+      // the rows that fall off the end are the oldest and least useful.
+      // `taken_at` is a DATE, and a client who measures five sites writes five
+      // rows carrying the same one: an order with ties in it is not an order,
+      // and at the cap the server may break them differently on each read, so a
+      // chest measurement that was here yesterday is simply gone today. The id
+      // settles them, exactly as src/ui/measurements.tsx settles its own.
+      supabase.from('measurements').select(MEAS_COLS)
+        .eq('user_id', id)
+        .order('taken_at', { ascending: false }).order('id', { ascending: false })
+        .limit(capLimit()),
     ]);
     if (wanted.current !== id) return;
+    setTodayISO(today);
 
     if (goalRes.error) {
       reportError('clientGoals.goals', goalRes.error);
@@ -187,6 +242,20 @@ export default function ClientGoals() {
     }
 
     setSeries(seriesFrom(scans, weighIns));
+
+    // Tape measurements stand on their own: they share no source with the three
+    // series above, so a refused scans read says nothing about them and a
+    // refused measurements read must not empty anything else.
+    if (measRes.error) {
+      reportError('clientGoals.measurements', measRes.error);
+      setMeasStatus('error');
+    } else {
+      const page = capped((measRes.data ?? []) as unknown as MeasurementRow[]);
+      const read = readMeasurements(page.rows);
+      setSites(read.sites);
+      setUnreadableMeas(read.skipped);
+      setMeasStatus(page.truncated ? 'partial' : 'ready');
+    }
   }, []);
 
   useEffect(() => {
@@ -196,7 +265,9 @@ export default function ClientGoals() {
       // screen that is no longer showing anybody.
       wanted.current = null;
       setGoals(null); setUnreadableGoals(0); setSeries(EMPTY_SERIES);
+      setSites(null); setUnreadableMeas(0);
       setGoalStatus('ready'); setScanStatus('ready'); setWeighStatus('ready');
+      setMeasStatus('ready');
       return;
     }
     void load(picked);
@@ -210,6 +281,15 @@ export default function ClientGoals() {
   const board = useMemo(
     () => goalBoard(goalStatus === 'error' ? null : goals),
     [goalStatus, goals],
+  );
+
+  // Same rule for the tape: 'error' hands it a null, which is the only way it
+  // can answer 'unreadable'. A client who has never picked up a tape and a read
+  // that was refused both arrive here as an empty list otherwise, and they are
+  // opposite things to say to a coach.
+  const tape = useMemo(
+    () => measureBoard(measStatus === 'error' ? null : sites),
+    [measStatus, sites],
   );
 
   /**
@@ -297,6 +377,35 @@ export default function ClientGoals() {
     );
   };
 
+  /**
+   * One site's row: what the tape said, how it has moved, and how old that is.
+   *
+   * The change gets a sign and no colour. The client's own screen paints a fall
+   * in `t.brand` (src/ui/measurements.tsx), which is fine on the screen of the
+   * person who knows what they are training for and wrong here — a coach reads
+   * five sites at once and the same green would mean "good" on a waist and
+   * "losing the arm they are building" one line below it. The only tone on the
+   * row is on the AGE, and that is a fact about the record rather than about
+   * the body: a reading from four months ago is out of date whatever it says.
+   */
+  const siteRow = (h: SiteHistory, i: number) => {
+    const stale = isSiteStale(h, todayISO);
+    return (
+      <View key={h.key} style={{ paddingVertical: sp.md, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
+        <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: sp.md }}>
+          <Text style={{ ...ty.body, color: t.ink, fontWeight: '600' }}>{h.label}</Text>
+          <Text style={{ ...ty.body, ...numeric, color: t.ink, fontWeight: '500' }}>
+            {fig(lengthLabel(h.latest.cm, lu))}
+          </Text>
+        </View>
+        <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.xs }}>{siteChangeLine(h, lu)}</Text>
+        <Text style={{ ...ty.micro, color: stale ? t.warn : t.ink3, marginTop: sp.xs }}>
+          {siteAgeLine(h, todayISO)}
+        </Text>
+      </View>
+    );
+  };
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
@@ -309,9 +418,9 @@ export default function ClientGoals() {
           </View>
         </View>
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-          What each client is aiming at, in their own words and numbers, and how far along they are.
-          You can read these; you can&rsquo;t change them — a goal is theirs to set and theirs to
-          call done.
+          What each client is aiming at, in their own words and numbers, how far along they are,
+          and what the tape says. You can read these; you can&rsquo;t change them — a goal is theirs
+          to set and theirs to call done, and a measurement is theirs to take.
         </Text>
 
         {!USE_SUPABASE ? (
@@ -425,6 +534,69 @@ export default function ClientGoals() {
                       {unreadableGoals === 1
                         ? 'One more goal is on record in a shape this version of the app cannot show, so it is not in the list above.'
                         : `${unreadableGoals} more goals are on record in a shape this version of the app cannot show, so they are not in the list above.`}
+                    </Flag>
+                  </Section>
+                ) : null}
+
+                {/* ── the tape ──────────────────────────────────────────────
+                    The scans above say what the scale and the machine say. A
+                    client whose weight has not moved for six weeks can still
+                    have lost two centimetres off their waist and put one on
+                    their arm, and until now their coach could not see it.
+
+                    Same three states as the goals, kept apart for the same
+                    reason: unreadable, nothing recorded, and readings. */}
+                <Rule />
+                {measStatus === 'loading' ? (
+                  <Section><Text style={{ ...ty.body, color: t.ink3 }}>Reading their measurements…</Text></Section>
+                ) : tape.state === 'unreadable' ? (
+                  <Section>
+                    <Notice tone={t.warn} kicker="Unreadable" title="Their measurements could not be read"
+                      note={`Nothing is shown below because nothing came back. It does not mean ${who} has never measured — the goals above came from a different read and are unaffected either way.`} />
+                  </Section>
+                ) : tape.state === 'none' ? (
+                  <Section>
+                    <SectionHead title="Tape" note="none recorded" />
+                    <Text style={{ ...ty.body, color: t.ink2 }}>
+                      {who} hasn&rsquo;t logged a tape measurement. The read came back and it was
+                      empty, so this is about them rather than about the connection — and it is the
+                      one record that moves when the scale doesn&rsquo;t.
+                    </Text>
+                  </Section>
+                ) : (
+                  <Section>
+                    <SectionHead title="Tape" note={`${tape.sites.length} ${tape.sites.length === 1 ? 'site' : 'sites'}`} />
+                    <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.sm }}>{DIRECTION_CAVEAT}</Text>
+                    {tape.sites.map(siteRow)}
+                    {/* Only under a whole read. Under 'partial' a site is
+                        missing from the list either because nobody has measured
+                        it or because its rows are older than the row limit, and
+                        naming it as never measured would pick the wrong one. */}
+                    {measStatus === 'ready' && unmeasuredSites(tape.sites).length ? (
+                      <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.md }}>
+                        Nothing on record for {unmeasuredSites(tape.sites).join(', ').toLowerCase()} — the
+                        client&rsquo;s own screen offers those boxes and they have been left empty.
+                      </Text>
+                    ) : null}
+                  </Section>
+                )}
+
+                {measStatus === 'partial' ? (
+                  <Section>
+                    <Flag tone={t.warn}>
+                      Their measurements came back at the row limit, so the newest are here and
+                      older ones may not be. A site showing one reading may have earlier ones that
+                      did not arrive, and every change is measured against the most recent earlier
+                      reading that did.
+                    </Flag>
+                  </Section>
+                ) : null}
+                {unreadableMeas > 0 ? (
+                  <Section>
+                    <Flag tone={t.warn}>
+                      {unreadableMeas === 1
+                        ? 'One more measurement is on record in a shape this version of the app cannot show, so it is not counted above.'
+                        : `${unreadableMeas} more measurements are on record in a shape this version of the app cannot show, so they are not counted above.`}
                     </Flag>
                   </Section>
                 ) : null}
