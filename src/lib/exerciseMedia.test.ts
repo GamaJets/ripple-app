@@ -6,7 +6,7 @@
 // "no picture of this movement" — which the screen says out loud — and "a URL
 // we built out of a row we did not understand", which renders as a grey box
 // the client reads as the app being broken.
-import { frameUrls, FRAME_BASE, REPDB_FRAME_BASE, demoCaption, demoIsShippable } from './exerciseMedia';
+import { frameUrls, FRAME_BASE, REPDB_FRAME_BASE, EVAL_DEMO_BASE, demoCaption, demoIsShippable, evalAnimationUrl } from './exerciseMedia';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -102,6 +102,27 @@ const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
   ok(!demoIsShippable(undefined, true), 'nor an undefined one');
   ok(!demoIsShippable('', true), 'nor an empty one');
   ok(!demoIsShippable('Commercial', true), 'and the check is exact — not a loose match on the word');
+}
+
+// ── evaluation animations never touch our storage ──────────────────────────
+//
+// A preview pack is CC BY-NC: it exists to be judged before a purchase, and
+// putting it in the exercise-demos bucket — which holds content we are licensed
+// to ship — would be the first step of losing track of which is which.
+{
+  ok(evalAnimationUrl('bench-leg-pull-in.webp', 'evaluation') === `${EVAL_DEMO_BASE}/bench-leg-pull-in.webp`,
+    'an evaluation animation resolves against the evaluation host');
+  // The assertion that keeps the two routes apart: a COMMERCIAL animation must
+  // NOT resolve here, because it belongs in the signed bucket. Returning a URL
+  // for it would quietly serve licensed content off an evaluation server.
+  ok(evalAnimationUrl('bench-leg-pull-in.webp', 'commercial') === null,
+    'a commercial animation does NOT resolve here — it belongs in the signed bucket');
+  ok(evalAnimationUrl('bench-leg-pull-in.webp', null) === null, 'nor an unlabelled one');
+  ok(evalAnimationUrl(null, 'evaluation') === null, 'no path, no URL');
+  // Shapes we do not understand are dropped rather than guessed at.
+  for (const bad of ['../../etc/passwd', 'nested/path.webp', 'file.exe', '', '   ']) {
+    ok(evalAnimationUrl(bad, 'evaluation') === null, `"${bad}" is not turned into a URL`);
+  }
 }
 
 if (errors.length) {

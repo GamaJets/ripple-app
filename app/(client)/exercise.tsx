@@ -36,7 +36,7 @@ import { ExerciseVideo } from '../../src/ui/ExerciseVideo';
 // up seeing two different pieces of artwork.
 import { DemoAnimation, FrameLoop } from '../../src/ui/ExerciseDemo';
 import { videoForExercise } from '../../src/lib/exerciseId';
-import { frameUrls, FRAMES_ARE_UNHOSTED, demoCaption, demoIsShippable, DEMO_BUCKET } from '../../src/lib/exerciseMedia';
+import { frameUrls, FRAMES_ARE_UNHOSTED, demoCaption, demoIsShippable, DEMO_BUCKET, evalAnimationUrl } from '../../src/lib/exerciseMedia';
 import { supabase } from '../../src/lib/supabase';
 import { useClientData } from '../../src/ui/clientData';
 import { RepdbInlineCredit } from '../../src/ui/Attribution';
@@ -71,6 +71,12 @@ export default function ExerciseScreen() {
     let cancelled = false;
     const path = detail?.animationPath;
     if (!path || !mayShowAnimation) { setAnimUrl(null); return; }
+    // An evaluation pack is a folder on whoever's machine is judging it, not
+    // something in our bucket — putting it there would be the first step of
+    // forgetting which assets we are licensed to ship. Resolved synchronously
+    // and returned before the signing call, which has nothing to sign.
+    const evalUrl = evalAnimationUrl(path, detail?.demoLicence);
+    if (evalUrl) { setAnimUrl(evalUrl); return; }
     (async () => {
       try {
         const { data, error } = await supabase.storage.from(DEMO_BUCKET).createSignedUrl(path, 60 * 60);
@@ -82,7 +88,7 @@ export default function ExerciseScreen() {
       }
     })();
     return () => { cancelled = true; };
-  }, [detail?.animationPath, mayShowAnimation]);
+  }, [detail?.animationPath, detail?.demoLicence, mayShowAnimation]);
 
   const frames = useMemo(() => frameUrls(detail?.imagePaths, detail?.source), [detail?.imagePaths, detail?.source]);
   const caption = demoCaption(detail?.source, frames.length);

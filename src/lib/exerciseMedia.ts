@@ -114,3 +114,42 @@ export function demoIsShippable(licence: string | null | undefined, isRelease: b
   // going to anybody — so the pack can actually be judged before it is bought.
   return !isRelease;
 }
+
+/**
+ * Where an EVALUATION animation is served from while somebody is judging a pack.
+ *
+ * A preview bundle arrives as a folder on whoever's laptop is assessing it. It
+ * is CC BY-NC — usable to decide whether to buy and never usable in a product
+ * that sells memberships — so it deliberately does NOT go into the
+ * exercise-demos bucket, which exists for licensed content the app may ship.
+ * Uploading it there would be the first step of forgetting which is which.
+ *
+ * Localhost, because the simulator shares the host's network. On a real device
+ * this resolves to nothing and the screen falls back to the still frames, which
+ * is the correct outcome: an evaluation asset has no business on a handset.
+ */
+export const EVAL_DEMO_BASE = 'http://localhost:8899';
+
+/**
+ * The URL for a row's animation, or null.
+ *
+ * Two routes that must not be confused. A COMMERCIAL animation lives in our own
+ * private bucket and is signed — the caller does that, because signing is
+ * asynchronous. An EVALUATION animation is served from wherever the preview
+ * pack is being assessed and never touches our storage at all.
+ *
+ * `null` for anything else, including a licence nobody recorded: the reason it
+ * is unrecorded is unknown, and the expensive guess is the permissive one.
+ */
+export function evalAnimationUrl(
+  animationPath: string | null | undefined,
+  licence: string | null | undefined,
+): string | null {
+  if (licence !== 'evaluation') return null;
+  const clean = String(animationPath || '').trim().replace(/^\/+/, '');
+  // Only the shape the evaluation server serves. A path we do not recognise is
+  // a row we do not understand, and guessing produces a broken image rather
+  // than an honest gap.
+  if (!/^[\w-]+\.(webp|gif|mp4|webm)$/i.test(clean)) return null;
+  return `${EVAL_DEMO_BASE}/${clean}`;
+}
