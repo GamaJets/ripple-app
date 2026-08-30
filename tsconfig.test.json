@@ -64,6 +64,7 @@
     "src/lib/clientBody.test.ts",
     "src/lib/bodyFigures.test.ts",
     "src/lib/wearableLink.test.ts",
-    "src/lib/backTo.test.ts"
+    "src/lib/backTo.test.ts",
+    "src/lib/injuryGate.test.ts"
   ]
 }

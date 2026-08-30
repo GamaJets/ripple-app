@@ -3,7 +3,7 @@ import { macrosFor, GOAL_ADJ, buildMealPlan } from './nutrition';
 import { isLateCancellation, cancelSession, overlaps, nextFromWaitlist } from './booking';
 import { ageFromDob } from './age';
 import { isoDate, seriesDelta } from './format';
-import { catalogSize, mealAt, buildPlan, groceryData, searchMeals, swapIndex, type PlanInput, type Slot } from './meals';
+import { catalogSize, mealAt, buildPlan, snackIdeas, SNACK_SHARE, groceryData, searchMeals, swapIndex, type PlanInput, type Slot } from './meals';
 import type { TrainingSession, Diet } from './types';
 
 const errors: string[] = [];
@@ -104,6 +104,58 @@ declare const process: { exit(code: number): void };
 ok(isoDate(new Date('2026-07-09T12:00:00')) === '2026-07-09', 'isoDate should format YYYY-MM-DD');
 ok(seriesDelta([71.2, 70, 67.4]) === -3.8, 'seriesDelta should be signed first→last');
 ok(seriesDelta([50]) === 0, 'seriesDelta of single point is 0');
+
+/* ── snack ideas ───────────────────────────────────────────────────────── */
+//
+// Reported as: the meals section needs snacks. The catalogue always had them,
+// reachable only by changing "meals per day" from 3 to 4 — which rebuilds the
+// whole day's meals as a side effect of wanting an apple.
+{
+  const c: PlanInput = { id: 'snack-client', weightKg: 80, bodyFatPct: 18, activity: 1.55, goal: 'fatloss', diet: 'meat', mealsPerDay: 3 };
+  const ideas = snackIdeas(c, 3);
+  ok(ideas.length === 3, 'three ideas by default');
+  ok(ideas.every((m) => m.slot === 'Snack'), 'and every one of them is a snack, not a meal');
+
+  // Distinct: three variations of one thing is not three ideas.
+  ok(new Set(ideas.map((m) => m.n)).size === 3, 'the three are different foods');
+
+  // Portioned as a snack, not as a fourth meal. The plan scales its meals to
+  // fill the day; a snack scaled the same way IS a meal.
+  const target = buildPlan(c).target.kcal;
+  for (const m of ideas) {
+    ok(m.K > 0, `${m.n} has calories`);
+    ok(m.K < target * 0.35, `${m.n} is a snack-sized portion, not a meal's share of the day`);
+  }
+  ok(SNACK_SHARE > 0 && SNACK_SHARE < 0.25, 'the share a snack is built to is a snack-sized fraction');
+
+  // They are IDEAS: nothing about them moves the plan or its targets, because
+  // a snack nobody has eaten is not a commitment.
+  const before = buildPlan(c);
+  snackIdeas(c, 3);
+  const after = buildPlan(c);
+  ok(before.tot.K === after.tot.K && before.plan.length === after.plan.length,
+    'asking for snack ideas does not change the plan or its totals');
+
+  // Negative positions, so an idea can never collide with a plan slot in the
+  // override map — an override written at slot 0 would swap breakfast.
+  ok(ideas.every((m) => m.pos < 0), 'snack ideas sit outside the plan slot numbering');
+  ok(new Set(ideas.map((m) => m.pos)).size === 3, 'and each has its own key');
+
+  // Stable for a client, so the section does not reshuffle on every render.
+  ok(JSON.stringify(snackIdeas(c, 3)) === JSON.stringify(ideas), 'the same client gets the same ideas');
+
+  // Diet and allergens are honoured — the whole point of generating rather
+  // than hard-coding a list.
+  const vegan = snackIdeas({ ...c, diet: 'vegan' }, 3);
+  ok(vegan.length === 3 && vegan.every((m) => m.diet === 'vegan'), 'a vegan client gets vegan snacks');
+  ok(JSON.stringify(vegan) !== JSON.stringify(ideas), 'and not the omnivore list relabelled');
+
+  // Asking for more than the catalogue holds returns what there is, not a
+  // padded list with repeats.
+  const many = snackIdeas(c, 500);
+  ok(many.length <= catalogSize('meat', 'Snack'), 'never more ideas than the catalogue has');
+  ok(new Set(many.map((m) => m.pos)).size === many.length, 'and no repeated keys among them');
+}
 
 console.log(errors.length ? 'LOGIC FAILURES:\n' + errors.join('\n') : 'ALL PRODUCTION-LOGIC TESTS PASSED');
 if (errors.length) process.exit(1);

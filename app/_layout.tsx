@@ -10,6 +10,7 @@ import { SessionsProvider } from '../src/ui/sessions';
 import { WorkoutLogProvider } from '../src/ui/workoutLog';
 import { MyTrainerProfileProvider } from '../src/ui/coachProfile';
 import { RosterProvider } from '../src/ui/roster';
+import { InjuryAcksProvider } from '../src/ui/injuryAcks';
 import { AssignedProgramsProvider } from '../src/ui/assignedPrograms';
 import { CoachFeedbackProvider } from '../src/ui/feedback';
 import { CoachNutritionProvider } from '../src/ui/coachNutrition';
@@ -109,6 +110,7 @@ export default function RootLayout() {
               <WorkoutLogProvider>
                 <MyTrainerProfileProvider>
                   <RosterProvider>
+                    <InjuryAcksProvider>
                     <AssignedProgramsProvider>
                     <CoachFeedbackProvider>
                     <CoachNutritionProvider>
@@ -154,6 +156,7 @@ export default function RootLayout() {
                     </CoachNutritionProvider>
                     </CoachFeedbackProvider>
                     </AssignedProgramsProvider>
+                    </InjuryAcksProvider>
                   </RosterProvider>
                 </MyTrainerProfileProvider>
               </WorkoutLogProvider>

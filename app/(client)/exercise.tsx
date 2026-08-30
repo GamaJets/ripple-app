@@ -20,6 +20,7 @@
 // that must never be dressed up as rule 3: a placeholder silhouette shown where
 // we have no picture is a lie a client acts on under load.
 import { useEffect, useMemo, useState } from 'react';
+import { Image as ExpoImage } from 'expo-image';
 import { View, Text, ScrollView, Pressable, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -72,7 +73,7 @@ export default function ExerciseScreen() {
   // that is the shape that already produced a client app and a coach app
   // disagreeing about the name of a muscle — worse here, because a picture
   // that fails to resolve is an empty box with no error to read.
-  const { frames, animUrl } = useExerciseMedia(detail);
+  const { frames, animUrl, equipmentUrl } = useExerciseMedia(detail);
   const caption = demoCaption(detail?.source, frames.length);
 
   const G = layout.gutter;
@@ -119,6 +120,25 @@ export default function ExerciseScreen() {
             {/* Beside the artwork, not two screens away. The licence asks for
                 one visible credit and the Credits card in settings is it; this
                 costs a line and is worth more where somebody is looking. */}
+            {detail?.source === 'repdb' ? <RepdbInlineCredit /> : null}
+          </>
+        ) : equipmentUrl ? (
+          // A handful of catalogue rows name a machine rather than a movement
+          // — Cable Machine, Ski Erg, Smith Machine — so there is no
+          // illustration of "performing" them and never will be. A picture of
+          // the kit is the useful thing to show, kept visibly apart from a
+          // demonstration: still, not cross-faded, and captioned as equipment.
+          <>
+            <ExpoImage
+              source={{ uri: equipmentUrl }}
+              contentFit="contain"
+              cachePolicy="disk"
+              accessibilityLabel={`${detail?.name || name}, equipment`}
+              style={{ width: '100%', aspectRatio: 4 / 3, borderRadius: radius.md, backgroundColor: t.surface2 }}
+            />
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 6 }}>
+              The equipment, not a demonstration — this is a machine rather than a movement.
+            </Text>
             {detail?.source === 'repdb' ? <RepdbInlineCredit /> : null}
           </>
         ) : (

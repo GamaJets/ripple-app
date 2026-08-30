@@ -35,6 +35,10 @@ export interface ExerciseDetail {
   imagePaths: string[];
   /** Storage key in the exercise-demos bucket, or null. A path, never a URL. */
   animationPath: string | null;
+  /** A picture of the KIT, for the few rows that name a machine rather than a
+   *  movement and so have no illustration of one. Never rendered as a
+   *  demonstration — see supabase/parts/80-equipment-icon.sql. */
+  equipmentIconPath: string | null;
   /** 'commercial' once bought, 'evaluation' for a CC BY-NC preview, null when
    *  there is no animation. An evaluation asset must never reach a release. */
   demoLicence: string | null;
@@ -68,7 +72,7 @@ export function useExerciseDetail(name: string | null | undefined) {
     try {
       const { data, error } = await supabase
         .from('exercises')
-        .select('id, name, muscle_group, is_cardio, description, category, equipment, level, mechanic, force, primary_muscles, secondary_muscles, instructions, tips, goals, tags, image_paths, animation_path, demo_licence, source')
+        .select('id, name, muscle_group, is_cardio, description, category, equipment, level, mechanic, force, primary_muscles, secondary_muscles, instructions, tips, goals, tags, image_paths, animation_path, equipment_icon_path, demo_licence, source')
         .eq('id', id)
         .maybeSingle();
       if (error) { reportError('exerciseDetail.read', error, { id }); setDetail(null); setStatus('error'); return; }
@@ -92,6 +96,7 @@ export function useExerciseDetail(name: string | null | undefined) {
         tags: strs(data.tags),
         imagePaths: strs(data.image_paths),
         animationPath: typeof data.animation_path === 'string' && data.animation_path ? data.animation_path : null,
+        equipmentIconPath: typeof data.equipment_icon_path === 'string' && data.equipment_icon_path ? data.equipment_icon_path : null,
         demoLicence: typeof data.demo_licence === 'string' && data.demo_licence ? data.demo_licence : null,
         source: data.source ?? null,
       });
@@ -152,7 +157,7 @@ export function useExerciseCatalogue() {
     try {
       const { data, error } = await supabase
         .from('exercises')
-        .select('id, name, muscle_group, equipment, image_paths, source')
+        .select('id, name, muscle_group, equipment, image_paths, equipment_icon_path, source')
         .order('name', { ascending: true })
         .limit(capLimit());
       if (error) { reportError('exerciseCatalogue.read', error); setStatus('error'); return; }
@@ -162,8 +167,13 @@ export function useExerciseCatalogue() {
         name: r.name,
         group: r.muscle_group ?? null,
         equipment: r.equipment ?? null,
+        // hasDemo stays about the MOVEMENT. An equipment icon fills the tile
+        // so the row is not blank, but it is not a demonstration and a filter
+        // for "has a demo" must not start returning these three.
         hasDemo: Array.isArray(r.image_paths) && r.image_paths.length > 0,
-        thumbPath: Array.isArray(r.image_paths) && r.image_paths.length ? String(r.image_paths[0]) : null,
+        thumbPath: Array.isArray(r.image_paths) && r.image_paths.length
+          ? String(r.image_paths[0])
+          : (typeof r.equipment_icon_path === 'string' && r.equipment_icon_path ? r.equipment_icon_path : null),
         source: r.source ?? null,
       })));
       // 'partial' rather than 'ready': the catalogue is 917 rows against a cap

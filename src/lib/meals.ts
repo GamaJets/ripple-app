@@ -126,7 +126,7 @@ const BREK_BASE: Comp[] = [
   { n: 'shakshuka', ico: '🍳', k: 260, p: 16, c: 12, f: 16, ing: [['Eggs', 2, '', 'Dairy & Eggs'], ['Tomato passata', 150, 'g', 'Pantry & Other']], step: 'Poach the eggs in spiced tomato sauce.', d: ['vegetarian', 'paleo', 'keto', 'meat'] },
 ];
 const BREK_TOP: Comp[] = [
-  { n: 'berry',   ing: [['Mixed berries', 80, 'g', 'Fruits']], k: 45, p: 1, c: 10, f: 0, d: ['meat', 'vegetarian', 'vegan', 'paleo', 'keto'] },
+  { n: 'berry',   ing: [['Mixed berries', 80, 'g', 'Fruits']], k: 45, p: 1, c: 1, f: 0, d: ['meat', 'vegetarian', 'vegan', 'paleo', 'keto'] },
   { n: 'banana',  ing: [['Banana', 1, '', 'Fruits']], k: 90, p: 1, c: 23, f: 0, d: ['meat', 'vegetarian', 'vegan', 'paleo'] },
   { n: 'apple & cinnamon', ing: [['Apple', 1, '', 'Fruits']], k: 80, p: 0, c: 21, f: 0, d: ['meat', 'vegetarian', 'vegan', 'paleo'] },
   { n: 'mango',   ing: [['Mango', 120, 'g', 'Fruits']], k: 80, p: 1, c: 20, f: 0, d: ['meat', 'vegetarian', 'vegan', 'paleo'] },
@@ -306,6 +306,57 @@ export function buildPlan(c: PlanInput): { plan: PlannedMeal[]; target: ReturnTy
   };
   return { plan, target, tot };
 }
+
+/**
+ * Snack ideas, whatever the plan is built from.
+ *
+ * The snack catalogue has always existed, and until now the only way to reach
+ * it was to notice a small "Meals per day 3 4 5" row inside the plan and
+ * change 3 to 4 — which rebuilds the whole day's meals as a side effect of
+ * wanting an apple and some almonds. Reported simply as: the meals section
+ * needs snacks.
+ *
+ * So these are ideas rather than plan slots. They do not move the day's
+ * targets or the macro split, because a snack somebody has not eaten yet is
+ * not a commitment; logging one is what counts it, the same as any other food.
+ * A client whose plan already carries Snack slots still gets them — more ideas
+ * is not a contradiction, and the section says which is which.
+ *
+ * Portioned to roughly an eighth of the day rather than a meal's share: the
+ * plan scales its meals to fill the target, and a snack scaled the same way is
+ * a fourth meal.
+ */
+export function snackIdeas(c: PlanInput, count = 3): PlannedMeal[] {
+  const avoid = c.avoid ?? [];
+  const size = catalogSize(c.diet, 'Snack', avoid);
+  if (!size) return [];
+  const target = applyCoachAdjust(macrosFor(c), c.coachAdjust);
+  const want = target.kcal * SNACK_SHARE;
+  // Seeded off the client like the plan is, and stepped by a number coprime
+  // with nothing in particular — the point is only that the three ideas are
+  // stable for a given client and are not three variations of one thing.
+  const seed = mealSeed(c, SNACK_SEED_SLOT);
+  const out: PlannedMeal[] = [];
+  for (let i = 0; i < Math.min(count, size); i++) {
+    const meal = mealAt(c.diet, 'Snack', (seed + i * 37) % size, avoid);
+    const servings = Math.max(0.5, Math.round((want / Math.max(1, meal.k)) * 4) / 4);
+    out.push({
+      ...meal,
+      // Negative, so a snack idea can never collide with a plan slot in the
+      // override map or in a React key.
+      pos: -1 - i,
+      servings,
+      K: Math.round(meal.k * servings), P: Math.round(meal.p * servings),
+      C: Math.round(meal.c * servings), F: Math.round(meal.f * servings),
+    });
+  }
+  return out;
+}
+
+/** A snack is about an eighth of the day. */
+export const SNACK_SHARE = 0.125;
+/** A slot index no real plan uses, so snack seeds never track a meal's. */
+const SNACK_SEED_SLOT = 97;
 
 /** Next meal in the catalog for a slot (the "swap" action). */
 export function swapIndex(diet: Diet, slot: Slot, currentIdx: number, avoid: Allergen[] = []): number {

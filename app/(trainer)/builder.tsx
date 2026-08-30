@@ -51,6 +51,9 @@ import { useExerciseCatalogue } from '../../src/ui/exerciseDetail';
 import { exerciseSlug } from '../../src/lib/exerciseId';
 import { buildProgram, type Program } from '../../src/lib/programs';
 import { guardOverwrite } from '../../src/lib/overwriteGuard';
+import { guardInjuries } from '../../src/lib/injuryGate';
+import { useInjuryAcks } from '../../src/ui/injuryAcks';
+import { areaLabel, type Injury } from '../../src/lib/injuries';
 import type { Goal } from '../../src/lib/types';
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -138,6 +141,33 @@ export default function Builder() {
     programStatus,
     client ? `the programme ${client.name.split(' ')[0]} is currently on` : "this client's current programme",
   );
+  // A programme is built AROUND what a client cannot do, so the coach reads
+  // the disclosures before writing the sessions. Two guards rather than one
+  // because they withhold the button for unrelated reasons and each has its
+  // own sentence; see src/lib/injuryGate.ts.
+  const acks = useInjuryAcks();
+  const clientInjuries: Injury[] = (client?.injuries ?? []).map((i, n) => ({
+    id: `${clientId}-${n}`, area: i.area, severity: i.severity as Injury['severity'],
+    status: 'active', note: i.note, at: '',
+  }));
+  const injuryGate = guardInjuries(
+    acks.status,
+    clientInjuries,
+    clientId ? acks.acknowledged(clientId) : null,
+    client?.name.split(' ')[0] ?? 'This client',
+  );
+  const [ackBusy, setAckBusy] = useState(false);
+  const [ackFailed, setAckFailed] = useState(false);
+  const confirmInjuries = async () => {
+    if (!clientId || ackBusy) return;
+    setAckBusy(true); setAckFailed(false);
+    const ok = await acks.acknowledge(clientId, injuryGate.outstanding);
+    setAckBusy(false);
+    // Reported, not swallowed. A coach who believes they confirmed something
+    // the server never recorded will hit the same wall next week with no idea
+    // why.
+    if (!ok) setAckFailed(true);
+  };
 
   const loadFrom = (p: Program) => {
     setTitle(p.title);
@@ -267,7 +297,7 @@ export default function Builder() {
     // Belt as well as braces: the control is withheld above, and the handler
     // refuses too. An overwrite of somebody's training must not be one stray
     // render away from happening.
-    if (!canAssign || !planGuard.allowed) return;
+    if (!canAssign || !planGuard.allowed || !injuryGate.allowed) return;
     const program: Program = {
       title: title.trim() || 'Custom program',
       focus: ['Coach-assigned', 'Personalised for you'],
@@ -489,10 +519,41 @@ export default function Builder() {
               the other side of that thumb is an irreversible write over a
               training programme this screen never read — no undo, no history
               row, and nothing that tells the client their sessions changed. */}
-          <View style={{ opacity: canAssign && planGuard.allowed ? 1 : 0.4 }} pointerEvents={canAssign && planGuard.allowed ? 'auto' : 'none'}>
-            <Cta wide label={planGuard.label ?? `Assign to ${client?.name ?? 'client'} · ${num(totalExercises)} exercises`} onPress={assign} />
+          {/* The disclosures themselves, above the button that is being held.
+              Telling a coach to read something without showing it to them is
+              a wall, not a check. */}
+          {!injuryGate.allowed && injuryGate.outstanding.length ? (
+            <View style={{ marginBottom: sp.lg }}>
+              <Notice tone={t.s3} kicker={`${client?.name.split(' ')[0] ?? 'This client'} has disclosed`} title="Injuries and Limitations">
+                <View style={{ marginTop: sp.md, gap: sp.sm }}>
+                  {injuryGate.outstanding.map((inj, i) => (
+                    <View key={i}>
+                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>
+                        {areaLabel(inj.area)} · {inj.severity}
+                      </Text>
+                      {inj.note ? <Text style={{ ...ty.label, color: t.ink2, marginTop: 2 }}>{inj.note}</Text> : null}
+                    </View>
+                  ))}
+                </View>
+                <View style={{ marginTop: sp.lg }}>
+                  <Cta wide label={ackBusy ? 'Confirming…' : 'I Have Read These'} onPress={confirmInjuries} />
+                </View>
+                {ackFailed ? (
+                  <Text style={{ ...ty.caption, color: t.crit, marginTop: sp.sm }}>
+                    That did not save, so nothing has been recorded. Check your connection and try again.
+                  </Text>
+                ) : null}
+              </Notice>
+            </View>
+          ) : null}
+          <View style={{ opacity: canAssign && planGuard.allowed && injuryGate.allowed ? 1 : 0.4 }} pointerEvents={canAssign && planGuard.allowed && injuryGate.allowed ? 'auto' : 'none'}>
+            <Cta wide label={injuryGate.label ?? planGuard.label ?? `Assign to ${client?.name ?? 'client'} · ${num(totalExercises)} exercises`} onPress={assign} />
           </View>
-          {!planGuard.allowed ? (
+          {!injuryGate.allowed ? (
+            <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.sm }}>
+              {injuryGate.reason}
+            </Text>
+          ) : !planGuard.allowed ? (
             <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.sm }}>
               {planGuard.reason}
             </Text>

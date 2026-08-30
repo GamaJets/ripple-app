@@ -34,7 +34,7 @@ const cache = new Map<string, { url: string; until: number }>();
  *  bucket and must be signed; anything else is still a vendor CDN path and is
  *  resolved by frameUrls instead. Named explicitly rather than sniffed,
  *  because a wrong guess here is a broken picture with no error to read. */
-const OURS = ['stills/', 'anim/'];
+const OURS = ['stills/', 'anim/', 'equipment/'];
 
 /** True for a path that lives in our bucket and therefore needs signing. A
  *  bare filename — 'bench-leg-pull-in.webp' — is an animation key, which the

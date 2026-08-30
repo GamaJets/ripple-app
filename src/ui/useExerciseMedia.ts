@@ -26,6 +26,11 @@ export interface ExerciseMedia {
   /** The looping animation, or null when there is none for this movement or
    *  the licence does not permit showing it in this build. */
   animUrl: string | null;
+  /** A picture of the KIT, for the handful of rows that name a machine rather
+   *  than a movement. Shown only when there is nothing else, and labelled as
+   *  equipment — it is not a demonstration and must never be presented as
+   *  one. */
+  equipmentUrl: string | null;
 }
 
 export function useExerciseMedia(detail: ExerciseDetail | null): ExerciseMedia {
@@ -45,9 +50,11 @@ export function useExerciseMedia(detail: ExerciseDetail | null): ExerciseMedia {
   );
   const [ourFrames, setOurFrames] = useState<string[]>([]);
   const [animUrl, setAnimUrl] = useState<string | null>(null);
+  const [equipUrl, setEquipUrl] = useState<string | null>(null);
 
   const pathsKey = ourPaths.join('|');
   const animPath = detail?.animationPath ?? null;
+  const equipPath = detail?.equipmentIconPath ?? null;
 
   useEffect(() => {
     let cancelled = false;
@@ -58,10 +65,15 @@ export function useExerciseMedia(detail: ExerciseDetail | null): ExerciseMedia {
     const wanted = [
       ...ourPaths,
       ...(animPath && mayShow && !evalUrl && needsSigning(animPath) ? [animPath] : []),
+      // Signed in the same round trip as everything else. It is only ever
+      // shown when the rest of this comes back empty, and a second request
+      // fired at that moment is a second wait to find out there is no picture.
+      ...(equipPath && needsSigning(equipPath) ? [equipPath] : []),
     ];
     if (!wanted.length) {
       setOurFrames([]);
       setAnimUrl(mayShow ? evalUrl : null);
+      setEquipUrl(null);
       return;
     }
     (async () => {
@@ -69,14 +81,19 @@ export function useExerciseMedia(detail: ExerciseDetail | null): ExerciseMedia {
       if (cancelled) return;
       setOurFrames(ourPaths.map((p) => signed.get(p)).filter((u): u is string => !!u));
       setAnimUrl(mayShow ? (evalUrl ?? (animPath ? signed.get(animPath) ?? null : null)) : null);
+      setEquipUrl(equipPath ? signed.get(equipPath) ?? null : null);
     })();
     return () => { cancelled = true; };
-  }, [pathsKey, animPath, mayShow, detail?.demoLicence]);
+  }, [pathsKey, animPath, equipPath, mayShow, detail?.demoLicence]);
 
   return {
     // Ours when we have them; the vendor CDN is the fallback while a few rows
     // are still served from it.
     frames: ourFrames.length ? ourFrames : vendorFrames,
     animUrl,
+    // Deliberately NOT folded into `frames`. A screen that cross-fades this
+    // would animate a static machine and caption it as somebody performing a
+    // lift; the caller shows it separately, labelled as the kit.
+    equipmentUrl: equipUrl,
   };
 }

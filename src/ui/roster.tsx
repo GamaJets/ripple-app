@@ -32,6 +32,21 @@ import { capLimit, capped } from '../lib/rowCap';
 import { useAuthRevision } from './authRevision';
 import { endCoaching } from '../lib/endCoaching';
 import { reportError } from '../lib/reportError';
+import { activeInjuries, type Injury } from '../lib/injuries';
+
+/**
+ * Whether a disclosure is new enough that a coach has probably not seen it.
+ *
+ * Only drives a "New injury" chip on the roster card, so the window is a
+ * judgement rather than a rule — but it is written down in one place instead of
+ * being a magic number in a map callback.
+ */
+const NEW_INJURY_DAYS = 14;
+const isRecent = (at: string | undefined): boolean => {
+  if (!at) return false;
+  const t = Date.parse(at);
+  return Number.isFinite(t) && Date.now() - t < NEW_INJURY_DAYS * 86400000;
+};
 
 let SEQ = 900;
 const MODE_KEY = 'repple.clientModes';
@@ -135,7 +150,7 @@ export function RosterProvider({ children }: { children: ReactNode }) {
         // refreshes with nothing wrong on the server. `clients` carries no
         // created_at (see the join-date note below), so id is the stable key.
         const { data: cls, error } = await supabase.from('clients')
-          .select('id, goal, diet, meals_per_day, avoid, mode').eq('trainer_id', uid)
+          .select('id, goal, diet, meals_per_day, avoid, mode, injuries').eq('trainer_id', uid)
           .order('id', { ascending: true }).limit(capLimit());
         if (cancelled) return;
         // Split apart what used to be one branch. A refused read is 'error'
@@ -255,7 +270,7 @@ export function RosterProvider({ children }: { children: ReactNode }) {
         //     not produce a smaller number, it produces a wrong one — often the
         //     wrong sign. Null, and the screen already renders that as no change
         //     recorded rather than as zero.
-        const real: RosterClient[] = linked.map((c: any) => { const sc = st[c.id]; return { id: c.id, name: names[c.id] || 'Client', goal: goalMap[c.goal] || 'General', weightDelta: scansTruncated ? null : sc.wDelta, adherence: sc.adh != null ? sc.adh : null, lastActive: sc.last ? ago(sc.last) : (statsTruncated ? '—' : 'no activity yet'), next: '—', unread: 0, mode: readCoachedMode(c.mode), metrics: sc.mx ?? undefined, diet: c.diet ?? undefined, mealsPerDay: c.meals_per_day ?? undefined, avoid: Array.isArray(c.avoid) ? c.avoid : undefined, joinedAt: joined[c.id] ?? null }; });
+        const real: RosterClient[] = linked.map((c: any) => { const sc = st[c.id]; return { id: c.id, name: names[c.id] || 'Client', goal: goalMap[c.goal] || 'General', weightDelta: scansTruncated ? null : sc.wDelta, adherence: sc.adh != null ? sc.adh : null, lastActive: sc.last ? ago(sc.last) : (statsTruncated ? '—' : 'no activity yet'), next: '—', unread: 0, mode: readCoachedMode(c.mode), metrics: sc.mx ?? undefined, diet: c.diet ?? undefined, mealsPerDay: c.meals_per_day ?? undefined, avoid: Array.isArray(c.avoid) ? c.avoid : undefined, joinedAt: joined[c.id] ?? null, injuries: activeInjuries(Array.isArray(c.injuries) ? c.injuries : []).map((i: Injury) => ({ area: i.area, severity: i.severity, note: i.note, isNew: isRecent(i.at) })) }; });
         if (!cancelled) { setRoster([...real, ...manual]); setStatus(partialFailure ? 'error' : partialRead ? 'partial' : 'ready'); }
       } catch { if (!cancelled) setStatus('error'); }
     })();

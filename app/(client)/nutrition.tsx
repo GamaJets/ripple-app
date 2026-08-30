@@ -12,12 +12,12 @@
 // 16F "Meal (photo)" entry whenever vision was unavailable or failed. Nothing is
 // logged now — the app says it could not read the photo rather than making a
 // number up.
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { num } from '../../src/lib/format';
 import { View, Text, Pressable, ScrollView, Modal, TextInput, Alert, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
-import { buildPlan, swapIndex, groceryData, DEPTS, DEPT_ICO, ALLERGENS, type PlannedMeal } from '../../src/lib/meals';
+import { buildPlan, snackIdeas, SNACK_SHARE, swapIndex, groceryData, DEPTS, DEPT_ICO, ALLERGENS, type PlannedMeal } from '../../src/lib/meals';
 import { mealPlanDoc, shareDoc } from '../../src/lib/exportShare';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Diet, Goal } from '../../src/lib/types';
@@ -155,6 +155,19 @@ export default function Nutrition() {
   const [override, setOverride] = useState<Record<number, number>>({});
   const [ovHydrated, setOvHydrated] = useState(false);
   const [recipe, setRecipe] = useState<PlannedMeal | null>(null);
+
+  /** Put a snack idea in today's log. Nothing else counts it — the section is
+   *  a menu, and reading a menu is not eating. */
+  const logSnack = (m: PlannedMeal, servings = 1) => {
+    void fl.addFood({
+      name: m.n,
+      kcal: Math.round(m.K * servings),
+      protein: Math.round(m.P * servings),
+      carbs: Math.round(m.C * servings),
+      fat: Math.round(m.F * servings),
+      via: 'manual',
+    });
+  };
   const [showGrocery, setShowGrocery] = useState(false);
   const [checked, setChecked] = useState<Record<string, boolean>>({});
   useEffect(() => { AsyncStorage.getItem('repple.grocery.checked').then((r) => { if (r) { try { setChecked(JSON.parse(r)); } catch { /* ignore */ } } }); }, []);
@@ -226,6 +239,11 @@ export default function Nutrition() {
 
   const input = { id: c.id, weightKg: w, bodyFatPct: bf, activity: c.activity, goal: c.goal, diet, mealsPerDay: c.mealsPerDay, mealOverride: { ...(coachAdjust?.mealOverride ?? {}), ...override }, coachAdjust: cyclingAdjust, avoid: c.avoid, energyPlan };
   const { plan, target, tot } = buildPlan(input);
+  // Snacks are ideas, not plan slots: they do not move the targets or the
+  // macro split above, because a snack nobody has eaten yet is not a
+  // commitment. Logging one is what counts it, like any other food.
+  const snacks = useMemo(() => snackIdeas(input, 3), [input]);
+  const planHasSnacks = plan.some((m) => m.slot === 'Snack');
   const coachPick = (pos: number) => !!(coachAdjust?.mealOverride && coachAdjust.mealOverride[pos] != null && override[pos] == null);
   const swap = (pos: number, slot: PlannedMeal['slot'], idx: number) => setOverride({ ...override, [pos]: swapIndex(diet, slot, idx) });
   const groc = groceryData(input);
@@ -242,7 +260,7 @@ export default function Nutrition() {
       groc.byDept[d]!.forEach((it) => { const q = it.qty + (it.unit ? ' ' + it.unit : ''); lines.push('- ' + it.item + ' — ' + q); html += '<li>' + it.item + ' — ' + q + '</li>'; });
       html += '</ul>'; lines.push('');
     });
-    await shareDoc(html, lines.join('\n'), 'Grocery list');
+    await shareDoc(html, lines.join('\n'), 'Grocery List');
   };
   const WEEKD = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
   const sharePlan = async () => {
@@ -598,8 +616,48 @@ export default function Nutrition() {
 
         <Rule />
 
+        {/* ── snacks ─────────────────────────────────────────────────────── */}
+        {snacks.length ? (
+          <>
+            <Section>
+              <SectionHead
+                title="Snacks"
+                note={planHasSnacks ? 'On top of the plan' : `About ${Math.round(SNACK_SHARE * 100)}% of your day each`}
+              />
+              <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
+                {planHasSnacks
+                  ? 'Your plan already builds snacks into the day. These are extras — log one and it counts toward today.'
+                  : 'Log one and it counts toward today. Nothing here changes your targets until you do.'}
+              </Text>
+              {snacks.map((m: PlannedMeal, i: number) => (
+                <View key={m.pos}>
+                  {i > 0 ? <Rule /> : null}
+                  <Pressable onPress={() => setRecipe(m)} accessibilityRole="button" accessibilityLabel={m.n}
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.lg }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }} numberOfLines={2}>{m.n}</Text>
+                      <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 3 }}>P{m.P} · C{m.C} · F{m.F}</Text>
+                    </View>
+                    <View style={{ alignItems: 'flex-end' }}>
+                      <Text style={{ ...value(20), color: t.ink }}>{num(m.K)}</Text>
+                      <Text style={{ ...ty.caption, color: t.ink3 }}>kcal</Text>
+                    </View>
+                    <Pressable onPress={() => logSnack(m)} hitSlop={10} accessibilityRole="button"
+                      accessibilityLabel={`Log ${m.n}`}
+                      style={{ width: 34, height: 34, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+                      <Icon name="plus" size={16} color={t.ink2} />
+                    </Pressable>
+                  </Pressable>
+                </View>
+              ))}
+            </Section>
+
+            <Rule />
+          </>
+        ) : null}
+
         <Section>
-          <Cta label={`Grocery list · ${grocCount} items`} wide onPress={() => setShowGrocery(true)} />
+          <Cta label={`Grocery List · ${grocCount} items`} wide onPress={() => setShowGrocery(true)} />
         </Section>
 
       </ScrollView>
@@ -665,7 +723,11 @@ export default function Nutrition() {
               <Text style={{ ...ty.micro, color: t.ink3 }}>{recipe.slot}</Text>
               <Text style={{ ...ty.title, color: t.ink, textTransform: 'capitalize', marginTop: 4 }}>{recipe.n}</Text>
               <Text style={{ ...ty.label, ...numeric, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>{Math.round(recipe.K * batch)} kcal · P{Math.round(recipe.P * batch)} / C{Math.round(recipe.C * batch)} / F{Math.round(recipe.F * batch)}{batch > 1 ? '  · ' + batch + ' servings' : ''}</Text>
-              <Ghost label="Swap This Meal" icon="swap" onPress={() => { swap(recipe.pos, recipe.slot, recipe.idx); setRecipe(null); }} />
+              {/* A snack idea has no slot in the plan, so there is nothing for a
+                  swap to write to — logging it is the action it has. */}
+              {recipe.pos < 0
+                ? <Ghost label="Log This Snack" icon="plus" onPress={() => { logSnack(recipe, batch); setRecipe(null); }} />
+                : <Ghost label="Swap This Meal" icon="swap" onPress={() => { swap(recipe.pos, recipe.slot, recipe.idx); setRecipe(null); }} />}
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginTop: sp.lg, marginBottom: sp.lg }}>
                 <Text style={{ ...ty.label, color: t.ink2 }}>Servings</Text>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.sm, paddingVertical: 4 }}>
