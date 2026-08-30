@@ -53,7 +53,7 @@ export default function ThisWeek() {
           <Ghost icon="back" onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }} numberOfLines={1}>{program.title}{coachProgram ? ' · coach plan' : ''}</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>This week</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>This Week</Text>
           </View>
         </View>
 

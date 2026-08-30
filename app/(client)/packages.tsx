@@ -43,7 +43,7 @@ export default function ClientPackages() {
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Connect</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Memberships &amp; packs</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Memberships &amp; Packs</Text>
             <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>What you've bought from your coach and what's left.</Text>
           </View>
           <Ghost icon="back" onPress={() => router.back()} />
@@ -52,7 +52,7 @@ export default function ClientPackages() {
         {loading ? <ActivityIndicator color={t.brand} style={{ marginVertical: 30 }} /> : (
           <>
             {activePacks.length > 0 ? (
-              <Hero label="Sessions remaining" figure={fig(remaining)}
+              <Hero label="Sessions Remaining" figure={fig(remaining)}
                 note={`Across ${activePacks.length} active pack${activePacks.length === 1 ? '' : 's'}`} />
             ) : null}
 

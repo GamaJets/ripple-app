@@ -1752,7 +1752,7 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, log, injuries, 
       <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
         <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40, paddingTop: topPad + 10 }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
           <View style={{ alignItems: 'center', marginTop: sp.xl }}><Icon name="trophy" size={40} color={t.brand} /></View>
-          <Text style={{ ...ty.title, color: t.ink, textAlign: 'center', marginTop: sp.md }}>Session complete</Text>
+          <Text style={{ ...ty.title, color: t.ink, textAlign: 'center', marginTop: sp.md }}>Session Complete</Text>
           <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: sp.xs, textTransform: 'capitalize' }}>{focus}</Text>
           <Section>
             <KpiRow items={[

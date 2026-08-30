@@ -257,7 +257,7 @@ export default function ClientPhotos() {
           <Ghost icon="back" onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Sent to you</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Progress photos</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Progress Photos</Text>
           </View>
         </View>
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>

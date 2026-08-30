@@ -195,7 +195,7 @@ export default function TrainerAnalytics() {
 
         {/* ── the hero ───────────────────────────────────────────────────── */}
         <Hero
-          label="Sessions delivered"
+          label="Sessions Delivered"
           figure={fig(sessionsMo)}
           unit={sessionsMo == null ? undefined : 'this month'}
           note={sessionsMo == null
@@ -459,7 +459,7 @@ export default function TrainerAnalytics() {
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setGoalOpen(false)} />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30 }}>
-          <Text style={{ ...ty.title, color: t.ink, marginBottom: sp.lg }}>Set your goals</Text>
+          <Text style={{ ...ty.title, color: t.ink, marginBottom: sp.lg }}>Set Your Goals</Text>
           <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Monthly revenue target ($)</Text>
           <TextInput value={gRev} onChangeText={setGRev} keyboardType="number-pad" placeholder="4000" placeholderTextColor={t.ink3}
             style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 11, marginBottom: sp.md }} />

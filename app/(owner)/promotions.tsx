@@ -99,7 +99,7 @@ export default function Promotions() {
 
         {/* ── the hero ───────────────────────────────────────────────────── */}
         <Hero
-          label="Live codes"
+          label="Live Codes"
           figure={fig(promos.length)}
           unit={promos.length === 1 ? 'code' : 'codes'}
           note={promos.length

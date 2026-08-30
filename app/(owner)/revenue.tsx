@@ -81,7 +81,7 @@ export default function OwnerRevenue() {
 
         {/* ── the hero ───────────────────────────────────────────────────── */}
         <Hero
-          label="Sessions delivered · 30 days"
+          label="Sessions Delivered · 30 Days"
           figure={loading ? '—' : fig(roll.sessions30)}
           note={loading
             ? 'Reading your roster…'

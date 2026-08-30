@@ -56,7 +56,7 @@ export default function FeedbackScreen({ audience }: { audience: string }) {
           <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
             <View style={{ flex: 1 }}>
               <Text style={{ ...ty.micro, color: t.ink3 }}>Feedback</Text>
-              <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Send feedback</Text>
+              <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Send Feedback</Text>
             </View>
             <Ghost icon="back" onPress={() => router.back()} />
           </View>

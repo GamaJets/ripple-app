@@ -145,7 +145,7 @@ export default function WeeklyReport() {
           </View>
         ) : null}
 
-        <Hero label="Trained this week" figure={fig(wk.workouts)} unit={wk.workouts === 1 ? 'session' : 'sessions'}
+        <Hero label="Trained This Week" figure={fig(wk.workouts)} unit={wk.workouts === 1 ? 'session' : 'sessions'}
           note={`${wk.days} active day${wk.days === 1 ? '' : 's'}${streak > 0 ? ` · ${streak}-day streak` : ''}`} />
 
         <Rule />

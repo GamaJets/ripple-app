@@ -292,7 +292,7 @@ export default function Devices() {
   <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
    <View style={{ flex: 1 }}>
     <Text style={{ ...ty.micro, color: t.ink3 }}>Wearables</Text>
-    <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Watch &amp; devices</Text>
+    <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Watch &amp; Devices</Text>
    </View>
    <Ghost icon="back" onPress={() => router.back()} />
   </View>
@@ -300,7 +300,7 @@ export default function Devices() {
   {/* ── the hero: today's live burn, when a device is feeding it ─────── */}
   {showLive ? (<>
    <Hero
-    label="Burned today"
+    label="Burned Today"
     figure={num(w.today.activeKcal)}
     unit="kcal"
     note={w.today.activeKcal == null
@@ -313,13 +313,13 @@ export default function Devices() {
 
    <Section>
     <SectionHead title="Live today" note={`${connected.length} ${devicesWord}`} onPress={() => setDetail('source')} />
-    <ListRow icon="heart" title="Average heart rate"
+    <ListRow icon="heart" title="Average Heart Rate"
      note={w.today.heartRateAvg == null ? 'Wear your Apple Watch' : `${num(w.today.heartRateAvg)} bpm across today's samples`}
      onPress={() => setDetail('hr')} />
     <ListRow icon="trending" title="Steps"
      note={w.today.steps == null ? 'Comes from your iPhone' : `${num(w.today.steps)} today`}
      onPress={() => setDetail('steps')} />
-    <ListRow icon="clock" title="Connected sources"
+    <ListRow icon="clock" title="Connected Sources"
      note={connected.map((p) => p.meta.name).join(' · ')}
      onPress={() => setDetail('source')} />
     <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>

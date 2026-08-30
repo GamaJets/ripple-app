@@ -110,7 +110,7 @@ export default function Measurements() {
   <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
    <View style={{ flex: 1 }}>
     <Text style={{ ...ty.micro, color: t.ink3 }}>Tape measurements in {lu}</Text>
-    <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Body measurements</Text>
+    <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Body Measurements</Text>
    </View>
    <Ghost icon="back" onPress={() => router.back()} />
   </View>

@@ -470,12 +470,12 @@ export default function TrainerVideos() {
 
         <View style={{ paddingTop: sp.md }}>
           <Text style={{ ...ty.micro, color: t.ink3 }}>You choose who sees these</Text>
-          <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Exercise videos</Text>
+          <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Exercise Videos</Text>
         </View>
 
         {/* ── the hero ───────────────────────────────────────────────────── */}
         <Hero
-          label="In your library"
+          label="In Your Library"
           figure={known ? fig(vids.length) : fig(null)}
           unit={known ? (vids.length === 1 ? 'clip' : 'clips') : undefined}
           note={
@@ -553,7 +553,7 @@ export default function TrainerVideos() {
         <Rule />
 
         <Section>
-          <ListRow icon="share" title="Broadcast a session to social" note="Share a session from your library"
+          <ListRow icon="share" title="Broadcast a Session to Social" note="Share a session from your library"
             onPress={() => router.push('/(trainer)/broadcast-session')} />
         </Section>
 
@@ -675,7 +675,7 @@ export default function TrainerVideos() {
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setLinkOpen(false)}
           accessibilityRole="button" accessibilityLabel="Close, without adding a video" />
         <View style={sheet}>
-          <Text style={{ ...ty.title, color: t.ink }}>Add a video by link</Text>
+          <Text style={{ ...ty.title, color: t.ink }}>Add a Video by Link</Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>Paste a hosted link (YouTube, Vimeo…). Clients watch it in their library.</Text>
           <TextInput value={lName} onChangeText={setLName} placeholder="Exercise name (e.g. Front Squat)" placeholderTextColor={t.ink3} style={input} />
           <TextInput value={lGroup} onChangeText={setLGroup} placeholder="Muscle group (e.g. Legs)" placeholderTextColor={t.ink3} style={input} />
@@ -693,7 +693,7 @@ export default function TrainerVideos() {
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => { if (!upBusy) setPendUri(null); }}
           accessibilityRole="button" accessibilityLabel="Close, without saving this clip" />
         <View style={sheet}>
-          <Text style={{ ...ty.title, color: t.ink }}>Name this clip</Text>
+          <Text style={{ ...ty.title, color: t.ink }}>Name This Clip</Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>{videoUploadAvailable() ? 'It uploads to your library, and only the people you choose below can watch it.' : 'Saved to this device — turn on the backend to share it with anyone.'}</Text>
           <TextInput value={upName} onChangeText={setUpName} editable={!upBusy} placeholder="Exercise name (e.g. Front Squat)" placeholderTextColor={t.ink3} style={input} />
           <TextInput value={upGroup} onChangeText={setUpGroup} editable={!upBusy} placeholder="Muscle group (e.g. Legs)" placeholderTextColor={t.ink3} style={input} />

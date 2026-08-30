@@ -302,7 +302,7 @@ export default function CoachChecklists() {
           <Ghost icon="back" onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Your book</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Their checklists</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Their Checklists</Text>
           </View>
         </View>
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>

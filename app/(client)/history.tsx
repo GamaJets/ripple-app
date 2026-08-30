@@ -273,7 +273,7 @@ export default function History() {
     <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
       <View style={{ flex: 1 }}>
         <Text style={{ ...ty.micro, color: t.ink3 }}>How far you have come</Text>
-        <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Your history</Text>
+        <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Your History</Text>
       </View>
       <Ghost icon="back" onPress={() => router.back()} />
     </View>

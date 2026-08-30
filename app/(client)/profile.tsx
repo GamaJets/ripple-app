@@ -423,9 +423,9 @@ export default function Profile() {
         <Rule />
 
         <Section>
-          <ListRow icon="search" title="User guide" note="What each tab does, any time"
+          <ListRow icon="search" title="User Guide" note="What each tab does, any time"
             onPress={() => router.push('/guide')} />
-          <ListRow icon="search" title="Explore all features" note="Search anything in the app"
+          <ListRow icon="search" title="Explore All Features" note="Search anything in the app"
             onPress={() => router.push('/(client)/explore')} />
         </Section>
 
@@ -455,7 +455,7 @@ export default function Profile() {
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, borderTopWidth: hairline, borderColor: t.ring, maxHeight: '90%', ...elevation.e2 }}>
           <ScrollView contentContainerStyle={{ padding: G }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sp.lg }}>
-              <Text style={{ ...ty.title, color: t.ink }}>Edit profile</Text>
+              <Text style={{ ...ty.title, color: t.ink }}>Edit Profile</Text>
               <Pressable onPress={() => setShowEdit(false)} hitSlop={8}><Text style={{ ...ty.body, fontWeight: '600', color: t.brand }}>Close</Text></Pressable>
             </View>
 

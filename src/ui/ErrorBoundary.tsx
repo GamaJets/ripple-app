@@ -48,7 +48,7 @@ export class ErrorBoundary extends Component<Props, State> {
       return (
         <View style={{ flex: 1, backgroundColor: '#0d0d0d', alignItems: 'center', justifyContent: 'center', padding: sp.xxl }}>
           <Icon name="wrench" size={40} color="#2dd4bf" />
-          <Text accessibilityRole="header" style={{ ...ty.title, color: '#ffffff', textAlign: 'center', marginTop: sp.md, marginBottom: sp.sm }}>Something went wrong</Text>
+          <Text accessibilityRole="header" style={{ ...ty.title, color: '#ffffff', textAlign: 'center', marginTop: sp.md, marginBottom: sp.sm }}>Something Went Wrong</Text>
           <Text style={{ ...ty.body, color: '#898781', textAlign: 'center', marginBottom: sp.xl }}>This screen hit an unexpected error. Your data is safe — tap below to reload.</Text>
           <Pressable onPress={this.reset} accessibilityRole="button" accessibilityLabel="Reload the app" style={{ backgroundColor: '#2dd4bf', borderRadius: radius.sm, paddingVertical: sp.lg, paddingHorizontal: 34 }}>
             <Text style={{ ...ty.label, fontWeight: '600', color: '#062e2a' }}>Reload</Text>

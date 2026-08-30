@@ -214,7 +214,7 @@ export default function LogSession() {
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
           <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setPicker(false)} />
           <View style={[sheet, { maxHeight: '82%' }]}>
-            <Text style={{ ...ty.title, color: t.ink, marginBottom: sp.lg }}>Add exercise</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginBottom: sp.lg }}>Add Exercise</Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginBottom: sp.lg }}>
               <TextInput value={custom} onChangeText={setCustom} placeholder="Custom exercise name"
                 placeholderTextColor={t.ink3} style={[inp, { flex: 1 }]} accessibilityLabel="Custom exercise name" />

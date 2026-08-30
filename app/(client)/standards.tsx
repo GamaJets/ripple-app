@@ -75,7 +75,7 @@ export default function Standards() {
   <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
    <View style={{ flex: 1 }}>
     <Text style={{ ...ty.micro, color: t.ink3 }}>Best lifts vs bodyweight · approximate</Text>
-    <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Strength standards</Text>
+    <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Strength Standards</Text>
    </View>
    <Ghost icon="back" onPress={() => router.back()} />
   </View>

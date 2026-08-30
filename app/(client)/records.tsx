@@ -41,7 +41,7 @@ export default function Records() {
   <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
    <View style={{ flex: 1 }}>
     <Text style={{ ...ty.micro, color: t.ink3 }}>Best estimated 1-rep max per lift</Text>
-    <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Personal records</Text>
+    <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Personal Records</Text>
    </View>
    <Ghost icon="back" onPress={() => router.back()} />
   </View>
@@ -74,7 +74,7 @@ export default function Records() {
   </>) : (<>
    {/* ── the hero: the heaviest thing you have lifted ────────────────── */}
    <Hero
-    label="Heaviest lift"
+    label="Heaviest Lift"
     figure={fig(est1RMIn(top.est1RM, wu))}
     unit={`${wu} est. 1RM`}
     note={`${top.exercise} · best set ${fig(liftLabel(top.weight, wu))} × ${top.reps} on ${dstr(top.at)}`}

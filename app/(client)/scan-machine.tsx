@@ -182,7 +182,7 @@ export default function ScanMachine() {
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md, marginBottom: sp.lg }}>
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Log a machine</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Scan machine</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Scan Machine</Text>
           </View>
           <Ghost label="Close" onPress={() => router.back()} />
         </View>

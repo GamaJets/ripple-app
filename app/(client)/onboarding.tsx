@@ -177,7 +177,7 @@ export default function Onboarding() {
     // 0 — welcome + name + goal
     (
       <View>
-        <Text style={{ ...ty.title, color: t.ink }}>Let's personalise Repple</Text>
+        <Text style={{ ...ty.title, color: t.ink }}>Let's Personalise Repple</Text>
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs, marginBottom: sp.xl }}>A minute now tailors your workouts and meals to you.</Text>
         <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Your name</Text>
         <TextInput value={name} onChangeText={setName} placeholder="First name" placeholderTextColor={t.ink3} autoCapitalize="words" style={[inp, { marginBottom: sp.xl }]} />
@@ -188,7 +188,7 @@ export default function Onboarding() {
     // 1 — stats
     (
       <View>
-        <Text style={{ ...ty.title, color: t.ink }}>Your stats</Text>
+        <Text style={{ ...ty.title, color: t.ink }}>Your Stats</Text>
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs, marginBottom: prefilled ? sp.md : sp.xl }}>Used to set your calorie and macro targets. Leave anything you don't know blank — you can add it later.</Text>
         {/* Said out loud when the boxes arrive with numbers already in them.
             A field that fills itself and does not say why reads as the app
@@ -223,7 +223,7 @@ export default function Onboarding() {
     // 2 — diet + allergens
     (
       <View>
-        <Text style={{ ...ty.title, color: t.ink }}>How you eat</Text>
+        <Text style={{ ...ty.title, color: t.ink }}>How You Eat</Text>
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs, marginBottom: sp.xl }}>Your meal plan is built around this.</Text>
         <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Diet style</Text>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginBottom: sp.xl }}>
@@ -239,7 +239,7 @@ export default function Onboarding() {
     // 3 — injuries / limitations
     (
       <View>
-        <Text style={{ ...ty.title, color: t.ink }}>Any injuries?</Text>
+        <Text style={{ ...ty.title, color: t.ink }}>Any Injuries?</Text>
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs, marginBottom: sp.sm }}>Tell us what to train around. Your coach and your plan will avoid loading these areas and offer safer swaps.</Text>
         <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>Guidance only, not medical advice — see a professional for pain or a diagnosis.</Text>
         <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Tap any that apply</Text>

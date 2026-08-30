@@ -319,7 +319,7 @@ export default function FindTrainer() {
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Connect</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Find a trainer</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Find a Trainer</Text>
             <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>Enter your coach's code, or browse everyone coaching on Repple.</Text>
           </View>
           <Ghost icon="back" onPress={() => router.back()} />

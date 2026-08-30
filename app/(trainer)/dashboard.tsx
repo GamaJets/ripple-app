@@ -625,7 +625,7 @@ export default function TrainerClients() {
 
         {/* ── the hero: one number leads the screen ───────────────────────── */}
         <Hero
-          label="Active clients"
+          label="Active Clients"
           figure={fig(active)}
           note={rosterUnread ? 'Your roster could not be read in full' : active === 0 ? 'No clients yet — add or invite your first below.' : driftNote()}
           tone={toContact == null ? t.ink3 : toContact > 0 ? t.warn : t.brand}
@@ -1203,7 +1203,7 @@ export default function TrainerClients() {
                   the same kind of thing as the feedback box and the private
                   notes above it, and the client screen is read-only by
                   construction. */}
-              <ListRow icon="bell" title="Send a check-in nudge" note={'A quick "how is it going?" message'} onPress={() => sendNudge(sel)} />
+              <ListRow icon="bell" title="Send a Check-in Nudge" note={'A quick "how is it going?" message'} onPress={() => sendNudge(sel)} />
 
               <Pressable
                 onPress={() => { const s = sel; Alert.alert('Remove client?', `Remove ${s.name} from your roster?`, [{ text: 'Keep', style: 'cancel' }, { text: 'Remove', style: 'destructive', onPress: () => { removeClient(s.id); setSel(null); } }]); }}
@@ -1223,7 +1223,7 @@ export default function TrainerClients() {
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end' }}>
           <Pressable style={SCRIM} onPress={() => setAddOpen(false)} />
           <View style={sheet(t)}>
-            <Text style={{ ...ty.title, color: t.ink }}>Add client</Text>
+            <Text style={{ ...ty.title, color: t.ink }}>Add Client</Text>
             <Text style={{ ...ty.label, color: t.ink3, marginTop: 3, marginBottom: sp.xl }}>They join your roster and become bookable in your schedule.</Text>
             <SheetHead t={t} title="Name" />
             <TextInput value={newName} onChangeText={setNewName} placeholder="Client name" placeholderTextColor={t.ink3} style={{ ...field(t), marginBottom: sp.lg }} />
@@ -1300,7 +1300,7 @@ export default function TrainerClients() {
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end' }}>
           <Pressable style={SCRIM} onPress={() => setBcOpen(false)} />
           <View style={sheet(t)}>
-            <Text style={{ ...ty.title, color: t.ink }}>Broadcast to all clients</Text>
+            <Text style={{ ...ty.title, color: t.ink }}>Broadcast to All Clients</Text>
             {/* This pins an announcement on this device. useAnnouncements is an
                 in-memory store with no Supabase table behind it — see the note
                 at the top of src/ui/announcements.tsx — so nothing here reaches
@@ -1321,7 +1321,7 @@ export default function TrainerClients() {
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end' }}>
           <Pressable style={SCRIM} onPress={() => setInvOpen(false)} />
           <View style={sheet(t)}>
-            <Text style={{ ...ty.title, color: t.ink }}>Add a client</Text>
+            <Text style={{ ...ty.title, color: t.ink }}>Add a Client</Text>
             <Text style={{ ...ty.label, color: t.ink3, marginTop: 3, marginBottom: sp.xl }}>Two ways in. The code works whoever they are and whatever address they signed up with; the email invite only reaches them if you spell it exactly as they did.</Text>
 
             {/* ── the code ──────────────────────────────────────────────── */}

@@ -64,13 +64,13 @@ export default function Habits() {
           <Ghost icon="back" onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Small wins, every day</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Daily habits</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Daily Habits</Text>
           </View>
         </View>
 
         {/* ── the hero: today, in one number ──────────────────────────────── */}
         <Hero
-          label="Today's progress"
+          label="Today's Progress"
           figure={fig(pct)}
           unit={pct == null ? undefined : '%'}
           arc={pct == null ? undefined : pct / 100}

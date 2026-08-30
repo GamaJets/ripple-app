@@ -129,7 +129,7 @@ export default function OwnerClassAnalytics() {
           <Ghost icon="back" onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Attendance drives pay</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Classes & payroll</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Classes & Payroll</Text>
           </View>
         </View>
 
@@ -162,7 +162,7 @@ export default function OwnerClassAnalytics() {
 
           {/* ── the hero: what this screen is for ────────────────────────── */}
           <Hero
-            label="Trainer payroll (AED)"
+            label="Trainer Payroll (AED)"
             figure={rate$ > 0 ? totals.payroll.toLocaleString() : '—'}
             note={rate$ > 0
               ? `${totals.attended} check-ins × AED ${rate$} · ${totals.classes} classes · ${totals.showPct ?? '—'}% turned up`

@@ -164,13 +164,13 @@ export default function OwnerLibrary() {
           <Ghost icon="back" onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>What the platform can teach your members</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Exercise library</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Exercise Library</Text>
           </View>
         </View>
 
         <View style={{ marginTop: sp.lg }}>
           <Hero
-            label="Movements in the catalogue"
+            label="Movements in the Catalogue"
             figure={countable ? String(rows.length) : '—'}
             note={
               status === 'loading' ? 'Reading the catalogue…'

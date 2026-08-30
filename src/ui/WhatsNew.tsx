@@ -102,7 +102,7 @@ export function WhatsNewSheet({ visible, force, onClose }: { visible: boolean; f
             <Icon name="sparkle" size={16} color={t.brand} />
             <Text style={{ ...ty.micro, color: t.ink3 }}>Version {APP_VERSION}</Text>
           </View>
-          <Text style={{ ...ty.title, color: t.ink, marginBottom: sp.lg }}>What’s new</Text>
+          <Text style={{ ...ty.title, color: t.ink, marginBottom: sp.lg }}>What’s New</Text>
           <ScrollView showsVerticalScrollIndicator={false}>
             {unseen.length === 0 ? (
               <Text style={{ ...ty.label, color: t.ink3, paddingVertical: sp.xl }}>

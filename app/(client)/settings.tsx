@@ -285,7 +285,7 @@ export default function Settings() {
 
         <Section>
           <SectionHead title="Appearance" />
-          <ListRow icon="palette" title="Theme & accent colour" note="10 palettes, applied live"
+          <ListRow icon="palette" title="Theme & Accent Colour" note="10 palettes, applied live"
             onPress={() => router.push('/(client)/appearance')} />
         </Section>
 

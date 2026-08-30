@@ -289,7 +289,7 @@ export default function ClientBody() {
           <Ghost icon="back" onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Your book</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: sp.xs }}>Body composition</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: sp.xs }}>Body Composition</Text>
           </View>
         </View>
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>

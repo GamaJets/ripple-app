@@ -85,7 +85,7 @@ export default function RestDay() {
 
         {/* ── the hero: how loaded this week already is ───────────────────── */}
         <Hero
-          label="Trained this week"
+          label="Trained This Week"
           figure={known ? fig(wk.days) : fig(null)}
           unit={known ? (wk.days === 1 ? 'day' : 'days') : undefined}
           arc={known ? wk.days / 7 : undefined}

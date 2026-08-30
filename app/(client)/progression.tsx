@@ -51,7 +51,7 @@ export default function Progression() {
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>From your logged lifts</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Next-session targets</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Next-session Targets</Text>
           </View>
           <Ghost icon="back" onPress={() => router.back()} />
         </View>

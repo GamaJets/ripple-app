@@ -294,7 +294,7 @@ export default function Tools() {
  <Ghost icon="back" onPress={() => router.back()} />
  <View style={{ flex: 1 }}>
  <Text style={{ ...ty.micro, color: t.ink3 }}>Calculators for the gym floor</Text>
- <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Lifting tools</Text>
+ <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Lifting Tools</Text>
  </View>
  </View>
 

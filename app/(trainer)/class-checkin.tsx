@@ -109,7 +109,7 @@ export default function ClassCheckin() {
 
         {/* ── the hero: the count payroll is built from ───────────────────── */}
         <Hero
-          label="Checked in"
+          label="Checked In"
           figure={fig(counted ? present : null)}
           unit={counted ? '/ ' + booked : undefined}
           note={unlinked ? 'No class was passed to this screen — this is not a count.' : loading ? 'Still reading the roster.' : !counted ? 'The roster could not be read — this is not a count of zero.' : booked === 0 ? 'No bookings on this class yet.' : present === booked ? 'Everyone booked is here.' : `${booked - present} still to arrive`}

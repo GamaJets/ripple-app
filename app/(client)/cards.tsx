@@ -109,7 +109,7 @@ export default function Cards() {
           <Ghost icon="back" onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Screenshot & share your wins</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Milestone cards</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Milestone Cards</Text>
           </View>
         </View>
 

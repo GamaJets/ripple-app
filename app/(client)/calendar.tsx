@@ -484,13 +484,13 @@ export default function Calendar() {
           <Ghost icon="back" onPress={() => router.push('/(client)/dashboard')} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Personal training</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Book sessions</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Book Sessions</Text>
           </View>
         </View>
 
         {/* ── the hero: what you have booked ──────────────────────────────── */}
         <Hero
-          label="Booked with your coach"
+          label="Booked with Your Coach"
           figure={fig(mine.length)}
           unit={mine.length === 1 ? 'session' : 'sessions'}
           note={open.length > 0
@@ -843,9 +843,9 @@ export default function Calendar() {
           </Card>
 
           <View style={{ marginTop: sp.md }}>
-            <ListRow icon="calendar" title="Gym classes" note="Book HIIT, spin, yoga & more"
+            <ListRow icon="calendar" title="Gym Classes" note="Book HIIT, spin, yoga & more"
               onPress={() => router.push('/(client)/classes')} />
-            <ListRow icon="grid" title="Membership & entry pass" note="Card, barcode & visits"
+            <ListRow icon="grid" title="Membership & Entry Pass" note="Card, barcode & visits"
               onPress={() => router.push('/(client)/membership')} />
           </View>
         </Section>

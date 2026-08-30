@@ -62,7 +62,7 @@ export default function Referral() {
           <Ghost icon="back" onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Training is easier with company</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Invite friends</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Invite Friends</Text>
           </View>
         </View>
 

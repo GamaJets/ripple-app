@@ -68,7 +68,7 @@ export default function Injuries() {
           <Ghost icon="back" onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Training</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Injuries & limitations</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Injuries & Limitations</Text>
           </View>
         </View>
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, marginBottom: sp.lg }}>Your coach and your plan train around these — flagging and swapping risky moves.</Text>
@@ -114,7 +114,7 @@ export default function Injuries() {
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setOpen(false)} />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, borderTopWidth: hairline, borderColor: t.ring, padding: layout.gutter, paddingBottom: sp.xxl, maxHeight: '88%', ...elevation.e2 }}>
           <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
-            <Text style={{ ...ty.title, color: t.ink, marginBottom: sp.lg }}>Disclose an injury</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginBottom: sp.lg }}>Disclose an Injury</Text>
 
             <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Area</Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginBottom: sp.lg }}>

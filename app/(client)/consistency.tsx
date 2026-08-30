@@ -88,7 +88,7 @@ export default function Consistency() {
 
         {/* ── the hero: the streak the heatmap is about ───────────────────── */}
         <Hero
-          label="Current streak"
+          label="Current Streak"
           figure={known ? fig(streak) : fig(null)}
           unit={known ? (streak === 1 ? 'day' : 'days') : undefined}
           note={!known

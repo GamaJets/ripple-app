@@ -363,7 +363,7 @@ export default function OwnerSettings() {
           <SectionHead title="Before you delete yourself" />
           <Text style={{ ...ty.label, color: facts && facts.waiting == null ? t.crit : t.ink2 }}>{queueLine()}</Text>
           <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{ownersLine()}</Text>
-          <ListRow icon="clock" title="Deletion requests" note="The queue, and the 30-day clock running on it"
+          <ListRow icon="clock" title="Deletion Requests" note="The queue, and the 30-day clock running on it"
             onPress={() => router.push('/(owner)/deletions')} />
         </Section>
 

@@ -234,7 +234,7 @@ export default function OwnerRota() {
         </View>
 
         <Hero
-          label="Uncovered hours"
+          label="Uncovered Hours"
           figure={fig(loaded ? (cov?.uncovered?.length ?? null) : null)}
           tone={(cov?.uncovered?.length ?? 0) > 0 ? t.crit : undefined}
           note={heroNote()}

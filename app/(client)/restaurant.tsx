@@ -53,7 +53,7 @@ export default function Restaurant() {
           <Ghost icon="back" onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Nutrition</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Eating out</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Eating Out</Text>
           </View>
         </View>
 

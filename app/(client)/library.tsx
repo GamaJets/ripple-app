@@ -186,7 +186,7 @@ export default function Library() {
      <Ghost icon="back" onPress={() => router.back()} />
      <View style={{ flex: 1 }}>
       <Text style={{ ...ty.micro, color: t.ink3 }}>How-to clips from your coach</Text>
-      <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Exercise library</Text>
+      <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Exercise Library</Text>
      </View>
     </View>
 

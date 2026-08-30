@@ -206,7 +206,7 @@ export default function OwnerMembers() {
         </View>
 
         <Hero
-          label="Recurring revenue (monthly)"
+          label="Recurring Revenue (monthly)"
           figure={money(sum.mrrCents) ?? '—'}
           note={failed
             ? 'The register could not be read, so recurring revenue is not known. This is a failed read, not a gym with no members.'

@@ -682,7 +682,7 @@ export default function Nutrition() {
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setShowGrocery(false)} />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, maxHeight: '82%', ...elevation.e2 }}>
           <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 30 }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
-            <Text style={{ ...ty.title, color: t.ink }}>Grocery list</Text>
+            <Text style={{ ...ty.title, color: t.ink }}>Grocery List</Text>
             <Text style={{ ...ty.label, color: t.ink3, marginTop: 4, marginBottom: sp.md }}>This week · {DIET_LABEL[diet]} · sorted by aisle</Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginBottom: sp.xl }}>
               <View style={{ flex: 1, height: 3, borderRadius: 2, backgroundColor: t.surface3, overflow: 'hidden' }}>
@@ -718,7 +718,7 @@ export default function Nutrition() {
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setDayInfo(false)} />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, maxHeight: '82%', ...elevation.e2 }}>
           <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 30 }}>
-            <Text style={{ ...ty.title, color: t.ink }}>Training, standard, rest</Text>
+            <Text style={{ ...ty.title, color: t.ink }}>Training, Standard, Rest</Text>
             <Text style={{ ...ty.label, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>The day you pick sets the calorie and carb targets the whole plan is built to.</Text>
             {DAY_TYPES.map((d, i) => {
               // The figures are asked of the same engine the screen runs on

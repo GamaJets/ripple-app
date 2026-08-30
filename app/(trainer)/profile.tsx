@@ -96,7 +96,7 @@ export default function CoachProfile() {
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md, paddingBottom: sp.lg }}>
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Your profile</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>How clients see you</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>How Clients See You</Text>
           </View>
         </View>
 
@@ -270,11 +270,11 @@ export default function CoachProfile() {
 
         <Section>
           <SectionHead title="Money" />
-          <ListRow icon="search" title="User guide" note="What each tab does, any time"
+          <ListRow icon="search" title="User Guide" note="What each tab does, any time"
             onPress={() => router.push('/guide')} />
           <ListRow icon="people" title="Payments" note="Get paid by clients — memberships & packs"
             onPress={() => router.push('/(trainer)/payments')} />
-          <ListRow icon="chart" title="Billing & subscription" note="Your plan, payment method & invoices"
+          <ListRow icon="chart" title="Billing & Subscription" note="Your plan, payment method & invoices"
             onPress={() => router.push('/(trainer)/billing')} />
         </Section>
 

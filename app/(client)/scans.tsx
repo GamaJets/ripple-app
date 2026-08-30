@@ -676,7 +676,7 @@ export default function Scans() {
 
         {/* ── the hero: one number leads the screen ───────────────────────── */}
         <Hero
-          label="Body fat"
+          label="Body Fat"
           figure={bfNow ? String(bfNow.value) : '—'}
           unit={bfNow ? '%' : undefined}
           // The date is not an ornament under the hero: this is the figure the
@@ -1079,7 +1079,7 @@ export default function Scans() {
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, maxHeight: '90%' }}>
           <ScrollView contentContainerStyle={{ padding: 20 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sp.xs }}>
-              <Text style={{ ...ty.title, color: t.ink }}>Add an InBody scan</Text>
+              <Text style={{ ...ty.title, color: t.ink }}>Add an InBody Scan</Text>
               <Ghost label="Close" onPress={() => setShowAdd(false)} />
             </View>
             <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>Snap or upload your report, pick the scan date, enter the numbers.</Text>

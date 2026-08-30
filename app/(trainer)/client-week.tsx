@@ -209,7 +209,7 @@ export default function ClientWeek() {
           <Ghost icon="back" onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Your book</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: sp.xs }}>Their week</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: sp.xs }}>Their Week</Text>
           </View>
         </View>
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>

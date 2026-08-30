@@ -53,7 +53,7 @@ export default function ForgotPassword() {
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingTop: sp.huge, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
           <Text style={{ ...ty.micro, color: t.ink3 }}>{appName}</Text>
-          <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Reset your password</Text>
+          <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Reset Your Password</Text>
           <Text style={{ ...ty.body, color: t.ink3, marginTop: sp.md, marginBottom: sp.xl }}>
             {sent
               ? `If an account exists for that email, we've sent a link to reset your ${appName} password. It works for your Client, Trainer, or Owner access — they all share one login.`

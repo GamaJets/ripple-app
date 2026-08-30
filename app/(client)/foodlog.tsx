@@ -289,7 +289,7 @@ export default function FoodLog() {
  <Ghost icon="back" onPress={() => router.back()} />
  <View style={{ flex: 1 }}>
  <Text style={{ ...ty.micro, color: t.ink3 }}>Nutrition</Text>
- <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Food log</Text>
+ <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Food Log</Text>
  </View>
  </View>
 
@@ -335,7 +335,7 @@ export default function FoodLog() {
  <Text style={{ ...ty.caption, fontWeight: '500', color: t.ink }}>Barcode</Text>
  </Pressable>
  </View>
- <ListRow icon="meals" title="Eating out?" note="Estimate a restaurant meal" onPress={() => router.push('/(client)/restaurant')} />
+ <ListRow icon="meals" title="Eating Out?" note="Estimate a restaurant meal" onPress={() => router.push('/(client)/restaurant')} />
  </Section>
 
  <Rule />
@@ -484,7 +484,7 @@ export default function FoodLog() {
  <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setEditing(null)} accessibilityRole="button" accessibilityLabel="Close" />
  <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30, ...elevation.e2 }}>
  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sp.md }}>
- <Text style={{ ...ty.title, color: t.ink }}>Correct this meal</Text>
+ <Text style={{ ...ty.title, color: t.ink }}>Correct This Meal</Text>
  <Pressable onPress={() => setEditing(null)} hitSlop={8} accessibilityRole="button" accessibilityLabel="Cancel">
  <Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>Cancel</Text>
  </Pressable>

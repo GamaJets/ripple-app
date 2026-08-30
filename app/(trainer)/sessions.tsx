@@ -165,11 +165,11 @@ export default function TrainerSessions() {
           <Pressable onPress={() => router.back()} hitSlop={10} accessibilityRole="button" accessibilityLabel="Back">
             <Icon name="chevron" size={20} color={t.ink3} />
           </Pressable>
-          <Text style={{ ...ty.title, color: t.ink, flex: 1 }}>Mark sessions</Text>
+          <Text style={{ ...ty.title, color: t.ink, flex: 1 }}>Mark Sessions</Text>
         </View>
 
         <Hero
-          label="Waiting on an outcome"
+          label="Waiting on an Outcome"
           figure={fig(loaded ? rows.length : null)}
           note={failed
             ? 'Could not be read — this is not a count of zero.'

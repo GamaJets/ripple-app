@@ -216,11 +216,11 @@ export default function OwnerDeletions() {
           <Pressable onPress={() => router.back()} hitSlop={10} accessibilityRole="button" accessibilityLabel="Back">
             <Icon name="chevron" size={20} color={t.ink3} />
           </Pressable>
-          <Text style={{ ...ty.title, color: t.ink, flex: 1 }}>Deletion requests</Text>
+          <Text style={{ ...ty.title, color: t.ink, flex: 1 }}>Deletion Requests</Text>
         </View>
 
         <Hero
-          label="Waiting on you"
+          label="Waiting on You"
           figure={fig(loaded ? queue.length : null)}
           tone={failed || overdue ? t.crit : undefined}
           note={failed

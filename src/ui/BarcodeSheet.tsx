@@ -67,7 +67,7 @@ export function BarcodeSheet({
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={close} />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30, ...elevation.e2 }}>
-          <Text style={{ ...ty.title, color: t.ink }}>Scan a barcode</Text>
+          <Text style={{ ...ty.title, color: t.ink }}>Scan a Barcode</Text>
           <Text style={{ ...ty.label, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>
             Type the number under the barcode — we look it up in Open Food Facts and add the real macros.
           </Text>

@@ -41,7 +41,7 @@ export function LockScreen() {
           <Icon name="lock" size={28} color={t.brand} />
         </View>
 
-        <Text style={{ ...ty.title, color: t.ink, textAlign: 'center' }}>Repple is locked</Text>
+        <Text style={{ ...ty.title, color: t.ink, textAlign: 'center' }}>Repple Is Locked</Text>
         <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', maxWidth: 300 }}>
           {tried
             ? `${label} did not unlock it. Try again, or sign out if this is not your phone.`

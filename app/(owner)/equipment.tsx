@@ -166,7 +166,7 @@ export default function OwnerEquipment() {
         </View>
 
         <Hero
-          label="Needing attention"
+          label="Needing Attention"
           figure={!loaded ? '—' : String(queue.length)}
           note={failed
             ? 'The register could not be read, so nothing here is known — that is a failed read, not an all-clear.'
@@ -211,7 +211,7 @@ export default function OwnerEquipment() {
             tap away here, and would be nowhere from a revenue roll-up. */}
         <Section>
           <SectionHead title="What the platform can teach on it" />
-          <ListRow icon="dumbbell" title="Exercise library"
+          <ListRow icon="dumbbell" title="Exercise Library"
             note="Every movement in the catalogue, filtered by the equipment it needs"
             onPress={() => router.push('/(owner)/library')} />
         </Section>

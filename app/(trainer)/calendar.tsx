@@ -223,18 +223,18 @@ export default function TrainerSchedule() {
         {/* ── the things you do from here ─────────────────────────────────── */}
         <Section>
           <SectionHead title="Manage" />
-          <ListRow icon="plus" title="Add a session"
+          <ListRow icon="plus" title="Add a Session"
             note={`Book a client or open a slot on ${DOW[selDate.getDay()]} ${selD} ${MON[selM].slice(0, 3)}`}
             onPress={() => { setAddClient(null); setAddOpen(true); }} />
-          <ListRow icon="clock" title="Weekly availability"
+          <ListRow icon="clock" title="Weekly Availability"
             note={availSlots.length
               ? `${availSlots.length} weekly slot${availSlots.length === 1 ? '' : 's'} · generate the next 4 weeks`
               : 'Set the times you offer every week'}
             onPress={() => setAvailOpen(true)} />
-          <ListRow icon="people" title="Group classes" note="Schedule & fill classes across branches"
+          <ListRow icon="people" title="Group Classes" note="Schedule & fill classes across branches"
             onPress={() => router.push('/(trainer)/classes')} />
           {booked.length > 0 ? (
-            <ListRow icon="share" title="Export schedule" note="Send your booked sessions to your calendar app"
+            <ListRow icon="share" title="Export Schedule" note="Send your booked sessions to your calendar app"
               onPress={exportSchedule} />
           ) : null}
         </Section>
@@ -414,7 +414,7 @@ export default function TrainerSchedule() {
 
             <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.md }}>Client</Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginBottom: sp.xl }}>
-              <Chip t={t} label="Open slot" on={addClient === null} onPress={() => setAddClient(null)} />
+              <Chip t={t} label="Open Slot" on={addClient === null} onPress={() => setAddClient(null)} />
               {roster.map((c) => <Chip key={c.id} t={t} label={c.name} on={c.id === addClient} onPress={() => setAddClient(c.id)} />)}
             </View>
 

@@ -173,7 +173,7 @@ export default function Financials() {
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Your gym</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Financial health</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Financial Health</Text>
           </View>
           <Ghost icon="back" onPress={() => router.back()} />
         </View>
@@ -242,7 +242,7 @@ export default function Financials() {
           <>
             {/* ── the hero ─────────────────────────────────────────────── */}
             <Hero
-              label="Health score"
+              label="Health Score"
               figure={fig(r.score)}
               unit="/100"
               note={`Grade ${r.grade} · ${money(r.netProfit)} net profit on a ${r.marginPct.toFixed(0)}% margin`}

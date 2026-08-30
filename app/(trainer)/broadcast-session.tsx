@@ -81,7 +81,7 @@ export default function BroadcastSession() {
           <Ghost icon="back" onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Your channels</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Broadcast a session</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Broadcast a Session</Text>
           </View>
         </View>
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>Post one clip to all your channels at once.</Text>

@@ -311,7 +311,7 @@ export default function Builder() {
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ paddingTop: sp.md }}>
           <Text style={{ ...ty.micro, color: t.ink3 }}>Programs</Text>
-          <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Program builder</Text>
+          <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Program Builder</Text>
           <Text style={{ ...ty.label, color: t.ink3, marginTop: 4 }}>Build a weekly plan and assign it to a client.</Text>
         </View>
 
@@ -514,7 +514,7 @@ export default function Builder() {
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <Pressable style={scrim} onPress={() => setPickerDay(null)} />
         <View style={[sheet, { maxHeight: '82%' }]}>
-          <Text style={{ ...ty.title, color: t.ink, marginBottom: sp.lg }}>Add exercise</Text>
+          <Text style={{ ...ty.title, color: t.ink, marginBottom: sp.lg }}>Add Exercise</Text>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
             <TextInput value={custom} onChangeText={setCustom} placeholder="Search, or type a new exercise" placeholderTextColor={t.ink3}
               accessibilityLabel="Search the exercise catalogue, or type a name of your own"
@@ -674,7 +674,7 @@ export default function Builder() {
       <Modal visible={tplPick} transparent animationType="slide" onRequestClose={() => setTplPick(false)}>
         <Pressable style={scrim} onPress={() => setTplPick(false)} />
         <View style={[sheet, { maxHeight: '80%' }]}>
-          <Text style={{ ...ty.title, color: t.ink }}>Start from a template</Text>
+          <Text style={{ ...ty.title, color: t.ink }}>Start From a Template</Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>
             Loads into the builder for {client?.name ?? 'this client'} — tweak, then assign.
           </Text>
@@ -728,7 +728,7 @@ export default function Builder() {
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <Pressable style={scrim} onPress={() => setSaveOpen(false)} />
         <View style={sheet}>
-          <Text style={{ ...ty.title, color: t.ink }}>Save as template</Text>
+          <Text style={{ ...ty.title, color: t.ink }}>Save as Template</Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>
             Reuse this program with other clients — {totalExercises} exercises across {days.filter((d) => d.exercises.length).length} days.
           </Text>

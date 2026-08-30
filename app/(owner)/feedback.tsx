@@ -75,7 +75,7 @@ export default function OwnerFeedback() {
 
         {/* ── the hero: the one number that summarises the inbox ─────────── */}
         <Hero
-          label="Average rating"
+          label="Average Rating"
           figure={avg ? avg.toFixed(1) : '—'}
           unit={avg ? '/ 5' : undefined}
           arc={avg ? avg / 5 : undefined}

@@ -50,7 +50,7 @@ export default function OwnerTrainers() {
 
         {/* Sessions delivered leads, because it is the number that moves. */}
         <Hero
-          label="Sessions delivered · 30 days"
+          label="Sessions Delivered · 30 Days"
           figure={loading || sessions30 == null ? '—' : String(sessions30)}
           note={
             loading ? 'Loading your roster…'

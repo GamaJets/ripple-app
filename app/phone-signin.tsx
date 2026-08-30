@@ -109,7 +109,7 @@ export default function PhoneSignIn() {
 
           {stage === 'number' ? (
             <>
-              <Text style={{ ...ty.title, color: t.ink }}>What’s your number?</Text>
+              <Text style={{ ...ty.title, color: t.ink }}>What’s Your Number?</Text>
               <Text style={{ ...ty.label, color: t.ink3, marginTop: 6, marginBottom: sp.xl }}>
                 We’ll text you a six-digit code. No password to remember, and nothing to reset.
               </Text>
@@ -165,7 +165,7 @@ export default function PhoneSignIn() {
             </>
           ) : (
             <>
-              <Text style={{ ...ty.title, color: t.ink }}>Enter your code</Text>
+              <Text style={{ ...ty.title, color: t.ink }}>Enter Your Code</Text>
               <Text style={{ ...ty.label, color: t.ink3, marginTop: 6, marginBottom: sp.xxl }}>
                 Sent to {sentTo ? maskedForDisplay(sentTo) : 'your phone'}.
               </Text>

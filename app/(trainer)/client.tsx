@@ -457,7 +457,7 @@ export default function ClientScreen() {
 
         {/* ── the hero: the one thing worth knowing first ─────────────────── */}
         <Hero
-          label="Days since anything on record"
+          label="Days Since Anything on Record"
           figure={fig(drift?.quietDays ?? null)}
           unit={drift?.quietDays != null ? (drift.quietDays === 1 ? 'day' : 'days') : undefined}
           note={unasked ?? lastSeenLine(drift, driftFailed, who)}
@@ -532,7 +532,7 @@ export default function ClientScreen() {
         <Section>
           <SectionHead title="Open" />
 
-          <ListRow icon="target" title="What they're working toward"
+          <ListRow icon="target" title="What They're Working Toward"
             note={unasked ?? goalsLine(goalStatus, board, who, nowMs)}
             tone={goalStatus === 'error' ? t.warn : undefined}
             onPress={go('/(trainer)/client-goals')} />
@@ -541,7 +541,7 @@ export default function ClientScreen() {
               this row are what two of the three measured goal kinds are held
               against — and because "how is this person actually going" is the
               same question asked twice. */}
-          <ListRow icon="chart" title="Their body composition"
+          <ListRow icon="chart" title="Their Body Composition"
             note={unasked ?? bodyLine(
               scansFailed,
               scanTop == null && !scansFailed,
@@ -553,7 +553,7 @@ export default function ClientScreen() {
             tone={scansFailed ? t.warn : undefined}
             onPress={go('/(trainer)/client-body')} />
 
-          <ListRow icon="calendar" title="The week they've planned"
+          <ListRow icon="calendar" title="The Week They've Planned"
             note={unasked ?? weekLine(weekStatus, week, who)}
             tone={weekStatus === 'error' ? t.warn : undefined}
             onPress={go('/(trainer)/client-week')} />
@@ -565,22 +565,22 @@ export default function ClientScreen() {
               coach to pick them. That belongs in checklists.tsx, which is not
               this change's to edit; the param is passed so it works the moment
               that screen starts reading it. */}
-          <ListRow icon="check" title="Their daily checklist"
+          <ListRow icon="check" title="Their Daily Checklist"
             note={unasked ?? listLine(itemStatus, activeLines, seen, who)}
             tone={worstStatus(itemStatus, tickStatus) === 'error' ? t.warn : undefined}
             onPress={go('/(trainer)/checklists')} />
 
-          <ListRow icon="camera" title="Progress photos they sent you"
+          <ListRow icon="camera" title="Progress Photos They Sent You"
             note={unasked ?? photosLine(inbox, photosFailed, who)}
             tone={photosFailed ? t.warn : undefined}
             onPress={go('/(trainer)/client-photos')} />
 
-          <ListRow icon="grid" title="Their program"
+          <ListRow icon="grid" title="Their Program"
             note={programmeLine(ap.status, programme?.title ?? null, programme?.days.length ?? null, who)}
             tone={ap.status === 'error' ? t.warn : undefined}
             onPress={go('/(trainer)/builder')} />
 
-          <ListRow icon="train" title="Log a session you ran"
+          <ListRow icon="train" title="Log a Session You Ran"
             note={`Goes into ${who}'s own record, marked as logged by you.`}
             onPress={go('/(trainer)/log-session')} />
 

@@ -88,17 +88,17 @@ export default function OwnerOps() {
         {tab === 'announce' ? (
           <View>
             <Section>
-          <ListRow icon="calendar" title="Trainer rota" note="Who is on the floor when, against what is booked"
+          <ListRow icon="calendar" title="Trainer Rota" note="Who is on the floor when, against what is booked"
             onPress={() => router.push('/(owner)/rota')} />
-          <ListRow icon="wrench" title="Equipment register" note="What the gym owns, and what is due a service"
+          <ListRow icon="wrench" title="Equipment Register" note="What the gym owns, and what is due a service"
             onPress={() => router.push('/(owner)/equipment')} />
-          <ListRow icon="dumbbell" title="Exercise library" note="Every movement the app can teach, and the kit each one needs"
+          <ListRow icon="dumbbell" title="Exercise Library" note="Every movement the app can teach, and the kit each one needs"
             onPress={() => router.push('/(owner)/library')} />
-          <ListRow icon="clock" title="Deletion requests" note="Members who asked to be erased, and the 30-day clock"
+          <ListRow icon="clock" title="Deletion Requests" note="Members who asked to be erased, and the 30-day clock"
             onPress={() => router.push('/(owner)/deletions')} />
           <ListRow icon="settings" title="Settings" note="Who you are signed in as, your data, and deleting your account"
             onPress={() => router.push('/(owner)/settings')} />
-          <ListRow icon="search" title="User guide" note="What each tab does, any time"
+          <ListRow icon="search" title="User Guide" note="What each tab does, any time"
             onPress={() => router.push('/guide')} />
         </Section>
 

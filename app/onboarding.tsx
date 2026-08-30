@@ -145,7 +145,7 @@ export default function Onboarding() {
         {role === 'owner' && step === 0 && (
           <View>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Step 1 of 1</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Name your gym</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Name Your Gym</Text>
             <Text style={{ ...ty.body, color: t.ink3, marginTop: sp.sm, marginBottom: sp.xl }}>
               This is what your members and trainers will see. You can change it later under Brand.
             </Text>
@@ -184,7 +184,7 @@ export default function Onboarding() {
         {role === 'client' && step === 0 && (
           <View style={{ alignItems: 'center' }}>
             <Text style={{ ...ty.micro, color: t.ink3, alignSelf: 'flex-start' }}>Step {step + 1} of {totalSteps}</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5, alignSelf: 'flex-start' }}>Add a photo</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 5, alignSelf: 'flex-start' }}>Add a Photo</Text>
             <Text style={{ ...ty.body, color: t.ink3, marginTop: sp.sm, marginBottom: sp.xl, alignSelf: 'flex-start' }}>Optional — helps your coach recognise you.</Text>
             {cd.photo ? <Image source={{ uri: cd.photo }} style={{ width: 120, height: 120, borderRadius: radius.pill, marginBottom: sp.xl }} /> : <View style={{ width: 120, height: 120, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center', marginBottom: sp.xl }}><Icon name="camera" size={40} color={t.ink3} /></View>}
             <View style={{ flexDirection: 'row', gap: sp.sm, alignSelf: 'stretch' }}>
@@ -197,7 +197,7 @@ export default function Onboarding() {
         {role === 'client' && step === 1 && (
           <View>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Step {step + 1} of {totalSteps}</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>What's your goal?</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>What's Your Goal?</Text>
             <Text style={{ ...ty.body, color: t.ink3, marginTop: sp.sm, marginBottom: sp.xl }}>We tailor workouts & meals to this.</Text>
             {GOALS.map((g) => (
               <Option key={g.id} on={cd.goal === g.id} onPress={() => cd.setGoal(g.id)} label={g.label} mark="check" />
@@ -208,7 +208,7 @@ export default function Onboarding() {
         {role === 'client' && step === 2 && (
           <View>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Step {step + 1} of {totalSteps}</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Diet preference</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Diet Preference</Text>
             <Text style={{ ...ty.body, color: t.ink3, marginTop: sp.sm, marginBottom: sp.xl }}>Your meal plan is built around this.</Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
               {DIETS.map((d) => {
@@ -226,7 +226,7 @@ export default function Onboarding() {
         {role === 'client' && step === 3 && (
           <View>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Step {step + 1} of {totalSteps}</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Starting stats</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Starting Stats</Text>
             <Text style={{ ...ty.body, color: t.ink3, marginTop: sp.sm, marginBottom: sp.xl }}>So we can set your calorie & macro targets.</Text>
             <Text style={lab}>Weight (kg)</Text>
             <TextInput value={weight} onChangeText={setWeight} keyboardType="numeric" placeholder="kg" placeholderTextColor={t.ink3} accessibilityLabel="Weight in kilograms" style={{ ...inp, marginBottom: sp.lg }} />

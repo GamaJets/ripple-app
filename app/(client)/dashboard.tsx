@@ -490,14 +490,14 @@ export default function Home() {
           ) : null}
 
           {remoteCoached ? (
-            <ListRow icon="message" title="Weekly check-in"
+            <ListRow icon="message" title="Weekly Check-in"
               note={booksSessions
                 ? 'How the weeks you train alone went — your coach reads it'
                 : 'How the week went — your coach only sees what you send'}
               onPress={() => router.push('/(client)/checkin')} />
           ) : null}
 
-          <ListRow icon="clock" title="Your history" note="Every month you have trained, back to the start"
+          <ListRow icon="clock" title="Your History" note="Every month you have trained, back to the start"
             onPress={() => router.push('/(client)/history')} />
 
           <ListRow icon="trophy" title="Challenges" note="Track your progress against the goal"

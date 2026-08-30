@@ -82,7 +82,7 @@ export default function Membership() {
 
         {/* ── the hero: the only live number this screen has ──────────────── */}
         <Hero
-          label="Sessions logged this month"
+          label="Sessions Logged This Month"
           figure={logKnown ? fig(visits) : fig(null)}
           note={!logKnown ? 'We couldn’t read your training log — this is not a month with nothing in it.'
             : visits > 0 ? `Last logged ${last}` : 'No sessions logged yet this month'}

@@ -109,7 +109,7 @@ export default function Trends() {
 
         {/* ── the hero: this week's tonnage ──────────────────────────────── */}
         <Hero
-          label="Lifted this week"
+          label="Lifted This Week"
           figure={logKnown ? fig(volumeIn(thisWeek.vol, wu)?.toLocaleString()) : fig(null)}
           unit={logKnown ? wu : undefined}
           note={!logKnown ? 'We couldn’t read your training log — this is not a week with nothing in it.'

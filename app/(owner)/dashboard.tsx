@@ -170,7 +170,7 @@ export default function OwnerOverview() {
 
         {/* ── the hero ───────────────────────────────────────────────────── */}
         <Hero
-          label="Sessions delivered · 30 days"
+          label="Sessions Delivered · 30 Days"
           figure={trainersUnknown ? '—' : fig(roll.sessions30)}
           note={loading
             ? 'Reading your roster…'
@@ -265,13 +265,13 @@ export default function OwnerOverview() {
 
         {/* ── the rest: navigational, deliberately quiet ──────────────────── */}
         <Section>
-          <ListRow icon="trending" title="Revenue analytics" note="Forecast, plan mix, LTV & revenue at risk"
+          <ListRow icon="trending" title="Revenue Analytics" note="Forecast, plan mix, LTV & revenue at risk"
             onPress={() => router.push('/(owner)/revenue')} />
-          <ListRow icon="sparkle" title="Financial health · AI review" note="KPIs, retention & where to improve · connect accounting"
+          <ListRow icon="sparkle" title="Financial Health · AI Review" note="KPIs, retention & where to improve · connect accounting"
             onPress={() => router.push('/(owner)/financials')} />
           <ListRow icon="share" title="Promotions" note="Create an offer & push it to members"
             onPress={() => router.push('/(owner)/promotions')} />
-          <ListRow icon="calendar" title="Classes & payroll" note="Attendance, fill rates & trainer pay per check-in"
+          <ListRow icon="calendar" title="Classes & Payroll" note="Attendance, fill rates & trainer pay per check-in"
             onPress={() => router.push('/(owner)/class-analytics')} />
         </Section>
       </ScrollView>

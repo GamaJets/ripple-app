@@ -61,7 +61,7 @@ export default function PtSessions() {
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>At the gym</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Personal training</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Personal Training</Text>
             <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>Sessions your trainer has delivered. Approving confirms it with them, and any comment you add goes with it.</Text>
           </View>
           <Ghost icon="back" onPress={() => router.back()} />
@@ -114,7 +114,7 @@ export default function PtSessions() {
         <Rule />
 
         <Section>
-          <ListRow icon="trophy" title="My packages & sessions" note="What you have bought and what is left"
+          <ListRow icon="trophy" title="My Packages & Sessions" note="What you have bought and what is left"
             onPress={() => router.push('/(client)/packages')} />
         </Section>
       </ScrollView>

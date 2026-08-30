@@ -131,7 +131,7 @@ export default function BodyTrends() {
               Every body metric across {scans.length} scan{scans.length === 1 ? '' : 's'}
               {cd.weightSeries.length > scanCount ? ' and your latest weigh-in' : ''}
             </Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Composition trends</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Composition Trends</Text>
           </View>
           <Ghost icon="back" onPress={() => router.back()} />
         </View>
