@@ -226,7 +226,36 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
         const { data, error } = await supabase.from('profiles').select('full_name, avatar').eq('id', sbUid).single();
         if (error) { reportError('clientData.hydrate.profiles', error); failed = true; }
         else if (!cancelled) {
-          if (typeof data?.full_name === 'string' && data.full_name.trim()) setName(data.full_name.trim());
+          const fromProfile = typeof data?.full_name === 'string' ? data.full_name.trim() : '';
+          if (fromProfile) setName(fromProfile);
+          else {
+            // The name signup collected, when the profiles row never received it.
+            //
+            // handle_new_user() copies raw_user_meta_data->>'full_name' into
+            // profiles, but it ends `on conflict (id) do nothing`, and accounts
+            // created before that trigger existed never got it at all. The home
+            // screen greets people from profiles.full_name, so an account in
+            // that state opened to "Good morning" and nothing after it — while
+            // the name sat in the auth record the whole time. Reported exactly
+            // that way.
+            //
+            // Read rather than assumed, and only used when the profile column
+            // is genuinely blank: a name the client has since edited in the app
+            // is theirs, and must not be reverted to whatever they typed at
+            // signup. The push effect below persists whatever this sets, so the
+            // gap closes permanently on the first launch after this ships.
+            try {
+              const { data: au } = await supabase.auth.getUser();
+              const meta = au?.user?.user_metadata as Record<string, unknown> | undefined;
+              const fromAuth = typeof meta?.full_name === 'string' ? meta.full_name.trim() : '';
+              if (fromAuth && !cancelled) setName(fromAuth);
+            } catch (e) {
+              // no-error-ok: a name we could not recover leaves the greeting
+              // without one, which is what it already did — never a failure
+              // worth blocking the rest of the profile read for.
+              reportError('clientData.hydrate.authName', e);
+            }
+          }
           if (typeof data?.avatar === 'string' && data.avatar) setPhoto(data.avatar);
         }
       } catch (e) { reportError('clientData.hydrate.profiles', e); failed = true; }
