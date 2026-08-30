@@ -25,17 +25,17 @@ export default function OwnerLayout() {
       <Tabs.Screen name="ops" options={{ title: 'Ops', tabBarIcon: ({ color }) => <Icon name="wrench" size={23} color={color} /> }} />
       <Tabs.Screen name="members" options={{ href: null, title: 'Members' }} />
       <Tabs.Screen name="equipment" options={{ href: null, title: 'Equipment' }} />
-      <Tabs.Screen name="library" options={{ href: null, title: 'Exercise library' }} />
+      <Tabs.Screen name="library" options={{ href: null, title: 'Exercise Library' }} />
       <Tabs.Screen name="exercise" options={{ href: null, title: 'Exercise' }} />
       <Tabs.Screen name="rota" options={{ href: null, title: 'Rota' }} />
-      <Tabs.Screen name="deletions" options={{ href: null, title: 'Deletion requests' }} />
+      <Tabs.Screen name="deletions" options={{ href: null, title: 'Deletion Requests' }} />
       <Tabs.Screen name="settings" options={{ href: null, title: 'Settings' }} />
       <Tabs.Screen name="explore" options={{ href: null, title: 'Explore' }} />
       <Tabs.Screen name="feedback" options={{ href: null, title: 'Feedback' }} />
       <Tabs.Screen name="revenue" options={{ href: null, title: 'Revenue' }} />
-      <Tabs.Screen name="financials" options={{ href: null, title: 'Financial health' }} />
+      <Tabs.Screen name="financials" options={{ href: null, title: 'Financial Health' }} />
       <Tabs.Screen name="promotions" options={{ href: null, title: 'Promotions' }} />
-      <Tabs.Screen name="class-analytics" options={{ href: null, title: 'Classes & payroll' }} />
+      <Tabs.Screen name="class-analytics" options={{ href: null, title: 'Classes & Payroll' }} />
     </Tabs>
   );
 }

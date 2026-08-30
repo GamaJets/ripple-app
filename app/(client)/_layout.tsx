@@ -57,9 +57,9 @@ export default function ClientLayout() {
       <Tabs.Screen name="checkin" options={{ href: null, title: 'Weekly Check-in' }} />
       <Tabs.Screen name="activity" options={{ href: null, title: 'Activity' }} />
       <Tabs.Screen name="measurements" options={{ href: null, title: 'Body Measurements' }} />
-      <Tabs.Screen name="injuries" options={{ href: null, title: 'Injuries & limitations' }} />
+      <Tabs.Screen name="injuries" options={{ href: null, title: 'Injuries & Limitations' }} />
       <Tabs.Screen name="reminders" options={{ href: null, title: 'Reminders' }} />
-      <Tabs.Screen name="packages" options={{ href: null, title: 'Memberships & packs' }} />
+      <Tabs.Screen name="packages" options={{ href: null, title: 'Memberships & Packs' }} />
       <Tabs.Screen name="report" options={{ href: null, title: 'Weekly Report' }} />
       <Tabs.Screen name="records" options={{ href: null, title: 'Personal Records' }} />
       <Tabs.Screen name="goal" options={{ href: null, title: 'Goal Tracker' }} />
@@ -73,21 +73,21 @@ export default function ClientLayout() {
       <Tabs.Screen name="trainers" options={{ href: null, title: 'Find a Trainer' }} />
       <Tabs.Screen name="explore" options={{ href: null, title: 'Explore' }} />
       <Tabs.Screen name="challenges" options={{ href: null, title: 'Challenges' }} />
-      <Tabs.Screen name="onboarding" options={{ href: null, title: 'Get started' }} />
+      <Tabs.Screen name="onboarding" options={{ href: null, title: 'Get Started' }} />
       <Tabs.Screen name="progression" options={{ href: null, title: 'Progression' }} />
       <Tabs.Screen name="trends" options={{ href: null, title: 'Trends' }} />
-      <Tabs.Screen name="history" options={{ href: null, title: 'Your history' }} />
-      <Tabs.Screen name="body-trends" options={{ href: null, title: 'Composition trends' }} />
-      <Tabs.Screen name="scan-machine" options={{ href: null, title: 'Scan machine' }} />
+      <Tabs.Screen name="history" options={{ href: null, title: 'Your History' }} />
+      <Tabs.Screen name="body-trends" options={{ href: null, title: 'Composition Trends' }} />
+      <Tabs.Screen name="scan-machine" options={{ href: null, title: 'Scan Machine' }} />
       <Tabs.Screen name="feedback" options={{ href: null, title: 'Send Feedback' }} />
       <Tabs.Screen name="referral" options={{ href: null, title: 'Invite Friends' }} />
-      <Tabs.Screen name="restaurant" options={{ href: null, title: 'Eating out' }} />
+      <Tabs.Screen name="restaurant" options={{ href: null, title: 'Eating Out' }} />
       <Tabs.Screen name="classes" options={{ href: null, title: 'Classes' }} />
       <Tabs.Screen name="membership" options={{ href: null, title: 'Membership' }} />
       <Tabs.Screen name="access" options={{ href: null, title: 'Access' }} />
-      <Tabs.Screen name="restday" options={{ href: null, title: 'Rest & deload' }} />
-      <Tabs.Screen name="pt-sessions" options={{ href: null, title: 'Personal training' }} />
-      <Tabs.Screen name="bookings" options={{ href: null, title: 'My bookings' }} />
+      <Tabs.Screen name="restday" options={{ href: null, title: 'When to Rest' }} />
+      <Tabs.Screen name="pt-sessions" options={{ href: null, title: 'Personal Training' }} />
+      <Tabs.Screen name="bookings" options={{ href: null, title: 'My Bookings' }} />
     </Tabs>
   );
 }

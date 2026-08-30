@@ -35,17 +35,23 @@ export const CLIENT_FEATURES: Feature[] = [
 
   // ── Nutrition ─────────────────────────────────────────────
   { key: 'foodlog', label: 'Food Log', note: 'Search, barcode or photo', route: '/(client)/foodlog', icon: 'meals', area: 'meals', keywords: 'calories macros barcode photo diary' },
-  { key: 'restaurant', label: 'Eating out', note: 'Estimate restaurant macros', route: '/(client)/restaurant', icon: 'meals', area: 'meals', keywords: 'restaurant eating out dining takeout macros estimate cuisine' },
+  { key: 'restaurant', label: 'Eating Out', note: 'Estimate restaurant macros', route: '/(client)/restaurant', icon: 'meals', area: 'meals', keywords: 'restaurant eating out dining takeout macros estimate cuisine' },
   { key: 'classes', label: 'Classes', note: 'Book gym group classes', route: '/(client)/classes', icon: 'calendar', area: 'train', keywords: 'classes group class booking gym schedule hiit spin yoga crossfit waitlist branch' },
   { key: 'membership', label: 'Membership', note: 'Card, entry pass & visits', route: '/(client)/membership', icon: 'grid', area: 'me', keywords: 'membership member card gym access barcode entry pass visits plan renew' },
-  { key: 'access', label: 'Gym access', note: 'Entry barcode', route: '/(client)/access', icon: 'grid', area: 'me', keywords: 'access barcode entry scan gym door turnstile membership' },
-  { key: 'pt-sessions', label: 'Personal training', note: 'Approve delivered PT sessions', route: '/(client)/pt-sessions', icon: 'people', area: 'me', keywords: 'personal training pt sessions approve delivered package trainer' },
-  { key: 'bookings', label: 'My bookings', note: 'Classes & PT in one place', route: '/(client)/bookings', icon: 'check', area: 'me', keywords: 'my bookings booked classes pt sessions upcoming cancel schedule' },
+  { key: 'access', label: 'Gym Access', note: 'Entry barcode', route: '/(client)/access', icon: 'grid', area: 'me', keywords: 'access barcode entry scan gym door turnstile membership' },
+  { key: 'pt-sessions', label: 'Personal Training', note: 'Approve delivered PT sessions', route: '/(client)/pt-sessions', icon: 'people', area: 'me', keywords: 'personal training pt sessions approve delivered package trainer' },
+  { key: 'bookings', label: 'My Bookings', note: 'Classes & PT in one place', route: '/(client)/bookings', icon: 'check', area: 'me', keywords: 'my bookings booked classes pt sessions upcoming cancel schedule' },
 
   // ── Progress & Insights ───────────────────────────────────
   { key: 'report', label: 'Weekly Report', note: 'Your week at a glance · share it', route: '/(client)/report', icon: 'chart', area: 'progress', keywords: 'summary' },
   { key: 'consistency', label: 'Consistency', note: '12-week training heatmap', route: '/(client)/consistency', icon: 'flame', area: 'progress', keywords: 'heatmap streak' },
-  { key: 'restday', label: 'Rest & deload', note: 'Recovery planner from your log', route: '/(client)/restday', icon: 'moon', area: 'train', keywords: 'rest day deload recovery fatigue overtraining planner' },
+  // The label answers the question a member actually has. 'Deload' and
+  // 'training load' both stay in the keywords: a coach or an experienced
+  // lifter will search for those words, and a rename that makes a screen
+  // unfindable to the people most likely to want it is a worse bug than the
+  // jargon was. The label is for the person who does not know the term; the
+  // keywords are for the person who does.
+  { key: 'restday', label: 'When to Rest', note: 'When to rest or back off, read from your log', route: '/(client)/restday', icon: 'moon', area: 'train', keywords: 'rest day deload recovery fatigue overtraining overreaching planner training load back off easy week' },
   { key: 'records', label: 'Personal Records', note: 'Your best lifts, ranked', route: '/(client)/records', icon: 'trophy', area: 'progress', keywords: 'pr prs best lifts' },
   { key: 'progression', label: 'Next-session Targets', note: 'Auto progression from your lifts', route: '/(client)/progression', icon: 'trending', area: 'train', keywords: 'progression overload progressive weight increase targets next' },
   { key: 'standards', label: 'Strength Standards', note: 'How your lifts stack up', route: '/(client)/standards', icon: 'chart', area: 'progress', keywords: 'benchmark bodyweight' },

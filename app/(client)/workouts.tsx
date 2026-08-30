@@ -1032,14 +1032,34 @@ export default function Train() {
               people never read, so all twelve now wrap onto three lines and are
               simply visible. */}
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
-            {/* Playlists leads deliberately. Music & Playlists existed the whole
-                time and was reachable from exactly one place — Me → Music &
-                Playlists — so the person who wants it is the person about to
-                train, on the one tab that never mentioned it: "how do i access
-                music playlist for my work out in the train tab? there is no
-                such feature there." Reading order still carries meaning now the
-                row wraps, and this is the one you reach for before a session. */}
-            {([['play', 'Playlists', '/(client)/music'], ['camera', 'Scan machine', '/(client)/scan-machine'], ['clock', 'History', '/(client)/activity'], ['chart', 'Trends', '/(client)/trends'], ['trending', 'Targets', '/(client)/progression'], ['calendar', 'This Week', '/(client)/week'], ['trophy', 'Records', '/(client)/records'], ['water', 'Recovery', '/(client)/recovery'], ['moon', 'Rest & deload', '/(client)/restday'], ['heart', 'Watch & devices', '/(client)/devices'], ['video', 'Library', '/(client)/library'], ['settings', 'Tools', '/(client)/tools']] as const).map(([ic, label, route]) => (
+            {/* Ordered by what somebody is DOING, not alphabetically and not by
+                when each screen happened to be built. Four groups, in the order
+                a session actually runs:
+
+                  before you start   Playlists · Scan Machine · Library
+                  what to do         This Week · Targets · When to Rest
+                  what you did       History · Trends · Records
+                  how you are        Recovery · Watch & Devices
+                  settings           Tools
+
+                Labels are title case throughout. The row previously mixed
+                "This Week" with "Scan machine" and "Watch & devices", and that
+                last one contradicted the screen's OWN title, which has always
+                been "Watch & Devices". */}
+            {([
+              ['play', 'Playlists', '/(client)/music'],
+              ['camera', 'Scan Machine', '/(client)/scan-machine'],
+              ['video', 'Library', '/(client)/library'],
+              ['calendar', 'This Week', '/(client)/week'],
+              ['trending', 'Targets', '/(client)/progression'],
+              ['moon', 'When to Rest', '/(client)/restday'],
+              ['clock', 'History', '/(client)/activity'],
+              ['chart', 'Trends', '/(client)/trends'],
+              ['trophy', 'Records', '/(client)/records'],
+              ['water', 'Recovery', '/(client)/recovery'],
+              ['heart', 'Watch & Devices', '/(client)/devices'],
+              ['settings', 'Tools', '/(client)/tools'],
+            ] as const).map(([ic, label, route]) => (
               <Pressable key={route} onPress={() => router.push(route as any)} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: sp.sm }}>
                 <Icon name={ic} size={14} color={t.ink2} /><Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>{label}</Text>
               </Pressable>

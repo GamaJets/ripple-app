@@ -37,26 +37,26 @@ export default function TrainerLayout() {
       <Tabs.Screen name="calendar" options={{ title: 'Schedule', tabBarIcon: ({ color }) => <Icon name="calendar" size={23} color={color} /> }} />
       <Tabs.Screen name="videos" options={{ title: 'Videos', tabBarIcon: ({ color }) => <Icon name="video" size={23} color={color} /> }} />
       <Tabs.Screen name="analytics" options={{ title: 'Analytics', tabBarIcon: ({ color }) => <Icon name="chart" size={23} color={color} /> }} />
-            <Tabs.Screen name="sessions" options={{ href: null, title: 'Mark sessions' }} />
+            <Tabs.Screen name="sessions" options={{ href: null, title: 'Mark Sessions' }} />
 <Tabs.Screen name="leaderboard" options={{ href: null, title: 'Leaderboard' }} />
       <Tabs.Screen name="explore" options={{ href: null, title: 'Explore' }} />
       <Tabs.Screen name="chat" options={{ href: null, title: 'Chat' }} />
-      <Tabs.Screen name="log-session" options={{ href: null, title: 'Log a session' }} />
-      <Tabs.Screen name="checklists" options={{ href: null, title: 'Their checklists' }} />
-      <Tabs.Screen name="client-goals" options={{ href: null, title: 'Working toward' }} />
-      <Tabs.Screen name="client-photos" options={{ href: null, title: 'Progress photos' }} />
-      <Tabs.Screen name="client-week" options={{ href: null, title: 'Their week' }} />
+      <Tabs.Screen name="log-session" options={{ href: null, title: 'Log a Session' }} />
+      <Tabs.Screen name="checklists" options={{ href: null, title: 'Their Checklists' }} />
+      <Tabs.Screen name="client-goals" options={{ href: null, title: 'Working Toward' }} />
+      <Tabs.Screen name="client-photos" options={{ href: null, title: 'Progress Photos' }} />
+      <Tabs.Screen name="client-week" options={{ href: null, title: 'Their Week' }} />
       <Tabs.Screen name="client" options={{ href: null, title: 'Client' }} />
-      <Tabs.Screen name="client-body" options={{ href: null, title: 'Body composition' }} />
+      <Tabs.Screen name="client-body" options={{ href: null, title: 'Body Composition' }} />
       <Tabs.Screen name="templates" options={{ href: null, title: 'Program Templates' }} />
       <Tabs.Screen name="exercise" options={{ href: null, title: 'Exercise' }} />
       <Tabs.Screen name="feedback" options={{ href: null, title: 'Send Feedback' }} />
-      <Tabs.Screen name="billing" options={{ href: null, title: 'Billing & subscription' }} />
+      <Tabs.Screen name="billing" options={{ href: null, title: 'Billing & Subscription' }} />
       <Tabs.Screen name="payments" options={{ href: null, title: 'Payments' }} />
       <Tabs.Screen name="classes" options={{ href: null, title: 'Classes' }} />
-      <Tabs.Screen name="class-checkin" options={{ href: null, title: 'Class check-in' }} />
+      <Tabs.Screen name="class-checkin" options={{ href: null, title: 'Class Check-in' }} />
       <Tabs.Screen name="broadcast" options={{ href: null, title: 'Broadcast' }} />
-      <Tabs.Screen name="broadcast-session" options={{ href: null, title: 'Broadcast a session' }} />
+      <Tabs.Screen name="broadcast-session" options={{ href: null, title: 'Broadcast a Session' }} />
       <Tabs.Screen name="settings" options={{ href: null, title: 'Settings' }} />
       <Tabs.Screen name="profile" options={{ title: 'Profile', tabBarIcon: ({ color }) => <Icon name="me" size={23} color={color} /> }} />
     </Tabs>

@@ -74,7 +74,7 @@ export default function RestDay() {
           <Ghost icon="back" onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>What your log suggests</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Rest & deload</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>When to Rest</Text>
           </View>
         </View>
 
