@@ -126,7 +126,7 @@ const BREK_BASE: Comp[] = [
   { n: 'shakshuka', ico: '🍳', k: 260, p: 16, c: 12, f: 16, ing: [['Eggs', 2, '', 'Dairy & Eggs'], ['Tomato passata', 150, 'g', 'Pantry & Other']], step: 'Poach the eggs in spiced tomato sauce.', d: ['vegetarian', 'paleo', 'keto', 'meat'] },
 ];
 const BREK_TOP: Comp[] = [
-  { n: 'berry',   ing: [['Mixed berries', 80, 'g', 'Fruits']], k: 45, p: 1, c: 1, f: 0, d: ['meat', 'vegetarian', 'vegan', 'paleo', 'keto'] },
+  { n: 'berry',   ing: [['Mixed berries', 80, 'g', 'Fruits']], k: 45, p: 1, c: 10, f: 0, d: ['meat', 'vegetarian', 'vegan', 'paleo', 'keto'] },
   { n: 'banana',  ing: [['Banana', 1, '', 'Fruits']], k: 90, p: 1, c: 23, f: 0, d: ['meat', 'vegetarian', 'vegan', 'paleo'] },
   { n: 'apple & cinnamon', ing: [['Apple', 1, '', 'Fruits']], k: 80, p: 0, c: 21, f: 0, d: ['meat', 'vegetarian', 'vegan', 'paleo'] },
   { n: 'mango',   ing: [['Mango', 120, 'g', 'Fruits']], k: 80, p: 1, c: 20, f: 0, d: ['meat', 'vegetarian', 'vegan', 'paleo'] },

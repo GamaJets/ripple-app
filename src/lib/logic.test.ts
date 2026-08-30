@@ -3,7 +3,7 @@ import { macrosFor, GOAL_ADJ, buildMealPlan } from './nutrition';
 import { isLateCancellation, cancelSession, overlaps, nextFromWaitlist } from './booking';
 import { ageFromDob } from './age';
 import { isoDate, seriesDelta } from './format';
-import { catalogSize, mealAt, buildPlan, snackIdeas, SNACK_SHARE, groceryData, searchMeals, swapIndex, type PlanInput, type Slot } from './meals';
+import { catalogSize, mealAt, buildPlan, snackIdeas, SNACK_SHARE, groceryData, searchMeals, swapIndex, DEPTS, type PlanInput, type Slot } from './meals';
 import type { TrainingSession, Diet } from './types';
 
 const errors: string[] = [];
@@ -104,6 +104,82 @@ declare const process: { exit(code: number): void };
 ok(isoDate(new Date('2026-07-09T12:00:00')) === '2026-07-09', 'isoDate should format YYYY-MM-DD');
 ok(seriesDelta([71.2, 70, 67.4]) === -3.8, 'seriesDelta should be signed first→last');
 ok(seriesDelta([50]) === 0, 'seriesDelta of single point is 0');
+
+/* ── every meal the generator can produce ──────────────────────────────── */
+//
+// Mutation testing put this file's kill rate at 8.6%: it is mostly a table of
+// food components — hundreds of kcal/protein/carb/fat literals — and changing
+// any one of them was a change no test noticed.
+//
+// Transcribing the table into assertions would prove nothing and break on
+// every recipe tweak. What is worth pinning is that the table stays COHERENT,
+// checked through the generator rather than by reading the table, so it
+// covers what the app actually renders. All 95,518 combinations, in about a
+// tenth of a second.
+{
+  const DIETS: Diet[] = ['meat', 'vegetarian', 'vegan', 'paleo', 'keto'];
+  const SLOTS: Slot[] = ['Breakfast', 'Lunch', 'Dinner', 'Snack'];
+  const depts = new Set<string>(DEPTS);
+
+  // Components are rounded individually, so 4p + 4c + 9f never lands exactly
+  // on the stated kcal. The worst gap across the whole catalogue today is 38
+  // kcal (9.9%); the bounds below are set above that with room for a recipe
+  // tweak, and are still far tighter than any realistic typo — a component
+  // whose 220 kcal became 20 shifts a meal by 40%, and a transposed protein
+  // figure by about 29%.
+  const MAX_GAP_KCAL = 60;
+  const MAX_GAP_PCT = 0.15;
+
+  let checked = 0;
+  const fail: string[] = [];
+  const note = (m: string) => { if (fail.length < 5) fail.push(m); };
+
+  for (const diet of DIETS) {
+    for (const slot of SLOTS) {
+      const size = catalogSize(diet, slot);
+      ok(size > 0, `${diet}/${slot} has meals at all`);
+      for (let i = 0; i < size; i++) {
+        const x = mealAt(diet, slot, i);
+        checked++;
+        const where = `${diet}/${slot}#${i}`;
+
+        if (!x.n || /undefined|NaN|\[object/.test(x.n)) note(`${where}: name reads "${x.n}"`);
+        if (x.slot !== slot) note(`${where}: came back as a ${x.slot}`);
+        if (x.diet !== diet) note(`${where}: came back as ${x.diet}`);
+
+        // A meal with no calories is a row somebody will eat and log as zero.
+        if (!(x.k > 0)) note(`${where}: ${x.k} kcal`);
+        for (const [key, v] of [['p', x.p], ['c', x.c], ['f', x.f]] as const) {
+          if (!Number.isFinite(v) || v < 0) note(`${where}: ${key} is ${v}`);
+        }
+
+        const atwater = 4 * x.p + 4 * x.c + 9 * x.f;
+        const gap = Math.abs(atwater - x.k);
+        if (gap > MAX_GAP_KCAL || (x.k > 0 && gap / x.k > MAX_GAP_PCT)) {
+          note(`${where}: ${x.k} kcal but its macros come to ${atwater}`);
+        }
+
+        // Steps and ingredients are what the recipe sheet renders. An empty
+        // one is a sheet with a heading and nothing under it.
+        if (!x.steps?.length || x.steps.some((st) => !st.trim())) note(`${where}: empty method`);
+        if (!x.ing?.length) note(`${where}: no ingredients`);
+        for (const g of x.ing ?? []) {
+          if (!g[0]?.trim()) note(`${where}: an ingredient with no name`);
+          if (!(g[1] > 0)) note(`${where}: ${g[0]} has quantity ${g[1]}`);
+          // The UNIT may be empty, and that is correct: "1 Banana", "2 Eggs".
+          // Countable things have no unit, and demanding one here would have
+          // failed 34,568 perfectly good ingredients.
+          if (typeof g[2] !== 'string') note(`${where}: ${g[0]} has a non-string unit`);
+          // The department is what sorts the grocery list. An unknown one
+          // silently drops the item off the shopping list.
+          if (!depts.has(g[3])) note(`${where}: ${g[0]} is filed under "${g[3]}"`);
+        }
+      }
+    }
+  }
+  ok(checked > 90000, `the whole catalogue was walked, not a sample (${checked})`);
+  ok(fail.length === 0, 'every generated meal is coherent — ' + fail.join(' · '));
+}
 
 /* ── snack ideas ───────────────────────────────────────────────────────── */
 //
