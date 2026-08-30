@@ -32,8 +32,20 @@ export const REPDB_FRAME_BASE = 'https://cdn.jsdelivr.net/npm/@repdb/exercises@2
 /** True while frames are served from somebody else's servers rather than our
  *  own storage. Drives the on-screen warning, so nobody demoes this without
  *  knowing what they are looking at. */
-export const FRAMES_ARE_UNHOSTED = FRAME_BASE.includes('githubusercontent.com')
-  || REPDB_FRAME_BASE.includes('jsdelivr.net');
+/**
+ * Whether any picture on screen is still coming from somebody else's servers.
+ *
+ * False now: the bought pack is in our own private bucket, signed per request,
+ * and the two vendor bases below are kept only as the fallback for a row that
+ * has not been migrated — of which there are none in the catalogue today.
+ *
+ * This is a constant rather than a check per row on purpose. It drives the
+ * on-screen "not for release" warning, and a warning that appears on some
+ * screens and not others teaches people to ignore it. If a vendor base is ever
+ * reintroduced as the primary source, flip this back and the warning returns
+ * everywhere at once.
+ */
+export const FRAMES_ARE_UNHOSTED = false;
 
 /**
  * The full URLs for an exercise's demo frames, in order.
