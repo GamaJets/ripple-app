@@ -1,6 +1,6 @@
 // wearable-day — returns today's normalized metrics for a connected cloud vendor.
 // Reads the stored token, refreshes it if expired, calls the vendor API, and maps
-// the response to { activeKcal, steps, heartRateAvg, heartRateResting, workoutMins }.
+// the response to { activeKcal, totalKcal, steps, heartRateAvg, heartRateResting, workoutMins }.
 // Defensive: any missing field comes back null; never throws to the client.
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
@@ -60,10 +60,15 @@ async function refresh(provider: string, refreshToken: string) {
 async function fitbitDay(token: string) {
   const h = { Authorization: 'Bearer ' + token };
   const d = today();
-  const out: any = { activeKcal: null, steps: null, heartRateAvg: null, heartRateResting: null, workoutMins: null };
+  const out: any = { activeKcal: null, totalKcal: null, steps: null, heartRateAvg: null, heartRateResting: null, workoutMins: null };
   try {
     const a = await (await fetch(`https://api.fitbit.com/1/user/-/activities/date/${d}.json`, { headers: h })).json();
-    out.activeKcal = numOr(a?.summary?.activityCalories ?? a?.summary?.caloriesOut);
+    // Two different quantities, and the old `activityCalories ?? caloriesOut`
+    // fell from one to the other silently: activityCalories is energy above
+    // resting, caloriesOut is the whole day including it. On the same
+    // afternoon that is roughly 400 against roughly 2,400.
+    out.activeKcal = numOr(a?.summary?.activityCalories);
+    out.totalKcal = numOr(a?.summary?.caloriesOut);
     out.steps = numOr(a?.summary?.steps);
   } catch { /* leave nulls */ }
   try {
@@ -76,11 +81,12 @@ async function fitbitDay(token: string) {
 async function ouraDay(token: string) {
   const h = { Authorization: 'Bearer ' + token };
   const d = today();
-  const out: any = { activeKcal: null, steps: null, heartRateAvg: null, heartRateResting: null, workoutMins: null };
+  const out: any = { activeKcal: null, totalKcal: null, steps: null, heartRateAvg: null, heartRateResting: null, workoutMins: null };
   try {
     const a = await (await fetch(`https://api.ouraring.com/v2/usercollection/daily_activity?start_date=${d}&end_date=${d}`, { headers: h })).json();
     const row = a?.data?.[0];
     out.activeKcal = numOr(row?.active_calories);
+    out.totalKcal = numOr(row?.total_calories);
     out.steps = numOr(row?.steps);
   } catch { /* leave nulls */ }
   return out;
@@ -88,13 +94,20 @@ async function ouraDay(token: string) {
 
 async function whoopDay(token: string) {
   const h = { Authorization: 'Bearer ' + token };
-  const out: any = { activeKcal: null, steps: null, heartRateAvg: null, heartRateResting: null, workoutMins: null, heartRateMax: null, zoneSeconds: null };
+  const out: any = { activeKcal: null, totalKcal: null, steps: null, heartRateAvg: null, heartRateResting: null, workoutMins: null, heartRateMax: null, zoneSeconds: null };
   // WHOOP v2. Cycle = a physiological day: energy (kilojoule) + average HR.
   try {
     const c = await (await fetch('https://api.prod.whoop.com/developer/v2/cycle?limit=1', { headers: h })).json();
     const s = c?.records?.[0]?.score;
     if (s) {
-      if (Number.isFinite(Number(s.kilojoule))) out.activeKcal = Math.round(Number(s.kilojoule) / 4.184);
+      // TOTAL, not active. The cycle's kilojoule is everything the body spent
+      // since the cycle began, resting metabolism included — it is the figure
+      // WHOOP's own app shows as the day's calories, and it is why a client
+      // sitting at a desk had "1,309 kcal burned" by mid-afternoon. Storing it
+      // as activeKcal made every screen that reasons about exercise wrong.
+      // WHOOP publishes no active-only figure, so activeKcal stays null and
+      // the app says what it actually has.
+      if (Number.isFinite(Number(s.kilojoule))) out.totalKcal = Math.round(Number(s.kilojoule) / 4.184);
       out.heartRateAvg = numOr(s.average_heart_rate);
     }
   } catch { /* leave nulls */ }

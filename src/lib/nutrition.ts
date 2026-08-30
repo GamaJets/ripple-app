@@ -239,6 +239,11 @@ export interface CaloriesLeft {
   eaten: number;
   /** What the wearable measured. Shown, never spent. */
   burned: number;
+  /** Whether `burned` is energy ABOVE rest or the WHOLE day including it.
+   *  WHOOP publishes only the second; Oura only the first; Fitbit and Apple
+   *  both. Comparing one against the other is a ~1,600 kcal mistake, so the
+   *  quantity travels with the figure. */
+  burnKind: BurnKind;
   /** The non-resting energy the target already assumed: tdee − bmr. */
   budgetedActive: number;
   /** burned − budgetedActive, floored at 0. How much bigger than usual the
@@ -246,11 +251,14 @@ export interface CaloriesLeft {
   extraBurned: number;
 }
 
+export type BurnKind = 'active' | 'total';
+
 export function caloriesLeft(
   targetKcal: number,
   eatenKcal: number,
   burnedKcal: number = 0,
   budgetedActiveKcal: number = 0,
+  burnKind: BurnKind = 'active',
 ): CaloriesLeft {
   const target = Math.max(0, Math.round(targetKcal || 0));
   const eaten = Math.max(0, Math.round(eatenKcal || 0));
@@ -258,7 +266,7 @@ export function caloriesLeft(
   const budgetedActive = Math.max(0, Math.round(budgetedActiveKcal || 0));
   const extraBurned = Math.max(0, burned - budgetedActive);
   const net = target - eaten;
-  return { net, over: net < 0 ? -net : 0, target, eaten, burned, budgetedActive, extraBurned };
+  return { net, over: net < 0 ? -net : 0, target, eaten, burned, burnKind, budgetedActive, extraBurned };
 }
 
 /**
@@ -278,11 +286,48 @@ export function caloriesLeft(
 export function caloriesNote(cal: CaloriesLeft): string {
   const head = `${num(cal.eaten)} of ${num(cal.target)} kcal Eaten`;
   if (!cal.burned) return head;
-  if (cal.extraBurned > 0) return `${head} · ${num(cal.burned)} Burned, ${num(cal.extraBurned)} Above a Usual Day`;
-  return `${head} · ${num(cal.burned)} Burned, Already in Your Target`;
+  // Say WHICH quantity. "1,309 burned" by mid-afternoon reads as a huge
+  // training day when it is a WHOOP whole-day figure that is mostly the client
+  // lying still, and somebody asked exactly that: where does it come from.
+  const what = cal.burnKind === 'total'
+    ? `${num(cal.burned)} kcal Burned All Day, Rest Included`
+    : `${num(cal.burned)} Active kcal Burned`;
+  // Not "above a usual day" — asked twice, "based on what exactly?", and the
+  // honest answer was not in the sentence. It is measured against the ACTIVITY
+  // LEVEL on the profile: that multiplier is what decides how much movement
+  // the target pays for, and this is how far today has gone past it. Nothing
+  // here knows what the client's actual recent days looked like, so it must
+  // not claim to.
+  const verdict = cal.extraBurned > 0
+    ? `${num(cal.extraBurned)} More Than Your Activity Level Assumes`
+    : 'Already in Your Target';
+  return `${head} · ${what}, ${verdict}`;
 }
 
 /** The non-resting energy a target built from an activity multiplier assumed. */
 export function budgetedActiveKcal(m: Pick<Macros, 'bmr' | 'tdee'>): number {
   return Math.max(0, Math.round((m.tdee || 0) - (m.bmr || 0)));
+}
+
+/**
+ * The figure a wearable actually gave, paired with the budget it should be
+ * compared against — active against the movement the multiplier bought, whole
+ * day against the whole TDEE.
+ *
+ * Prefers active when both are known: it is the quantity a person means by
+ * "calories burned", and comparing it is the smaller of the two numbers to get
+ * wrong. Returns null when neither is known, so the caller shows no burn at
+ * all rather than a zero standing in for a device that has not reported.
+ */
+export function dayBurn(
+  m: Pick<Macros, 'bmr' | 'tdee'>,
+  today: { activeKcal: number | null; totalKcal: number | null },
+): { burned: number; budgeted: number; kind: BurnKind } | null {
+  if (typeof today.activeKcal === 'number') {
+    return { burned: today.activeKcal, budgeted: budgetedActiveKcal(m), kind: 'active' };
+  }
+  if (typeof today.totalKcal === 'number') {
+    return { burned: today.totalKcal, budgeted: Math.max(0, Math.round(m.tdee || 0)), kind: 'total' };
+  }
+  return null;
 }

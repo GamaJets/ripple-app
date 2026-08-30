@@ -63,7 +63,14 @@ for (const root of ROOTS) {
       if (FORMATTED.test(line)) return;
       if (/<TextInput/.test(line)) return;
       // {expr} in JSX text, and ${expr} in a template literal.
-      const exprs = [...line.matchAll(/\$?\{([A-Za-z_$][\w.$]*)\}/g)].map((m) => m[1]);
+      //
+      // A JSX ATTRIBUTE — prop={value} — passes a number on rather than
+      // printing it, and the screen that finally shows it is where the
+      // separator belongs. Matching those flagged every prop named after a
+      // figure, which teaches people to silence the check rather than read it.
+      const exprs = [...line.matchAll(/(=)?\$?\{([A-Za-z_$][\w.$]*)\}/g)]
+        .filter((m) => m[1] !== '=')
+        .map((m) => m[2]);
       for (const expr of exprs) {
         const leaf = expr.split('.').pop();
         if (!BIG.test(leaf)) continue;

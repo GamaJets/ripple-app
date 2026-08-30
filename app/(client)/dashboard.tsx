@@ -14,7 +14,8 @@ import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Hero, KpiRow, ActionCard, ListRow, Cta, Ghost, QuickRow, Meter, Spark, WeekDots, Notice, Card, fig } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty, numeric, value } from '../../src/theme/scale';
 import { Icon } from '../../src/ui/Icon';
-import { macrosFor, applyCoachAdjust } from '../../src/lib/nutrition';
+import { num } from '../../src/lib/format';
+import { macrosFor, applyCoachAdjust, caloriesLeft, caloriesNote, dayBurn } from '../../src/lib/nutrition';
 import { buildProgram } from '../../src/lib/programs';
 import { useClientData } from '../../src/ui/clientData';
 import { useSettings } from '../../src/ui/settings';
@@ -106,7 +107,7 @@ export default function Home() {
     acceptInvite: acceptCoachInvite, declineInvite: declineCoachInvite,
   } = useInvites();
   const foodToday = useFoodLog().consumed;
-  const burnedToday = useWearables().today.activeKcal || 0;
+  const wToday = useWearables().today;
 
   const solo = c.coachingMode === 'solo';
   // Whether to offer a way to FIND a coach. Deliberately not `solo`: that is
@@ -170,9 +171,15 @@ export default function Home() {
     : null;
   // Real logged intake (shared with the Meals tab + Food Log); reflects what was actually eaten today.
   const consumed = { kcal: foodToday.kcal, p: foodToday.protein, cbs: foodToday.carbs, f: foodToday.fat };
+  const burn = macros ? dayBurn(macros, wToday) : null;
   const _todayKey = new Date().toISOString().slice(0, 10);
   const trainedToday = log.some((e) => (e.t || '').slice(0, 10) === _todayKey);
-  const kcalLeft = macros ? Math.max(0, macros.kcal + burnedToday - consumed.kcal) : 0;
+  // The third copy of this sum, and it had both of the faults the other two
+  // were fixed for: it ADDED the day's burn to a target that already assumed
+  // movement, and clamped at zero so Home could never say a client was over.
+  // One function now, the same one the Meals tab and the Food Log call.
+  const dayCal = macros ? caloriesLeft(macros.kcal, consumed.kcal, burn?.burned ?? 0, burn?.budgeted ?? 0, burn?.kind) : null;
+  const kcalLeft = dayCal ? dayCal.net : 0;
   // Only claim somebody is under-recovered when there is a score saying so.
   // Unknown readiness falls through to the ordinary prompts, which assert
   // nothing about their body.
@@ -181,7 +188,7 @@ export default function Home() {
     : !trainedToday
     ? { headline: 'Ready to Train', tip: readiness?.tip ?? 'Log tonight’s sleep and your readiness appears here.', cta: 'Start Workout', route: '/(client)/workouts', tone: t.brand }
     : kcalLeft > 200
-    ? { headline: 'Fuel Up', tip: kcalLeft + ' kcal left today' + (burnedToday > 0 ? ' (incl. ' + burnedToday + ' burned)' : '') + '.', cta: 'Log a Meal', route: '/(client)/nutrition', tone: t.brand }
+    ? { headline: 'Fuel Up', tip: dayCal ? caloriesNote(dayCal) + '.' : num(kcalLeft) + ' kcal left today.', cta: 'Log a Meal', route: '/(client)/nutrition', tone: t.brand }
     : { headline: 'On Track', tip: 'Session done and your macros are on point. Nice work.', cta: 'View Plan', route: '/(client)/nutrition', tone: t.brand };
 
   const ws = c.weightSeries.map((x) => x.v);
@@ -219,7 +226,7 @@ export default function Home() {
   const hi = d.getHours() < 12 ? 'Good Morning' : d.getHours() < 18 ? 'Good Afternoon' : 'Good Evening';
 
   const firstName = (c.name || '').trim().split(' ')[0] || '';
-  const kcalNote = macros ? `${consumed.kcal.toLocaleString()} of ${macros.kcal.toLocaleString()} kcal` : `${consumed.kcal.toLocaleString()} kcal eaten — add your weight for a target`;
+  const kcalNote = macros ? `${num(consumed.kcal)} of ${num(macros.kcal)} kcal` : `${num(consumed.kcal)} kcal eaten — add your weight for a target`;
   const G = layout.gutter;
 
   return (

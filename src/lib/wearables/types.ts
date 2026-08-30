@@ -13,7 +13,22 @@ export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'err
 /** A single day's roll-up. Any field a provider can't supply is null. */
 export interface DailyMetrics {
   date: string;                 // YYYY-MM-DD (local)
-  activeKcal: number | null;    // active energy burned
+  /**
+   * Energy burned ON TOP of resting metabolism — a run, a session, walking to
+   * work. NOT the whole day.
+   *
+   * The distinction is not pedantry, it is the difference between two numbers
+   * that differ by about 1,600 kcal. WHOOP's cycle `kilojoule` is TOTAL daily
+   * expenditure and was being stored here, so the app showed a mid-afternoon
+   * "Calories Burned" of 1,309 — a plausible active figure for a hard day, and
+   * in fact mostly the client lying still. Fitbit has the same trap: its
+   * `caloriesOut` is total and `activityCalories` is active.
+   */
+  activeKcal: number | null;
+  /** Whole-day expenditure including resting metabolism. Some providers give
+   *  only this (WHOOP), some only active (Oura), some both (Fitbit, Apple).
+   *  Kept apart so a screen never compares one against the other. */
+  totalKcal: number | null;
   steps: number | null;
   heartRateAvg: number | null;  // bpm, mean of today's samples
   heartRateLatest: number | null; // bpm, most recent sample (live-ish during a workout)
@@ -85,5 +100,5 @@ export interface WearableProvider {
 export function emptyMetrics(source: ProviderId): DailyMetrics {
   const d = new Date();
   const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  return { date, activeKcal: null, steps: null, heartRateAvg: null, heartRateLatest: null, heartRateResting: null, heartRateMax: null, zoneSeconds: null, workoutMins: null, updatedAt: d.toISOString(), source };
+  return { date, activeKcal: null, totalKcal: null, steps: null, heartRateAvg: null, heartRateLatest: null, heartRateResting: null, heartRateMax: null, zoneSeconds: null, workoutMins: null, updatedAt: d.toISOString(), source };
 }

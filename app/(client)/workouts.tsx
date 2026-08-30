@@ -6,6 +6,7 @@
 // only on the live metric and the primary action.
 // Guided session runner, cardio logging & month calendar preserved.
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { maintenanceFor } from '../../src/lib/nutrition';
 import { num } from '../../src/lib/format';
 import { View, Text, TextInput, Pressable, ScrollView, Modal, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -208,6 +209,12 @@ export default function Train() {
   const [injRevealed, setInjRevealed] = useState<string[]>([]);
   const [deloadDismiss, setDeloadDismiss] = useState(false);
   const { videos: exVideos, status: exVideoStatus } = useExerciseVideos();
+  // Resting burn per minute, for correcting a whole-day energy counter down to
+  // just the session. Null without a weight and body fat — there is no resting
+  // rate to compute, and a guessed one would be subtracted from a real figure.
+  const restingKcalPerMin = (cd.weightKg != null && cd.bodyFatPct != null)
+    ? maintenanceFor({ weightKg: cd.weightKg, bodyFatPct: cd.bodyFatPct, activity: cd.activity }).bmr / 1440
+    : null;
   // Who coaches this member. The library read is filtered by policy, not by
   // trainer, so it can hand back both a platform clip and this member's own
   // coach demonstrating the same lift — and being shown a stranger when your
@@ -1234,7 +1241,7 @@ export default function Train() {
       </Modal>
 
       <Modal visible={session} animationType="slide" onRequestClose={() => setSession(false)}>
-        <SessionRunner t={t} unit={wu} exercises={planEx.filter((e) => !isInjHidden(e))} focus={workout.focus} nameOf={nameOf} age={ageFromDob(cd.dob)} log={workoutLog} injuries={cd.injuries} videos={exVideos} videoStatus={exVideoStatus} preferTrainerId={coachId} onComplete={addWorkouts} onClose={() => setSession(false)} />
+        <SessionRunner t={t} unit={wu} exercises={planEx.filter((e) => !isInjHidden(e))} focus={workout.focus} nameOf={nameOf} age={ageFromDob(cd.dob)} restingKcalPerMin={restingKcalPerMin} log={workoutLog} injuries={cd.injuries} videos={exVideos} videoStatus={exVideoStatus} preferTrainerId={coachId} onComplete={addWorkouts} onClose={() => setSession(false)} />
       </Modal>
 
       {/* Mounted only while a session is running, so its clock starts at zero
@@ -1246,6 +1253,7 @@ export default function Train() {
             kind={timed.kind}
             activity={timed.activity}
             age={ageFromDob(cd.dob)}
+            restingKcalPerMin={restingKcalPerMin}
             defaultUnit={unit}
             onSave={(v) => { void commitSession(timed.kind, timed.activity, v.mins, v); setTimed(null); }}
             onClose={() => setTimed(null)}
@@ -1338,15 +1346,33 @@ function LogRow({ t, unit, onLog }: { t: Theme; unit: WeightUnit; onLog: (reps: 
  * WHOOP user would finish and see "42 min in Zone 2" derived from one number
  * that had nothing to do with the workout.
  */
-function useLiveVitals(age: number | null) {
+function useLiveVitals(age: number | null, restingKcalPerMin: number | null) {
   const w = useWearables();
   const liveSample = w.today.heartRateLatest;          // a real, current reading
   const liveHr = liveSample ?? w.today.heartRateAvg;   // display only
   const startKcalRef = useRef<number | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const [hrPeak, setHrPeak] = useState<number | null>(null);
-  if (startKcalRef.current == null && typeof w.today.activeKcal === 'number') startKcalRef.current = w.today.activeKcal;
-  const sessionKcal = (typeof w.today.activeKcal === 'number' && startKcalRef.current != null) ? Math.max(0, Math.round(w.today.activeKcal - startKcalRef.current)) : null;
+  // The session's burn is the day's counter minus what it read when the
+  // session started.
+  //
+  // WHICH counter matters. Some devices publish energy above rest (Oura,
+  // Apple) and some publish the whole day including resting metabolism
+  // (WHOOP). Differencing a whole-day counter over an hour hands back the
+  // hour's resting burn as if it were the session — roughly 70 kcal, credited
+  // to a workout that did not do it — so the resting share of the elapsed time
+  // is taken back off. `restingKcalPerMin` is null when there is no body to
+  // compute a resting rate from, and then a total-only device reports nothing
+  // rather than an overstatement.
+  const dayKcal = typeof w.today.activeKcal === 'number' ? w.today.activeKcal : w.today.totalKcal;
+  const dayKind: 'active' | 'total' = typeof w.today.activeKcal === 'number' ? 'active' : 'total';
+  if (startKcalRef.current == null && typeof dayKcal === 'number') startKcalRef.current = dayKcal;
+  const rawSession = (typeof dayKcal === 'number' && startKcalRef.current != null)
+    ? Math.max(0, Math.round(dayKcal - startKcalRef.current)) : null;
+  const restingShare = (dayKind === 'total' && restingKcalPerMin != null) ? restingKcalPerMin * (elapsed / 60) : 0;
+  const sessionKcal = rawSession == null ? null
+    : (dayKind === 'total' && restingKcalPerMin == null) ? null
+    : Math.max(0, Math.round(rawSession - restingShare));
   // Elapsed is read off the wall clock rather than counted up a tick at a time.
   // A phone that locks or backgrounds the app stops delivering the interval, so
   // a counter would silently under-report — and for a timed session that number
@@ -1433,14 +1459,14 @@ function ZonePanel({ t, liveZone, liveSample, zoneSecs }: {
  * genuinely share is the vitals hook and the zone panel above, so those are
  * shared and the rest is not.
  */
-function TimedSessionRunner({ t, kind, activity, age, defaultUnit, onSave, onClose }: {
-  t: Theme; kind: SessionKind; activity: string; age: number | null; defaultUnit: string;
+function TimedSessionRunner({ t, kind, activity, age, restingKcalPerMin, defaultUnit, onSave, onClose }: {
+  t: Theme; kind: SessionKind; activity: string; age: number | null; restingKcalPerMin: number | null; defaultUnit: string;
   onSave: (v: { mins: number; dist: number; unit: string; watts: number; kcal: number | null; zones: ZoneSeconds }) => void;
   onClose: () => void;
 }) {
   const insets = useSafeAreaInsets();
   const topPad = Math.max(insets.top, 44);
-  const { w, elapsed, liveSample, liveHr, hrPeak, sessionKcal, zoneSecs, liveZone } = useLiveVitals(age);
+  const { w, elapsed, liveSample, liveHr, hrPeak, sessionKcal, zoneSecs, liveZone } = useLiveVitals(age, restingKcalPerMin);
   const [finalElapsed, setFinalElapsed] = useState(0);
   const [finished, setFinished] = useState(false);
   const [confetti, setConfetti] = useState(false);
@@ -1609,10 +1635,10 @@ function TimedSessionRunner({ t, kind, activity, age, defaultUnit, onSave, onClo
   );
 }
 
-function SessionRunner({ t, unit, exercises, focus, nameOf, age, log, injuries, videos, videoStatus, preferTrainerId, onComplete, onClose }: { t: Theme; unit: WeightUnit; exercises: ProgramExercise[]; focus: string; nameOf: (e: ProgramExercise) => string; age: number | null; log: WorkoutEntry[]; injuries: Injury[]; videos: VideoItem[]; videoStatus: LibraryStatus; preferTrainerId: string | null; onComplete: (entries: WorkoutEntry[]) => void; onClose: () => void }) {
+function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerMin, log, injuries, videos, videoStatus, preferTrainerId, onComplete, onClose }: { t: Theme; unit: WeightUnit; exercises: ProgramExercise[]; focus: string; nameOf: (e: ProgramExercise) => string; age: number | null; restingKcalPerMin: number | null; log: WorkoutEntry[]; injuries: Injury[]; videos: VideoItem[]; videoStatus: LibraryStatus; preferTrainerId: string | null; onComplete: (entries: WorkoutEntry[]) => void; onClose: () => void }) {
   const insets = useSafeAreaInsets();
   const topPad = Math.max(insets.top, 44);
-  const { w, elapsed, liveSample, liveHr, hrPeak, sessionKcal, zoneSecs, liveZone } = useLiveVitals(age);
+  const { w, elapsed, liveSample, liveHr, hrPeak, sessionKcal, zoneSecs, liveZone } = useLiveVitals(age, restingKcalPerMin);
   const [finalElapsed, setFinalElapsed] = useState(0);
   const [idx, setIdx] = useState(0);
   const [results, setResults] = useState<{ reps: number; kg: number }[][]>(() => exercises.map(() => []));

@@ -23,7 +23,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Diet, Goal } from '../../src/lib/types';
 import { useClientData } from '../../src/ui/clientData';
 import { useWearables } from '../../src/ui/wearables';
-import { caloriesLeft, caloriesNote, budgetedActiveKcal, macrosFor, applyCoachAdjust, maintenanceFor } from '../../src/lib/nutrition';
+import { caloriesLeft, caloriesNote, dayBurn, macrosFor, applyCoachAdjust, maintenanceFor } from '../../src/lib/nutrition';
 import { energyPlanFor, observedRateKg, MAX_DEFICIT_FRACTION_OF_TDEE, type EnergyPlan } from '../../src/lib/goalEnergy';
 import { useGoalTracker } from '../../src/ui/goalTracker';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
@@ -259,8 +259,12 @@ export default function Nutrition() {
   // The budget argument is what stops a day's movement being counted twice:
   // this target is bmr * activity, so the multiplier has already paid for an
   // ordinary day and only the excess over it is new food. See caloriesLeft().
-  const burnedKcal = useWearables().today.activeKcal || 0;
-  const cal = caloriesLeft(target.kcal, eaten.kcal, burnedKcal, budgetedActiveKcal(target));
+  // dayBurn picks the figure the connected device actually publishes and the
+  // budget it may be compared against — active against the movement the
+  // activity multiplier bought, whole-day against the whole TDEE. Null when no
+  // device has reported, which shows no burn rather than a zero.
+  const burn = dayBurn(target, useWearables().today);
+  const cal = caloriesLeft(target.kcal, eaten.kcal, burn?.burned ?? 0, burn?.budgeted ?? 0, burn?.kind);
   const cycleNote = dayType === 'training' ? `+${CYCLE_KCAL} kcal, more carbs` : dayType === 'rest' ? `−${CYCLE_KCAL} kcal, fewer carbs` : undefined;
 
   if (!hasBody) {
@@ -386,9 +390,8 @@ export default function Nutrition() {
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
               <Text style={{ ...ty.micro, color: t.ink3 }}>Today is a…</Text>
               <Pressable onPress={() => setDayInfo(true)} hitSlop={12} accessibilityRole="button"
-                accessibilityLabel="What training, standard and rest days mean"
-                style={{ width: 18, height: 18, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: t.surface2, borderWidth: hairline, borderColor: t.ring }}>
-                <Text style={{ ...ty.micro, fontWeight: '700', color: t.ink2 }}>i</Text>
+                accessibilityLabel="What training, standard and rest days mean">
+                <Icon name="info" size={17} color={t.ink3} />
               </Pressable>
             </View>
             {cycleNote ? <Text style={{ ...ty.caption, color: t.ink3 }}>{cycleNote}</Text> : null}

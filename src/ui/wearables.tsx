@@ -36,7 +36,7 @@ interface Value {
   /** Re-sync every connected+available provider now (used by the live workout view). */
   syncAll: () => void;
   /** Combined "today" roll-up across every connected device (for the dashboard). */
-  today: { activeKcal: number | null; steps: number | null; heartRateAvg: number | null; heartRateLatest: number | null };
+  today: { activeKcal: number | null; totalKcal: number | null; steps: number | null; heartRateAvg: number | null; heartRateLatest: number | null };
 }
 
 const Ctx = createContext<Value | null>(null);
@@ -205,11 +205,16 @@ export function WearablesProvider({ children }: { children: ReactNode }) {
     return vals.length ? vals : null;
   };
   const kcals = pick('activeKcal');
+  const totals = pick('totalKcal');
   const steps = pick('steps');
   const hrs = pick('heartRateAvg');
   const hrl = pick('heartRateLatest');
   const today = {
     activeKcal: kcals ? Math.max(...kcals) : null,
+    // Kept apart from activeKcal rather than folded into it. WHOOP publishes
+    // only this one, and storing it as "active" is what put 1,309 kcal of
+    // mostly-resting energy on a screen that meant exercise.
+    totalKcal: totals ? Math.max(...totals) : null,
     steps: steps ? Math.max(...steps) : null,
     heartRateAvg: hrs ? Math.round(hrs.reduce((a, b) => a + b, 0) / hrs.length) : null,
     heartRateLatest: hrl && hrl.length ? Math.round(hrl[hrl.length - 1]) : null,

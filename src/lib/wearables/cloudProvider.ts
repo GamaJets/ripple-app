@@ -123,6 +123,7 @@ export function makeCloudProvider(meta: ProviderMeta): WearableProvider {
       if (!raw) return null;
       const m = emptyMetrics(meta.id);
       m.activeKcal = typeof raw.activeKcal === 'number' ? raw.activeKcal : null;
+      m.totalKcal = typeof raw.totalKcal === 'number' ? raw.totalKcal : null;
       m.steps = typeof raw.steps === 'number' ? raw.steps : null;
       m.heartRateAvg = typeof raw.heartRateAvg === 'number' ? raw.heartRateAvg : null;
       m.heartRateResting = typeof raw.heartRateResting === 'number' ? raw.heartRateResting : null;

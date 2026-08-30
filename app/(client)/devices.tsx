@@ -270,16 +270,42 @@ export default function Devices() {
  // Apple Health can contribute several rows here, because it holds whatever
  // every watch and app on the phone wrote into it.
  const lastNightKey = recentNights(1)[0];
- const showLive = connected.length > 0 && (w.today.activeKcal != null || w.today.heartRateAvg != null || w.today.steps != null);
+ // totalKcal counts as a live reading too. WHOOP publishes only that, so
+ // testing activeKcal alone hid the whole panel from every WHOOP user the
+ // moment its energy stopped being filed under the wrong name.
+ const showLive = connected.length > 0 && (w.today.activeKcal != null || w.today.totalKcal != null || w.today.heartRateAvg != null || w.today.steps != null);
 
+ const devicesWord = connected.length === 1 ? 'device' : 'devices';
+ // Active where a device gives it, whole-day otherwise, and never one label on
+ // the other's number.
+ const energy: { kcal: number | null; kind: 'active' | 'total'; from: string } = (() => {
+  const named = (key: 'activeKcal' | 'totalKcal') =>
+   connected.find((p) => typeof w.metrics[p.meta.id]?.[key] === 'number')?.meta.name ?? 'your device';
+  if (typeof w.today.activeKcal === 'number') return { kcal: w.today.activeKcal, kind: 'active', from: named('activeKcal') };
+  if (typeof w.today.totalKcal === 'number') return { kcal: w.today.totalKcal, kind: 'total', from: named('totalKcal') };
+  return { kcal: null, kind: 'active', from: 'your device' };
+ })();
  const DETAILS: Record<MetricKey, { ico: string; title: string; value: string; blurb: string }> = {
- kcal: { ico: 'flame', title: 'Calories Burned', value: `${num(w.today.activeKcal)} kcal`, blurb: 'Active energy your watch recorded today. It feeds into your daily calorie target — on training days you can eat back what you earn.' },
+ kcal: {
+  ico: 'flame',
+  // Which number a device publishes is not a detail: WHOOP reports the WHOLE
+  // day including resting metabolism, Oura reports only energy above rest,
+  // and the two differ by a night's sleep and a working day. Naming both the
+  // quantity and the device it came from is what answers "where does the
+  // 1,309 come from" without anybody having to ask.
+  title: energy.kind === 'total' ? 'Energy Burned Today' : 'Active Calories Burned',
+  value: `${num(energy.kcal)} kcal`,
+  blurb: energy.kcal == null
+   ? `No connected device has reported today's energy yet.`
+   : energy.kind === 'total'
+    ? `Your whole day's energy from ${energy.from}, resting metabolism included — which is most of it. Your calorie target already accounts for an ordinary day, so this is not extra food to eat.`
+    : `Energy above resting from ${energy.from} — the part that is actually exercise. Your calorie target already accounts for an ordinary day's movement.`,
+ },
  hr: { ico: 'heart', title: 'Average Heart Rate', value: `${num(w.today.heartRateAvg)} bpm`, blurb: 'The mean of today’s heart-rate samples from your watch. During a workout, live heart rate is written into that session.' },
  steps: { ico: 'trending', title: 'Steps', value: num(w.today.steps), blurb: 'Total steps today across your connected devices. A simple daily-movement signal that complements your training.' },
  source: { ico: 'clock', title: 'Connected Sources', value: `${connected.length} ${connected.length === 1 ? 'device' : 'devices'}`, blurb: connected.map((p) => `• ${p.meta.name}`).join('\n') || 'No devices connected yet.' },
  };
 
- const devicesWord = connected.length === 1 ? 'device' : 'devices';
  const G = layout.gutter;
 
  return (
@@ -298,12 +324,14 @@ export default function Devices() {
   {/* ── the hero: today's live burn, when a device is feeding it ─────── */}
   {showLive ? (<>
    <Hero
-    label="Burned Today"
-    figure={num(w.today.activeKcal)}
+    label={energy.kind === 'total' ? 'Energy Today' : 'Active Today'}
+    figure={num(energy.kcal)}
     unit="kcal"
-    note={w.today.activeKcal == null
-     ? `Wear your watch — active energy syncs on its own from your ${connected.length} connected ${devicesWord}.`
-     : `Active energy from your watch · feeds your daily calorie target.`}
+    note={energy.kcal == null
+     ? `Wear your watch — energy syncs on its own from your ${connected.length} connected ${devicesWord}.`
+     : energy.kind === 'total'
+      ? `Whole day from ${energy.from}, rest included · already inside your calorie target.`
+      : `Energy above rest, from ${energy.from} · already inside your calorie target.`}
     onPress={() => setDetail('kcal')}
    />
 
@@ -649,7 +677,8 @@ export default function Devices() {
          if (!m) return <Text style={{ ...ty.caption, color: t.ink3 }}>Connected. Tap Sync — no data for today yet.</Text>;
          return (
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.lg }}>
-           {m.activeKcal != null ? <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{num(m.activeKcal)} kcal</Text> : null}
+           {m.activeKcal != null ? <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{num(m.activeKcal)} active kcal</Text>
+            : m.totalKcal != null ? <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{num(m.totalKcal)} kcal all day</Text> : null}
            {m.heartRateAvg != null ? <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{m.heartRateAvg} bpm avg</Text> : null}
            {m.heartRateResting != null ? <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{m.heartRateResting} resting</Text> : null}
            {m.steps != null ? <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{m.steps.toLocaleString()} steps</Text> : null}

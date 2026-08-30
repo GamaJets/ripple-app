@@ -22,7 +22,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { ensureMediaPermission } from '../../src/ui/permissions';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { useTheme } from '../../src/ui/components';
-import { caloriesLeft, budgetedActiveKcal, macrosFor, applyCoachAdjust } from '../../src/lib/nutrition';
+import { caloriesLeft, dayBurn, macrosFor, applyCoachAdjust } from '../../src/lib/nutrition';
 import { useClientData } from '../../src/ui/clientData';
 import { Icon } from '../../src/ui/Icon';
 import { analyzeMeal, visionAvailable } from '../../src/lib/vision';
@@ -224,9 +224,11 @@ export default function FoodLog() {
  };
 
  const tot = { k: fl.consumed.kcal, p: fl.consumed.protein, c: fl.consumed.carbs, f: fl.consumed.fat };
- const burned = useWearables().today.activeKcal || 0;
+ const wToday = useWearables().today;
+ const burn = target ? dayBurn(target, wToday) : null;
+ const burned = burn?.burned ?? 0;
  // Same function the Meals tab calls, so the two cannot drift apart again.
- const remK = target ? caloriesLeft(target.kcal, tot.k, burned, budgetedActiveKcal(target)).net : 0;
+ const remK = target ? caloriesLeft(target.kcal, tot.k, burned, burn?.budgeted ?? 0, burn?.kind).net : 0;
 
  const fillEst = (n: string, k: number, p: number, c: number, f: number) => { setEstN(n); setEstK(String(k)); setEstP(String(p)); setEstC(String(c)); setEstF(String(f)); setReadFailed(false); setReading(false); };
  const takeMealPhoto = async (fromCamera: boolean) => {

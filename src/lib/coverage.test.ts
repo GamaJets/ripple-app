@@ -35,7 +35,7 @@ import { payroll30For, payrollBlocker, type GymTrainer } from './gymTrainers';
 import { gymRollup, trainerHealth } from './ownerAnalytics';
 import { ROW_CAP, capLimit, capped, assertWhole, isTruncated, TruncatedRead } from './rowCap';
 import { isWhole, worstStatus } from '../ui/loadStatus';
-import { caloriesLeft, caloriesNote, budgetedActiveKcal } from './nutrition';
+import { caloriesLeft, caloriesNote, budgetedActiveKcal, dayBurn } from './nutrition';
 import { progressChange, progressChangeLines, progressCsv, progressSummary, progressSpanLabel, PROGRESS_CSV_HEADER, type ProgressRow } from './progressExport';
 import { isDelivered, isAwaitingOutcome, isPayable, payrollByTrainer, payrollTotal, settlementBlocker, settleableSessions, settlementAmount, settleBlocker, sessionProfileIds, namesById, PAY_DELIVERED_ONLY, type PtSession } from './gymSessions';
 import { dwellMinutes, averageDwellMinutes, uniqueMembers, summariseVisits, visitsByHour, peakHour, visitsPerDay, lastSeenDays, type Visit } from './gymVisits';
@@ -4459,7 +4459,10 @@ function by2(v: ReturnType<typeof buildStaff>, id: string) {
 
   // The wording. A burn figure printed beside a number it was NOT added to is
   // what made the old screen unreadable — it looked like it had been.
-  ok(caloriesNote(day).includes('Above a Usual Day'), 'a bigger day says how far above usual it was');
+  ok(caloriesNote(day).includes('More Than Your Activity Level Assumes'),
+    'a bigger day names what it is measured against, because "a usual day" does not');
+  ok(!caloriesNote(day).includes('Usual Day'),
+    'and never claims to know what the client\'s usual day was — nothing here has their history');
   ok(!caloriesNote(day).includes('Already in Your Target'), 'and does not also claim it was ordinary');
   const ordinary = caloriesLeft(2040, 0, 700, budget);
   ok(caloriesNote(ordinary).includes('Already in Your Target'),
@@ -4469,7 +4472,7 @@ function by2(v: ReturnType<typeof buildStaff>, id: string) {
   ok(caloriesNote(day).startsWith('0 of 2,040 kcal Eaten'), 'the note still opens with eaten of target');
   // Title case, with the minor words left alone and the unit symbol intact —
   // "Kcal" is not a unit, and "0 Of 2,040" is not title case.
-  ok(caloriesNote(day).includes(' of ') && caloriesNote(day).includes(' a '),
+  ok(caloriesNote(day).includes(' of ') && caloriesNote(day).includes(' Than Your '),
     'short function words stay lowercase');
   ok(caloriesNote(day).includes('kcal') && !caloriesNote(day).includes('Kcal'),
     'the unit symbol is not a word to capitalise');
@@ -4478,6 +4481,52 @@ function by2(v: ReturnType<typeof buildStaff>, id: string) {
   // which would turn an ordinary day into one "above usual".
   ok(budgetedActiveKcal({ bmr: 2000, tdee: 1500 }) === 0, 'a tdee below bmr budgets nothing, never a negative');
   ok(budgetedActiveKcal({ bmr: 0, tdee: 0 }) === 0, 'and no stats budget nothing');
+}
+
+// ── active energy and whole-day energy are not the same number ────────────
+//
+// "Where does the 1,309 calories burned come from?" From WHOOP — whose cycle
+// `kilojoule` is TOTAL daily expenditure, resting metabolism included, and
+// which was being stored as activeKcal. So a client at a desk had 1,309 kcal
+// of "calories burned" by mid-afternoon, most of it spent lying still, and
+// every screen that reasoned about exercise reasoned about the wrong quantity.
+// Fitbit had the same trap the other way: `activityCalories ?? caloriesOut`
+// fell from active to total without saying so.
+{
+  const m = { bmr: 1620, tdee: Math.round(1620 * 1.55) };   // tdee 2511
+
+  // Active is preferred when a device gives it, and measured against the
+  // movement the multiplier bought.
+  const active = dayBurn(m, { activeKcal: 700, totalKcal: 2400 });
+  ok(active?.kind === 'active' && active.burned === 700, 'an active figure is used as the active figure');
+  ok(active?.budgeted === 891, 'and compared against tdee minus bmr');
+
+  // Whole-day is compared against the whole day. Comparing it against the
+  // active budget is the ~1,600 kcal mistake: 1,309 against 891 reads as a
+  // huge training day when it is an ordinary one.
+  const total = dayBurn(m, { activeKcal: null, totalKcal: 1309 });
+  ok(total?.kind === 'total' && total.burned === 1309, 'a whole-day figure is used as the whole-day figure');
+  ok(total?.budgeted === 2511, 'and compared against the whole tdee, not tdee minus bmr');
+  ok(caloriesLeft(2040, 0, total!.burned, total!.budgeted, total!.kind).extraBurned === 0,
+    'so a mid-afternoon 1,309 is an ordinary day, not 418 above one');
+  ok(caloriesLeft(2040, 0, 1309, budgetedActiveKcal(m), 'active').extraBurned === 418,
+    'which is exactly what the old pairing claimed');
+
+  // No device has reported: null, so a screen shows no burn rather than a zero
+  // standing in for a watch that is on a bedside table.
+  ok(dayBurn(m, { activeKcal: null, totalKcal: null }) === null, 'nothing measured is nothing, not zero');
+
+  // The wording names the quantity, which is what makes the figure answerable.
+  const totalNote = caloriesNote(caloriesLeft(2040, 0, 1309, 2511, 'total'));
+  ok(totalNote.includes('All Day') && totalNote.includes('Rest Included'),
+    'a whole-day figure says so on the screen');
+  const activeNote = caloriesNote(caloriesLeft(2040, 0, 700, 891, 'active'));
+  ok(activeNote.includes('Active kcal Burned'), 'and an active figure says that instead');
+  ok(!activeNote.includes('All Day'), 'never both labels on one number');
+
+  // The kind travels with the figure rather than being re-derived downstream.
+  ok(caloriesLeft(2040, 0, 100, 50).burnKind === 'active', 'active is the default kind');
+  ok(caloriesLeft(2040, 0, 100, 50, 'total').burnKind === 'total', 'and an explicit kind is carried through');
 }
 
 

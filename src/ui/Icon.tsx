@@ -11,7 +11,7 @@ export type IconName =
   | 'pencil' | 'search' | 'swap' | 'camera' | 'flame' | 'bell' | 'check' | 'lock'
   | 'water' | 'moon' | 'sun' | 'target' | 'trophy' | 'clock' | 'message'
   | 'ruler' | 'scale' | 'heart' | 'share' | 'settings' | 'sparkle' | 'dumbbell' | 'chat'
-  | 'eye' | 'eye-off';
+  | 'eye' | 'eye-off' | 'info';
 
 export function Icon({ name, size = 22, color = '#fff', filled = false, strokeWidth = 2 }: {
   // ColorValue, not string: expo-router's tabBarIcon hands its render callback a
@@ -106,6 +106,19 @@ export function Icon({ name, size = 22, color = '#fff', filled = false, strokeWi
       return S(<><Circle cx="18" cy="5" r="2.5" {...common} /><Circle cx="6" cy="12" r="2.5" {...common} /><Circle cx="18" cy="19" r="2.5" {...common} /><Path d="M8.2 10.8 15.8 6.2M8.2 13.2 15.8 17.8" {...common} /></>);
     case 'settings':
       return S(<><Circle cx="12" cy="12" r="3" {...common} /><Path d="M12 2v3M12 19v3M4.2 4.2l2 2M17.8 17.8l2 2M2 12h3M19 12h3M4.2 19.8l2-2M17.8 6.2l2-2" {...common} /></>);
+    case 'info':
+      // A drawn glyph rather than the letter "i" in a <Text>: the micro type
+      // style is uppercase, so the letter rendered as a capital I — reported
+      // as "needs to be a lower case i or a better info icon". A letter also
+      // has to be re-centred by eye inside its circle at every size, which is
+      // what the old inline version was doing.
+      return S(
+        <>
+          <Circle cx="12" cy="12" r="9" {...common} />
+          <Circle cx="12" cy="7.6" r={strokeWidth * 0.6} fill={color} stroke="none" />
+          <Path d="M12 11v5.6" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+        </>,
+      );
     case 'sparkle':
       return S(<Path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z" fill={filled ? color : 'none'} stroke={color} strokeWidth={strokeWidth} strokeLinejoin="round" />);
     default:
