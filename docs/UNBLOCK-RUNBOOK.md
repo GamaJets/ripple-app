@@ -287,3 +287,50 @@ Useful checks:
            has_function_privilege('authenticated', oid, 'EXECUTE') as authed
     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'public';
+
+## `--auto-submit` works for the client app and fails for coach and owner
+
+Symptom, at the end of an otherwise fine build:
+
+    No complete App Store Connect credentials, skipping TestFlight setup
+    Looking up credentials configuration for com.washateria.repple.coach...
+    App Store Connect API Keys cannot be set up in --non-interactive mode.
+        Error: build command failed.
+
+**The build still ran.** EAS queues it before the submit step is checked, so
+there is a finished `.ipa` on the build page and only the hand-off to Apple was
+lost. Check with `eas build:list --platform ios --limit 5` before rebuilding —
+rebuilding costs a slot and fixes nothing.
+
+The cause is not in this repo. `eas.json` is already correct: each profile
+carries its own `ascAppId` (client 6790096518, coach 6804358275, owner has its
+own). What is missing is an **App Store Connect API key stored against the
+coach and owner apps on EAS**. The client app has one, which is the whole
+reason its builds submit themselves and the other two do not.
+
+It is a one-time, interactive, credential-handling job and it is the owner's to
+do — it authenticates to an Apple account:
+
+    npx eas-cli credentials --platform ios
+
+Select the app → App Store Connect API Key → set up for EAS Submit. **One key
+serves all three apps**; reuse the one already on the account rather than
+generating three. If the `.p8` is gone, App Store Connect → Users and Access →
+Integrations → App Store Connect API → generate one with the App Manager role.
+Apple lets you download it exactly once.
+
+To hand an already-built artifact to Apple without rebuilding:
+
+    npx eas-cli submit --platform ios --profile production-coach --latest
+
+That command sets the credential up on first run and then submits, so it does
+both jobs at once.
+
+### Why this is not fixed in eas.json
+
+`eas.json` accepts `ascApiKeyPath` / `ascApiKeyId` / `ascApiKeyIssuerId`. Using
+them would put an issuer id and a path to a private key in a committed file and
+make every machine that builds need the `.p8` on disk at that path. The
+EAS-managed key is stored once, server-side, shared by the three apps, and
+nothing about it lands in the repo. That is why the fix is a command rather
+than a diff.

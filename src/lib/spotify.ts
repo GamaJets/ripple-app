@@ -24,6 +24,7 @@
 // classification and the reason a 403 points at the development-mode allowlist.
 //
 // expo-auth-session is lazy-required so an OTA without it degrades gracefully.
+import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   classifySpotifyResponse, networkFailure, nowPlayingFrom, playlistsFrom,
@@ -73,7 +74,25 @@ export class SpotifyError extends Error {
 function raise(f: SpotifyFailure): never { throw new SpotifyError(f.kind, f.message, f.status); }
 
 export function spotifyClientId(): string {
-  try { return (process.env as any)?.EXPO_PUBLIC_SPOTIFY_CLIENT_ID || ''; } catch { return ''; }
+  // Expo's Babel plugin replaces the LITERAL member expression
+  // `process.env.EXPO_PUBLIC_X` with a string at build time. It matches on that
+  // exact shape, so `(process.env as any)?.EXPO_PUBLIC_...` — which is what
+  // this was — matches nothing, is left untouched, and reads undefined from a
+  // bundle where process.env is empty. The id was set in .env and in all eight
+  // eas.json profiles the whole time; the app just could not see it, and told
+  // testers "Spotify isn't set up in this build — the owner sets
+  // EXPO_PUBLIC_SPOTIFY_CLIENT_ID", which sent them looking for a
+  // configuration problem that did not exist.
+  //
+  // The literal form first, then app.config.ts's `extra` — the same fallback
+  // src/lib/wearables/oauthConfig.ts uses, and the reason the wearable client
+  // ids survived this while Spotify's did not.
+  const inlined = process.env.EXPO_PUBLIC_SPOTIFY_CLIENT_ID;
+  if (inlined) return inlined;
+  try {
+    const fromExtra = (Constants.expoConfig?.extra as Record<string, unknown> | undefined)?.EXPO_PUBLIC_SPOTIFY_CLIENT_ID;
+    return typeof fromExtra === 'string' ? fromExtra : '';
+  } catch { return ''; }
 }
 export function spotifyConfigured(): boolean { return !!spotifyClientId(); }
 

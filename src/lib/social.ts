@@ -17,12 +17,17 @@ export const SOCIAL_PLATFORMS: PlatformInfo[] = [
 
 // Connected once the platform's OAuth client id is configured (and the account linked).
 export function socialConnected(p: SocialPlatform): boolean {
-  const env = process.env;
+  // Read as literal member expressions, never through an alias. Expo's Babel
+  // plugin substitutes `process.env.EXPO_PUBLIC_X` at build time by matching
+  // that exact shape, so `const env = process.env; env.EXPO_PUBLIC_X` is left
+  // alone and reads undefined from a bundle — every platform would report as
+  // not connected however the build was configured. Same mistake as the one
+  // that told testers Spotify was not set up.
   switch (p) {
-    case 'youtube': return !!env.EXPO_PUBLIC_YOUTUBE_CLIENT_ID;
-    case 'instagram': return !!env.EXPO_PUBLIC_INSTAGRAM_CLIENT_ID;
-    case 'facebook': return !!env.EXPO_PUBLIC_FACEBOOK_APP_ID;
-    case 'tiktok': return !!env.EXPO_PUBLIC_TIKTOK_CLIENT_KEY;
+    case 'youtube': return !!process.env.EXPO_PUBLIC_YOUTUBE_CLIENT_ID;
+    case 'instagram': return !!process.env.EXPO_PUBLIC_INSTAGRAM_CLIENT_ID;
+    case 'facebook': return !!process.env.EXPO_PUBLIC_FACEBOOK_APP_ID;
+    case 'tiktok': return !!process.env.EXPO_PUBLIC_TIKTOK_CLIENT_KEY;
     default: return false;
   }
 }
