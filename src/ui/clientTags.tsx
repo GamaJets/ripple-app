@@ -1,7 +1,7 @@
 // Client tagging for the coach — attach custom labels ("new", "comp prep",
 // "high-touch", "paused"…) to any client and filter the roster by them. Persists
-// to Supabase `client_tags` (coach_id, client_id, tag) with an in-memory
-// fallback + demo seed, so it works signed-in or in demo mode.
+// to Supabase `client_tags` (coach_id, client_id, tag), with an in-memory copy
+// so the roster filter stays responsive between reads.
 //
 // Tags are used to AIM things. The broadcast screen sends a message to everyone
 // carrying a tag; the roster filter narrows a coach's list by one. So a failed
@@ -30,21 +30,19 @@ interface TagsValue {
   removeTag: (clientId: string, tag: string) => Promise<boolean>;
 }
 
-// No seed. This used to be
+// The map starts empty, and nothing seeds it. It used to be initialised with
 //   { c1: ['comp prep', 'high-touch'], c2: ['new'], c4: ['paused'] }
 // merged unconditionally into `allTags`, so every real coach saw four segments
 // they had never created — rendered as selectable chips on the broadcast screen,
-// where each one matched zero recipients. The ids are the mock clients that were
+// where each one matched zero recipients. The ids were sample clients that were
 // deleted from the roster long ago.
-const SEED: Record<string, string[]> = {};
-
 const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ').slice(0, 24);
 
 const Ctx = createContext<TagsValue | null>(null);
 
 export function ClientTagsProvider({ children }: { children: ReactNode }) {
   const authRev = useAuthRevision();
-  const [map, setMap] = useState<Record<string, string[]>>(() => JSON.parse(JSON.stringify(SEED)));
+  const [map, setMap] = useState<Record<string, string[]>>({});
   const [uid, setUid] = useState<string | null>(null);
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
 
@@ -82,7 +80,9 @@ export function ClientTagsProvider({ children }: { children: ReactNode }) {
         const page = capped(data);
         const next: Record<string, string[]> = {};
         page.rows.forEach((r: any) => { (next[r.client_id] ||= []).push(r.tag); });
-        // Merge real tags over the demo seed (real wins for overlapping clients).
+        // Merged rather than assigned so a tag added optimistically while this
+        // read was in flight is not dropped by the answer to a query that was
+        // sent before it.
         if (Object.keys(next).length) setMap((p) => ({ ...p, ...next }));
         setStatus(page.truncated ? 'partial' : 'ready');
       } catch { if (!cancelled) setStatus('error'); }

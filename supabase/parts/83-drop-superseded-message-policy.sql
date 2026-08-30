@@ -1,0 +1,28 @@
+-- A client could forge a message from their coach.
+--
+-- 01-schema.sql created `msg_participants` — one FOR ALL policy covering both
+-- sides of a thread. 10-messages-setup.sql replaced it with the pair that pins
+-- each side to its own `sender` value, and dropped `msg_client` and
+-- `msg_coach` before recreating them — but never dropped the policy it was
+-- superseding. Both have been live ever since.
+--
+-- Two Postgres rules make that a hole rather than an untidiness. Permissive
+-- policies are OR'd, so the narrower pair cannot constrain anything the wider
+-- one already allows. And a FOR ALL policy with no WITH CHECK reuses its USING
+-- expression for writes — so `msg_participants` permitted a client to INSERT
+-- any row in their own thread, including `sender = 'coach'`.
+--
+-- The effect: a client could write a message into their own thread that the
+-- app renders as having come from their coach, and their coach would see it
+-- there too. Nothing in the app does this; nothing stopped it either.
+--
+-- Dropping it removes no legitimate access. Its USING clause is exactly the
+-- union of the two policies that remain: `client_id = auth.uid()` is
+-- msg_client's, and the trainer_id EXISTS clause is what is_my_client()
+-- evaluates for msg_coach.
+--
+-- The general lesson, for the next time a part supersedes another: dropping
+-- the policies you are about to recreate is not the same as dropping the one
+-- you are replacing. Only the names you write survive; the old name does not
+-- go away because a newer file exists.
+drop policy if exists msg_participants on public.messages;

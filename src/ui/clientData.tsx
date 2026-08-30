@@ -142,7 +142,8 @@ const MODE_KEY = 'repple.coachingMode';
 const initials = (n: string) => n.trim().split(/\s+/).map((x) => x[0]).join('').slice(0, 2).toUpperCase();
 
 export function ClientDataProvider({ children }: { children: ReactNode }) {
-  // NO mock data — always start empty. Real data loads from Supabase if user is authenticated.
+  // Always starts empty. Real data loads from Supabase for a signed-in user;
+  // there is nothing to fall back to for anyone else.
   const [name, setName] = useState('');
   const [dob, setDob] = useState('');
   const [photo, setPhoto] = useState<string | null>(null);
@@ -418,7 +419,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
         // "not measured yet". Say instead that we do not know.
         if (error) { reportError('clientData.hydrate.scans', error); setScansStatus('error'); return; }
         const page = capped(data);
-        // Only ever show the user's own real scans — never seed demo scans into a live account.
+        // Only ever show the user's own real scans — nothing is ever seeded.
         setScans(page.rows.slice().reverse().map((r: any) => ({ id: r.id, takenAt: r.taken_at, weightKg: Number(r.weight_kg), bodyFatPct: Number(r.body_fat_pct), skeletalMuscleKg: r.skeletal_muscle_kg != null ? Number(r.skeletal_muscle_kg) : null, source: r.source ?? '', metrics: r.metrics ?? undefined })));
         setScansStatus(page.truncated ? 'partial' : 'ready');
       } catch (e) { reportError('clientData.hydrate.scans', e); if (!cancelled) setScansStatus('error'); }

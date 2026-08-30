@@ -52,7 +52,7 @@ export interface ExportResult {
 export async function exportMyDataDetailed(): Promise<ExportResult> {
   const out: Record<string, unknown> = { app: 'Repple', exportedAt: new Date().toISOString() };
   if (!USE_SUPABASE) {
-    out.note = 'Local/demo mode — no server-stored data.';
+    out.note = 'Not connected to Repple — nothing of yours is stored on a server to export.';
     out.complete = true;
     return { json: JSON.stringify(out, null, 2), complete: true, failed: [] };
   }

@@ -28,7 +28,6 @@ export interface TrainerInvite {
   email: string;
   status: 'pending' | 'accepted' | 'revoked';
   createdAt: string;
-  demo?: boolean;
 }
 
 interface TrainerInvitesValue {
@@ -79,14 +78,10 @@ export function TrainerInvitesProvider({ children }: { children: ReactNode }) {
       return AsyncStorage.setItem(DISMISS_KEY, JSON.stringify([...set]));
     }).catch(() => {});
   };
-  // No demo invitation. This used to inject a fabricated pending invite from
-  // "Repple HQ" — and it fired whenever there was no authenticated user, not
-  // only in no-backend mode, so a signed-out trainer saw an invitation that
-  // had never been sent.
-  const seedDemo = () => { setReceived([]); };
-
   useEffect(() => {
-    if (!USE_SUPABASE) { seedDemo(); setStatus('ready'); return; }
+    // No backend connected: nobody can have been invited, so an empty list is
+    // the true answer and not a read we failed to make.
+    if (!USE_SUPABASE) { setReceived([]); setStatus('ready'); return; }
     let cancelled = false;
     (async () => {
       let failed = false;
@@ -106,7 +101,7 @@ export function TrainerInvitesProvider({ children }: { children: ReactNode }) {
         if (authErr) { setStatus('error'); return; }
         const u = auth?.user;
         // Signed out: nobody has been invited, which is knowable and true.
-        if (!u) { seedDemo(); setStatus('ready'); return; }
+        if (!u) { setReceived([]); setStatus('ready'); return; }
         setUid(u.id);
         try {
           const prof = await supabase.from('profiles').select('full_name, tenant_id').eq('id', u.id).single();
@@ -141,11 +136,11 @@ export function TrainerInvitesProvider({ children }: { children: ReactNode }) {
               const page = capped(r.data);
               if (page.truncated) truncated = true;
               if (page.rows.length) setReceived(page.rows.map(rowTo));
-              // no pending invites for a real account -> clean slate, no sample
+              // No rows is a clean slate, and `received` already reflects it.
             }
-          } catch { failed = true; /* real account: never fall back to the sample invite */ }
+          } catch { failed = true; }
         }
-      } catch { failed = true; seedDemo(); }
+      } catch { failed = true; setReceived([]); }
       if (!cancelled) setStatus(failed ? 'error' : truncated ? 'partial' : 'ready');
     })();
     return () => { cancelled = true; };
@@ -184,7 +179,7 @@ export function TrainerInvitesProvider({ children }: { children: ReactNode }) {
   const acceptTrainerInvite: TrainerInvitesValue['acceptTrainerInvite'] = async (id) => {
     const inv = received.find((i) => i.id === id);
     setReceived((p) => p.filter((i) => i.id !== id));
-    if (!USE_SUPABASE || !inv || inv.demo) { markDismissed(id); return false; }
+    if (!USE_SUPABASE || !inv) { markDismissed(id); return false; }
     let attached = false;
     try {
       // This RPC is what puts the trainer in the owner's tenant and starts

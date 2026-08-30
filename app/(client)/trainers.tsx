@@ -384,7 +384,7 @@ export default function FindTrainer() {
           <View style={{ marginTop: sp.lg }}>
             {received.map((iv) => (
               <Notice key={iv.id} tone={t.brand}
-                kicker={`Coaching invitation${iv.demo ? ' · sample' : ''}`}
+                kicker="Coaching invitation"
                 title={`${iv.coachName || 'A Coach'} invited you`}
                 note={`${COACHED_MODE_SHORT[iv.mode]} coaching. ${COACHING_MODE_NOTE[iv.mode]} Accept to connect — their program, feedback and messaging turn on for you.`}>
                 <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.lg }}>

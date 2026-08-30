@@ -69,7 +69,8 @@ interface MyTrainerProfileValue extends TrainerProfileFields {
 const Ctx = createContext<MyTrainerProfileValue | null>(null);
 
 export function MyTrainerProfileProvider({ children }: { children: ReactNode }) {
-  // NO mock data — always start empty. Real data loads from Supabase if user is authenticated.
+  // Always starts empty. Real data loads from Supabase for a signed-in user;
+  // there is nothing to fall back to for anyone else.
   const [name, setName] = useState('');
   const [photo, setPhoto] = useState<string | null>(null);
   const [tagline, setTagline] = useState('');

@@ -1,6 +1,6 @@
 // Shared, reactive workout log. Persists to Supabase per signed-in user
 // (hydrate on mount + optimistic insert on log). Starts empty: a new account has
-// no workout history until the user logs one. Never seeds demo data.
+// no workout history until the user logs one. Never seeds sample data.
 //
 // ── Why this hook now reports a status, and why the writes return a boolean ──
 //

@@ -1,9 +1,12 @@
-// Trainer-portal shapes, the shared at-risk rule, and the built-in exercise
-// library.
+// Trainer-portal shapes and the shared at-risk rule.
 //
-// ROSTER is empty. It previously held five invented clients ("Jordan P.",
-// "Sam R.", "Alex M.", "Priya N.") with invented adherence, weight deltas and
-// injuries, which shipped in the production bundle.
+// There is no sample data left in this file, and that is the point of it now.
+// It once exported ROSTER — five invented clients ("Jordan P.", "Sam R.",
+// "Alex M.", "Priya N.") with invented adherence, weight deltas and injuries —
+// and EX_VIDEOS, a six-entry "video library" whose rows were marked
+// `uploaded: true` while their URLs were YouTube search queries, so a coach was
+// shown six clips they had never recorded. Both shipped in the production
+// bundle. What remains are the types the trainer screens are built on.
 import type { CoachedMode } from './types';
 
 export interface RosterClient {
@@ -52,7 +55,6 @@ export interface RosterClient {
   mealsPerDay?: number;
   avoid?: import('./meals').Allergen[];
 }
-export const ROSTER: RosterClient[] = [];
 export interface ExVideo { id: string; name: string; group: string; dur: string; uploaded: boolean; url?: string; }
 
 // Shared "at-risk" definition so every trainer screen agrees (adherence low OR
@@ -79,15 +81,3 @@ export function noRecordOf(c: { adherence: number | null; lastActive: string }):
 export function atRiskClient(c: { adherence: number | null; lastActive: string }): boolean {
   return (c.adherence != null && c.adherence < 80) || staleDays(c.lastActive) >= 2 || noRecordOf(c);
 }
-// Built-in exercise library. Each ships with a real proper-form demo (opens
-// relevant videos so the row is never a dead end); a trainer replaces any of
-// these with their own recorded clip from the Videos screen.
-const demo = (q: string) => 'https://www.youtube.com/results?search_query=' + encodeURIComponent(q + ' proper form technique');
-export const EX_VIDEOS: ExVideo[] = [
-  { id: 'v1', name: 'Back Squat', group: 'Legs', dur: '', uploaded: true, url: demo('barbell back squat') },
-  { id: 'v2', name: 'Barbell Bench Press', group: 'Chest', dur: '', uploaded: true, url: demo('barbell bench press') },
-  { id: 'v3', name: 'Romanian Deadlift', group: 'Hamstrings', dur: '', uploaded: true, url: demo('romanian deadlift') },
-  { id: 'v4', name: 'Pull-up', group: 'Back', dur: '', uploaded: true, url: demo('pull up') },
-  { id: 'v5', name: 'Overhead Press', group: 'Shoulders', dur: '', uploaded: true, url: demo('overhead barbell press') },
-  { id: 'v6', name: 'Walking Lunge', group: 'Legs', dur: '', uploaded: true, url: demo('walking lunge') },
-];

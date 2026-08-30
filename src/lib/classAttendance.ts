@@ -12,6 +12,16 @@ export interface RosterMember { userId: string; name: string; status: string; at
 
 
 /**
+ * The id the check-in screen stands in with when it was routed to without one.
+ *
+ * It exists so both functions below can refuse it by name. A screen that does
+ * not know which class it is looking at must not read a roster and must not
+ * write attendance — the reads would answer about nothing and the writes would
+ * be silently discarded while the trainer watched ticks land.
+ */
+export const UNLINKED_CLASS = 'unlinked';
+
+/**
  * Load a class's booked members with their attendance.
  *
  * `[]` means nobody booked. **`null` means we could not find out** — and the two
@@ -21,7 +31,7 @@ export interface RosterMember { userId: string; name: string; status: string; at
  * believes it stops checking anybody in, and nobody gets paid for the class.
  */
 export async function classRoster(classId: string): Promise<RosterMember[] | null> {
-  if (!USE_SUPABASE || !classId || classId.startsWith('demo')) return null;
+  if (!USE_SUPABASE || !classId || classId === UNLINKED_CLASS) return null;
   try {
     const { data, error } = await supabase.rpc('class_roster', { p_class: classId });
     // The RPC resolves with { data, error } rather than throwing, so the old
@@ -43,7 +53,7 @@ export async function classRoster(classId: string): Promise<RosterMember[] | nul
  * silence is the one response that guarantees nobody notices.
  */
 export async function setAttendance(classId: string, userId: string, present: boolean): Promise<boolean> {
-  if (!USE_SUPABASE || !classId || classId.startsWith('demo')) return false;
+  if (!USE_SUPABASE || !classId || classId === UNLINKED_CLASS) return false;
   try {
     const { error } = await supabase.rpc('set_class_attendance', { p_class: classId, p_user: userId, p_present: present });
     return !error;

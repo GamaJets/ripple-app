@@ -8,7 +8,9 @@
 // and invented booking counts, and BRANCHES hardcoded six Dubai locations that
 // a real gym does not necessarily have — both shipped in the production
 // bundle, and the branch list was what a trainer picked from when creating a
-// real class. Branches now come from the gym's own classes.
+// real class. Branches now come from the gym's own classes, and MOCK_CLASSES
+// is gone entirely: it had been an empty array nothing imported, which is a
+// place for sample data to grow back.
 
 export type ClassBookingStatus = 'booked' | 'waitlist';
 
@@ -33,5 +35,3 @@ export const CLASS_KINDS = ['Abs & Glutes', 'Boxing', 'CrossFit', 'Cycle', 'GRIT
 export function branchesFrom(classes: { branch: string }[]): string[] {
   return [...new Set(classes.map((c) => (c.branch || '').trim()).filter(Boolean))].sort();
 }
-
-export const MOCK_CLASSES: GymClass[] = [];

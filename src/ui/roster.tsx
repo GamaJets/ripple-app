@@ -15,7 +15,7 @@
 //     `manual` as `[]` and every manually added client simply disappeared.
 //   · `if (error || !cls || !cls.length) { … return; }` folded a failed read and
 //     an empty table into one branch.
-//   · the outer `catch { /* stay on demo roster */ }` swallowed the rest.
+//   · the outer `catch { /* stay on the sample roster */ }` swallowed the rest.
 //
 // The reads still degrade the same way — a coach with no signal keeps whatever
 // loaded — but `status` now says whether the list on screen is the server's
@@ -87,7 +87,7 @@ export function RosterProvider({ children }: { children: ReactNode }) {
   const [roster, setRoster] = useState<RosterClient[]>([]);
   // Trainer-set delivery overrides (persisted). Real DB clients default to
   // 'online'; this lets the coach classify each so the roster filter works for
-  // them, and it is the only home a demo or not-yet-synced client has.
+  // them, and it is the only home a not-yet-synced client has.
   //
   // It used to carry a second job — holding 'hybrid', which no `mode` column
   // would accept — and outlived it when part 57 widened the constraints. What
@@ -99,8 +99,10 @@ export function RosterProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
   useEffect(() => { (async () => { try { const raw = await AsyncStorage.getItem(MODE_KEY); if (raw) setModeOverrides(JSON.parse(raw)); } catch { /* local classification only; the roster itself is unaffected */ } })(); }, []);
 
-  // A real signed-in coach sees ONLY their linked clients (clean slate if none);
-  // a guest/demo (no session) sees the sample roster so the portal isn't empty to explore.
+  // A signed-in coach sees ONLY their linked clients, and a clean slate if they
+  // have none. With no session there is nothing to read and nothing to show —
+  // there is no sample roster to fall back to any more, which is why the
+  // no-session branch below sets 'ready' rather than filling the list.
   useEffect(() => {
     if (!USE_SUPABASE) return;
     let cancelled = false;
@@ -309,14 +311,36 @@ export function RosterProvider({ children }: { children: ReactNode }) {
     const localId = `c${SEQ++}`;
     setRoster((p) => [...p, { id: localId, name: n, goal, weightDelta: null, adherence: null, lastActive: 'just added', next: '—', unread: 0, mode, joinedAt: new Date().toISOString() }]);
     // Durable: persist to coach_clients so the roster survives restarts/devices.
-    if (!USE_SUPABASE || !uid) return false;
+    //
+    // `uid` is null until the read effect above has resolved a session. A coach
+    // who opens Add Client faster than that used to get a silent false — the
+    // row appeared on screen, nothing was written, and no error existed to
+    // read. Resolve it here rather than trusting the effect to have run.
+    if (!USE_SUPABASE) return false;
+    let writerId = uid;
+    if (!writerId) {
+      try {
+        const { data: auth } = await supabase.auth.getUser();
+        writerId = auth?.user?.id ?? null;
+        if (writerId) setUid(writerId);
+      } catch (e) { reportError('roster.addClient.session', e); }
+    }
+    if (!writerId) { reportError('roster.addClient', new Error('no signed-in coach to attribute the client to')); return false; }
     try {
-      const { data, error } = await supabase.from('coach_clients').insert({ trainer_id: uid, name: n, goal, mode }).select('id').single();
+      const { data, error } = await supabase.from('coach_clients').insert({ trainer_id: writerId, name: n, goal, mode }).select('id').single();
       const sid = data?.id;
-      if (error || !sid) return false;
+      // Reported, not swallowed. This returned a bare false on every failure —
+      // a refused policy, a CHECK the UI can violate, a dropped connection —
+      // and the caller did not read it either, so a coach added somebody, saw
+      // them appear, and found them gone at the next launch with nothing
+      // anywhere saying why. `coach_clients` was empty on a live account whose
+      // owner had added a client that afternoon, and there was no way to find
+      // out what had happened to it.
+      if (error) { reportError('roster.addClient', error, { mode, hasGoal: !!goal }); return false; }
+      if (!sid) { reportError('roster.addClient', new Error('insert returned no id'), { mode }); return false; }
       setRoster((p) => p.map((c) => (c.id === localId ? { ...c, id: sid } : c)));
       return true;
-    } catch { return false; }
+    } catch (e) { reportError('roster.addClient', e, { mode }); return false; }
   };
   // ── Removing a client, and the two records that word covers ────────────────
   //

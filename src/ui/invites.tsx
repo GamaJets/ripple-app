@@ -2,8 +2,7 @@
 // client with that email sees a pending invitation and accepts, which links the
 // two accounts (accept_invite → link_coaching → coaching_relationships +
 // clients.trainer_id). Supabase-backed. Accepted/declined invites are remembered
-// locally (AsyncStorage) so a handled invitation never re-appears on next login,
-// and a real signed-in account never sees the sample invite.
+// locally (AsyncStorage) so a handled invitation never re-appears on next login.
 //
 // ── Accepting an invitation was the failure with no symptom ────────────────
 //
@@ -41,7 +40,6 @@ export interface Invite {
   mode: InviteMode;
   status: 'pending' | 'accepted' | 'revoked';
   createdAt: string;
-  demo?: boolean;
 }
 
 interface InvitesValue {
@@ -88,10 +86,6 @@ const rowToInvite = (r: any): Invite => ({
   createdAt: r.created_at ?? new Date().toISOString(),
 });
 
-// No demo invitation. A fabricated pending invite from "Coach Sam Rivera" used
-// to be injected here in no-backend mode; a client had a coaching invitation
-// from someone who does not exist sitting in their app.
-
 const Ctx = createContext<InvitesValue | null>(null);
 
 export function InvitesProvider({ children }: { children: ReactNode }) {
@@ -137,11 +131,11 @@ export function InvitesProvider({ children }: { children: ReactNode }) {
       try { const raw = await AsyncStorage.getItem(DISMISS_KEY); if (raw) skip = new Set<string>(JSON.parse(raw)); } catch { /* ignore */ }
       if (!cancelled()) setDismissed(skip);
 
-      // Demo mode (no backend): show the sample invite unless already handled.
+      // No backend connected: there is nowhere an invitation could have come
+      // from, so an empty list is the true answer rather than a failed read.
       if (!USE_SUPABASE) { if (!cancelled()) { setReceived([]); setStatus('ready'); } return; }
 
-      // Real backend: only ever show genuine pending invites for this email.
-      // No fake/sample invite for a live account (that was the re-pop bug).
+      // Only ever show genuine pending invites for this email.
       let failed = false;
       // A read that came back short, which is not a read that did not happen:
       // the invitations listed are real, there are simply more of them.
@@ -201,7 +195,7 @@ export function InvitesProvider({ children }: { children: ReactNode }) {
             }
           } catch { failed = true; if (!cancelled()) setReceived([]); }
         }
-      } catch { failed = true; /* leave received empty — no sample invite on a real account */ }
+      } catch { failed = true; /* leave received empty — 'error' below is what stops the screen calling it "no invitations" */ }
       if (!cancelled()) setStatus(failed ? 'error' : truncated ? 'partial' : 'ready');
     };
     run();
@@ -251,7 +245,7 @@ export function InvitesProvider({ children }: { children: ReactNode }) {
     const inv = received.find((i) => i.id === id);
     const mode: InviteMode = inv?.mode ?? 'online';
     setReceived((p) => p.filter((i) => i.id !== id));
-    if (!USE_SUPABASE || !inv || inv.demo) { markDismissed(id); return { mode, ok: true }; }
+    if (!USE_SUPABASE || !inv) { markDismissed(id); return { mode, ok: true }; }
     // The dismiss is what makes a failure here permanent — the id goes into a
     // persisted set and the invitation never appears again — so it now waits
     // for the server to confirm the link.
@@ -277,7 +271,7 @@ export function InvitesProvider({ children }: { children: ReactNode }) {
     // invitation the coach still sees as pending, not a link the client thinks
     // exists and does not.
     markDismissed(id);
-    if (!USE_SUPABASE || !inv || inv.demo || id.startsWith('local-')) return true;
+    if (!USE_SUPABASE || !inv || id.startsWith('local-')) return true;
     try {
       const { error } = await supabase.from('coach_invites').update({ status: 'revoked' }).eq('id', id);
       return !error;

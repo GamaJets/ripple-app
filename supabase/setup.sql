@@ -10314,3 +10314,65 @@ grant execute on function public.join_by_code(text, text) to authenticated;
 
 comment on function public.my_join_codes is
   'Per-code join counts for the signed-in coach: the default code plus every named one, live and revoked. Rows sum to my_join_code_stats().';
+
+-- ▶ profile-units.sql
+
+-- Units belong to the PERSON, not to their role.
+--
+-- weight_unit and length_unit have lived on `clients` since TF-37, which is
+-- correct for a client and leaves everybody else with nowhere to put the
+-- answer. A coach has no `clients` row, so their choice fell back to this
+-- handset's AsyncStorage: it survived a relaunch and not a reinstall, and did
+-- not follow them to a second device. In practice every coach was pinned to
+-- kilograms, and the trainer portal offered no control to change it at all —
+-- while `log-session.tsx` wrote whatever they typed into a CLIENT's history
+-- with a hardcoded "kg" label.
+--
+-- `profiles` is the one table every account has whatever its role, which is
+-- why the columns go here rather than on `trainers`: an owner has the same
+-- problem and would otherwise need a third home for the same preference.
+--
+-- Nullable, and deliberately so. NULL means "never chosen" and must not
+-- overwrite what a device already had — see the note in src/ui/settings.tsx.
+-- The CHECK is the same one `clients` carries, so a row cannot hold a unit the
+-- app has no code path for.
+--
+-- No new policy: profiles_self is already `for all` on `id = auth.uid()`, so
+-- an account can read and write its own units and nobody else's.
+alter table public.profiles
+  add column if not exists weight_unit text check (weight_unit in ('kg', 'lb')),
+  add column if not exists length_unit text check (length_unit in ('cm', 'in'));
+
+comment on column public.profiles.weight_unit is
+  'kg or lb, the unit this ACCOUNT reads weights in, whatever its role. Null means never chosen. Clients also have clients.weight_unit, which stays authoritative for them.';
+
+-- ▶ drop-superseded-message-policy.sql
+
+-- A client could forge a message from their coach.
+--
+-- 01-schema.sql created `msg_participants` — one FOR ALL policy covering both
+-- sides of a thread. 10-messages-setup.sql replaced it with the pair that pins
+-- each side to its own `sender` value, and dropped `msg_client` and
+-- `msg_coach` before recreating them — but never dropped the policy it was
+-- superseding. Both have been live ever since.
+--
+-- Two Postgres rules make that a hole rather than an untidiness. Permissive
+-- policies are OR'd, so the narrower pair cannot constrain anything the wider
+-- one already allows. And a FOR ALL policy with no WITH CHECK reuses its USING
+-- expression for writes — so `msg_participants` permitted a client to INSERT
+-- any row in their own thread, including `sender = 'coach'`.
+--
+-- The effect: a client could write a message into their own thread that the
+-- app renders as having come from their coach, and their coach would see it
+-- there too. Nothing in the app does this; nothing stopped it either.
+--
+-- Dropping it removes no legitimate access. Its USING clause is exactly the
+-- union of the two policies that remain: `client_id = auth.uid()` is
+-- msg_client's, and the trainer_id EXISTS clause is what is_my_client()
+-- evaluates for msg_coach.
+--
+-- The general lesson, for the next time a part supersedes another: dropping
+-- the policies you are about to recreate is not the same as dropping the one
+-- you are replacing. Only the names you write survive; the old name does not
+-- go away because a newer file exists.
+drop policy if exists msg_participants on public.messages;

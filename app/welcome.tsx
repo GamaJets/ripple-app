@@ -19,7 +19,7 @@ import { useBrand } from '../src/ui/brand';
 import { USE_SUPABASE } from '../src/lib/config';
 import { VARIANT, VARIANT_LABEL, VARIANT_TILE } from '../src/lib/variant';
 import { recordReferral, stashPendingReferral, flushPendingReferral } from '../src/lib/referrals';
-import { Rule, Card, Cta } from '../src/ui/kit';
+import { Card, Cta } from '../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../src/theme/scale';
 
 function Ripple({ size, color }: { size: number; color: string }) {
@@ -211,13 +211,7 @@ export default function Welcome() {
             <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>Continue with Google</Text>
           </Pressable>
 
-          <View style={{ marginTop: sp.xl }}><Rule /></View>
-          <Pressable onPress={() => { auth.enterDemo(); router.replace('/'); }} accessibilityRole="button" accessibilityLabel="Explore the demo" style={{ alignItems: 'center', paddingVertical: sp.lg }}>
-            <Text style={{ ...ty.body, fontWeight: '600', color: t.brand }}>Explore the demo →</Text>
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>See the full app with sample data — no sign-up needed</Text>
-          </Pressable>
-
-          <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.md }}>{USE_SUPABASE ? 'Your account is securely stored. By continuing you agree to the Terms & Privacy Policy.' : 'Demo mode — any email/password works. Real accounts activate when the backend is connected.'}</Text>
+          <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.xl }}>{USE_SUPABASE ? 'Your account is securely stored. By continuing you agree to the Terms & Privacy Policy.' : 'Not connected to Repple — any email/password works and stays on this device. Real accounts activate when the backend is connected.'}</Text>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>

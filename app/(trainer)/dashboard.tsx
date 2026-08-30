@@ -161,6 +161,11 @@ const SHORTCUTS: [IconName, string, string][] = [
   ['chart', 'Analytics', '/(trainer)/analytics'],
   ['trophy', 'Leaderboard', '/(trainer)/leaderboard'],
   ['message', 'Feedback', '/(trainer)/feedback'],
+  // The coach's own training, last because it is the one thing here that is
+  // not about a client. It was reachable only from a row inside Profile, which
+  // is buried — and a coach who cannot find where to log their own session
+  // logs it nowhere, or worse, into somebody else's record.
+  ['dumbbell', 'My Training', '/(trainer)/my-training'],
 ];
 
 /**
@@ -618,7 +623,7 @@ export default function TrainerClients() {
           {trainerInvites.length > 0 ? (
             <View>
               {trainerInvites.map((iv) => (
-                <Notice key={iv.id} tone={t.brand} kicker={`Platform invitation${iv.demo ? ' · sample' : ''}`}
+                <Notice key={iv.id} tone={t.brand} kicker="Platform invitation"
                   title={`${iv.ownerName || 'Repple'} invited you to coach`}
                   note="Accept to join the platform as a trainer and set up your coaching profile.">
                   <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.lg }}>
@@ -1283,7 +1288,21 @@ export default function TrainerClients() {
               <View style={{ flex: 2 }}>
                 <Cta label="Add Client" wide onPress={async () => {
                   if (!newName.trim()) { Alert.alert('Add a name', 'Enter the client name.'); return; }
-                  addClient(newName, newGoal, newMode);
+                  // Awaited and READ, like sendInvite two lines down already
+                  // was. Firing this and moving on is why a coach could add
+                  // somebody, watch them appear, and find them gone at the next
+                  // launch: the row is added to local state first and the
+                  // server write can refuse without anything on screen
+                  // changing. If it did not land, say so and keep the sheet
+                  // open with what they typed still in it.
+                  const added = await addClient(newName, newGoal, newMode);
+                  if (!added) {
+                    Alert.alert(
+                      'Not saved',
+                      `${newName.trim()} is showing on this phone but was not recorded, so they will be gone when you next open the app. Check your connection and try again.`,
+                    );
+                    return;
+                  }
                   const em = newEmail.trim();
                   const wanted = !!em && em.includes('@');
                   // Awaited and read. sendInvite resolves false when the write

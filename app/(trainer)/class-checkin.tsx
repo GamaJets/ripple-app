@@ -29,23 +29,23 @@ import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Hero, Ghost, fig, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { tapLight } from '../../src/ui/haptics';
-import { classRoster, setAttendance, type RosterMember } from '../../src/lib/classAttendance';
+import { classRoster, setAttendance, UNLINKED_CLASS, type RosterMember } from '../../src/lib/classAttendance';
 
 export default function ClassCheckin() {
   const t = useTheme();
   const router = useRouter();
   const params = useLocalSearchParams<{ id?: string; title?: string; branch?: string }>();
-  const classId = String(params.id || 'demo');
+  const classId = String(params.id || UNLINKED_CLASS);
   const title = String(params.title || 'Class');
   const branch = String(params.branch || '');
 
-  // Routed to without an id, `classId` falls back to 'demo' — and both
-  // classRoster and setAttendance refuse ids beginning 'demo'. The screen then
+  // Routed to without an id, `classId` falls back to UNLINKED_CLASS — and both
+  // classRoster and setAttendance refuse that id by name. The screen then
   // rendered an empty roster under "No one has booked this class yet", which is
   // a statement about a class, and offered ticks that went nowhere while the
   // footnote promised "Check-ins are saved as you tap". Neither is a claim this
   // screen can make when it was never told which class it is looking at.
-  const unlinked = !params.id || classId.startsWith('demo');
+  const unlinked = !params.id || classId === UNLINKED_CLASS;
 
   // null is not []. [] means nobody booked this class; null means the roster
   // could not be read, and the two used to render the same sentence.

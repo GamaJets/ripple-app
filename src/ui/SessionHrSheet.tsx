@@ -32,7 +32,7 @@ export function SessionHrSheet({ visible, onClose, title, startISO, durationMin,
           if (!cancelled && s && s.length >= 2) { setState({ samples: s, live: true }); return; }
         } catch (e) { reportError('sessionHrSheet.appleHrSeries', e); }
       }
-      // No demo curve. If HealthKit has nothing for this window the chart says so,
+      // No invented curve. If HealthKit has nothing for this window the chart says so,
       // rather than showing a fabricated session as if it were the user's own.
       if (!cancelled) setState({ samples: [], live: false });
     })();

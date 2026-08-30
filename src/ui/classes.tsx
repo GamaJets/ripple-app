@@ -183,7 +183,7 @@ export function ClassesProvider({ children }: { children: React.ReactNode }) {
       }
     }
     // No backend to book against: the seat exists on this device only, so this
-    // is the demo/offline path rather than a confirmed reservation.
+    // is the offline path rather than a confirmed reservation.
     return optimistic;
   };
 

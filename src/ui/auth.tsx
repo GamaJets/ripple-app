@@ -50,10 +50,10 @@ interface AuthValue {
   sendPhoneCode: (e164: string) => Promise<{ ok: true } | { ok: false; reason: string }>;
   /** Exchange a code for a session. Only `ok: true` means they are signed in. */
   verifyPhoneCode: (e164: string, code: string, name?: string) => Promise<{ ok: true } | { ok: false; reason: string }>;
-  demo: boolean;
-  enterDemo: () => void;
   signOut: () => void;
-  /** Email a reset link. In demo mode this is a no-op (there's no real inbox). */
+  /** Email a reset link. A no-op with no backend connected — there is no real
+   *  inbox to send to, and pretending otherwise would have the reader waiting
+   *  on mail that was never sent. */
   sendPasswordReset: (email: string) => Promise<void>;
   /** Establish a session from the recovery email's raw token hash — the
    * primary path (see verifyRecoveryToken's doc comment in supabase.ts). */
@@ -74,7 +74,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   // In live mode we don't know the persisted session until we've checked storage.
   const [loading, setLoading] = useState<boolean>(USE_SUPABASE);
-  const [demo, setDemo] = useState(false);
 
   // Build an AuthUser from the current Supabase session (+ profile row if present).
   async function refreshFromSession(): Promise<AuthUser | null> {
@@ -185,7 +184,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signInWithProvider = async (provider: 'apple' | 'google') => {
     if (!USE_SUPABASE) {
-      setUser({ id: 'local', name: provider === 'apple' ? 'Apple User' : 'Google User', email: `demo@${provider}.com`, role: 'client' });
+      setUser({ id: 'local', name: provider === 'apple' ? 'Apple User' : 'Google User', email: `local@${provider}.invalid`, role: 'client' });
       return;
     }
     // Native OAuth needs provider config in Supabase + a deep-link handler.
@@ -193,20 +192,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     throw new Error('Social sign-in is not set up yet — please use email for now.');
   };
 
-  const enterDemo = () => {
-    // Guest/demo entry: no Supabase session, so every provider falls back to its
-    // rich in-memory sample data. Great for trial + App Store review (no login).
-    setDemo(true);
-    setUser({ id: 'demo-guest', name: 'Demo User', email: 'demo@repple.app', role: 'client' });
-  };
-
   const signOut = () => {
     if (USE_SUPABASE) sbSignOut().catch(() => {});
-    setUser(null); setDemo(false);
+    setUser(null);
   };
 
   const sendPasswordReset = async (email: string) => {
-    if (!USE_SUPABASE) return; // demo mode — no real inbox to email
+    if (!USE_SUPABASE) return; // no backend connected — no real inbox to email
     await sbSendPasswordReset(email, resetRedirectUrl());
   };
 
@@ -228,7 +220,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <Ctx.Provider value={{ authed: !!user, user, loading, demo, enterDemo, signIn, signUp, signInWithProvider, sendPhoneCode, verifyPhoneCode, signOut, sendPasswordReset, beginPasswordRecoveryWithTokenHash, beginPasswordRecoveryWithCode, beginPasswordRecoveryWithTokens, completePasswordReset }}>
+    <Ctx.Provider value={{ authed: !!user, user, loading, signIn, signUp, signInWithProvider, sendPhoneCode, verifyPhoneCode, signOut, sendPasswordReset, beginPasswordRecoveryWithTokenHash, beginPasswordRecoveryWithCode, beginPasswordRecoveryWithTokens, completePasswordReset }}>
       {children}
     </Ctx.Provider>
   );

@@ -68,10 +68,13 @@ const strs = (v: unknown): string[] =>
  * The catalogue's read policy is `to authenticated`, so a signed-out session
  * gets an EMPTY RESULT rather than an error — PostgREST filters the rows away
  * and reports success. That is indistinguishable, at the call site, from a
- * movement genuinely not being in the catalogue, and the difference matters:
- * demo mode has no session, so it was telling people "this movement has no
- * catalogue entry" about Back Squat, which has one. A false statement about
- * our own data is worse than an admission that we could not look.
+ * movement genuinely not being in the catalogue, and the difference matters.
+ * The demo entry point that first exposed this is gone — it signed nobody in,
+ * so the app told people "this movement has no catalogue entry" about Back
+ * Squat, which has one. The guard stays because the condition outlived the
+ * demo: a session that expired mid-use, or a screen reached before sign-in,
+ * produces the same empty result. A false statement about our own data is
+ * worse than an admission that we could not look.
  *
  * Cheap: the session is read from local storage, not the network.
  */

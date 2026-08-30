@@ -373,3 +373,45 @@ select max(created_at) from public.workouts;
 ```
 
 If that timestamp is not the workout you just logged, writes are being refused.
+
+---
+
+## 10. Store review needs a real account now that the demo is gone — BLOCKER, 30 Aug 2026
+
+**App Store Connect → App Review Information → Sign-In Required. Play Console →
+App content → App access.**
+
+The welcome screen used to offer "Explore the demo → See the full app with
+sample data — no sign-up needed", which handed a reviewer the whole app without
+a password. That entry point was removed on 30 Aug 2026 and the sample data
+with it. Every screen in all three apps is now behind a login.
+
+**Why it was removed.** It signed nobody in. With no Supabase session the
+exercise catalogue's `to authenticated` read policy returned zero rows and no
+error, so the demo showed an app with no exercises at all — sitting beside 604
+real ones — and told people "Back Squat has no catalogue entry" about a
+movement that has one. A reviewer exploring it was being shown a worse product
+than the one being submitted.
+
+**What that costs.** Apple's guideline 2.1 requires working demo credentials for
+an app behind a login, and a submission without them is rejected without the
+app being opened. This was not a blocker before, because there was nothing to
+supply. It is one now, and it is on the submission itself rather than in the
+code — nothing in this repo will fail if it is forgotten.
+
+Before submitting each of the three apps:
+
+- Create a real account per variant — client, coach, owner — on the production
+  project, and confirm each one signs in from a clean install of the build
+  being submitted. A reviewer gets one attempt and no support thread.
+- Put the address and password in App Store Connect's Sign-In Required fields
+  and in Play Console's App access section. They are per-app, so all three
+  submissions need their own.
+- Give those accounts something to look at. A coach account with an empty
+  roster is honest and reads as a broken app; link the client account to the
+  coach account, log a session, and book a class, so the screens a reviewer
+  opens have real rows behind them.
+- These accounts sign in with a password, so they must survive item 1 above.
+  Confirm their email addresses before email confirmation is turned back on, or
+  the credentials in the review notes stop working on the day that toggle
+  flips.

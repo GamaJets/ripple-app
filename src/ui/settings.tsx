@@ -71,6 +71,10 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   // A ref rather than state because `set` is called from an event handler that
   // must see the current value, not the one from the render it was created in.
   const writable = useRef<string | null>(null);
+  /** Which table this account's units live in. `clients` for a client;
+   *  `profiles` for a coach or owner, who has no clients row. Set by the read
+   *  so the write cannot go somewhere the read never looked. */
+  const unitHome = useRef<'clients' | 'profiles'>('clients');
   const latest = useRef<Settings>(s);
   latest.current = s;
 
@@ -111,19 +115,42 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         }
         // maybeSingle rather than single: a trainer or owner signed into the
         // same build has no `clients` row, and that is an absence, not a fault
-        // to report. They keep the device-local preference.
-        if (data) {
+        // to report.
+        //
+        // It used to mean they kept a DEVICE-LOCAL preference — which survived
+        // a relaunch, not a reinstall, and never followed them to a second
+        // phone. In practice every coach was pinned to kilograms. profiles
+        // carries the same two columns now (part 82) precisely because it is
+        // the one table an account has whatever its role, so the fallback is a
+        // real account-level answer rather than a handset's.
+        let row: { weight_unit?: unknown; length_unit?: unknown } | null = data ?? null;
+        let home: 'clients' | 'profiles' = 'clients';
+        if (!row) {
+          const { data: prof, error: profErr } = await supabase
+            .from('profiles').select('weight_unit, length_unit').eq('id', uid).maybeSingle();
+          if (cancelled) return;
+          if (profErr) {
+            // Same reasoning as the clients read above: a failed read leaves
+            // `writable` null so this device publishes nothing over a choice
+            // made elsewhere.
+            reportError('settings.units.read', profErr);
+            setUnitsLoaded(true);
+            return;
+          }
+          row = prof ?? null;
+          home = 'profiles';
+        }
+        unitHome.current = home;
+        if (row) {
           const patch: Partial<Settings> = {};
-          if (isWeightUnit(data.weight_unit)) patch.weightUnit = data.weight_unit;
-          if (isLengthUnit(data.length_unit)) patch.lengthUnit = data.length_unit;
+          if (isWeightUnit(row.weight_unit)) patch.weightUnit = row.weight_unit;
+          if (isLengthUnit(row.length_unit)) patch.lengthUnit = row.length_unit;
           // NULL columns mean "never chosen" and deliberately do NOT overwrite
           // what this device already had — a client who set pounds before this
           // shipped keeps pounds, and the next tap writes it to their account.
           if (Object.keys(patch).length) setS((prev) => ({ ...prev, ...patch }));
-          writable.current = uid;
-        } else {
-          writable.current = uid;
         }
+        writable.current = uid;
         setUnitsLoaded(true);
       } catch (e) {
         if (cancelled) return;
@@ -146,7 +173,10 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     const row: Record<string, string> = {};
     if (patch.weightUnit !== undefined) row.weight_unit = next.weightUnit;
     if (patch.lengthUnit !== undefined) row.length_unit = next.lengthUnit;
-    supabase.from('clients').update(row).eq('id', uid)
+    // Written back to whichever table the read found the account in, so a
+    // coach's choice lands somewhere durable and a client's keeps landing
+    // where every other screen already reads it from.
+    supabase.from(unitHome.current).update(row).eq('id', uid)
       .then(({ error }) => { if (error) reportError('settings.units.write', error); },
             (e: unknown) => reportError('settings.units.write', e));
   };

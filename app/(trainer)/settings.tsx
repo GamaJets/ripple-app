@@ -34,6 +34,8 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { Rule, Section, SectionHead, ListRow, Ghost, fig } from '../../src/ui/kit';
+import { useSettings } from '../../src/ui/settings';
+import { convertedNote } from '../../src/lib/units';
 import { sp, layout, hairline, type as ty, radius } from '../../src/theme/scale';
 import { BuildInfo } from '../../src/ui/BuildInfo';
 import { useAuth } from '../../src/ui/auth';
@@ -66,6 +68,10 @@ function day(iso: string | null): string {
 export default function TrainerSettings() {
   const t = useTheme();
   const router = useRouter();
+  const st = useSettings();
+  // The same sentence the client's settings screen shows: what a change to
+  // this actually converts, so nobody expects it to rewrite stored history.
+  const weightNote = convertedNote(st.weightUnit);
   const auth = useAuth();
   const lock = useAppLock();
   const toggleLock = async () => {
@@ -243,6 +249,42 @@ export default function TrainerSettings() {
               <View style={{ width: 21, height: 21, borderRadius: radius.pill, backgroundColor: lock.enabled ? t.brandInk : t.ink3, alignSelf: lock.enabled ? 'flex-end' : 'flex-start' }} />
             </View>
           </Pressable>
+        </Section>
+
+        <Rule />
+
+        {/* Units.
+            The coach portal had no unit control at all, so every coach read
+            and typed kilograms whatever they think in — including in
+            log-session, which writes into a CLIENT's history. A coach
+            thinking in pounds typed 135 and 135 kg went onto somebody's
+            record.
+            It persists to profiles (part 82) rather than clients, because a
+            coach has no clients row and the answer was previously kept in
+            this handset's storage: it survived a relaunch and not a
+            reinstall, and never followed them to a second phone. */}
+        <Section>
+          <SectionHead title="Units" />
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: sp.md }}>
+            <View style={{ flex: 1, paddingRight: sp.md }}>
+              <Text style={{ ...ty.body, color: t.ink }}>Weight</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                {weightNote ?? "What you read and type, including when you log a session on a client's record"}
+              </Text>
+            </View>
+            <View style={{ flexDirection: 'row', gap: 6 }}>
+              {(['kg', 'lb'] as const).map((u) => {
+                const on = st.weightUnit === u;
+                return (
+                  <Pressable key={u} onPress={() => st.set({ weightUnit: u })}
+                    accessibilityRole="radio" accessibilityState={{ selected: on }}
+                    style={{ paddingHorizontal: sp.lg, paddingVertical: 7, borderRadius: radius.sm, backgroundColor: on ? t.brand : t.surface2 }}>
+                    <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{u}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
         </Section>
 
         <Rule />

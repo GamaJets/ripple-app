@@ -39,7 +39,14 @@ Deno.serve(async (req: Request) => {
       } else { title = 'Your coach'; }
     } else {
       // Client → coach: notify the client's trainer; title = the client's name.
-      route = '/(trainer)/messages';
+      //
+      // '/(trainer)/messages' is not a route in this app — the coach's thread
+      // is app/(trainer)/chat.tsx, and it needs the clientId to know WHOSE
+      // thread to open. A coach tapping this notification went nowhere. It was
+      // masked because src/ui/messaging.ts fires a second, correctly-routed
+      // push for the same message; anybody removing that duplicate would have
+      // been left with only this one.
+      route = `/(trainer)/chat?clientId=${encodeURIComponent(clientId)}`;
       const { data: c } = await admin.from('clients').select('trainer_id').eq('id', clientId).maybeSingle();
       recipient = c?.trainer_id ?? null;
       const { data: p } = await admin.from('profiles').select('full_name').eq('id', clientId).maybeSingle();

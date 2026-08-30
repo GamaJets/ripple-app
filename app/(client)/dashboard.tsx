@@ -300,7 +300,7 @@ export default function Home() {
           ) : null}
 
           {myInvites.length > 0 ? (
-            <Notice tone={t.brand} kicker={`Coaching invitation${myInvites[0].demo ? ' · sample' : ''}`}
+            <Notice tone={t.brand} kicker="Coaching invitation"
               title={`${myInvites[0].coachName || 'A Coach'} invited you`}
               note={`${COACHED_MODE_SHORT[myInvites[0].mode]} coaching. ${COACHING_MODE_NOTE[myInvites[0].mode]} Accept to connect.`}>
               <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.lg }}>
