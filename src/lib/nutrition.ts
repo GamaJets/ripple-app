@@ -3,6 +3,7 @@
 // trivially unit-testable, identical on client and server.
 import type { BodyStats, Macros, Goal, Diet } from './types';
 import { planKcal, type EnergyPlan } from './goalEnergy';
+import { num } from './format';
 
 export const GOAL_ADJ: Record<Goal, number> = {
   fatloss: -0.20,
@@ -269,12 +270,16 @@ export function caloriesLeft(
  * to, with no way to tell. It is never added now, so the sentence says so —
  * and on a day that genuinely outran the target it says that too, which is the
  * signal a coach acts on.
+ *
+ * Title case, on request, with the ordinary exception for words under four
+ * letters that are not doing any work — of, a, in. `kcal` stays lowercase
+ * because it is a unit symbol and "Kcal" is not one.
  */
 export function caloriesNote(cal: CaloriesLeft): string {
-  const head = `${cal.eaten.toLocaleString()} of ${cal.target.toLocaleString()} kcal eaten`;
+  const head = `${num(cal.eaten)} of ${num(cal.target)} kcal Eaten`;
   if (!cal.burned) return head;
-  if (cal.extraBurned > 0) return `${head} · ${cal.burned.toLocaleString()} burned, ${cal.extraBurned.toLocaleString()} above a usual day`;
-  return `${head} · ${cal.burned.toLocaleString()} burned, already in your target`;
+  if (cal.extraBurned > 0) return `${head} · ${num(cal.burned)} Burned, ${num(cal.extraBurned)} Above a Usual Day`;
+  return `${head} · ${num(cal.burned)} Burned, Already in Your Target`;
 }
 
 /** The non-resting energy a target built from an activity multiplier assumed. */

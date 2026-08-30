@@ -4459,14 +4459,20 @@ function by2(v: ReturnType<typeof buildStaff>, id: string) {
 
   // The wording. A burn figure printed beside a number it was NOT added to is
   // what made the old screen unreadable — it looked like it had been.
-  ok(caloriesNote(day).includes('above a usual day'), 'a bigger day says how far above usual it was');
-  ok(!caloriesNote(day).includes('already in your target'), 'and does not also claim it was ordinary');
+  ok(caloriesNote(day).includes('Above a Usual Day'), 'a bigger day says how far above usual it was');
+  ok(!caloriesNote(day).includes('Already in Your Target'), 'and does not also claim it was ordinary');
   const ordinary = caloriesLeft(2040, 0, 700, budget);
-  ok(caloriesNote(ordinary).includes('already in your target'),
+  ok(caloriesNote(ordinary).includes('Already in Your Target'),
     'an ordinary day says the burn was already in the target rather than leaving it unexplained');
-  ok(!caloriesNote(caloriesLeft(2040, 0, 0, budget)).includes('burned'),
+  ok(!caloriesNote(caloriesLeft(2040, 0, 0, budget)).toLowerCase().includes('burned'),
     'with no burn at all, the note does not mention burning');
-  ok(caloriesNote(day).startsWith('0 of 2,040 kcal eaten'), 'the note still opens with eaten of target');
+  ok(caloriesNote(day).startsWith('0 of 2,040 kcal Eaten'), 'the note still opens with eaten of target');
+  // Title case, with the minor words left alone and the unit symbol intact —
+  // "Kcal" is not a unit, and "0 Of 2,040" is not title case.
+  ok(caloriesNote(day).includes(' of ') && caloriesNote(day).includes(' a '),
+    'short function words stay lowercase');
+  ok(caloriesNote(day).includes('kcal') && !caloriesNote(day).includes('Kcal'),
+    'the unit symbol is not a word to capitalise');
 
   // budgetedActiveKcal itself: rubbish in must not become a negative budget,
   // which would turn an ordinary day into one "above usual".
