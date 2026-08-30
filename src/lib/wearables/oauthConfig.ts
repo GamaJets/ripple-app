@@ -21,6 +21,13 @@ const env = (k: string): string => {
   // In Expo, EXPO_PUBLIC_* variables are baked into the build
   // Try accessing from process.env first (web), then Constants (native)
   try {
+    // This cannot be the literal form: the key is a parameter and one function
+    // serves five vendors. It is also why it does NOT break — the
+    // Constants.expoConfig.extra fallback immediately below is a real second
+    // source, and it is precisely why the WHOOP, Oura and Fitbit client ids
+    // survived the inlining problem that left Spotify's empty. An indirect read
+    // WITHOUT such a fallback is the bug; this is the shape that withstands it.
+    // env-indirect-ok: falls back to Constants.expoConfig.extra, which is baked in by app.config.ts
     const val = (process.env as any)?.[k];
     if (val) return val;
   } catch { }

@@ -19,11 +19,12 @@
     "check:native": "node scripts/check-native.mjs",
     "check:schema": "node scripts/check-schema.mjs",
     "check:schema:offline": "node scripts/check-schema.mjs --offline",
-    "preflight": "npm run typecheck && npm run test:zones && npm run db:check && npm run check:native && npm run check:reads && npm run check:portal && npm run check:trainer-profile && npm run check:schema && npm run check:bundle",
+    "preflight": "npm run typecheck && npm run test:zones && npm run db:check && npm run check:native && npm run check:reads && npm run check:portal && npm run check:trainer-profile && npm run check:traps && npm run check:schema && npm run check:bundle",
     "check:bundle": "expo export --platform all --output-dir .preflight-export",
     "check:reads": "node scripts/check-reads.mjs",
     "check:portal": "node scripts/check-portal-imports.mjs",
     "check:trainer-profile": "node scripts/check-trainer-profile-imports.mjs",
+    "check:traps": "node scripts/check-runtime-traps.mjs",
     "test:zones": "TZ=America/Los_Angeles npm run test && TZ=Pacific/Auckland npm run test && TZ=Asia/Dubai npm run test"
   },
   "dependencies": {
@@ -36,6 +37,7 @@
     "expo-crypto": "~57.0.2",
     "expo-dev-client": "~57.0.15",
     "expo-device": "~57.0.1",
+    "expo-file-system": "~57.0.6",
     "expo-haptics": "~57.0.1",
     "expo-image-manipulator": "~57.0.13",
     "expo-image-picker": "~57.0.13",

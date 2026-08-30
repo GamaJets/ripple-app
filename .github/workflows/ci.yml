@@ -96,6 +96,18 @@ jobs:
       - name: Trainer profile is not read where it cannot answer
         run: npm run check:trainer-profile
 
+      # Three bugs shipped that no typecheck, test or bundle could catch, and
+      # every one of them compiled perfectly: two modals visible at once (iOS
+      # silently refuses the second, so "Cook mode" was a dead button); a
+      # require of a package that was never installed (Metro treats a require in
+      # a try/catch as OPTIONAL, so the PDF export was absent from every build
+      # ever made); and an env var read in a form Expo's Babel plugin cannot
+      # inline (the Spotify client id was configured everywhere and empty in the
+      # bundle, and the app blamed the owner for it). This is the step that
+      # would have caught each one.
+      - name: Runtime traps a compiler cannot see
+        run: npm run check:traps
+
       # Both directions of schema drift. PostgREST rejects the WHOLE statement
       # for one unknown column, so a column the app writes and the database
       # lacks loses every other field on the row too — silently, inside a

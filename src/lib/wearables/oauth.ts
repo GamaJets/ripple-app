@@ -44,7 +44,35 @@ export async function connectVendor(id: ProviderId): Promise<void> {
   const result = await request.promptAsync(discovery);
 
   if (!result || result.type !== 'success' || !result.params?.code) {
-    throw new Error(result?.type === 'dismiss' || result?.type === 'cancel' ? 'Sign-in cancelled.' : 'Could not complete sign-in.');
+    if (result?.type === 'dismiss' || result?.type === 'cancel') {
+      throw new Error('Sign-in cancelled.');
+    }
+    // Say what the vendor said.
+    //
+    // This threw a bare "Could not complete sign-in." and dropped everything
+    // the provider had told us. OAuth failures come back as `?error=` and
+    // `?error_description=` on the redirect, and those are the only thing that
+    // distinguishes a scope this app is not registered for from a bad client
+    // id, an unregistered redirect, or a vendor outage — four faults with four
+    // different remedies, all of which read as one sentence with no next step.
+    //
+    // It cost a whole diagnosis: WHOOP stopped signing in immediately after
+    // `read:sleep` was added to the requested scopes, and with the reason
+    // discarded there was no way to tell "WHOOP does not know that scope for
+    // this app" from anything else, on a device, from a screenshot.
+    const err = String(result?.params?.error ?? '').trim();
+    const desc = String(result?.params?.error_description ?? '').replace(/\+/g, ' ').trim();
+    if (err || desc) {
+      // `invalid_scope` is worth naming outright, because the remedy is in the
+      // vendor's own dashboard rather than anywhere in this app: every provider
+      // here declares which scopes it may request, and asking for one that is
+      // not on that list is refused before the user ever sees a consent screen.
+      const hint = /invalid.?scope/i.test(err) || /scope/i.test(desc)
+        ? ` Repple asked ${v.id} for a permission its developer app is not registered for — the scope has to be enabled in the ${v.id} developer dashboard before this can work.`
+        : '';
+      throw new Error(`${v.id} refused the sign-in: ${desc || err}.${hint}`);
+    }
+    throw new Error(`Could not complete sign-in with ${v.id}, and ${v.id} did not say why.`);
   }
 
   // Hand the code to the server for the secret-bearing token exchange.
