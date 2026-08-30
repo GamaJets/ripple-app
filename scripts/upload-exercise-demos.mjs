@@ -45,6 +45,11 @@ const LICENCE = flag('licence');
 const DRY = has('dry-run');
 const BUCKET = 'exercise-demos';
 const MAPPING = join(process.cwd(), 'data/exercise-demo-mapping.json');
+// A pack names its files by the VENDOR's ids, not ours. scripts/build-demo-map.mjs
+// turns the vendor's own JSON into filename → our row, which is a lookup rather
+// than a guess. Passed in rather than assumed, so a pack that happens to use our
+// slugs still works without one.
+const MAP_FILE = flag('map');
 const REVIEW = join(process.cwd(), 'docs/exercise-demo-review.tsv');
 const PLAYABLE = new Set(['.mp4', '.webm', '.webp', '.gif', '.json']);
 
@@ -92,6 +97,9 @@ const byId = new Map(rows.map((r) => [r.id, r]));
 const confirmed = existsSync(MAPPING)
   ? (JSON.parse(readFileSync(MAPPING, 'utf8')).mappings || {})
   : {};
+// filename → our id, built from the vendor's own data. Authoritative: where it
+// has an answer, no name matching is attempted at all.
+const vendorMap = MAP_FILE && existsSync(MAP_FILE) ? JSON.parse(readFileSync(MAP_FILE, 'utf8')) : {};
 // The mapping file is written the human way round — our id → the vendor's file
 // name — so it reads as a list of decisions rather than of filenames.
 const fileFor = new Map(Object.entries(confirmed).map(([id, f]) => [f, id]));
@@ -101,7 +109,18 @@ const unmatched = [];
 for (const f of files) {
   const stem = basename(f, extname(f));
   const byName = byId.has(slug(stem)) ? slug(stem) : null;
-  const id = fileFor.get(f) ?? byName;
+  // Vendor map first — it is derived from the pack's own JSON and is the only
+  // one of the three that knows 'squat.webp' belongs to Barbell Back Squat.
+  //
+  // But only when it names a row that EXISTS. The paid bundle renames some
+  // movements relative to the free package our catalogue was built from —
+  // 'bench-press.webp' is "Barbell Bench Press" there and "Bench Press" here —
+  // so the vendor's own name resolves to a slug we do not have, while the
+  // filename is already exactly our id. Verifying against the catalogue rather
+  // than trusting the map blind is what turns those eleven from "needs a human"
+  // into an exact match, and it costs nothing when the map is right.
+  const mapped = vendorMap[f];
+  const id = (mapped && byId.has(mapped)) ? mapped : (fileFor.get(f) ?? byName);
   if (id && byId.has(id)) matched.push({ file: f, id });
   else unmatched.push(f);
 }
