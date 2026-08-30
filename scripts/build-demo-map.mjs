@@ -33,10 +33,30 @@ const raw = JSON.parse(readFileSync(join(BUNDLE, 'exercises.json'), 'utf8'));
 const recs = Array.isArray(raw) ? raw : (raw.exercises || Object.values(raw));
 
 // A file may be named after the id OR after image_alias; index both.
+// A file key can name MORE THAN ONE record, and the map used to keep only the
+// last one seen.
+//
+// `image_alias` exists because RepDB gives two movements the same artwork and
+// names both files after the alias — 'ohp' is shared by Overhead Press and
+// Paused Overhead Press. Writing both `r.id` and `r.image_alias` into one Map
+// meant whichever record was read second silently overwrote the first, so
+// ohp.webp resolved to Paused Overhead Press alone and plain Overhead Press —
+// far the more commonly programmed of the two — was left with no animation at
+// all. Deadlift, Calf Raise, Barbell Lunge, Clap Push-ups and EZ-Bar Romanian
+// Deadlift went the same way. Six movements, and the only visible symptom was
+// a screen quietly cross-fading two stills where its neighbour played a clip.
+//
+// So a key maps to a LIST. One file legitimately illustrates every record that
+// claims it, which is what sharing artwork means.
 const byFileKey = new Map();
+const addKey = (k, r) => {
+  if (!k) return;
+  const at = byFileKey.get(k);
+  if (at) { if (!at.includes(r)) at.push(r); } else byFileKey.set(k, [r]);
+};
 for (const r of recs) {
-  byFileKey.set(r.id, r);
-  if (r.image_alias) byFileKey.set(r.image_alias, r);
+  addKey(r.id, r);
+  addKey(r.image_alias, r);
 }
 
 const sup = JSON.parse(readFileSync(join(process.cwd(), 'data/repdb-superseded.json'), 'utf8'));
@@ -53,10 +73,13 @@ for (const f of files) {
   // turn 'bench-press' into 'bench' and quietly mis-file it.
   const stem = basename(f, extname(f));
   const key = stem.replace(/-(start|peak|main)$/, '');
-  const rec = byFileKey.get(key) || byFileKey.get(stem);
-  if (!rec) { unmatched.push(f); continue; }
+  const recs4 = byFileKey.get(key) || byFileKey.get(stem);
+  if (!recs4 || !recs4.length) { unmatched.push(f); continue; }
   // Our own row wins wherever it supersedes the RepDB one.
-  map[f] = theirsToOurs.get(rec.id) ?? slug(rec.name_en);
+  const ours = recs4.map((r) => theirsToOurs.get(r.id) ?? slug(r.name_en));
+  // One target stays the common case and keeps the file's shape unchanged;
+  // several become a list. The uploader reads both.
+  map[f] = ours.length === 1 ? ours[0] : [...new Set(ours)];
 }
 
 writeFileSync(OUT, JSON.stringify(map, null, 0));

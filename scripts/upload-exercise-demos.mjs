@@ -119,9 +119,16 @@ for (const f of files) {
   // filename is already exactly our id. Verifying against the catalogue rather
   // than trusting the map blind is what turns those eleven from "needs a human"
   // into an exact match, and it costs nothing when the map is right.
+  // A vendor file can name SEVERAL of our rows. RepDB shares one piece of
+  // artwork between related movements via image_alias, and taking only the
+  // first target is what left plain Overhead Press with no animation while
+  // Paused Overhead Press had one — six movements in all, each silently
+  // cross-fading two stills where its neighbour played a clip.
   const mapped = vendorMap[f];
-  const id = (mapped && byId.has(mapped)) ? mapped : (fileFor.get(f) ?? byName);
-  if (id && byId.has(id)) matched.push({ file: f, id });
+  const wanted = Array.isArray(mapped) ? mapped : (mapped ? [mapped] : []);
+  const known = wanted.filter((m) => byId.has(m));
+  const ids = known.length ? known : [fileFor.get(f) ?? byName].filter((x) => x && byId.has(x));
+  if (ids.length) for (const id of ids) matched.push({ file: f, id });
   else unmatched.push(f);
 }
 
@@ -143,7 +150,7 @@ if (unmatched.length) {
 }
 
 console.log(
-  `${files.length} files · ${matched.length} matched by name or confirmed · ${unmatched.length} need a human`
+  `${files.length} files · ${matched.length} row(s) matched by name or confirmed · ${unmatched.length} need a human`
   + (unmatched.length ? `\n  ${REVIEW} — fill in our_id_to_confirm, copy into ${MAPPING}, re-run` : ''),
 );
 if (DRY) { console.log('\n--dry-run: nothing uploaded, nothing written.'); process.exit(0); }
