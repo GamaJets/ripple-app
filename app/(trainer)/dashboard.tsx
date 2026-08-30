@@ -292,7 +292,7 @@ export default function TrainerClients() {
 
   const { sessionFee, name: coachName } = useMyTrainerProfile();
   const { getFeedback, addFeedback } = useCoachFeedback();
-  const { get: getNutri, setAdjust: setNutri, clear: clearNutri } = useCoachNutrition();
+  const { get: getNutri, setAdjust: setNutri, clear: clearNutri, status: nutriStatus } = useCoachNutrition();
   const [mealPick, setMealPick] = useState<{ pos: number; slot: Slot } | null>(null);
   const [mealQuery, setMealQuery] = useState('');
   const { getNotes, addNote, removeNote } = useCoachNotes();
@@ -1060,6 +1060,27 @@ export default function TrainerClients() {
               <View style={{ marginBottom: sp.xl }}>
                 <SheetHead t={t} title="Meal plan targets" />
                 <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>Shape {sel.name.split(' ')[0]}'s daily calories, protein, carbs & fat — applies to their Meals tab live.</Text>
+
+                {/* The controls are withheld, not just annotated, when the
+                    adjustment could not be read.
+                    `getNutri(id)?.[key] ?? 0` cannot tell "no adjustment set"
+                    from "we could not read the adjustment", so under a failed
+                    read every chip row highlighted 0 — and a coach looking at
+                    a client they had already cut 300 kcal from would be shown
+                    a plan of no change. Tapping any chip then upserts, so the
+                    next tap would have overwritten the real figures with what
+                    the screen had guessed. Offering nothing is the only
+                    version of this that cannot destroy what is on the server. */}
+                {nutriStatus === 'error' ? (
+                  <Text style={{ ...ty.label, color: t.warn }}>
+                    {sel.name.split(' ')[0]}&rsquo;s current adjustment could not be read, so it is not shown
+                    and cannot be changed here — anything set now would overwrite figures we
+                    cannot see. Their Meals tab is unaffected. Try again once you are connected.
+                  </Text>
+                ) : nutriStatus === 'loading' ? (
+                  <Text style={{ ...ty.label, color: t.ink3 }}>Reading their current targets…</Text>
+                ) : (
+                <>
                 {([
                   ['Calories', [-300, -150, 0, 150, 300], 'kcalDelta'],
                   ['Protein (g)', [0, 10, 20, 30], 'proteinDelta'],
@@ -1103,6 +1124,8 @@ export default function TrainerClients() {
                     <Text style={{ ...ty.caption, color: t.ink3 }}>Clear adjustment</Text>
                   </Pressable>
                 ) : null}
+                </>
+                )}
               </View>
 
               {clientMeals === null ? (

@@ -12,29 +12,53 @@ import { View, Text, Pressable, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Ghost } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Ghost, Notice } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, value } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 
 export default function Leaderboard() {
   const t = useTheme();
   const router = useRouter();
-  const { roster } = useRoster();
+  const { roster, status } = useRoster();
 
-  // Composite: adherence (0-100) + progress bonus (fat-loss clients rewarded for
-  // negative weightDelta; others for positive). Simple, transparent.
-  const scored = roster.map((c) => {
+  // Composite: adherence (0-100) + a progress bonus (fat-loss clients rewarded
+  // for negative weightDelta; others for positive).
+  //
+  // ── Who can be ranked at all ──────────────────────────────────────────────
+  //
+  // `adherence` is null when a client has never submitted a check-in, and
+  // `weightDelta` is null when they have never been scanned. This screen used
+  // to score those as `adherence ?? 0`, which reads as a real measurement: a
+  // client nobody has heard from ranked last, below everybody, indistinguishable
+  // from one who checks in every week and reports zero. The comment defending it
+  // argued against the OTHER default — an earlier version handed them 100, so
+  // strangers outranked people who were training — and both are the same
+  // mistake pointing in opposite directions.
+  //
+  // A ranking is a comparison, so it needs something measured to compare. With
+  // no adherence on record there is nothing, and the honest answer is that this
+  // client cannot be placed rather than that they came last. They are listed
+  // below the board instead, with what is missing, which is also the more
+  // useful thing for a coach to see: it names who to chase for a check-in.
+  const goalScore = (c: (typeof roster)[number]) => {
     const goalDown = /fat|tone/i.test(c.goal);
-    // A client with no scans has no progress to score. Null contributes
-    // nothing rather than counting as "held their weight", which is what a 0
-    // delta meant here — it let somebody who has never stepped on a scale
-    // score the same as somebody measured to be flat.
-    const prog = c.weightDelta == null ? null : (goalDown ? -c.weightDelta : c.weightDelta);
-    // A client with no check-ins contributes 0 adherence, not a phantom 100 -
-    // otherwise strangers outrank clients who are actually training.
-    const score = Math.round((c.adherence ?? 0) + Math.max(0, prog ?? 0) * 4);
-    return { c, score };
-  }).sort((a, b) => b.score - a.score);
+    return c.weightDelta == null ? null : (goalDown ? -c.weightDelta : c.weightDelta);
+  };
+
+  const scored = roster
+    .filter((c) => c.adherence != null)
+    .map((c) => {
+      const prog = goalScore(c);
+      // An absent progress figure earns no bonus, which is the same as a
+      // measured-flat one earns — so the row says which of the two it is
+      // rather than letting the number imply a scan that never happened.
+      return { c, score: Math.round((c.adherence as number) + Math.max(0, prog ?? 0) * 4), scanned: prog != null };
+    })
+    .sort((a, b) => b.score - a.score);
+
+  // Everyone the board cannot place. Not a failure state and not a ranking —
+  // a list of people nothing has been recorded about yet.
+  const unplaced = roster.filter((c) => c.adherence == null);
 
   const maxScore = Math.max(1, ...scored.map((s) => s.score));
 
@@ -58,13 +82,31 @@ export default function Leaderboard() {
         <Section>
           <SectionHead title="Ranking" note={scored.length ? `${scored.length} client${scored.length === 1 ? '' : 's'}` : undefined} />
 
-          {scored.length === 0 ? (
+          {/* An unread roster is not an empty one. Without this the screen tells
+              a coach with a full book that they have no clients, which is the
+              most expensive sentence it can say. */}
+          {status === 'error' ? (
+            <Notice tone={t.warn} kicker="Roster" title="Your clients could not be read"
+              note="Nothing is ranked below because the roster did not come back — it does not mean nobody is on your book." />
+          ) : status === 'partial' ? (
+            <Notice tone={t.warn} kicker="Roster" title="This board is built from part of your book"
+              note="Your roster came back short, so the ranking below leaves people out and the order is not final." />
+          ) : null}
+
+          {scored.length === 0 && unplaced.length === 0 && status !== 'error' ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>
               No clients yet — your leaderboard fills in as clients join and log their workouts.
             </Text>
           ) : null}
 
-          {scored.map(({ c, score }, i) => (
+          {scored.length === 0 && unplaced.length > 0 ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>
+              Nobody has checked in yet, so there is nothing to rank on. Everyone on your book is
+              listed below.
+            </Text>
+          ) : null}
+
+          {scored.map(({ c, score, scanned }, i) => (
             <Pressable key={c.id} onPress={() => router.push('/(trainer)/analytics')}
               accessibilityRole="button" accessibilityLabel={`${c.name}, rank ${i + 1}, score ${score}`}
               style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
@@ -74,7 +116,7 @@ export default function Leaderboard() {
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{c.name}</Text>
-                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{c.goal} · {c.adherence == null ? 'no check-ins' : `${c.adherence}% adherence`} · {c.weightDelta == null ? 'no scans yet' : `${c.weightDelta > 0 ? '+' : ''}${c.weightDelta} kg`}</Text>
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{c.goal} · {`${c.adherence}% adherence`} · {scanned ? `${(c.weightDelta as number) > 0 ? '+' : ''}${c.weightDelta} kg` : 'no scans — progress not counted'}</Text>
                 <View style={{ height: 3, borderRadius: 2, backgroundColor: t.surface3, overflow: 'hidden', marginTop: 7 }}>
                   <View style={{ height: 3, borderRadius: 2, backgroundColor: t.brand, width: `${Math.round((score / maxScore) * 100)}%` }} />
                 </View>
@@ -83,6 +125,35 @@ export default function Leaderboard() {
             </Pressable>
           ))}
         </Section>
+
+        {unplaced.length > 0 ? (
+          <View>
+            <Rule />
+            <Section>
+              <SectionHead title="Not enough recorded to rank" note={`${unplaced.length}`} />
+              <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
+                These clients have never submitted a check-in, so there is no adherence to compare.
+                That is not a low score — it is no score.
+              </Text>
+              {unplaced.map((c, i) => (
+                <Pressable key={c.id} onPress={() => router.push({ pathname: '/(trainer)/chat', params: { clientId: c.id, name: c.name } })}
+                  accessibilityRole="button" accessibilityLabel={`Message ${c.name}, who has not checked in`}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+                  <View style={{ width: 38, height: 38, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+                    <Text style={{ ...ty.label, fontWeight: '600', color: t.ink3 }}>{c.name.split(' ').map((x) => x[0]).join('')}</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink2, textTransform: 'capitalize' }}>{c.name}</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                      {c.goal} · no check-ins{c.weightDelta == null ? ' · no scans yet' : ''}
+                    </Text>
+                  </View>
+                  <Text style={{ ...ty.caption, color: t.ink3 }}>—</Text>
+                </Pressable>
+              ))}
+            </Section>
+          </View>
+        ) : null}
 
         <Rule />
 
