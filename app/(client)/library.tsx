@@ -41,6 +41,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView, Modal, Linking, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { useBackFromHub } from '../../src/ui/backTo';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
 import { ExerciseVideo } from '../../src/ui/ExerciseVideo';
@@ -58,6 +59,7 @@ import { signMedia, needsSigning } from '../../src/ui/signedMedia';
 export default function Library() {
  const t = useTheme();
  const router = useRouter();
+ const goBack = useBackFromHub('(client)');
  const [q, setQ] = useState('');
  const [group, setGroup] = useState('All');
  const { videos, status, reload } = useExerciseVideos();
@@ -207,7 +209,7 @@ export default function Library() {
    <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
 
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-     <Ghost icon="back" onPress={() => router.back()} />
+     <Ghost icon="back" onPress={goBack} />
      <View style={{ flex: 1 }}>
       <Text style={{ ...ty.micro, color: t.ink3 }}>How-to clips from your coach</Text>
       <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Exercise Library</Text>
@@ -321,7 +323,7 @@ export default function Library() {
         <View key={e.id}>
          {i > 0 ? <Rule /> : null}
          <Pressable
-          onPress={() => router.push({ pathname: '/(client)/exercise', params: { name: e.name } })}
+          onPress={() => router.push({ pathname: '/(client)/exercise', params: { name: e.name, from: 'clientLibrary' } })}
           accessibilityRole="button"
           accessibilityLabel={e.name}
           style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}

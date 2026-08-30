@@ -29,6 +29,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { useBackFromHub } from '../../src/ui/backTo';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Notice, Ghost, PartialRead } from '../../src/ui/kit';
@@ -95,6 +96,7 @@ const PAGE = 50;
 export default function OwnerLibrary() {
   const t = useTheme();
   const router = useRouter();
+  const goBack = useBackFromHub('(owner)');
   const { rows, status, reload } = useExerciseCatalogue();
   const [q, setQ] = useState('');
   const [group, setGroup] = useState(ALL);
@@ -161,7 +163,7 @@ export default function OwnerLibrary() {
         keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon="back" onPress={goBack} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>What the platform can teach your members</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Exercise Library</Text>
@@ -265,7 +267,7 @@ export default function OwnerLibrary() {
                         icon={r.hasDemo ? 'play' : 'dumbbell'}
                         title={r.name}
                         note={rowNote(r)}
-                        onPress={() => router.push({ pathname: '/(owner)/exercise', params: { name: r.name } })}
+                        onPress={() => router.push({ pathname: '/(owner)/exercise', params: { name: r.name, from: 'ownerLibrary' } })}
                       />
                     </View>
                   ))}

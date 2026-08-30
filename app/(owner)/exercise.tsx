@@ -25,6 +25,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { View, Text, ScrollView, Pressable, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useBackTo } from '../../src/ui/backTo';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Notice, Ghost, Flag } from '../../src/ui/kit';
@@ -41,7 +42,8 @@ import { RepdbInlineCredit } from '../../src/ui/Attribution';
 export default function OwnerExercise() {
   const t = useTheme();
   const router = useRouter();
-  const { name: raw } = useLocalSearchParams<{ name?: string }>();
+  const { name: raw, from } = useLocalSearchParams<{ name?: string; from?: string }>();
+  const goBack = useBackTo(from);
   const name = (raw || '').trim();
   const { detail, status } = useExerciseDetail(name);
 
@@ -64,7 +66,7 @@ export default function OwnerExercise() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md, marginBottom: sp.lg }}>
-          <Pressable onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Back" hitSlop={10}>
+          <Pressable onPress={goBack} accessibilityRole="button" accessibilityLabel="Back" hitSlop={10}>
             <Icon name="back" size={20} color={t.ink} />
           </Pressable>
           <Text style={{ ...ty.title, color: t.ink, flex: 1 }} numberOfLines={2}>{detail?.name || name || 'Exercise'}</Text>

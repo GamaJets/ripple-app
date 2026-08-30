@@ -63,6 +63,7 @@
     "src/lib/overwriteGuard.test.ts",
     "src/lib/clientBody.test.ts",
     "src/lib/bodyFigures.test.ts",
-    "src/lib/wearableLink.test.ts"
+    "src/lib/wearableLink.test.ts",
+    "src/lib/backTo.test.ts"
   ]
 }

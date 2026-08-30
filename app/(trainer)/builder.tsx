@@ -233,7 +233,7 @@ export default function Builder() {
   /** Open a movement's detail screen without losing the day being built. */
   const previewExercise = (name: string) => {
     setPreviewing(true);
-    router.push({ pathname: '/(trainer)/exercise', params: { name } });
+    router.push({ pathname: '/(trainer)/exercise', params: { name, from: 'trainerBuilder' } });
   };
 
   const composeProgram = (): Program => ({

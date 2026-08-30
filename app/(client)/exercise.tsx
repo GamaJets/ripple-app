@@ -23,6 +23,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { View, Text, ScrollView, Pressable, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useBackTo } from '../../src/ui/backTo';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Notice, Ghost, Flag } from '../../src/ui/kit';
@@ -47,7 +48,8 @@ import { useExerciseMedia } from '../../src/ui/useExerciseMedia';
 export default function ExerciseScreen() {
   const t = useTheme();
   const router = useRouter();
-  const { name: raw } = useLocalSearchParams<{ name?: string }>();
+  const { name: raw, from } = useLocalSearchParams<{ name?: string; from?: string }>();
+  const goBack = useBackTo(from);
   const name = (raw || '').trim();
   const { detail, status } = useExerciseDetail(name);
   const { videos } = useExerciseVideos();
@@ -82,7 +84,7 @@ export default function ExerciseScreen() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md, marginBottom: sp.lg }}>
-          <Pressable onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Back" hitSlop={10}>
+          <Pressable onPress={goBack} accessibilityRole="button" accessibilityLabel="Back" hitSlop={10}>
             <Icon name="back" size={20} color={t.ink} />
           </Pressable>
           <Text style={{ ...ty.title, color: t.ink, flex: 1 }} numberOfLines={2}>{detail?.name || name || 'Exercise'}</Text>

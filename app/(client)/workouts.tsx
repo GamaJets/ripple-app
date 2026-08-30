@@ -6,7 +6,7 @@
 // only on the live metric and the primary action.
 // Guided session runner, cardio logging & month calendar preserved.
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { View, Text, TextInput, Pressable, ScrollView, Modal, Alert, Linking, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, TextInput, Pressable, ScrollView, Modal, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter, useFocusEffect, useLocalSearchParams } from 'expo-router';
@@ -204,7 +204,6 @@ export default function Train() {
     else Alert.alert('Not saved', 'We could not reach your training log. What you typed is showing on this phone, but it has not been recorded and will be gone when you next open the app.');
   };
   const [swapFor, setSwapFor] = useState<ProgramExercise | null>(null);
-  const [videoFor, setVideoFor] = useState<string | null>(null);
   const [injRevealed, setInjRevealed] = useState<string[]>([]);
   const [deloadDismiss, setDeloadDismiss] = useState(false);
   const { videos: exVideos, status: exVideoStatus } = useExerciseVideos();
@@ -829,12 +828,18 @@ export default function Train() {
                                 </Pressable>
                               </View>
                             ) : <View style={{ flex: 1 }} />}
-                            {/* Offered for a movement the user typed in themselves too. A
+                            {/* Opens the movement's own screen — the animation, the steps,
+                                the tips — rather than a sheet holding only a coach clip.
+                                That screen already answers "what does this look like" in
+                                order: the client's coach, the Academy, the bought
+                                animation, the reference frames. Back returns here.
+
+                                Offered for a movement the user typed in themselves too. A
                                 custom exercise mints its own catalogue slug the first time
                                 a clip is recorded against it, so "Kettlebell Windmill" can
                                 genuinely have a demo — hiding the button meant a client
                                 whose coach had filmed exactly that could never reach it. */}
-                            <Pressable accessibilityLabel={'Watch a demonstration of ' + nameOf(e)} accessibilityRole="button" onPress={() => setVideoFor(nameOf(e))} style={{ width: 38, height: 38, backgroundColor: t.surface2, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' }}><Icon name="video" size={15} color={t.ink2} /></Pressable>
+                            <Pressable accessibilityLabel={'Watch a demonstration of ' + nameOf(e)} accessibilityRole="button" onPress={() => router.push({ pathname: '/(client)/exercise', params: { name: nameOf(e), from: 'clientWorkouts' } })} style={{ width: 38, height: 38, backgroundColor: t.surface2, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' }}><Icon name="video" size={15} color={t.ink2} /></Pressable>
                             <Pressable accessibilityRole="button" accessibilityLabel={isCustom ? 'Edit ' + nameOf(e) : 'Swap ' + nameOf(e)} onPress={() => replaceExercise(e)} style={{ width: 38, height: 38, backgroundColor: t.surface2, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' }}><Icon name={isCustom ? 'pencil' : 'swap'} size={15} color={flag ? t.s3 : t.ink2} /></Pressable>
                           </View>
                           <LogRow t={t} unit={wu} onLog={(reps, kg) => logSet(e, reps, kg)} />
@@ -1107,41 +1112,6 @@ export default function Train() {
         </View>
       </Modal>
 
-      {/* The demo plays here, on top of this screen, and this screen stays
-          mounted underneath it. That is the whole point: the old affordance was
-          Linking.openURL, which put the client in the system browser and took
-          them off the session they were halfway through typing. */}
-      <Modal visible={!!videoFor} transparent animationType="slide" onRequestClose={() => setVideoFor(null)}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Close the demonstration"
-          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }}
-          onPress={() => setVideoFor(null)}
-        />
-        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: Math.max(insets.bottom, layout.gutter), ...elevation.e2 }}>
-          {(() => {
-            const nm = videoFor || '';
-            // Exact catalogue-slug match, never a substring. This used to be
-            // `vn === n || vn.includes(n) || n.includes(vn)`, so asking for the
-            // demo on "Squat" played whichever of Back / Front / Goblet Squat
-            // sorted first — a different movement, captioned as this one, to
-            // someone about to copy it under load. No clip is an honest answer.
-            const vid = videoForExercise(nm, exVideos, coachId);
-            return (
-              <View>
-                <Text style={{ ...ty.head, color: t.ink, textTransform: 'capitalize' }}>{nm}</Text>
-                <ExerciseVideoBlock
-                  video={vid}
-                  exerciseName={nm}
-                  status={exVideoStatus}
-                  onSearch={() => Linking.openURL('https://www.youtube.com/results?search_query=' + encodeURIComponent('how to ' + nm + ' proper form'))}
-                />
-                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm, textAlign: 'center' }}>Tap outside to close — the sets you have typed are still there.</Text>
-              </View>
-            );
-          })()}
-        </View>
-      </Modal>
 
       <Modal visible={showCal} transparent animationType="slide" onRequestClose={() => setShowCal(false)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setShowCal(false)} />
