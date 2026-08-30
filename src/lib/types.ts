@@ -39,10 +39,10 @@ export const COACHED_MODE_SHORT: Record<CoachedMode, string> = {
 };
 
 export const COACHING_MODE_LABEL: Record<CoachingMode, string> = {
-  online: 'Online coach',
-  inperson: 'In-person coach',
-  hybrid: 'Hybrid coach',
-  solo: 'On my own',
+  online: 'Online Coach',
+  inperson: 'In-Person Coach',
+  hybrid: 'Hybrid Coach',
+  solo: 'On My Own',
 };
 
 /** One line, in the client's own voice, saying what picking this changes. It
