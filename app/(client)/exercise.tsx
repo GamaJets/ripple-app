@@ -19,8 +19,8 @@
 // back to a stranger's clip. Rule 3 is what this screen adds. Rule 4 is the one
 // that must never be dressed up as rule 3: a placeholder silhouette shown where
 // we have no picture is a lie a client acts on under load.
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, ScrollView, Image, Pressable, ActivityIndicator, Animated, Easing } from 'react-native';
+import { useEffect, useMemo, useState } from 'react';
+import { View, Text, ScrollView, Pressable, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -30,8 +30,11 @@ import { sp, layout, radius, type as ty } from '../../src/theme/scale';
 import { useExerciseDetail } from '../../src/ui/exerciseDetail';
 import { useExerciseVideos } from '../../src/ui/exerciseVideos';
 import { ExerciseVideo } from '../../src/ui/ExerciseVideo';
-import { useVideoPlayer, VideoView } from 'expo-video';
-import { Image as ExpoImage } from 'expo-image';
+// The demonstration renderers moved to src/ui/ExerciseDemo when the owner app
+// gained an exercise screen of its own: one implementation, imported twice, so
+// two members of the same gym looking at the same lift on two apps cannot end
+// up seeing two different pieces of artwork.
+import { DemoAnimation, FrameLoop } from '../../src/ui/ExerciseDemo';
 import { videoForExercise } from '../../src/lib/exerciseId';
 import { frameUrls, FRAMES_ARE_UNHOSTED, demoCaption, demoIsShippable, DEMO_BUCKET } from '../../src/lib/exerciseMedia';
 import { supabase } from '../../src/lib/supabase';
@@ -39,147 +42,6 @@ import { useClientData } from '../../src/ui/clientData';
 import { RepdbInlineCredit } from '../../src/ui/Attribution';
 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
-
-/**
- * A bought animation, looping.
- *
- * Muted and autoplaying, with no controls — the opposite of a coach's clip.
- * That one is somebody talking through a cue and is worth a play button and
- * sound; this is a diagram that happens to move, and asking a client to press
- * play on a diagram is a step for nothing.
- *
- * ── Two renderers, because packs ship two different things ─────────────────
- *
- * Vendors deliver either video (MP4/WebM) or an animated image (WebP/GIF), and
- * the two need completely different players. React Native's own <Image> does
- * not animate WebP on iOS and expo-video cannot open one at all, so a WebP pack
- * played through the video path renders a blank box — no error, no log, just an
- * empty frame where the demonstration should be. That is exactly the class of
- * bug scripts/check-runtime-traps.mjs exists for, and it would have shipped.
- *
- * The extension decides, because it is the one thing about a bought file we
- * know for certain.
- */
-const ANIMATED_IMAGE = /\.(webp|gif|apng)(\?|$)/i;
-
-function DemoVideo({ uri, label }: { uri: string; label: string }) {
-  const t = useTheme();
-  const player = useVideoPlayer(uri, (p) => { p.loop = true; p.muted = true; p.play(); });
-  return (
-    <VideoView
-      player={player}
-      nativeControls={false}
-      contentFit="contain"
-      accessibilityLabel={`${label}, looping demonstration`}
-      style={{ width: '100%', aspectRatio: 4 / 3, borderRadius: radius.md, backgroundColor: t.surface2 }}
-    />
-  );
-}
-
-function DemoAnimation({ uri, label }: { uri: string; label: string }) {
-  const t = useTheme();
-  if (!ANIMATED_IMAGE.test(uri)) return <DemoVideo uri={uri} label={label} />;
-  return (
-    <ExpoImage
-      source={{ uri }}
-      contentFit="contain"
-      // expo-image animates WebP and GIF on both platforms; the built-in
-      // <Image> shows only the first frame on iOS, which looks like a still
-      // rather than like a failure.
-      autoplay
-      cachePolicy="disk"
-      accessibilityLabel={`${label}, looping demonstration`}
-      style={{ width: '100%', aspectRatio: 4 / 3, borderRadius: radius.md, backgroundColor: t.surface2 }}
-    />
-  );
-}
-
-/**
- * The catalogue frames as a movement, not a slideshow.
- *
- * ── Why this is a cross-fade and not a swap ────────────────────────────────
- *
- * The first version toggled opacity between two mounted images every 900ms.
- * Two photographs are a start position and an end position, so that is a hard
- * cut between two quite different pictures, six or seven times a minute —
- * which reads as a strobe rather than as a repetition. Reported as "the video
- * is very choppy".
- *
- * Fading between them does not invent any motion that was not photographed,
- * and it is honest about that: what it removes is the JOLT. The eye reads a
- * dissolve between two postures as one movement passing through them, which is
- * what the client is being asked to copy.
- *
- * ── Why Animated with the native driver ────────────────────────────────────
- *
- * setInterval driving React state re-renders the whole screen on every tick,
- * on the JS thread, competing with a scroll. Animated.loop with
- * useNativeDriver hands the opacity curve to the UI thread once and never
- * touches JS again — so the fade holds 60fps even while the list below it is
- * being scrolled, and it costs nothing when the screen is idle.
- *
- * A two-frame set can never be smooth in the way a licensed animation is. This
- * is the most that two photographs can honestly be made to look like.
- */
-const HOLD_MS = 620;   // long enough to read the posture
-const FADE_MS = 420;   // long enough to dissolve rather than cut
-
-function FrameLoop({ urls, label }: { urls: string[]; label: string }) {
-  const t = useTheme();
-  const [ready, setReady] = useState(false);
-  // 0 → first frame, 1 → second. Everything else is interpolated from it.
-  const progress = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    let live = true;
-    Promise.all(urls.map((u) => Image.prefetch(u).catch(() => false)))
-      .then(() => { if (live) setReady(true); })
-      .catch(() => { if (live) setReady(true); });
-    return () => { live = false; };
-  }, [urls.join('|')]);
-
-  useEffect(() => {
-    if (!ready || urls.length < 2) return;
-    progress.setValue(0);
-    // Ease in and out of each fade. A linear dissolve still reads as mechanical;
-    // easing makes the hold at each end feel like the pause at the top and
-    // bottom of a rep.
-    const leg = (to: number) => Animated.timing(progress, {
-      toValue: to, duration: FADE_MS, easing: Easing.inOut(Easing.quad), useNativeDriver: true,
-    });
-    const wait = (d: number) => Animated.delay(d);
-    const anim = Animated.loop(Animated.sequence([wait(HOLD_MS), leg(1), wait(HOLD_MS), leg(0)]));
-    anim.start();
-    return () => anim.stop();
-  }, [ready, urls.length, progress]);
-
-  // Opposed opacities from ONE value, so the two never both dim mid-fade and
-  // show the container through the gap.
-  const first = progress.interpolate({ inputRange: [0, 1], outputRange: [1, 0] });
-  const second = progress;
-
-  return (
-    <View style={{ width: '100%', aspectRatio: 4 / 3, borderRadius: radius.md, backgroundColor: t.surface2, overflow: 'hidden' }}>
-      {urls.slice(0, 2).map((u, n) => (
-        <Animated.Image
-          key={u}
-          source={{ uri: u }}
-          accessibilityLabel={n === 0 ? `${label}, start position` : `${label}, end position`}
-          resizeMode="contain"
-          style={{
-            position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-            opacity: urls.length < 2 ? 1 : (n === 0 ? first : second),
-          }}
-        />
-      ))}
-      {!ready ? (
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-          <ActivityIndicator />
-        </View>
-      ) : null}
-    </View>
-  );
-}
 
 export default function ExerciseScreen() {
   const t = useTheme();
@@ -222,7 +84,7 @@ export default function ExerciseScreen() {
     return () => { cancelled = true; };
   }, [detail?.animationPath, mayShowAnimation]);
 
-  const frames = useMemo(() => frameUrls(detail?.imagePaths), [detail?.imagePaths]);
+  const frames = useMemo(() => frameUrls(detail?.imagePaths, detail?.source), [detail?.imagePaths, detail?.source]);
   const caption = demoCaption(detail?.source, frames.length);
 
   const G = layout.gutter;

@@ -38,6 +38,27 @@
 --     can fail on it rather than trusting somebody to remember.
 -- ─────────────────────────────────────────────────────────────────────────
 
+-- ── The four columns this part is the first to need ──────────────────────
+--
+-- Part 71 added category, equipment, level, mechanic, force and the arrays.
+-- description, met, goals and tags arrived with RepDB and nothing declares
+-- them, so the insert below named four columns that do not exist on a database
+-- built from setup.sql — the whole part fails on `column "description" of
+-- relation "exercises" does not exist`, and a fresh environment ends up with
+-- the 917-row free-exercise-db catalogue and no descriptions at all, which is
+-- the one thing this dataset was adopted for.
+alter table public.exercises add column if not exists description text;
+-- numeric(4,1) rather than bare numeric: production already carries these four
+-- columns, added by hand, and met is 4,1 there. A fresh database built from
+-- this file must match it exactly rather than nearly — two environments whose
+-- column types differ is the drift check-schema.mjs exists to catch.
+alter table public.exercises add column if not exists met         numeric(4,1);
+alter table public.exercises add column if not exists goals       text[];
+alter table public.exercises add column if not exists tags        text[];
+
+comment on column public.exercises.description is
+  'What the movement IS, in one sentence — distinct from instructions, which are how to perform it. Null on rows that predate RepDB; a screen must say nothing rather than invent one.';
+
 insert into public.exercises
   (id, name, muscle_group, is_cardio, description, category, equipment, level, mechanic, force,
    primary_muscles, secondary_muscles, instructions, image_paths, met, goals, tags, source) values

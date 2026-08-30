@@ -16,6 +16,10 @@ export interface ExerciseDetail {
   name: string;
   group: string | null;
   isCardio: boolean;
+  /** One sentence saying what the movement IS — not how to do it, which is
+   *  `instructions`. Null on every row that predates the RepDB catalogue, and a
+   *  screen must then say nothing rather than fill the space. */
+  description: string | null;
   category: string | null;
   equipment: string | null;
   level: string | null;
@@ -60,7 +64,7 @@ export function useExerciseDetail(name: string | null | undefined) {
     try {
       const { data, error } = await supabase
         .from('exercises')
-        .select('id, name, muscle_group, is_cardio, category, equipment, level, mechanic, force, primary_muscles, secondary_muscles, instructions, image_paths, animation_path, demo_licence, source')
+        .select('id, name, muscle_group, is_cardio, description, category, equipment, level, mechanic, force, primary_muscles, secondary_muscles, instructions, image_paths, animation_path, demo_licence, source')
         .eq('id', id)
         .maybeSingle();
       if (error) { reportError('exerciseDetail.read', error, { id }); setDetail(null); setStatus('error'); return; }
@@ -70,6 +74,7 @@ export function useExerciseDetail(name: string | null | undefined) {
         name: data.name,
         group: data.muscle_group ?? null,
         isCardio: !!data.is_cardio,
+        description: data.description ?? null,
         category: data.category ?? null,
         equipment: data.equipment ?? null,
         level: data.level ?? null,
@@ -95,15 +100,30 @@ export function useExerciseDetail(name: string | null | undefined) {
   return { detail, status, reload: load };
 }
 
-export interface CatalogueRow { id: string; name: string; group: string | null; hasDemo: boolean }
+export interface CatalogueRow {
+  id: string;
+  name: string;
+  group: string | null;
+  /** What the movement is performed on — 'barbell', 'cable', 'body only'. Null
+   *  on rows where the catalogue does not record it, which is a gap and not the
+   *  claim that the exercise needs no kit. */
+  equipment: string | null;
+  hasDemo: boolean;
+}
 
 /**
  * Every movement in the catalogue, names only.
  *
- * Names, group and whether a demonstration exists — nothing else. The full
- * rows carry instructions for 871 exercises and come to roughly a megabyte;
- * pulling that to draw a scrollable list of names would spend it on text no
- * one is reading yet. The detail screen fetches the one row it needs.
+ * Name, group, equipment and whether a demonstration exists — nothing else.
+ * The full rows carry instructions and descriptions for the whole catalogue and
+ * come to roughly a megabyte; pulling that to draw a scrollable list of names
+ * would spend it on text no one is reading yet. The detail screen fetches the
+ * one row it needs.
+ *
+ * `equipment` is here because the gym owner's library filters on it — a short
+ * text column against 900 rows is a few kilobytes, where `instructions` is the
+ * megabyte. Adding a whole extra read to answer "what kit does this assume"
+ * would have been the expensive way to get the cheap field.
  *
  * `hasDemo` is computed here rather than on the screen so the list can say
  * which entries are illustrated WITHOUT reading image_paths into every row —
@@ -119,7 +139,7 @@ export function useExerciseCatalogue() {
     try {
       const { data, error } = await supabase
         .from('exercises')
-        .select('id, name, muscle_group, image_paths')
+        .select('id, name, muscle_group, equipment, image_paths')
         .order('name', { ascending: true })
         .limit(capLimit());
       if (error) { reportError('exerciseCatalogue.read', error); setStatus('error'); return; }
@@ -128,6 +148,7 @@ export function useExerciseCatalogue() {
         id: r.id,
         name: r.name,
         group: r.muscle_group ?? null,
+        equipment: r.equipment ?? null,
         hasDemo: Array.isArray(r.image_paths) && r.image_paths.length > 0,
       })));
       // 'partial' rather than 'ready': the catalogue is 917 rows against a cap

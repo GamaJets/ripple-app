@@ -16,10 +16,24 @@
 // exactly the swap the path-not-URL decision was protecting.
 export const FRAME_BASE = 'https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises';
 
-/** True while the frames are served from the source repo rather than our own
- *  storage. Read by the preflight guard; also drives the on-screen note, so
- *  nobody demoes this to a stakeholder without knowing what they are seeing. */
-export const FRAMES_ARE_UNHOSTED = FRAME_BASE.includes('githubusercontent.com');
+/**
+ * Where the RepDB illustrations come from.
+ *
+ * The npm CDN for the public package. Correct for seeing the catalogue work and
+ * wrong for release for the same reason as FRAME_BASE: it is somebody else's
+ * bandwidth and somebody else's uptime. Before this ships the images either move
+ * to our own private bucket — the licence's term 3 forbids republishing the
+ * dataset, and a private bucket serving our own app is in-app use, not
+ * republication — or are bundled with the binary, which at ~16KB each is
+ * genuinely viable and buys offline into the bargain.
+ */
+export const REPDB_FRAME_BASE = 'https://cdn.jsdelivr.net/npm/@repdb/exercises@2026.8.1';
+
+/** True while frames are served from somebody else's servers rather than our
+ *  own storage. Drives the on-screen warning, so nobody demoes this without
+ *  knowing what they are looking at. */
+export const FRAMES_ARE_UNHOSTED = FRAME_BASE.includes('githubusercontent.com')
+  || REPDB_FRAME_BASE.includes('jsdelivr.net');
 
 /**
  * The full URLs for an exercise's demo frames, in order.
@@ -29,16 +43,28 @@ export const FRAMES_ARE_UNHOSTED = FRAME_BASE.includes('githubusercontent.com');
  * cannot tell "no frames" from "frames we failed to build a URL for" will show
  * a broken image to one of them.
  */
-export function frameUrls(paths: readonly string[] | null | undefined): string[] {
+export function frameUrls(
+  paths: readonly string[] | null | undefined,
+  source?: string | null,
+): string[] {
   if (!paths || !paths.length) return [];
+  // Two catalogues, two path shapes, two hosts. RepDB stores
+  // 'images/flat/<id>-start.webp'; free-exercise-db stores 'Folder_Name/0.jpg'.
+  // Deciding by the SOURCE column rather than by sniffing the string, because a
+  // guess that gets it wrong produces a 404 the client reads as a broken app.
+  const repdb = source === 'repdb';
+  const base = repdb ? REPDB_FRAME_BASE : FRAME_BASE;
+  const shape = repdb
+    ? /^images\/[\w-]+\/[\w-]+\.(webp|png|jpg|jpeg)$/i
+    : /^[\w.-]+\/\d+\.(jpg|jpeg|png|webp)$/i;
   const out: string[] = [];
   for (const p of paths) {
     const clean = String(p || '').trim().replace(/^\/+/, '');
     // Only the shapes the catalogue actually stores. Anything else is a row we
     // do not understand, and guessing at it produces a 404 the client reads as
     // "this app is broken" rather than as "we have no picture of this".
-    if (!clean || !/^[\w.-]+\/\d+\.(jpg|jpeg|png|webp)$/i.test(clean)) continue;
-    out.push(`${FRAME_BASE}/${clean}`);
+    if (!clean || !shape.test(clean)) continue;
+    out.push(`${base}/${clean}`);
   }
   return out;
 }
@@ -58,6 +84,7 @@ export const FRAME_MS = 900;
  *  diagram deserve different trust, and the client should be told which. */
 export function demoCaption(source: string | null | undefined, frames: number): string | null {
   if (frames <= 0) return null;
+  if (source === 'repdb') return 'Illustration — start and peak position.';
   if (source === 'free-exercise-db') return 'Reference illustration — start and end position.';
   return null;
 }

@@ -6,7 +6,7 @@
 // "no picture of this movement" — which the screen says out loud — and "a URL
 // we built out of a row we did not understand", which renders as a grey box
 // the client reads as the app being broken.
-import { frameUrls, FRAME_BASE, demoCaption, demoIsShippable } from './exerciseMedia';
+import { frameUrls, FRAME_BASE, REPDB_FRAME_BASE, demoCaption, demoIsShippable } from './exerciseMedia';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -50,6 +50,38 @@ const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
   ok(demoCaption('free-exercise-db', 2) !== null, 'an imported illustration is labelled as one');
   ok(demoCaption('free-exercise-db', 0) === null, 'nothing to caption when there are no frames');
   ok(demoCaption('repple', 0) === null, 'nor for our own rows with no frames');
+}
+
+// ── two catalogues, two hosts, decided by source and not by sniffing ───────
+//
+// RepDB stores 'images/flat/<id>-start.webp'; free-exercise-db stores
+// 'Folder/0.jpg'. They are served from different places, so a row resolved
+// against the wrong base is a 404 the client reads as a broken app.
+{
+  const r = frameUrls(['images/flat/ab-wheel-rollout-start.webp', 'images/flat/ab-wheel-rollout-peak.webp'], 'repdb');
+  ok(r.length === 2, `two RepDB frames, got ${r.length}`);
+  // Read through a default rather than indexed raw: a test that CRASHES when
+  // the thing it is testing breaks reports a stack trace instead of the
+  // sentence naming what went wrong, which is most of a test's value.
+  const first = r[0] ?? '';
+  ok(first === `${REPDB_FRAME_BASE}/images/flat/ab-wheel-rollout-start.webp`,
+    `built from the RepDB base, got "${first}"`);
+  ok(first.startsWith(REPDB_FRAME_BASE) && !first.startsWith(FRAME_BASE), 'and not from the other one');
+
+  // The assertion that names the failure: the SAME path under the wrong source
+  // must not resolve, because a wrong base is a 404 rather than a wrong picture.
+  ok(frameUrls(['images/flat/ab-wheel-rollout-start.webp']).length === 0,
+    'a RepDB path with no source does not resolve against the free-exercise-db base');
+  ok(frameUrls(['Barbell_Curl/0.jpg'], 'repdb').length === 0,
+    'and a free-exercise-db path does not resolve against the RepDB base');
+
+  // Traversal is rejected under the new shape too.
+  ok(frameUrls(['images/../../etc/passwd'], 'repdb').length === 0, 'traversal is refused for RepDB paths');
+  ok(frameUrls(['images/flat/x.gif'], 'repdb').length === 0, 'and an unexpected extension');
+
+  ok(demoCaption('repdb', 2) !== null, 'a RepDB illustration is captioned as one');
+  ok(demoCaption('repdb', 2) !== demoCaption('free-exercise-db', 2),
+    'and the two sources are not described with the same sentence');
 }
 
 // ── the licence gate ───────────────────────────────────────────────────────
