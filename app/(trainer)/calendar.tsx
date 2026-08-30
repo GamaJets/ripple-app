@@ -60,7 +60,7 @@ export default function TrainerSchedule() {
   const now = new Date();
   const router = useRouter();
   const { sessions, addSession, releaseSession, removeSession } = useSessions();
-  const { roster } = useRoster();
+  const { roster, status: rosterStatus } = useRoster();
   const { sessionFee } = useMyTrainerProfile();
   const nameOf = (id: string | null) => roster.find((c) => c.id === id)?.name ?? 'Open slot';
   const [viewYear, setViewYear] = useState(now.getFullYear());
@@ -68,6 +68,7 @@ export default function TrainerSchedule() {
   const [selKey, setSelKey] = useState(`${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`);
   const [addOpen, setAddOpen] = useState(false);
   const [addHour, setAddHour] = useState(9);
+  const [addMinute, setAddMinute] = useState(0);
   const [addDur, setAddDur] = useState(60);
   const [addClient, setAddClient] = useState<string | null>(null);
   const { slots: availSlots, addSlot: addAvail, removeSlot: removeAvail } = useAvailability();
@@ -116,7 +117,7 @@ export default function TrainerSchedule() {
   }
 
   function handleAdd() {
-    const d = new Date(selY, selM, selD); d.setHours(addHour, 0, 0, 0);
+    const d = new Date(selY, selM, selD); d.setHours(addHour, addMinute, 0, 0);
     const s: TrainingSession = {
       id: `ms${SEQ++}`, trainerId: '', clientId: addClient,
       startsAt: d.toISOString(), durationMin: addDur,
@@ -186,7 +187,21 @@ export default function TrainerSchedule() {
     ]);
   }
 
-  const HOURS = [6, 7, 8, 9, 10, 11, 12, 13, 16, 17, 18, 19, 20];
+  // Every hour of the day.
+  //
+  // This was a hand-written list that ran 6am–1pm and then jumped to 4pm, so a
+  // coach could not book anybody at 2pm or 3pm at all — and nothing said why.
+  // Any hand-picked window is somebody's assumption about when training
+  // happens: a 5am lifter, a shift worker training at 11pm, a gym that opens
+  // at four. The calendar has no business deciding that, so it offers all
+  // twenty-four and lets the coach pick.
+  const HOURS = Array.from({ length: 24 }, (_, h) => h);
+  // Quarter past, half past, quarter to. The time was whole hours only, and
+  // sessions are not: an 8:30 start had to be booked as 8 or 9 and the record
+  // was wrong either way. A second row rather than 64 chips in one scroller —
+  // hour then minute is two short reads; one list of every quarter hour is a
+  // drag through a haystack.
+  const MINUTES = [0, 15, 30, 45];
   const DURS = [30, 45, 60, 90];
 
   const G = layout.gutter;
@@ -396,13 +411,29 @@ export default function TrainerSchedule() {
             <Text style={{ ...ty.head, color: t.ink }}>Add Session</Text>
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>{DOW[selDate.getDay()]}, {MON[selM]} {selD}</Text>
 
-            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.md }}>Time</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.lg }}>
+            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.md }}>
+              Time · {(addHour % 12) || 12}:{String(addMinute).padStart(2, '0')}{addHour >= 12 ? 'pm' : 'am'}
+            </Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.md }}>
               {HOURS.map((h) => {
                 const sel = h === addHour; const ap = h >= 12 ? 'pm' : 'am'; const hh = h % 12 || 12;
                 return <Chip key={h} t={t} label={`${hh}${ap}`} on={sel} onPress={() => setAddHour(h)} />;
               })}
             </ScrollView>
+            <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.lg }}>
+              {MINUTES.map((m) => (
+                <View key={m} style={{ flex: 1 }}>
+                  <Pressable onPress={() => setAddMinute(m)} accessibilityRole="button"
+                    accessibilityState={{ selected: m === addMinute }}
+                    accessibilityLabel={`${(addHour % 12) || 12}:${String(m).padStart(2, '0')}${addHour >= 12 ? 'pm' : 'am'}`}
+                    style={{ paddingVertical: sp.sm, borderRadius: radius.pill, alignItems: 'center', backgroundColor: m === addMinute ? t.brand : t.surface2 }}>
+                    <Text style={{ ...ty.label, ...numeric, fontWeight: m === addMinute ? '500' : '400', color: m === addMinute ? t.brandInk : t.ink2 }}>
+                      :{String(m).padStart(2, '0')}
+                    </Text>
+                  </Pressable>
+                </View>
+              ))}
+            </View>
 
             <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.md }}>Duration</Text>
             <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.lg }}>
@@ -420,10 +451,30 @@ export default function TrainerSchedule() {
             </View>
 
             <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.md }}>Client</Text>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginBottom: sp.xl }}>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginBottom: sp.md }}>
               <Chip t={t} label="Open Slot" on={addClient === null} onPress={() => setAddClient(null)} />
               {roster.map((c) => <Chip key={c.id} t={t} label={c.name} on={c.id === addClient} onPress={() => setAddClient(c.id)} />)}
             </View>
+            {/* Reported as "nowhere here does it allow me to select a client".
+                With an empty roster this row rendered ONE chip — Open Slot —
+                and said nothing, which reads as the feature being missing
+                rather than as there being nobody to book. And an empty roster
+                has three quite different causes that must not look alike: it
+                is still loading, the read failed, or there genuinely is
+                nobody. */}
+            {roster.length === 0 ? (
+              <Text style={{ ...ty.caption, color: rosterStatus === 'error' ? t.warn : t.ink3, marginBottom: sp.xl }}>
+                {rosterStatus === 'loading'
+                  ? 'Reading your clients…'
+                  : rosterStatus === 'error'
+                    ? 'Your clients could not be read, so none can be listed here. This is a connection problem, not an empty book — you can still add an open slot.'
+                    : 'No clients on your roster yet, so there is nobody to book. Add one from the Clients tab, or leave this as an open slot for somebody to take.'}
+              </Text>
+            ) : rosterStatus === 'partial' ? (
+              <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.xl }}>
+                Part of your roster did not load, so somebody may be missing from this list.
+              </Text>
+            ) : <View style={{ marginBottom: sp.xl }} />}
 
             <View style={{ flexDirection: 'row', gap: sp.md }}>
               <View style={{ flex: 1 }}><Ghost label="Cancel" onPress={() => setAddOpen(false)} /></View>
