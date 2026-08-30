@@ -52,9 +52,15 @@ const rows = [];
 for (const f of partFiles) {
   let src;
   try { src = readFileSync(join(ROOT, f), 'utf8'); } catch { continue; }
-  // ('id', 'Name', … — the leading two columns of every seeded row.
-  for (const m of src.matchAll(/\n\s*\('([a-z0-9-]+)',\s*'((?:[^']|'')*)'/g)) {
-    rows.push({ id: m[1], name: m[2].replace(/''/g, "'") });
+  // Only the INSERT's VALUES block. The seed also carries a clean-up at the end
+  // whose mapping pairs — ('ab-crunch', 'crunches') — are indistinguishable
+  // from ('id', 'Name') to a regex, and reading those as exercises reported
+  // eleven rows as unreachable that do not exist. A guard that cries wolf is a
+  // guard people learn to skip.
+  for (const block of src.matchAll(/insert into public\.exercises[\s\S]*?\bvalues\b([\s\S]*?)\non conflict/g)) {
+    for (const m of block[1].matchAll(/\n\s*\('([a-z0-9-]+)',\s*'((?:[^']|'')*)'/g)) {
+      rows.push({ id: m[1], name: m[2].replace(/''/g, "'") });
+    }
   }
 }
 if (rows.length < 100) {
