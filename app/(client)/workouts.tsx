@@ -188,10 +188,11 @@ export default function Train() {
   const [cardioLog, setCardioLog] = useState<{ type: string; mins: number; dist: number; unit: string; kcal: number | null }[]>([]);
   const [nlw, setNlw] = useState('');
   const logWorkoutNL = async () => {
-    const lifts = parseWorkoutText(nlw);
-    // The example is written in the member's own unit. parseWorkoutText reads
-    // "60kg" and "135lb" but takes a bare number as kilograms, so telling a
-    // pounds member to type "100kg" is the one hint that would mislead them.
+    // The member's unit, so a bare "135" means what it says on their plates.
+    // Without it every unsuffixed number was read as kilograms, and a pounds
+    // member logging "bench 3x8 @135" stored 297lb.
+    const lifts = parseWorkoutText(nlw, wu);
+    // The example is written in the member's own unit.
     if (!lifts.length) { Alert.alert('Could not read that', wu === 'lb' ? 'Try e.g. "bench 3x8 135lb, squat 225lb 5 5 5".' : 'Try e.g. "bench 3x8 60kg, squat 100kg 5 5 5".'); return; }
     const nowISO = new Date().toISOString();
     const saved = await addWorkouts(lifts.map((l) => ({ t: nowISO, exercise: l.exercise, sets: l.sets, kcal: Math.round(l.sets.reduce((a, [r, w]) => a + r * (w || 0), 0) / 60) + l.sets.length * 8 })));

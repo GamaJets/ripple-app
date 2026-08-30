@@ -24,7 +24,8 @@ import { useWellness } from '../../src/ui/wellness';
 import { useHabits } from '../../src/ui/habits';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useFoodLog } from '../../src/ui/foodLog';
-import { readinessScore } from '../../src/lib/readiness';
+import { readinessScore, readinessSleep } from '../../src/lib/readiness';
+import { useDeviceSleep } from '../../src/ui/deviceSleep';
 import { suggestProgression } from '../../src/lib/progression';
 import { currentStreak } from '../../src/lib/streaks';
 
@@ -47,13 +48,21 @@ export default function Coach() {
   const { water, waterGoal } = useHabits();
   const { log } = useWorkoutLog();
   const { consumed } = useFoodLog();
-  const _recentSleep = sleep.slice(0, 3);
+  // Device sleep first, exactly as the home screen does it. This read the
+  // hand-typed wellness log alone, so a client with a watch syncing every night
+  // had a coach that was told 'readiness: not enough data' and never heard about
+  // their sleep at all — while the same client's Recovery screen listed the week.
+  const _devSleep = useDeviceSleep();
+  const _sleepFor = readinessSleep(_devSleep.nights, sleep, 3);
   // null, not 7 - the coach was being told a readiness score derived from a
   // sleep figure nobody recorded, and repeating it back as fact.
-  const _avgSleep = _recentSleep.length ? _recentSleep.reduce((a, x) => a + x.hours, 0) / _recentSleep.length : null;
+  const _avgSleep = _sleepFor.avgHours;
   const _since2d = Date.now() - 2 * 86400000;
   const _load2d = new Set(log.filter((e) => Date.parse(e.t) >= _since2d).map((e) => e.t.slice(0, 10))).size;
-  const _readiness = _avgSleep == null ? null : readinessScore({ avgSleepHours: _avgSleep, hydrationPct: waterGoal ? water / waterGoal : 0, workoutsLast2Days: _load2d });
+  // `: 0` was the bug the home screen already had fixed: a client with no water
+  // goal set was reported to the coach as zero percent hydrated, which scores as
+  // badly as a client who drank nothing all day. Unknown travels as null.
+  const _readiness = readinessScore({ avgSleepHours: _avgSleep, hydrationPct: waterGoal ? water / waterGoal : null, workoutsLast2Days: _load2d });
   const _streak = currentStreak(log);
   const _lastEx = log.length ? log[0].exercise : '';
   const _prog = suggestProgression(log)[0];
@@ -78,6 +87,14 @@ export default function Coach() {
     kcal: macros?.kcal ?? 'not set', protein: macros?.protein ?? 'not set', carbs: macros?.carbs ?? 'not set', fat: macros?.fat ?? 'not set',
     programTitle: program.title, programFocus: program.focus.join(', '),
     readiness: _readiness ? `${_readiness.score}/100 (${_readiness.label})` : 'not enough data',
+    // Said plainly, with where it came from. A coach that knows the watch
+    // measured 5.2 hours can talk about the night; one handed only a score
+    // can only repeat the score back.
+    sleep: _sleepFor.avgHours == null
+      ? 'no nights recorded'
+      : `${Math.round(_sleepFor.avgHours * 10) / 10}h average over ${_sleepFor.nights.length} night${_sleepFor.nights.length === 1 ? '' : 's'}`
+        + `, ${_sleepFor.fromDevice ? `${_sleepFor.fromDevice} measured by a device` : 'none measured by a device'}`
+        + `${_sleepFor.fromTyped ? `, ${_sleepFor.fromTyped} logged by hand` : ''}`,
     eatenToday: macros ? `${consumed.kcal}/${macros.kcal} kcal, protein ${consumed.protein}/${macros.protein}g` : `${consumed.kcal} kcal eaten, no target set`,
     streak: _streak,
     lastTrained: _lastEx || undefined,
