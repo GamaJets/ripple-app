@@ -34,7 +34,8 @@ import { Cta, Ghost } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
 import { useSettings } from '../../src/ui/settings';
-import { weightToKg, heightToCm, heightIn, kgToLb, cmToIn } from '../../src/lib/units';
+import { weightToKg, heightToCm, heightIn, weightIn, heightParts, kgToLb, cmToIn } from '../../src/lib/units';
+import { dayLabel } from '../../src/lib/bodyFigures';
 import { ALLERGENS, type Allergen } from '../../src/lib/meals';
 import type { Goal, Diet } from '../../src/lib/types';
 import { INJURY_AREAS, newInjuryId } from '../../src/lib/injuries';
@@ -65,21 +66,64 @@ export default function Onboarding() {
   const t = useTheme();
   const router = useRouter();
   const c = useClientData();
+  // Read before the fields are initialised, because a useState initialiser runs
+  // once and cannot wait for a hook declared below it.
+  const stInit = useSettings();
+  const wuInit = stInit.weightUnit;
+  const luInit = stInit.lengthUnit;
+  // The client's own measured figures. weightKg / bodyFatPct are the most
+  // recent of {scan, weigh-in} and are null when nothing has been measured.
+  const fromScan = { weightKg: c.weightKg, bodyFatPct: c.bodyFatPct };
+  const scanHeight = (() => {
+    if (c.heightCm == null) return { whole: '', inches: '' };
+    if (luInit === 'in') {
+      const parts = heightParts(c.heightCm);
+      return parts ? { whole: String(parts.feet), inches: String(parts.inches) } : { whole: '', inches: '' };
+    }
+    return { whole: String(Math.round(c.heightCm)), inches: '' };
+  })();
+
   const [step, setStep] = useState(0);
   const [name, setName] = useState(c.name);
   const [goal, setGoal] = useState<Goal>(c.goal);
-  // Blank, not pre-filled: nothing here is known until the user types it.
-  const [weight, setWeight] = useState('');
-  const [height, setHeight] = useState('');    // centimetres, or whole feet
-  const [heightInVal, setHeightInVal] = useState(''); // inches, imperial only
-  const [bf, setBf] = useState('');
+  // Pre-filled from a MEASUREMENT, and blank otherwise.
+  //
+  // These fields were emptied for a good reason: they used to read back out of
+  // ClientDataProvider, whose weight/height/body-fat were placeholder fallbacks
+  // for a new account (70kg / 170cm / 20%, plus a hardcoded `|| 175`). Tapping
+  // straight through wrote that invented body to the profile, and every calorie
+  // and macro target was computed from it.
+  //
+  // What changed is the provider, not the argument. It no longer invents a
+  // body: weight and body fat are the most recent of {InBody scan, hand-typed
+  // weigh-in} and are NULL when neither exists. So a figure here is now either
+  // something somebody measured or nothing at all — and asking a client to
+  // re-type a number off a scan the app already holds is its own small insult.
+  //
+  // Still blank when there is nothing. The rule this screen exists to protect
+  // is that a value only ever reaches the profile because a person put it
+  // there, and a prefill from a scan they stood on satisfies that.
+  const scanW = fromScan.weightKg == null ? '' : String(Math.round((weightIn(fromScan.weightKg, wuInit) ?? 0) * 10) / 10);
+  const scanBf = fromScan.bodyFatPct == null ? '' : String(Math.round(fromScan.bodyFatPct * 10) / 10);
+  const [weight, setWeight] = useState(scanW);
+  const [height, setHeight] = useState(scanHeight.whole);    // centimetres, or whole feet
+  const [heightInVal, setHeightInVal] = useState(scanHeight.inches); // inches, imperial only
+  const [bf, setBf] = useState(scanBf);
+
+  // Whether the boxes arrived with anything in them, and what to call the
+  // source. `scans` is oldest-first, so the newest is the last element.
+  const latestScan = c.scans.length ? c.scans[c.scans.length - 1] : null;
+  const prefilled = scanW !== '' || scanBf !== '' || scanHeight.whole !== '';
+  const lastScanLabel = latestScan && (scanW !== '' || scanBf !== '')
+    ? `${latestScan.source || 'scan'}, ${dayLabel(latestScan.takenAt)}`
+    : null;
 
   // The units this account reads in. Nothing on this screen offers to change
   // them — a first run is not the place for a settings control, and Settings
   // and the profile sheet both already own that toggle.
-  const st = useSettings();
-  const wu = st.weightUnit;
-  const lu = st.lengthUnit;
+  const st = stInit;
+  const wu = wuInit;
+  const lu = luInit;
 
   // The same bounds, said in the unit being typed. Rounded to whole units so
   // the comparison is against a number of the same shape as the one in the box.
@@ -145,7 +189,17 @@ export default function Onboarding() {
     (
       <View>
         <Text style={{ ...ty.title, color: t.ink }}>Your stats</Text>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs, marginBottom: sp.xl }}>Used to set your calorie and macro targets. Leave anything you don't know blank — you can add it later.</Text>
+        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs, marginBottom: prefilled ? sp.md : sp.xl }}>Used to set your calorie and macro targets. Leave anything you don't know blank — you can add it later.</Text>
+        {/* Said out loud when the boxes arrive with numbers already in them.
+            A field that fills itself and does not say why reads as the app
+            guessing, and the whole reason these were blank for a while is that
+            it used to be guessing. Naming the source also tells the client
+            which figure to correct if their scan is out of date. */}
+        {prefilled ? (
+          <Text style={{ ...ty.label, color: t.ink2, marginBottom: sp.xl }}>
+            Filled in from your most recent measurement{lastScanLabel ? ` — ${lastScanLabel}` : ''}. Change anything that has moved on.
+          </Text>
+        ) : null}
         <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 6 }}>Weight</Text>
         <TextInput value={weight} onChangeText={setWeight} keyboardType="decimal-pad" placeholder={wu} placeholderTextColor={t.ink3}
           accessibilityLabel={wu === 'kg' ? 'Weight in kilograms' : 'Weight in pounds'} style={[inp, { marginBottom: sp.lg }]} />
