@@ -1,0 +1,11 @@
+Source: https://github.com/yuhonas/free-exercise-db
+Licence: The Unlicense (public domain dedication)
+
+Vendored rather than fetched at build time on purpose. A catalogue that is
+rebuilt from the network produces a different database depending on the day it
+was run, and the one thing a seed must be is reproducible.
+
+The images referenced by `images` are in the same repository under
+`exercises/<id>/0.jpg` and `1.jpg`. They are NOT vendored here — see
+scripts/build-exercise-catalogue.mjs for why the paths are stored rather than
+the files.
