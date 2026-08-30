@@ -216,7 +216,7 @@ export default function Home() {
     .sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt))[0];
 
   const d = new Date();
-  const hi = d.getHours() < 12 ? 'Good morning' : d.getHours() < 18 ? 'Good afternoon' : 'Good evening';
+  const hi = d.getHours() < 12 ? 'Good Morning' : d.getHours() < 18 ? 'Good Afternoon' : 'Good Evening';
 
   const firstName = (c.name || '').trim().split(' ')[0] || '';
   const kcalNote = macros ? `${consumed.kcal.toLocaleString()} of ${macros.kcal.toLocaleString()} kcal` : `${consumed.kcal.toLocaleString()} kcal eaten — add your weight for a target`;
