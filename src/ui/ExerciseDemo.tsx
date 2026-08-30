@@ -12,11 +12,12 @@
 // the answer depends on the licence recorded against the row and on whether the
 // build is a release.
 import { useEffect, useRef, useState } from 'react';
-import { View, Image, ActivityIndicator, Animated, Easing } from 'react-native';
+import { View, Text, Image, ActivityIndicator, Animated, Easing } from 'react-native';
 import { useVideoPlayer, VideoView } from 'expo-video';
+import { HAS_NATIVE_VIDEO, UPDATE_REQUIRED_NOTE } from './nativeModules';
 import { Image as ExpoImage } from 'expo-image';
 import { useTheme } from './components';
-import { radius } from '../theme/scale';
+import { radius, sp, type as ty } from '../theme/scale';
 
 /**
  * A bought animation, looping.
@@ -42,6 +43,20 @@ const ANIMATED_IMAGE = /\.(webp|gif|apng)(\?|$)/i;
 
 export function DemoVideo({ uri, label }: { uri: string; label: string }) {
   const t = useTheme();
+  // An install made before expo-video was added has this screen and not the
+  // player. Mounting it there gives a black rectangle with nothing to read;
+  // this says which of the two possible problems it is.
+  if (!HAS_NATIVE_VIDEO) {
+    return (
+      <View
+        accessibilityRole="image"
+        accessibilityLabel={`This app version cannot play the demonstration of ${label}`}
+        style={{ width: '100%', aspectRatio: 4 / 3, borderRadius: radius.md, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center', paddingHorizontal: sp.lg }}
+      >
+        <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center' }}>{UPDATE_REQUIRED_NOTE}</Text>
+      </View>
+    );
+  }
   const player = useVideoPlayer(uri, (p) => { p.loop = true; p.muted = true; p.play(); });
   return (
     <VideoView

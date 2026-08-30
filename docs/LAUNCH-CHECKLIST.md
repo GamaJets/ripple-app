@@ -170,7 +170,17 @@ abandoned signup months ago.
 
 ---
 
-## 6. Exercise videos need a new binary, and will fail quietly without one
+## 6. Exercise videos need a new binary — NO LONGER QUIET, 30 Aug 2026
+
+It no longer fails silently. `src/ui/nativeModules.ts` asks whether the video
+module is actually in the running binary — `requireOptionalNativeModule`
+returns null instead of throwing — and both players now render a sentence
+saying the install predates the player and an update restores it, instead of a
+black rectangle with nothing to read.
+
+That is the runtime half. The process half below still stands: an old install
+still cannot play anything, and the fix is still a newer build.
+
 
 Added 26 Aug 2026, when the exercise video library was made to actually work.
 
@@ -212,7 +222,17 @@ being removed.
 
 ---
 
-## 7. Never submit with `--latest` from this repo
+## 7. Never submit with `--latest` from this repo — AUTOMATED 30 Aug 2026
+
+**`npm run submit -- --profile production-coach --platform ios`** now does the
+three steps below for you: it refuses `--latest` outright, resolves the newest
+finished build **for that profile** rather than for the platform, and refuses
+to upload if the build's own identifier is not the one the profile submits.
+Add `--dry-run` to see what it would send without sending it.
+
+The rest of this item is why it exists, and is still worth reading before
+submitting by hand.
+
 
 Learned the hard way on 27 Aug 2026, submitting the first builds in four days.
 
@@ -259,7 +279,12 @@ The binary's own bundle id is fixed at build time.
 
 ---
 
-## 8. A production build bundles JavaScript; a development build does not
+## 8. A production build bundles JavaScript; a development build does not — AUTOMATED
+
+`check:bundle` runs `expo export --platform all` as the last step of
+`npm run preflight`, which is the same bundle step EAS runs. A require Metro
+refuses fails preflight rather than reaching a build.
+
 
 Also 27 Aug 2026. Every production build of all three apps had failed since the
 Apple Health write path landed, and nothing said so for thirty commits.
@@ -285,7 +310,18 @@ perfectly; it is the bundler that refuses it.
 
 ---
 
-## 9. A migration can exist in this repo and not exist in the database
+## 9. A migration can exist in this repo and not exist in the database — AUTOMATED
+
+`check:schema` runs in `npm run preflight` and compares every column the repo
+declares against the live database in both directions — declared-but-missing
+(a part that was never run) and present-but-undeclared (a hand change nobody
+wrote down). It caught `injury_acknowledgements` on 30 Aug 2026, which was the
+second kind.
+
+It is not a substitute for the last paragraph of this item: a column can exist
+and a write can still be refused for a policy reason, and only a real insert
+finds that.
+
 
 Found on 27 Aug 2026, in the simulator, by watching a write fail.
 

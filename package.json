@@ -26,6 +26,7 @@
     "check:reads": "node scripts/check-reads.mjs",
     "check:portal": "node scripts/check-portal-imports.mjs",
     "check:trainer-profile": "node scripts/check-trainer-profile-imports.mjs",
+    "submit": "node scripts/submit.mjs",
     "check:numbers": "node scripts/check-numbers.mjs",
     "check:catalogue": "node scripts/check-catalogue.mjs",
     "check:attribution": "node scripts/check-attribution.mjs",

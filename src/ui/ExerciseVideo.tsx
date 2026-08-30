@@ -17,12 +17,13 @@
 import { useEffect, useState } from 'react';
 import { View, Text, Pressable } from 'react-native';
 import { useVideoPlayer, VideoView } from 'expo-video';
+import { HAS_NATIVE_VIDEO, UPDATE_REQUIRED_NOTE } from './nativeModules';
 import { useTheme } from './components';
 import { sp, radius, type as ty } from '../theme/scale';
 import type { LoadStatus } from './loadStatus';
 import { playbackUrl, type VideoItem } from './exerciseVideos';
 
-type Phase = 'resolving' | 'ready' | 'unavailable';
+type Phase = 'resolving' | 'ready' | 'unavailable' | 'no-player';
 
 /** The player itself. Split out so the hook receives a settled source — the URL
  *  arrives asynchronously and a hook cannot wait for it. */
@@ -62,6 +63,11 @@ export function ExerciseVideo({
   useEffect(() => {
     let live = true;
     if (!video) { setPhase('unavailable'); return; }
+    // Before spending a signed URL on a clip this binary cannot open. An
+    // install made before expo-video was added has these screens and not the
+    // player, and the old behaviour was to resolve the URL, mount the player
+    // and show a black rectangle with nothing to read.
+    if (!HAS_NATIVE_VIDEO) { setPhase('no-player'); onUnavailable?.(); return; }
     setPhase('resolving');
     (async () => {
       const u = await playbackUrl(video);
@@ -84,7 +90,9 @@ export function ExerciseVideo({
     <View
       accessibilityRole="image"
       accessibilityLabel={
-        phase === 'resolving' ? `Loading the demonstration of ${exerciseName}` : `No demonstration of ${exerciseName} available`
+        phase === 'resolving' ? `Loading the demonstration of ${exerciseName}`
+          : phase === 'no-player' ? `This app version cannot play the demonstration of ${exerciseName}`
+          : `No demonstration of ${exerciseName} available`
       }
       style={{
         width: '100%', aspectRatio: 16 / 9, borderRadius: radius.md,
@@ -92,7 +100,9 @@ export function ExerciseVideo({
       }}
     >
       <Text style={{ ...ty.label, color: t.ink3, paddingHorizontal: sp.lg, textAlign: 'center' }}>
-        {phase === 'resolving' ? 'Loading…' : 'This clip could not be played.'}
+        {phase === 'resolving' ? 'Loading…'
+          : phase === 'no-player' ? UPDATE_REQUIRED_NOTE
+          : 'This clip could not be played.'}
       </Text>
     </View>
   );
