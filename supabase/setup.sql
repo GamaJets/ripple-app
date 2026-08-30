@@ -10062,9 +10062,16 @@ end; $$;
  * The cap is not an arbitrary limit. Every code a coach holds is a string
  * somebody may still be typing; a coach with hundreds cannot audit them, and
  * the generator's collision loop is the wrong place to discover that.
+ *
+ * Returns the code itself, as my_join_code() and rotate_join_code() do, rather
+ * than the whole row. The caller already has the label — it just sent it — and
+ * re-reads the list immediately, so a row here would be a second copy of facts
+ * that can only disagree with it. It also keeps the function free of OUT
+ * parameters named `id`, `code` and `label`, which shadow the columns of the
+ * very table this function writes to.
  */
 create or replace function public.create_join_code(p_label text)
-returns table (id uuid, code text, label text, created_at timestamptz)
+returns text
 language plpgsql security definer set search_path = public as $$
 declare
   uid   uuid := auth.uid();
@@ -10102,10 +10109,8 @@ begin
 
   new_code := public.generate_join_code();
   insert into public.coach_join_codes (trainer_id, code, label)
-  values (uid, new_code, clean)
-  returning coach_join_codes.id, coach_join_codes.code, coach_join_codes.label, coach_join_codes.created_at
-  into id, code, label, created_at;
-  return next;
+  values (uid, new_code, clean);
+  return new_code;
 end; $$;
 
 /**
@@ -10186,6 +10191,9 @@ language sql security definer stable set search_path = public as $$
     from public.coach_requests q, me
     where q.trainer_id = me.uid and q.source = 'code'
   )
+  -- Every column reference below is qualified, deliberately. The RETURNS TABLE
+  -- columns are OUT parameters and are in scope inside this body, so a bare
+  -- `code` or `label` here is ambiguous and the function fails to run at all.
   select * from (
     select n.id, n.code, n.label, n.created_at, n.revoked_at, false as is_default,
            (select count(*) from reqs r where r.via = n.code and r.status = 'accepted') as joined,
@@ -10195,17 +10203,17 @@ language sql security definer stable set search_path = public as $$
     select null::uuid, t.join_code, 'Your main code', null::timestamptz, null::timestamptz, true,
            (select count(*) from reqs r
              where r.status = 'accepted'
-               and (r.via is null or r.via not in (select code from named))),
+               and (r.via is null or r.via not in (select n2.code from named n2))),
            (select count(*) from reqs r
              where r.status = 'pending'
-               and (r.via is null or r.via not in (select code from named)))
+               and (r.via is null or r.via not in (select n2.code from named n2)))
     from public.trainers t, me
     where t.id = me.uid and t.join_code is not null
-  ) rows
+  ) all_codes
   -- Default first, then live before revoked, newest first within each. The app
   -- sorts these again for its own reasons; ordering here means two coaches
   -- reading the same screen are not shown their codes in different orders.
-  order by rows.is_default desc, (rows.revoked_at is not null), rows.created_at desc nulls first;
+  order by all_codes.is_default desc, (all_codes.revoked_at is not null), all_codes.created_at desc nulls first;
 $$;
 
 -- The one-argument version was already dropped in part 56; the two-argument one

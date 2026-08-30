@@ -61,8 +61,14 @@ export async function fetchMyJoinCodes(): Promise<JoinCodesRead> {
   }
 }
 
-/** Create a named code. The label is what makes its count readable later. */
-export async function createJoinCode(label: string): Promise<{ ok: true; row: JoinCodeRow } | { ok: false; reason: string }> {
+/**
+ * Create a named code. The label is what makes its count readable later.
+ *
+ * Returns the code, not a row: the server hands back the six characters (see
+ * part 81) and the label is the one just sent, so there is nothing to be
+ * out of step with the list that is re-read straight afterwards.
+ */
+export async function createJoinCode(label: string): Promise<{ ok: true; code: string; label: string } | { ok: false; reason: string }> {
   const clean = normaliseLabel(label);
   if (!USE_SUPABASE) return { ok: false, reason: 'Sign in to Repple to make a code.' };
   try {
@@ -71,15 +77,14 @@ export async function createJoinCode(label: string): Promise<{ ok: true; row: Jo
     // refusal it raises here — no name, a name already live, twenty codes
     // already — is something the coach can act on in the next five seconds.
     if (error) { reportError('joinCode.create', error); return { ok: false, reason: createErrorMessage(error.message) }; }
-    const raw = (Array.isArray(data) ? data[0] : data) as RawJoinCode | undefined;
-    const row = shapeJoinCodes(raw ? [{ ...raw, is_default: false, joined: 0, pending: 0, revoked_at: null }] : [])[0];
-    // No row means the function did not reach its return. A code may or may not
-    // exist; saying it does and showing nothing to share is the worse half.
-    if (!row) {
-      reportError('joinCode.create', new Error('create_join_code returned no row'));
-      return { ok: false, reason: 'The code was not returned, so there is nothing to give out. Pull to refresh and check before making another.' };
+    const code = typeof data === 'string' ? data.trim().toUpperCase() : '';
+    // An empty string is not a code, and the row may or may not exist. Claiming
+    // success while showing nothing to give out is the worse half of that.
+    if (!code) {
+      reportError('joinCode.create', new Error('create_join_code returned no code'));
+      return { ok: false, reason: 'The code was not returned, so there is nothing to give out. Reopen this sheet and check before making another.' };
     }
-    return { ok: true, row };
+    return { ok: true, code, label: clean };
   } catch (e: any) {
     reportError('joinCode.create', e);
     return { ok: false, reason: createErrorMessage(e?.message) };

@@ -1353,10 +1353,17 @@ export default function TrainerClients() {
       <Modal visible={invOpen} transparent animationType="slide" onRequestClose={() => setInvOpen(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end' }}>
           <Pressable style={SCRIM} onPress={() => setInvOpen(false)} />
-          <View style={sheet(t)}>
+          {/* Capped and scrolled, following the meal and template sheets on
+              this screen. The code section used to be one code and one line;
+              it is now a list that grows with every campaign a coach runs, and
+              an uncapped sheet pushes Send Invite off the bottom of the phone
+              with nothing to scroll. The title and the two buttons stay put so
+              the sheet can always be finished or abandoned. */}
+          <View style={sheet(t, { maxHeight: '88%' })}>
             <Text style={{ ...ty.title, color: t.ink }}>Add a Client</Text>
             <Text style={{ ...ty.label, color: t.ink3, marginTop: 3, marginBottom: sp.xl }}>Two ways in. The code works whoever they are and whatever address they signed up with; the email invite only reaches them if you spell it exactly as they did.</Text>
 
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
             {/* ── the codes ────────────────────────────────────────────
                 One code became several. A coach running a gym flyer, an
                 Instagram bio link and a referral card was running three
@@ -1531,8 +1538,8 @@ export default function TrainerClients() {
                         await loadCodes();
                         Alert.alert(
                           'Code made',
-                          `${r.row.label}: ${r.row.code}. Put this one wherever that campaign lives — anyone who joins with it is counted against it.`,
-                          [{ text: 'Share it', onPress: () => { Share.share({ message: inviteMessage(r.row.code) }).catch(() => {}); } }, { text: 'Done', style: 'cancel' }],
+                          `${r.label}: ${r.code}. Put this one wherever that campaign lives — anyone who joins with it is counted against it.`,
+                          [{ text: 'Share it', onPress: () => { Share.share({ message: inviteMessage(r.code) }).catch(() => {}); } }, { text: 'Done', style: 'cancel' }],
                         );
                       }} />
                     </>
@@ -1556,7 +1563,8 @@ export default function TrainerClients() {
               ))}
             </View>
             <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.xl }}>{COACHED_MODE_NOTE_COACH[invMode]}</Text>
-            <View style={{ flexDirection: 'row', gap: sp.md }}>
+            </ScrollView>
+            <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.md }}>
               <View style={{ flex: 1 }}><Ghost label="Cancel" onPress={() => setInvOpen(false)} /></View>
               <View style={{ flex: 2 }}>
                 <Cta label="Send Invite" wide onPress={async () => {

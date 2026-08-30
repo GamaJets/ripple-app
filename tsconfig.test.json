@@ -69,6 +69,7 @@
     "src/lib/videoCoverage.test.ts",
     "src/lib/rosterMerge.test.ts",
     "src/lib/ownTraining.test.ts",
+    "src/lib/joinCodes.test.ts",
     "src/lib/foodSearch.test.ts"
   ]
 }
