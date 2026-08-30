@@ -22,6 +22,8 @@ import { useState } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, Modal, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
+import { readLift, type WeightUnit } from '../../src/lib/units';
+import { useSettings } from '../../src/ui/settings';
 import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Cta, Ghost, Flag } from '../../src/ui/kit';
 import { Icon } from '../../src/ui/Icon';
@@ -52,6 +54,9 @@ const mkKey = () => `ex-${SEQ++}`;
 export default function LogSession() {
   const t = useTheme();
   const router = useRouter();
+  // The unit the COACH reads in. The field was hardcoded "kg", so a coach
+  // thinking in pounds typed 135 and wrote 135 kg into a client's history.
+  const wu: WeightUnit = useSettings().weightUnit;
   const auth = useAuth();
   const { clientId, name } = useLocalSearchParams<{ clientId?: string; name?: string }>();
   const coachEx = useCoachExercises();
@@ -80,19 +85,54 @@ export default function LogSession() {
 
   // Only sets with a rep count are real. A blank row the coach tabbed past is
   // not a set of zero reps, and writing it as one would put a lie in the log.
+  //
+  // The same reasoning applies to the LOAD, and it had not been applied.
+  // `parseFloat(s.kg) || 0` turned anything unreadable into zero — a letter O
+  // typed for a nought, a comma decimal, a stray space — and zero here is not
+  // an absence, it is a bodyweight set written into somebody ELSE's history.
+  // It drags down their volume, their estimated 1RM and the next target built
+  // from it, and the person it happened to has no way of knowing.
+  //
+  // readLift refuses instead of coercing, and converts from whatever unit the
+  // coach reads in. `loadProblem` below surfaces the refusal rather than
+  // letting a bad figure through quietly.
   const entriesToWrite = (): WorkoutEntry[] => {
     const at = new Date().toISOString();
     return rows
       .map((r) => {
         const pairs = r.sets
           .filter((s) => (parseInt(s.reps, 10) || 0) > 0)
-          .map((s) => [parseInt(s.reps, 10) || 0, parseFloat(s.kg) || 0] as [number, number]);
+          .map((s) => {
+            const load = readLift(s.kg, wu);
+            // A refused load is not written as a number at all. `ready` below
+            // withholds the save while any refusal stands, so this only ever
+            // runs on figures that read.
+            return [parseInt(s.reps, 10) || 0, load.ok && load.kg != null ? load.kg : 0] as [number, number];
+          });
         return pairs.length ? { t: at, exercise: r.name, sets: pairs } : null;
       })
       .filter(Boolean) as WorkoutEntry[];
   };
 
-  const ready = entriesToWrite().length > 0;
+  /** The first unreadable load on the sheet, addressed to the coach. Null when
+   *  every figure reads — including the empty ones, which are bodyweight sets
+   *  and always legitimate. */
+  const loadProblem = (): string | null => {
+    for (const r of rows) {
+      for (const st of r.sets) {
+        if ((parseInt(st.reps, 10) || 0) <= 0) continue;
+        const load = readLift(st.kg, wu);
+        if (!load.ok) return `${r.name}: ${load.reason}`;
+      }
+    }
+    return null;
+  };
+
+  // Withheld while any load is unreadable. Saving a session with one bad
+  // figure silently zeroed is the failure above; refusing the save is the
+  // only honest alternative, because this is a write to a client's record
+  // with no undo and no notification to them.
+  const ready = entriesToWrite().length > 0 && loadProblem() == null;
 
   const save = async () => {
     const entries = entriesToWrite();
@@ -181,7 +221,7 @@ export default function LogSession() {
                       keyboardType="numeric" placeholder="Reps" placeholderTextColor={t.ink3}
                       accessibilityLabel={`${r.name} set ${i + 1} reps`} style={[inp, { flex: 1 }]} />
                     <TextInput value={s.kg} onChangeText={(v) => patchSet(r.key, i, { kg: v })}
-                      keyboardType="numeric" placeholder="kg" placeholderTextColor={t.ink3}
+                      keyboardType="numeric" placeholder={wu} placeholderTextColor={t.ink3}
                       accessibilityLabel={`${r.name} set ${i + 1} weight`} style={[inp, { flex: 1 }]} />
                   </View>
                 ))}
@@ -201,9 +241,12 @@ export default function LogSession() {
             <View style={{ opacity: ready && !busy ? 1 : 0.4 }} pointerEvents={ready && !busy ? 'auto' : 'none'}>
               <Cta wide label={busy ? 'Saving…' : `Log to ${first}'s record`} onPress={save} />
             </View>
+            {/* Two different reasons the button is held, and they need
+                different sentences. "Add a set" to somebody who added four and
+                typed one load wrong sends them looking for the wrong thing. */}
             {!ready ? (
-              <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.sm }}>
-                Add at least one set with a rep count.
+              <Text style={{ ...ty.caption, color: loadProblem() ? t.warn : t.ink3, textAlign: 'center', marginTop: sp.sm }}>
+                {loadProblem() ?? 'Add at least one set with a rep count.'}
               </Text>
             ) : null}
           </View>

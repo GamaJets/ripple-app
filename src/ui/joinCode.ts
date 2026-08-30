@@ -9,6 +9,8 @@ import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
 import { joinErrorMessage, normaliseCode } from '../lib/joinCode';
+import { shapeJoinCodes, spentCodeMessage, normaliseLabel, type JoinCodeRow, type RawJoinCode } from '../lib/joinCodes';
+import type { LoadStatus } from './loadStatus';
 import type { CoachedMode } from '../lib/types';
 
 export type MyCode = { ok: true; code: string } | { ok: false; reason: string };
@@ -23,6 +25,97 @@ export async function fetchJoinCodeStats(): Promise<{ joined: number; pending: n
     if (!row) return null;
     return { joined: Number(row.joined) || 0, pending: Number(row.pending) || 0 };
   } catch (e) { reportError('joinCode.stats', e); return null; }
+}
+
+/**
+ * Every code this coach holds, with what each one brought in.
+ *
+ * The status travels with the rows because the rows are counts, and this is the
+ * read where an empty answer is most dangerous: no rows under a failed read
+ * looks exactly like a coach whose campaigns brought in nobody. Nothing here
+ * substitutes a zero for an unknown — see src/lib/joinCodes.ts, which owns the
+ * sentence each row renders.
+ *
+ * 'partial' is never produced: my_join_codes() returns at most twenty-one rows
+ * and does its counting server-side, so PostgREST's 1,000-row cap cannot bite.
+ * The type still carries it so the screens do not have to be revisited if that
+ * ever stops being true.
+ */
+export type JoinCodesRead = { status: LoadStatus; rows: JoinCodeRow[]; reason?: string };
+
+export async function fetchMyJoinCodes(): Promise<JoinCodesRead> {
+  // Not "there are none". Without a server there is no table to have read, and
+  // an empty list under 'ready' would be a claim about a coach's campaigns made
+  // by an app that never asked anybody.
+  if (!USE_SUPABASE) return { status: 'error', rows: [], reason: 'Sign in to Repple to see your codes.' };
+  try {
+    const { data, error } = await supabase.rpc('my_join_codes');
+    if (error) {
+      reportError('joinCode.list', error);
+      return { status: 'error', rows: [], reason: 'Your codes could not be read, so nothing here is a count.' };
+    }
+    return { status: 'ready', rows: shapeJoinCodes((data ?? []) as RawJoinCode[]) };
+  } catch (e) {
+    reportError('joinCode.list', e);
+    return { status: 'error', rows: [], reason: 'Your codes could not be read, so nothing here is a count.' };
+  }
+}
+
+/** Create a named code. The label is what makes its count readable later. */
+export async function createJoinCode(label: string): Promise<{ ok: true; row: JoinCodeRow } | { ok: false; reason: string }> {
+  const clean = normaliseLabel(label);
+  if (!USE_SUPABASE) return { ok: false, reason: 'Sign in to Repple to make a code.' };
+  try {
+    const { data, error } = await supabase.rpc('create_join_code', { p_label: clean });
+    // The server's own words, not a flattened "something went wrong": every
+    // refusal it raises here — no name, a name already live, twenty codes
+    // already — is something the coach can act on in the next five seconds.
+    if (error) { reportError('joinCode.create', error); return { ok: false, reason: createErrorMessage(error.message) }; }
+    const raw = (Array.isArray(data) ? data[0] : data) as RawJoinCode | undefined;
+    const row = shapeJoinCodes(raw ? [{ ...raw, is_default: false, joined: 0, pending: 0, revoked_at: null }] : [])[0];
+    // No row means the function did not reach its return. A code may or may not
+    // exist; saying it does and showing nothing to share is the worse half.
+    if (!row) {
+      reportError('joinCode.create', new Error('create_join_code returned no row'));
+      return { ok: false, reason: 'The code was not returned, so there is nothing to give out. Pull to refresh and check before making another.' };
+    }
+    return { ok: true, row };
+  } catch (e: any) {
+    reportError('joinCode.create', e);
+    return { ok: false, reason: createErrorMessage(e?.message) };
+  }
+}
+
+function createErrorMessage(raw: string | null | undefined): string {
+  const m = (raw || '').toLowerCase();
+  if (m.includes('already have a live code called')) return 'You already have a live code with that name. Turn it off first, or pick another name.';
+  if (m.includes('20 live codes')) return 'You already have 20 live codes. Turn one off before making another.';
+  if (m.includes('a code needs a name')) return 'Give the code a name, so you can tell later which one worked.';
+  if (m.includes('name is too long')) return 'That name is too long — keep it to 40 characters.';
+  if (m.includes('no trainer profile')) return 'This account is not set up as a coach, so it cannot issue codes.';
+  if (m.includes('not signed in')) return 'Sign in to Repple to make a code.';
+  return raw?.trim() ? `${raw.trim()} No code was made.` : 'The code could not be made.';
+}
+
+/**
+ * Turn a named code off. It stops accepting joins and keeps its history, so the
+ * clients it already brought in stay attributed to it.
+ */
+export async function revokeJoinCode(id: string): Promise<{ ok: true } | { ok: false; reason: string }> {
+  if (!USE_SUPABASE) return { ok: false, reason: 'Sign in to Repple to turn a code off.' };
+  try {
+    const { error } = await supabase.rpc('revoke_join_code', { p_id: id });
+    if (error) {
+      reportError('joinCode.revoke', error);
+      // The code is still live. Saying otherwise would leave a coach believing
+      // a code they wanted off is off, while it keeps taking joins.
+      return { ok: false, reason: 'That code could not be turned off, so it is still working. Try again.' };
+    }
+    return { ok: true };
+  } catch (e) {
+    reportError('joinCode.revoke', e);
+    return { ok: false, reason: 'That code could not be turned off, so it is still working. Try again.' };
+  }
 }
 
 /** Issue a new code, retiring the old one. Returns the new code, or a reason. */
@@ -83,7 +176,11 @@ export async function joinByCode(input: string, mode: CoachedMode = 'online'): P
   if (!USE_SUPABASE) return { ok: false, reason: 'Sign in to Repple first, then enter the code.' };
   try {
     const { data, error } = await supabase.rpc('join_by_code', { p_code: code, p_mode: mode });
-    if (error) return { ok: false, reason: joinErrorMessage(error.message) };
+    // A named code that has been turned off is its own failure, and part 81
+    // raises it as one. Folded into "no coach uses that code" it would send the
+    // client back to their coach to argue about a code the coach knows they
+    // issued, with both of them looking for a typo that is not there.
+    if (error) return { ok: false, reason: spentCodeMessage(error.message) ?? joinErrorMessage(error.message) };
     // The RPC RETURNS TABLE, so supabase-js hands back an array. No row means
     // the function did not reach its `return query` — treat it as a failure
     // rather than reporting a join that may not have been written.
@@ -99,6 +196,6 @@ export async function joinByCode(input: string, mode: CoachedMode = 'online'): P
       already: !!row.already,
     };
   } catch (e: any) {
-    return { ok: false, reason: joinErrorMessage(e?.message) };
+    return { ok: false, reason: spentCodeMessage(e?.message) ?? joinErrorMessage(e?.message) };
   }
 }

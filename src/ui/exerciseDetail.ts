@@ -61,9 +61,37 @@ const strs = (v: unknown): string[] =>
  * invented this morning has no row. That must read as "we have no guide for
  * this" and never as a failure.
  */
+
+/**
+ * Whether anybody is signed in.
+ *
+ * The catalogue's read policy is `to authenticated`, so a signed-out session
+ * gets an EMPTY RESULT rather than an error — PostgREST filters the rows away
+ * and reports success. That is indistinguishable, at the call site, from a
+ * movement genuinely not being in the catalogue, and the difference matters:
+ * demo mode has no session, so it was telling people "this movement has no
+ * catalogue entry" about Back Squat, which has one. A false statement about
+ * our own data is worse than an admission that we could not look.
+ *
+ * Cheap: the session is read from local storage, not the network.
+ */
+async function signedIn(): Promise<boolean> {
+  try {
+    const { data } = await supabase.auth.getSession();
+    return !!data.session;
+  } catch {
+    // Could not tell. Treat as signed in, so a storage hiccup words the result
+    // as an ordinary empty rather than blaming the person for being signed out.
+    return true;
+  }
+}
+
 export function useExerciseDetail(name: string | null | undefined) {
   const [detail, setDetail] = useState<ExerciseDetail | null>(null);
   const [status, setStatus] = useState<LoadStatus>('loading');
+  /** True when the empty result is because nobody is signed in, not because
+   *  the movement is absent. */
+  const [signedOut, setSignedOut] = useState(false);
   const id = exerciseSlug(name || '');
 
   const load = useCallback(async () => {
@@ -76,7 +104,14 @@ export function useExerciseDetail(name: string | null | undefined) {
         .eq('id', id)
         .maybeSingle();
       if (error) { reportError('exerciseDetail.read', error, { id }); setDetail(null); setStatus('error'); return; }
-      if (!data) { setDetail(null); setStatus('ready'); return; }
+      if (!data) {
+        // No row. Before calling that a real answer, check we were allowed to
+        // look — see signedIn() above.
+        setDetail(null);
+        setSignedOut(!(await signedIn()));
+        setStatus('ready');
+        return;
+      }
       setDetail({
         id: data.id,
         name: data.name,
@@ -109,7 +144,7 @@ export function useExerciseDetail(name: string | null | undefined) {
   }, [id]);
 
   useEffect(() => { void load(); }, [load]);
-  return { detail, status, reload: load };
+  return { detail, status, signedOut, reload: load };
 }
 
 export interface CatalogueRow {
@@ -151,6 +186,10 @@ export interface CatalogueRow {
 export function useExerciseCatalogue() {
   const [rows, setRows] = useState<CatalogueRow[]>([]);
   const [status, setStatus] = useState<LoadStatus>('loading');
+  /** True when an empty catalogue is a permissions answer rather than a real
+   *  one — the read policy is `to authenticated`, and a signed-out session is
+   *  handed zero rows with no error. */
+  const [signedOut, setSignedOut] = useState(false);
 
   const load = useCallback(async () => {
     setStatus('loading');
@@ -162,6 +201,9 @@ export function useExerciseCatalogue() {
         .limit(capLimit());
       if (error) { reportError('exerciseCatalogue.read', error); setStatus('error'); return; }
       const page = capped(data);
+      // An empty catalogue is either a real answer or a signed-out one, and
+      // only one of those is worth telling somebody about.
+      if (!page.rows.length) setSignedOut(!(await signedIn()));
       setRows(page.rows.map((r: any) => ({
         id: r.id,
         name: r.name,
@@ -188,5 +230,5 @@ export function useExerciseCatalogue() {
   }, []);
 
   useEffect(() => { void load(); }, [load]);
-  return { rows, status, reload: load };
+  return { rows, status, signedOut, reload: load };
 }

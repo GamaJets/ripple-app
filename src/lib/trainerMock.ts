@@ -8,6 +8,22 @@ import type { CoachedMode } from './types';
 
 export interface RosterClient {
   id: string; name: string; goal: string;
+  /** The goal the COACH recorded for this person in Add Client, in their own
+   *  words — set only where a `coach_clients` note and a linked `clients` row
+   *  turn out to describe the same person, which is every client who joined by
+   *  code or through the directory.
+   *
+   *  It sits BESIDE `goal` rather than replacing it because neither value is
+   *  allowed to win. `goal` above is the client's own answer and is what drives
+   *  their macros; this is what their coach wrote down. Where the two differ
+   *  that is a coaching conversation to be surfaced, not a data conflict to be
+   *  resolved by whichever screen loaded last — so the roster carries both and
+   *  says so. See goalsDisagree() in src/lib/rosterMerge.ts, which compares them
+   *  on a normalised basis so 'Fat loss' and 'fatloss' are one goal.
+   *
+   *  Undefined means the coach recorded nothing. That is not the same as
+   *  recording something we could not read, and neither is a disagreement. */
+  coachGoal?: string | null;
   /** Change in body weight across the scans on record, in kg.
    *
    *  NULL when there are none — which is every client added by hand, and every

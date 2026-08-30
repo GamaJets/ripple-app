@@ -283,8 +283,14 @@ export default function FindTrainer() {
       const { data: auth } = await supabase.auth.getUser();
       const uid = auth?.user?.id;
       if (!uid) { Alert.alert('Sign in required', 'Sign in to Repple to request coaching.'); return; }
+      // `source` is what makes the coach's attribution add up. The column and
+      // its check constraint have allowed 'directory' since part 56 and nothing
+      // ever wrote it: this insert left it null, so a client who found their
+      // coach by browsing was indistinguishable from a row created before the
+      // column existed, and the coach's "where did people come from?" had one
+      // real bucket and one permanently empty one.
       const { error } = await supabase.from('coach_requests').insert({
-        client_id: uid, trainer_id: coach.id, mode, status: 'pending',
+        client_id: uid, trainer_id: coach.id, mode, status: 'pending', source: 'directory',
       });
       if (error && !/duplicate|unique/i.test(error.message)) {
         Alert.alert('Could not send request', error.message);

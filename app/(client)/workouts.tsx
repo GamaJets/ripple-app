@@ -15,7 +15,7 @@ import { useRouter, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { tapLight } from '../../src/ui/haptics';
 import { Icon } from '../../src/ui/Icon';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, Notice, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, Notice, fig, ChipGrid } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../../src/theme/scale';
 import type { Theme } from '../../src/theme/tokens';
 import { buildProgram, type ProgramExercise } from '../../src/lib/programs';
@@ -1036,49 +1036,40 @@ export default function Train() {
         {/* ── the rest: navigational, deliberately quiet ──────────────────── */}
         <Section>
           <SectionHead title="Go To" />
-          {/* Wrapped, not scrolled sideways.
-              This was a horizontal ScrollView, which put roughly seven of the
-              twelve destinations off the right edge with nothing to indicate
-              they were there — no scrollbar, no cut-off pill. Music & Playlists
-              was reported missing from Train while it sat in that row's tail,
-              and the same was true of Library, Tools, Watch & devices and Rest
-              & deload. A row you have to discover by dragging is a row most
-              people never read, so all twelve now wrap onto three lines and are
-              simply visible. */}
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
-            {/* Ordered by what somebody is DOING, not alphabetically and not by
-                when each screen happened to be built. Four groups, in the order
-                a session actually runs:
+          {/* Wrapped, not scrolled sideways — see ChipGrid in src/ui/kit,
+              which now carries this and the reasoning behind it. The coach
+              dashboard had the identical row with the identical fault, which
+              is why it is a component rather than a second copy. */}
+          {/* Ordered by what somebody is DOING, not alphabetically and not by
+              when each screen happened to be built. Four groups, in the order
+              a session actually runs:
 
-                  before you start   Playlists · Scan Machine · Library
-                  what to do         This Week · Targets · When to Rest
-                  what you did       History · Trends · Records
-                  how you are        Recovery · Watch & Devices
-                  settings           Tools
+                before you start   Playlists · Scan Machine · Library
+                what to do         This Week · Targets · When to Rest
+                what you did       History · Trends · Records
+                how you are        Recovery · Watch & Devices
+                settings           Tools
 
-                Labels are title case throughout. The row previously mixed
-                "This Week" with "Scan machine" and "Watch & devices", and that
-                last one contradicted the screen's OWN title, which has always
-                been "Watch & Devices". */}
-            {([
-              ['play', 'Playlists', '/(client)/music'],
-              ['camera', 'Scan Machine', '/(client)/scan-machine'],
-              ['video', 'Library', '/(client)/library'],
-              ['calendar', 'This Week', '/(client)/week'],
-              ['trending', 'Targets', '/(client)/progression'],
-              ['moon', 'When to Rest', '/(client)/restday'],
-              ['clock', 'History', '/(client)/activity'],
-              ['chart', 'Trends', '/(client)/trends'],
-              ['trophy', 'Records', '/(client)/records'],
-              ['water', 'Recovery', '/(client)/recovery'],
-              ['heart', 'Watch & Devices', '/(client)/devices'],
-              ['settings', 'Tools', '/(client)/tools'],
-            ] as const).map(([ic, label, route]) => (
-              <Pressable key={route} onPress={() => router.push(route as any)} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: sp.sm }}>
-                <Icon name={ic} size={14} color={t.ink2} /><Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>{label}</Text>
-              </Pressable>
-            ))}
-          </View>
+              Labels are title case throughout. The row previously mixed
+              "This Week" with "Scan machine" and "Watch & devices", and that
+              last one contradicted the screen's OWN title, which has always
+              been "Watch & Devices". */}
+          <ChipGrid items={([
+            ['play', 'Playlists', '/(client)/music'],
+            ['camera', 'Scan Machine', '/(client)/scan-machine'],
+            ['video', 'Library', '/(client)/library'],
+            ['calendar', 'This Week', '/(client)/week'],
+            ['trending', 'Targets', '/(client)/progression'],
+            ['moon', 'When to Rest', '/(client)/restday'],
+            ['clock', 'History', '/(client)/activity'],
+            ['chart', 'Trends', '/(client)/trends'],
+            ['trophy', 'Records', '/(client)/records'],
+            ['water', 'Recovery', '/(client)/recovery'],
+            ['heart', 'Watch & Devices', '/(client)/devices'],
+            ['settings', 'Tools', '/(client)/tools'],
+          ] as const).map(([icon, label, route]) => ({
+            icon, label, key: route, onPress: () => router.push(route as any),
+          }))} />
         </Section>
 
       </ScrollView>

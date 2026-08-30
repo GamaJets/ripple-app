@@ -67,6 +67,8 @@
     "src/lib/backTo.test.ts",
     "src/lib/injuryGate.test.ts",
     "src/lib/videoCoverage.test.ts",
+    "src/lib/rosterMerge.test.ts",
+    "src/lib/ownTraining.test.ts",
     "src/lib/foodSearch.test.ts"
   ]
 }

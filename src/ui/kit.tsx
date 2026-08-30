@@ -133,6 +133,58 @@ export function Hero({
   );
 }
 
+/* ── chip grid ────────────────────────────────────────────────────────────── */
+
+/**
+ * A set of destinations, all of them visible.
+ *
+ * The alternative — and what both apps did — is a horizontal ScrollView with
+ * `showsHorizontalScrollIndicator={false}`, which puts everything past the
+ * screen edge somewhere nobody knows to look. On the client's Train tab that
+ * hid roughly seven of twelve destinations; Music & Playlists was reported
+ * MISSING while it sat in that row's tail, and so were Library, Tools, Watch &
+ * Devices and When to Rest. A row you have to discover by dragging is a row
+ * most people never read.
+ *
+ * `flexWrap` is inert inside a horizontal ScrollView — it lays out on one
+ * unbounded main axis — which is why this is a plain View, and why the chips
+ * must NOT take `flex: 1`: they size to their content, and that is what lets
+ * twelve of them flow onto three lines.
+ *
+ * Distinct from QuickRow, which is a fixed row of equal-width vertical tiles
+ * for three or four primary actions. Handing QuickRow seven items squeezes
+ * them into one line rather than wrapping.
+ */
+export interface Chip {
+  icon: IconName;
+  label: string;
+  onPress: () => void;
+  /** Stable key. Defaults to the label, which is unique within a set in
+   *  practice; pass a route when two chips could ever share a word. */
+  key?: string;
+}
+
+export function ChipGrid({ items, tone }: { items: Chip[]; tone?: string }) {
+  const t = useTheme();
+  const mark = tone || t.ink2;
+  return (
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
+      {items.map((c) => (
+        <Pressable
+          key={c.key ?? c.label}
+          onPress={c.onPress}
+          accessibilityRole="button"
+          accessibilityLabel={c.label}
+          style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: sp.sm }}
+        >
+          <Icon name={c.icon} size={14} color={mark} />
+          <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>{c.label}</Text>
+        </Pressable>
+      ))}
+    </View>
+  );
+}
+
 /* ── KPI row ──────────────────────────────────────────────────────────────── */
 
 export interface KpiItem {

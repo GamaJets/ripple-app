@@ -268,6 +268,22 @@ export default function CoachProfile() {
 
         <Rule />
 
+        {/* ── the coach's own training ───────────────────────────────────── */}
+        {/* Its own section rather than a row under Account, because the thing
+            that has to be legible from the outside is WHOSE training it is.
+            Coaches train too, and until this row there was nowhere in this app
+            to log a session of their own — a coach who lifts had to keep a
+            second account in the client app. It sits above Account because it
+            is something a coach does weekly; signing out is not. */}
+        <Section>
+          <SectionHead title="Your Training" />
+          <ListRow icon="dumbbell" title="My Training"
+            note="Log and review your own workouts — separate from every client's record"
+            onPress={() => router.push('/(trainer)/my-training')} />
+        </Section>
+
+        <Rule />
+
         {/* ── money ──────────────────────────────────────────────────────── */}
         {/* Account — the in-app route to sign out, export, and account deletion.
             Repple Coach had none of the three before this. */}

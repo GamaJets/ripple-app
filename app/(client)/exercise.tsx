@@ -52,7 +52,7 @@ export default function ExerciseScreen() {
   const { name: raw, from } = useLocalSearchParams<{ name?: string; from?: string }>();
   const goBack = useBackTo(from);
   const name = (raw || '').trim();
-  const { detail, status } = useExerciseDetail(name);
+  const { detail, status, signedOut } = useExerciseDetail(name);
   const { videos } = useExerciseVideos();
   const cd = useClientData();
 
@@ -146,10 +146,17 @@ export default function ExerciseScreen() {
           // actually changes it, rather than a grey silhouette implying a
           // demonstration we do not have.
           <Notice tone={t.ink3} kicker="Demonstration"
-            title={detail ? 'No Demonstration Yet' : 'Not in Our Catalogue'}
+            title={detail ? 'No Demonstration Yet' : signedOut ? 'Sign In to See This' : 'Not in Our Catalogue'}
             note={detail
               ? 'Nobody has filmed this movement and the catalogue has no reference frames for it. Your coach can add a clip from their app.'
-              : 'This movement is not in our catalogue, so there is no guide for it. If your coach wrote it into your program, ask them how they want it done.'} />
+              // Not "this movement is not in our catalogue" — that is a claim
+              // about our data, and while signed out we have not been allowed
+              // to look. The catalogue reads `to authenticated`, so a
+              // signed-out session is handed zero rows with no error, which is
+              // indistinguishable from an absent movement unless we say so.
+              : signedOut
+                ? 'The exercise library is only available once you are signed in, so this screen could not look this movement up. It is very likely in there.'
+                : 'This movement is not in our catalogue, so there is no guide for it. If your coach wrote it into your program, ask them how they want it done.'} />
         )}
 
         {FRAMES_ARE_UNHOSTED && frames.length ? (

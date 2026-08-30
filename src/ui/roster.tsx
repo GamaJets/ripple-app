@@ -33,6 +33,7 @@ import { useAuthRevision } from './authRevision';
 import { endCoaching } from '../lib/endCoaching';
 import { reportError } from '../lib/reportError';
 import { activeInjuries, type Injury } from '../lib/injuries';
+import { mergeRoster } from '../lib/rosterMerge';
 
 /**
  * Whether a disclosure is new enough that a coach has probably not seen it.
@@ -271,7 +272,28 @@ export function RosterProvider({ children }: { children: ReactNode }) {
         //     wrong sign. Null, and the screen already renders that as no change
         //     recorded rather than as zero.
         const real: RosterClient[] = linked.map((c: any) => { const sc = st[c.id]; return { id: c.id, name: names[c.id] || 'Client', goal: goalMap[c.goal] || 'General', weightDelta: scansTruncated ? null : sc.wDelta, adherence: sc.adh != null ? sc.adh : null, lastActive: sc.last ? ago(sc.last) : (statsTruncated ? '—' : 'no activity yet'), next: '—', unread: 0, mode: readCoachedMode(c.mode), metrics: sc.mx ?? undefined, diet: c.diet ?? undefined, mealsPerDay: c.meals_per_day ?? undefined, avoid: Array.isArray(c.avoid) ? c.avoid : undefined, joinedAt: joined[c.id] ?? null, injuries: activeInjuries(Array.isArray(c.injuries) ? c.injuries : []).map((i: Injury) => ({ area: i.area, severity: i.severity, note: i.note, isNew: isRecent(i.at) })) }; });
-        if (!cancelled) { setRoster([...real, ...manual]); setStatus(partialFailure ? 'error' : partialRead ? 'partial' : 'ready'); }
+        // ── One row per person, not one row per table ──────────────────────
+        //
+        // These two lists used to be concatenated, on the assumption that a
+        // client is either linked OR hand-written and never both. That stopped
+        // being true when request approval started writing both: CoachRequests
+        // links the relationship and then upserts a `coach_clients` row keyed on
+        // the client's own uid, so the coach has somewhere to keep what they
+        // know about somebody from the moment they accept them. The client then
+        // appeared on the roster twice — once with the goal they chose, the
+        // weight they had lost and when they were last seen, and once directly
+        // underneath as 'General · added by you'.
+        //
+        // The second row is the expensive one. It is a note the coach made, and
+        // every figure on it is the ABSENCE of a reading rather than a reading:
+        // a coach scanning the list for who has gone quiet sees 'added by you'
+        // against somebody who trained this morning. mergeRoster keeps the
+        // linked record, because it is the only one of the two able to say
+        // anything about a person who has been training, and lifts the coach's
+        // typed goal onto it as `coachGoal` rather than dropping it — the two
+        // goals disagreeing is a conversation for the coach to have, not a
+        // conflict for this loader to settle.
+        if (!cancelled) { setRoster(mergeRoster(real, manual)); setStatus(partialFailure ? 'error' : partialRead ? 'partial' : 'ready'); }
       } catch { if (!cancelled) setStatus('error'); }
     })();
     return () => { cancelled = true; };

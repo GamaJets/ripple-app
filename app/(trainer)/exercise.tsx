@@ -54,7 +54,7 @@ export default function TrainerExercise() {
   const { name: raw, from } = useLocalSearchParams<{ name?: string; from?: string }>();
   const goBack = useBackTo(from);
   const name = (raw || '').trim();
-  const { detail, status } = useExerciseDetail(name);
+  const { detail, status, signedOut } = useExerciseDetail(name);
   const { videos } = useExerciseVideos();
   const { user } = useAuth();
 
@@ -129,10 +129,15 @@ export default function TrainerExercise() {
           // one — rather than a grey silhouette implying a demonstration we do
           // not have.
           <Notice tone={t.ink3} kicker="Demonstration"
-            title={detail ? 'No Demonstration Yet' : 'Not in the Catalogue'}
+            title={detail ? 'No Demonstration Yet' : signedOut ? 'Sign In to See This' : 'Not in the Catalogue'}
             note={detail
               ? 'Nobody has filmed this movement and the catalogue has no illustration for it, so your client sees its name, its muscles and the written steps. Record a clip from Videos and it appears here for them.'
-              : 'This movement has no catalogue entry, so there is no illustration, description or muscle data for it. You can still put it in a program — your client sees the name you typed and whatever you write in the note.'} />
+              // See the matching note on the client screen. Saying "no
+              // catalogue entry" while signed out told a coach exploring the
+              // demo that Back Squat is not in a catalogue that contains it.
+              : signedOut
+                ? 'The exercise catalogue is only available once you are signed in, so this screen could not look this movement up. Sign in and its illustration, muscles and steps appear here.'
+                : 'This movement has no catalogue entry, so there is no illustration, description or muscle data for it. You can still put it in a program — your client sees the name you typed and whatever you write in the note.'} />
         )}
 
         {FRAMES_ARE_UNHOSTED && frames.length ? (

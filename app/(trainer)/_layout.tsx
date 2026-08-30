@@ -3,6 +3,17 @@
 // Configuration, not layout: every Tabs.Screen, name, href, title and the order
 // they appear in is untouched. Only the tab label and the bar's padding moved
 // onto the scale (`src/theme/scale`); the dead emoji TabIcon is gone.
+//
+// The bar is SIX items and stays six. Everything else in this group is a detail
+// screen registered with `href: null` — reachable by navigation, absent from the
+// bar. A seventh bar item does not simply appear at the end: it squeezes the six
+// that matter, which is how "Programs" came to render as "Progra…" the one time
+// a route was added without it. `my-training`, the coach's own workout log, is
+// one of those detail screens and is reached from Profile.
+//
+// A `<Tabs.Screen>` list is walked by expo-router rather than rendered, so keep
+// commentary out from between the entries — notes about a route belong here, or
+// in the route's own file header.
 import { Tabs, Redirect } from 'expo-router';
 import { groupAllowed } from '../../src/lib/variant';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -42,6 +53,7 @@ export default function TrainerLayout() {
       <Tabs.Screen name="explore" options={{ href: null, title: 'Explore' }} />
       <Tabs.Screen name="chat" options={{ href: null, title: 'Chat' }} />
       <Tabs.Screen name="log-session" options={{ href: null, title: 'Log a Session' }} />
+      <Tabs.Screen name="my-training" options={{ href: null, title: 'My Training' }} />
       <Tabs.Screen name="checklists" options={{ href: null, title: 'Their Checklists' }} />
       <Tabs.Screen name="client-goals" options={{ href: null, title: 'Working Toward' }} />
       <Tabs.Screen name="client-photos" options={{ href: null, title: 'Progress Photos' }} />

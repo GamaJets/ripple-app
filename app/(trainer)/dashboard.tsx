@@ -41,7 +41,7 @@ import { billingAvailable } from '../../src/lib/billing';
 import { Icon, type IconName } from '../../src/ui/Icon';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
-import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Card, Cta, Ghost, Notice, fig, Flag as KitFlag } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Card, Cta, Ghost, Notice, PartialRead, ChipGrid, fig, Flag as KitFlag } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../../src/theme/scale';
 import { useMyTrainerProfile } from '../../src/ui/coachProfile';
 import { CoachRequests } from '../../src/ui/CoachRequests';
@@ -61,7 +61,11 @@ import { useAnnouncements } from '../../src/ui/announcements';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useCheckIns } from '../../src/ui/checkins';
 import { useInvites } from '../../src/ui/invites';
-import { fetchMyJoinCode, fetchJoinCodeStats, rotateJoinCode } from '../../src/ui/joinCode';
+import { fetchMyJoinCode, rotateJoinCode, fetchMyJoinCodes, createJoinCode, revokeJoinCode, type JoinCodesRead } from '../../src/ui/joinCode';
+import {
+  codeCountLine, labelProblem, canCreateCode, DEFAULT_CODE_NOTE, MAX_LABEL, MAX_LIVE_CODES,
+  type JoinCodeRow,
+} from '../../src/lib/joinCodes';
 import { useTrainerInvites } from '../../src/ui/trainerInvites';
 import { useClientTags } from '../../src/ui/clientTags';
 import { useProgramTemplates } from '../../src/ui/programTemplates';
@@ -327,8 +331,30 @@ export default function TrainerClients() {
   // write.
   const [myCode, setMyCode] = useState<string | null>(null);
   const [myCodeErr, setMyCodeErr] = useState<string | null>(null);
-  /** null while unread — 'no one has used it' and 'we could not check' differ. */
-  const [codeStats, setCodeStats] = useState<{ joined: number; pending: number } | null>(null);
+  // Every code this coach holds, and the status of the read that produced them.
+  // The rows alone cannot tell "nobody has used it" from "we could not check",
+  // and those are the two answers a coach acts on in opposite directions — see
+  // src/ui/loadStatus.ts. codeCountLine below refuses to state a figure under
+  // anything but a completed read.
+  const [codes, setCodes] = useState<JoinCodesRead>({ status: 'loading', rows: [] });
+  const [newCodeLabel, setNewCodeLabel] = useState('');
+  const [codeBusy, setCodeBusy] = useState(false);
+  // Re-read rather than patching a row in place after a write: the list is the
+  // only thing that says which codes are live, and a local edit would show a
+  // code as off whether or not the server agreed.
+  const loadCodes = async () => {
+    setCodes((c) => ({ ...c, status: 'loading' }));
+    setCodes(await fetchMyJoinCodes());
+  };
+  const namedCodes = codes.rows.filter((r) => !r.isDefault);
+  // The main code's row, or a zeroed stand-in when the read produced none —
+  // which happens only when the code was allocated after the list was read,
+  // i.e. a code so new nobody can have used it. The stand-in states nothing on
+  // its own: codeCountLine gates every figure on the status above.
+  const defaultCodeRow: JoinCodeRow = codes.rows.find((r) => r.isDefault) ?? {
+    id: null, code: myCode ?? '', label: 'Your main code',
+    isDefault: true, isLive: true, createdAt: null, joined: 0, pending: 0,
+  };
   const [invEmail, setInvEmail] = useState('');
   const [invMode, setInvMode] = useState<CoachedMode>('online');
   const [newEmail, setNewEmail] = useState('');
@@ -662,15 +688,21 @@ export default function TrainerClients() {
         {/* ── coaching tools ─────────────────────────────────────────────── */}
         <Section>
           <SectionHead title="Coaching Tools" />
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -2 }} contentContainerStyle={{ gap: sp.sm, paddingHorizontal: 2 }}>
-            {SHORTCUTS.map(([ic, label, route]) => (
-              <Pressable key={route} onPress={() => router.push(route as any)}
-                style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: 13, paddingVertical: 8 }}>
-                <Icon name={ic} size={14} color={t.brand} />
-                <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>{label}</Text>
-              </Pressable>
-            ))}
-          </ScrollView>
+          {/* Seven destinations, and this was a horizontal ScrollView with its
+              indicator hidden — so Analytics, Leaderboard and Feedback sat past
+              the right edge of a phone with nothing on screen saying they were
+              there. The client app's Train tab had the identical fault and hid
+              most of its row; ChipGrid wraps instead. It has to be a plain View
+              to do it: flexWrap is inert inside a horizontal ScrollView, which
+              lays out on one unbounded axis, so this could not be fixed in
+              place. `tone` keeps the coach's icons in brand, as they were.
+              `key` is the route, so two chips sharing a word cannot collide. */}
+          <ChipGrid
+            tone={t.brand}
+            items={SHORTCUTS.map(([ic, label, route]) => ({
+              icon: ic, label, key: route, onPress: () => router.push(route as any),
+            }))}
+          />
         </Section>
 
         {/* ── pending invites ────────────────────────────────────────────── */}
@@ -729,7 +761,7 @@ export default function TrainerClients() {
                 setMyCode(null); setMyCodeErr(null);
                 const r = await fetchMyJoinCode();
                 if (r.ok) setMyCode(r.code); else setMyCodeErr(r.reason);
-                setCodeStats(await fetchJoinCodeStats());
+                await loadCodes();
               }} /></View>
             <View style={{ flex: 1 }}><Cta label="Add Client" wide onPress={async () => {
                 setNewName(''); setNewEmail(''); setNewGoal('Fat loss'); setNewMode('online'); setAddOpen(true);
@@ -1325,8 +1357,23 @@ export default function TrainerClients() {
             <Text style={{ ...ty.title, color: t.ink }}>Add a Client</Text>
             <Text style={{ ...ty.label, color: t.ink3, marginTop: 3, marginBottom: sp.xl }}>Two ways in. The code works whoever they are and whatever address they signed up with; the email invite only reaches them if you spell it exactly as they did.</Text>
 
-            {/* ── the code ──────────────────────────────────────────────── */}
-            <SheetHead t={t} title="Your Coaching Code" />
+            {/* ── the codes ────────────────────────────────────────────
+                One code became several. A coach running a gym flyer, an
+                Instagram bio link and a referral card was running three
+                campaigns through one string and got one fused number back, so
+                "which of these worked?" had no answer — and the only lever on
+                offer, New Code, DESTROYED the code already printed on the card
+                in order to make a second one. Named codes run in parallel; see
+                supabase/parts/81-coach-join-codes.sql.
+
+                New Code is kept, and only for the default code. It is not a
+                campaign tool and never was — it is the remedy for a code that
+                has got somewhere the coach did not put it, and there is no
+                other way to stop a string that is loose in the world. Named
+                codes are turned off individually instead, which keeps their
+                history; rotating deliberately does not, and that is why it is
+                still behind a destructive confirmation. */}
+            <SheetHead t={t} title="Your Main Code" />
             <View style={{ marginBottom: sp.xl }}>
               {myCodeErr ? (
                 <Text style={{ ...ty.label, color: t.ink2 }}>{myCodeErr}</Text>
@@ -1356,32 +1403,146 @@ export default function TrainerClients() {
                   </Text>
                   <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: sp.md }}>
                     {/* "Is the code working?" is the first thing anybody asks
-                        about a code, and until now nothing recorded the answer.
-                        Unread is not zero: a failed count says so. */}
-                    <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }}>
-                      {codeStats == null
-                        ? 'We couldn’t check how many people have used it.'
-                        : codeStats.joined === 0 && codeStats.pending === 0
-                        ? 'Nobody has used it yet.'
-                        : `${codeStats.joined} joined with it${codeStats.pending ? ` · ${codeStats.pending} waiting on you` : ''}.`}
-                    </Text>
+                        about a code. Unread is not zero, and codeCountLine
+                        refuses to print a figure the read did not establish —
+                        a coach shown "0 joined" because the request failed
+                        concludes the campaign failed and stops running it. */}
+                    <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }}>{codeCountLine(codes.status, defaultCodeRow)}</Text>
                     <Ghost label="New Code" onPress={() => {
                       Alert.alert(
                         'Issue a new code?',
-                        'Your current code stops working straight away. Anyone you have already given it to will not be able to use it, and clients who already joined are unaffected.',
+                        'Your current code stops working straight away. Anyone you have already given it to will not be able to use it, and clients who already joined are unaffected.\n\nTo run a second code alongside this one — for a flyer or a bio link — make a named code below instead.',
                         [
                           { text: 'Keep it' },
                           { text: 'New code', style: 'destructive', onPress: async () => {
                             const r = await rotateJoinCode();
-                            if (r.ok) { setMyCode(r.code); setMyCodeErr(null); }
+                            if (r.ok) { setMyCode(r.code); setMyCodeErr(null); await loadCodes(); }
                             else Alert.alert('Not changed', r.reason);
                           } },
                         ],
                       );
                     }} />
                   </View>
+                  {/* The main code's count is not only its own — it carries every
+                      join by code that no named code claims, including codes New
+                      Code has replaced. Said out loud, because otherwise the
+                      number reads as belonging to the six characters above it. */}
+                  {codes.status === 'ready' ? (
+                    <Text style={{ ...ty.micro, color: t.ink3, marginTop: 4 }}>{DEFAULT_CODE_NOTE}</Text>
+                  ) : null}
                 </>
               )}
+            </View>
+
+            {/* ── named codes ──────────────────────────────────────────── */}
+            <SheetHead t={t} title="Codes You Have Named" />
+            <View style={{ marginBottom: sp.xl }}>
+              {/* An empty list means "you have made none" ONLY under a completed
+                  read. Under a failure it means the app does not know, and the
+                  create form is hidden with it: a coach who cannot see their
+                  existing codes cannot tell whether the one they are about to
+                  make is a duplicate. */}
+              {codes.status === 'error' ? (
+                <Notice
+                  tone={t.warn}
+                  kicker="Not read"
+                  title="Your named codes could not be read"
+                  note={codes.reason ?? 'Nothing here is a count. Close this and open it again once you have a connection.'}
+                />
+              ) : codes.status === 'partial' ? (
+                <PartialRead what="codes" shown={namedCodes.length} />
+              ) : codes.status === 'loading' ? (
+                <Text style={{ ...ty.label, color: t.ink3 }}>Reading your codes…</Text>
+              ) : namedCodes.length === 0 ? (
+                <Text style={{ ...ty.label, color: t.ink3 }}>
+                  None yet. A named code tells you which of the things you did brought somebody in — one for the gym flyer, one for your Instagram bio, both live at once.
+                </Text>
+              ) : null}
+
+              {namedCodes.map((c) => (
+                <View key={c.id ?? c.code} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingVertical: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ ...ty.label, fontWeight: '500', color: c.isLive ? t.ink : t.ink3 }}>{c.label}</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{codeCountLine(codes.status, c)}</Text>
+                    {!c.isLive ? (
+                      // Kept on screen with its counts. A campaign that is over
+                      // still tells the coach what it did, and deleting the row
+                      // would make it look as though it never ran.
+                      <Text style={{ ...ty.micro, color: t.ink3, marginTop: 2 }}>Turned off — it takes nobody new.</Text>
+                    ) : null}
+                  </View>
+                  <Pressable
+                    onPress={() => { Share.share({ message: inviteMessage(c.code) }).catch(() => {}); }}
+                    disabled={!c.isLive}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Share the code for ${c.label}, ${c.code.split('').join(' ')}`}
+                    style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 8, opacity: c.isLive ? 1 : 0.5 }}>
+                    <Text style={{ ...ty.label, ...numeric, color: t.ink, letterSpacing: 2 }}>{c.code}</Text>
+                  </Pressable>
+                  {c.isLive && c.id ? (
+                    <Ghost label="Turn Off" onPress={() => {
+                      const id = c.id as string;
+                      Alert.alert(
+                        `Turn off “${c.label}”?`,
+                        'It stops working for anyone you have given it to. Clients who already joined with it are unaffected, and it keeps its count so you can still see what it brought in.',
+                        [
+                          { text: 'Keep it' },
+                          { text: 'Turn it off', style: 'destructive', onPress: async () => {
+                            const r = await revokeJoinCode(id);
+                            // Re-read rather than editing the row in place: the
+                            // list is the only thing that says which codes are
+                            // live, and a local edit would show it off whether
+                            // or not the server agreed.
+                            if (r.ok) await loadCodes();
+                            else Alert.alert('Still on', r.reason);
+                          } },
+                        ],
+                      );
+                    }} />
+                  ) : null}
+                </View>
+              ))}
+
+              {codes.status === 'ready' ? (
+                <View style={{ marginTop: sp.md }}>
+                  {canCreateCode(codes.rows) ? (
+                    <>
+                      <TextInput
+                        value={newCodeLabel}
+                        onChangeText={setNewCodeLabel}
+                        placeholder="Name it — “Gym flyer”, “Instagram bio”"
+                        placeholderTextColor={t.ink3}
+                        maxLength={MAX_LABEL}
+                        style={{ ...field(t), marginBottom: sp.sm }}
+                      />
+                      <Ghost label={codeBusy ? 'Making…' : 'Make a Named Code'} onPress={async () => {
+                        if (codeBusy) return;
+                        // Checked here as well as in Postgres so a blank or
+                        // duplicate name costs nothing to find out about. The
+                        // server stays the authority — two devices can create
+                        // codes at once and only it sees both.
+                        const problem = labelProblem(newCodeLabel, codes.rows.filter((r) => r.isLive && !r.isDefault).map((r) => r.label));
+                        if (problem) { Alert.alert('Name it first', problem); return; }
+                        setCodeBusy(true);
+                        const r = await createJoinCode(newCodeLabel);
+                        setCodeBusy(false);
+                        if (!r.ok) { Alert.alert('Not made', r.reason); return; }
+                        setNewCodeLabel('');
+                        await loadCodes();
+                        Alert.alert(
+                          'Code made',
+                          `${r.row.label}: ${r.row.code}. Put this one wherever that campaign lives — anyone who joins with it is counted against it.`,
+                          [{ text: 'Share it', onPress: () => { Share.share({ message: inviteMessage(r.row.code) }).catch(() => {}); } }, { text: 'Done', style: 'cancel' }],
+                        );
+                      }} />
+                    </>
+                  ) : (
+                    <Text style={{ ...ty.caption, color: t.ink3 }}>
+                      You have {MAX_LIVE_CODES} codes live at once, which is the most Repple will issue. Turn one off to make another.
+                    </Text>
+                  )}
+                </View>
+              ) : null}
             </View>
 
             <Rule />

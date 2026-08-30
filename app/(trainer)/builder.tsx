@@ -56,7 +56,7 @@ import { guardOverwrite } from '../../src/lib/overwriteGuard';
 import { guardInjuries } from '../../src/lib/injuryGate';
 import { useInjuryAcks } from '../../src/ui/injuryAcks';
 import { areaLabel, type Injury } from '../../src/lib/injuries';
-import type { Goal } from '../../src/lib/types';
+import { goalToEnum, goalsDisagree } from '../../src/lib/rosterMerge';
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const LIB: { name: string; group: string }[] = [
@@ -80,12 +80,32 @@ const nextKey = () => 'e' + KEY++;
 type BEx = { key: string; name: string; group: string; sets: number; reps: string };
 type BDay = { day: string; focus: string; cardio?: string; exercises: BEx[] };
 
-function goalToEnum(g: string): Goal {
-  const s = (g || '').toLowerCase();
-  if (s.includes('muscle')) return 'muscle';
-  if (s.includes('tone')) return 'tone';
-  return 'fatloss';
-}
+// ── The goal that generates a programme is now allowed to be unknown ───────
+//
+// This screen carried its own goalToEnum: lowercase the roster's goal string,
+// return 'muscle' if it contained "muscle", 'tone' if it contained "tone", and
+// otherwise fall through to 'fatloss'. Two failures lived in that last line.
+//
+// The fallthrough was reached by everything the table did not recognise, and
+// the string it was reached by most often is 'General' — which is precisely
+// what the roster puts where a client's goal could NOT be read. So a client
+// whose goal row was refused, or empty, or written by a newer build, had a
+// fat-loss programme generated for them, the builder presented it as their
+// plan, and the Assign button underneath offered to send it. Nothing on screen
+// said the goal had been guessed. The substring test was wrong too: it asks
+// about muscle before tone, so the phrase "muscle tone" resolved to muscle.
+//
+// Both now live in src/lib/rosterMerge.ts, matched on an exact key and
+// returning null for anything they do not recognise, and this screen answers
+// that null by WITHHOLDING the generated plan rather than by picking a goal.
+//
+// Withholding the generated plan, and not the whole screen: the danger is the
+// auto plan specifically, because that is the artefact whose content is chosen
+// by the goal and which looks identical to work a human did. A programme the
+// coach types out themselves is theirs whatever the roster knows about the
+// goal, so Assign stays available for it — see the notice in the Program
+// section, which asks the coach to set the goal rather than guessing it for
+// them.
 
 export default function Builder() {
   const t = useTheme();
@@ -139,6 +159,15 @@ export default function Builder() {
   // their auto-generated program" — and offering a Revert for a programme we
   // cannot see — would both be assertions this screen has no basis for.
   const assignedNow = programStatus === 'ready' && !!getProgram(clientId);
+  // The goal the auto plan would be built from, or null when the roster does
+  // not know it. Null is the state this screen used to be unable to hold, and
+  // it is not rare: it covers a `clients.goal` that could not be read, one a
+  // newer build wrote a value this app has never heard of into, and every
+  // hand-added client whose goal the coach left blank.
+  const autoGoal = goalToEnum(client?.goal);
+  // Two goals for one person, in two vocabularies. Normalised before comparing,
+  // so a client on 'fatloss' under a coach who wrote 'Fat loss' is agreement.
+  const goalSplit = !!client && goalsDisagree(client.goal, client.coachGoal);
   const planGuard = guardOverwrite(
     programStatus,
     client ? `the programme ${client.name.split(' ')[0]} is currently on` : "this client's current programme",
@@ -194,10 +223,18 @@ export default function Builder() {
     if (!clientId) return;
     if (programStatus !== 'ready') { setTitle(''); setNote(''); setDays([]); return; }
     const existing = getProgram(clientId);
-    if (existing) loadFrom(existing);
-    else loadFrom(buildProgram(goalToEnum(client?.goal ?? ''), 25));
+    if (existing) { loadFrom(existing); return; }
+    // No coach-assigned programme, so the builder would normally open on the
+    // client's auto plan — but the auto plan's whole content is chosen by the
+    // goal, and we do not have one. Generating from a guess and drawing it here
+    // is indistinguishable from drawing the real thing, which is the same trap
+    // the plan guard above exists for: the coach adjusts what is on screen and
+    // assigns it, and somebody trains to a goal nobody ever established. Blank,
+    // and the Program section says why.
+    if (!autoGoal) { setTitle(''); setNote(''); setDays([]); return; }
+    loadFrom(buildProgram(autoGoal, 25));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clientId, programStatus]);
+  }, [clientId, programStatus, autoGoal]);
 
   // If opened from the template library with a templateId, load it once.
   const loadedTplRef = useRef<string | null>(null);
@@ -349,7 +386,12 @@ export default function Builder() {
       Alert.alert('Not reverted', `${client?.name ?? 'Your client'} is still on their coach-assigned program — the removal did not reach the server. Reopen this screen once you have signal and try again.`);
       return;
     }
-    loadFrom(buildProgram(goalToEnum(client?.goal ?? ''), 25));
+    // The removal is what reverts them — the client's own Train tab generates
+    // their auto plan from the goal on their own row. All that is in question
+    // here is what this builder shows next, so an unknown goal empties it
+    // rather than filling it with a fat-loss plan nobody chose.
+    if (autoGoal) loadFrom(buildProgram(autoGoal, 25));
+    else { setTitle(''); setNote(''); setDays([]); }
     Alert.alert('Reverted to auto', `${client?.name ?? 'Your client'} is back on their auto-generated program.`);
   };
 
@@ -427,6 +469,19 @@ export default function Builder() {
               </Text>
             </View>
           ) : null}
+          {/* ── the coach's goal and the client's, when they are not the same ──
+              Said, not settled. The line above shows the CLIENT's goal, because
+              that is what their macros and their own screens run on; what the
+              coach picked in Add Client was written to a different table and
+              was, until now, simply never shown to anybody again. Two people
+              working to two different goals is a conversation to have in the
+              next session, so this is neutral: no warning tone, no control to
+              "fix" it, and nothing here overwrites either value. */}
+          {goalSplit ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 6 }}>
+              You recorded {client!.coachGoal} for {client!.name.split(' ')[0]}; they have {client!.goal.toLowerCase()} set in their own app. Neither has been changed.
+            </Text>
+          ) : null}
         </Section>
 
         <Rule />
@@ -452,6 +507,17 @@ export default function Builder() {
               title={programStatus === 'loading' ? 'Reading Their Current Programme' : 'What they are on could not be read'}
               note={`${planGuard.reason} Nothing has been loaded into the builder, because an empty builder is not this client's plan.`} />
           )}
+
+          {/* An unreadable goal used to be answered with a fat-loss programme.
+              The builder is empty instead, and this says whose goal is missing
+              and what to do about it — the coach or the client sets one, and
+              nobody here guesses. It is only shown once we know there is no
+              coach-assigned programme to display, because that case has a plan
+              to show and needs no goal at all. */}
+          {client && planGuard.allowed && !assignedNow && !autoGoal ? (
+            <Notice tone={t.ink3} kicker="Goal" title="No Goal On Record"
+              note={`${client.name.split(' ')[0]}'s goal is not one this app recognises${client.goal ? ` — their roster row reads “${client.goal}”` : ''}, so no auto-generated plan has been built: the plan a goal produces is a fat-loss block, a toning block or a muscle block, and picking one on their behalf is a guess about somebody's training. Ask them to set a goal in their app, or build the week yourself below and assign it.`} />
+          ) : null}
 
           <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Program name</Text>
           <TextInput value={title} onChangeText={setTitle} placeholder="e.g. Push · Pull · Legs" placeholderTextColor={t.ink3}
