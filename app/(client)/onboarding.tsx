@@ -53,9 +53,9 @@ const MIN_CM = 80;
 const MAX_CM = 260;
 
 const GOALS: { id: Goal; label: string; sub: string }[] = [
-  { id: 'fatloss', label: 'Lose fat', sub: 'Lean out, keep muscle' },
-  { id: 'tone', label: 'Tone up', sub: 'Recomp — a bit of both' },
-  { id: 'muscle', label: 'Build muscle', sub: 'Add size and strength' },
+  { id: 'fatloss', label: 'Lose Fat', sub: 'Lean out, keep muscle' },
+  { id: 'tone', label: 'Tone Up', sub: 'Recomp — a bit of both' },
+  { id: 'muscle', label: 'Build Muscle', sub: 'Add size and strength' },
 ];
 const DIETS: { id: Diet; label: string }[] = [
   { id: 'meat', label: 'Meat' }, { id: 'vegetarian', label: 'Vegetarian' }, { id: 'vegan', label: 'Vegan' },
@@ -268,7 +268,7 @@ export default function Onboarding() {
           <Ghost label="Skip" onPress={skip} />
         )}
         <View style={{ flex: 1 }}>
-          <Cta label={last ? 'Start training' : 'Continue'} onPress={() => (last ? finish() : setStep(step + 1))} wide />
+          <Cta label={last ? 'Start Training' : 'Continue'} onPress={() => (last ? finish() : setStep(step + 1))} wide />
         </View>
       </View>
     </SafeAreaView>

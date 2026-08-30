@@ -69,7 +69,7 @@ export default function OwnerTrainers() {
           <KpiRow items={[
             { label: 'Trainers', value: loading ? '—' : String(roll.trainers) },
             { label: 'Clients', value: loading ? '—' : String(roll.clients) },
-            { label: 'Need a look', value: loading ? '—' : String(roll.atRiskCount) },
+            { label: 'Need a Look', value: loading ? '—' : String(roll.atRiskCount) },
           ]} />
           <View style={{ marginTop: sp.xl }}>
             <Cta label="Invite a Trainer by Email" wide onPress={() => { setInvEmail(''); setInvOpen(true); }} />
@@ -79,7 +79,7 @@ export default function OwnerTrainers() {
         {pending.length > 0 ? (<>
           <Rule />
           <Section>
-            <SectionHead title="Pending invites" note={String(pending.length)} />
+            <SectionHead title="Pending Invites" note={String(pending.length)} />
             {pending.map((i, ix) => (
               <View key={i.id} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: ix === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                 <View style={{ flex: 1 }}>

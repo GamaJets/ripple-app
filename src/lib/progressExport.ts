@@ -58,7 +58,7 @@ interface MetricSpec { key: ProgressMetric; label: string; suffix: string; mass:
 
 const progressMetrics = (unit: WeightUnit): MetricSpec[] => [
   { key: 'weightKg', label: 'Weight', suffix: ` ${unit}`, mass: true },
-  { key: 'bodyFatPct', label: 'Body fat', suffix: '%', mass: false },
+  { key: 'bodyFatPct', label: 'Body Fat', suffix: '%', mass: false },
   { key: 'muscleKg', label: 'Muscle', suffix: ` ${unit}`, mass: true },
 ];
 

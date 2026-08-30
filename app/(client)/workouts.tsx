@@ -403,7 +403,7 @@ export default function Train() {
   const prettyDay = (ds: string) => { const [y, m, d] = ds.split('-').map(Number); return new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' }); };
 
   const programDays = Array.isArray(program && program.days) ? program.days : [];
-  const workout = programDays[dayIdx % (programDays.length || 1)] || programDays[0] || { day: '', focus: 'Rest day', exercises: [] };
+  const workout = programDays[dayIdx % (programDays.length || 1)] || programDays[0] || { day: '', focus: 'Rest Day', exercises: [] };
   const exercises = Array.isArray(workout && workout.exercises) ? workout.exercises : [];
   const estMin = Math.max(20, exercises.length * 9);
   const uid = (e: ProgramExercise) => `${dayIdx}:${e.key}`;
@@ -848,7 +848,7 @@ export default function Train() {
               {exercises.length === 0 ? (
                 <View style={{ alignItems: 'center', paddingVertical: sp.xl }}>
                   <Icon name="moon" size={26} color={t.ink3} />
-                  <Text style={{ ...ty.head, color: t.ink, marginTop: sp.md }}>Rest day</Text>
+                  <Text style={{ ...ty.head, color: t.ink, marginTop: sp.md }}>Rest Day</Text>
                   <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: sp.xs }}>Nothing scheduled today — recovery is where the gains happen. Pick another day above to train, or switch to Cardio to log a session.</Text>
                 </View>
               ) : null}
@@ -924,7 +924,7 @@ export default function Train() {
               </Text>
 
               <View style={{ marginTop: layout.section }}>
-                <SectionHead title="Today's sessions" />
+                <SectionHead title="Today's Sessions" />
                 {todayCardio.length > 0 ? (
                   todayCardio.map((c, i) => (
                     <View key={i}>
@@ -954,7 +954,7 @@ export default function Train() {
         {stripEntries.length > 0 ? (<>
           <Rule />
           <Section>
-            <SectionHead title="Already in your log" note={prettyDay(stripDay)} />
+            <SectionHead title="Already in Your Log" note={prettyDay(stripDay)} />
             {stripEntries.map((l, i) => (
               <View key={l.id ?? `${l.t}-${l.exercise}-${i}`}>
                 {i > 0 ? <Rule /> : null}
@@ -991,7 +991,7 @@ export default function Train() {
 
         {/* ── log by text ────────────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Log by text" />
+          <SectionHead title="Log by Text" />
           <View style={{ flexDirection: 'row', gap: sp.sm }}>
             {/* This field is the last thing on the screen, so when the keyboard
                 comes up it is exactly where the keyboard is. The ScrollView's
@@ -1021,7 +1021,7 @@ export default function Train() {
 
         {/* ── the rest: navigational, deliberately quiet ──────────────────── */}
         <Section>
-          <SectionHead title="Go to" />
+          <SectionHead title="Go To" />
           {/* Wrapped, not scrolled sideways.
               This was a horizontal ScrollView, which put roughly seven of the
               twelve destinations off the right edge with nothing to indicate
@@ -1510,8 +1510,8 @@ function TimedSessionRunner({ t, kind, activity, age, defaultUnit, onSave, onClo
     const strip: { label: string; value: string; dot?: string }[] = [
       { label: 'Time', value: clock(finalElapsed) },
     ];
-    if (hrPeak != null) strip.push({ label: 'Peak bpm', value: fig(hrPeak), dot: hrColor(hrPeak, age) });
-    if (typeof w.today.heartRateAvg === 'number') strip.push({ label: 'Avg bpm', value: fig(w.today.heartRateAvg) });
+    if (hrPeak != null) strip.push({ label: 'Peak Bpm', value: fig(hrPeak), dot: hrColor(hrPeak, age) });
+    if (typeof w.today.heartRateAvg === 'number') strip.push({ label: 'Avg Bpm', value: fig(w.today.heartRateAvg) });
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
         <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40, paddingTop: topPad + 10 }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
@@ -1524,7 +1524,7 @@ function TimedSessionRunner({ t, kind, activity, age, defaultUnit, onSave, onClo
           <Rule />
           {zoneSecondsTotal(zoneSecs) > 0 ? (<>
             <Section>
-              <SectionHead title="Time in zone" note={`${splatPoints(zoneSecs)} splat`} />
+              <SectionHead title="Time in Zone" note={`${splatPoints(zoneSecs)} splat`} />
               <ZoneBoard seconds={zoneSecs} showSplat={false} />
             </Section>
             <Rule />
@@ -1539,7 +1539,7 @@ function TimedSessionRunner({ t, kind, activity, age, defaultUnit, onSave, onClo
             </Section>
           ) : (
             <Section>
-              <SectionHead title="Anything to add" />
+              <SectionHead title="Anything to Add" />
               <View style={{ flexDirection: 'row', gap: sp.sm }}>
                 <TextInput value={dist} onChangeText={setDist} keyboardType="numeric" placeholder="Distance" placeholderTextColor={t.ink3} style={inp} />
                 <Pressable onPress={() => setUnit(unit === 'km' ? 'mi' : 'km')} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, justifyContent: 'center' }}>
@@ -1746,8 +1746,8 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, log, injuries, 
       { label: 'Time', value: `${Math.floor(finalElapsed / 60)}:${String(finalElapsed % 60).padStart(2, '0')}` },
     ];
     if (sessionKcal != null) strip.push({ label: 'kcal burned', value: fig(sessionKcal) });
-    if (hrPeak != null) strip.push({ label: 'Peak bpm', value: fig(hrPeak), dot: hrColor(hrPeak, age) });
-    if (typeof w.today.heartRateAvg === 'number') strip.push({ label: 'Avg bpm', value: fig(w.today.heartRateAvg) });
+    if (hrPeak != null) strip.push({ label: 'Peak Bpm', value: fig(hrPeak), dot: hrColor(hrPeak, age) });
+    if (typeof w.today.heartRateAvg === 'number') strip.push({ label: 'Avg Bpm', value: fig(w.today.heartRateAvg) });
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
         <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40, paddingTop: topPad + 10 }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
@@ -1771,7 +1771,7 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, log, injuries, 
           <Rule />
           {zoneSecondsTotal(zoneSecs) > 0 ? (<>
             <Section>
-              <SectionHead title="Time in zone" note={`${splatPoints(zoneSecs)} splat`} />
+              <SectionHead title="Time in Zone" note={`${splatPoints(zoneSecs)} splat`} />
               <ZoneBoard seconds={zoneSecs} showSplat={false} />
             </Section>
             <Rule />
@@ -1915,8 +1915,8 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, log, injuries, 
 
         <View style={{ marginTop: sp.xl }}>
           {done.length >= ex.sets
-            ? <Cta label={idx < exercises.length - 1 ? 'Next exercise →' : 'Finish session'} wide onPress={next} />
-            : <Ghost label={idx < exercises.length - 1 ? 'Next exercise →' : 'Finish session'} onPress={next} />}
+            ? <Cta label={idx < exercises.length - 1 ? 'Next Exercise →' : 'Finish Session'} wide onPress={next} />
+            : <Ghost label={idx < exercises.length - 1 ? 'Next Exercise →' : 'Finish Session'} onPress={next} />}
         </View>
       </ScrollView>
       <Confetti show={confetti} onDone={() => setConfetti(false)} />

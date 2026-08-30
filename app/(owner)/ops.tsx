@@ -103,7 +103,7 @@ export default function OwnerOps() {
         </Section>
 
         <Section>
-              <SectionHead title="New announcement" />
+              <SectionHead title="New Announcement" />
               <TextInput value={text} onChangeText={setText} placeholder="Note to self — this does not reach trainers yet…" placeholderTextColor={t.ink3} multiline
                 style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: sp.md, minHeight: 80, textAlignVertical: 'top', marginBottom: sp.md }} />
               <Cta wide label="Save Announcement"
@@ -127,7 +127,7 @@ export default function OwnerOps() {
         ) : tab === 'support' ? (
           <View>
             <Section>
-              <SectionHead title="Support inbox" note={allTickets.length ? (openCount ? `${openCount} open` : 'All resolved') : undefined} />
+              <SectionHead title="Support Inbox" note={allTickets.length ? (openCount ? `${openCount} open` : 'All resolved') : undefined} />
               {allTickets.length === 0 ? (
                 <Empty tone={t.ink3}>No tickets. Feedback sent from inside the app lands here.</Empty>
               ) : allTickets.map((tk, i) => {
@@ -160,7 +160,7 @@ export default function OwnerOps() {
         ) : (
           <View>
             <Section>
-              <SectionHead title="Platform activity" note={feed.length ? `${feed.length} events` : undefined} />
+              <SectionHead title="Platform Activity" note={feed.length ? `${feed.length} events` : undefined} />
               {feed.length === 0 ? (
                 <Empty tone={t.ink3}>Nothing yet — trials, plan changes and suspensions land here as they happen.</Empty>
               ) : feed.map((e, i) => (

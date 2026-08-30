@@ -177,7 +177,7 @@ export default function ResetPassword() {
                 </View>
               ) : null}
               <View style={{ marginTop: sp.sm }}>
-                <Cta wide disabled={!canSave} onPress={save} label={stage === 'saving' ? 'Saving…' : 'Save new password'} />
+                <Cta wide disabled={!canSave} onPress={save} label={stage === 'saving' ? 'Saving…' : 'Save New Password'} />
               </View>
             </>
           ) : null}

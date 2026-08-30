@@ -187,9 +187,9 @@ export default function OwnerLibrary() {
         <Section>
           <SectionHead title="What it assumes you own" />
           <KpiRow items={[
-            { label: 'Kinds of kit', value: countable ? String(kitKinds) : '—' },
+            { label: 'Kinds of Kit', value: countable ? String(kitKinds) : '—' },
             { label: 'Illustrated', value: countable ? String(illustrated) : '—' },
-            { label: 'Text only', value: countable ? String(rows.length - illustrated) : '—' },
+            { label: 'Text Only', value: countable ? String(rows.length - illustrated) : '—' },
           ]} />
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
             {countable
@@ -225,7 +225,7 @@ export default function OwnerLibrary() {
 
         <Section>
           <SectionHead
-            title={kit === ALL ? (group === ALL ? 'All exercises' : group) : `${kit}${group === ALL ? '' : ` · ${group}`}`}
+            title={kit === ALL ? (group === ALL ? 'All Exercises' : group) : `${kit}${group === ALL ? '' : ` · ${group}`}`}
             // Only when the read is whole. A "412 exercises" over a capped read
             // is the subtotal-as-total mistake in the one place an owner would
             // read it as a fact about the product.

@@ -80,12 +80,12 @@ export default function Activity() {
   // Streak milestone (as of now)
   const streak = currentStreak(log);
   const milestone = streakMilestone(streak);
-  if (milestone) events.push({ at: new Date().toISOString(), icon: 'flame', title: 'Streak milestone', sub: milestone, route: '/(client)/achievements' });
+  if (milestone) events.push({ at: new Date().toISOString(), icon: 'flame', title: 'Streak Milestone', sub: milestone, route: '/(client)/achievements' });
   // Check-ins
-  for (const c of checkins) events.push({ at: c.at, icon: 'pencil', title: 'Weekly check-in sent', sub: `${fig(weightLabel(c.weightKg, wu))} · energy ${c.energy}/5 · sleep ${c.sleep}/5`, route: '/(client)/checkin' });
+  for (const c of checkins) events.push({ at: c.at, icon: 'pencil', title: 'Weekly Check-in Sent', sub: `${fig(weightLabel(c.weightKg, wu))} · energy ${c.energy}/5 · sleep ${c.sleep}/5`, route: '/(client)/checkin' });
   // My sessions
   for (const s of sessions) {
-    if (s.status === 'booked' && s.clientId === cd.id) events.push({ at: s.startsAt, icon: 'calendar', title: 'Session booked', sub: `${timeLabel(s.startsAt)} · ${s.durationMin} min`, route: '/(client)/bookings' });
+    if (s.status === 'booked' && s.clientId === cd.id) events.push({ at: s.startsAt, icon: 'calendar', title: 'Session Booked', sub: `${timeLabel(s.startsAt)} · ${s.durationMin} min`, route: '/(client)/bookings' });
   }
 
   events.sort((a, b) => Date.parse(b.at) - Date.parse(a.at));

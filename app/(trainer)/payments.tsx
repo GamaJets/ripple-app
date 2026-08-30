@@ -88,10 +88,10 @@ export default function TrainerPayments() {
             {/* ── payout status: the one decision on this screen ──────────── */}
             {!active ? (
               <View style={{ marginTop: sp.xl }}>
-                <Notice tone={t.warn} kicker="Payouts" title="Set up payouts"
+                <Notice tone={t.warn} kicker="Payouts" title="Set Up Payouts"
                   note={conn?.stripe_account_id ? 'Finish verifying with Stripe to go live.' : 'Connect a payout account with Stripe.'}>
                   <View style={{ marginTop: sp.lg }}>
-                    <Cta label={busy ? 'Opening…' : (conn?.stripe_account_id ? 'Continue setup' : 'Set up payouts')} wide disabled={busy} onPress={onboard} />
+                    <Cta label={busy ? 'Opening…' : (conn?.stripe_account_id ? 'Continue Setup' : 'Set Up Payouts')} wide disabled={busy} onPress={onboard} />
                   </View>
                 </Notice>
               </View>
@@ -114,7 +114,7 @@ export default function TrainerPayments() {
 
             {/* ── what clients can buy ───────────────────────────────────── */}
             <Section>
-              <SectionHead title="Your packages" note={(pkgs ?? []).filter((p) => p.active).length ? String((pkgs ?? []).filter((p) => p.active).length) : undefined} />
+              <SectionHead title="Your Packages" note={(pkgs ?? []).filter((p) => p.active).length ? String((pkgs ?? []).filter((p) => p.active).length) : undefined} />
               {pkgErr ? (
                 <Flag tone={t.crit}>
                   Your packages could not be read, so this is not a list of what you sell. Do not add
@@ -143,7 +143,7 @@ export default function TrainerPayments() {
 
             {/* ── add a package ──────────────────────────────────────────── */}
             <Section>
-              <SectionHead title="Add a package" />
+              <SectionHead title="Add a Package" />
               <TextInput value={name} onChangeText={setName} placeholder="Name — e.g. 10-Session Pack" placeholderTextColor={t.ink3} style={input} />
               <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
                 <View style={{ flex: 1 }}>
@@ -156,7 +156,7 @@ export default function TrainerPayments() {
                 </View>
               </View>
               <View style={{ height: sp.lg }} />
-              <Cta label={busy ? 'Saving…' : 'Add package'} wide disabled={busy} onPress={addPkg} />
+              <Cta label={busy ? 'Saving…' : 'Add Package'} wide disabled={busy} onPress={addPkg} />
             </Section>
 
             <Rule />

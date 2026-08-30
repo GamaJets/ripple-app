@@ -50,7 +50,7 @@ function OneRM({ t }: { t: Theme }) {
  return (
  <View>
  <Section>
- <SectionHead title="Your best set" />
+ <SectionHead title="Your Best Set" />
  <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'center' }}>
  <TextInput value={w} onChangeText={setW} keyboardType="numeric" style={inp} placeholder="kg" placeholderTextColor={t.ink3} accessibilityLabel="Weight in kilograms" />
  <Text style={{ ...ty.label, color: t.ink3 }}>kg ×</Text>
@@ -65,7 +65,7 @@ function OneRM({ t }: { t: Theme }) {
  {oneRm > 0 ? (<>
  <Rule />
  <Section>
- <SectionHead title="Training percentages" />
+ <SectionHead title="Training Percentages" />
  {pcts.map((p, i) => (
  <View key={p}>
  {i > 0 ? <Rule /> : null}
@@ -94,7 +94,7 @@ function PlateCalc({ t }: { t: Theme }) {
  return (
  <View>
  <Section>
- <SectionHead title="Load the bar" />
+ <SectionHead title="Load the Bar" />
  <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'center' }}>
  <TextInput value={target} onChangeText={setTarget} keyboardType="numeric" style={inp} placeholder="total kg" placeholderTextColor={t.ink3} accessibilityLabel="Target total in kilograms" />
  <Text style={{ ...ty.label, color: t.ink3 }}>bar</Text>
@@ -113,18 +113,18 @@ function PlateCalc({ t }: { t: Theme }) {
  <Rule />
 
  <Section>
- <SectionHead title="Per side" />
+ <SectionHead title="Per Side" />
  <KpiRow items={[
- { label: 'Each side', value: fig(perSide), unit: 'kg' },
- { label: 'Plates a side', value: fig(plates.length) },
- { label: 'Loadable total', value: fig(achievable), unit: 'kg' },
+ { label: 'Each Side', value: fig(perSide), unit: 'kg' },
+ { label: 'Plates a Side', value: fig(plates.length) },
+ { label: 'Loadable Total', value: fig(achievable), unit: 'kg' },
  ]} />
  </Section>
 
  {plates.length ? (<>
  <Rule />
  <Section>
- <SectionHead title="Load, heaviest first" />
+ <SectionHead title="Load, Heaviest First" />
  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
  {plates.map((p, i) => (
  <View key={i} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: sp.sm }}>
@@ -177,18 +177,18 @@ function MacroRef({ t }: { t: Theme }) {
  <View>
  {m ? (<>
  <Section>
- <SectionHead title="Your figures" note="Your latest scan or measurement" />
+ <SectionHead title="Your Figures" note="Your latest scan or measurement" />
  <KpiRow items={[
  { label: 'Bodyweight', value: fig(c.weightKg), unit: 'kg' },
- { label: 'Body fat', value: fig(c.bodyFatPct), unit: '%' },
- { label: 'Lean mass', value: fig(m.leanMassKg), unit: 'kg' },
+ { label: 'Body Fat', value: fig(c.bodyFatPct), unit: '%' },
+ { label: 'Lean Mass', value: fig(m.leanMassKg), unit: 'kg' },
  ]} />
  </Section>
 
  <Rule />
 
  <Section>
- <SectionHead title="Your daily targets" />
+ <SectionHead title="Your Daily Targets" />
  <TargetRow t={t} name="Protein" grams={rangeLabel(m.protein)}
  from={`${PROTEIN_G_PER_KG_LEAN.low}–${PROTEIN_G_PER_KG_LEAN.high} g per kg of your ${fig(m.leanMassKg)} kg lean mass`} />
  <Rule />
@@ -211,7 +211,7 @@ function MacroRef({ t }: { t: Theme }) {
  </Section>
  </>) : (
  <Section>
- <SectionHead title="Your daily targets" />
+ <SectionHead title="Your Daily Targets" />
  {/* Three different silences, and they must not read alike: a refused
  read is not "you have never been measured", and neither is a read
  still in flight. Only the third offers the way to fix it. */}
@@ -233,7 +233,7 @@ function MacroRef({ t }: { t: Theme }) {
  <Rule />
 
  <Section>
- <SectionHead title="Macro reference" note={m ? 'Where those figures come from' : undefined} />
+ <SectionHead title="Macro Reference" note={m ? 'Where those figures come from' : undefined} />
  {rows.map(([k, cal, note], i) => (
  <View key={k}>
  {i > 0 ? <Rule /> : null}

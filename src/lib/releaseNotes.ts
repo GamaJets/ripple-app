@@ -95,7 +95,7 @@ export const RELEASES: Release[] = [
       {
         kind: 'fixed',
         apps: ['trainer', 'client'],
-        title: 'Exercise videos load again',
+        title: 'Exercise Videos Load Again',
         note: 'The library was returning nothing for everyone signed in. It was not empty; it could not be read.',
       },
       {
@@ -125,13 +125,13 @@ export const RELEASES: Release[] = [
       {
         kind: 'new',
         apps: ['client'],
-        title: 'Sauna counts as recovery',
+        title: 'Sauna Counts as Recovery',
         note: 'And Recovery is one thing now, not two screens using the word differently.',
       },
       {
         kind: 'new',
         apps: ['client'],
-        title: 'A sign-out button',
+        title: 'A Sign-out Button',
         note: 'Under Me › Settings. There was not one.',
       },
       {

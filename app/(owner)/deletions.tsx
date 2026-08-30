@@ -241,7 +241,7 @@ export default function OwnerDeletions() {
         <Rule />
 
         <Section>
-          <SectionHead title="The 30-day promise" />
+          <SectionHead title="The 30-day Promise" />
           <KpiRow items={[
             { label: 'Waiting', value: fig(loaded ? queue.length : null) },
             { label: 'Overdue', value: fig(loaded ? overdue : null) },
@@ -318,7 +318,7 @@ export default function OwnerDeletions() {
         <Rule />
 
         <Section>
-          <SectionHead title="Already actioned" note={log?.length ? `${log.length} recorded` : undefined} />
+          <SectionHead title="Already Actioned" note={log?.length ? `${log.length} recorded` : undefined} />
           {log === null ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>
               The record could not be read just now. Deletions you have already carried out are

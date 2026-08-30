@@ -86,9 +86,9 @@ import { USE_SUPABASE } from '../../src/lib/config';
  * say, because a truncated permission is worse than none.
  */
 const VIS: { key: Visibility; label: string; chip: string; note: string }[] = [
-  { key: 'private', label: 'Only me', chip: 'Only me', note: 'Nobody else sees this clip. Useful for a take you are still working on.' },
-  { key: 'clients', label: 'My clients', chip: 'My clients', note: 'Everyone you coach sees it in their program, on any device.' },
-  { key: 'gym', label: 'Everyone at the gym', chip: 'The gym', note: 'Anyone training at your gym can watch it, whether or not you coach them.' },
+  { key: 'private', label: 'Only Me', chip: 'Only me', note: 'Nobody else sees this clip. Useful for a take you are still working on.' },
+  { key: 'clients', label: 'My Clients', chip: 'My clients', note: 'Everyone you coach sees it in their program, on any device.' },
+  { key: 'gym', label: 'Everyone at the Gym', chip: 'The gym', note: 'Anyone training at your gym can watch it, whether or not you coach them.' },
   { key: 'public', label: 'Anyone on Repple', chip: 'Anyone', note: 'Anyone on Repple can watch it. Only choose this for a clip you are happy to publish.' },
 ];
 const visOf = (v: Visibility) => VIS.find((c) => c.key === v) ?? VIS[1];
@@ -497,7 +497,7 @@ export default function TrainerVideos() {
         {coverage && coverageLine(coverage) ? (
           <>
             <Section>
-              <SectionHead title="What your programmes need"
+              <SectionHead title="What Your Programmes Need"
                 note={coverage.missing.length ? `${coverage.missing.length} to film` : undefined} />
               <Text style={{ ...ty.label, color: t.ink2 }}>{coverageLine(coverage)}</Text>
 
@@ -542,7 +542,7 @@ export default function TrainerVideos() {
 
         {/* ── add a clip: the primary action ─────────────────────────────── */}
         <Section>
-          <SectionHead title="Add a clip" />
+          <SectionHead title="Add a Clip" />
           <Cta label="Record" wide onPress={() => upload(true)} />
           <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm }}>
             <View style={{ flex: 1 }}><Ghost label="Upload" icon="plus" onPress={() => upload(false)} /></View>

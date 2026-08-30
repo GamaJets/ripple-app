@@ -111,13 +111,13 @@ export function leaveOutcome(result: EndCoachingResult, coachName: string | null
   const who = coachLabel(coachName);
   if (!result.ok) {
     return {
-      title: 'Still linked',
+      title: 'Still Linked',
       body: `${result.reason} Nothing was changed, so ${who} still coaches you and still sees your training.`,
     };
   }
   if (!result.ended) {
     return {
-      title: 'Nothing to end',
+      title: 'Nothing to End',
       body: `Repple has no record of ${who} coaching you, so nothing was changed. If they still appear in your app, close it and open it again.`,
     };
   }

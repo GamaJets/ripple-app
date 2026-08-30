@@ -248,16 +248,16 @@ export default function TrainerSettings() {
         <Rule />
 
         <Section>
-          <SectionHead title="Your data" />
-          <ListRow icon="share" title={exporting ? 'Preparing export…' : 'Export my data'}
+          <SectionHead title="Your Data" />
+          <ListRow icon="share" title={exporting ? 'Preparing Export…' : 'Export My Data'}
             note="Everything Repple stores about you, as a JSON file you can keep"
             onPress={exportData} />
           {pending?.requestedAt ? (
-            <ListRow icon="back" title={withdrawing ? 'Withdrawing…' : 'Withdraw my deletion request'}
+            <ListRow icon="back" title={withdrawing ? 'Withdrawing…' : 'Withdraw My Deletion Request'}
               note="Keep your account. You can withdraw right up until the deletion is carried out."
               onPress={withdraw} />
           ) : (
-            <ListRow icon="minus" tone={t.crit} title={deleting ? 'Requesting…' : 'Delete my account'}
+            <ListRow icon="minus" tone={t.crit} title={deleting ? 'Requesting…' : 'Delete My Account'}
               note="Ask for your account and your data to be erased permanently"
               onPress={deleteAccount} />
           )}

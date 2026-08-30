@@ -144,7 +144,7 @@ export default function TrainerClasses() {
 
         {/* ── new class ──────────────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="New class" />
+          <SectionHead title="New Class" />
 
           <TextInput value={title} onChangeText={setTitle} placeholder="Class title — e.g. Sunrise CrossFit" placeholderTextColor={t.ink3} style={inp} />
 
@@ -183,7 +183,7 @@ export default function TrainerClasses() {
           </ScrollView>
 
           <View style={{ height: sp.lg }} />
-          <Cta label={busy ? 'Adding…' : 'Add class'} wide disabled={!canAdd || busy} onPress={submit} />
+          <Cta label={busy ? 'Adding…' : 'Add Class'} wide disabled={!canAdd || busy} onPress={submit} />
         </Section>
 
         <Rule />

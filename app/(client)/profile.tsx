@@ -34,9 +34,9 @@ import { Icon, type IconName } from '../../src/ui/Icon';
 import { COACHING_MODE_LABEL, COACHING_MODE_NOTE, type Goal, type Diet } from '../../src/lib/types';
 
 const GOALS: { id: Goal; label: string }[] = [
-  { id: 'fatloss', label: 'Fat loss' },
+  { id: 'fatloss', label: 'Fat Loss' },
   { id: 'tone', label: 'Tone' },
-  { id: 'muscle', label: 'Build muscle' },
+  { id: 'muscle', label: 'Build Muscle' },
 ];
 // The order is the order of the answers, and each carries the one line that
 // says what picking it changes — see COACHING_MODE_NOTE. Before TF-30 the first
@@ -160,7 +160,7 @@ const HUB_GROUPS: { title: string; items: { label: string; note: string; route: 
     { label: 'Exercise Library', note: 'How-to videos from your coach', route: '/(client)/library' },
     { label: 'Lifting Tools', note: '1RM, plate math & macro reference', route: '/(client)/tools' },
     { label: 'Recovery', note: 'Hydration, sleep & mobility', route: '/(client)/recovery' },
-    { label: 'Injuries & limitations', note: 'Train around injuries — safer swaps', route: '/(client)/injuries' },
+    { label: 'Injuries & Limitations', note: 'Train around injuries — safer swaps', route: '/(client)/injuries' },
   ] },
   { title: 'Daily', items: [
     { label: 'Daily Habits', note: 'Habits & water tracker', route: '/(client)/habits' },
@@ -169,8 +169,8 @@ const HUB_GROUPS: { title: string; items: { label: string; note: string; route: 
     { label: 'Reminders', note: 'Hydration & supplement nudges', route: '/(client)/reminders' },
   ] },
   { title: 'Connect', items: [
-    { label: 'Find a trainer', note: 'Have a code from your coach? Enter it here', route: '/(client)/trainers' },
-    { label: 'Memberships & packs', note: 'Your session packs & payments', route: '/(client)/packages' },
+    { label: 'Find a Trainer', note: 'Have a code from your coach? Enter it here', route: '/(client)/trainers' },
+    { label: 'Memberships & Packs', note: 'Your session packs & payments', route: '/(client)/packages' },
     { label: 'AI Coach', note: 'Chat with your AI coach', route: '/(client)/coach' },
     { label: 'Messages', note: 'Chat with your coach', route: '/(client)/messages' },
     { label: 'Share & Social', note: 'Post progress to Instagram / TikTok', route: '/(client)/social' },
@@ -372,7 +372,7 @@ export default function Profile() {
 
         {/* ── goal ───────────────────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Your goal" />
+          <SectionHead title="Your Goal" />
           <View style={{ flexDirection: 'row', gap: sp.sm }}>
             {GOALS.map((g) => {
               const on = cd.goal === g.id;
@@ -408,7 +408,7 @@ export default function Profile() {
 
         {/* ── what this profile adds up to ───────────────────────────────── */}
         <Section>
-          <SectionHead title="Daily target" note={macros ? `${macros.kcal.toLocaleString()} kcal` : undefined} onPress={() => router.push('/(client)/nutrition')} />
+          <SectionHead title="Daily Target" note={macros ? `${macros.kcal.toLocaleString()} kcal` : undefined} onPress={() => router.push('/(client)/nutrition')} />
           {macros ? (
             <KpiRow items={[
               { label: 'Protein', value: fig(macros.protein), unit: 'g' },

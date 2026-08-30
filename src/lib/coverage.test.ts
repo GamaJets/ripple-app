@@ -4494,7 +4494,7 @@ function by2(v: ReturnType<typeof buildStaff>, id: string) {
     'and no projected finish date');
   ok(goalLabel(custom) === 'Squat without my knee complaining',
     'a custom goal is labelled with the words the client wrote');
-  ok(goalLabel(goal()) === 'Target weight', 'a measured goal is labelled by its metric');
+  ok(goalLabel(goal()) === 'Target Weight', 'a measured goal is labelled by its metric');
 
   // ── progress starts when the GOAL does ──
   // 90 kg a week before the goal, 88 kg the day it was set, 84 kg since.

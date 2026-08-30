@@ -121,16 +121,16 @@ export default function OwnerGrowth() {
 
         {/* ── platform client analytics ──────────────────────────────────── */}
         <Section>
-          <SectionHead title="Platform clients" note="Across every trainer" />
+          <SectionHead title="Platform Clients" note="Across every trainer" />
           <KpiRow items={[
-            { label: 'Active clients', value: loading ? '—' : fig(ca.total) },
+            { label: 'Active Clients', value: loading ? '—' : fig(ca.total) },
             { label: 'Engaged', value: loading ? '—' : fig(ca.engagementPct), unit: loading || ca.engagementPct == null ? undefined : '%' },
-            { label: 'Avg / trainer', value: loading ? '—' : fig(ca.avgPerTrainer) },
+            { label: 'Avg / Trainer', value: loading ? '—' : fig(ca.avgPerTrainer) },
           ]} />
           <View style={{ marginTop: sp.xl }}>
             <DistBar segments={[
               { label: 'Engaged', value: ca.engaged, color: t.brand },
-              { label: 'At risk', value: ca.atRisk, color: t.warn },
+              { label: 'At Risk', value: ca.atRisk, color: t.warn },
             ]} />
             <View style={{ flexDirection: 'row', gap: sp.lg, marginTop: sp.md }}>
               {([['Engaged', ca.engaged, t.brand], ['At risk', ca.atRisk, t.warn]] as const).map(([l, v, col]) => (
@@ -155,7 +155,7 @@ export default function OwnerGrowth() {
 
         {/* ── cohort retention ───────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Cohort retention" note="By signup month" />
+          <SectionHead title="Cohort Retention" note="By signup month" />
           {loading ? <Text style={{ ...ty.label, color: t.ink3 }}>Reading your roster…</Text>
             : coh.length === 0 ? <Text style={{ ...ty.label, color: t.ink3 }}>No signups to group yet.</Text> : null}
           {coh.map((c) => (
@@ -167,7 +167,7 @@ export default function OwnerGrowth() {
 
         {/* ── trainer acquisition funnel ─────────────────────────────────── */}
         <Section>
-          <SectionHead title="Trainer acquisition funnel" note="From signup" />
+          <SectionHead title="Trainer Acquisition Funnel" note="From signup" />
           {loading ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Reading your roster…</Text>
           ) : roll.trainers === 0 ? (
@@ -181,7 +181,7 @@ export default function OwnerGrowth() {
 
         {/* ── promo / referral codes ─────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Promo & referral codes" note="Trainer subscriptions" />
+          <SectionHead title="Promo & Referral Codes" note="Trainer subscriptions" />
           <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.md }}>
             <TextInput value={code} onChangeText={setCode} placeholder="CODE" placeholderTextColor={t.ink3}
               autoCapitalize="characters" autoCorrect={false}

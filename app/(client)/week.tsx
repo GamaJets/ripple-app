@@ -75,11 +75,11 @@ export default function ThisWeek() {
         ) : null}
 
         <Section>
-          <SectionHead title="The plan" note={`${trainingDays} training day${trainingDays === 1 ? '' : 's'} a week`} />
+          <SectionHead title="The Plan" note={`${trainingDays} training day${trainingDays === 1 ? '' : 's'} a week`} />
 
           {WEEK.map((label, i) => {
             const date = new Date(monday); date.setDate(monday.getDate() + i);
-            const workout = (program.days && program.days.length) ? program.days[i % program.days.length] : { day: '', focus: 'Rest day', exercises: [] };
+            const workout = (program.days && program.days.length) ? program.days[i % program.days.length] : { day: '', focus: 'Rest Day', exercises: [] };
             const isToday = i === jsToMon;
             const done = logged.has(dstr(date));
             return (

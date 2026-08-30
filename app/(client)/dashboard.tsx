@@ -145,7 +145,7 @@ export default function Home() {
   const programUnknown = !solo && programStatus === 'error' && coachProgram == null;
   const program = (solo ? null : coachProgram) ?? buildProgram(c.goal, c.bodyFatPct);
   const jsToMon = (new Date().getDay() + 6) % 7;
-  const workout = program.days[jsToMon % program.days.length] || program.days[0] || { focus: 'Rest day', exercises: [] };
+  const workout = program.days[jsToMon % program.days.length] || program.days[0] || { focus: 'Rest Day', exercises: [] };
 
   const freezes = freezeBudget(log);
   const frz = currentStreakFrozen(log, freezes);
@@ -177,12 +177,12 @@ export default function Home() {
   // Unknown readiness falls through to the ordinary prompts, which assert
   // nothing about their body.
   const today = readiness != null && readiness.tone === 'low'
-    ? { headline: 'Recover today', tip: 'Under-recovered — keep it light or take a rest day.', cta: 'Recovery', route: '/(client)/recovery', tone: t.warn }
+    ? { headline: 'Recover Today', tip: 'Under-recovered — keep it light or take a rest day.', cta: 'Recovery', route: '/(client)/recovery', tone: t.warn }
     : !trainedToday
-    ? { headline: 'Ready to train', tip: readiness?.tip ?? 'Log tonight’s sleep and your readiness appears here.', cta: 'Start workout', route: '/(client)/workouts', tone: t.brand }
+    ? { headline: 'Ready to Train', tip: readiness?.tip ?? 'Log tonight’s sleep and your readiness appears here.', cta: 'Start Workout', route: '/(client)/workouts', tone: t.brand }
     : kcalLeft > 200
-    ? { headline: 'Fuel up', tip: kcalLeft + ' kcal left today' + (burnedToday > 0 ? ' (incl. ' + burnedToday + ' burned)' : '') + '.', cta: 'Log a meal', route: '/(client)/nutrition', tone: t.brand }
-    : { headline: 'On track', tip: 'Session done and your macros are on point. Nice work.', cta: 'View plan', route: '/(client)/nutrition', tone: t.brand };
+    ? { headline: 'Fuel Up', tip: kcalLeft + ' kcal left today' + (burnedToday > 0 ? ' (incl. ' + burnedToday + ' burned)' : '') + '.', cta: 'Log a Meal', route: '/(client)/nutrition', tone: t.brand }
+    : { headline: 'On Track', tip: 'Session done and your macros are on point. Nice work.', cta: 'View Plan', route: '/(client)/nutrition', tone: t.brand };
 
   const ws = c.weightSeries.map((x) => x.v);
   // The same series in the unit this client reads in, converted point by point
@@ -294,7 +294,7 @@ export default function Home() {
 
           {myInvites.length > 0 ? (
             <Notice tone={t.brand} kicker={`Coaching invitation${myInvites[0].demo ? ' · sample' : ''}`}
-              title={`${myInvites[0].coachName || 'A coach'} invited you`}
+              title={`${myInvites[0].coachName || 'A Coach'} invited you`}
               note={`${COACHED_MODE_SHORT[myInvites[0].mode]} coaching. ${COACHING_MODE_NOTE[myInvites[0].mode]} Accept to connect.`}>
               <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.lg }}>
                 <View style={{ flex: 1 }}><Ghost label="Decline" onPress={() => declineCoachInvite(myInvites[0].id)} /></View>
@@ -384,7 +384,7 @@ export default function Home() {
               // Body fat is a proportion of the body, not an amount of it, and
               // stays a percentage under every unit preference. Nothing on this
               // line converts.
-              { label: 'Body fat', value: fig(c.bodyFatPct), unit: '%', route: '/(client)/scans', good: bfD <= 0, delta: bfD !== 0 ? `${bfD < 0 ? '−' : '+'}${Math.abs(bfD)}` : undefined },
+              { label: 'Body Fat', value: fig(c.bodyFatPct), unit: '%', route: '/(client)/scans', good: bfD <= 0, delta: bfD !== 0 ? `${bfD < 0 ? '−' : '+'}${Math.abs(bfD)}` : undefined },
               { label: 'Muscle', value: fig(weightIn(c.muscleKg, wu)), unit: wu, route: '/(client)/scans', good: muD != null ? muD >= 0 : undefined, delta: muDShown ? `${muDShown < 0 ? '−' : '+'}${Math.abs(muDShown)}` : undefined },
             ]}
           />
@@ -405,7 +405,7 @@ export default function Home() {
 
         {/* ── fuel ───────────────────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Fuel today" note={kcalNote} onPress={() => router.push('/(client)/nutrition')} />
+          <SectionHead title="Fuel Today" note={kcalNote} onPress={() => router.push('/(client)/nutrition')} />
           {macros ? (<>
             <Meter label="Protein" val={consumed.p} target={macros.protein} />
             <Meter label="Carbs" val={consumed.cbs} target={macros.carbs} dim />
@@ -454,7 +454,7 @@ export default function Home() {
 
         {/* ── this week ──────────────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="This week" note="All activity" onPress={() => router.push('/(client)/trends')} />
+          <SectionHead title="This Week" note="All activity" onPress={() => router.push('/(client)/trends')} />
           <KpiRow items={[
             { label: 'Sessions', value: logKnown ? fig(wk.workouts) : fig(null), unit: logKnown ? `/${goalDays}` : undefined },
             // `(0).toLocaleString()` is the string "0" — a tonnage stated as
@@ -482,7 +482,7 @@ export default function Home() {
             <ListRow icon="calendar"
               title={nextSession
                 ? `Next session · ${new Date(nextSession.startsAt).toLocaleDateString(undefined, { weekday: 'short' })} ${(() => { let h = new Date(nextSession.startsAt).getHours(); const ap = h >= 12 ? 'pm' : 'am'; h = h % 12 || 12; return `${h}${ap}`; })()}`
-                : 'No sessions booked'}
+                : 'No Sessions Booked'}
               note={nextSession
                 ? `In person · ${nextSession.durationMin} min with your coach`
                 : 'Tap to book an in-person session'}
@@ -505,7 +505,7 @@ export default function Home() {
 
           {needsCoach ? (
             <ListRow icon="people"
-              title={solo ? 'Work with a coach' : 'Find your coach'}
+              title={solo ? 'Work with a Coach' : 'Find Your Coach'}
               note={solo
                 ? "Enter your coach's code, or browse trainers"
                 : "You have not been linked to a coach yet — enter their code, accept an invitation, or browse trainers"}
@@ -517,7 +517,7 @@ export default function Home() {
         {(!solo && (coachNotes.length > 0 || !!ann)) ? (<>
           <Rule />
           <Section>
-            <SectionHead title="From your coach" />
+            <SectionHead title="From Your Coach" />
             {coachNotes.length > 0 ? (
               <Text style={{ ...ty.body, color: t.ink2 }} numberOfLines={4}>{coachNotes[0].body}</Text>
             ) : null}

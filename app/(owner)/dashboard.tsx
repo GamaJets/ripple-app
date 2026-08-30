@@ -188,7 +188,7 @@ export default function OwnerOverview() {
 
         {/* ── the shape of the platform ──────────────────────────────────── */}
         <Section>
-          <SectionHead title="Your gym" note="Trainers" onPress={() => router.push('/(owner)/trainers')} />
+          <SectionHead title="Your Gym" note="Trainers" onPress={() => router.push('/(owner)/trainers')} />
           <KpiRow items={[
             { label: 'Trainers', value: loading ? '—' : fig(roll.trainers), delta: loading ? 'not read yet' : roll.avgSessionsPerTrainer == null ? 'no trainers yet' : `${roll.avgSessionsPerTrainer} sessions avg` },
             { label: 'Clients', value: loading ? '—' : fig(roll.clients), delta: loading ? 'not read yet' : roll.avgClientsPerTrainer == null ? 'no trainers yet' : `${roll.avgClientsPerTrainer} avg / trainer` },
@@ -200,7 +200,7 @@ export default function OwnerOverview() {
 
         {/* ── MRR trend (real, accumulating) ─────────────────────────────── */}
         <Section>
-          <SectionHead title="Sessions trend"
+          <SectionHead title="Sessions Trend"
             note={delta !== 0 ? `${delta > 0 ? '+' : '−'}$${Math.abs(delta).toLocaleString()} vs last mo` : 'Tracking started'}
             onPress={() => router.push('/(owner)/revenue')} />
           {months >= 2 ? (
@@ -221,7 +221,7 @@ export default function OwnerOverview() {
 
         {/* ── trainer health board ───────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Trainer health" note="Worst first" />
+          <SectionHead title="Trainer Health" note="Worst first" />
           {loading ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Reading your roster…</Text>
           ) : ranked.length === 0 ? (
@@ -247,7 +247,7 @@ export default function OwnerOverview() {
 
         {/* ── revenue by plan ────────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Client load" note="Revenue" onPress={() => router.push('/(owner)/revenue')} />
+          <SectionHead title="Client Load" note="Revenue" onPress={() => router.push('/(owner)/revenue')} />
           {byTrainer.map((p) => (
             <View key={p.id} style={{ marginBottom: sp.lg }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>

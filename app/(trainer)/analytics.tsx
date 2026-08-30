@@ -156,8 +156,8 @@ export default function TrainerAnalytics() {
   // far. A revenue goal with no session rate has the first and not the second,
   // and is spoken to separately below rather than drawn as a bar at zero.
   const goalRows = ([
-    { label: 'Monthly revenue', cur: revenue, goal: goals.revenue, money: true },
-    { label: 'Active clients', cur: clients, goal: goals.clients, money: false },
+    { label: 'Monthly Revenue', cur: revenue, goal: goals.revenue, money: true },
+    { label: 'Active Clients', cur: clients, goal: goals.clients, money: false },
   ] as { label: string; cur: number | null; goal: number; money: boolean }[])
     .filter((g): g is typeof g & { cur: number } => g.goal > 0 && g.cur != null);
   const G = layout.gutter;
@@ -218,8 +218,8 @@ export default function TrainerAnalytics() {
           <SectionHead title="Roster" note="Leaderboard" onPress={() => router.push('/(trainer)/leaderboard')} />
           <KpiRow items={[
             { label: 'Clients', value: fig(clients) },
-            { label: 'Avg adherence', value: fig(avgAdh), unit: avgAdh == null ? undefined : '%' },
-            { label: 'Value / client', value: valuePerClient == null ? '—' : '$' + valuePerClient.toLocaleString(), unit: valuePerClient == null ? undefined : '/mo' },
+            { label: 'Avg Adherence', value: fig(avgAdh), unit: avgAdh == null ? undefined : '%' },
+            { label: 'Value / Client', value: valuePerClient == null ? '—' : '$' + valuePerClient.toLocaleString(), unit: valuePerClient == null ? undefined : '/mo' },
           ]} />
         </Section>
 
@@ -227,7 +227,7 @@ export default function TrainerAnalytics() {
 
         {/* ── goals ──────────────────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Your goals" note="Edit"
+          <SectionHead title="Your Goals" note="Edit"
             onPress={() => { setGRev(String(goals.revenue)); setGCli(String(goals.clients)); setGoalOpen(true); }} />
           {goals.revenue <= 0 && goals.clients <= 0 ? (
             // Was a heading with nothing under it. A section that renders
@@ -317,7 +317,7 @@ export default function TrainerAnalytics() {
 
         {/* ── roster health ──────────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Roster health"
+          <SectionHead title="Roster Health"
             note={!rosterWhole ? undefined : avgAdh == null ? 'no check-ins yet' : `${avgAdh}% avg adherence`}
             onPress={() => router.push('/(trainer)/leaderboard')} />
           {/* The bar is withheld rather than drawn from what loaded. A DistBar
@@ -360,7 +360,7 @@ export default function TrainerAnalytics() {
               just been recorded — nothing was, deliberately: an unsound figure
               written here would be indistinguishable from a real month forever
               after. */}
-          <SectionHead title="Revenue trend"
+          <SectionHead title="Revenue Trend"
             note={revenue == null ? 'This month not recorded'
               : revHist.delta !== 0 ? `${revHist.delta > 0 ? '+' : '−'}$${Math.abs(revHist.delta).toLocaleString()} vs last mo`
               : 'Tracking started'}
@@ -383,7 +383,7 @@ export default function TrainerAnalytics() {
 
         {/* ── at-risk clients ────────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="At-risk clients" note="Low adherence or inactive 2+ days" />
+          <SectionHead title="At-risk Clients" note="Low adherence or inactive 2+ days" />
           {/* "Everyone is on track" is a claim about every client the coach
               has, and an unread roster is not a clean one. */}
           {atRisk.length === 0 && rosterWhole ? (
@@ -414,7 +414,7 @@ export default function TrainerAnalytics() {
 
         {/* ── AI digest ──────────────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Weekly business digest" />
+          <SectionHead title="Weekly Business Digest" />
           {digest ? (
             <Text style={{ ...ty.body, color: t.ink2, marginBottom: sp.lg }}>{digest}</Text>
           ) : (

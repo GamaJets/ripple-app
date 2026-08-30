@@ -123,7 +123,7 @@ export default function WeeklyReport() {
     // hasBody only checks that a weight exists — a client can log a weight in a
     // check-in without ever having a scan, in which case body fat and muscle are
     // still unknown and used to print the 20% / 0 kg placeholders.
-    { label: 'Body fat', value: c.bodyFatPct != null ? `${c.bodyFatPct}` : '—', unit: c.bodyFatPct != null ? '%' : undefined },
+    { label: 'Body Fat', value: c.bodyFatPct != null ? `${c.bodyFatPct}` : '—', unit: c.bodyFatPct != null ? '%' : undefined },
     { label: 'Muscle', value: fig(weightIn(c.muscleKg, wu)), unit: c.muscleKg != null ? wu : undefined },
     ...(waistDShown != null ? [{ label: 'Waist', value: fig(lengthIn(mLatest.waist, lu)), unit: lu, delta: `${waistDShown > 0 ? '+' : ''}${waistDShown} ${lu}`, good: waistD != null && waistD <= 0 }] : []),
   ];
@@ -161,7 +161,7 @@ export default function WeeklyReport() {
             // wrong enough to matter. A tonne of bar work is understood.
             { label: 'Volume', value: `${(wk.volumeKg / 1000).toFixed(1)}`, unit: 't', delta: `${wk.kcal.toLocaleString()} kcal` },
             { label: 'Streak', value: `${streak}`, unit: streak === 1 ? 'day' : 'days', delta: streak > 0 ? 'running' : 'not started', good: streak > 0 },
-            { label: 'PRs on record', value: fig(prs.length), delta: 'all-time' },
+            { label: 'PRs on Record', value: fig(prs.length), delta: 'all-time' },
           ]} />
         </Section>
 
@@ -190,7 +190,7 @@ export default function WeeklyReport() {
           <View>
             <Rule />
             <Section>
-              <SectionHead title="Latest check-in" />
+              <SectionHead title="Latest Check-in" />
               <Text style={{ ...ty.body, color: t.ink2 }}>Energy {checkIn.energy}/5 · sleep {checkIn.sleep}/5 · mood {checkIn.mood}/5 · adherence {checkIn.adherence}/5</Text>
               {checkIn.note ? <Text style={{ ...ty.label, color: t.ink3, marginTop: 6, fontStyle: 'italic' }}>“{checkIn.note}”</Text> : null}
             </Section>

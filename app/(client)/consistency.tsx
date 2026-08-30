@@ -107,15 +107,15 @@ export default function Consistency() {
               training history, and it is the one thing we do not have. */}
           <KpiRow items={[
             { label: 'Sessions', value: known ? fig(totalSessions) : fig(null) },
-            { label: 'Days trained', value: known ? fig(trainedDays) : fig(null) },
-            { label: 'Best streak', value: known ? fig(best) : fig(null) },
+            { label: 'Days Trained', value: known ? fig(trainedDays) : fig(null) },
+            { label: 'Best Streak', value: known ? fig(best) : fig(null) },
           ]} />
         </Section>
 
         <Rule />
 
         <Section>
-          <SectionHead title="Training days" note={`${WEEKS} weeks`} />
+          <SectionHead title="Training Days" note={`${WEEKS} weeks`} />
           <View style={{ flexDirection: 'row' }}>
             <View style={{ justifyContent: 'space-between', marginRight: 6, paddingVertical: 2 }}>
               {DOW.map((d) => <Text key={d} style={{ ...ty.micro, color: t.ink3, height: 16 }}>{d[0]}</Text>)}

@@ -295,7 +295,7 @@ export default function FoodLog() {
 
  {/* ── the hero: what is left in the day ──────────────────────────── */}
  <Hero
- label={remK >= 0 ? 'Calories remaining' : 'Calories over'}
+ label={remK >= 0 ? 'Calories Remaining' : 'Calories Over'}
  figure={fig(Math.abs(remK))}
  unit="kcal"
  note={target ? `${tot.k} of ${target.kcal} kcal eaten${burned ? ` · ${burned} kcal burned` : ''}` : `${tot.k} kcal eaten${burned ? ` · ${burned} kcal burned` : ''} · add your weight for a target`}
@@ -317,7 +317,7 @@ export default function FoodLog() {
 
  {/* ── log a meal ─────────────────────────────────────────────────── */}
  <Section>
- <SectionHead title="Log a meal" />
+ <SectionHead title="Log a Meal" />
  <View style={{ flexDirection: 'row', gap: sp.sm }}>
  <Pressable accessibilityLabel="Take a meal photo" accessibilityRole="button" onPress={() => takeMealPhoto(true)}
  style={{ flex: 1, backgroundColor: t.brand, borderRadius: radius.sm, paddingVertical: sp.md, alignItems: 'center', gap: 5 }}>
@@ -342,7 +342,7 @@ export default function FoodLog() {
 
  {/* ── describe it in words ───────────────────────────────────────── */}
  <Section>
- <SectionHead title="Describe it" />
+ <SectionHead title="Describe It" />
  <Text style={{ ...ty.caption, color: t.ink3, marginBottom: 6 }}>In your own words — the AI reads it into macros</Text>
  <View style={{ flexDirection: 'row', gap: sp.sm }}>
  <TextInput value={nl} onChangeText={setNl} placeholder='"chicken burrito & a coke"' placeholderTextColor={t.ink3} onSubmitEditing={logNL} returnKeyType="done"
@@ -359,7 +359,7 @@ export default function FoodLog() {
  {/* ── search the food table ──────────────────────────────────────── */}
  <Section>
  <SectionHead
- title="Search foods"
+ title="Search Foods"
  note={!q.trim() ? undefined
    : searching ? 'searching…'
    : searchDown ? 'search unavailable'
@@ -400,7 +400,7 @@ export default function FoodLog() {
 
  {/* ── today's entries, or an honest empty state ──────────────────── */}
  <Section>
- <SectionHead title="Logged today" note={`${tot.k} kcal`} />
+ <SectionHead title="Logged Today" note={`${tot.k} kcal`} />
  {fl.entries.length === 0 ? (
  <Text style={{ ...ty.label, color: t.ink3 }}>Nothing logged yet today.</Text>
  ) : (<>

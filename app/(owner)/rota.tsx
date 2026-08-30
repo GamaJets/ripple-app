@@ -243,11 +243,11 @@ export default function OwnerRota() {
         <Rule />
 
         <Section>
-          <SectionHead title="Supply against demand" />
+          <SectionHead title="Supply Against Demand" />
           <KpiRow items={[
-            { label: 'Rostered hours', value: fig(loaded ? hrs(cov?.rosteredHours ?? null) : null), unit: 'h' },
-            { label: 'Booked hours covered', value: fig(loaded ? pct(cov?.coverRate ?? null) : null) },
-            { label: 'Idle hours', value: fig(loaded ? (cov?.idle?.length ?? null) : null) },
+            { label: 'Rostered Hours', value: fig(loaded ? hrs(cov?.rosteredHours ?? null) : null), unit: 'h' },
+            { label: 'Booked Hours Covered', value: fig(loaded ? pct(cov?.coverRate ?? null) : null) },
+            { label: 'Idle Hours', value: fig(loaded ? (cov?.idle?.length ?? null) : null) },
           ]} />
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
             {!loaded
@@ -262,7 +262,7 @@ export default function OwnerRota() {
 
         {/* ── the whole point: where the two disagree ────────────────────── */}
         <Section>
-          <SectionHead title="Where the rota misses" />
+          <SectionHead title="Where the Rota Misses" />
           {!loaded ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Loading…</Text>
           ) : cov?.blocker ? (
@@ -316,7 +316,7 @@ export default function OwnerRota() {
         {/* ── the rota itself ───────────────────────────────────────────── */}
         <Section>
           <SectionHead
-            title="The week"
+            title="The Week"
             note={loaded && sum!.shifts > 0
               ? `${sum!.shifts} shift${sum!.shifts === 1 ? '' : 's'}${sum!.cancelled ? ` · ${sum!.cancelled} pulled` : ''}`
               : undefined}
@@ -358,7 +358,7 @@ export default function OwnerRota() {
           <>
             <Rule />
             <Section>
-              <SectionHead title="Hours per trainer" />
+              <SectionHead title="Hours Per Trainer" />
               {roster.map((r, i) => (
                 <View key={r.trainerId}>
                   {i > 0 ? <Rule /> : null}

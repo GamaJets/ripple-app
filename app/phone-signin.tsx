@@ -155,7 +155,7 @@ export default function PhoneSignIn() {
               ) : null}
 
               <View style={{ marginTop: sp.xl }}>
-                <Cta label={busy ? 'Sending…' : 'Send me a code'} wide disabled={!canSend} onPress={send} />
+                <Cta label={busy ? 'Sending…' : 'Send Me a Code'} wide disabled={!canSend} onPress={send} />
               </View>
 
               <Pressable onPress={() => router.replace('/welcome')} hitSlop={8}
@@ -224,7 +224,7 @@ export default function PhoneSignIn() {
                     Resend a new code in {String(Math.floor(left / 60)).padStart(2, '0')}:{String(left % 60).padStart(2, '0')}
                   </Text>
                 ) : (
-                  <Ghost label={busy ? 'Sending…' : 'Send a new code'} onPress={send} />
+                  <Ghost label={busy ? 'Sending…' : 'Send a New Code'} onPress={send} />
                 )}
               </View>
 

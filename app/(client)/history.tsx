@@ -98,7 +98,7 @@ function MonthBars({ cells, t, unit }: { cells: MonthCell[]; t: Theme; unit: Wei
   const W = 320, H = 112, top = 10, base = H - 10;
   const slot = W / Math.max(1, cells.length);
   const barW = Math.max(3, Math.min(24, slot * 0.62));
-  const label = 'Training volume by month. '
+  const label = 'Training Volume by Month. '
     + cells.map((c) => `${monthLabel(c.key)}, ${describeMonth(c, unit)}`).join('. ') + '.';
   return (
     <Svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none"
@@ -318,7 +318,7 @@ export default function History() {
   if (stage === 'empty' || !span) {
     return frame(
       <><Rule /><Section>
-        <SectionHead title="Nothing logged yet" />
+        <SectionHead title="Nothing Logged Yet" />
         <Text style={{ ...ty.body, color: t.ink2, marginBottom: sp.lg }}>
           {historyNote(log)} Log one session and this page starts keeping the score for you —
           month by month, for as long as you train.
@@ -371,7 +371,7 @@ export default function History() {
           and this page is where it goes.
         </Text>
       </>) : (<>
-        <SectionHead title="Your years" note={`${active} month${active === 1 ? '' : 's'} trained`} />
+        <SectionHead title="Your Years" note={`${active} month${active === 1 ? '' : 's'} trained`} />
         <YearGrid rows={rows} peak={peak} t={t} unit={wu} />
         <GridLegend t={t} />
       </>)}
@@ -381,7 +381,7 @@ export default function History() {
 
     {/* ── month by month ─────────────────────────────────────────────────── */}
     <Section>
-      <SectionHead title="Month by month" note={`Total ${wu} lifted`} />
+      <SectionHead title="Month by Month" note={`Total ${wu} lifted`} />
       {peak != null ? (<>
         <MonthBars cells={cells} t={t} unit={wu} />
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: sp.sm }}>
@@ -401,7 +401,7 @@ export default function History() {
       <View style={{ height: sp.lg }} />
       <KpiRow items={[
         { label: 'Sessions', value: fig(life.sessions), delta: `${fig(life.days)} day${life.days === 1 ? '' : 's'}` },
-        { label: 'Best month', value: fig(volumeIn(best?.volumeKg, wu)?.toLocaleString()), unit: best?.volumeKg != null ? wu : undefined, delta: best ? monthLabel(best.key) : undefined },
+        { label: 'Best Month', value: fig(volumeIn(best?.volumeKg, wu)?.toLocaleString()), unit: best?.volumeKg != null ? wu : undefined, delta: best ? monthLabel(best.key) : undefined },
         { label: 'Lifts', value: fig(life.lifts), delta: 'with weights' },
       ]} />
       {earlier > 0 ? (
@@ -416,7 +416,7 @@ export default function History() {
     {arc ? (<>
       <Rule />
       <Section>
-        <SectionHead title="Then and now" note={`${arc.months} months apart`} />
+        <SectionHead title="Then and Now" note={`${arc.months} months apart`} />
         <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: sp.lg }}>
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.caption, color: t.ink3 }}>{monthLabel(arc.fromKey)}</Text>
@@ -476,7 +476,7 @@ export default function History() {
     {/* ── personal bests over time, not just the current best ────────────── */}
     <Rule />
     <Section>
-      <SectionHead title="Personal bests over time" note={records.length ? 'Newest first' : undefined} />
+      <SectionHead title="Personal Bests Over Time" note={records.length ? 'Newest first' : undefined} />
       {records.length === 0 ? (
         <Text style={{ ...ty.label, color: t.ink3 }}>
           No records set yet — the first weighted set you log becomes one.

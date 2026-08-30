@@ -43,9 +43,9 @@ export default function Referral() {
   const shareMsg = `Join me on ${appName} — the app I use to plan workouts, track progress and dial in my nutrition. Use my code ${code} when you sign up.`;
 
   const steps = [
-    { n: '1', label: 'Share your code', note: 'Send it to a friend or training partner.' },
-    { n: '2', label: 'They join ' + appName, note: 'They enter your code when they sign up.' },
-    { n: '3', label: 'Train together', note: 'Keep each other consistent and accountable.' },
+    { n: '1', label: 'Share Your Code', note: 'Send it to a friend or training partner.' },
+    { n: '2', label: 'They Join ' + appName, note: 'They enter your code when they sign up.' },
+    { n: '3', label: 'Train Together', note: 'Keep each other consistent and accountable.' },
   ];
 
   const invite = async () => {
@@ -86,7 +86,7 @@ export default function Referral() {
         <Rule />
 
         <Section>
-          <SectionHead title="How it works" />
+          <SectionHead title="How It Works" />
           {steps.map((s, i) => (
             <View key={s.n} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
               <View style={{ width: 30, height: 30, borderRadius: 15, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>

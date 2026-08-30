@@ -142,7 +142,7 @@ export default function TrainerExercise() {
           // one — rather than a grey silhouette implying a demonstration we do
           // not have.
           <Notice tone={t.ink3} kicker="Demonstration"
-            title={detail ? 'No demonstration yet' : 'Not in the catalogue'}
+            title={detail ? 'No Demonstration Yet' : 'Not in the Catalogue'}
             note={detail
               ? 'Nobody has filmed this movement and the catalogue has no illustration for it, so your client sees its name, its muscles and the written steps. Record a clip from Videos and it appears here for them.'
               : 'This movement has no catalogue entry, so there is no illustration, description or muscle data for it. You can still put it in a program — your client sees the name you typed and whatever you write in the note.'} />
@@ -202,7 +202,7 @@ export default function TrainerExercise() {
               <>
                 <Rule />
                 <Section>
-                  <SectionHead title="Muscles worked" />
+                  <SectionHead title="Muscles Worked" />
                   {detail.primaryMuscles.length ? (
                     <Text style={{ ...ty.body, color: t.ink, marginBottom: 4 }}>
                       <Text style={{ fontWeight: '600' }}>Primary: </Text>{detail.primaryMuscles.map(cap).join(', ')}
@@ -221,7 +221,7 @@ export default function TrainerExercise() {
               <>
                 <Rule />
                 <Section>
-                  <SectionHead title="How to do it" note={`${detail.instructions.length} steps`} />
+                  <SectionHead title="How to Do It" note={`${detail.instructions.length} steps`} />
                   {detail.instructions.map((step, n) => (
                     <View key={n} style={{ flexDirection: 'row', gap: sp.md, marginBottom: sp.md }}>
                       <Text style={{ ...ty.label, fontWeight: '700', color: t.ink3, minWidth: 18 }}>{n + 1}</Text>
@@ -251,7 +251,7 @@ export default function TrainerExercise() {
 
         <Rule />
         <Section>
-          <Ghost label={clip ? 'Your clip library' : 'Record a clip for this movement'} icon="video"
+          <Ghost label={clip ? 'Your Clip Library' : 'Record a clip for this movement'} icon="video"
             onPress={() => router.push('/(trainer)/videos')} />
         </Section>
       </ScrollView>

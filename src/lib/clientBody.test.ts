@@ -225,7 +225,7 @@ ok(bodyLine(false, false, '2026-08-18', true, '2026-08-20', 'Sam').includes('2 d
 
 ok(BODY_METRICS.length === 3, 'three metrics');
 ok(BODY_METRICS.map((m) => m.key).join(',') === 'weight,bodyfat,muscle', 'in the order the client sees them');
-ok(seriesOf(three, 'muscle').label === 'Skeletal muscle', 'and each names itself');
+ok(seriesOf(three, 'muscle').label === 'Skeletal Muscle', 'and each names itself');
 ok(seriesOf(three, 'bodyfat').readings.length === 3, 'seriesOf picks the right one');
 
 if (errors.length) {

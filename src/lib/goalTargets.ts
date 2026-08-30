@@ -26,9 +26,9 @@ export type MeasuredKind = Exclude<GoalKind, 'custom'>;
 export const MEASURED_KINDS: readonly MeasuredKind[] = ['weight', 'bodyfat', 'muscle'];
 
 export const GOAL_METRIC: Record<MeasuredKind, { label: string; unit: string; source: string }> = {
-  weight:  { label: 'Target weight',    unit: 'kg', source: 'weigh-ins and scans' },
-  bodyfat: { label: 'Target body fat',  unit: '%',  source: 'scans' },
-  muscle:  { label: 'Target muscle',    unit: 'kg', source: 'scans' },
+  weight:  { label: 'Target Weight',    unit: 'kg', source: 'weigh-ins and scans' },
+  bodyfat: { label: 'Target Body Fat',  unit: '%',  source: 'scans' },
+  muscle:  { label: 'Target Muscle',    unit: 'kg', source: 'scans' },
 };
 
 export interface GoalTarget {

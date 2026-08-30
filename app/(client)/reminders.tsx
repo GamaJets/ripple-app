@@ -130,7 +130,7 @@ export default function Reminders() {
 
         {/* Supplements */}
         <Section>
-          <SectionHead title="Supplement reminders" note={supps.length ? String(supps.length) : undefined} />
+          <SectionHead title="Supplement Reminders" note={supps.length ? String(supps.length) : undefined} />
           {supps.map((s, i) => (
             <View key={s.id} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
               <Text style={{ ...ty.body, color: t.ink2, flex: 1 }}>{s.name}</Text>

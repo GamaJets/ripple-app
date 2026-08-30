@@ -48,12 +48,12 @@ export function buildProgram(goal: Goal, bodyFatPct: number | null | undefined):
   }
   // fatloss / tone → 3-day full body + conditioning, glute/core emphasis
   return {
-    title: 'Full-body + conditioning',
+    title: 'Full-body + Conditioning',
     focus, note,
     days: [
-      { day: 'Mon', focus: 'Full body A', cardio: '15 min incline walk', exercises: [E('squat', 'Back Squat', 'Legs', 4, '8-10', ['Goblet Squat', 'Leg Press', 'Bulgarian Split Squat']), E('hipthrust', 'Hip Thrust', 'Glutes', 3, '10-12', ['Glute Bridge', 'Cable Kickback', 'Step-up']), E('bench', 'Dumbbell Bench Press', 'Chest', 3, '10-12', ['Push-up', 'Machine Chest Press']), E('row', 'Seated Row', 'Back', 3, '10-12', ['Lat Pulldown', 'Dumbbell Row']), E('plank', 'Plank', 'Core', 3, '45 sec', ['Dead Bug', 'Hollow Hold']) ] },
-      { day: 'Wed', focus: 'Full body B', cardio: '20 min intervals', exercises: [E('rdl', 'Romanian Deadlift', 'Hamstrings', 4, '8-10', ['Leg Curl', 'Kettlebell Swing']), E('lunge', 'Walking Lunge', 'Legs', 3, '12', ['Reverse Lunge', 'Step-up']), E('ohp', 'Shoulder Press', 'Shoulders', 3, '10-12', ['Arnold Press', 'Lateral Raise']), E('pull', 'Lat Pulldown', 'Back', 3, '10-12', ['Assisted Pull-up', 'Straight-arm Pulldown']), E('core', 'Cable Crunch', 'Core', 3, '15', ['Hanging Knee Raise', 'Russian Twist']) ] },
-      { day: 'Fri', focus: 'Full body C', cardio: '15 min row', exercises: [E('hipthrust', 'Hip Thrust', 'Glutes', 4, '10-12', ['Glute Bridge', 'Cable Kickback']), E('squat', 'Goblet Squat', 'Legs', 3, '10-12', ['Leg Press', 'Split Squat']), E('bench', 'Push-up', 'Chest', 3, '12', ['Dumbbell Press', 'Machine Press']), E('row', 'Dumbbell Row', 'Back', 3, '12', ['Seated Row', 'Lat Pulldown']), E('plank', 'Side Plank', 'Core', 3, '30 sec/side', ['Pallof Press', 'Bird Dog']) ] },
+      { day: 'Mon', focus: 'Full Body A', cardio: '15 min incline walk', exercises: [E('squat', 'Back Squat', 'Legs', 4, '8-10', ['Goblet Squat', 'Leg Press', 'Bulgarian Split Squat']), E('hipthrust', 'Hip Thrust', 'Glutes', 3, '10-12', ['Glute Bridge', 'Cable Kickback', 'Step-up']), E('bench', 'Dumbbell Bench Press', 'Chest', 3, '10-12', ['Push-up', 'Machine Chest Press']), E('row', 'Seated Row', 'Back', 3, '10-12', ['Lat Pulldown', 'Dumbbell Row']), E('plank', 'Plank', 'Core', 3, '45 sec', ['Dead Bug', 'Hollow Hold']) ] },
+      { day: 'Wed', focus: 'Full Body B', cardio: '20 min intervals', exercises: [E('rdl', 'Romanian Deadlift', 'Hamstrings', 4, '8-10', ['Leg Curl', 'Kettlebell Swing']), E('lunge', 'Walking Lunge', 'Legs', 3, '12', ['Reverse Lunge', 'Step-up']), E('ohp', 'Shoulder Press', 'Shoulders', 3, '10-12', ['Arnold Press', 'Lateral Raise']), E('pull', 'Lat Pulldown', 'Back', 3, '10-12', ['Assisted Pull-up', 'Straight-arm Pulldown']), E('core', 'Cable Crunch', 'Core', 3, '15', ['Hanging Knee Raise', 'Russian Twist']) ] },
+      { day: 'Fri', focus: 'Full Body C', cardio: '15 min row', exercises: [E('hipthrust', 'Hip Thrust', 'Glutes', 4, '10-12', ['Glute Bridge', 'Cable Kickback']), E('squat', 'Goblet Squat', 'Legs', 3, '10-12', ['Leg Press', 'Split Squat']), E('bench', 'Push-up', 'Chest', 3, '12', ['Dumbbell Press', 'Machine Press']), E('row', 'Dumbbell Row', 'Back', 3, '12', ['Seated Row', 'Lat Pulldown']), E('plank', 'Side Plank', 'Core', 3, '30 sec/side', ['Pallof Press', 'Bird Dog']) ] },
     ],
   };
 }

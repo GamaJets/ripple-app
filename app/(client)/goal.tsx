@@ -38,8 +38,8 @@ import {
 } from '../../src/lib/goalTargets';
 
 const KIND_TAB: { kind: GoalKind; label: string }[] = [
-  ...MEASURED_KINDS.map((k) => ({ kind: k as GoalKind, label: k === 'weight' ? 'Weight' : k === 'bodyfat' ? 'Body fat' : 'Muscle' })),
-  { kind: 'custom', label: 'Something else' },
+  ...MEASURED_KINDS.map((k) => ({ kind: k as GoalKind, label: k === 'weight' ? 'Weight' : k === 'bodyfat' ? 'Body Fat' : 'Muscle' })),
+  { kind: 'custom', label: 'Something Else' },
 ];
 
 const DATE_CHIPS: [string, number | null][] = [['4 wks', 28], ['8 wks', 56], ['12 wks', 84], ['No date', null]];
@@ -215,7 +215,7 @@ export default function Goal() {
             ) : null}
 
             <Section>
-              <SectionHead title="Your goals" note={goals.length ? `${open.length} open` : undefined} />
+              <SectionHead title="Your Goals" note={goals.length ? `${open.length} open` : undefined} />
               {!goals.length ? (
                 <Text style={{ ...ty.body, color: t.ink3 }}>
                   No goals yet. Set one below — a number to work toward, or anything else you’re chasing.
@@ -272,7 +272,7 @@ export default function Goal() {
             <Rule />
 
             <Section>
-              <SectionHead title="Set a goal" />
+              <SectionHead title="Set a Goal" />
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginBottom: sp.md }}>
                 {KIND_TAB.map((k) => (
                   <Pressable key={k.kind} onPress={() => setKind(k.kind)} accessibilityRole="button"
@@ -313,7 +313,7 @@ export default function Goal() {
               </View>
 
               <View style={{ marginTop: sp.lg }}>
-                <Cta label={saving ? 'Saving…' : 'Save goal'} wide disabled={saving} onPress={save} />
+                <Cta label={saving ? 'Saving…' : 'Save Goal'} wide disabled={saving} onPress={save} />
               </View>
               {kind !== 'custom' ? (
                 <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.sm }}>

@@ -117,7 +117,7 @@ export default function OwnerExercise() {
           // silhouette implying a demonstration we do not have — which on this
           // screen would misrepresent the product to the person buying it.
           <Notice tone={t.ink3} kicker="Demonstration"
-            title={detail ? 'No illustration for this one' : 'Not in our catalogue'}
+            title={detail ? 'No illustration for this one' : 'Not in Our Catalogue'}
             note={detail
               ? 'This movement has no artwork, so members see its name, its muscles and the written steps. Your coaches can film their own clip for it from the trainer app.'
               : 'This movement is not in our catalogue, so there is no guide for it — nothing here is missing because of an error.'} />
@@ -170,7 +170,7 @@ export default function OwnerExercise() {
               <>
                 <Rule />
                 <Section>
-                  <SectionHead title="Muscles worked" />
+                  <SectionHead title="Muscles Worked" />
                   {detail.primaryMuscles.length ? (
                     <Text style={{ ...ty.body, color: t.ink, marginBottom: 4 }}>
                       <Text style={{ fontWeight: '600' }}>Primary: </Text>{detail.primaryMuscles.map(cap).join(', ')}
@@ -189,7 +189,7 @@ export default function OwnerExercise() {
               <>
                 <Rule />
                 <Section>
-                  <SectionHead title="How to do it" note={`${detail.instructions.length} steps`} />
+                  <SectionHead title="How to Do It" note={`${detail.instructions.length} steps`} />
                   {detail.instructions.map((step, n) => (
                     <View key={n} style={{ flexDirection: 'row', gap: sp.md, marginBottom: sp.md }}>
                       <Text style={{ ...ty.label, fontWeight: '700', color: t.ink3, minWidth: 18 }}>{n + 1}</Text>

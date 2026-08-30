@@ -426,7 +426,7 @@ export default function TrainerClients() {
     // read lands there is no honest count, so the old chip stands in.
     ...(bands
       ? [{ key: 'drifting', label: 'Drifting', n: bands.drifting },
-         { key: 'nodata', label: 'Nothing recorded', n: bands.unknown }]
+         { key: 'nodata', label: 'Nothing Recorded', n: bands.unknown }]
       : [{ key: 'atrisk', label: 'At-risk', n: atRisk }]),
     // One segment per delivery, built from the vocabulary rather than listed by
     // hand — a book with no hybrid clients simply shows a zero, the same as the
@@ -636,16 +636,16 @@ export default function TrainerClients() {
 
         {/* ── the business, in three columns ──────────────────────────────── */}
         <Section>
-          <SectionHead title="This month" note="Analytics" onPress={() => router.push('/(trainer)/analytics')} />
+          <SectionHead title="This Month" note="Analytics" onPress={() => router.push('/(trainer)/analytics')} />
           <KpiRow items={[
             // A dash, not $0, when no session rate is set: the estimate is
             // unknowable rather than nil, and "$0/mo" reads as a fact about the
             // business. Same rule as the "To contact" figure beside it.
-            { label: 'Est. revenue', value: revenue == null ? '—' : '$' + revenue.toLocaleString(), unit: revenue == null ? undefined : '/mo' },
+            { label: 'Est. Revenue', value: revenue == null ? '—' : '$' + revenue.toLocaleString(), unit: revenue == null ? undefined : '/mo' },
             { label: 'Unread', value: fig(unread) },
             // Null until the record has been read: an em-dash, never a zero
             // that would tell a coach nobody needs them this week.
-            { label: 'To contact', value: fig(toContact) },
+            { label: 'To Contact', value: fig(toContact) },
           ]} />
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
             {active === 0
@@ -660,7 +660,7 @@ export default function TrainerClients() {
 
         {/* ── coaching tools ─────────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Coaching tools" />
+          <SectionHead title="Coaching Tools" />
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -2 }} contentContainerStyle={{ gap: sp.sm, paddingHorizontal: 2 }}>
             {SHORTCUTS.map(([ic, label, route]) => (
               <Pressable key={route} onPress={() => router.push(route as any)}
@@ -676,7 +676,7 @@ export default function TrainerClients() {
         {sentInvites.filter((i) => i.status === 'pending').length > 0 ? (<>
           <Rule />
           <Section>
-            <SectionHead title="Pending invites" note={`${sentInvites.filter((i) => i.status === 'pending').length} awaiting`} />
+            <SectionHead title="Pending Invites" note={`${sentInvites.filter((i) => i.status === 'pending').length} awaiting`} />
             {sentInvites.filter((i) => i.status === 'pending').map((i, idx) => (
               <View key={i.id} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: idx === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                 <View style={{ width: 34, height: 34, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
@@ -696,7 +696,7 @@ export default function TrainerClients() {
 
         {/* ── the roster ─────────────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Your clients" note={active > 0 ? driftNote() : undefined} />
+          <SectionHead title="Your Clients" note={active > 0 ? driftNote() : undefined} />
 
           {/* The read failed. Say so, say what it cost, and do NOT let the
               ordinary order pass for the drift order. */}
@@ -1028,7 +1028,7 @@ export default function TrainerClients() {
               </View>
 
               <View style={{ marginBottom: sp.xl }}>
-                <SheetHead t={t} title="AI weekly summary" />
+                <SheetHead t={t} title="AI Weekly Summary" />
                 {aiSummary ? <Text style={{ ...ty.body, color: t.ink2, marginBottom: sp.md }}>{aiSummary}</Text> : null}
                 <Pressable onPress={() => genSummary(sel)} disabled={aiBusy}
                   style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: sp.sm, backgroundColor: t.surface2, borderRadius: radius.sm, paddingVertical: 12, opacity: aiBusy ? 0.6 : 1 }}>
@@ -1059,7 +1059,7 @@ export default function TrainerClients() {
               </View>
 
               <View style={{ marginBottom: sp.xl }}>
-                <SheetHead t={t} title="Meal plan targets" />
+                <SheetHead t={t} title="Meal Plan Targets" />
                 <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>Shape {sel.name.split(' ')[0]}'s daily calories, protein, carbs & fat — applies to their Meals tab live.</Text>
 
                 {/* The controls are withheld, not just annotated, when the
@@ -1131,14 +1131,14 @@ export default function TrainerClients() {
 
               {clientMeals === null ? (
                 <View style={{ marginBottom: sp.xl }}>
-                  <SheetHead t={t} title="Recent meals logged" />
+                  <SheetHead t={t} title="Recent Meals Logged" />
                   <Text style={{ ...ty.label, color: t.ink3 }}>
                     Could not read {sel.name.split(' ')[0]}’s food log. This does not mean they have not been logging.
                   </Text>
                 </View>
               ) : clientMeals.length > 0 ? (
                 <View style={{ marginBottom: sp.xl }}>
-                  <SheetHead t={t} title="Recent meals logged" />
+                  <SheetHead t={t} title="Recent Meals Logged" />
                   {clientMeals.map((m, i) => (
                     <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: sp.sm, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                       <Text style={{ ...ty.label, color: t.ink2, flex: 1 }} numberOfLines={1}>{m.name}</Text>
@@ -1149,7 +1149,7 @@ export default function TrainerClients() {
               ) : null}
 
               <View style={{ marginBottom: sp.xl }}>
-                <SheetHead t={t} title="Coach feedback" />
+                <SheetHead t={t} title="Coach Feedback" />
                 {getFeedback(sel.id).length === 0 ? (
                   <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.sm }}>No feedback yet. Leave {sel.name.split(' ')[0]} a note below.</Text>
                 ) : getFeedback(sel.id).map((fitem, i) => (
@@ -1165,7 +1165,7 @@ export default function TrainerClients() {
               </View>
 
               <View style={{ marginBottom: sp.xl }}>
-                <SheetHead t={t} title="Private notes (only you)" />
+                <SheetHead t={t} title="Private Notes (only You)" />
                 {getNotes(sel.id).map((n, i) => (
                   <View key={n.id} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.sm, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                     <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}>{n.body}</Text>
@@ -1235,7 +1235,7 @@ export default function TrainerClients() {
                 <Chip key={g} t={t} label={g} on={newGoal === g} onPress={() => setNewGoal(g)} />
               ))}
             </View>
-            <SheetHead t={t} title="Coaching type" />
+            <SheetHead t={t} title="Coaching Type" />
             <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.sm }}>
               {COACHED_MODES.map((id) => (
                 <Chip key={id} t={t} label={COACHED_MODE_SHORT[id]} on={newMode === id} onPress={() => setNewMode(id)} />
@@ -1325,7 +1325,7 @@ export default function TrainerClients() {
             <Text style={{ ...ty.label, color: t.ink3, marginTop: 3, marginBottom: sp.xl }}>Two ways in. The code works whoever they are and whatever address they signed up with; the email invite only reaches them if you spell it exactly as they did.</Text>
 
             {/* ── the code ──────────────────────────────────────────────── */}
-            <SheetHead t={t} title="Your coaching code" />
+            <SheetHead t={t} title="Your Coaching Code" />
             <View style={{ marginBottom: sp.xl }}>
               {myCodeErr ? (
                 <Text style={{ ...ty.label, color: t.ink2 }}>{myCodeErr}</Text>
@@ -1385,9 +1385,9 @@ export default function TrainerClients() {
 
             <Rule />
             <View style={{ height: sp.lg }} />
-            <SheetHead t={t} title="Or invite by email" />
+            <SheetHead t={t} title="Or Invite by Email" />
             <TextInput value={invEmail} onChangeText={setInvEmail} placeholder="client@email.com" placeholderTextColor={t.ink3} autoCapitalize="none" keyboardType="email-address" style={{ ...field(t), marginBottom: sp.lg }} />
-            <SheetHead t={t} title="Coaching type" />
+            <SheetHead t={t} title="Coaching Type" />
             <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.sm }}>
               {COACHED_MODES.map((id) => (
                 <Chip key={id} t={t} label={COACHED_MODE_SHORT[id]} on={invMode === id} onPress={() => setInvMode(id)} />

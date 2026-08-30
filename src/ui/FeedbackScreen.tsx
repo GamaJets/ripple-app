@@ -86,7 +86,7 @@ export default function FeedbackScreen({ audience }: { audience: string }) {
           <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Details</Text>
           <TextInput value={body} onChangeText={setBody} placeholder="What happened, or what would make this better?" placeholderTextColor={t.ink3} multiline style={{ ...ty.body, color: t.ink, backgroundColor: t.surface, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md, minHeight: 120, textAlignVertical: 'top', marginBottom: sp.xl }} />
 
-          <Cta label={busy ? 'Sending...' : 'Send feedback'} onPress={submit} disabled={busy} wide />
+          <Cta label={busy ? 'Sending...' : 'Send Feedback'} onPress={submit} disabled={busy} wide />
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>

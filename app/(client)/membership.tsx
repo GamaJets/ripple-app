@@ -55,13 +55,13 @@ export default function Membership() {
   }, [log]);
 
   const actions: { label: string; note: string; icon: IconName; route: string; hero?: boolean }[] = [
-    { label: 'Entry barcode', note: 'Your Repple ID — link it at reception', icon: 'grid', route: '/(client)/access', hero: true },
+    { label: 'Entry Barcode', note: 'Your Repple ID — link it at reception', icon: 'grid', route: '/(client)/access', hero: true },
     { label: 'Classes', note: 'Book a group class at your branch', icon: 'calendar', route: '/(client)/classes' },
-    { label: 'Personal training', note: 'Approve sessions your trainer delivered', icon: 'people', route: '/(client)/pt-sessions' },
-    { label: 'My bookings', note: 'Everything you have booked', icon: 'check', route: '/(client)/bookings' },
-    { label: 'Memberships & packs', note: 'What you have bought and what is left', icon: 'trophy', route: '/(client)/packages' },
+    { label: 'Personal Training', note: 'Approve sessions your trainer delivered', icon: 'people', route: '/(client)/pt-sessions' },
+    { label: 'My Bookings', note: 'Everything you have booked', icon: 'check', route: '/(client)/bookings' },
+    { label: 'Memberships & Packs', note: 'What you have bought and what is left', icon: 'trophy', route: '/(client)/packages' },
     { label: 'Offers', note: 'What else the app can do', icon: 'sparkle', route: '/(client)/explore' },
-    { label: 'Refer a friend', note: 'Share Repple with someone', icon: 'share', route: '/(client)/referral' },
+    { label: 'Refer a Friend', note: 'Share Repple with someone', icon: 'share', route: '/(client)/referral' },
   ];
   const heroAction = actions.find((a) => a.hero);
   const G = layout.gutter;
@@ -94,7 +94,7 @@ export default function Membership() {
         {heroAction ? (
           <Section>
             <ActionCard
-              title="Show entry barcode"
+              title="Show Entry Barcode"
               note={`Member ${memberNo} · ${heroAction.note}`}
               cta="Show"
               onPress={() => router.push(heroAction.route as any)}
@@ -106,7 +106,7 @@ export default function Membership() {
 
         {/* ── everywhere else you can go ─────────────────────────────────── */}
         <Section>
-          <SectionHead title="At the gym" />
+          <SectionHead title="At the Gym" />
           {actions.filter((a) => !a.hero).map((a) => (
             <ListRow key={a.label} icon={a.icon} title={a.label} note={a.note}
               onPress={() => router.push(a.route as any)} />

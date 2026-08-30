@@ -341,7 +341,7 @@ export default function CoachChecklists() {
           <View>
             <Rule />
             <Section>
-              <SectionHead title={client?.name ?? 'Their list'} note={shown ? `${shown.filter((i) => i.active).length} showing` : undefined} />
+              <SectionHead title={client?.name ?? 'Their List'} note={shown ? `${shown.filter((i) => i.active).length} showing` : undefined} />
 
               {/* The caveats come BEFORE the figures they qualify. A coach who
                   reads "3 of 28" first and the reason it might not mean what it
@@ -473,7 +473,7 @@ export default function CoachChecklists() {
             <Rule />
 
             <Section>
-              <SectionHead title="Add a line" note={`${draft.length}/${LABEL_MAX}`} />
+              <SectionHead title="Add a Line" note={`${draft.length}/${LABEL_MAX}`} />
               <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'center' }}>
                 <TextInput value={icon} onChangeText={setIcon} placeholder="🥗" placeholderTextColor={t.ink3}
                   accessibilityLabel="Icon, optional" maxLength={8}
@@ -483,7 +483,7 @@ export default function CoachChecklists() {
                   style={{ flex: 1, ...ty.body, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md }} />
               </View>
               <View style={{ marginTop: sp.md }}>
-                <Cta label={busy ? 'Saving…' : 'Add to their list'} wide disabled={busy} onPress={add} />
+                <Cta label={busy ? 'Saving…' : 'Add to Their List'} wide disabled={busy} onPress={add} />
               </View>
             </Section>
           </View>

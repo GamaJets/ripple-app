@@ -266,7 +266,7 @@ export default function ClientWeek() {
                   </Section>
                 ) : board.state === 'none' ? (
                   <Section>
-                    <SectionHead title={client?.name ?? 'Their week'} note="nothing marked" />
+                    <SectionHead title={client?.name ?? 'Their Week'} note="nothing marked" />
                     <Text style={{ ...ty.body, color: t.ink2 }}>
                       The read came back and {who} has marked no days between{' '}
                       {dayHeading(window?.fromISO ?? '')} and {dayHeading(window?.toISO ?? '')}.
@@ -284,7 +284,7 @@ export default function ClientWeek() {
                         the past, so it stays on its row and out of here. */}
                     {board.conflicts.length ? (
                       <Section>
-                        <SectionHead title="Worth raising" note={`${board.conflicts.length}`} />
+                        <SectionHead title="Worth Raising" note={`${board.conflicts.length}`} />
                         <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.sm }}>
                           Days where {who}&rsquo;s mark and the programme you assigned them say
                           different things. Neither has been changed by the other, and nothing on
@@ -333,7 +333,7 @@ export default function ClientWeek() {
                       <>
                         <Rule />
                         <Section>
-                          <SectionHead title="Already gone" note={`last ${DAYS_BEHIND} days`} />
+                          <SectionHead title="Already Gone" note={`last ${DAYS_BEHIND} days`} />
                           <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.sm }}>
                             What {who} meant to do, on days that have passed. Still only intentions:
                             this screen does not read their training log, so nothing below says

@@ -705,7 +705,7 @@ export default function Scans() {
         {/* ── the one card: the scan you can act on ───────────────────────── */}
         <Section>
           <ActionCard
-            title={latest ? 'Latest InBody scan' : 'Add your first InBody scan'}
+            title={latest ? 'Latest InBody Scan' : 'Add your first InBody scan'}
             // The scan's OWN figures and the scan's OWN date. This card is the
             // one place on the screen whose subject really is the scan, so it
             // may differ from the Weight tile below — and it now says the date
@@ -714,7 +714,7 @@ export default function Scans() {
             note={latest
               ? `${fig(weightLabel(latest.weightKg, wu))} · ${latest.bodyFatPct}% BF · ${bodyDayLabel(latest.takenAt)}${ago ? ` · ${ago}` : ''}`
               : 'Snap or upload your report — the numbers are read for you.'}
-            cta={latest ? 'Add scan' : 'Start'}
+            cta={latest ? 'Add Scan' : 'Start'}
             onPress={() => setShowAdd(true)}
           />
         </Section>
@@ -779,7 +779,7 @@ export default function Scans() {
               is deliberately absent while the list is still loading and while
               it is genuinely empty — in both of those the body below says
               which, and a note reading "0 saved" would collapse them into one. */}
-          <SectionHead title="Progress photos" note={photosNote(photos) ?? undefined} />
+          <SectionHead title="Progress Photos" note={photosNote(photos) ?? undefined} />
           <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.lg }}>
             <View style={{ flex: 1 }}><Ghost label="Upload" onPress={() => { if (!photoBusy) addPhoto(false); }} /></View>
             <View style={{ flex: 1 }}><Ghost label="Photo" onPress={() => { if (!photoBusy) addPhoto(true); }} /></View>
@@ -1010,7 +1010,7 @@ export default function Scans() {
                 Converting these would need a second, finer rule for pounds than
                 the rest of the app uses, and two rules for the same unit is how
                 a client ends up seeing the same reading two ways. */}
-            <SectionHead title="Body composition" note="Latest vs previous" />
+            <SectionHead title="Body Composition" note="Latest vs previous" />
             {(mInsights.improving.length > 0 || mInsights.watch.length > 0 || mInsights.balance.length > 0) && (
               <View style={{ marginBottom: sp.lg }}>
                 {mInsights.improving.length > 0 ? (
@@ -1061,14 +1061,33 @@ export default function Scans() {
 
         {/* ── the rest: navigational, deliberately quiet ──────────────────── */}
         <Section>
-          <SectionHead title="Go deeper" />
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingRight: G }}>
-            {([['chart', 'Report', '/(client)/report'], ['trending', 'Composition', '/(client)/body-trends'], ['trophy', 'Records', '/(client)/records'], ['flame', 'Consistency', '/(client)/consistency'], ['chart', 'Standards', '/(client)/standards'], ['ruler', 'Measurements', '/(client)/measurements'], ['target', 'Goal', '/(client)/goal']] as const).map(([ic, label, route]) => (
+          <SectionHead title="Go Deeper" />
+          {/* Wrapped, not scrolled sideways — the same fix the Train tab's row
+              needed. Seven destinations in a horizontal strip put three of
+              them past the right edge with nothing to say they were there.
+
+              Ordered by the question being asked, rather than by when each
+              screen was built:
+
+                the summary      Report
+                the body         Composition · Measurements
+                what you lift    Records · Standards
+                habit and aim    Consistency · Goal */}
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
+            {([
+              ['chart', 'Report', '/(client)/report'],
+              ['trending', 'Composition', '/(client)/body-trends'],
+              ['ruler', 'Measurements', '/(client)/measurements'],
+              ['trophy', 'Records', '/(client)/records'],
+              ['chart', 'Standards', '/(client)/standards'],
+              ['flame', 'Consistency', '/(client)/consistency'],
+              ['target', 'Goal', '/(client)/goal'],
+            ] as const).map(([ic, label, route]) => (
               <Pressable key={route} onPress={() => router.push(route as any)} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: sp.sm }}>
                 <Icon name={ic} size={14} color={t.ink2} /><Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>{label}</Text>
               </Pressable>
             ))}
-          </ScrollView>
+          </View>
         </Section>
       </ScrollView>
 

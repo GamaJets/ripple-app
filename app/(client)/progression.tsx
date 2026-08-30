@@ -22,10 +22,10 @@ import { Rule, Section, SectionHead, KpiRow, Notice, Cta, Ghost, fig } from '../
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 
 const META: Record<ProgressAction, { label: string; icon: string; color: (t: any) => string }> = {
-  increase: { label: 'Add load', icon: 'trending', color: (t) => t.brand },
-  reps: { label: 'Chase reps', icon: 'plus', color: (t) => t.good ?? t.brand },
+  increase: { label: 'Add Load', icon: 'trending', color: (t) => t.brand },
+  reps: { label: 'Chase Reps', icon: 'plus', color: (t) => t.good ?? t.brand },
   hold: { label: 'Hold', icon: 'minus', color: (t) => t.warn },
-  deload: { label: 'Ease back', icon: 'swap', color: (t) => t.crit },
+  deload: { label: 'Ease Back', icon: 'swap', color: (t) => t.crit },
 };
 
 export default function Progression() {
@@ -85,7 +85,7 @@ export default function Progression() {
             </Section>
           ) : (
           <Section>
-            <SectionHead title="No targets yet" />
+            <SectionHead title="No Targets Yet" />
             <Text style={{ ...ty.body, color: t.ink2 }}>Log a few weighted sets and your progression targets will appear here.</Text>
             <View style={{ height: sp.lg }} />
             <View style={{ alignSelf: 'flex-start' }}>
@@ -125,11 +125,11 @@ export default function Progression() {
                   <View style={{ height: sp.md }} />
                   <KpiRow items={[
                     {
-                      label: 'Target load', value: fig(liftIn(tip.nextWeight, wu)), unit: wu,
+                      label: 'Target Load', value: fig(liftIn(tip.nextWeight, wu)), unit: wu,
                       good: bump >= 0,
                       delta: bump !== 0 && bumpShown != null ? `${bumpShown > 0 ? '+' : '−'}${Math.abs(bumpShown)} ${wu}` : 'same weight',
                     },
-                    { label: 'Target reps', value: fig(tip.nextReps) },
+                    { label: 'Target Reps', value: fig(tip.nextReps) },
                   ]} />
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{tip.rationale}</Text>
                 </View>

@@ -195,14 +195,14 @@ export default function CoachProfile() {
         <Rule />
 
         <Section>
-          <SectionHead title="What you offer" note="Tap a chip to remove" />
+          <SectionHead title="What You Offer" note="Tap a chip to remove" />
           <ChipEditor t={t} items={p.offers} onAdd={addOffer} onRemove={(i) => p.setOffers(p.offers.filter((_, x) => x !== i))} value={newOffer} setValue={setNewOffer} placeholder="e.g. Nutrition coaching" />
         </Section>
 
         <Rule />
 
         <Section>
-          <SectionHead title="Session rate" />
+          <SectionHead title="Session Rate" />
           {/* `String(p.sessionFee)` literally rendered the text "null" into the
               box. And `|| 0` meant clearing the field set a real rate of zero
               rather than clearing it, so a coach could not un-set a rate once
@@ -228,7 +228,7 @@ export default function CoachProfile() {
         {/* Public directory opt-in. Off by default and never set on the
             trainer's behalf — clients only see coaches who switched this on. */}
         <Section>
-          <SectionHead title="Find a Trainer directory" />
+          <SectionHead title="Find a Trainer Directory" />
           <Pressable
             onPress={() => p.setListed(!p.listed)}
             accessibilityRole="switch"

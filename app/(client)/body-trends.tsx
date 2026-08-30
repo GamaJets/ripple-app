@@ -78,9 +78,9 @@ interface MetricDef {
 }
 const METRICS: MetricDef[] = [
   { key: 'weightKg', label: 'Weight', unit: 'kg', better: 'down', weight: true, from: 'weight' },
-  { key: 'bodyFatPct', label: 'Body fat', unit: '%', better: 'down', from: 'bodyFat' },
-  { key: 'skeletalMuscleKg', label: 'Skeletal muscle', unit: 'kg', better: 'up', weight: true, from: 'muscle' },
-  { key: 'inbodyScore', label: 'InBody score', unit: 'pts', better: 'up', from: 'score' },
+  { key: 'bodyFatPct', label: 'Body Fat', unit: '%', better: 'down', from: 'bodyFat' },
+  { key: 'skeletalMuscleKg', label: 'Skeletal Muscle', unit: 'kg', better: 'up', weight: true, from: 'muscle' },
+  { key: 'inbodyScore', label: 'InBody Score', unit: 'pts', better: 'up', from: 'score' },
 ];
 
 export default function BodyTrends() {
@@ -149,7 +149,7 @@ export default function BodyTrends() {
 
         {!anyTrend ? (
           <Section>
-            <SectionHead title="Not enough readings yet" />
+            <SectionHead title="Not Enough Readings Yet" />
             <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>Add another scan to see trends</Text>
             <Text style={{ ...ty.label, color: t.ink3, marginTop: 4 }}>Once you've logged two or more readings, each metric graphs here so you can watch it move over time.</Text>
           </Section>

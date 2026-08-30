@@ -81,8 +81,8 @@ export type BodyMetricKey = MeasuredKind;
  */
 export const BODY_METRICS: readonly { key: BodyMetricKey; label: string }[] = [
   { key: 'weight', label: 'Weight' },
-  { key: 'bodyfat', label: 'Body fat' },
-  { key: 'muscle', label: 'Skeletal muscle' },
+  { key: 'bodyfat', label: 'Body Fat' },
+  { key: 'muscle', label: 'Skeletal Muscle' },
 ];
 
 /**

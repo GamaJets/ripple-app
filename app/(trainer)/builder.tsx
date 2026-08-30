@@ -394,7 +394,7 @@ export default function Builder() {
               the bottom is what has to be held. */}
           {planGuard.allowed ? null : (
             <Notice tone={t.warn} kicker={programStatus === 'loading' ? 'Reading' : 'Programme'}
-              title={programStatus === 'loading' ? 'Reading their current programme' : 'What they are on could not be read'}
+              title={programStatus === 'loading' ? 'Reading Their Current Programme' : 'What they are on could not be read'}
               note={`${planGuard.reason} Nothing has been loaded into the builder, because an empty builder is not this client's plan.`} />
           )}
 
@@ -410,7 +410,7 @@ export default function Builder() {
 
         {/* ── days ───────────────────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Training days"
+          <SectionHead title="Training Days"
             note={days.length ? `${days.length} day${days.length === 1 ? '' : 's'} · ${totalExercises} exercises` : undefined} />
 
           {days.length === 0 ? (
@@ -557,7 +557,7 @@ export default function Builder() {
                 gap reads as a list that failed to load, which is the one thing
                 it is not — the coach may simply have searched for something
                 only the catalogue has. */}
-            {ownShown.length ? <SectionHead title="Your exercises" /> : null}
+            {ownShown.length ? <SectionHead title="Your Exercises" /> : null}
 
             {ownShown.map((x, i) => (
               <View key={x.name} style={{
@@ -581,7 +581,7 @@ export default function Builder() {
             {/* ── the catalogue ──────────────────────────────────────────── */}
             <View style={{ marginTop: sp.xl }}>
               <SectionHead
-                title="Exercise catalogue"
+                title="Exercise Catalogue"
                 // A count of what came back is only a count of the catalogue
                 // once we know the read was whole. Under 'partial' or 'error'
                 // it is the size of what arrived, which is a different fact.

@@ -120,7 +120,7 @@ export default function ClassCheckin() {
 
         {/* ── the trainer's own estimate ──────────────────────────────────── */}
         <Section>
-          <SectionHead title="Pay estimate" />
+          <SectionHead title="Pay Estimate" />
           <Text style={{ ...ty.caption, color: t.ink3, marginBottom: 6 }}>Rate per attendee</Text>
           <TextInput value={rate} onChangeText={setRate} keyboardType="numeric" placeholder="Your rate" placeholderTextColor={t.ink3}
             style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 }} />

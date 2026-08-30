@@ -185,7 +185,7 @@ export default function Habits() {
             that never looked broken — it had a row, a hero arc and a readiness
             score built on it, all from a literal. */}
         <Section>
-          <SectionHead title="Your daily targets" note="Optional" />
+          <SectionHead title="Your Daily Targets" note="Optional" />
           <Text style={{ ...ty.body, color: t.ink3, marginBottom: sp.md }}>
             Set any of these and it joins your list. Leave one blank and nothing is assumed.
           </Text>

@@ -346,7 +346,7 @@ export default function ClientBody() {
                   </Section>
                 ) : board.state === 'none' ? (
                   <Section>
-                    <SectionHead title={client?.name ?? 'Their scans'} note="never scanned" />
+                    <SectionHead title={client?.name ?? 'Their Scans'} note="never scanned" />
                     {/* "The read came back and it was empty" is only true when
                         nothing was dropped. Rows that arrived and could not be
                         used are a different story, and the flag below tells it
@@ -363,7 +363,7 @@ export default function ClientBody() {
                   <>
                     <Section>
                       <SectionHead
-                        title={client?.name ?? 'Their scans'}
+                        title={client?.name ?? 'Their Scans'}
                         note={board.history.scans === 1 ? '1 scan' : `${board.history.scans} scans`}
                       />
                       <Text style={{ ...ty.label, color: t.ink3 }}>{DIRECTION_CAVEAT}</Text>
@@ -408,7 +408,7 @@ export default function ClientBody() {
                   </Section>
                 ) : manual == null ? (
                   <Section>
-                    <SectionHead title="Typed by hand" note="none" />
+                    <SectionHead title="Typed by Hand" note="none" />
                     <Text style={{ ...ty.body, color: t.ink2 }}>
                       Nothing typed. Every figure above came off a scan sheet, so there is no
                       hand-entered number sitting under the same heading as a machine reading.
@@ -416,7 +416,7 @@ export default function ClientBody() {
                   </Section>
                 ) : (
                   <Section>
-                    <SectionHead title="Typed by hand" note="not a scan" />
+                    <SectionHead title="Typed by Hand" note="not a scan" />
                     {/* Which figure the client's own app is showing them is a
                         comparison against their newest scan, so it can only be
                         made once that read has landed. Under a failed or

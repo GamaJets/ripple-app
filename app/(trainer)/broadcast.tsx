@@ -128,7 +128,7 @@ export default function Broadcast() {
 
         {/* ── the segment ────────────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Send to" />
+          <SectionHead title="Send To" />
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm }}>
             {chip('All clients', seg === null, () => setSeg(null))}
             {allTags.map((tg) => chip(tg, seg === tg, () => setSeg(tg === seg ? null : tg)))}

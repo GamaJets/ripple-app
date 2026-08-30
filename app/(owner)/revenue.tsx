@@ -96,10 +96,10 @@ export default function OwnerRevenue() {
 
         {/* ── unit economics ─────────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Unit economics" note="Per client" />
+          <SectionHead title="Unit Economics" note="Per client" />
           <KpiRow items={[
-            { label: 'Session fee', value: fee == null ? '—' : usd(fee), delta: fee == null ? 'not set' : 'per delivered session' },
-            { label: 'Value / client', value: loading || valuePerClient == null ? '—' : usd(valuePerClient), delta: loading ? 'not read yet' : valuePerClient == null ? 'needs a session fee' : 'last 30 days' },
+            { label: 'Session Fee', value: fee == null ? '—' : usd(fee), delta: fee == null ? 'not set' : 'per delivered session' },
+            { label: 'Value / Client', value: loading || valuePerClient == null ? '—' : usd(valuePerClient), delta: loading ? 'not read yet' : valuePerClient == null ? 'needs a session fee' : 'last 30 days' },
             { label: 'Clients', value: loading ? '—' : fig(roll.clients), delta: loading ? 'not read yet' : roll.avgClientsPerTrainer == null ? 'no trainers yet' : `${roll.avgClientsPerTrainer} avg / trainer` },
           ]} />
         </Section>
@@ -108,7 +108,7 @@ export default function OwnerRevenue() {
 
         {/* ── trend ──────────────────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Sessions trend"
+          <SectionHead title="Sessions Trend"
             note={delta !== 0 ? `${delta > 0 ? '+' : '−'}${usd(Math.abs(delta))} vs last mo` : 'Tracking started'} />
           {months >= 2 ? (
             <>
@@ -148,7 +148,7 @@ export default function OwnerRevenue() {
 
         {/* ── revenue by plan ────────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Sessions by trainer" note={byTrainer.length > 0 ? `${trainerTotal} in 30d` : undefined} />
+          <SectionHead title="Sessions by Trainer" note={byTrainer.length > 0 ? `${trainerTotal} in 30d` : undefined} />
           {loading ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Reading your roster…</Text>
           ) : byTrainer.length === 0 ? (
@@ -181,7 +181,7 @@ export default function OwnerRevenue() {
               </View>
             </Notice>
           ) : (<>
-            <SectionHead title="Revenue at risk" note="Trainers" onPress={() => router.push('/(owner)/trainers')} />
+            <SectionHead title="Revenue at Risk" note="Trainers" onPress={() => router.push('/(owner)/trainers')} />
             <Text style={{ ...ty.label, color: t.ink3 }}>
               {loading ? 'Reading your roster…'
                 : roll.trainers === 0 ? 'No trainers on the platform yet.'

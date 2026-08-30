@@ -294,7 +294,7 @@ export default function ClientPhotos() {
             <Rule />
             <Section>
               <SectionHead
-                title={client?.name ?? 'Sent to you'}
+                title={client?.name ?? 'Sent to You'}
                 note={inboxNote(inbox) ?? undefined}
               />
 
@@ -363,7 +363,7 @@ export default function ClientPhotos() {
                   ) : null}
 
                   <View style={{ flexDirection: 'row', marginTop: sp.md }}>
-                    <Ghost label={loading ? 'Checking…' : 'Check again now'} onPress={() => { if (picked) void load(picked); }} />
+                    <Ghost label={loading ? 'Checking…' : 'Check Again Now'} onPress={() => { if (picked) void load(picked); }} />
                   </View>
                 </View>
               ) : null}

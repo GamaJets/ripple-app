@@ -473,7 +473,7 @@ export default function ClientScreen() {
 
         {/* ── what is outstanding ─────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Needs you" />
+          <SectionHead title="Needs You" />
           {unasked ? (
             <Flag tone={t.ink3}>
               {unasked} Nothing is outstanding on this screen because nothing was asked for — which
@@ -504,14 +504,14 @@ export default function ClientScreen() {
 
         {/* ── three figures, and a dash wherever the record cannot answer ─── */}
         <Section>
-          <SectionHead title="Where they are" />
+          <SectionHead title="Where They Are" />
           <KpiRow items={[
             {
-              label: 'Weight change',
+              label: 'Weight Change',
               value: delta == null ? '—' : `${delta > 0 ? '+' : ''}${fig(delta)}`,
               unit: delta == null ? undefined : wu,
             },
-            { label: 'In the app', value: fig(seen ? seen.seenDays : null), unit: seen ? `/ ${seen.windowDays} days` : undefined },
+            { label: 'In the App', value: fig(seen ? seen.seenDays : null), unit: seen ? `/ ${seen.windowDays} days` : undefined },
             { label: 'Unread', value: fig(client ? client.unread : null) },
           ]} />
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>

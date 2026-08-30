@@ -113,7 +113,7 @@ export default function BroadcastSession() {
 
         {/* ── platforms ──────────────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Post to" note={sel.length ? `${sel.length} selected` : 'None selected'} />
+          <SectionHead title="Post To" note={sel.length ? `${sel.length} selected` : 'None selected'} />
           {SOCIAL_PLATFORMS.map((p, i) => {
             const on = sel.includes(p.key); const connected = socialConnected(p.key);
             return (

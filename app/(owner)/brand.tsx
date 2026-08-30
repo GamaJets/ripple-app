@@ -35,7 +35,7 @@ export default function OwnerBrand() {
         </View>
 
         <Section>
-          <SectionHead title="App name" />
+          <SectionHead title="App Name" />
           <TextInput value={appName} onChangeText={setAppName} placeholder="Your brand" placeholderTextColor={t.ink3} style={inp} />
         </Section>
 
@@ -43,7 +43,7 @@ export default function OwnerBrand() {
 
         {/* ── the colours are the content, not decoration ────────────────── */}
         <Section>
-          <SectionHead title="Primary palette" note={palettes.find((p) => p.key === palette)?.name} />
+          <SectionHead title="Primary Palette" note={palettes.find((p) => p.key === palette)?.name} />
           <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>Tap a colour — the whole app rethemes instantly.</Text>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.md }}>
             {palettes.map((p) => {
@@ -63,7 +63,7 @@ export default function OwnerBrand() {
 
         {/* ── live preview: chrome and the primary action, no invented data ─ */}
         <Section>
-          <SectionHead title="Live preview" />
+          <SectionHead title="Live Preview" />
           <View style={{ backgroundColor: t.surface, borderRadius: radius.md, overflow: 'hidden', ...elevation.e1 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, padding: sp.lg, backgroundColor: t.surface2 }}>
               <View style={{ width: 32, height: 32, borderRadius: radius.sm, backgroundColor: t.brand }} />

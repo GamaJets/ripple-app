@@ -292,7 +292,7 @@ export default function Recovery() {
     avgBpm={hrSource === 'whoop' ? whoopMetrics?.heartRateAvg ?? null : null}
     maxBpm={hrSource === 'whoop' ? whoopMetrics?.heartRateMax ?? null : null}
     age={age}
-    title="Heart-rate zones"
+    title="Heart-rate Zones"
     subtitle={
       hrSource === 'apple' ? 'Today, from your Apple Watch'
       : hrSource === 'whoop' ? "Today's workouts, from WHOOP"
@@ -418,7 +418,7 @@ export default function Recovery() {
 
   {/* ── logged recovery sessions ─────────────────────────────────────── */}
   <Section>
-   <SectionHead title="Recovery sessions" note={recoverySessions.length ? `${recoverySessions.length} recent` : undefined} />
+   <SectionHead title="Recovery Sessions" note={recoverySessions.length ? `${recoverySessions.length} recent` : undefined} />
    {logStatus === 'error' ? (
     <Text style={{ ...ty.label, color: t.ink2 }}>
      Your sessions could not be read, so none are shown. That is not the same as having logged none.
@@ -456,7 +456,7 @@ export default function Recovery() {
 
   {/* ── mobility routines ───────────────────────────────────────────── */}
   <Section>
-   <SectionHead title="Mobility & warm-ups" note={`${MOBILITY.length} routines`} />
+   <SectionHead title="Mobility & Warm-ups" note={`${MOBILITY.length} routines`} />
    {MOBILITY.map((r, i) => {
     const open = openRoutine === i;
     return (
@@ -490,7 +490,7 @@ export default function Recovery() {
 
   {/* ── rest-day guidance ───────────────────────────────────────────── */}
   <Section>
-   <SectionHead title="Rest-day guidance" />
+   <SectionHead title="Rest-day Guidance" />
    <Text style={{ ...ty.body, color: t.ink2 }}>Aim for 1–2 rest days a week. Deload every 4–6 weeks (drop ~40% volume) to let strength catch up. Light walking, mobility, and 7–9 h sleep beat total inactivity for recovery.</Text>
   </Section>
  </ScrollView>

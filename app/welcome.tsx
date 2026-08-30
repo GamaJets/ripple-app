@@ -195,7 +195,7 @@ export default function Welcome() {
 
           <View style={{ marginTop: sp.sm }}>
             <Cta wide disabled={!canGo || busy} onPress={go}
-              label={busy ? 'Please wait…' : mode === 'up' ? 'Create Account' : 'Sign In'} />
+              label={busy ? 'Please Wait…' : mode === 'up' ? 'Create Account' : 'Sign In'} />
           </View>
 
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginVertical: sp.xl }}>

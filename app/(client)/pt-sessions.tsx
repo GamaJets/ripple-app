@@ -71,7 +71,7 @@ export default function PtSessions() {
 
         {/* ── awaiting approval: the only actionable thing here ───────────── */}
         <Section>
-          <SectionHead title="Awaiting your approval" note={pending.length > 0 ? String(pending.length) : undefined} />
+          <SectionHead title="Awaiting Your Approval" note={pending.length > 0 ? String(pending.length) : undefined} />
           {pending.map((s) => (
             <Card key={s.id} style={{ marginBottom: sp.md }}>
               <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: t.ink }}>{fmt(s.startsAt)}</Text>
@@ -80,7 +80,7 @@ export default function PtSessions() {
                 placeholder="Add a comment for your trainer (optional)…" placeholderTextColor={t.ink3}
                 editable={busy !== s.id} multiline
                 style={{ ...ty.label, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: sp.md, marginTop: sp.md, marginBottom: sp.md }} />
-              <Cta label={busy === s.id ? 'Approving…' : 'Approve session'} wide disabled={busy === s.id} onPress={() => approve(s.id)} />
+              <Cta label={busy === s.id ? 'Approving…' : 'Approve Session'} wide disabled={busy === s.id} onPress={() => approve(s.id)} />
             </Card>
           ))}
           {pending.length === 0 ? <Text style={{ ...ty.label, color: t.ink3 }}>Nothing to approve right now.</Text> : null}

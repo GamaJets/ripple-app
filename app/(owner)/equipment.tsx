@@ -182,11 +182,11 @@ export default function OwnerEquipment() {
         <Rule />
 
         <Section>
-          <SectionHead title="The register" />
+          <SectionHead title="The Register" />
           <KpiRow items={[
             { label: 'Items', value: !loaded || list.length === 0 ? '—' : String(sum!.items) },
-            { label: 'Usable units', value: !loaded || list.length === 0 ? '—' : String(sum!.usableUnits) },
-            { label: 'Out of service', value: !loaded || list.length === 0 ? '—' : String(sum!.downUnits) },
+            { label: 'Usable Units', value: !loaded || list.length === 0 ? '—' : String(sum!.usableUnits) },
+            { label: 'Out of Service', value: !loaded || list.length === 0 ? '—' : String(sum!.downUnits) },
           ]} />
           {failed ? (
             <Flag tone={t.crit} style={{ marginTop: sp.md }}>
@@ -221,7 +221,7 @@ export default function OwnerEquipment() {
         {queue.length > 0 ? (
           <>
             <Section>
-              <SectionHead title="Needs attention" />
+              <SectionHead title="Needs Attention" />
               {queue.map(({ item, state }, i) => (
                 <View key={item.id}>
                   {i > 0 ? <Rule /> : null}

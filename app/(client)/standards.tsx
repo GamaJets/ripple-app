@@ -83,7 +83,7 @@ export default function Standards() {
   <Rule />
 
   <Section>
-   <SectionHead title="The big lifts" note={bw != null ? `bodyweight ${weightLabel(bw, wu)}` : 'add your weight for ratios'} />
+   <SectionHead title="The Big Lifts" note={bw != null ? `bodyweight ${weightLabel(bw, wu)}` : 'add your weight for ratios'} />
    {rows.map(({ lift, best, ratio, lvl, nextTarget }, i) => (
     <View key={lift.name} style={{ paddingVertical: sp.lg, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' }}>

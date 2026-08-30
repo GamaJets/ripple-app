@@ -111,7 +111,7 @@ export default function Promotions() {
 
         {/* ── new promotion ──────────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="New promotion" />
+          <SectionHead title="New Promotion" />
           <TextInput value={title} onChangeText={setTitle} placeholder="Title — e.g. Summer Special" placeholderTextColor={t.ink3} style={inp} />
           <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm }}>
             <TextInput value={code} onChangeText={setCode} placeholder="CODE" autoCapitalize="characters" placeholderTextColor={t.ink3} style={[inp, { flex: 1 }]} />
@@ -143,7 +143,7 @@ export default function Promotions() {
 
         {/* ── active promotions ──────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Active promotions" note={promos.length ? String(promos.length) : undefined} />
+          <SectionHead title="Active Promotions" note={promos.length ? String(promos.length) : undefined} />
           {promos.length === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>
               No promotions yet. Create a code above and it appears here, ready to push to every member.

@@ -174,7 +174,7 @@ export default function Measurements() {
 
   {/* ── new entry ───────────────────────────────────────────────────── */}
   <Section>
-   <SectionHead title="Log new measurements" note={lu} />
+   <SectionHead title="Log New Measurements" note={lu} />
    {METRICS.map(({ key, label }) => (
     <View key={key} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: sp.sm }}>
      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink2 }}>{label}</Text>

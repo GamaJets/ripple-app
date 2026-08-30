@@ -349,7 +349,7 @@ export default function FindTrainer() {
           </View>
         ) : coach ? (
           <Section>
-            <SectionHead title="Your coach" />
+            <SectionHead title="Your Coach" />
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
               <View style={{ width: 34, height: 34, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
                 {/* A coach who has not set a name is a real state — part 67
@@ -379,7 +379,7 @@ export default function FindTrainer() {
             {received.map((iv) => (
               <Notice key={iv.id} tone={t.brand}
                 kicker={`Coaching invitation${iv.demo ? ' · sample' : ''}`}
-                title={`${iv.coachName || 'A coach'} invited you`}
+                title={`${iv.coachName || 'A Coach'} invited you`}
                 note={`${COACHED_MODE_SHORT[iv.mode]} coaching. ${COACHING_MODE_NOTE[iv.mode]} Accept to connect — their program, feedback and messaging turn on for you.`}>
                 <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.lg }}>
                   <View style={{ flex: 1 }}><Ghost label="Decline" onPress={() => declineInvite(iv.id)} /></View>

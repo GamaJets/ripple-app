@@ -211,7 +211,7 @@ export default function Library() {
     </ScrollView>
 
     <Section>
-     <SectionHead title={group === 'All' ? 'All exercises' : group}
+     <SectionHead title={group === 'All' ? 'All Exercises' : group}
       note={status === 'ready' && list.length ? `${list.length} exercise${list.length === 1 ? '' : 's'}` : undefined} />
      {status === 'ready' && list.length ? (
       <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.xs }}>Tap one to watch it — and to log the sets you just did.</Text>
@@ -266,7 +266,7 @@ export default function Library() {
     <Rule />
     <Section>
      <SectionHead
-      title="All exercises"
+      title="All Exercises"
       note={cat.status === 'ready' || cat.status === 'partial' ? `${catList.length} of ${cat.rows.length}` : undefined}
      />
      {cat.status === 'loading' ? (
@@ -349,7 +349,7 @@ export default function Library() {
      {/* ── log it, from here ────────────────────────────────────────────── */}
      <Rule />
      <View>
-      <SectionHead title="Log this exercise" note={banked.length ? `${banked.length} set${banked.length === 1 ? '' : 's'} ready` : undefined} />
+      <SectionHead title="Log This Exercise" note={banked.length ? `${banked.length} set${banked.length === 1 ? '' : 's'} ready` : undefined} />
       {banked.length ? (
        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: sp.md, alignItems: 'center' }}>
         {banked.map((s, i) => (
@@ -376,7 +376,7 @@ export default function Library() {
        </Pressable>
       </View>
       <View style={{ marginTop: sp.md }}>
-       <Cta label={saving ? 'Logging…' : 'Log to today'} wide disabled={saving} onPress={logIt} />
+       <Cta label={saving ? 'Logging…' : 'Log to Today'} wide disabled={saving} onPress={logIt} />
       </View>
       <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
        Goes into today's log alongside your programme, so your calendar, streak and records all count it. Leave the weight blank for a bodyweight set.

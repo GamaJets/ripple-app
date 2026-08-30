@@ -81,7 +81,7 @@ export default function ClientPackages() {
               </View>
             ) : (
               <Section>
-                <SectionHead title="Your purchases" note={`${(rows ?? []).length}`} />
+                <SectionHead title="Your Purchases" note={`${(rows ?? []).length}`} />
                 {(rows ?? []).map((r, i) => (
                   <View key={r.id}>
                     {i > 0 ? <Rule /> : null}

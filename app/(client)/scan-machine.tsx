@@ -194,7 +194,7 @@ export default function ScanMachine() {
                 <Text style={{ ...ty.label, color: t.ink3 }}>Preparing camera…</Text>
               </Section>
             ) : !permission.granted ? (
-              <Notice kicker="Camera" title="Camera access"
+              <Notice kicker="Camera" title="Camera Access"
                 note="Repple reads the code on a machine, then names the exercise and muscle group for you.">
                 <View style={{ marginTop: sp.lg }}>
                   <Cta label="Allow Camera" wide onPress={requestPermission} />
@@ -253,7 +253,7 @@ export default function ScanMachine() {
             {needsPick ? (<>
               <Rule />
               <Section>
-                <SectionHead title="Machine catalogue" note={`${list.length}`} />
+                <SectionHead title="Machine Catalogue" note={`${list.length}`} />
                 <TextInput value={q} onChangeText={setQ} placeholder="Search machines (rower, leg press, lat…)" placeholderTextColor={t.ink3}
                   style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11, marginBottom: sp.md }} />
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
@@ -275,7 +275,7 @@ export default function ScanMachine() {
 
             {cardio ? (
               <Section>
-                <SectionHead title="Your effort" note={kcalNow != null ? `${kcalNow} kcal` : undefined} />
+                <SectionHead title="Your Effort" note={kcalNow != null ? `${kcalNow} kcal` : undefined} />
                 <View style={{ flexDirection: 'row', gap: sp.sm }}>
                   <TextInput value={mins} onChangeText={setMins} keyboardType="numeric" placeholder="minutes" placeholderTextColor={t.ink3} style={inp} />
                   <TextInput value={dist} onChangeText={setDist} keyboardType="numeric" placeholder={'distance (' + unit + ')'} placeholderTextColor={t.ink3} style={inp} />
@@ -298,7 +298,7 @@ export default function ScanMachine() {
               </Section>
             ) : (
               <Section>
-                <SectionHead title="Add your sets" note={sets.length ? `${sets.length} logged` : undefined} />
+                <SectionHead title="Add Your Sets" note={sets.length ? `${sets.length} logged` : undefined} />
                 <View style={{ flexDirection: 'row', gap: sp.sm }}>
                   <TextInput value={reps} onChangeText={setReps} keyboardType="numeric" placeholder="reps" placeholderTextColor={t.ink3} style={inp} />
                   <TextInput value={kg} onChangeText={setKg} keyboardType="numeric" placeholder="kg" placeholderTextColor={t.ink3} style={inp} />

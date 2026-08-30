@@ -220,11 +220,11 @@ export default function OwnerMembers() {
         <Rule />
 
         <Section>
-          <SectionHead title="The register" />
+          <SectionHead title="The Register" />
           <KpiRow items={[
             { label: 'Active', value: !loaded ? '—' : String(sum.activeMembers) },
             { label: 'Frozen', value: !loaded ? '—' : String(frozen) },
-            { label: 'Payments logged', value: !loaded ? '—' : String(sum.payments) },
+            { label: 'Payments Logged', value: !loaded ? '—' : String(sum.payments) },
           ]} />
         </Section>
 

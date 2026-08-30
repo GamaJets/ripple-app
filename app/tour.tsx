@@ -73,7 +73,7 @@ export default function Tour() {
         <View style={{ flex: 1 }} />
 
         <View style={{ gap: sp.sm, marginTop: sp.xl }}>
-          <Cta label={last ? 'Start using the app' : 'Next'} onPress={() => (last ? leave() : setI(i + 1))} />
+          <Cta label={last ? 'Start Using the App' : 'Next'} onPress={() => (last ? leave() : setI(i + 1))} />
           {/* Back and Skip take the row; the hint sits under them on its own
               line. It used to share the row and had nowhere to wrap, so it ran
               off the right edge and lost its last word. */}

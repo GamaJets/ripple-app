@@ -139,9 +139,9 @@ export default function Trends() {
           )}
           <View style={{ height: sp.lg }} />
           <KpiRow items={[
-            { label: 'This week', value: logKnown ? fig(volumeIn(thisWeek.vol, wu)?.toLocaleString()) : fig(null), unit: logKnown ? wu : undefined },
-            { label: 'Training days', value: logKnown ? fig(thisWeek.sessions) : fig(null) },
-            { label: 'Best week', value: logKnown ? fig(volumeIn(bestWeek.vol, wu)?.toLocaleString()) : fig(null), unit: logKnown ? wu : undefined, delta: logKnown && anyVolume ? `w/c ${bestWeek.label}` : undefined },
+            { label: 'This Week', value: logKnown ? fig(volumeIn(thisWeek.vol, wu)?.toLocaleString()) : fig(null), unit: logKnown ? wu : undefined },
+            { label: 'Training Days', value: logKnown ? fig(thisWeek.sessions) : fig(null) },
+            { label: 'Best Week', value: logKnown ? fig(volumeIn(bestWeek.vol, wu)?.toLocaleString()) : fig(null), unit: logKnown ? wu : undefined, delta: logKnown && anyVolume ? `w/c ${bestWeek.label}` : undefined },
           ]} />
         </Section>
 
@@ -149,7 +149,7 @@ export default function Trends() {
 
         {/* ── per-exercise est-1RM ───────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Strength trend" note="Estimated 1-rep max" />
+          <SectionHead title="Strength Trend" note="Estimated 1-rep max" />
           {exercises.length === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>
               {logKnown ? 'Log a few sets and your strength trend shows up here.' : 'We couldn’t read your logged sets, so there is no strength trend to draw.'}

@@ -53,9 +53,9 @@ const GOAL_LABEL: Record<Goal, string> = { fatloss: 'Fat loss', tone: 'Tone', mu
 // have to keep reading correctly when day types can be planned a week ahead,
 // which is the direction this is going.
 const DAY_TYPES = [
-  { key: 'training', label: 'Training day', blurb: 'A day you train — a gym session or a hard effort. Fuel goes up so there is something to train on.' },
+  { key: 'training', label: 'Training Day', blurb: 'A day you train — a gym session or a hard effort. Fuel goes up so there is something to train on.' },
   { key: 'off', label: 'Standard', blurb: 'A normal day with no session: work, walking, ordinary movement. This is the baseline target.' },
-  { key: 'rest', label: 'Rest day', blurb: 'A full day off training. Fuel comes down, because there is no session to feed.' },
+  { key: 'rest', label: 'Rest Day', blurb: 'A full day off training. Fuel comes down, because there is no session to feed.' },
 ] as const;
 
 // ── where the calorie target came from (TF-29) ───────────────────────────────
@@ -226,8 +226,8 @@ export default function Nutrition() {
   const grocChecked = grocKeys.filter((k) => checked[k]).length;
   const toggleGroc = (k: string) => setChecked((prev) => { const n = { ...prev, [k]: !prev[k] }; AsyncStorage.setItem('repple.grocery.checked', JSON.stringify(n)); return n; });
   const shareGrocery = async () => {
-    const lines: string[] = ['Grocery list', ''];
-    let html = '<h2>Grocery list</h2>';
+    const lines: string[] = ['Grocery List', ''];
+    let html = '<h2>Grocery List</h2>';
     DEPTS.filter((d) => groc.byDept[d]?.length).forEach((d) => {
       lines.push(d.toUpperCase());
       html += '<h3>' + d + '</h3><ul>';
@@ -304,7 +304,7 @@ export default function Nutrition() {
 
         {/* ── the hero: what is left to eat today ────────────────────────── */}
         <Hero
-          label={cal.net >= 0 ? 'Calories left' : 'Calories over'}
+          label={cal.net >= 0 ? 'Calories Left' : 'Calories Over'}
           figure={Math.abs(cal.net).toLocaleString()}
           unit="kcal"
           note={`${cal.eaten.toLocaleString()} of ${cal.target.toLocaleString()} kcal eaten${cal.burned ? ` · ${cal.burned.toLocaleString()} kcal burned` : ''}`}
@@ -317,7 +317,7 @@ export default function Nutrition() {
         {/* ── where that target came from ────────────────────────────────── */}
         <Section>
           <SectionHead
-            title="Why this target"
+            title="Why This Target"
             note={energyPlan.kind === 'derived' && !energyPlan.onTime ? 'Slower than your date' : undefined}
           />
           <Text style={{ ...ty.label, color: t.ink2 }}>{targetBasis(energyPlan, GOAL_LABEL[c.goal])}</Text>
@@ -347,7 +347,7 @@ export default function Nutrition() {
               A meter toward a target means intake here, because that is what
               the figure above it means. The plan's own total keeps its place in
               the note, where it is named. */}
-          <SectionHead title="Macros eaten" note={`${tot.K.toLocaleString()} kcal planned below`} />
+          <SectionHead title="Macros Eaten" note={`${tot.K.toLocaleString()} kcal planned below`} />
           <Meter label="Protein" val={eaten.protein} target={target.protein} />
           <Meter label="Carbs" val={eaten.carbs} target={target.carbs} dim />
           <Meter label="Fat" val={eaten.fat} target={target.fat} dim />
@@ -389,7 +389,7 @@ export default function Nutrition() {
 
         {/* ── the one card: log what you actually ate ────────────────────── */}
         <Section>
-          <SectionHead title="Log what you ate" note={`${fl.consumed.kcal.toLocaleString()} of ${target.kcal.toLocaleString()} kcal`} />
+          <SectionHead title="Log What You Ate" note={`${fl.consumed.kcal.toLocaleString()} of ${target.kcal.toLocaleString()} kcal`} />
           <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>Eating something off-plan? Add it and it counts toward your day.</Text>
           <Card>
             <View style={{ flexDirection: 'row', gap: sp.sm }}>
@@ -480,14 +480,14 @@ export default function Nutrition() {
             // targets this screen is already showing. It now says where it
             // goes, and lands on the tab it meant rather than the 1RM
             // estimator.
-            { icon: 'settings', label: 'Macro guide', onPress: () => router.push({ pathname: '/(client)/tools', params: { tab: 'macros' } }) },
+            { icon: 'settings', label: 'Macro Guide', onPress: () => router.push({ pathname: '/(client)/tools', params: { tab: 'macros' } }) },
           ]} />
         </Section>
 
         {coachAdjust?.note ? (<>
           <Rule />
           <Section>
-            <SectionHead title="Note from your coach" />
+            <SectionHead title="Note From Your Coach" />
             <Text style={{ ...ty.body, color: t.ink2 }}>{coachAdjust.note}</Text>
           </Section>
         </>) : null}

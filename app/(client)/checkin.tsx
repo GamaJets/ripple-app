@@ -130,7 +130,7 @@ export default function CheckIn() {
         <Rule />
 
         <Section>
-          <SectionHead title="Current weight" note={wu} />
+          <SectionHead title="Current Weight" note={wu} />
           <TextInput value={weight} onChangeText={setTyped} keyboardType="numeric" placeholder={wu} placeholderTextColor={t.ink3}
             accessibilityLabel={wu === 'kg' ? 'Current weight in kilograms' : 'Current weight in pounds'}
             style={{ ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md }} />
@@ -140,17 +140,17 @@ export default function CheckIn() {
         <Rule />
 
         <Section>
-          <SectionHead title="How the week went" note="1 – 5" />
-          <Rating t={t} label="Energy this week" value={energy} onChange={setEnergy} />
-          <Rating t={t} label="Sleep quality" value={sleep} onChange={setSleep} />
+          <SectionHead title="How the Week Went" note="1 – 5" />
+          <Rating t={t} label="Energy This Week" value={energy} onChange={setEnergy} />
+          <Rating t={t} label="Sleep Quality" value={sleep} onChange={setSleep} />
           <Rating t={t} label="Mood" value={mood} onChange={setMood} />
-          <Rating t={t} label="Plan adherence" value={adherence} onChange={setAdherence} />
+          <Rating t={t} label="Plan Adherence" value={adherence} onChange={setAdherence} />
         </Section>
 
         <Rule />
 
         <Section>
-          <SectionHead title="Anything for your coach?" />
+          <SectionHead title="Anything for Your Coach?" />
           <TextInput value={note} onChangeText={setNote} placeholder="Wins, struggles, questions…" placeholderTextColor={t.ink3} multiline accessibilityLabel="Note for your coach"
             style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md, minHeight: 100, textAlignVertical: 'top' }} />
         </Section>
@@ -161,7 +161,7 @@ export default function CheckIn() {
           <View>
             <Rule />
             <Section>
-              <SectionHead title="Last check-in" note={new Date(ci.latest.at).toLocaleDateString()} />
+              <SectionHead title="Last Check-in" note={new Date(ci.latest.at).toLocaleDateString()} />
               {/* The stored kilograms read back in the client's unit. The two
                   ratings beside it are scores out of five and are not a
                   measurement of anything physical, so they are printed as they

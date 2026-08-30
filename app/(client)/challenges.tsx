@@ -38,7 +38,7 @@ export default function Challenges() {
         </View>
 
         <Section>
-          <SectionHead title="Open challenges" />
+          <SectionHead title="Open Challenges" />
 
           {CHALLENGES.map((c, ci) => {
             const joined = ch.isJoined(c.id);
@@ -59,7 +59,7 @@ export default function Challenges() {
                     </View>
                   </View>
 
-                  <Meter label="Your score" val={my} target={c.goal} unit={' ' + c.unit} dim={!joined} />
+                  <Meter label="Your Score" val={my} target={c.goal} unit={' ' + c.unit} dim={!joined} />
 
                   <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: sp.lg }}>
                     <Pressable onPress={() => setOpen(c)} hitSlop={8} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>

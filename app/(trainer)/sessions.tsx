@@ -35,10 +35,10 @@ import {
 
 /** The four outcomes, in the order a person would consider them. */
 const OUTCOMES: { id: SessionOutcome; label: string; short: string; tone: (t: Theme) => string }[] = [
-  { id: 'completed',      label: 'Went ahead',    short: 'Done',        tone: (t) => t.brand },
-  { id: 'no_show',        label: 'Did not turn up', short: 'No show',   tone: (t) => t.crit },
-  { id: 'late_cancelled', label: 'Cancelled late', short: 'Late cxl',   tone: (t) => t.s3 },
-  { id: 'cancelled',      label: 'Cancelled in time', short: 'Cxl',     tone: (t) => t.ink3 },
+  { id: 'completed',      label: 'Went Ahead',    short: 'Done',        tone: (t) => t.brand },
+  { id: 'no_show',        label: 'Did Not Turn Up', short: 'No show',   tone: (t) => t.crit },
+  { id: 'late_cancelled', label: 'Cancelled Late', short: 'Late cxl',   tone: (t) => t.s3 },
+  { id: 'cancelled',      label: 'Cancelled in Time', short: 'Cxl',     tone: (t) => t.ink3 },
 ];
 
 const when = (iso: string) => {
@@ -264,7 +264,7 @@ export default function TrainerSessions() {
           <>
             <Rule />
             <Section>
-              <SectionHead title="Marked just now" note="Tap to undo" />
+              <SectionHead title="Marked Just Now" note="Tap to undo" />
               {justMarked.map((e, i) => (
                 <View key={e.s.id}>
                   {i > 0 ? <Rule /> : null}

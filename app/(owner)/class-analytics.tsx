@@ -172,14 +172,14 @@ export default function OwnerClassAnalytics() {
           <Rule />
 
           <Section>
-            <SectionHead title="This range" />
+            <SectionHead title="This Range" />
             <KpiRow items={[
               { label: 'Classes', value: fig(totals.classes) },
               { label: 'Check-ins', value: fig(totals.attended) },
               // Fill is booked/capacity; show is attended/booked. Both are on
               // screen now, so neither has to stand in for the other.
-              { label: 'Avg fill', value: totals.fillPct == null ? '—' : String(totals.fillPct), unit: totals.fillPct == null ? undefined : '%' },
-              { label: 'Avg show', value: totals.showPct == null ? '—' : String(totals.showPct), unit: totals.showPct == null ? undefined : '%' },
+              { label: 'Avg Fill', value: totals.fillPct == null ? '—' : String(totals.fillPct), unit: totals.fillPct == null ? undefined : '%' },
+              { label: 'Avg Show', value: totals.showPct == null ? '—' : String(totals.showPct), unit: totals.showPct == null ? undefined : '%' },
             ]} />
           </Section>
 
@@ -187,7 +187,7 @@ export default function OwnerClassAnalytics() {
 
           {/* ── payroll by trainer ───────────────────────────────────────── */}
           <Section>
-            <SectionHead title="Payroll by trainer" note={rate$ > 0 ? `AED ${totals.payroll.toLocaleString()}` : undefined} />
+            <SectionHead title="Payroll by Trainer" note={rate$ > 0 ? `AED ${totals.payroll.toLocaleString()}` : undefined} />
             {rateField}
             {byTrainer.map(([name, v], i) => (
               <View key={name} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
@@ -207,7 +207,7 @@ export default function OwnerClassAnalytics() {
 
           {/* ── where the check-ins are ──────────────────────────────────── */}
           <Section>
-            <SectionHead title="Attendance by branch" note={`${totals.attended} of ${totals.booked} booked`} />
+            <SectionHead title="Attendance by Branch" note={`${totals.attended} of ${totals.booked} booked`} />
             {byBranch.map(([b, v]) => (
               <Bar key={b} t={t} label={b} note={`${v.attended} / ${v.booked}`} pct={Math.round((v.attended / maxBranch) * 100)} />
             ))}
@@ -216,7 +216,7 @@ export default function OwnerClassAnalytics() {
           <Rule />
 
           <Section>
-            <SectionHead title="Popularity by class type" />
+            <SectionHead title="Popularity by Class Type" />
             {byKind.map(([k, v]) => (
               <Bar key={k} t={t} label={k} note={`${v.attended} · ${v.classes} run`} pct={Math.round((v.attended / maxKind) * 100)} dim />
             ))}

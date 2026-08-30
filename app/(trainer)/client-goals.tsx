@@ -471,7 +471,7 @@ export default function ClientGoals() {
                   </Section>
                 ) : board.state === 'none' ? (
                   <Section>
-                    <SectionHead title={client?.name ?? 'Their goals'} note="none set" />
+                    <SectionHead title={client?.name ?? 'Their Goals'} note="none set" />
                     <Text style={{ ...ty.body, color: t.ink2 }}>
                       {who} hasn&rsquo;t set a goal yet. The read came back and it was empty, so this
                       is about them rather than about the connection — which makes it worth raising.
@@ -479,7 +479,7 @@ export default function ClientGoals() {
                   </Section>
                 ) : board.state === 'reached' ? (
                   <Section>
-                    <SectionHead title={client?.name ?? 'Their goals'} note="all reached" />
+                    <SectionHead title={client?.name ?? 'Their Goals'} note="all reached" />
                     <Text style={{ ...ty.body, color: t.ink2, marginBottom: sp.md }}>
                       Everything {who} set has been reached and marked done. Nothing is outstanding —
                       which is not the same as nothing being set, and is usually the moment to agree
@@ -503,7 +503,7 @@ export default function ClientGoals() {
                     ) : null}
 
                     <Section>
-                      <SectionHead title={client?.name ?? 'Their goals'} note={`${board.open.length} open`} />
+                      <SectionHead title={client?.name ?? 'Their Goals'} note={`${board.open.length} open`} />
                       {board.open.map(goalCard)}
                     </Section>
 

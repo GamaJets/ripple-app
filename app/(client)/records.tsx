@@ -68,7 +68,7 @@ export default function Records() {
   </>) : prs.length === 0 ? (<>
    <Rule />
    <Section>
-    <SectionHead title="No records yet" />
+    <SectionHead title="No Records Yet" />
     <Text style={{ ...ty.body, color: t.ink2 }}>No records yet — log a strength workout to set your first PR.</Text>
    </Section>
   </>) : (<>
@@ -88,7 +88,7 @@ export default function Records() {
    <Rule />
 
    <Section>
-    <SectionHead title="All records" note={`${prs.length} lift${prs.length === 1 ? '' : 's'}`} />
+    <SectionHead title="All Records" note={`${prs.length} lift${prs.length === 1 ? '' : 's'}`} />
     {prs.map((pr, i) => (
      <View key={pr.exercise} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
       <Text style={{ ...ty.caption, ...numeric, color: t.ink3, width: 18 }}>{i + 1}</Text>

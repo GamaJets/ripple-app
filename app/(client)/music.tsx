@@ -215,7 +215,7 @@ export default function Music() {
 
  {/* ── what is playing, and the same transport a session gets ─────── */}
  <Section>
- <SectionHead title="Now playing" />
+ <SectionHead title="Now Playing" />
  <SessionMusicBar />
  </Section>
 
@@ -223,9 +223,9 @@ export default function Music() {
 
  {/* ── services ───────────────────────────────────────────────────── */}
  <Section>
- <SectionHead title="Your music" note={anyConnected ? 'Connected' : undefined} />
+ <SectionHead title="Your Music" note={anyConnected ? 'Connected' : undefined} />
  {needsReconnect ? (
- <Notice kicker="Spotify" title="Reconnect to finish this"
+ <Notice kicker="Spotify" title="Reconnect to Finish This"
  note="Your Spotify sign-in predates playlist and playback permission, and Spotify cannot add permissions to a token that already exists. Disconnect and connect again — it takes one tap each." />
  ) : null}
  {SERVICES.map((s, i) => (
@@ -255,7 +255,7 @@ export default function Music() {
  <>
  <Rule />
  <Section>
- <SectionHead title="Your playlists" note={mine ? String(mine.length) : undefined} onPress={loadMine} />
+ <SectionHead title="Your Playlists" note={mine ? String(mine.length) : undefined} onPress={loadMine} />
  {mineBusy ? (
  <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, paddingVertical: sp.md }}>
  <ActivityIndicator size="small" color={t.ink3} />
@@ -298,7 +298,7 @@ export default function Music() {
 
  {/* ── what to build ──────────────────────────────────────────────── */}
  <Section>
- <SectionHead title="Build for" note={`${minutes} min`} />
+ <SectionHead title="Build For" note={`${minutes} min`} />
  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
  {MODES.map((m) => <Chip key={m.id} on={mode === m.id} label={m.label} onPress={() => setMode(m.id)} />)}
  </View>

@@ -64,7 +64,7 @@ export function guardOverwrite(status: LoadStatus, subject: string): OverwriteGu
     case 'loading':
       return {
         allowed: false,
-        label: 'Checking what is saved…',
+        label: 'Checking What Is Saved…',
         reason: `Still reading ${subject}. Saving now could replace something this screen has not seen yet — this takes a moment.`,
       };
     case 'partial':

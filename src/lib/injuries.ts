@@ -19,16 +19,16 @@ export interface AreaDef { id: string; label: string; groups: string[]; keywords
 // Muscle-group names below match src/lib/programs.ts groups exactly:
 // Arms, Back, Calves, Chest, Core, Glutes, Hamstrings, Legs, Shoulders.
 export const INJURY_AREAS: AreaDef[] = [
-  { id: 'lower_back', label: 'Lower back', groups: ['Back', 'Hamstrings', 'Glutes', 'Core'], keywords: ['deadlift', 'rdl', 'romanian', 'good morning', 'bent-over', 'bent over', 'row', 'squat', 'clean', 'swing', 'hyperextension', 'hip thrust'] },
+  { id: 'lower_back', label: 'Lower Back', groups: ['Back', 'Hamstrings', 'Glutes', 'Core'], keywords: ['deadlift', 'rdl', 'romanian', 'good morning', 'bent-over', 'bent over', 'row', 'squat', 'clean', 'swing', 'hyperextension', 'hip thrust'] },
   { id: 'knee', label: 'Knee', groups: ['Legs', 'Glutes'], keywords: ['squat', 'lunge', 'leg press', 'leg extension', 'jump', 'pistol', 'step-up', 'step up', 'box', 'goblet'] },
   { id: 'shoulder', label: 'Shoulder', groups: ['Shoulders', 'Chest'], keywords: ['press', 'overhead', 'bench', 'snatch', 'jerk', 'lateral raise', 'upright row', 'dip', 'push-up', 'push up', 'pull-up', 'pull up', 'pulldown', 'face pull'] },
   { id: 'elbow', label: 'Elbow', groups: ['Arms'], keywords: ['curl', 'extension', 'pushdown', 'skullcrusher', 'chin', 'pull-up', 'pull up', 'dip'] },
-  { id: 'wrist', label: 'Wrist / hand', groups: ['Arms', 'Chest'], keywords: ['push-up', 'push up', 'press', 'curl', 'plank', 'clean', 'front squat', 'goblet'] },
+  { id: 'wrist', label: 'Wrist / Hand', groups: ['Arms', 'Chest'], keywords: ['push-up', 'push up', 'press', 'curl', 'plank', 'clean', 'front squat', 'goblet'] },
   { id: 'hip', label: 'Hip', groups: ['Glutes', 'Legs', 'Core'], keywords: ['squat', 'lunge', 'deadlift', 'hip thrust', 'leg raise', 'abduction', 'step-up', 'step up', 'rdl'] },
-  { id: 'ankle', label: 'Ankle / foot', groups: ['Calves', 'Legs'], keywords: ['squat', 'lunge', 'calf', 'jump', 'run', 'box', 'sprint', 'step-up', 'step up'] },
+  { id: 'ankle', label: 'Ankle / Foot', groups: ['Calves', 'Legs'], keywords: ['squat', 'lunge', 'calf', 'jump', 'run', 'box', 'sprint', 'step-up', 'step up'] },
   { id: 'hamstring', label: 'Hamstring', groups: ['Hamstrings'], keywords: ['deadlift', 'rdl', 'romanian', 'leg curl', 'good morning', 'sprint', 'lunge'] },
   { id: 'neck', label: 'Neck', groups: ['Shoulders'], keywords: ['shrug', 'overhead', 'bridge', 'press'] },
-  { id: 'chest_rib', label: 'Chest / rib', groups: ['Chest'], keywords: ['bench', 'push-up', 'push up', 'dip', 'fly', 'press'] },
+  { id: 'chest_rib', label: 'Chest / Rib', groups: ['Chest'], keywords: ['bench', 'push-up', 'push up', 'dip', 'fly', 'press'] },
   { id: 'other', label: 'Other', groups: [], keywords: [] },
 ];
 

@@ -504,8 +504,8 @@ export default function Calendar() {
         <Section>
           <SectionHead title="Availability" />
           <KpiRow items={[
-            { label: 'Open slots', value: fig(open.length) },
-            ...(packLeft != null && packLeft > 0 ? [{ label: 'Pack credits', value: fig(packLeft) }] : []),
+            { label: 'Open Slots', value: fig(open.length) },
+            ...(packLeft != null && packLeft > 0 ? [{ label: 'Pack Credits', value: fig(packLeft) }] : []),
           ]} />
           {mine.length > 0 ? (
             <View style={{ alignSelf: 'flex-start', marginTop: sp.lg }}>
@@ -612,9 +612,9 @@ export default function Calendar() {
               work of drawing it differently. */}
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.md, marginTop: sp.md, justifyContent: 'center' }}>
             {[
-              { dot: PLAN_RING, label: 'Planned, not logged', hollow: true },
-              { dot: t.brand, label: 'Your session', hollow: false },
-              { dot: t.ink3, label: 'Open slot', hollow: false },
+              { dot: PLAN_RING, label: 'Planned, Not Logged', hollow: true },
+              { dot: t.brand, label: 'Your Session', hollow: false },
+              { dot: t.ink3, label: 'Open Slot', hollow: false },
               ...WORKOUT_KINDS.map((kind) => ({ dot: KIND_DOT[kind], label: KIND_LABEL[kind], hollow: false })),
             ].map((it) => (
               <View key={it.label} style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
@@ -780,7 +780,7 @@ export default function Calendar() {
             than making it. Days already gone are not here: they are history,
             and history belongs to the log. */}
         <Section>
-          <SectionHead title="Planned ahead" note={planStatus === 'error' ? 'Not read' : undefined} />
+          <SectionHead title="Planned Ahead" note={planStatus === 'error' ? 'Not read' : undefined} />
           {planStatus === 'error' ? (
             // No count, no list, no reassurance. Under a failed read the honest
             // statement is that we do not know, and a dash is how this app says
@@ -815,7 +815,7 @@ export default function Calendar() {
 
         {/* ── your coach + the rest ──────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Your coach" />
+          <SectionHead title="Your Coach" />
           <Card onPress={() => setShowCoach(true)}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
               {/* The photo is gone rather than fixed: `coach.photo` is
@@ -915,7 +915,7 @@ export default function Calendar() {
             />
 
             <View style={{ marginTop: sp.xl }}>
-              <Cta label={planBusy ? 'Saving…' : 'Save this day'} wide disabled={planBusy} onPress={savePlan} />
+              <Cta label={planBusy ? 'Saving…' : 'Save This Day'} wide disabled={planBusy} onPress={savePlan} />
             </View>
             {planFor && plans.some((p) => p.dateISO === planFor) ? (
               <View style={{ alignSelf: 'center', marginTop: sp.md }}>

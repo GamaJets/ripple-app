@@ -84,7 +84,7 @@ export default function TrainerBilling() {
           <ActivityIndicator color={t.brand} style={{ marginVertical: 30 }} />
         ) : subErr ? (
           <Section>
-            <SectionHead title="Current plan" />
+            <SectionHead title="Current Plan" />
             <Flag tone={t.crit}>
               We could not read your subscription, so nothing below tells you whether you have one.
               If you are already subscribed you still are — do not subscribe again from this screen.
@@ -93,7 +93,7 @@ export default function TrainerBilling() {
           </Section>
         ) : sub && sub.status ? (
           <Section>
-            <SectionHead title="Current plan" />
+            <SectionHead title="Current Plan" />
             <Text style={{ ...ty.title, color: t.ink }}>{sub.plan || 'Subscription'}</Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.sm }}>
               <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: statusTone(sub.status) }} />
@@ -105,11 +105,11 @@ export default function TrainerBilling() {
               </Text>
             ) : null}
             <View style={{ height: sp.lg }} />
-            <Cta label={busy === 'portal' ? 'Opening…' : 'Manage billing'} wide disabled={busy === 'portal'} onPress={manage} />
+            <Cta label={busy === 'portal' ? 'Opening…' : 'Manage Billing'} wide disabled={busy === 'portal'} onPress={manage} />
           </Section>
         ) : (
           <Section>
-            <SectionHead title="Choose a plan" />
+            <SectionHead title="Choose a Plan" />
             {PLANS.map((pl, i) => {
               const priced = !!PRICE_IDS[pl.name];
               return (
@@ -128,7 +128,7 @@ export default function TrainerBilling() {
                     </View>
                   ))}
                   <View style={{ height: sp.md }} />
-                  <Cta label={busy === pl.name ? 'Opening…' : (available && priced ? 'Subscribe' : 'Coming soon')} wide
+                  <Cta label={busy === pl.name ? 'Opening…' : (available && priced ? 'Subscribe' : 'Coming Soon')} wide
                     disabled={!available || !priced || busy === pl.name}
                     onPress={() => (available && priced ? subscribe(pl.name) : Alert.alert('Not available yet', 'This plan needs a Stripe price id configured.'))} />
                 </View>

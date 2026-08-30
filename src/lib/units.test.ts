@@ -207,7 +207,7 @@ ok(typeof convertedNote('in') === 'string', 'so are inches');
   // The one row that must NOT move. A percentage of a body is the same
   // percentage however that body is weighed; converting it would print 53.1%
   // where the machine said 24.1%, and it would look like a measurement.
-  ok(lbLines[1] === 'Body fat 24.1% → 22.6% (−1.5%)', `body fat is a percentage in every unit system, got "${lbLines[1]}"`);
+  ok(lbLines[1] === 'Body Fat 24.1% → 22.6% (−1.5%)', `body fat is a percentage in every unit system, got "${lbLines[1]}"`);
   ok(progressChangeLines(two, 'kg')[1] === lbLines[1], 'body fat reads identically in both unit systems');
 
   // The change is the converted SPAN, not the difference of the two converted

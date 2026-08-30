@@ -265,18 +265,18 @@ export default function Settings() {
 
         <Section>
           <SectionHead title="Notifications" />
-          <Row t={t} first label="Push notifications" sub="Session reminders, PRs, coach messages" right={<Toggle t={t} on={st.notifPush} onPress={() => st.set({ notifPush: !st.notifPush })} />} />
-          <Row t={t} label="Email updates" sub="Weekly summary & tips" right={<Toggle t={t} on={st.notifEmail} onPress={() => st.set({ notifEmail: !st.notifEmail })} />} />
+          <Row t={t} first label="Push Notifications" sub="Session reminders, PRs, coach messages" right={<Toggle t={t} on={st.notifPush} onPress={() => st.set({ notifPush: !st.notifPush })} />} />
+          <Row t={t} label="Email Updates" sub="Weekly summary & tips" right={<Toggle t={t} on={st.notifEmail} onPress={() => st.set({ notifEmail: !st.notifEmail })} />} />
         </Section>
 
         <Rule />
 
         <Section>
           <SectionHead title="Units" />
-          <Row t={t} first label="Body weight" sub={weightNote ?? 'Your weight, goals and scans'} right={
+          <Row t={t} first label="Body Weight" sub={weightNote ?? 'Your weight, goals and scans'} right={
             <Units options={['kg', 'lb']} value={st.weightUnit} onPick={(u) => st.set({ weightUnit: u })} t={t} />
           } />
-          <Row t={t} label="Height & measurements" sub={lengthNote ?? 'Your height and your tape measurements'} right={
+          <Row t={t} label="Height & Measurements" sub={lengthNote ?? 'Your height and your tape measurements'} right={
             <Units options={['cm', 'in']} value={st.lengthUnit} onPick={(u) => st.set({ lengthUnit: u })} t={t} />
           } />
         </Section>
@@ -292,25 +292,25 @@ export default function Settings() {
         <Rule />
 
         <Section>
-          <SectionHead title="Your data" />
+          <SectionHead title="Your Data" />
           <Pressable onPress={exportData} accessibilityRole="button" accessibilityLabel="Export my data">
-            <Row t={t} first label={dataBusy ? 'Preparing export…' : 'Export my data'} sub="Download everything we store about you (JSON)"
+            <Row t={t} first label={dataBusy ? 'Preparing Export…' : 'Export My Data'} sub="Download everything we store about you (JSON)"
               right={<Text style={{ ...ty.head, color: t.brand }}>{'⤓'}</Text>} />
           </Pressable>
           {deletion === null ? (
             // Not read yet. Deliberately not pressable: requesting again would
             // reset deletion_requested_at, restarting somebody's 30 days.
-            <Row t={t} label="Delete my account" sub="Checking whether you already have a request in…" right={<Icon name="chevron" size={15} color={t.ink3} />} />
+            <Row t={t} label="Delete My Account" sub="Checking whether you already have a request in…" right={<Icon name="chevron" size={15} color={t.ink3} />} />
           ) : deletion === 'failed' ? (
             <>
-              <Row t={t} label="Deletion status unknown" sub="We couldn't check whether you already have a request in. That's a read that failed, not an answer — it does not mean you have none." right={
+              <Row t={t} label="Deletion Status Unknown" sub="We couldn't check whether you already have a request in. That's a read that failed, not an answer — it does not mean you have none." right={
                 <Pressable onPress={() => { void loadDeletion(); }} hitSlop={8} accessibilityRole="button" accessibilityLabel="Check your deletion status again"
                   style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 7 }}>
                   <Text style={{ ...ty.label, fontWeight: '600', color: t.ink2 }}>Try again</Text>
                 </Pressable>
               } />
               <Pressable onPress={deleteAccount} accessibilityRole="button" accessibilityLabel="Delete my account">
-                <Row t={t} label="Delete my account" sub="Request permanent erasure of your account and data" right={
+                <Row t={t} label="Delete My Account" sub="Request permanent erasure of your account and data" right={
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
                     <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
                     <Icon name="chevron" size={15} color={t.ink3} />
@@ -320,17 +320,17 @@ export default function Settings() {
             </>
           ) : pendingAt ? (
             <>
-              <Row t={t} label="Deletion requested" sub={`Asked on ${requestedDay(pendingAt)} · your account and data are due to be erased`} right={
+              <Row t={t} label="Deletion Requested" sub={`Asked on ${requestedDay(pendingAt)} · your account and data are due to be erased`} right={
                 <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
               } />
               <Pressable onPress={withdrawDeletion} disabled={withdrawBusy} accessibilityRole="button" accessibilityLabel="Withdraw my deletion request">
-                <Row t={t} label={withdrawBusy ? 'Withdrawing…' : 'Withdraw my deletion request'} sub="Keep your account. You can withdraw until the deletion is actioned, and ask again at any time."
+                <Row t={t} label={withdrawBusy ? 'Withdrawing…' : 'Withdraw My Deletion Request'} sub="Keep your account. You can withdraw until the deletion is actioned, and ask again at any time."
                   right={<Icon name="chevron" size={15} color={t.ink3} />} />
               </Pressable>
             </>
           ) : (
             <Pressable onPress={deleteAccount} accessibilityRole="button" accessibilityLabel="Delete my account">
-              <Row t={t} label="Delete my account" sub="Request permanent erasure of your account and data" right={
+              <Row t={t} label="Delete My Account" sub="Request permanent erasure of your account and data" right={
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
                   <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
                   <Icon name="chevron" size={15} color={t.ink3} />

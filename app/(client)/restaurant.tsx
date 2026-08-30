@@ -86,7 +86,7 @@ export default function Restaurant() {
         </ScrollView>
 
         <Section>
-          <SectionHead title={cuisine || 'All dishes'} note={`${results.length} dish${results.length === 1 ? '' : 'es'}`} />
+          <SectionHead title={cuisine || 'All Dishes'} note={`${results.length} dish${results.length === 1 ? '' : 'es'}`} />
           {results.map((d, i) => (
             <View key={d.id}>
               {i > 0 ? <Rule /> : null}

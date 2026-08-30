@@ -74,7 +74,7 @@ export default function Social() {
 
  {measured ? (
  <Hero
- label={wtDropShown >= 0 ? 'Weight down' : 'Weight up'}
+ label={wtDropShown >= 0 ? 'Weight Down' : 'Weight Up'}
  figure={Math.abs(wtDropShown).toString()}
  unit={wu}
  note={`Body fat ${bfDrop >= 0 ? 'down' : 'up'} ${Math.abs(bfDrop)}% across ${cd.scans.length} scans`}
@@ -93,10 +93,10 @@ export default function Social() {
 
  {measured ? (<>
  <Section>
- <SectionHead title="Since your first scan" />
+ <SectionHead title="Since Your First Scan" />
  <KpiRow items={[
  { label: 'Weight', value: `${wtDropShown >= 0 ? '−' : '+'}${Math.abs(wtDropShown)}`, unit: wu },
- { label: 'Body fat', value: `${bfDrop >= 0 ? '−' : '+'}${Math.abs(bfDrop)}`, unit: '%' },
+ { label: 'Body Fat', value: `${bfDrop >= 0 ? '−' : '+'}${Math.abs(bfDrop)}`, unit: '%' },
  { label: 'Scans', value: fig(cd.scans.length) },
  ]} />
  </Section>
@@ -104,7 +104,7 @@ export default function Social() {
  </>) : null}
 
  <Section>
- <SectionHead title="How sharing works" />
+ <SectionHead title="How Sharing Works" />
  <Text style={{ ...ty.body, color: t.ink2 }}>
  Sharing opens your phone's own share sheet, so it goes wherever you send it — a story, a post, a message to one person. Repple has no posting access to any account: nothing is ever posted automatically, and you approve every share.
  </Text>
@@ -113,7 +113,7 @@ export default function Social() {
  <Rule />
 
  <Section>
- <Cta label={measured ? 'Share my progress' : 'Share Repple'} wide onPress={share} />
+ <Cta label={measured ? 'Share My Progress' : 'Share Repple'} wide onPress={share} />
  </Section>
 
  </ScrollView>

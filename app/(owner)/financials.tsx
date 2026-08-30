@@ -34,14 +34,14 @@ const KEY = 'repple.owner.financials';
 const money = (n: number) => 'AED ' + Math.round(n).toLocaleString();
 
 const FIELDS: { key: keyof FinInputs; label: string; hint: string }[] = [
-  { key: 'revenue', label: 'Total revenue / mo', hint: 'AED' },
-  { key: 'expenses', label: 'Total expenses / mo', hint: 'AED' },
-  { key: 'mrr', label: 'Recurring membership revenue', hint: 'AED' },
-  { key: 'members', label: 'Active members', hint: 'count' },
-  { key: 'newMembers', label: 'Joined this month', hint: 'count' },
-  { key: 'churnedMembers', label: 'Left this month', hint: 'count' },
-  { key: 'ptRevenue', label: 'Personal-training revenue', hint: 'AED' },
-  { key: 'classRevenue', label: 'Class revenue', hint: 'AED' },
+  { key: 'revenue', label: 'Total Revenue / Mo', hint: 'AED' },
+  { key: 'expenses', label: 'Total Expenses / Mo', hint: 'AED' },
+  { key: 'mrr', label: 'Recurring Membership Revenue', hint: 'AED' },
+  { key: 'members', label: 'Active Members', hint: 'count' },
+  { key: 'newMembers', label: 'Joined This Month', hint: 'count' },
+  { key: 'churnedMembers', label: 'Left This Month', hint: 'count' },
+  { key: 'ptRevenue', label: 'Personal-training Revenue', hint: 'AED' },
+  { key: 'classRevenue', label: 'Class Revenue', hint: 'AED' },
 ];
 
 export default function Financials() {
@@ -159,7 +159,7 @@ export default function Financials() {
   const connectRow = (
     <ListRow
       icon="chart"
-      title={connected ? 'Accounting connected' : 'Connect accounting'}
+      title={connected ? 'Accounting Connected' : 'Connect Accounting'}
       note={connected ? 'Syncing from Xero' : 'Xero · QuickBooks — pull real P&L'}
       tone={connected ? t.good : undefined}
       onPress={() => Alert.alert('Connect accounting', 'Link Xero or QuickBooks to pull real revenue, expenses and P&L automatically. Setup uses your accounting login — ask us to enable it for your account.')}
@@ -184,7 +184,7 @@ export default function Financials() {
         {!hydrated ? null : editing ? (
           /* ── entry form ───────────────────────────────────────────────── */
           <Section>
-            <SectionHead title="Your monthly figures" note="This device only" />
+            <SectionHead title="Your Monthly Figures" note="This device only" />
             <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>
               Leave a field blank if you don't track it. Stored on this device only.
             </Text>
@@ -230,7 +230,7 @@ export default function Financials() {
         ) : !ready ? (
           /* ── honest empty state: no hero of zeros ─────────────────────── */
           <Section>
-            <SectionHead title="No figures yet" />
+            <SectionHead title="No Figures Yet" />
             <Text style={{ ...ty.body, color: t.ink2 }}>
               Connect your accounting, or enter this month's revenue, expenses and membership
               numbers. Nothing is shown until it comes from you.
@@ -267,14 +267,14 @@ export default function Financials() {
             <Rule />
 
             <Section>
-              <SectionHead title="AI financial review" note={`Grade ${r.grade}`} />
+              <SectionHead title="AI Financial Review" note={`Grade ${r.grade}`} />
               <Text style={{ ...ty.body, color: t.ink2 }}>{r.summary}</Text>
             </Section>
 
             <Rule />
 
             <Section>
-              <SectionHead title="This month" note="From your figures" />
+              <SectionHead title="This Month" note="From your figures" />
               {[0, 2, 4, 6].map((i) => (
                 <View key={i} style={{ marginTop: i === 0 ? 0 : sp.lg }}>
                   <KpiRow items={kpis.slice(i, i + 2).map(([l, v]) => ({ label: l, value: v }))} />
@@ -285,7 +285,7 @@ export default function Financials() {
             {r.strengths.length > 0 ? (<>
               <Rule />
               <Section>
-                <SectionHead title="What's working" />
+                <SectionHead title="What's Working" />
                 {flagList(r.strengths)}
               </Section>
             </>) : null}
@@ -293,7 +293,7 @@ export default function Financials() {
             <Rule />
 
             <Section>
-              <SectionHead title="Where to improve" />
+              <SectionHead title="Where to Improve" />
               {flagList(r.improvements)}
             </Section>
 

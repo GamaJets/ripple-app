@@ -76,7 +76,7 @@ export default function ForgotPassword() {
               <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Email</Text>
               <TextInput value={email} onChangeText={setEmail} placeholder="Email" placeholderTextColor={t.ink3} keyboardType="email-address" autoCapitalize="none" autoCorrect={false} style={inp} accessibilityLabel="Email" autoFocus />
               <View style={{ marginTop: sp.sm }}>
-                <Cta wide disabled={!canGo} onPress={send} label={busy ? 'Sending…' : 'Send reset link'} />
+                <Cta wide disabled={!canGo} onPress={send} label={busy ? 'Sending…' : 'Send Reset Link'} />
               </View>
               <Pressable onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Back to sign in" style={{ marginTop: sp.lg, alignItems: 'center', paddingVertical: sp.sm }}>
                 <Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>Back to sign in</Text>

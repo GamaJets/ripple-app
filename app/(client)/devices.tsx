@@ -312,7 +312,7 @@ export default function Devices() {
    <Rule />
 
    <Section>
-    <SectionHead title="Live today" note={`${connected.length} ${devicesWord}`} onPress={() => setDetail('source')} />
+    <SectionHead title="Live Today" note={`${connected.length} ${devicesWord}`} onPress={() => setDetail('source')} />
     <ListRow icon="heart" title="Average Heart Rate"
      note={w.today.heartRateAvg == null ? 'Wear your Apple Watch' : `${num(w.today.heartRateAvg)} bpm across today's samples`}
      onPress={() => setDetail('hr')} />
@@ -332,7 +332,7 @@ export default function Devices() {
   {canImport ? (<>
    <Rule />
    <Section>
-    <SectionHead title="Import workouts" note={importLabel} />
+    <SectionHead title="Import Workouts" note={importLabel} />
     <Text style={{ ...ty.label, color: t.ink2 }}>
      Pull sessions from your connected devices — runs, cycling, lifting, Pilates — straight into your training log. No manual entry.
     </Text>
@@ -402,7 +402,7 @@ export default function Devices() {
   {connected.length ? (<>
    <Rule />
    <Section>
-    <SectionHead title="Sleep sources" note={`last night`} />
+    <SectionHead title="Sleep Sources" note={`last night`} />
     <Text style={{ ...ty.label, color: t.ink2 }}>
      Sleep is read from every device you have connected, not from one of them. Where two disagree, Recovery shows the figure one device actually reported and names it — it never averages them into a number no device recorded.
     </Text>
@@ -580,7 +580,7 @@ export default function Devices() {
   {/* ── available devices ───────────────────────────────────────────── */}
   <Rule />
   <Section>
-   <SectionHead title="Available devices" note={connected.length ? `${connected.length} connected` : undefined} />
+   <SectionHead title="Available Devices" note={connected.length ? `${connected.length} connected` : undefined} />
    {PROVIDERS.map((p, i) => {
     const st = w.states[p.meta.id] || 'disconnected';
     // The account question and the sleep question, asked separately and

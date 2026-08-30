@@ -127,9 +127,9 @@ export default function Classes() {
                         </View>
                       </View>
                       {mine ? (
-                        <Ghost label={mine === 'waitlist' ? 'Leave waitlist' : 'Cancel'} onPress={() => onCancel(c)} />
+                        <Ghost label={mine === 'waitlist' ? 'Leave Waitlist' : 'Cancel'} onPress={() => onCancel(c)} />
                       ) : (
-                        <Cta label={full ? 'Join waitlist' : 'Book'} onPress={() => onBook(c)} />
+                        <Cta label={full ? 'Join Waitlist' : 'Book'} onPress={() => onBook(c)} />
                       )}
                     </View>
                   </View>

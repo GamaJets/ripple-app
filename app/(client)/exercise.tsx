@@ -144,7 +144,7 @@ export default function ExerciseScreen() {
           // actually changes it, rather than a grey silhouette implying a
           // demonstration we do not have.
           <Notice tone={t.ink3} kicker="Demonstration"
-            title={detail ? 'No demonstration yet' : 'Not in our catalogue'}
+            title={detail ? 'No Demonstration Yet' : 'Not in Our Catalogue'}
             note={detail
               ? 'Nobody has filmed this movement and the catalogue has no reference frames for it. Your coach can add a clip from their app.'
               : 'This movement is not in our catalogue, so there is no guide for it. If your coach wrote it into your program, ask them how they want it done.'} />
@@ -179,7 +179,7 @@ export default function ExerciseScreen() {
               <>
                 <Rule />
                 <Section>
-                  <SectionHead title="Muscles worked" />
+                  <SectionHead title="Muscles Worked" />
                   {detail.primaryMuscles.length ? (
                     <Text style={{ ...ty.body, color: t.ink, marginBottom: 4 }}>
                       <Text style={{ fontWeight: '600' }}>Primary: </Text>{detail.primaryMuscles.map(cap).join(', ')}
@@ -198,7 +198,7 @@ export default function ExerciseScreen() {
               <>
                 <Rule />
                 <Section>
-                  <SectionHead title="How to do it" note={`${detail.instructions.length} steps`} />
+                  <SectionHead title="How to Do It" note={`${detail.instructions.length} steps`} />
                   {detail.instructions.map((step, n) => (
                     <View key={n} style={{ flexDirection: 'row', gap: sp.md, marginBottom: sp.md }}>
                       <Text style={{ ...ty.label, fontWeight: '700', color: t.ink3, minWidth: 18 }}>{n + 1}</Text>

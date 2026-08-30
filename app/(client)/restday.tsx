@@ -60,9 +60,9 @@ export default function RestDay() {
     : `${wk.days} training day${wk.days === 1 ? '' : 's'} this week — that is light by volume alone. This reads your training log only, not your sleep or hydration; Readiness on Home weighs those together.`;
 
   const restActions = [
-    { icon: 'water', label: 'Hydrate & refuel', note: 'Protein + carbs to rebuild.' },
-    { icon: 'moon', label: 'Prioritise sleep', note: '7–9 hours is where you adapt.' },
-    { icon: 'heart', label: 'Easy movement', note: 'A walk or light mobility, not a session.' },
+    { icon: 'water', label: 'Hydrate & Refuel', note: 'Protein + carbs to rebuild.' },
+    { icon: 'moon', label: 'Prioritise Sleep', note: '7–9 hours is where you adapt.' },
+    { icon: 'heart', label: 'Easy Movement', note: 'A walk or light mobility, not a session.' },
   ] as const;
 
   return (
@@ -98,17 +98,17 @@ export default function RestDay() {
         <Section>
           <SectionHead title="Load" />
           <KpiRow items={[
-            { label: 'Hard weeks', value: known ? fig(dl.hardWeeks) : fig(null) },
+            { label: 'Hard Weeks', value: known ? fig(dl.hardWeeks) : fig(null) },
             // `(0/1000).toFixed(1)` is "0.0" — a tonnage printed to one decimal
             // place, which reads as measured rather than as absent.
-            { label: 'Volume this week', value: known ? (wk.volumeKg / 1000).toFixed(1) : fig(null), unit: known ? 't' : undefined },
+            { label: 'Volume This Week', value: known ? (wk.volumeKg / 1000).toFixed(1) : fig(null), unit: known ? 't' : undefined },
           ]} />
         </Section>
 
         {dl.due ? (<>
           <Rule />
           <Section>
-            <SectionHead title="How to deload" />
+            <SectionHead title="How to Deload" />
             <Text style={{ ...ty.body, color: t.ink2 }}>Keep training, but cut volume to ~60%: fewer sets, or ~10% lighter weights, staying well shy of failure. One easier week lets fatigue clear so you come back stronger.</Text>
           </Section>
         </>) : null}
@@ -116,7 +116,7 @@ export default function RestDay() {
         <Rule />
 
         <Section>
-          <SectionHead title="On a rest day" />
+          <SectionHead title="On a Rest Day" />
           {restActions.map((a, ai) => (
             <View key={a.label}>
               {ai > 0 ? <Rule /> : null}
@@ -145,7 +145,7 @@ export default function RestDay() {
             training log and nothing else — would be the last place that should
             blur the two. */}
         <Section>
-          <SectionHead title="Plan it in" />
+          <SectionHead title="Plan It In" />
           <Text style={{ ...ty.body, color: t.ink2 }}>
             {dl.due
               ? 'A deload is a week, not a mood — mark the days on your calendar and the plan is there when you get to them.'
