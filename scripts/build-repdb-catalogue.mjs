@@ -69,11 +69,34 @@ const num = (v) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? n
 const seen = new Set();
 const out = [];
 const collisions = [];
+/** [id RepDB gave us, id the name slugs to] for every row where the two differ.
+ *  Emitted as a rename below — see the paragraph beside `renames`. */
+const renames = [];
 for (const r of rows) {
-  const id = slug(r.id || r.name_en);
+  // ── The id is the slug of the NAME WE DISPLAY, never RepDB's own ─────────
+  //
+  // This was `slug(r.id || r.name_en)`, on the reasonable-looking grounds that
+  // RepDB's ids are already in our slug convention. For 521 of the 601 they
+  // are. For 80 they are not: the row RepDB calls `bench-press` is named
+  // "Barbell Bench Press", `bicep-curl` is "Dumbbell Bicep Curl",
+  // `childs-pose` is "Child's Pose".
+  //
+  // That breaks the one rule the whole app is built on. A program stores an
+  // exercise NAME; every screen that wants the catalogue entry — the client's,
+  // the coach's, the owner's — resolves it with exerciseSlug(name). So those
+  // 80 movements are in the catalogue and unreachable from it: tap "Barbell
+  // Bench Press" and the screen looks up `barbell-bench-press`, finds nothing,
+  // and says the movement is not in our catalogue. Illustrated, described, and
+  // invisible.
+  //
+  // slug(name_en) is unique across all 601, so this costs nothing but the
+  // rename below.
+  const id = slug(r.name_en || r.id);
   if (!id) continue;
   if (seen.has(id)) { collisions.push(id); continue; }
   seen.add(id);
+  const priorId = slug(r.id || r.name_en);
+  if (priorId && priorId !== id) renames.push([priorId, id]);
   const bp = String(r.body_part || '').toLowerCase();
   const group = GROUP[bp] || GROUP[String((r.primary_muscles || [])[0] || '').toLowerCase()] || 'Full body';
   // Two frames, start and peak. The free tier is stills; the paid tier adds a
@@ -110,6 +133,34 @@ const values = out.map((r) =>
   + `${q(r.equipment)}, ${q(r.level)}, ${q(r.mechanic)}, ${q(r.force)}, ${arr(r.primary)}, ${arr(r.secondary)}, `
   + `${arr(r.instructions)}, ${arr(r.images)}, ${num(r.met)}, ${arr(r.goals)}, ${arr(r.tags)}, 'repdb')`,
 ).join(',\n');
+
+/**
+ * Move the rows an earlier run of this generator keyed by RepDB's own id onto
+ * the id their name slugs to.
+ *
+ * Without this the fix above only helps a database that has never run this
+ * part. One that HAS — production has, and it is where the 80 unreachable
+ * movements actually are — would get 80 correct rows inserted alongside the 80
+ * wrong ones, so the picker would list every one of them twice.
+ *
+ * Three guards, each for a specific way this could do damage:
+ *
+ *   · `source = 'repdb'` — never touch an id somebody else's import owns;
+ *   · the `not exists` — if the destination id is already taken (usually by
+ *     the free-exercise-db row for the same movement) the rename is skipped
+ *     and the insert below simply enriches that row instead, which is the
+ *     outcome we wanted anyway;
+ *   · exact literals, computed by the one slug function in this file. The
+ *     alternative was reimplementing exerciseSlug() in SQL, and a second copy
+ *     of the identity rule is how the two drift apart silently.
+ *
+ * Idempotent: on a database that never ran the old version nothing matches.
+ */
+const renameSql = renames.length ? renames.map(([from, to]) =>
+  `update public.exercises set id = ${q(to)}\n`
+  + `  where id = ${q(from)} and source = 'repdb'\n`
+  + `    and not exists (select 1 from public.exercises x where x.id = ${q(to)});`,
+).join('\n') : '-- nothing to repoint: every RepDB id already equals the slug of its name.';
 
 const sql = `-- ─────────────────────────────────────────────────────────────────────────
 -- The RepDB catalogue: ${out.length} movements, each with a description.
@@ -171,6 +222,21 @@ alter table public.exercises add column if not exists tags        text[];
 
 comment on column public.exercises.description is
   'What the movement IS, in one sentence — distinct from instructions, which are how to perform it. Null on rows that predate RepDB; a screen must say nothing rather than invent one.';
+
+-- ── Every id is the slug of the name, including on a database already run ─
+--
+-- ${renames.length} of the ${out.length} rows were keyed by RepDB's own id, which for those is
+-- not the slug of the name we display: RepDB's \`bench-press\` is named "Barbell
+-- Bench Press". Every screen resolves a program's exercise NAME through
+-- exerciseSlug(), so those rows were in the catalogue and unreachable from it —
+-- illustrated, described, and answering "not in our catalogue" when tapped.
+--
+-- The insert below now keys on the name. This repoints the rows an earlier run
+-- already wrote, so a database that has run this part is corrected rather than
+-- given a second copy of all ${renames.length}. Skipped where the destination id is taken,
+-- which means the free-exercise-db row for the same movement is there and the
+-- insert enriches it instead.
+${renameSql}
 
 insert into public.exercises
   (id, name, muscle_group, is_cardio, description, category, equipment, level, mechanic, force,

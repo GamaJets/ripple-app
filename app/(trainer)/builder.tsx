@@ -34,10 +34,10 @@
 // thumb lands on. So until the current programme has actually been read the
 // builder stays empty, says why, and the Assign control is held. See
 // src/lib/overwriteGuard.ts.
-import { useEffect, useState, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, Modal, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Cta, Ghost, Notice, PartialRead } from '../../src/ui/kit';
@@ -46,6 +46,8 @@ import { useRoster } from '../../src/ui/roster';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
 import { useProgramTemplates } from '../../src/ui/programTemplates';
 import { useCoachExercises, mergeExerciseLists } from '../../src/ui/coachExercises';
+import { useExerciseCatalogue } from '../../src/ui/exerciseDetail';
+import { exerciseSlug } from '../../src/lib/exerciseId';
 import { buildProgram, type Program } from '../../src/lib/programs';
 import { guardOverwrite } from '../../src/lib/overwriteGuard';
 import type { Goal } from '../../src/lib/types';
@@ -104,7 +106,23 @@ export default function Builder() {
   const [days, setDays] = useState<BDay[]>([]);
   const [pickerDay, setPickerDay] = useState<number | null>(null);
   const coachEx = useCoachExercises();
+  // The whole catalogue, names and groups only — the hook is explicit that it
+  // does NOT pull instructions or descriptions, so this is a list of names to
+  // search rather than the megabyte behind them. The detail screen fetches the
+  // one row a coach actually opens.
+  const cat = useExerciseCatalogue();
   const [custom, setCustom] = useState('');
+  // Drawn in pages. Six hundred rows mounted inside a bottom sheet is a visibly
+  // janky scroll on an older phone, and nobody reads past the first screenful
+  // of an alphabetical list anyway.
+  const [catShown, setCatShown] = useState(30);
+  // The picker is a native modal, and on iOS a modal sits above anything pushed
+  // underneath it — so opening the detail screen from inside the sheet would
+  // put the movement behind the sheet that sent them there. Hiding it keeps
+  // `pickerDay` intact, which is the point: the coach comes back to the same
+  // day they were adding to rather than to a builder that forgot.
+  const [previewing, setPreviewing] = useState(false);
+  useFocusEffect(useCallback(() => { setPreviewing(false); }, []));
   const [tplPick, setTplPick] = useState(false);
   const [saveOpen, setSaveOpen] = useState(false);
   const [tplName, setTplName] = useState('');
@@ -180,6 +198,43 @@ export default function Builder() {
 
   const totalExercises = days.reduce((a, d) => a + d.exercises.length, 0);
   const canAssign = !!clientId && totalExercises > 0;
+
+  // ── what the picker searches ────────────────────────────────────────────
+  //
+  // One field does both jobs. What the coach types filters the two lists below
+  // AND is what the Add button writes as a custom exercise, because those are
+  // the same gesture from the coach's side: they know the movement's name and
+  // they want it in Thursday. If we have a row for it they should tap it and
+  // get the group and the illustration for free; if we have never heard of it —
+  // a coach's own progression, a piece of kit only their gym owns — typing it
+  // is the custom case working, not an error, and the Add button stays there
+  // whether the search found anything or not.
+  const pickTerm = custom.trim().toLowerCase();
+  const ownList = useMemo(
+    () => mergeExerciseLists(coachEx.saved, LIB),
+    [coachEx.saved],
+  );
+  const ownShown = ownList.filter((x) => pickTerm === '' || x.name.toLowerCase().includes(pickTerm));
+  // Hidden from the catalogue list when the coach's own list already offers the
+  // same movement, so "Bench Press" is not two rows that do the same thing.
+  //
+  // Exact slug equality and nothing else. Similarity matching on these names
+  // pairs Back Squat with Hack Squat at 0.90 and Hip Abduction with Cable Hip
+  // Adduction — the opposite movement — and the cost of getting it wrong here
+  // is a coach assigning one lift and their client being shown another.
+  const ownSlugs = useMemo(() => new Set(ownList.map((x) => exerciseSlug(x.name))), [ownList]);
+  const catShownList = cat.rows.filter(
+    (e) => !ownSlugs.has(e.id) && (pickTerm === '' || e.name.toLowerCase().includes(pickTerm)),
+  );
+  // A fresh search starts at the top of the catalogue rather than 300 rows into
+  // the last one.
+  useEffect(() => { setCatShown(30); }, [pickTerm]);
+
+  /** Open a movement's detail screen without losing the day being built. */
+  const previewExercise = (name: string) => {
+    setPreviewing(true);
+    router.push({ pathname: '/(trainer)/exercise', params: { name } });
+  };
 
   const composeProgram = (): Program => ({
     title: title.trim() || 'Custom program',
@@ -455,13 +510,14 @@ export default function Builder() {
       </ScrollView>
 
       {/* ── exercise picker ──────────────────────────────────────────────── */}
-      <Modal visible={pickerDay !== null} transparent animationType="slide" onRequestClose={() => setPickerDay(null)}>
+      <Modal visible={pickerDay !== null && !previewing} transparent animationType="slide" onRequestClose={() => setPickerDay(null)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <Pressable style={scrim} onPress={() => setPickerDay(null)} />
         <View style={[sheet, { maxHeight: '82%' }]}>
           <Text style={{ ...ty.title, color: t.ink, marginBottom: sp.lg }}>Add exercise</Text>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginBottom: sp.lg }}>
-            <TextInput value={custom} onChangeText={setCustom} placeholder="Custom exercise name" placeholderTextColor={t.ink3}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
+            <TextInput value={custom} onChangeText={setCustom} placeholder="Search, or type a new exercise" placeholderTextColor={t.ink3}
+              accessibilityLabel="Search the exercise catalogue, or type a name of your own"
               style={[inp, { flex: 1 }]} />
             <Cta label="Add" onPress={() => {
               if (custom.trim() && pickerDay !== null) {
@@ -477,6 +533,11 @@ export default function Builder() {
               }
             }} />
           </View>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 6, marginBottom: sp.lg }}>
+            Tap a movement to add it, or the arrow to read what it is first. Add puts whatever you
+            typed in as it stands — a movement we have never heard of is fine.
+          </Text>
+
           <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
             {coachEx.status === 'error' ? (
               <Text style={{ ...ty.caption, color: t.ink2, marginBottom: sp.md }}>
@@ -491,16 +552,119 @@ export default function Builder() {
                 Your saved exercises came back short — there are more of them than are listed here.
               </Text>
             ) : null}
-            {mergeExerciseLists(coachEx.saved, LIB).map((x, i) => (
-              <Pressable key={x.name} onPress={() => { if (pickerDay !== null) { addExercise(pickerDay, x.name, x.group); setPickerDay(null); } }}
-                style={{
-                  flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: sp.md,
-                  borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
-                }}>
-                <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{x.name}</Text>
-                <Text style={{ ...ty.caption, color: t.ink3 }}>{x.group}</Text>
-              </Pressable>
+
+            {/* Headed only when it has rows. An empty "Your exercises" above a
+                gap reads as a list that failed to load, which is the one thing
+                it is not — the coach may simply have searched for something
+                only the catalogue has. */}
+            {ownShown.length ? <SectionHead title="Your exercises" /> : null}
+
+            {ownShown.map((x, i) => (
+              <View key={x.name} style={{
+                flexDirection: 'row', alignItems: 'center',
+                borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
+              }}>
+                <Pressable onPress={() => { if (pickerDay !== null) { addExercise(pickerDay, x.name, x.group); setPickerDay(null); } }}
+                  accessibilityRole="button" accessibilityLabel={`Add ${x.name}`}
+                  style={{ flex: 1, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: sp.md }}>
+                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{x.name}</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3 }}>{x.group}</Text>
+                </Pressable>
+                <Pressable onPress={() => previewExercise(x.name)} hitSlop={8}
+                  accessibilityRole="button" accessibilityLabel={`What ${x.name} is`}
+                  style={{ paddingLeft: sp.md, paddingVertical: sp.md }}>
+                  <Icon name="chevron" size={15} color={t.ink3} />
+                </Pressable>
+              </View>
             ))}
+
+            {/* ── the catalogue ──────────────────────────────────────────── */}
+            <View style={{ marginTop: sp.xl }}>
+              <SectionHead
+                title="Exercise catalogue"
+                // A count of what came back is only a count of the catalogue
+                // once we know the read was whole. Under 'partial' or 'error'
+                // it is the size of what arrived, which is a different fact.
+                note={cat.status === 'ready' ? `${catShownList.length} of ${cat.rows.length}` : undefined}
+              />
+
+              {cat.status === 'loading' ? (
+                <Text style={{ ...ty.caption, color: t.ink3 }}>Reading the exercise catalogue…</Text>
+              ) : cat.status === 'error' ? (
+                // Not "no exercises". There are hundreds; we could not read
+                // them. The coach's own list above is unaffected and still
+                // works, and so does typing a name — this only removes the
+                // catalogue, and says so.
+                <Text style={{ ...ty.caption, color: t.ink2 }}>
+                  The catalogue could not be read, so only your own list is shown above. The movements
+                  are still there — your saved names and anything you type still work. Try again once
+                  you have signal.
+                </Text>
+              ) : catShownList.length === 0 ? (
+                <>
+                  {/* Said before the empty line, not after it: under 'partial'
+                      the read stopped at the row cap, so "nothing matches" is a
+                      statement about the part of the catalogue that arrived and
+                      not about the catalogue. */}
+                  {cat.status === 'partial' ? <PartialRead what="catalogue movements" shown={cat.rows.length} /> : null}
+                  <Text style={{ ...ty.caption, color: t.ink3 }}>
+                    {pickTerm
+                      ? cat.status === 'partial'
+                        ? `Nothing in the part of the catalogue that loaded matches “${custom.trim()}”. Tap Add to put it in as your own.`
+                        : `No catalogue movement matches “${custom.trim()}”. Tap Add to put it in as your own.`
+                      : cat.status === 'partial'
+                        ? 'Everything that loaded is already in your list above.'
+                        : 'Every catalogue movement is already in your list above.'}
+                  </Text>
+                </>
+              ) : (
+                <>
+                  {cat.status === 'partial' ? <PartialRead what="catalogue movements" shown={cat.rows.length} /> : null}
+                  {catShownList.slice(0, catShown).map((e, i) => (
+                    <View key={e.id} style={{
+                      flexDirection: 'row', alignItems: 'center',
+                      borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
+                    }}>
+                      <Pressable
+                        onPress={() => { if (pickerDay !== null) { addExercise(pickerDay, e.name, e.group || ''); setPickerDay(null); } }}
+                        accessibilityRole="button" accessibilityLabel={`Add ${e.name}`}
+                        style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{e.name}</Text>
+                          {/* Only what the row actually carries. A movement with
+                              no muscle group shows no muscle group — never
+                              "Uncategorised", which is a label we invented, and
+                              never a blank chip implying one is loading. And
+                              "illustrated" is claimed only where image_paths is
+                              genuinely non-empty, because a coach who taps
+                              expecting a picture and gets a sentence stops
+                              trusting the marker on every other row. */}
+                          {e.group || e.hasDemo ? (
+                            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                              {[e.group, e.hasDemo ? 'illustrated' : null].filter(Boolean).join(' · ')}
+                            </Text>
+                          ) : null}
+                        </View>
+                      </Pressable>
+                      <Pressable onPress={() => previewExercise(e.name)} hitSlop={8}
+                        accessibilityRole="button" accessibilityLabel={`What ${e.name} is`}
+                        style={{ paddingLeft: sp.md, paddingVertical: sp.md }}>
+                        <Icon name="chevron" size={15} color={t.ink3} />
+                      </Pressable>
+                    </View>
+                  ))}
+                  {catShownList.length > catShown ? (
+                    <View style={{ marginTop: sp.md }}>
+                      {/* A count, not a bare "Show more". The number is what a
+                          coach scrolling an alphabetical list wants to know:
+                          how much of it is still below. */}
+                      <Ghost label={`Show ${Math.min(30, catShownList.length - catShown)} more of ${catShownList.length - catShown}`}
+                        onPress={() => setCatShown((n) => n + 30)} />
+                    </View>
+                  ) : null}
+                </>
+              )}
+            </View>
           </ScrollView>
         </View>
               </KeyboardAvoidingView>
