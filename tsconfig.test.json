@@ -113,6 +113,7 @@
     "src/lib/coachCredentials.test.ts",
     "src/lib/reviews.test.ts",
     "src/lib/plateMath.test.ts",
-    "src/lib/wroteRows.test.ts"
+    "src/lib/wroteRows.test.ts",
+    "src/lib/unitPreference.test.ts"
   ]
 }

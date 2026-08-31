@@ -20,6 +20,22 @@ export type Agreement =
   | 'no_record'
   /** Records exist but the owner has not typed anything yet. */
   | 'not_entered'
+  /**
+   * The register could not be READ, so there is nothing to compare against and
+   * we do not know why.
+   *
+   * Distinct from `no_record`, and the distinction is the reason it exists. A
+   * failed read leaves the derived figure null, exactly as an empty register
+   * does, and the owner was then told "Nothing recorded yet, so your MRR cannot
+   * be checked against the register" — a confident claim about their own gym
+   * made by code that never managed to read it. An owner who believes it goes
+   * looking for the memberships they are sure they entered.
+   *
+   * `reconcile()` never returns this: it cannot tell, because it is handed one
+   * number and one null. The caller, which knows whether its query threw, builds
+   * it with `unreadable()`.
+   */
+  | 'unreadable'
   /** Both exist and match within tolerance. */
   | 'agrees'
   /** Both exist and disagree. */
@@ -75,6 +91,20 @@ export function reconcile(
 }
 
 /**
+ * The comparison a caller whose read FAILED should show.
+ *
+ * Separate from `reconcile()` rather than a fourth branch inside it, because
+ * `reconcile()` is pure over its two arguments and genuinely cannot distinguish
+ * an empty register from an unread one — only the caller holding the rejected
+ * promise can. Every derived field is null, as under `no_record`: nothing here
+ * is known, and a screen must not offer a "Use It" button for a figure that was
+ * never read.
+ */
+export function unreadable(typed: number): Reconciliation {
+  return { state: 'unreadable', typed, derived: null, delta: null, driftPct: null };
+}
+
+/**
  * A sentence for the screen, or null when there is nothing worth saying.
  *
  * `agrees` returns null on purpose. A console that congratulates itself every
@@ -89,6 +119,10 @@ export function reconcileNote(
   switch (r.state) {
     case 'no_record':
       return `Nothing recorded yet, so your ${label} cannot be checked against the register.`;
+    case 'unreadable':
+      // Says what happened and what it is NOT, because the sentence above is
+      // what this used to render and an owner has to be able to tell them apart.
+      return `Your register could not be read, so your ${label} has not been checked — this is a failed read, not an empty register.`;
     case 'not_entered':
       return `Your records show ${fmt(r.derived as number)}. Use that, or type your own figure.`;
     case 'differs':

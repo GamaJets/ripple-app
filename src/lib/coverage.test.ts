@@ -8,7 +8,7 @@ import { summarise, money, type MembershipPlan, type Membership, type GymPayment
 import { weeklyOccurrences, summariseAttendance, weeklyAttendance, pct, type GymClass, type NewClass, classFillState } from './gymSchedule';
 import { summariseClassRows, type ClassSummaryRow } from './classRates';
 import { STATUS_LABEL, STATUS_RANK, statusFromRisk, riskLabel } from './status';
-import { reconcile, reconcileNote } from './finReconcile';
+import { reconcile, reconcileNote, unreadable } from './finReconcile';
 import { VARIANT_ACCENT, VARIANT_TILE, VARIANT_LABEL } from './variant';
 import { tipsFor, nextTip, markShown, isDue, tipToShow, EMPTY_TIP_STATE, type TipState } from './tips';
 import { buildIcs } from './ics';
@@ -892,6 +892,35 @@ ok(reconcileNote(reconcile(34500, 34500), 'MRR') === null, 'agreement says nothi
 ok((reconcileNote(reconcile(40000, 34500), 'MRR') ?? '').includes('less'), 'a shortfall is described as less');
 ok((reconcileNote(reconcile(30000, 34500), 'MRR') ?? '').includes('more'), 'a surplus is described as more');
 ok((reconcileNote(reconcile(40000, null), 'MRR') ?? '').includes('Nothing recorded'), 'no-record note explains why');
+
+// ── an unread register is not an empty one ────────────────────────────────
+//
+// The defect: `fetchMemberships` throws on a PostgREST error, the financials
+// screen caught it and logged it, and both derived figures stayed null — which
+// is byte-for-byte the state an empty register produces. `reconcile` therefore
+// said 'no_record' and the screen told the owner "Nothing recorded yet, so your
+// MRR cannot be checked against the register". An owner who believes that goes
+// looking for memberships they are sure they entered.
+//
+// `reconcile()` cannot fix this and must not pretend to: handed one number and
+// one null it genuinely does not know which happened. Only the caller holding
+// the rejected promise knows, and `unreadable()` is how it says so.
+ok(unreadable(40000).state === 'unreadable', 'a failed read is its own state, not "no record"');
+ok(reconcile(40000, null).state !== unreadable(40000).state,
+   'AND IT IS NOT THE SAME STATE AS AN EMPTY REGISTER — collapsing these two is the whole defect');
+ok(unreadable(40000).derived === null, 'nothing is derived from a read that did not happen');
+ok(unreadable(40000).delta === null, 'and no gap can be computed from it');
+ok(unreadable(40000).driftPct === null, 'nor any drift');
+ok(unreadable(40000).typed === 40000, 'what the owner typed survives — it is the only figure that is known');
+{
+  const note = reconcileNote(unreadable(40000), 'MRR') ?? '';
+  ok(note !== '', 'the unread state says something rather than falling silent like agreement does');
+  ok(/could not be read/i.test(note), 'and it says the read failed');
+  ok(!/Nothing recorded/i.test(note),
+     'and it must NOT reuse the empty-register wording, which is the sentence that was wrong');
+  ok(note !== reconcileNote(reconcile(40000, null), 'MRR'),
+     'the two notes differ, so an owner can tell an unread register from an empty one');
+}
 }
 
 

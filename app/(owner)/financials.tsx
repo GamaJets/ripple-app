@@ -23,7 +23,7 @@ import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Cta, Ghost, Notice, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { emptyFinances, hasFigures, reviewFinances, type FinInputs, type FinFlag } from '../../src/lib/financialAI';
-import { reconcile, reconcileNote } from '../../src/lib/finReconcile';
+import { reconcile, reconcileNote, unreadable } from '../../src/lib/finReconcile';
 import { fetchPlans, fetchMemberships, fetchPayments, summarise } from '../../src/lib/gymRecord';
 import { useTenant, gymMoney } from '../../src/ui/tenant';
 import { supabase } from '../../src/lib/supabase';
@@ -84,6 +84,19 @@ export default function Financials() {
   // lose what the owner knows. The screen names both and lets them decide.
   const [derivedMrr, setDerivedMrr] = useState<number | null>(null);
   const [derivedMembers, setDerivedMembers] = useState<number | null>(null);
+  /**
+   * The register could not be read.
+   *
+   * `fetchPlans`/`fetchMemberships`/`fetchPayments` all throw on a PostgREST
+   * error, and the catch below only logged it — which left both derived figures
+   * null, which is the same state an empty register produces. So `reconcile`
+   * returned 'no_record' and the screen told an owner "Nothing recorded yet, so
+   * your MRR cannot be checked against the register": a specific claim about
+   * their own gym, in the same type used when it is true, arrived at by code
+   * that never read a row. On a screen whose entire purpose is checking the
+   * owner's figures against the register, that is the worst available sentence.
+   */
+  const [derivedFailed, setDerivedFailed] = useState(false);
 
   useEffect(() => {
     let live = true;
@@ -102,13 +115,23 @@ export default function Financials() {
         // that makes an owner doubt a figure they are right about.
         setDerivedMrr(sum.mrrCents == null ? null : Math.round(sum.mrrCents / 100));
         setDerivedMembers(memberships.length ? sum.activeMembers : null);
-      } catch (e) { reportError('financials.derived', e); }
+        setDerivedFailed(false);
+      } catch (e) {
+        reportError('financials.derived', e);
+        // The figures already on screen are from a read that no longer holds,
+        // so they are cleared rather than left standing beside the failure.
+        if (!live) return;
+        setDerivedMrr(null); setDerivedMembers(null); setDerivedFailed(true);
+      }
     })();
     return () => { live = false; };
   }, [tenant?.id]);
 
-  const mrrCheck = reconcile(fin.mrr, derivedMrr);
-  const memberCheck = reconcile(fin.members, derivedMembers);
+  // `unreadable` rather than `reconcile(..., null)`: only this screen knows the
+  // query threw, and it is the one piece of information that separates "your
+  // register is empty" from "we could not read your register".
+  const mrrCheck = derivedFailed ? unreadable(fin.mrr) : reconcile(fin.mrr, derivedMrr);
+  const memberCheck = derivedFailed ? unreadable(fin.members) : reconcile(fin.members, derivedMembers);
 
   useEffect(() => {
     (async () => {
