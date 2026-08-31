@@ -8,8 +8,11 @@
 // screen registered with `href: null` — reachable by navigation, absent from the
 // bar. A seventh bar item does not simply appear at the end: it squeezes the six
 // that matter, which is how "Programs" came to render as "Progra…" the one time
-// a route was added without it. `my-training`, the coach's own workout log, is
-// one of those detail screens and is reached from Profile.
+// a route was added without it. `my-training`, `my-nutrition` and `my-progress`
+// — the coach's own workout log, food log and body record — are three of those
+// detail screens, reached from the Coaching Tools row on the Clients tab. They
+// are deliberately not bar items: the bar is about clients, and the coach's own
+// tracking is the one thing in this group that is not.
 //
 // A `<Tabs.Screen>` list is walked by expo-router rather than rendered, so keep
 // commentary out from between the entries — notes about a route belong here, or
@@ -54,6 +57,8 @@ export default function TrainerLayout() {
       <Tabs.Screen name="chat" options={{ href: null, title: 'Chat' }} />
       <Tabs.Screen name="log-session" options={{ href: null, title: 'Log a Session' }} />
       <Tabs.Screen name="my-training" options={{ href: null, title: 'My Training' }} />
+      <Tabs.Screen name="my-nutrition" options={{ href: null, title: 'My Nutrition' }} />
+      <Tabs.Screen name="my-progress" options={{ href: null, title: 'My Progress' }} />
       <Tabs.Screen name="checklists" options={{ href: null, title: 'Their Checklists' }} />
       <Tabs.Screen name="client-goals" options={{ href: null, title: 'Working Toward' }} />
       <Tabs.Screen name="client-photos" options={{ href: null, title: 'Progress Photos' }} />

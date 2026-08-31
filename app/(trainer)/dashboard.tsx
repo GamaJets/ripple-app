@@ -161,11 +161,16 @@ const SHORTCUTS: [IconName, string, string][] = [
   ['chart', 'Analytics', '/(trainer)/analytics'],
   ['trophy', 'Leaderboard', '/(trainer)/leaderboard'],
   ['message', 'Feedback', '/(trainer)/feedback'],
-  // The coach's own training, last because it is the one thing here that is
-  // not about a client. It was reachable only from a row inside Profile, which
-  // is buried — and a coach who cannot find where to log their own session
-  // logs it nowhere, or worse, into somebody else's record.
+  // The coach's own tracking, last and together because these three are the
+  // only things here that are not about a client. My Training was reachable
+  // only from a row inside Profile, which is buried — and a coach who cannot
+  // find where to log their own session logs it nowhere, or worse, into
+  // somebody else's record. Nutrition and Progress sit beside it rather than
+  // anywhere else for exactly that reason: the same coach, on the same day,
+  // looking for the same thing.
   ['dumbbell', 'My Training', '/(trainer)/my-training'],
+  ['meals', 'My Nutrition', '/(trainer)/my-nutrition'],
+  ['progress', 'My Progress', '/(trainer)/my-progress'],
 ];
 
 /**
