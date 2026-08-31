@@ -50,7 +50,7 @@ import { View, Text, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Ghost, Notice, Flag, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Cta, Ghost, Notice, Flag, fig } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
@@ -100,7 +100,11 @@ export default function ClientScreen() {
   // the roster provider may still be reading. It is never used as an access
   // claim: every read below is filtered on the id and every policy behind them
   // is `is_my_client`.
-  const params = useLocalSearchParams<{ clientId?: string; name?: string }>();
+  const params = useLocalSearchParams<{ clientId?: string; name?: string; checkedIn?: string }>();
+  /** Arrived here from Check In on the calendar: the client is standing in
+   *  front of the coach and the session is under way. The screen leads with
+   *  logging rather than making them find it among nine other rows. */
+  const justCheckedIn = params.checkedIn === '1';
   const id = typeof params.clientId === 'string' && params.clientId ? params.clientId : null;
   const client = useMemo(() => r.roster.find((c) => c.id === id) ?? null, [r.roster, id]);
   const fullName = client?.name ?? (typeof params.name === 'string' ? params.name : '') ?? '';
@@ -455,6 +459,27 @@ export default function ClientScreen() {
           </Section>
         ) : null}
 
+        {/* ── the two things a coach comes here to DO ─────────────────────────
+            Both of these existed already and neither could be found: booking a
+            client was only ever reachable from the calendar, which asks who it
+            is for after the coach has already said, and their programme was the
+            sixth row of a list below a hero and two sections — off the bottom of
+            the screen on any phone. Reading about somebody is not the reason you
+            open their page; these are. */}
+        {id ? (
+          <Section>
+            <Cta label={`Book ${who} a Session`} wide onPress={go('/(trainer)/calendar')} />
+            <View style={{ marginTop: sp.md }}>
+              <ListRow icon="grid" title={programme ? 'Their Program' : `Build ${who} a Program`}
+                note={programmeLine(ap.status, programme?.title ?? null, programme?.days.length ?? null, who)}
+                tone={ap.status === 'error' ? t.warn : undefined}
+                onPress={go('/(trainer)/builder')} />
+            </View>
+          </Section>
+        ) : null}
+
+        <Rule />
+
         {/* ── the hero: the one thing worth knowing first ─────────────────── */}
         <Hero
           label="Days Since Anything on Record"
@@ -575,13 +600,10 @@ export default function ClientScreen() {
             tone={photosFailed ? t.warn : undefined}
             onPress={go('/(trainer)/client-photos')} />
 
-          <ListRow icon="grid" title="Their Program"
-            note={programmeLine(ap.status, programme?.title ?? null, programme?.days.length ?? null, who)}
-            tone={ap.status === 'error' ? t.warn : undefined}
-            onPress={go('/(trainer)/builder')} />
-
-          <ListRow icon="train" title="Log a Session You Ran"
-            note={`Goes into ${who}'s own record, marked as logged by you.`}
+          <ListRow icon="train" title={justCheckedIn ? `Log What ${who} Just Did` : 'Log a Session You Ran'}
+            note={justCheckedIn
+              ? `${who} is checked in. Enter the exercises as you go — it lands in their own record and shows up in their app.`
+              : `Goes into ${who}'s own record, marked as logged by you.`}
             onPress={go('/(trainer)/log-session')} />
 
           <ListRow icon="chat" title={`Message ${who}`}

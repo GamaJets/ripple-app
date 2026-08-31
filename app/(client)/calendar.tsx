@@ -388,7 +388,21 @@ export default function Calendar() {
     // silence is the wrong side to err on when somebody's pack may not have
     // been debited.
     const mayHaveCredits = packLeft == null || packLeft > 0;
-    bookSession(s.id, cd.id);
+    // The booking itself was the one write here that was never awaited, because
+    // until now it could not answer. It can: the server books only a slot that
+    // is still open and belongs to this client's coach, and refuses silently
+    // otherwise. Nothing below this line should happen for a booking that was
+    // refused — least of all drawing a session off the client's pack and
+    // telling their coach to expect them.
+    const booked = await bookSession(s.id, cd.id);
+    if (!booked) {
+      Alert.alert(
+        'Not booked',
+        `${slot} was not booked — someone may have taken it first. Pull down to refresh and pick another time.`,
+        [{ text: 'OK' }],
+      );
+      return;
+    }
 
     // `redeemSession` declines rather than throws — no pack, an exhausted pack,
     // or an update the server refused all come back as `ok:false`. Only the

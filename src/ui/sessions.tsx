@@ -160,17 +160,42 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
   };
 
   const bookSession: SessionsValue['bookSession'] = async (id, clientId) => {
-    setSessions((p) => p.map((x) => (x.id === id ? { ...x, status: 'booked', clientId, released: false } : x)));
     const s = sessions.find((x) => x.id === id);
-    if (s && s.startsAt) {
-      const start = new Date(s.startsAt);
-      scheduleLocal('Session in 1 hour', 'Your training session starts at ' + start.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) + '.', new Date(start.getTime() - 60 * 60 * 1000));
-    }
-    if (!USE_SUPABASE || !uid) return false;
+    // Drawing the booking and scheduling the reminder are what a CONFIRMED
+    // booking looks like, so neither happens until the server has confirmed one.
+    const apply = () => {
+      setSessions((p) => p.map((x) => (x.id === id ? { ...x, status: 'booked', clientId, released: false } : x)));
+      if (s && s.startsAt) {
+        const start = new Date(s.startsAt);
+        scheduleLocal('Session in 1 hour', 'Your training session starts at ' + start.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) + '.', new Date(start.getTime() - 60 * 60 * 1000));
+      }
+    };
+    if (!USE_SUPABASE || !uid) { apply(); return false; }
+    // `book_session` books only a slot that is still 'available' and belongs to
+    // this client's own trainer. When neither holds it updates nothing — and an
+    // update that changes no rows is not an error, so the old `!error` reported
+    // a slot somebody else had already taken as a confirmed booking, complete
+    // with a reminder for a session that did not exist. The RPC now returns
+    // whether it booked, and that is what is believed.
+    let booked = false;
     try {
-      const { error } = await supabase.rpc('book_session', { p_session: id });
-      return !error;
+      const { data, error } = await supabase.rpc('book_session', { p_session: id });
+      if (error) return false;
+      if (typeof data === 'boolean') booked = data;
+      else {
+        // An outcome we cannot read is not a booking. Settle it against the row
+        // itself rather than guessing in either direction.
+        const { data: row, error: readErr } = await supabase.from('sessions').select('status, client_id').eq('id', id).maybeSingle();
+        // A read that failed leaves the outcome unknown, and unknown is not a
+        // booking. Reporting false when the row was in fact booked costs the
+        // client a second attempt and a re-read that will show it; reporting
+        // true when it was not books nobody, reminds them to attend, and draws
+        // a session off their pack.
+        booked = !readErr && !!row && row.status === 'booked' && row.client_id === uid;
+      }
     } catch { return false; }
+    if (booked) apply();
+    return booked;
   };
 
   const releaseSession: SessionsValue['releaseSession'] = async (id) => {

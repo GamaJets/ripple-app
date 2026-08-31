@@ -10,11 +10,11 @@
 // became one hero figure, the six bordered cards became hairline-separated
 // sections, and the day grid now reads through weight and the accent rather
 // than through boxes and 800-weight text.
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { View, Text, Pressable, ScrollView, Alert, Modal } from 'react-native';
 import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { Rule, Section, SectionHead, Hero, ListRow, Cta, Ghost, fig } from '../../src/ui/kit';
@@ -26,7 +26,11 @@ import { useAvailability, upcomingDates } from '../../src/ui/availability';
 import { useRoster } from '../../src/ui/roster';
 import type { TrainingSession } from '../../src/lib/types';
 import { buildIcs, shareIcs } from '../../src/lib/exportShare';
-import { sendPush } from '../../src/ui/pushNotifications';
+import { sendPush, sendPushChecked } from '../../src/ui/pushNotifications';
+import { markOutcome } from '../../src/lib/gymSessions';
+import { supabase } from '../../src/lib/supabase';
+import { useTenant } from '../../src/ui/tenant';
+import { reportError } from '../../src/lib/reportError';
 
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MON = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -61,6 +65,7 @@ export default function TrainerSchedule() {
   const router = useRouter();
   const { sessions, addSession, releaseSession, removeSession } = useSessions();
   const { roster, status: rosterStatus } = useRoster();
+  const { tenant } = useTenant();
   const { sessionFee } = useMyTrainerProfile();
   const nameOf = (id: string | null) => roster.find((c) => c.id === id)?.name ?? 'Open slot';
   const [viewYear, setViewYear] = useState(now.getFullYear());
@@ -71,21 +76,47 @@ export default function TrainerSchedule() {
   const [addMinute, setAddMinute] = useState(0);
   const [addDur, setAddDur] = useState(60);
   const [addClient, setAddClient] = useState<string | null>(null);
+  // Opened from a client's own profile ("Book a Session"), the coach has already
+  // said who this is for. Asking them again on the next screen is the step that
+  // made booking-for-a-client feel like it did not exist.
+  const params = useLocalSearchParams();
+  const bookFor = typeof params.clientId === 'string' && params.clientId ? params.clientId : null;
+  useEffect(() => {
+    if (!bookFor) return;
+    setAddClient(bookFor);
+    setAddOpen(true);
+  }, [bookFor]);
   const { slots: availSlots, addSlot: addAvail, removeSlot: removeAvail } = useAvailability();
   const [availOpen, setAvailOpen] = useState(false);
   const [avDow, setAvDow] = useState(1);
   const [avHour, setAvHour] = useState(9);
-  const generateSlots = () => {
+  // `addSession(...).ok` means only that the slot did not overlap one already on
+  // this screen. Whether it reached the server is `saved`, and that is the half
+  // that decides whether a client can ever see the slot — so a slot the server
+  // refused used to be counted in "12 open slots added" and then be bookable by
+  // nobody. The count now says how many are actually open.
+  const generateSlots = async () => {
     if (!availSlots.length) { Alert.alert('No availability set', 'Add at least one weekly slot first.'); return; }
-    let added = 0;
+    const saves: Promise<boolean>[] = [];
+    let overlapped = 0;
     for (const sl of availSlots) {
       for (const d of upcomingDates(sl.dow, sl.hour, 4)) {
         const ses: TrainingSession = { id: 'ms' + (SEQ++), trainerId: '', clientId: null, startsAt: d.toISOString(), durationMin: sl.dur, status: 'available', released: false };
-        if (addSession(ses).ok) added++;
+        const res = addSession(ses);
+        if (res.ok) saves.push(res.saved ?? Promise.resolve(false));
+        else overlapped++;
       }
     }
     setAvailOpen(false);
-    Alert.alert('Slots generated', added + ' open slot' + (added === 1 ? '' : 's') + ' added across the next 4 weeks (existing/overlapping times were skipped).');
+    const results = await Promise.all(saves);
+    const added = results.filter(Boolean).length;
+    const lost = results.length - added;
+    const lines = [
+      added + ' open slot' + (added === 1 ? '' : 's') + ' added across the next 4 weeks — your clients can book ' + (added === 1 ? 'it' : 'them') + ' now.',
+    ];
+    if (overlapped) lines.push(overlapped + ' time' + (overlapped === 1 ? ' was' : 's were') + ' skipped because you already have something booked then.');
+    if (lost) lines.push(lost + ' slot' + (lost === 1 ? '' : 's') + ' could not be saved to the server, so ' + (lost === 1 ? 'it is' : 'they are') + ' not open to anyone. Try generating again.');
+    Alert.alert(added ? 'Slots generated' : 'No slots opened', lines.join('\n\n'));
   };
 
   const booked = sessions.filter((s) => s.status === 'booked');
@@ -116,7 +147,7 @@ export default function TrainerSchedule() {
     setViewMonth(m); setViewYear(y);
   }
 
-  function handleAdd() {
+  async function handleAdd() {
     const d = new Date(selY, selM, selD); d.setHours(addHour, addMinute, 0, 0);
     const s: TrainingSession = {
       id: `ms${SEQ++}`, trainerId: '', clientId: addClient,
@@ -129,10 +160,30 @@ export default function TrainerSchedule() {
       return;
     }
     setAddOpen(false);
-    if (addClient) {
-      sendPush([addClient], 'Session booked', `Your session on ${DOW[selDate.getDay()]} at ${timeLabel(s.startsAt)} is confirmed.`, { route: '/(client)/calendar' });
-      Alert.alert('Session booked', `${timeLabel(s.startsAt)} with ${nameOf(addClient)} confirmed.\n\nA notification was sent to ${nameOf(addClient)} — they will see it if they have notifications on.`, [{ text: 'Great' }]);
+    if (!addClient) return;
+    const who = nameOf(addClient);
+    // Two things had to be true for the old alert to be honest and neither was
+    // checked: that the session reached the server (until it does, it is on this
+    // phone alone and the client's app knows nothing about it) and that the push
+    // was accepted. Both are awaited now, and the alert says what happened.
+    const saved = await (res.saved ?? Promise.resolve(false));
+    if (!saved) {
+      Alert.alert(
+        'Not booked',
+        `${timeLabel(s.startsAt)} with ${who} could not be saved, so it is not on your calendar and ${who} has not been booked. Try again.`,
+        [{ text: 'OK' }],
+      );
+      return;
     }
+    const push = await sendPushChecked([addClient], 'Session booked', `Your session on ${DOW[selDate.getDay()]} at ${timeLabel(s.startsAt)} is confirmed.`, { route: '/(client)/calendar' });
+    Alert.alert(
+      'Session booked',
+      `${timeLabel(s.startsAt)} with ${who} is confirmed, and it is now on their calendar in the Repple app.\n\n` +
+        (push.ok
+          ? `${who} was sent a notification — they will see it if they have notifications on.`
+          : `We couldn't send ${who} a notification${push.error ? ` (${push.error})` : ''}, so message them to let them know.`),
+      [{ text: 'Great' }],
+    );
   }
 
   function doCancel(s: TrainingSession) {
@@ -206,6 +257,32 @@ export default function TrainerSchedule() {
 
   const G = layout.gutter;
   const totalSlots = booked.length + open.length;
+  /**
+   * The client turned up: record it, then open their record.
+   *
+   * Marked `completed` at check-in rather than after logging, because that is
+   * the fact being asserted — this person is here and the session is
+   * happening. A coach who gets interrupted and never opens the log has still
+   * delivered the session, and leaving the outcome unset would put it back in
+   * the Mark Sessions queue as though nobody knew what happened. A no-show is
+   * the other button, and a session marked in error can be re-marked there.
+   *
+   * The write is awaited and read. Navigating away from a refused update would
+   * take the coach to a screen implying the attendance was recorded.
+   */
+  const checkIn = async (s: TrainingSession) => {
+    if (!s.clientId) return;
+    const who = nameOf(s.clientId);
+    try {
+      await markOutcome(supabase, s.id, 'completed', tenant?.sessionFee != null ? tenant.sessionFee * 100 : undefined);
+    } catch (e) {
+      reportError('calendar.checkIn', e, { sessionId: s.id });
+      Alert.alert('Not checked in', `${who} was not marked present — that did not save. Check your connection and try again.`);
+      return;
+    }
+    router.push({ pathname: '/(trainer)/client', params: { clientId: s.clientId, name: who, checkedIn: '1' } });
+  };
+
   const exportSchedule = async () => {
     const evts = booked.map((s) => ({ start: s.startsAt, durationMin: s.durationMin, title: `Session · ${nameOf(s.clientId)}` }));
     await shareIcs(buildIcs(evts, 'Repple — Coaching schedule'), 'repple-schedule.ics', 'Export your schedule');
@@ -349,9 +426,18 @@ export default function TrainerSchedule() {
                   </View>
                 </View>
                 <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md, marginLeft: sp.md + 6 }}>
-                  {s.status === 'booked' ? (
-                    <Ghost label="Cancel" onPress={() => confirmCancel(s)} />
-                  ) : (<>
+                  {s.status === 'booked' ? (<>
+                    {/* Check in is the start of the session, and it is the one
+                        thing a coach does standing next to somebody. It marks
+                        them present and opens their record — the overview
+                        first, because what you want thirty seconds before a
+                        session is what they did last time and what they cannot
+                        do. Entering the exercises is one tap on from there,
+                        and lands in the client's OWN record, so it reaches
+                        their app rather than staying on the coach's screen. */}
+                    <View style={{ flex: 1 }}><Cta label="Check In" wide onPress={() => checkIn(s)} /></View>
+                    <View style={{ flex: 1 }}><Ghost label="Cancel" onPress={() => confirmCancel(s)} /></View>
+                  </>) : (<>
                     <View style={{ flex: 1 }}><Ghost label="Re-offer" onPress={() => reoffer(s)} /></View>
                     <View style={{ flex: 1 }}><Ghost label="Remove" onPress={() => removeOpen(s)} /></View>
                   </>)}

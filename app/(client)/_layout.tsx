@@ -11,6 +11,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
 import { sp, type as ty } from '../../src/theme/scale';
+import { WaiverGate } from '../../src/ui/waiver';
 
 export default function ClientLayout() {
   // This build is one of three separate apps. If the client portal is not
@@ -23,6 +24,7 @@ export default function ClientLayout() {
   const insets = useSafeAreaInsets();
   const bottomPad = Math.max(insets.bottom, 10);
   return (
+    <WaiverGate>
     <Tabs
       backBehavior="history"
       screenOptions={{
@@ -89,5 +91,6 @@ export default function ClientLayout() {
       <Tabs.Screen name="pt-sessions" options={{ href: null, title: 'Personal Training' }} />
       <Tabs.Screen name="bookings" options={{ href: null, title: 'My Bookings' }} />
     </Tabs>
+    </WaiverGate>
   );
 }
