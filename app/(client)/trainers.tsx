@@ -162,6 +162,47 @@ export default function FindTrainer() {
         if (cancelled) return;
         setCoach(mine);
         setCoachStatus('ready');
+
+        // ── and then the name ──────────────────────────────────────────────
+        //
+        // fetchMyCoach() reads the name straight off `profiles`, and a client
+        // cannot read that row. Every SELECT policy on `profiles` runs the
+        // other way — coach → client, owner → tenant — except
+        // profiles_public_directory_r, which shows `trainers.listed = true`
+        // to everybody and is the only reason this ever appeared to work.
+        // `listed` defaults to FALSE, so for a coach who got their first
+        // client by handing over a join code rather than by publishing a
+        // directory profile — which is every new independent coach — the read
+        // matches no row and the card above renders their coach as "—", above
+        // a button offering to "Leave your coach". Confirmed on the live
+        // database against a freshly provisioned coach and client.
+        //
+        // my_coach() is the answer the rest of the app already uses for this
+        // (supabase/parts/67, extended by 115; src/ui/messaging.ts calls it for
+        // the thread header). It is SECURITY DEFINER, takes no argument — so
+        // there is no id to probe with and no coach but your own can be named
+        // — and it names the two columns it returns rather than handing over a
+        // whole profiles row.
+        //
+        // Asked SECOND, and only to fill a blank. fetchMyCoach() stays the
+        // authority on WHETHER somebody coaches you, so this screen and the
+        // photo-sharing screen still cannot disagree about that; all that is
+        // taken from here is the label. A refusal leaves the dash exactly
+        // where it already was.
+        if (mine && !(mine.name || '').trim()) {
+          const { data: named, error: namedErr } = await supabase.rpc('my_coach');
+          if (cancelled) return;
+          if (namedErr) {
+            reportError('findTrainer.coachName', namedErr);
+          } else {
+            const row = Array.isArray(named) ? named[0] : named;
+            const n = typeof row?.coach_name === 'string' ? row.coach_name.trim() : '';
+            // Only when it is the same coach. The two reads are a moment
+            // apart and a link that changed in between must not put one
+            // coach's name against another's id.
+            if (n && row?.coach_id === mine.id) setCoach({ ...mine, name: n });
+          }
+        }
       } catch (e) {
         reportError('findTrainer.myCoach', e);
         if (!cancelled) setCoachStatus('error');

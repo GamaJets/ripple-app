@@ -9,9 +9,48 @@
 // hairline-separated sections, the one card left is the payout decision itself,
 // and the Georgia serif header is gone.
 //
-// Nothing here reports a balance, a payout or a transaction: every figure is a
-// price the trainer typed, stored in `trainer_packages`. There is no earnings
-// number on this screen because the app is not told one.
+// ── What this screen may say about money, and what it may not ─────────────
+//
+// It used to say: "Nothing here reports a balance, a payout or a transaction:
+// every figure is a price the trainer typed. There is no earnings number on
+// this screen because the app is not told one." Half of that was true and half
+// of it was a read nobody had written.
+//
+// The true half stands. Stripe has never told this app a balance, a payout, its
+// own processing fee or the platform's application fee — no webhook in this
+// repo writes any of them — so none of those four words appears on this screen.
+// A "net earnings" figure here would be plausible and invented, and the one
+// number a working trainer has to be able to trust is the one about their own
+// money.
+//
+// The false half is now fixed. One thing IS written down: what a client was
+// charged. `client_purchases` records `amount_cents` on every completed
+// one-off checkout, and all four functions that had ever read that table
+// filtered on `client_id = uid` — they are the CLIENT's side. So the app took
+// money on the coach's behalf and then showed them nothing about it: not who
+// bought a ten-pack, not how many sessions were left on it, not who had run
+// out. `fetchClientPurchases` is the other side of the same sale, and the
+// figure above it is labelled as exactly what it is — gross, taken, per
+// currency, before anybody's fee.
+//
+// Two things are deliberately NOT in that figure:
+//
+//   · Subscription renewals. The webhook handles `invoice.*` on a coaching
+//     subscription by re-reading the subscription and writing its STATUS; it
+//     writes no money row at all. So a month of renewals cannot be added up
+//     from anything we hold. What CAN be stated is the standing price of the
+//     subscriptions running today, and that is printed separately, as a price.
+//   · Any purchase whose currency we cannot recover. `client_purchases` has no
+//     currency column — the unit lives only in the `trainer_packages` row the
+//     sale came from — so a deleted package leaves an amount with no unit
+//     forever. Those are counted and reported as missing from the total rather
+//     than dropped out of it quietly or summed as dollars.
+//
+// Stopping a subscription is still the client's to do. The `cancel`/`resume`
+// actions in the connect-checkout edge function scope the lookup to
+// `client_id = auth.uid()`, so a coach calling them gets "subscription not
+// found" — and a Cancel button that always fails is worse than none. It is said
+// on screen instead of offered.
 //
 // Two things are new. A package can now bill EVERY month or year rather than
 // once (part 97), which is the biggest difference between two rows on this
@@ -37,10 +76,11 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Cta, Ghost, Notice, Flag, PartialRead, fig } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, type as ty, value } from '../../src/theme/scale';
 import type { LoadStatus } from '../../src/ui/loadStatus';
-import { startTrainerOnboarding, fetchMyConnect, fetchMyPackages, createPackage, deactivatePackage, type ConnectStatus, type TrainerPackage } from '../../src/lib/connect';
+import { startTrainerOnboarding, fetchMyConnect, fetchMyPackages, createPackage, deactivatePackage, fetchClientPurchases, type ConnectStatus, type TrainerPackage, type CoachPurchase } from '../../src/lib/connect';
 import { fetchMySubscribers, myTenantCurrency, pkgMoney, pkgPriceLine, statusLabel, isLive, type BillingInterval, type Subscriber } from '../../src/lib/subscriptions';
+import { sumTaken, sumRecurring, since, monthStart, packLeft, packRunOut, minorMoney } from '../../src/lib/coachMoney';
 
 const INTERVALS: { key: BillingInterval | null; label: string }[] = [
   { key: null, label: 'One-off' },
@@ -83,13 +123,20 @@ export default function TrainerPayments() {
   // not the same fact about somebody's income.
   const [subs, setSubs] = useState<Subscriber[]>([]);
   const [subsStatus, setSubsStatus] = useState<LoadStatus>('loading');
+  // What clients have actually bought. Same three-way distinction, and it
+  // carries more weight here than anywhere else on the screen: an empty list
+  // under 'error' is "we could not look", and rendering it as "nothing has been
+  // bought" tells a coach who has been paid that they have not been.
+  const [buys, setBuys] = useState<CoachPurchase[]>([]);
+  const [buysStatus, setBuysStatus] = useState<LoadStatus>('loading');
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [c, p, s, cur] = await Promise.all([fetchMyConnect(), fetchMyPackages(), fetchMySubscribers(), myTenantCurrency()]);
+    const [c, p, s, cur, b] = await Promise.all([fetchMyConnect(), fetchMyPackages(), fetchMySubscribers(), myTenantCurrency(), fetchClientPurchases()]);
     setConn(c); setPkgs(p); setPkgErr(p === null);
     setSubs(s.rows); setSubsStatus(s.status);
     setCurrency(cur.currency); setCurrencyErr(cur.error);
+    setBuys(b.rows); setBuysStatus(b.status);
     setLoading(false);
   }, []);
   useEffect(() => { load(); }, [load]);
@@ -170,6 +217,40 @@ export default function TrainerPayments() {
   );
 
   const liveSubs = subs.filter((s) => isLive(s.status));
+
+  // ── the money figures ─────────────────────────────────────────────────────
+  // Only a WHOLE read may be summed. 'partial' is refused alongside 'error' on
+  // purpose, and it is the more dangerous of the two: a subtotal of somebody's
+  // sales printed as a month's takings is a plausible number with nothing about
+  // it to doubt, where an error at least looks like one.
+  const buysWhole = buysStatus === 'ready';
+  const paid = buys.filter((b) => b.status === 'paid');
+  const takenAll = buysWhole ? sumTaken(paid) : null;
+  const takenMonth = buysWhole ? sumTaken(since(paid, monthStart())) : null;
+  // A standing price, not a takings — no renewal is recorded as an amount
+  // anywhere, so this is what is running today, not what came in this month.
+  const recurring = subsStatus === 'ready' ? sumRecurring(liveSubs) : null;
+  // The packs a coach has to know about: sold, and how much of each is left.
+  // Listable under 'partial' (the rows are real); not countable.
+  const packs = buys.filter((b) => b.sessions_total != null);
+  const runOut = packs.filter(packRunOut);
+
+  /** A row of money pots, one per currency. Never one figure: AED 600 and
+   *  GBP 90 do not add to 690 of anything, and a white-label product sees both
+   *  on the same coach's book the first time a visitor buys a session. */
+  const Pots = ({ label, pots }: { label: string; pots: { currency: string; minorUnits: number; count: number }[] }) => (
+    <View style={{ flex: 1 }}>
+      <Text style={{ ...ty.caption, color: t.ink3 }}>{label}</Text>
+      {pots.length === 0 ? (
+        <Text style={{ ...value(22), color: t.ink, marginTop: 4 }}>{fig(null)}</Text>
+      ) : pots.map((p) => (
+        <View key={p.currency} style={{ marginTop: 4 }}>
+          <Text style={{ ...value(22), color: t.ink }}>{fig(minorMoney(p.minorUnits, p.currency))}</Text>
+          <Text style={{ ...ty.caption, color: t.ink3 }}>{p.count === 1 ? 'from 1 sale' : 'from ' + p.count + ' sales'}</Text>
+        </View>
+      ))}
+    </View>
+  );
   // The typed price read back in the gym's currency, or null when either half
   // is missing. Never a number with a unit put on it for the look of the thing.
   const typed = parseFloat(price);
@@ -216,6 +297,107 @@ export default function TrainerPayments() {
                 </View>
               </Section>
             )}
+
+            <Rule />
+
+            {/* ── what has actually been taken ───────────────────────────── */}
+            <Section>
+              <SectionHead title="Taken Through Stripe" />
+              {buysStatus === 'error' ? (
+                <Flag tone={t.crit}>
+                  Your sales could not be read, so there is no figure here. This is not a statement
+                  that nothing has been bought — anything a client has paid for, they have paid for.
+                </Flag>
+              ) : buysStatus === 'partial' ? (
+                <PartialRead what="sales" shown={buys.length} onPress={load} />
+              ) : takenAll && takenMonth ? (<>
+                <View style={{ flexDirection: 'row', gap: sp.md }}>
+                  <Pots label="This month" pots={takenMonth.pots} />
+                  <Pots label="All time" pots={takenAll.pots} />
+                </View>
+                {/* An amount we cannot put a unit on is missing from the totals
+                    above, and saying so is the only thing that keeps them
+                    honest. `client_purchases` stores no currency: the unit of a
+                    sale lives in the package it came from, so a deleted package
+                    leaves the amount unlabelled for good. */}
+                {takenAll.unlabelled || takenAll.unpriced ? (
+                  <View style={{ marginTop: sp.md }}>
+                    <Flag tone={t.warn}>
+                      {takenAll.unlabelled
+                        ? `${takenAll.unlabelled === 1 ? 'One sale is' : takenAll.unlabelled + ' sales are'} not in the figures above: the package ${takenAll.unlabelled === 1 ? 'it was' : 'they were'} bought from is gone, and the currency was only ever recorded there. Stripe still has ${takenAll.unlabelled === 1 ? 'it' : 'them'}.`
+                        : `${takenAll.unpriced === 1 ? 'One sale has' : takenAll.unpriced + ' sales have'} no amount recorded, so ${takenAll.unpriced === 1 ? 'it is' : 'they are'} not in the figures above.`}
+                    </Flag>
+                  </View>
+                ) : null}
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
+                  What your clients were charged for one-off packages and session packs, in the
+                  currency each was sold in. It is the gross — Stripe&apos;s fee and the platform fee
+                  come out of it, and Repple is not told either, so this is not a payout and not a
+                  balance. Your Stripe dashboard has those.
+                </Text>
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                  Subscription renewals are not counted here. Repple records that a subscription is
+                  running and what it is priced at, but no renewal is recorded as an amount, so a
+                  month of them cannot be added up honestly. What they are priced at is below.
+                </Text>
+              </>) : null}
+            </Section>
+
+            <Rule />
+
+            {/* ── session packs sold, and what is left on them ───────────── */}
+            <Section>
+              {/* Counted only under 'ready'. Under 'partial' the packs shown
+                  are real but there are more, and "2 clients have run out" off
+                  part of the set is a smaller number than the truth — which is
+                  the direction that makes it safe to ignore. */}
+              <SectionHead title="Session Packs" note={buysWhole && packs.length ? String(packs.length) : undefined} />
+              {buysStatus === 'error' ? (
+                <Flag tone={t.crit}>
+                  We could not read what your clients have bought, so this is not a list of their
+                  packs. Anyone holding credits still holds them.
+                </Flag>
+              ) : buysStatus === 'partial' ? (
+                <PartialRead what="purchases" shown={buys.length} onPress={load} />
+              ) : packs.length === 0 ? (
+                <Text style={{ ...ty.label, color: t.ink3 }}>
+                  Nobody has bought a session pack yet. Add one below with a number of sessions, and
+                  the balance appears here as your clients use it.
+                </Text>
+              ) : runOut.length ? (
+                <View style={{ marginBottom: sp.md }}>
+                  <Flag tone={t.warn}>
+                    {runOut.length === 1
+                      ? 'One client has used every session they paid for. Their next session is not covered by a pack.'
+                      : runOut.length + ' clients have used every session they paid for. Their next sessions are not covered by a pack.'}
+                  </Flag>
+                </View>
+              ) : null}
+              {(buysStatus === 'error' ? [] : packs).map((b, i) => {
+                const left = packLeft(b);
+                const out = packRunOut(b);
+                return (
+                  <View key={b.id} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.md }}>
+                      {/* A name we could not read is a dash, never 'Client'. */}
+                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, flex: 1 }}>{fig(b.client_name)}</Text>
+                      {/* Dashed rather than dollared when the package it was
+                          sold from is gone: that row held the only record of
+                          what this amount is denominated in. */}
+                      <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>{fig(minorMoney(b.amount_cents, b.currency))}</Text>
+                    </View>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 4 }}>
+                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: out ? t.warn : t.brand }} />
+                      <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }}>
+                        {fig(left)} of {fig(b.sessions_total)} left
+                        {b.package_name ? ' · ' + b.package_name : ''}
+                        {' · '}{new Date(b.created_at).toLocaleDateString()}
+                      </Text>
+                    </View>
+                  </View>
+                );
+              })}
+            </Section>
 
             <Rule />
 
@@ -287,6 +469,40 @@ export default function TrainerPayments() {
                   </View>
                 </View>
               ))}
+
+              {/* What is running today, at what it is priced at — printed only
+                  on a whole read, and never called income. Kept apart by
+                  interval as well as by currency: a yearly package divided by
+                  twelve is a monthly figure this app invented. */}
+              {recurring && recurring.pots.length ? (
+                <View style={{ marginTop: sp.md, paddingTop: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
+                  <Text style={{ ...ty.caption, color: t.ink3 }}>Priced to recur</Text>
+                  {recurring.pots.map((p) => (
+                    <Text key={p.currency + p.interval} style={{ ...value(20), color: t.ink, marginTop: 4 }}>
+                      {fig(pkgPriceLine(p.minorUnits, p.currency, p.interval))}
+                    </Text>
+                  ))}
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                    What your live subscriptions are priced at, not what has been collected. A
+                    renewal is not recorded as an amount anywhere in Repple, so renewals cannot be
+                    added up here — Stripe has them.
+                  </Text>
+                </View>
+              ) : null}
+
+              {/* Why there is no Cancel button beside these rows. The cancel and
+                  resume actions in the connect-checkout function look the
+                  subscription up by `client_id = auth.uid()`, so a coach
+                  pressing one would get "subscription not found" every time,
+                  and a control that always fails on somebody's recurring charge
+                  is worse than no control. Said rather than offered. */}
+              {liveSubs.length ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
+                  Stopping a subscription is the client&apos;s to do, from their Memberships screen —
+                  it cancels at the end of the period they have already paid for. You can also cancel
+                  or refund from your Stripe dashboard.
+                </Text>
+              ) : null}
             </Section>
 
             <Rule />

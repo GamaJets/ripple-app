@@ -23,7 +23,6 @@ import { HealthPill } from '../../src/ui/charts';
 import { useSessionsHistory } from '../../src/ui/useMrrHistory';
 import { cohorts } from '../../src/lib/ownerAnalytics';
 import { ownerReportDoc, shareDoc } from '../../src/lib/exportShare';
-import { fetchFailedInvoices, money, type Invoice } from '../../src/lib/billing';
 import { reportError } from '../../src/lib/reportError';
 import { Linking } from 'react-native';
 
@@ -46,6 +45,9 @@ export default function OwnerOverview() {
   const trainersUnread = trainersStatus === 'error';
   const trainersUnknown = loading || trainersUnread;
   const { tenant } = useTenant();
+  // The gym's own currency (`tenants.currency`, part 99). Null until the tenant
+  // read returns, and gymMoney falls back to GYM_CURRENCY for that window.
+  const cur = tenant?.currency ?? null;
   const roll = gymRollup(trainers as TrainerLike[], tenant?.sessionFee ?? null);
   // This hook PERSISTS what it is handed, so a figure we are unsure of is not
   // wrong for a second — it is saved as this month's history and nothing later
@@ -62,24 +64,27 @@ export default function OwnerOverview() {
   // Trainers sorted worst-health first so problems surface at the top.
   const ranked = [...(trainers as TrainerLike[])].map((tr) => ({ tr, h: trainerHealth(tr) })).sort((a, b) => a.h.score - b.h.score);
   const selHealth = sel ? trainerHealth(sel) : null;
-  // Null until the read returns. The `.catch` is not decoration: without it a
-  // rejected read was an unhandled promise rejection and the state kept its
-  // initial `[]`, so "no failed payments" was indistinguishable from "we never
-  // found out" — and this is the callout an owner acts on to chase money.
-  const [dunning, setDunning] = useState<Invoice[] | null>(null);
-  // null is now returned by fetchFailedInvoices for a refused read as well as
-  // being the initial value, so the two need telling apart: the callout below
-  // renders only when there ARE unpaid invoices, which means a failed read drew
-  // nothing at all and the owner read that as "everyone has paid".
-  const [dunningFailed, setDunningFailed] = useState(false);
-  useEffect(() => {
-    let c = false;
-    fetchFailedInvoices()
-      .then((r) => { if (!c) { setDunning(r); setDunningFailed(r === null); } })
-      .catch((e) => { reportError('ownerDashboard.dunning', e); if (!c) { setDunning(null); setDunningFailed(true); } });
-    return () => { c = true; };
-  }, []);
-  const dunningTotal = (dunning ?? []).reduce((a, i) => a + (i.amount_due || 0), 0);
+  // ── The failed-payments callout is gone, and it should never have been here.
+  //
+  // It read `invoices`, which is the Stripe ledger for a TRAINER paying REPPLE
+  // (part 20) — not gym money. It is a survivor of the subscription console
+  // this app used to be. So a gym owner was shown "AED X in failed payments,
+  // retry or chase before they churn" over other people's platform bills, in a
+  // currency it hardcoded, and the money their own members owe them was never
+  // on this screen at all.
+  //
+  // The Trainers screen states the principle in its own header: what a trainer
+  // pays Repple is "not a number a gym owner has any business seeing on their
+  // own dashboard".
+  //
+  // It was also reading across every gym in the project. `invoices` has no
+  // tenant column, and the policy's second arm was an unscoped
+  // `role = 'owner'`, so the query returned every trainer's invoices
+  // everywhere. Part 106 removes that arm; this removes the reader.
+  //
+  // The gym's own receivables are `gym_invoices` (part 29) and its payments are
+  // `gym_payments`, read by the Members screen. A callout over those would be
+  // the right feature — it is not this one.
   const exportReport = async () => {
     // The one artefact on this screen that leaves the app. Every figure in it
     // is a roll-up of `trainers`, and ownerReportDoc prints each one as a bare
@@ -156,30 +161,6 @@ export default function OwnerOverview() {
             </Notice>
           ) : null}
 
-          {dunningFailed ? (
-            <Notice tone={t.warn} kicker="Failed payments"
-              title="Unpaid invoices could not be read"
-              note="This is not a statement that everybody has paid. Until it loads, nothing here tells you whether money is outstanding — check Stripe directly before you assume it is not." />
-          ) : null}
-
-          {dunning && dunning.length > 0 ? (
-            <Notice tone={t.crit} kicker="Failed payments"
-              title={`${money(dunningTotal)} in failed payments`}
-              note={`${dunning.length} unpaid invoice${dunning.length > 1 ? 's' : ''} — retry or chase before they churn.`}>
-              <View style={{ marginTop: sp.md }}>
-                {dunning.slice(0, 4).map((inv) => (
-                  <Pressable key={inv.id} onPress={() => inv.hosted_invoice_url && Linking.openURL(inv.hosted_invoice_url)}
-                    style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, paddingVertical: sp.sm, borderTopWidth: hairline, borderTopColor: t.ring }}>
-                    <Text style={{ ...ty.caption, color: t.ink2, flex: 1 }} numberOfLines={1}>
-                      Invoice {inv.id.slice(-8)} · {inv.attempt_count || 0} attempt{(inv.attempt_count || 0) === 1 ? '' : 's'}
-                    </Text>
-                    <Text style={{ ...ty.caption, ...numeric, color: t.ink }}>{money(inv.amount_due, inv.currency)}</Text>
-                    {inv.hosted_invoice_url ? <Icon name="chevron" size={14} color={t.ink3} /> : null}
-                  </Pressable>
-                ))}
-              </View>
-            </Notice>
-          ) : null}
         </View>
 
         {!loading && roll.trainers === 0 ? (
@@ -204,7 +185,7 @@ export default function OwnerOverview() {
             ? `${delta > 0 ? '+' : '−'}${num(Math.abs(delta))} vs last month`
             : roll.payroll30 == null
               ? 'Set a session fee in Ops to value these'
-              : `Worth ${gymMoney(roll.payroll30)} at your session fee`}
+              : `Worth ${gymMoney(roll.payroll30, cur)} at your session fee`}
           onPress={() => router.push('/(owner)/revenue')}
         />
 
@@ -216,7 +197,7 @@ export default function OwnerOverview() {
           <KpiRow items={[
             { label: 'Trainers', value: trainersUnknown ? '—' : fig(roll.trainers), delta: loading ? 'not read yet' : trainersUnread ? 'could not be read' : roll.avgSessionsPerTrainer == null ? 'no trainers yet' : `${roll.avgSessionsPerTrainer} sessions avg` },
             { label: 'Clients', value: trainersUnknown ? '—' : fig(num(roll.clients)), delta: loading ? 'not read yet' : trainersUnread ? 'could not be read' : roll.avgClientsPerTrainer == null ? 'no trainers yet' : `${roll.avgClientsPerTrainer} avg / trainer` },
-            { label: 'Payroll · 30d', value: trainersUnknown ? '—' : fig(gymMoney(roll.payroll30)), delta: loading ? 'not read yet' : trainersUnread ? 'could not be read' : roll.payroll30 == null ? 'no session fee set' : 'at your session fee' },
+            { label: 'Payroll · 30d', value: trainersUnknown ? '—' : fig(gymMoney(roll.payroll30, cur)), delta: loading ? 'not read yet' : trainersUnread ? 'could not be read' : roll.payroll30 == null ? 'no session fee set' : 'at your session fee' },
           ]} />
         </Section>
 

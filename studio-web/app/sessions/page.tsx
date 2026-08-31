@@ -13,6 +13,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase, loadMe, type Me } from '@/lib/supabase';
 import { Shell } from '@/components/Shell';
 import { DataTable, type Column } from '@/components/DataTable';
+import { amount, currencyNote, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
 import {
   fetchSessions, markOutcome, clearOutcome,
   isAwaitingOutcome, payrollByTrainer, payrollTotal, settlementBlocker,
@@ -36,6 +37,10 @@ export default function Sessions() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
   const [gymName, setGymName] = useState<string | null>(null);
   const [sessionFee, setSessionFee] = useState<number | null>(null);
+  // `tenants.currency`. Null means the gym has not said what money it charges
+  // in, and every figure on this page is the gym's own session fee multiplied
+  // out — none of them carries a currency of its own to fall back on.
+  const [ccy, setCcy] = useState<TenantCurrency>(null);
   const [sessions, setSessions] = useState<PtSession[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
@@ -105,10 +110,11 @@ export default function Sessions() {
       // owner "set a session fee" — sending him to check a setting that is
       // probably already correct, for a read he was never told had failed.
       const { data: t, error } = await supabase
-        .from('tenants').select('name, session_fee').eq('id', who.tenantId).single();
+        .from('tenants').select('name, session_fee, currency').eq('id', who.tenantId).single();
       if (live) {
         setGymName(error ? null : (t?.name ?? null));
         setSessionFee(error ? null : (t?.session_fee ?? null));
+        setCcy(error ? null : ((((t as any)?.currency ?? '') as string).trim().toUpperCase() || null));
         setGymError(error ? (error.message || 'Could not read your gym.') : null);
       }
       await load(who.tenantId);
@@ -237,13 +243,16 @@ export default function Sessions() {
       .map(([trainerId, e]) => ({
         trainerId, name: e.name, rows: e.rows, unmarked: e.unmarked,
         cents: settlementAmount(e.rows, feeCents),
-        blocker: settleBlocker(e.rows, e.unmarked),
+        blocker: settleBlocker(e.rows, e.unmarked)
+          ?? (e.rows.length && !ccy
+            ? 'This gym has not set its currency, so a settlement cannot say what money it is in.'
+            : null),
       }))
       .filter((x) => x.rows.length > 0 || x.unmarked > 0);
-  }, [sessions, policy, sessionFee]);
+  }, [sessions, policy, sessionFee, ccy]);
 
   const settle = async (t: NonNullable<typeof owed>[number]) => {
-    if (!me?.tenantId || t.blocker) return;
+    if (!me?.tenantId || t.blocker || !ccy) return;
     const dates = t.rows.map((s) => s.startsAt.slice(0, 10)).sort();
     setSettling(t.trainerId);
     try {
@@ -253,6 +262,11 @@ export default function Sessions() {
         periodTo: dates[dates.length - 1],
         amountCents: t.cents,
         sessionIds: t.rows.map((s) => s.id),
+        // Stated, never defaulted: gymSessions writes `currency ?? 'AED'` into
+        // payroll_settlements, so leaving this out does not merely mislabel the
+        // screen — it stamps the wrong money onto a permanent payment record
+        // that /accounting and /close later read back as fact.
+        currency: ccy,
       });
       await load(me.tenantId);
     } catch (e: any) {
@@ -295,10 +309,14 @@ export default function Sessions() {
              note={policy.payNoShows ? 'no-shows included' : 'delivered only'} />
         <Kpi
           label="Payroll, 30 days"
-          text={total.cents == null ? null : money(total.cents)}
+          text={amount(total.cents, ccy)}
           // No note at all when the sessions are unknown: "ready to settle" on a
           // period nobody could read is the worst of the available sentences.
-          note={sessions === null ? undefined : (blocker ?? 'ready to settle')}
+          // A missing currency is its own reason and names the setting, rather
+          // than being reported as something wrong with the sessions.
+          note={sessions === null
+            ? undefined
+            : (blocker ?? currencyNote(total.cents, ccy) ?? 'ready to settle')}
         />
       </div>
 
@@ -332,10 +350,10 @@ export default function Sessions() {
       </Section>
 
       <Awaiting sessions={awaiting} unread={unread} onMark={mark} />
-      <Payroll lines={lines} unread={unread} />
-      <Settle owed={owed} unread={unread} settling={settling} onSettle={settle} />
+      <Payroll lines={lines} unread={unread} ccy={ccy} />
+      <Settle owed={owed} unread={unread} settling={settling} onSettle={settle} ccy={ccy} />
       <Settled runs={settlements} error={settlementsError} />
-      <Marked sessions={settled} unread={unread} onClear={undo} />
+      <Marked sessions={settled} unread={unread} onClear={undo} ccy={ccy} />
     </Shell>
   );
 }
@@ -389,8 +407,8 @@ function Awaiting({ sessions, unread, onMark }: {
 
 /* ── per-trainer payroll ───────────────────────────────────────────────────── */
 
-function Payroll({ lines, unread }: {
-  lines: ReturnType<typeof payrollByTrainer> | null; unread: boolean;
+function Payroll({ lines, unread, ccy }: {
+  lines: ReturnType<typeof payrollByTrainer> | null; unread: boolean; ccy: TenantCurrency;
 }) {
   const cols: Column<NonNullable<typeof lines>[number]>[] = [
     { key: 'name', header: 'Trainer', value: (l) => l.trainerName ?? '',
@@ -406,7 +424,7 @@ function Payroll({ lines, unread }: {
       // Null is unpriced work, not free work.
       render: (l) => l.cents == null
         ? <span className="dash">not priced</span>
-        : money(l.cents) },
+        : (amount(l.cents, ccy) ?? <span className="dash">{NO_CURRENCY_NOTE}</span>) },
   ];
   return (
     <Section title="Payroll by trainer" sub="Priced from confirmed sessions at the rate snapshotted when each was marked.">
@@ -425,11 +443,12 @@ function Payroll({ lines, unread }: {
 
 /* ── settling: handing the money over, exactly once ────────────────────────── */
 
-function Settle({ owed, unread, settling, onSettle }: {
+function Settle({ owed, unread, settling, onSettle, ccy }: {
   owed: { trainerId: string; name: string | null; rows: PtSession[]; unmarked: number; cents: number; blocker: string | null }[] | null;
   unread: boolean;
   settling: string | null;
   onSettle: (t: any) => void;
+  ccy: TenantCurrency;
 }) {
   return (
     <Section
@@ -453,7 +472,13 @@ function Settle({ owed, unread, settling, onSettle }: {
           padding: '12px 14px', borderTop: '1px solid var(--ring)',
         }}>
           <div style={{ flex: 1, minWidth: 180 }}>
-            <div style={{ fontSize: 13.5, fontWeight: 500 }}>{t.name ?? 'Trainer'}</div>
+            {/* A dash, not "Trainer". /classes states the rule this row used to
+                break: a made-up label on a row with a Pay button beside it gets
+                read as a person, and the money goes out against a name nobody
+                recorded. */}
+            <div style={{ fontSize: 13.5, fontWeight: 500 }}>
+              {t.name ?? <span className="dash">name not readable</span>}
+            </div>
             <div style={{ fontSize: 12.5, color: 'var(--ink3)', marginTop: 2 }}>
               {t.blocker
                 ? t.blocker
@@ -461,7 +486,9 @@ function Settle({ owed, unread, settling, onSettle }: {
             </div>
           </div>
           <div style={{ fontFamily: 'var(--mono)', fontSize: 15, minWidth: 100, textAlign: 'right' }}>
-            {t.blocker ? <span className="dash">—</span> : money(t.cents)}
+            {t.blocker
+              ? <span className="dash">—</span>
+              : (amount(t.cents, ccy) ?? <span className="dash">{NO_CURRENCY_NOTE}</span>)}
           </div>
           <button
             disabled={!!t.blocker || settling === t.trainerId}
@@ -499,8 +526,10 @@ function Settled({ runs, error }: { runs: Settlement[] | null; error: string | n
     { key: 'n', header: 'Sessions', value: (r) => r.sessionsCount, numeric: true },
     { key: 'amount', header: 'Amount', value: (r) => r.amountCents, numeric: true,
       // Snapshotted at the time, never recomputed — a later fee change must not
-      // rewrite what was actually handed over.
-      render: (r) => money(r.amountCents) },
+      // rewrite what was actually handed over. The row snapshots its CURRENCY
+      // too, and dropping it printed every past run in whatever money the helper
+      // defaults to rather than the money that actually left the account.
+      render: (r) => money(r.amountCents, r.currency) },
   ];
   return (
     <Section title="Already paid" sub="Amounts as they were when the money went out, not as today's rates would price them.">
@@ -522,8 +551,9 @@ function Settled({ runs, error }: { runs: Settlement[] | null; error: string | n
 
 /* ── the marked history, so a mistake can be undone ────────────────────────── */
 
-function Marked({ sessions, unread, onClear }: {
+function Marked({ sessions, unread, onClear, ccy }: {
   sessions: PtSession[] | null; unread: boolean; onClear: (id: string) => void;
+  ccy: TenantCurrency;
 }) {
   const cols: Column<PtSession>[] = [
     { key: 'when', header: 'When', value: (s) => s.startsAt,
@@ -534,7 +564,9 @@ function Marked({ sessions, unread, onClear }: {
     { key: 'outcome', header: 'Outcome', value: (s) => s.outcome ?? '',
       render: (s) => s.outcome ? OUTCOME_LABEL[s.outcome] : <span className="dash">—</span> },
     { key: 'rate', header: 'Rate', value: (s) => s.rateCents ?? -1, numeric: true,
-      render: (s) => s.rateCents == null ? <span className="dash">—</span> : money(s.rateCents) },
+      render: (s) => s.rateCents == null
+        ? <span className="dash">—</span>
+        : (amount(s.rateCents, ccy) ?? <span className="dash">{NO_CURRENCY_NOTE}</span>) },
     { key: 'undo', header: '', value: () => 0, align: 'right',
       render: (s) => <button style={linkBtn} onClick={() => onClear(s.id)}>Undo</button> },
   ];

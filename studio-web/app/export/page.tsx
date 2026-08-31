@@ -26,10 +26,15 @@
 // stub in place of its CSV, an INCOMPLETE in every filename, and a warning at
 // the top of the README. src/lib/gymExport.ts does that part; this file's only
 // job is to be honest about what it managed to read.
+//
+// The eleven files leave as ONE zip, written by lib/zip.ts — no dependency, the
+// 1989 format is a page of DataViews. See the comment on `downloadAll` for why
+// eleven separate downloads was not a bundle.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase, loadMe, type Me } from '@/lib/supabase';
 import { Shell } from '@/components/Shell';
 import { DataTable, type Column } from '@/components/DataTable';
+import { zip } from '@/lib/zip';
 import { fetchPlans, fetchMemberships, fetchPayments } from '@lib/gymRecord';
 import { fetchClasses } from '@lib/gymSchedule';
 import { fetchSessions } from '@lib/gymSessions';
@@ -208,10 +213,10 @@ export default function ExportPage() {
     <Shell me={me} gymName={gymName} current="/export">
       <h1>Export</h1>
       <p style={{ color: 'var(--ink3)', marginTop: 6, fontSize: 13, maxWidth: 640 }}>
-        The whole operating record as CSV, in the shapes another system can
-        read: the price book, members, memberships, payments, the timetable,
-        class attendance, one-to-ones, passes, the door log and invites. It is
-        the gym’s record, and leaving with it has to be possible.
+        The whole operating record as CSV in one zip, in the shapes another
+        system can read: the price book, members, memberships, payments, the
+        timetable, class attendance, one-to-ones, passes, the door log and
+        invites. It is the gym’s record, and leaving with it has to be possible.
       </p>
 
       {bundle && !bundle.complete ? (
@@ -308,19 +313,36 @@ function Files({ bundle, blocker }: {
   blocker: string | null;
 }) {
   const [busy, setBusy] = useState(false);
+  const [zipError, setZipError] = useState<string | null>(null);
 
+  /**
+   * One archive, not eleven downloads.
+   *
+   * The old loop fired each file at the browser in turn with a pause between,
+   * because a burst of programmatic downloads gets throttled and the tail is
+   * dropped — silently, which is the exact failure this screen exists to avoid.
+   * A pause makes that less likely, never impossible, and it still left the gym
+   * holding eleven loose files with no edge between them: README.txt and
+   * manifest.json, the two that say what is missing, arriving as just two more
+   * things in Downloads. A zip either arrives whole or does not arrive.
+   *
+   * Names inside the archive are the same names the per-file buttons produce,
+   * INCOMPLETE marker and all, so unpacking the bundle and downloading the
+   * files one by one cannot produce differently-named records of the same
+   * export.
+   */
   const downloadAll = async () => {
     if (!bundle) return;
     setBusy(true);
+    setZipError(null);
     try {
-      // One at a time with a breath between: browsers throttle a burst of
-      // programmatic downloads and drop the tail, which would take files out of
-      // the bundle silently — the exact failure this whole screen exists to
-      // avoid.
-      for (const f of bundle.files) {
-        download(f);
-        await new Promise((r) => setTimeout(r, 220));
-      }
+      const blob = await zip(bundle.files.map((f) => ({ name: f.name, text: f.text })));
+      save(blob, `${bundle.prefix}.zip`);
+    } catch (e) {
+      // Said out loud rather than swallowed: a button that appears to do
+      // nothing reads as "the export is empty". The per-file buttons below
+      // still work, so the record is still reachable.
+      setZipError(reason(e));
     } finally { setBusy(false); }
   };
 
@@ -360,9 +382,19 @@ function Files({ bundle, blocker }: {
     >
       <div style={formRow}>
         <button onClick={downloadAll} disabled={!bundle || !!blocker || busy} style={primaryBtn}>
-          {busy ? 'Downloading…' : `Download all ${bundle?.files.length ?? ''} files`.trim()}
+          {busy
+            ? 'Building the archive…'
+            : bundle
+              ? `Download all ${bundle.files.length} files as a zip`
+              : 'Download all files as a zip'}
         </button>
         {blocker ? <span style={{ color: 'var(--ink3)', fontSize: 12.5 }}>{blocker}</span> : null}
+        {zipError ? (
+          <span style={{ color: 'var(--crit)', fontSize: 12.5 }}>
+            The archive could not be built: {zipError}. Nothing was downloaded — take the files
+            individually below.
+          </span>
+        ) : null}
       </div>
       {bundle === null
         ? <div style={{ padding: '26px 20px', color: 'var(--ink3)' }}>Reading the record…</div>
@@ -372,11 +404,14 @@ function Files({ bundle, blocker }: {
 }
 
 function download(f: ExportFile) {
-  const blob = new Blob([f.text], { type: f.mime });
+  save(new Blob([f.text], { type: f.mime }), f.name);
+}
+
+function save(blob: Blob, name: string) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = f.name;
+  a.download = name;
   document.body.appendChild(a);
   a.click();
   a.remove();

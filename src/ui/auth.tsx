@@ -5,6 +5,7 @@
 // on launch. Screens are unchanged — they just read { authed, user }.
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { USE_SUPABASE } from '../lib/config';
+import { VARIANT } from '../lib/variant';
 import { registerForPush } from './pushNotifications';
 import {
   supabase,
@@ -219,11 +220,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    * For a number that already has an account Supabase ignores the data, which
    * is the behaviour wanted — an existing member's brand is not up for revision
    * by whichever app they happened to open.
+   *
+   * ── `role` travels with it, for exactly the same reason ────────────────────
+   *
+   * It did not, and that was a hole with a floor under it. handle_new_user()
+   * reads `raw_user_meta_data->>'role'` and COALESCES it to 'client'; the phone
+   * path sent brand and nothing else, so every account created by tapping
+   * "Continue with your phone number" was provisioned as a client — a `clients`
+   * row and no `trainers` row — whichever of the three apps it was tapped in.
+   *
+   * On Repple Coach that button is the FIRST thing on the sign-up screen, above
+   * the name and email fields, and a coach who took it got an app that could
+   * not issue them a join code: my_join_code() raises 'no trainer profile for
+   * this account' (verified on the live database), which the invite sheet shows
+   * as "This account is not set up as a coach". Nothing before that point looks
+   * wrong — the code screen works, they are signed in, the dashboard opens —
+   * so the first sign of it is the moment they try to get their first client.
+   *
+   * VARIANT, and not a parameter: this is the same fact the email door already
+   * states the same way (`const role = VARIANT` in app/welcome.tsx). The app
+   * somebody installed decides what they are signing up as; asking again could
+   * only contradict it.
+   *
+   * The `data` is only read when the row is CREATED, so this cannot re-role an
+   * existing account — a member of a gym whose number already has an account
+   * stays a client when they open the coach app, exactly as the brand does.
    */
   const sendPhoneCode = async (e164: string): Promise<{ ok: true } | { ok: false; reason: string }> => {
     if (!USE_SUPABASE) return { ok: false, reason: 'Not connected to Repple, so no code was sent.' };
     try {
-      const { error } = await supabase.auth.signInWithOtp({ phone: e164, options: { shouldCreateUser: true, data: brandSignUpMetadata() } });
+      const { error } = await supabase.auth.signInWithOtp({ phone: e164, options: { shouldCreateUser: true, data: { ...brandSignUpMetadata(), role: VARIANT } } });
       if (error) { reportError('auth.sendPhoneCode', error); return { ok: false, reason: phoneAuthError(error.message) }; }
       return { ok: true };
     } catch (e: any) {

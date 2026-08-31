@@ -9,7 +9,7 @@
 // Inviting is kept because it is the one action here that was always real: it
 // writes a `trainer_invites` row the invitee accepts in their own app.
 import { useState } from 'react';
-import { View, Text, ScrollView, Pressable, Modal, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, ScrollView, Pressable, Modal, TextInput, KeyboardAvoidingView, Platform, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -19,6 +19,7 @@ import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } f
 import { usePlatformTrainers, type GymTrainer } from '../../src/ui/trainers';
 import { useTrainerInvites } from '../../src/ui/trainerInvites';
 import { useTenant, gymMoney } from '../../src/ui/tenant';
+import { parseEmail } from '../../src/lib/csvImport';
 import { trainerHealth, gymRollup } from '../../src/lib/ownerAnalytics';
 
 export default function OwnerTrainers() {
@@ -34,10 +35,49 @@ export default function OwnerTrainers() {
   const trainersUnread = trainersStatus === 'error';
   const trainersUnknown = loading || trainersUnread;
   const { tenant } = useTenant();
+  // The gym's own currency (`tenants.currency`, part 99), not the operating
+  // record's fallback. Null while the tenant is unread, and gymMoney falls back
+  // for exactly that window.
+  const cur = tenant?.currency ?? null;
   const { sent: sentInvites, sendTrainerInvite, revokeTrainerInvite } = useTrainerInvites();
   const [invOpen, setInvOpen] = useState(false);
   const [invEmail, setInvEmail] = useState('');
+  // The invite sheet reports its own outcome rather than closing on hope. See
+  // `send` below for what it used to do instead.
+  const [invBusy, setInvBusy] = useState(false);
+  const [invErr, setInvErr] = useState<string | null>(null);
   const [sel, setSel] = useState<GymTrainer | null>(null);
+
+  // The sheet closes when the invitation is ON THE SERVER, and not before.
+  //
+  // This was `await sendTrainerInvite(invEmail); setInvOpen(false);` — the
+  // boolean dropped on the floor. Paired with the provider inserting its
+  // optimistic row before the network call, a refused invite closed the sheet
+  // and left a "Pending" row for somebody who had not been invited: the two
+  // halves of one bug, and either half alone would have been survivable. The
+  // provider no longer invents the row; this no longer claims it was sent.
+  const send = async () => {
+    const parsed = parseEmail(invEmail);
+    if (!parsed.ok) { setInvErr('Enter the email address they will sign in with.'); return; }
+    setInvBusy(true); setInvErr(null);
+    const sent = await sendTrainerInvite(parsed.value);
+    setInvBusy(false);
+    if (!sent) {
+      setInvErr(`${parsed.value} has not been invited. Nothing was sent and nothing was saved — check your connection and try again.`);
+      return;
+    }
+    setInvOpen(false); setInvEmail('');
+  };
+
+  // Same again: a revoke the server refused used to take the invitation off this
+  // screen while leaving it live in the invitee's app, where accepting it still
+  // attaches them to the gym.
+  const revoke = async (id: string, email: string) => {
+    const done = await revokeTrainerInvite(id);
+    if (!done) {
+      Alert.alert('Not cancelled', `The invitation to ${email} is still open. Nothing changed — try again in a moment.`);
+    }
+  };
 
   const current = sel ? trainers.find((x) => x.id === sel.id) ?? null : null;
   const roll = gymRollup(trainers, tenant?.sessionFee ?? null);
@@ -67,7 +107,7 @@ export default function OwnerTrainers() {
             : trainers.length === 0 ? 'Invite a trainer and their delivered sessions start counting here.'
             : payroll30 == null
               ? `Across ${trainers.length} trainer${trainers.length === 1 ? '' : 's'} · set a session fee to see what that is worth`
-              : `Across ${trainers.length} trainer${trainers.length === 1 ? '' : 's'} · ${gymMoney(payroll30)} at your session fee`
+              : `Across ${trainers.length} trainer${trainers.length === 1 ? '' : 's'} · ${gymMoney(payroll30, cur)} at your session fee`
           }
           onPress={() => router.push('/(owner)/revenue')}
         />
@@ -97,7 +137,7 @@ export default function OwnerTrainers() {
             { label: 'Need a Look', value: trainersUnknown ? '—' : fig(roll.atRiskCount) },
           ]} />
           <View style={{ marginTop: sp.xl }}>
-            <Cta label="Invite a Trainer by Email" wide onPress={() => { setInvEmail(''); setInvOpen(true); }} />
+            <Cta label="Invite a Trainer by Email" wide onPress={() => { setInvEmail(''); setInvErr(null); setInvOpen(true); }} />
           </View>
         </Section>
 
@@ -111,7 +151,7 @@ export default function OwnerTrainers() {
                   <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{i.email}</Text>
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>Awaiting sign-up / accept</Text>
                 </View>
-                <Ghost label="Cancel" onPress={() => revokeTrainerInvite(i.id)} />
+                <Ghost label="Cancel" onPress={() => { void revoke(i.id, i.email); }} />
               </View>
             ))}
           </Section>
@@ -170,11 +210,15 @@ export default function OwnerTrainers() {
             <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>
               They join your gym when they accept in their own app.
             </Text>
-            <TextInput value={invEmail} onChangeText={setInvEmail} placeholder="their@email.com" placeholderTextColor={t.ink3}
-              autoCapitalize="none" keyboardType="email-address" style={input} />
+            <TextInput value={invEmail} onChangeText={(v) => { setInvEmail(v); if (invErr) setInvErr(null); }}
+              placeholder="their@email.com" placeholderTextColor={t.ink3}
+              autoCapitalize="none" autoCorrect={false} keyboardType="email-address" style={input} />
+            {invErr ? (
+              <Text style={{ ...ty.caption, color: t.warn, marginTop: sp.sm }}>{invErr}</Text>
+            ) : null}
             <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.lg }}>
-              <View style={{ flex: 1 }}><Ghost label="Cancel" onPress={() => setInvOpen(false)} /></View>
-              <View style={{ flex: 1 }}><Cta label="Send Invite" wide onPress={async () => { await sendTrainerInvite(invEmail); setInvOpen(false); }} /></View>
+              <View style={{ flex: 1 }}><Ghost label="Cancel" onPress={() => { setInvErr(null); setInvOpen(false); }} /></View>
+              <View style={{ flex: 1 }}><Cta label={invBusy ? 'Sending…' : 'Send Invite'} wide disabled={invBusy} onPress={() => { void send(); }} /></View>
             </View>
           </View>
         </KeyboardAvoidingView>
@@ -203,7 +247,7 @@ export default function OwnerTrainers() {
                   />
                 ) : tenant?.sessionFee != null ? (
                   <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: sp.lg }}>
-                    {gymMoney(current.delivered30 * tenant.sessionFee)} at your {gymMoney(tenant.sessionFee)}/session fee
+                    {gymMoney(current.delivered30 * tenant.sessionFee, cur)} at your {gymMoney(tenant.sessionFee, cur)}/session fee
                   </Text>
                 ) : (
                   <Notice kicker="No session fee" title="Set a session fee in Ops to value delivered sessions." />

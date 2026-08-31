@@ -64,7 +64,11 @@ export default function Overview() {
         const rows = await fetchGymTrainers(supabase, who.tenantId);
         if (live) setTrainers(rows);
       } catch (e: any) {
-        if (live) { setError(e?.message ?? 'Could not read the roster.'); setTrainers([]); }
+        // Null, not []. An empty roster is fed to `gymRollup`, which answers
+        // 0 trainers, 0 clients, 0 sessions and 0 needing a look — six invented
+        // figures — and the table below it says "No trainers in this gym yet.
+        // Invite one." to an owner whose roster is full and whose read failed.
+        if (live) { setError(e?.message ?? 'Could not read the roster.'); setTrainers(null); }
       }
 
       // allSettled, not all: one failing read must not take the others with it.
@@ -279,7 +283,14 @@ export default function Overview() {
         <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--ring)' }}>
           <h2>Roster</h2>
         </div>
-        {trainers === null ? (
+        {trainers === null && error ? (
+          // Not the DataTable's empty state: that sentence claims the gym has
+          // no trainers, and this branch is reached precisely when nobody knows.
+          <div style={{ padding: '28px 20px', color: 'var(--ink3)', fontSize: 13 }}>
+            The roster could not be read, so this is not an empty gym — it is an unread one.
+            The figures above that come from the roster are missing for the same reason.
+          </div>
+        ) : trainers === null ? (
           <div style={{ padding: '28px 20px', color: 'var(--ink3)' }}>Loading…</div>
         ) : (
           <DataTable

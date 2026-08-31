@@ -63,7 +63,24 @@ export default function TrainerSchedule() {
   const t = useTheme();
   const now = new Date();
   const router = useRouter();
-  const { sessions, addSession, releaseSession, removeSession, refresh } = useSessions();
+  const { sessions, status: sessionsStatus, addSession, releaseSession, removeSession, refresh } = useSessions();
+  // ── The empty diary that was not empty ───────────────────────────────────
+  //
+  // Every figure and every empty-state sentence below was built straight off
+  // `sessions.length`, and this provider returns an empty list for two entirely
+  // different answers: the coach genuinely has nothing scheduled, and the
+  // calendar could not be read. Under 'error' this screen therefore told a
+  // coach with a full week "Booked — 0 sessions", "Nothing scheduled yet" and,
+  // on whichever day they tapped, "No sessions this day" — the standing rule in
+  // src/ui/loadStatus.ts, broken on the screen where it costs the most. A coach
+  // reading that thirty seconds before a client arrives does not conclude the
+  // network is down; they conclude the booking never happened.
+  //
+  // 'partial' is separated from 'ready' for the other half of the rule: the
+  // rows are real but they are not all of them, so they may be listed and must
+  // not be counted. Both counts and the percentage go to a dash there.
+  const known = sessionsStatus !== 'error';
+  const countable = sessionsStatus === 'ready';
   // The other side of this booking happens on somebody else's phone. Re-read on
   // focus so what is on screen is the diary as it stands, not as it stood at
   // launch — including a slot that has just been taken.
@@ -108,14 +125,41 @@ export default function TrainerSchedule() {
   // nobody. The count now says how many are actually open.
   const generateSlots = async () => {
     if (!availSlots.length) { Alert.alert('No availability set', 'Add at least one weekly slot first.'); return; }
+    // Generating against a calendar we could not read would open slots on top of
+    // sessions that are already there: `addSession`'s overlap check runs against
+    // the list this screen holds, and under 'error' that list is empty for want
+    // of a read rather than for want of bookings. The result is a coach offering
+    // a client an hour somebody else already has.
+    if (!known) {
+      Alert.alert(
+        'Can’t generate slots yet',
+        'Your calendar could not be read, so Repple does not know what you already have booked — and generating now could open slots on top of existing sessions.\n\nYour weekly availability is safe. Pull down to refresh and try again.',
+        [{ text: 'OK' }],
+      );
+      return;
+    }
     const saves: Promise<boolean>[] = [];
-    let overlapped = 0;
+    // Two quite different reasons a time is skipped, and they were reported as
+    // one sentence: "you already have something booked then". Generating twice —
+    // which a coach does without thinking, because the button does not say it
+    // has been pressed — skipped every date against the OPEN slots the first
+    // press created, and then announced that the coach's empty week was fully
+    // booked. Counted apart so each can be said truthfully.
+    let clash = 0;
+    let alreadyOpen = 0;
     for (const sl of availSlots) {
       for (const d of upcomingDates(sl.dow, sl.hour, sl.minute, 4)) {
-        const ses: TrainingSession = { id: 'ms' + (SEQ++), trainerId: '', clientId: null, startsAt: d.toISOString(), durationMin: sl.dur, status: 'available', released: false };
+        const iso = d.toISOString();
+        const ses: TrainingSession = { id: 'ms' + (SEQ++), trainerId: '', clientId: null, startsAt: iso, durationMin: sl.dur, status: 'available', released: false };
         const res = addSession(ses);
-        if (res.ok) saves.push(res.saved ?? Promise.resolve(false));
-        else overlapped++;
+        if (res.ok) { saves.push(res.saved ?? Promise.resolve(false)); continue; }
+        // `addSession` refuses on any overlap. Ask the same list it asked which
+        // KIND of thing is in the way — a booking or a block the coach must deal
+        // with themselves, or simply the offer they already made.
+        const blocking = sessions.some((x) => (x.status === 'booked' || x.status === 'blocked')
+          && Date.parse(x.startsAt) < Date.parse(iso) + sl.dur * 60_000
+          && Date.parse(iso) < Date.parse(x.startsAt) + x.durationMin * 60_000);
+        if (blocking) clash++; else alreadyOpen++;
       }
     }
     setAvailOpen(false);
@@ -125,9 +169,25 @@ export default function TrainerSchedule() {
     const lines = [
       added + ' open slot' + (added === 1 ? '' : 's') + ' added across the next 4 weeks — your clients can book ' + (added === 1 ? 'it' : 'them') + ' now.',
     ];
-    if (overlapped) lines.push(overlapped + ' time' + (overlapped === 1 ? ' was' : 's were') + ' skipped because you already have something booked then.');
+    if (alreadyOpen) lines.push(alreadyOpen + ' time' + (alreadyOpen === 1 ? ' was' : 's were') + ' already open on your calendar, so ' + (alreadyOpen === 1 ? 'it was' : 'they were') + ' left as ' + (alreadyOpen === 1 ? 'it is' : 'they are') + '. Nothing was lost.');
+    if (clash) lines.push(clash + ' time' + (clash === 1 ? ' was' : 's were') + ' skipped because you already have a session booked or time blocked then.');
     if (lost) lines.push(lost + ' slot' + (lost === 1 ? '' : 's') + ' could not be saved to the server, so ' + (lost === 1 ? 'it is' : 'they are') + ' not open to anyone. Try generating again.');
     Alert.alert(added ? 'Slots generated' : 'No slots opened', lines.join('\n\n'));
+  };
+
+  const addWeekly = async () => {
+    const when = `${DOW[avDow]} ${avTime(avHour, avMinute)}`;
+    const res = await addAvail(avDow, avHour, avMinute, 60);
+    if (res === 'saved') return;
+    if (res === 'duplicate') {
+      Alert.alert('Already on your week', `You already offer ${when} every week, so nothing was added.`, [{ text: 'OK' }]);
+      return;
+    }
+    Alert.alert(
+      'Saved on this phone only',
+      `${when} is in your weekly list here, but it did not reach the server — so it is not on your other devices, and generating open slots from it may not work.\n\nIt has not been lost. Check your connection and remove and re-add it once you are back online.`,
+      [{ text: 'OK' }],
+    );
   };
 
   const booked = sessions.filter((s) => s.status === 'booked');
@@ -181,7 +241,17 @@ export default function TrainerSchedule() {
         'Not blocked',
         row?.reason === 'booked'
           ? `You have a session booked in that time, so nothing was changed. Cancel it first — that tells the client — and then block the time.`
-          : `That did not save, so the time is not blocked and clients can still book it. Try again.`,
+          // 'already-blocked' is the reason supabase/parts/113 added, and it
+          // exists because this branch used to be reached by an exception and
+          // answered with the sentence below — which was false in both halves.
+          // Extending a block (block the morning, then decide to take the whole
+          // day) raised a raw exclusion_violation out of the RPC, and the coach
+          // was told their time was NOT blocked and clients could still book it,
+          // when the block that caused the error was the very thing stopping
+          // them. They were then invited to try again, forever.
+          : row?.reason === 'already-blocked'
+            ? `You have already blocked time that overlaps this, so nothing was changed — and nobody can book across it. To cover a longer period, free the existing block up on this day first, then block the new hours.`
+            : `That did not save, so the time is not blocked and clients can still book it. Try again.`,
         [{ text: 'OK' }],
       );
       return;
@@ -433,12 +503,21 @@ export default function TrainerSchedule() {
         {/* ── the hero: how much of the schedule is spoken for ────────────── */}
         <Hero
           label="Booked"
-          figure={fig(booked.length)}
-          unit={booked.length === 1 ? 'session' : 'sessions'}
-          note={totalSlots === 0
-            ? 'Nothing scheduled yet — add a session or set your weekly availability.'
-            : `${open.length} open slot${open.length === 1 ? '' : 's'} · ${Math.round((booked.length / totalSlots) * 100)}% of your slots are filled`}
-          arc={totalSlots ? booked.length / totalSlots : undefined}
+          figure={countable ? fig(booked.length) : fig(null)}
+          unit={countable && booked.length === 1 ? 'session' : 'sessions'}
+          note={!known
+            ? 'Your calendar could not be read, so this is not a count of your week — it is a dash because the number is unknown. Nothing has been cancelled. Pull down to refresh.'
+            : sessionsStatus === 'loading'
+              ? 'Reading your calendar…'
+              : !countable
+                ? 'Only part of your calendar loaded, so it cannot be counted. The days below show what did come back.'
+                : totalSlots === 0
+                  ? 'Nothing scheduled yet — add a session or set your weekly availability.'
+                  : `${open.length} open slot${open.length === 1 ? '' : 's'} · ${Math.round((booked.length / totalSlots) * 100)}% of your slots are filled`}
+          // The ring is a proportion, which is a figure like any other. Drawn
+          // from a partial read it would show a coach a filled-up week off a
+          // fraction of it.
+          arc={countable && totalSlots ? booked.length / totalSlots : undefined}
           arcLabel="of today's slots booked"
         />
 
@@ -538,7 +617,18 @@ export default function TrainerSchedule() {
             onPress={() => { setAddClient(null); setAddOpen(true); }} />
 
           {selDaySessions.length === 0 ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>No sessions this day. Tap Add to book one.</Text>
+            // "No sessions this day" is a claim about the coach's diary, and it
+            // may only be made when the diary was actually read. Under 'error'
+            // this is the sentence that sends a coach home.
+            <Text style={{ ...ty.label, color: !known ? t.warn : t.ink3 }}>
+              {!known
+                ? 'Your calendar could not be read, so nothing can be shown for this day. This is a connection problem, not an empty day — do not book over it until it loads.'
+                : sessionsStatus === 'loading'
+                  ? 'Reading your calendar…'
+                  : sessionsStatus === 'partial'
+                    ? 'Nothing came back for this day, but only part of your calendar loaded — so this day may not be empty. Pull down to refresh.'
+                    : 'No sessions this day. Tap Add to book one.'}
+            </Text>
           ) : selDaySessions.map((s, i) => (
             <View key={s.id}>
               {i > 0 ? <Rule /> : null}
@@ -636,7 +726,13 @@ export default function TrainerSchedule() {
                 </View>
               ))}
             </View>
-            <Ghost label={`Add ${DOW[avDow]} ${avTime(avHour, avMinute)}`} icon="plus" onPress={() => addAvail(avDow, avHour, avMinute, 60)} />
+            {/* The result was discarded, and it is the half that matters: this
+                sheet is the template the month is generated from, so a weekly
+                slot that never reached the server is four sessions that never
+                open — and it sat in the list above looking exactly like a
+                saved one. Now each of the three outcomes says its own thing,
+                and the two that are not "saved" say what to do. */}
+            <Ghost label={`Add ${DOW[avDow]} ${avTime(avHour, avMinute)}`} icon="plus" onPress={() => { void addWeekly(); }} />
           </ScrollView>
           <View style={{ height: sp.lg }} />
           <Cta label="Generate Open Slots · Next 4 Weeks" wide onPress={generateSlots} />

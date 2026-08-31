@@ -26,6 +26,7 @@ import type { Message } from '../lib/types';
 import type { LoadStatus } from './loadStatus';
 import { capLimit, capped } from '../lib/rowCap';
 import { resolvePeerName, type PeerName } from '../lib/threadPeer';
+import { resolvePeerAvatar } from '../lib/peerAvatar';
 
 export type ChatRole = 'client' | 'coach';
 
@@ -193,29 +194,50 @@ export function useThread(clientId: string | null, role: ChatRole) {
  * a labelled dash for almost every client — honest, and a poor experience in an
  * app whose premise is that somebody is coaching you.
  *
- * `public.my_coach()` (supabase/parts/67) is a security-definer function that
- * takes no arguments and returns one column for one person. Having no parameter
- * is what makes it safe: there is nothing to probe, and it can only ever answer
- * about the coach of whoever is calling it.
+ * `public.my_coach()` (supabase/parts/67, extended by 115) is a security-definer
+ * function that takes no arguments and returns two columns for one person.
+ * Having no parameter is what makes it safe: there is nothing to probe, and it
+ * can only ever answer about the coach of whoever is calling it.
+ *
+ * ── And the face that goes with the name ─────────────────────────────────
+ *
+ * `avatar` is the second half of the same answer and obeys the same rule: it is
+ * whatever came back from the read for the OTHER party's id, and null the
+ * moment that party is not identified. It is deliberately NOT a separate read
+ * a screen could satisfy from somewhere else — the whole of TF-32 was a screen
+ * finding the reader's own name and the reader's own face because those were
+ * the ones it could get. resolvePeerAvatar (src/lib/peerAvatar.ts) is where
+ * that is asserted.
+ *
+ * A caller that only wants the name can keep ignoring the extra field; the
+ * value still satisfies PeerName, so app/(client)/calendar.tsx and
+ * bookings.tsx are unaffected by its arrival.
  *
  * @param role who I am in this thread.
  * @param clientId the thread key when I am the coach; ignored for a client,
  *        whose coach comes from my_coach().
  */
-export function useThreadPeerName(role: ChatRole, clientId: string | null): PeerName {
+export type ThreadPeer = PeerName & {
+  /** The other party's avatar, or null to draw a monogram instead. Never the
+   *  signed-in user's own — see src/lib/peerAvatar.ts. */
+  avatar: string | null;
+};
+
+export function useThreadPeerName(role: ChatRole, clientId: string | null): ThreadPeer {
   const authRev = useAuthRevision();
-  const [peer, setPeer] = useState<PeerName>(() =>
+  const [peer, setPeer] = useState<ThreadPeer>(() =>
     // With no backend there is no coaching link to read and never will be, so
     // this is settled at 'unlinked' rather than spinning on 'loading' forever.
-    USE_SUPABASE ? { kind: 'loading' } : { kind: 'unlinked' });
+    USE_SUPABASE ? { kind: 'loading', avatar: null } : { kind: 'unlinked', avatar: null });
 
   useEffect(() => {
-    if (!USE_SUPABASE) { setPeer({ kind: 'unlinked' }); return; }
+    if (!USE_SUPABASE) { setPeer({ kind: 'unlinked', avatar: null }); return; }
     let cancelled = false;
     (async () => {
       let peerId: string | null = null;
       let linkFailed = false;
       let name: string | null = null;
+      let avatar: string | null = null;
 
       if (role === 'coach') {
         // The coach's peer is handed in by the roster, so there is no link to
@@ -240,8 +262,12 @@ export function useThreadPeerName(role: ChatRole, clientId: string | null): Peer
             // different answer from a name we could not read — resolvePeerName
             // reports the first as 'withheld' only because peerId is present.
             name = typeof row?.coach_name === 'string' && row.coach_name ? row.coach_name : null;
+            // Same column, same read, same row. A coach who has set no picture
+            // is null here, which is the honest input to resolvePeerAvatar and
+            // draws a monogram rather than somebody else's face.
+            avatar = typeof row?.coach_avatar === 'string' ? row.coach_avatar : null;
           }
-        } catch { if (!cancelled) { setPeer({ kind: 'unknown' }); } return; }
+        } catch { if (!cancelled) { setPeer({ kind: 'unknown', avatar: null }); } return; }
       }
 
       // Coach side only. A client's name arrives with the link above, and
@@ -250,9 +276,13 @@ export function useThreadPeerName(role: ChatRole, clientId: string | null): Peer
       if (!cancelled && role === 'coach' && peerId && !linkFailed) {
         try {
           // no-error-ok: refused and empty both render as the same labelled dash
-          const { data } = await supabase.from('profiles').select('full_name').eq('id', peerId).single();
+          const { data } = await supabase.from('profiles').select('full_name, avatar').eq('id', peerId).single();
           if (cancelled) return;
           name = typeof (data as any)?.full_name === 'string' ? (data as any).full_name : null;
+          // `profiles_trainer_read` is what makes this readable, and it runs
+          // coach → their own client only. There is no branch on which this row
+          // is the reader's; peerId came from the roster.
+          avatar = typeof (data as any)?.avatar === 'string' ? (data as any).avatar : null;
         } catch { /* leaves the name unread, which the resolver reports as withheld */ }
       }
 
@@ -269,7 +299,13 @@ export function useThreadPeerName(role: ChatRole, clientId: string | null): Peer
         } catch { /* as above */ }
       }
 
-      if (!cancelled) setPeer(resolvePeerName({ settled: true, linkFailed, peerId, name }));
+      // `identified` is the same condition the name obeys: somebody is there,
+      // and the link read is what says so. A failed link read leaves peerId
+      // null for the same reason no-coach does, so both draw no face.
+      if (!cancelled) setPeer({
+        ...resolvePeerName({ settled: true, linkFailed, peerId, name }),
+        avatar: resolvePeerAvatar({ identified: !linkFailed && !!peerId, url: avatar }),
+      });
     })();
     return () => { cancelled = true; };
   }, [role, clientId, authRev]);

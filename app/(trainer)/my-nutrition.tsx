@@ -18,31 +18,34 @@
 // spelled out at length in my-training.tsx: a coach glancing at this screen
 // mid-day must be able to tell in one look that they are not reading a client.
 //
-// ── Why a coach account may not be able to STORE a meal ────────────────────
+// ── Where a coach's meal is stored, and why that was once nowhere ──────────
 //
 // This is the one thing here that is not simply "the client screen, for the
 // coach", and it is worth reading before changing anything.
 //
-// `food_logs.client_id` is `references clients(id)`. RLS is not the obstacle —
-// `food_owner` is `for all using (client_id = auth.uid())`, so a coach passes
-// it — but the FOREIGN KEY is: `provision_profile()` gives a role='trainer'
-// signup a `trainers` row and no `clients` row, so the insert is refused with
-// a constraint violation no matter what the policy says. Confirmed against the
-// live database: every trainer and owner profile there has no `clients` row.
+// `food_logs.client_id` USED TO BE `references clients(id)`. RLS was never the
+// obstacle — `food_owner` is `for all using (client_id = auth.uid())`, so a
+// coach passes it — but the FOREIGN KEY was: `provision_profile()` gives a
+// role='trainer' signup a `trainers` row and no `clients` row, so the insert
+// was refused with a constraint violation no matter what the policy said. So
+// the form was closed rather than left to fail on every submission forever.
 //
-// `useFoodLog.addFood` already resolves false in that case and this screen
-// would already say "not saved" — truthfully, and every single time, forever.
-// A form that can only ever fail is worse than no form, so the screen asks the
-// question ONCE up front (see `useFoodLogHome`) and says plainly which of the
-// two situations the coach is in. Nothing is faked either way: with a member
-// record on the account the full logging path works exactly as it does in the
-// client app, and without one the coach is told why rather than being invited
-// to type meals into a drain.
+// supabase/parts/95-own-food-and-scans.sql repointed both `food_logs` and
+// `scans` at `profiles(id)`, which is the table every account does have, and
+// that part is APPLIED to the live database — checked against pg_constraint
+// rather than taken from the file:
 //
-// Closing it properly needs a migration — either widening the FK to `profiles`
-// or provisioning a `clients` row for every account — and supabase/ is not
-// this screen's to change. When that lands, this screen needs no edit: the
-// probe starts answering "yes" and the form opens.
+//     food_logs_client_id_fkey  FOREIGN KEY (client_id)
+//                               REFERENCES profiles(id) ON DELETE CASCADE
+//
+// and an insert run as a real role='trainer' account, under RLS, is accepted
+// and reads back. So a coach can log a meal, and this screen opens the form.
+//
+// The probe below is KEPT rather than deleted, and now asks the question the
+// foreign key actually asks: is there a `profiles` row to hang a meal on. That
+// is true of every provisioned account, so in practice it answers 'stores' —
+// but a signup whose `handle_new_user()` never ran is a real state, and being
+// told why beats a form that silently refuses. Nothing is faked either way.
 //
 // ── What this screen is not ────────────────────────────────────────────────
 //
@@ -77,18 +80,24 @@ import { num } from '../../src/lib/format';
  * Whether this account has anywhere to PUT a meal.
  *
  * 'checking'  — the question is still in flight.
- * 'stores'    — there is a `clients` row, so an insert will be accepted.
- * 'no-record' — the account has no member record, so `food_logs` will refuse
- *               the write on its foreign key however well-formed it is.
+ * 'stores'    — there is a `profiles` row, so an insert will be accepted.
+ * 'no-record' — the account has no profile row at all, so `food_logs` will
+ *               refuse the write on its foreign key however well-formed it is.
  * 'unknown'   — we could not find out. Distinct from 'no-record' on purpose:
  *               a failed read is not permission to tell a coach their logging
  *               is broken, and it is not permission to promise them it works.
  *
+ * `profiles`, not `clients`. The table named here has to be the one the
+ * FOREIGN KEY names, and since part 95 that is `profiles` — asking `clients`
+ * answers a question the database stopped caring about, and answered it 'no'
+ * for every coach, which is what closed this form for all of them. Every
+ * account has a `profiles` row from `handle_new_user()`, coaches included.
+ *
  * A read, not a data layer: it fetches no meal and computes nothing. It exists
- * because the alternative is a form that silently fails. `maybeSingle` and the
- * reasoning behind it are lifted from src/ui/settings.tsx, which asks the same
- * question of the same table for the same reason — a coach has no clients row,
- * and that is an absence rather than a fault.
+ * because the alternative is a form that silently fails. `maybeSingle` because
+ * a missing row is an answer rather than a fault — `single()` would report
+ * PGRST116 as an error and land the coach in 'unknown' on the one path this
+ * exists to describe.
  */
 type FoodLogHome = 'checking' | 'stores' | 'no-record' | 'unknown';
 
@@ -106,11 +115,11 @@ function useFoodLogHome(): FoodLogHome {
         const { data: sess } = await supabase.auth.getSession();
         if (cancelled) return;
         // Signed out. Nothing is readable and nothing is writable, and saying
-        // "your account has no member record" to nobody in particular would be
+        // "your account has no profile" to nobody in particular would be
         // a claim about an account we have not identified.
         if (!sess?.session) { setHome('unknown'); return; }
         const uid = sess.session.user.id;
-        const { data, error } = await supabase.from('clients').select('id').eq('id', uid).maybeSingle();
+        const { data, error } = await supabase.from('profiles').select('id').eq('id', uid).maybeSingle();
         if (cancelled) return;
         if (error) { reportError('myNutrition.foodLogHome', error); setHome('unknown'); return; }
         setHome(data ? 'stores' : 'no-record');
@@ -230,7 +239,7 @@ export default function MyNutrition() {
     // of it, and emptying the form would take that away on the one path where
     // the coach may want to try again.
     setProblem(home === 'no-record'
-      ? 'Not saved. Your coach account has no member record, so there is nowhere on the server to store a meal against it — see the note at the top of this screen.'
+      ? 'Not saved. We could not find a profile for this account, so there is nowhere on the server to store a meal against it — see the note at the top of this screen.'
       : 'Not saved — we could not reach your food log. This meal is counting toward today on this phone only and will be gone when you next open the app.');
   };
 
@@ -327,7 +336,7 @@ export default function MyNutrition() {
           {home === 'no-record' ? (
             <Section>
               <Notice tone={t.crit} kicker="Nowhere to store it" title="This account cannot keep a food log yet"
-                note="Meals are stored against a member record, and a coach account is not given one. Anything you type below would be refused by the server, so the form is closed rather than throwing what you enter away. Your training log and your body measurements are unaffected — both are stored against your profile and work normally.">
+                note="Meals are stored against your profile, and we could not find one for this account. Anything you type below would be refused by the server, so the form is closed rather than throwing what you enter away. Signing out and back in usually rebuilds it; if it does not, your account needs looking at.">
                 <View style={{ marginTop: sp.lg }}>
                   <Ghost label="Log My Training Instead" icon="dumbbell" onPress={() => router.push('/(trainer)/my-training')} />
                 </View>
@@ -365,11 +374,25 @@ export default function MyNutrition() {
               // Not a target of zero, and not a target guessed from a default
               // body. The reason is named, because "no target" with no reason
               // reads as a bug rather than as a missing measurement.
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
-                {cd.profileStatus === 'loading'
-                  ? 'Reading your profile…'
-                  : 'There is no daily target here because nothing has measured you. A target is built from a weight and a body-fat percentage, and those live on a member record — which a coach account does not have. What is logged above is still your real intake.'}
-              </Text>
+              <View style={{ marginTop: sp.lg }}>
+                <Text style={{ ...ty.caption, color: t.ink3 }}>
+                  {cd.profileStatus === 'loading'
+                    ? 'Reading your profile…'
+                    : cd.scansStatus === 'loading'
+                      ? 'Reading your body composition…'
+                      : cd.scansStatus === 'error'
+                        // Not "nothing has measured you" — a failed read gives
+                        // nobody the standing to say that about somebody's own
+                        // record.
+                        ? 'Your body composition could not be read, so there is no target to build from it. That is not the same as never having been measured. What is logged above is still your real intake.'
+                        : 'There is no daily target here because nothing has measured you. A target is built from a weight and a body-fat percentage, and those come from a body scan. Add one on My Progress and this fills in. What is logged above is still your real intake.'}
+                </Text>
+                {cd.scansStatus !== 'loading' && cd.scansStatus !== 'error' ? (
+                  <View style={{ marginTop: sp.md }}>
+                    <Ghost label="Add My Body Scan" icon="scale" onPress={() => router.push('/(trainer)/my-progress')} />
+                  </View>
+                ) : null}
+              </View>
             ) : null}
           </Section>
 
@@ -387,6 +410,15 @@ export default function MyNutrition() {
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
                 Built from your own weight and body fat with Katch–McArdle, the same way the client app
                 builds one. Burn from a watch is shown beside the day, never added to the allowance.
+                {/* Said, not hidden. `macrosFor` shifts calories by GOAL_ADJ and
+                    the fat split by diet, and a coach account carries neither —
+                    a goal and a diet live on a member record. What it uses are
+                    the app's starting values, so the figure is a maintenance-led
+                    muscle-gain target rather than one built on answers this
+                    coach gave. A number whose assumptions are unstated is a
+                    number nobody can check. */}
+                {' '}It assumes a muscle-gain goal and no dietary restriction — a coach account holds
+                neither, so those are the app&rsquo;s starting values rather than answers you gave.
               </Text>
             ) : null}
           </Section>

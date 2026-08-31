@@ -63,16 +63,22 @@ export const RELEASES: Release[] = [
     version: '1.2.0',
     date: '2026-08-31',
     headlines: {
-      client:  'Injuries your plan works around, bookings that no longer claim to have happened, and a release to read before you start.',
+      client:  'Blood sugar beside your meals, injuries your plan works around, and bookings that no longer claim to have happened.',
       trainer: 'Injuries in front of you before you write the plan, a package that renews, time you can block out, and your own training in the same app.',
-      owner:   'Figures that say when they could not be read, and an account that opens only in your own gym’s app.',
+      owner:   'Your gym’s activity as it happens, promo codes that stay put, and figures that say when they could not be read.',
     },
     entries: [
       {
         kind: 'new',
         apps: ['client'],
         title: 'Blood sugar from your monitor, beside what you ate',
-        note: 'Meals › Blood Sugar. A Dexcom, or a Libre through its own app, writes into Apple Health and Repple reads it from there. Your coach sees none of it until you turn sharing on, and turning it off again hides the history too.',
+        note: 'Meals › Blood Sugar. A Dexcom, or a Libre through its own app, writes into Apple Health and Repple reads it from there — on iPhone; on Android you can type readings in yourself. Your coach sees none of it until you turn sharing on, and turning it off again hides the history too.',
+      },
+      {
+        kind: 'new',
+        apps: ['client'],
+        title: 'Redeem a code your gym has given you',
+        note: 'Membership › Offers. Repple records that you used it and tells your gym, who take the discount off through their own billing. A code works once, and only at the gym that issued it.',
       },
       {
         kind: 'new',
@@ -84,7 +90,7 @@ export const RELEASES: Release[] = [
         kind: 'new',
         apps: ['client'],
         title: 'Tell your coach about an injury, and have your plan work around it',
-        note: 'Me › Injuries. Type it in, or photograph a physio report or pick a PDF and we will read it back to you. Nothing is saved until you confirm it, and your coach is told the injury, never the document.',
+        note: 'Me › Injuries & Limitations. Type it in, or photograph a physio report or pick a PDF and we will read it back to you. Nothing is saved until you confirm it, and your coach is told the injury, never the document.',
       },
       {
         kind: 'new',
@@ -118,9 +124,15 @@ export const RELEASES: Release[] = [
       },
       {
         kind: 'new',
-        apps: ['trainer', 'client'],
-        title: 'A coach can block out time they are not available',
+        apps: ['trainer'],
+        title: 'Block out time you are not available',
         note: 'Schedule › Manage › Block Out Time, for a whole day or a from-and-until pair. Blocked time is not an open slot and nobody can book it.',
+      },
+      {
+        kind: 'new',
+        apps: ['trainer'],
+        title: 'The times you offer every week can start on any quarter hour',
+        note: 'Schedule › Manage › Weekly Availability. It offered whole hours between 6am and 8pm, so 6:45 every Tuesday could not be said at all. Slots you already had keep the time they had.',
       },
       {
         kind: 'new',
@@ -161,7 +173,7 @@ export const RELEASES: Release[] = [
       {
         kind: 'fixed',
         apps: ['client', 'trainer'],
-        title: 'A message can no longer be sent in your coach’s name',
+        title: 'A message can no longer be sent under somebody else’s name',
         note: 'Who sent a message is decided where it is stored, not by the app that sent it.',
       },
       {
@@ -171,16 +183,28 @@ export const RELEASES: Release[] = [
         note: 'A roster that could not be read looked exactly like a roster with nobody on it.',
       },
       {
-        kind: 'new',
+        kind: 'fixed',
         apps: ['client', 'trainer'],
-        title: 'Every movement in the exercise library shows how it is done',
-        note: 'Overhead Press and five others had nothing to show. The demos are served by Repple now, so they load in a gym with poor signal.',
+        title: 'Overhead Press and five other lifts show the right movement',
+        note: 'Deadlift is among them. They were cross-fading two stills, or playing the artwork of a near-identical lift, and both looked like the app was broken.',
       },
       {
         kind: 'new',
         apps: ['trainer'],
         title: 'A movement you type in is added to the library',
         note: 'So a program you build from it shows your client the same demo as everything else.',
+      },
+      {
+        kind: 'new',
+        apps: ['owner'],
+        title: 'Ops › Activity is your gym’s own feed',
+        note: 'Members joining, coaches joining, sessions marked delivered or missed, and promo codes being used. Recorded as they happen rather than typed by anyone, and it holds the most recent hundred.',
+      },
+      {
+        kind: 'new',
+        apps: ['owner'],
+        title: 'Promo codes stay put, and say how many people used them',
+        note: 'Growth. A code you create is there next time you open the app and on your other devices, and each row counts the members who have redeemed it. A count that could not be read shows a dash.',
       },
       {
         kind: 'fixed',

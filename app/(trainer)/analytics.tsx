@@ -26,7 +26,7 @@
 // month that really was that quiet.
 import { View, Text, ScrollView, Pressable, ActivityIndicator, Modal, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
@@ -42,6 +42,8 @@ import { askCoach } from '../../src/lib/coach';
 import { useTrainerGoals, goalPct } from '../../src/ui/trainerGoals';
 import { useMonthlyHistory } from '../../src/ui/useMrrHistory';
 import { useSessions } from '../../src/ui/sessions';
+import { myTenantCurrency } from '../../src/lib/subscriptions';
+import { wholeMoney } from '../../src/lib/coachMoney';
 
 export default function TrainerAnalytics() {
   const t = useTheme();
@@ -123,6 +125,23 @@ export default function TrainerAnalytics() {
   // money at risk, which is the one direction that makes the card safe to
   // ignore.
   const atRiskRevenue = sessionFee == null || !figuresWhole ? null : _atRiskSessions * sessionFee;
+  // Every money figure on this screen is the coach's own session rate times a
+  // count, and every one of them printed a dollar sign. Repple is
+  // white-labelled and its live gyms are priced in AED, so the whole screen has
+  // been quoting a coach in Dubai a number in a currency they do not take. The
+  // unit is the gym's (`tenants.currency`, part 99) and there is no fallback:
+  // with none set the amounts are withheld, because "$4,000" invented for a
+  // London gym reads as a considered figure rather than as a missing setting.
+  const [gymCur, setGymCur] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    myTenantCurrency().then((r) => { if (alive) setGymCur(r.currency); });
+    return () => { alive = false; };
+  }, []);
+  /** A whole-unit figure in the gym's currency, or null — never a bare number
+   *  and never a dollar. `fig()` renders the null as a dash. */
+  const priced = (n: number | null | undefined) => wholeMoney(n, gymCur);
+
   const { goals, setGoals } = useTrainerGoals();
   const [goalOpen, setGoalOpen] = useState(false);
   const [gRev, setGRev] = useState('');
@@ -140,8 +159,13 @@ export default function TrainerAnalytics() {
     // The model is told the rate is unset rather than handed a number, because
     // a null arriving as 0 would come back as a paragraph about a coach who
     // earned nothing this month.
-    const ctx = { sessionsDeliveredThisMonth: sessionsMo, revenueAtOwnRateUsd: revenue ?? 'unknown — no session rate set', clients, avgAdherence: avgAdh != null ? avgAdh + '%' : 'no check-ins yet', atRiskClients: atRisk.length, onTrack, watch, atRiskLow: riskCount };
-    const reply = await askCoach([{ role: 'user', content: 'You are my fitness-coaching business assistant. Write a short Monday digest (3-4 sentences) from these numbers (revenueAtOwnRateUsd is sessions delivered multiplied by the coach own session rate, in US dollars): one line on revenue and clients, one on roster health (on-track vs at-risk), and one concrete action to grow or retain. Encouraging and specific.' }], ctx);
+    // The rate was labelled `…Usd` and the prompt said "in US dollars", on a
+    // product whose live gyms price in AED. The model was being told the wrong
+    // currency and dutifully wrote it back to the coach in prose, where no
+    // formatter could catch it. It is now told the gym's actual code — or told
+    // there is none, and to leave the amount out rather than pick one.
+    const ctx = { sessionsDeliveredThisMonth: sessionsMo, revenueAtOwnRate: revenue ?? 'unknown — no session rate set', currency: gymCur ?? 'unknown — the gym has not set one', clients, avgAdherence: avgAdh != null ? avgAdh + '%' : 'no check-ins yet', atRiskClients: atRisk.length, onTrack, watch, atRiskLow: riskCount };
+    const reply = await askCoach([{ role: 'user', content: 'You are my fitness-coaching business assistant. Write a short Monday digest (3-4 sentences) from these numbers (revenueAtOwnRate is sessions delivered multiplied by the coach own session rate, denominated in the currency given in the currency field — write that ISO code before any amount, never a currency symbol, and if currency is unknown do not state an amount at all): one line on revenue and clients, one on roster health (on-track vs at-risk), and one concrete action to grow or retain. Encouraging and specific.' }], ctx);
     setDigestBusy(false);
     setDigest(reply || 'Could not generate the digest right now — the AI backend may be unavailable.');
   };
@@ -205,7 +229,9 @@ export default function TrainerAnalytics() {
                   ? 'Your sessions came back short, so they cannot be counted — a subtotal printed here would be read as a month.'
                   : 'Your sessions could not be read, so this is not a count of zero.')
             : revenue != null && sessionFee != null
-              ? `$${revenue.toLocaleString()} at your $${sessionFee} session rate — Repple does not process this, so it is your own arithmetic, not a payout.`
+              ? (gymCur
+                  ? `${fig(priced(revenue))} at your ${fig(priced(sessionFee))} session rate — Repple does not process this, so it is your own arithmetic, not a payout. What Stripe actually took is on Payments.`
+                  : 'Your gym has not set a currency, so there is no unit to price these sessions in. An owner sets it in the gym settings.')
               : 'Set a session rate in your profile to see what that is worth.'}
           arc={revenue != null && goals.revenue > 0 ? goalPct(revenue, goals.revenue) : undefined}
           arcLabel="of the revenue goal"
@@ -220,7 +246,7 @@ export default function TrainerAnalytics() {
           <KpiRow items={[
             { label: 'Clients', value: fig(clients) },
             { label: 'Avg Adherence', value: fig(avgAdh), unit: avgAdh == null ? undefined : '%' },
-            { label: 'Value / Client', value: valuePerClient == null ? '—' : '$' + valuePerClient.toLocaleString(), unit: valuePerClient == null ? undefined : '/mo' },
+            { label: 'Value / Client', value: fig(priced(valuePerClient)), unit: priced(valuePerClient) == null ? undefined : '/mo' },
           ]} />
         </Section>
 
@@ -243,7 +269,7 @@ export default function TrainerAnalytics() {
               is withheld and the reason is given instead. */}
           {goals.revenue > 0 && revenue == null ? (
             <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>
-              Monthly revenue target ${goals.revenue.toLocaleString()} — progress needs {sessionsMo == null ? (sessionsStatus === 'loading' ? 'a session count that is still being read' : 'a session count that did not come back whole') : 'a session rate in your profile'}.
+              Monthly revenue target {fig(priced(goals.revenue))} — progress needs {sessionsMo == null ? (sessionsStatus === 'loading' ? 'a session count that is still being read' : 'a session count that did not come back whole') : 'a session rate in your profile'}.
             </Text>
           ) : null}
           {/* Same withholding for the client target. A bar drawn at 0% tells a
@@ -261,7 +287,7 @@ export default function TrainerAnalytics() {
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                   <Text style={{ ...ty.caption, color: t.ink2 }}>{g.label}</Text>
                   <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>
-                    {g.money ? '$' + g.cur.toLocaleString() : g.cur} / {g.money ? '$' + g.goal.toLocaleString() : g.goal}
+                    {g.money ? fig(priced(g.cur)) : g.cur} / {g.money ? fig(priced(g.goal)) : g.goal}
                   </Text>
                 </View>
                 <View style={{ height: 3, borderRadius: 2, backgroundColor: t.surface3, marginTop: 7, overflow: 'hidden' }}>
@@ -292,7 +318,7 @@ export default function TrainerAnalytics() {
                       set there is no figure — and "~$0/mo at risk" is the one
                       reading that would make this card safe to ignore. */}
                   <Text style={{ ...value(26), color: t.ink }}>
-                    {atRiskRevenue == null ? '—' : <>~${atRiskRevenue.toLocaleString()}<Text style={{ ...ty.caption, color: t.ink3 }}>/mo</Text></>}
+                    {priced(atRiskRevenue) == null ? '—' : <>~{priced(atRiskRevenue)}<Text style={{ ...ty.caption, color: t.ink3 }}>/mo</Text></>}
                   </Text>
                   {/* "N clients slipping" is a count of the whole book, and off
                       a short roster it is a count of whoever happened to load —
@@ -449,7 +475,9 @@ export default function TrainerAnalytics() {
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
             {sessionFee == null
               ? 'Set a session rate in your profile to see what a new client is worth.'
-              : `Every new client at $${sessionFee}/session adds about $${(sessionFee * 4).toLocaleString()}/mo.`}
+              : gymCur
+                ? `Every new client at ${fig(priced(sessionFee))}/session adds about ${fig(priced(sessionFee * 4))}/mo.`
+                : 'Your gym has not set a currency, so what a new client is worth cannot be priced here.'}
           </Text>
         </Section>
 
@@ -461,7 +489,7 @@ export default function TrainerAnalytics() {
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setGoalOpen(false)} />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30 }}>
           <Text style={{ ...ty.title, color: t.ink, marginBottom: sp.lg }}>Set Your Goals</Text>
-          <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Monthly revenue target ($)</Text>
+          <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Monthly revenue target ({fig(gymCur)})</Text>
           <TextInput value={gRev} onChangeText={setGRev} keyboardType="number-pad" placeholder="4000" placeholderTextColor={t.ink3}
             style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 11, marginBottom: sp.md }} />
           <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Client target</Text>

@@ -7,6 +7,8 @@ import { Linking } from 'react-native';
 import { appLink } from './deepLink';
 import { supabase } from './supabase';
 import { reportError } from './reportError';
+import { capLimit, capped } from './rowCap';
+import type { LoadStatus } from '../ui/loadStatus';
 
 export interface ConnectStatus { stripe_account_id: string | null; charges_enabled: boolean; details_submitted: boolean }
 /**
@@ -28,7 +30,14 @@ export interface ConnectStatus { stripe_account_id: string | null; charges_enabl
  * See `pkgMoney` in src/lib/subscriptions.ts and tenants.currency in part 99.
  */
 export interface TrainerPackage { id: string; trainer_id: string; name: string; price_cents: number; currency: string; sessions: number | null; billing_interval: string | null; active: boolean }
-export interface Purchase { id: string; trainer_id: string | null; package_id: string | null; amount_cents: number | null; sessions_total: number | null; sessions_used: number; status: string; created_at: string }
+/** A completed one-off sale. `client_id` was missing from this type for as long
+ *  as every function reading the table filtered on it — the client-side reads
+ *  never needed to look at a column they were already scoped by. The coach-side
+ *  read below is scoped by `trainer_id`, so who bought it is the thing it has to
+ *  say. Note what is NOT here: there is no currency column on this table at
+ *  all, which is why an amount from it is only printable alongside the package
+ *  it was sold from. */
+export interface Purchase { id: string; client_id: string | null; trainer_id: string | null; package_id: string | null; amount_cents: number | null; sessions_total: number | null; sessions_used: number; status: string; created_at: string }
 
 const openUrl = async (url?: string | null) => { if (url) { try { await Linking.openURL(url); } catch { /* ignore */ } } };
 
@@ -219,6 +228,88 @@ export async function sessionsRemaining(trainerId?: string): Promise<number | nu
     return (data as { sessions_total: number | null; sessions_used: number }[])
       .reduce((a, r) => a + Math.max(0, (r.sessions_total || 0) - r.sessions_used), 0);
   } catch (e) { reportError('connect.sessionsRemaining', e); return null; }
+}
+
+/**
+ * One purchase as the COACH sees it: the row, plus the two labels that live in
+ * other tables and the currency that lives in no table at all.
+ */
+export interface CoachPurchase extends Purchase {
+  /** null when the name could not be read. The money beside it is still real. */
+  client_name: string | null;
+  /** null when the package has been deleted since the sale. */
+  package_name: string | null;
+  /**
+   * From the PACKAGE. `client_purchases` has no currency column — checked
+   * against the live schema — so this is null whenever the package row is gone,
+   * and an amount with a null currency is printed as a dash rather than as a
+   * number in a unit we picked. See `sumTaken` in coachMoney.ts, which counts
+   * those separately instead of quietly leaving them out of the total.
+   */
+  currency: string | null;
+}
+
+/**
+ * What the signed-in coach's clients have bought from them — one-off
+ * memberships and session packs, newest first.
+ *
+ * The twin of `fetchMyPurchases` below, from the other side of the sale. Every
+ * purchase function in this file filters on `client_id = uid`, so until now a
+ * coach could not see who had bought a ten-pack, how many sessions were left on
+ * it, or who had run out — the app took money on their behalf and then showed
+ * them nothing about it.
+ *
+ * No new policy was needed for this: `cp_trainer_read` on `client_purchases`
+ * already grants SELECT where `trainer_id = auth.uid()`, and `purch_read`
+ * grants the same to the gym owner. Verified live before writing this.
+ *
+ * Returns the rows AND how far they can be trusted, because the three answers a
+ * coach can get look identical as a list: 'ready' with nothing is a coach
+ * nobody has bought from, 'error' with nothing is a coach who could not be
+ * told, and 'partial' is more sales than one read returns — on which no total
+ * may be quoted. This is somebody's income; "nothing" and "unknown" are not the
+ * same sentence about it.
+ */
+export async function fetchClientPurchases(): Promise<{ rows: CoachPurchase[]; status: LoadStatus }> {
+  try {
+    const { data: auth } = await supabase.auth.getUser();
+    const uid = auth?.user?.id; if (!uid) return { rows: [], status: 'error' };
+    const { data, error } = await supabase.from('client_purchases').select('*')
+      .eq('trainer_id', uid).order('created_at', { ascending: false }).limit(capLimit());
+    if (error) { reportError('connect.fetchClientPurchases', error); return { rows: [], status: 'error' }; }
+    const page = capped((data as Purchase[]) ?? []);
+
+    // The package carries the name AND the unit. A coach reads their own
+    // packages whether or not they are still on sale (pkg_read is `active OR
+    // trainer_id = uid`), so withdrawing a package does not un-label the sales
+    // made from it — which is exactly what happens to the CLIENT, who can only
+    // see active ones. A package actually DELETED still leaves an amount with
+    // no unit, and that is unrecoverable rather than unread.
+    const pkgIds = [...new Set(page.rows.map((r) => r.package_id).filter(Boolean))] as string[];
+    const pkgs = new Map<string, { name: string | null; currency: string | null }>();
+    if (pkgIds.length) {
+      // no-error-ok: a package we cannot read leaves the sale unlabelled and unpriced-in-anything, which is the same outcome as a package that was deleted — and both are reported by sumTaken as amounts missing from the total, never as dollars
+      const { data: rows } = await supabase.from('trainer_packages').select('id, name, currency').in('id', pkgIds).limit(capLimit());
+      (rows ?? []).forEach((p: any) => { if (p?.id) pkgs.set(p.id, { name: (p.name || '').trim() || null, currency: (p.currency || '').trim() || null }); });
+    }
+
+    const clientIds = [...new Set(page.rows.map((r) => r.client_id).filter(Boolean))] as string[];
+    const names = new Map<string, string>();
+    if (clientIds.length) {
+      // Bounded by `clientIds`, which the cap above already holds at ROW_CAP or fewer.
+      // no-error-ok: a name we cannot read stays null and renders as a dash; the purchase it labels is still real and still paid for
+      const { data: profs } = await supabase.from('profiles').select('id, full_name').in('id', clientIds).limit(capLimit());
+      (profs ?? []).forEach((p: any) => { if (p?.id) names.set(p.id, (p.full_name || '').trim()); });
+    }
+
+    const rows: CoachPurchase[] = page.rows.map((r) => ({
+      ...r,
+      client_name: (r.client_id && names.get(r.client_id)) || null,
+      package_name: (r.package_id && pkgs.get(r.package_id)?.name) || null,
+      currency: (r.package_id && pkgs.get(r.package_id)?.currency) || null,
+    }));
+    return { rows, status: page.truncated ? 'partial' : 'ready' };
+  } catch (e) { reportError('connect.fetchClientPurchases', e); return { rows: [], status: 'error' }; }
 }
 
 /** Draw down one credit from the client's oldest active pack for a trainer.

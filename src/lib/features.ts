@@ -1,7 +1,38 @@
 // Single source of truth for the client app's secondary features. Drives the
-// Explore/search directory and the slimmed Me hub so navigation stays in sync.
-// Each feature is "owned" by the primary tab it belongs under (rebalanced IA):
+// Explore/search directory. Each feature is "owned" by the primary tab it
+// belongs under (rebalanced IA):
 //   train · meals · progress · me
+//
+// ── This file used to say "and the slimmed Me hub" ─────────────────────────
+//
+// It did not drive the hub — app/(client)/profile.tsx has its own HUB_GROUPS —
+// but that sentence was the justification for slimming it, and the slimming was
+// only safe if this list really did contain everything. It did not. Ten client
+// screens were missing from it, and one of them (Reminders) was in the group the
+// hub had stopped rendering, so between the two files that screen had no route
+// into it from anywhere in the app. Both halves are fixed: the hub shows every
+// group again, and the ten are below.
+//
+// ── What is deliberately NOT listed ────────────────────────────────────────
+//
+// Explore pushes `route` with no params. So a screen that needs one cannot go in
+// this list, however useful it is — the row would open a screen with nothing in
+// it, which is a worse answer to a search than no row at all.
+//
+//   · /(client)/exercise needs `name`, and with none it renders an exercise
+//     with no title, no muscles and no clip. The Exercise Library is the way in
+//     and it IS listed.
+//
+// And one screen is left out on judgement rather than on mechanics:
+//
+//   · /(client)/onboarding is the first-run intake. It is not a feature to go
+//     back to, it is a wizard that WRITES goal, stats, diet and allergens
+//     straight into the client record, and it is reached from the dashboard's
+//     "personalise" banner when it is actually due. A member who searched
+//     "start" and tapped it out of curiosity would be walked through
+//     overwriting their own profile, and the last step marks onboarding
+//     complete, so the banner that was legitimately offering it disappears.
+//     A search result should not be able to do that.
 import type { IconName } from '../ui/Icon';
 
 export type FeatureArea = 'train' | 'meals' | 'progress' | 'me';
@@ -32,10 +63,23 @@ export const CLIENT_FEATURES: Feature[] = [
   { key: 'recovery', label: 'Recovery', note: 'Hydration, sleep & mobility', route: '/(client)/recovery', icon: 'water', area: 'train', keywords: 'sleep hydration mobility rest' },
   { key: 'habits', label: 'Daily Habits', note: 'Habits & water tracker', route: '/(client)/habits', icon: 'check', area: 'train', keywords: 'water streak daily' },
   { key: 'calendar', label: 'Book a Session', note: 'Month calendar · book your coach', route: '/(client)/calendar', icon: 'calendar', area: 'train', keywords: 'booking session appointment', soloHide: true },
+  { key: 'injuries', label: 'Injuries & Limitations', note: 'Train around injuries — safer swaps', route: '/(client)/injuries', icon: 'heart', area: 'train', keywords: 'injury injuries pain limitation niggle shoulder knee back hurt rehab physio safer swaps avoid' },
+  // Listed separately from Injuries rather than folded into it: somebody
+  // holding a physio report in their hand is looking for "upload", "scan" or
+  // "report", not for the manual entry screen, and the two do genuinely
+  // different things.
+  { key: 'injury-doc', label: 'Read an Injury From a Document', note: 'Photograph a physio or scan report', route: '/(client)/injury-doc', icon: 'camera', area: 'train', keywords: 'injury document physio report scan letter mri x-ray upload photo ocr extract' },
+  { key: 'scan-machine', label: 'Scan a Machine', note: 'Point at a gym machine and log the set', route: '/(client)/scan-machine', icon: 'camera', area: 'train', keywords: 'scan machine qr barcode code gym equipment log set cardio rower bike' },
+  { key: 'reminders', label: 'Reminders', note: 'Hydration & supplement nudges', route: '/(client)/reminders', icon: 'bell', area: 'train', keywords: 'reminder reminders water hydration supplement nudge alarm notification daily' },
 
   // ── Nutrition ─────────────────────────────────────────────
   { key: 'foodlog', label: 'Food Log', note: 'Search, barcode or photo', route: '/(client)/foodlog', icon: 'meals', area: 'meals', keywords: 'calories macros barcode photo diary' },
   { key: 'restaurant', label: 'Eating Out', note: 'Estimate restaurant macros', route: '/(client)/restaurant', icon: 'meals', area: 'meals', keywords: 'restaurant eating out dining takeout macros estimate cuisine' },
+  // Filed under Nutrition because the screen reads CGM values against the meals
+  // they surround — that is what somebody is looking at it FOR. The label is
+  // the phrase a member uses; 'cgm', 'libre' and 'dexcom' are the words the
+  // person who actually wears one will type.
+  { key: 'glucose', label: 'Blood Sugar', note: 'CGM readings from Health, against your meals', route: '/(client)/glucose', icon: 'water', area: 'meals', keywords: 'blood sugar glucose cgm libre dexcom diabetes diabetic health continuous monitor' },
   { key: 'classes', label: 'Classes', note: 'Book gym group classes', route: '/(client)/classes', icon: 'calendar', area: 'train', keywords: 'classes group class booking gym schedule hiit spin yoga crossfit waitlist branch' },
   { key: 'membership', label: 'Membership', note: 'Card, entry pass & visits', route: '/(client)/membership', icon: 'grid', area: 'me', keywords: 'membership member card gym access barcode entry pass visits plan renew' },
   { key: 'access', label: 'Gym Access', note: 'Entry barcode', route: '/(client)/access', icon: 'grid', area: 'me', keywords: 'access barcode entry scan gym door turnstile membership' },
@@ -62,12 +106,31 @@ export const CLIENT_FEATURES: Feature[] = [
   { key: 'cards', label: 'Milestone Cards', note: 'Shareable cards of your wins', route: '/(client)/cards', icon: 'share', area: 'progress', keywords: 'share card' },
   { key: 'checkin', label: 'Weekly Check-in', note: 'Send your coach a weekly pulse', route: '/(client)/checkin', icon: 'pencil', area: 'progress', keywords: 'weight mood energy coach', soloHide: true },
   { key: 'activity', label: 'Activity', note: 'Your training feed & updates', route: '/(client)/activity', icon: 'bell', area: 'progress', keywords: 'feed updates' },
+  { key: 'trends', label: 'Trends', note: 'Weekly volume & estimated 1RM over time', route: '/(client)/trends', icon: 'trending', area: 'progress', keywords: 'trend trends graph chart volume tonnage 1rm estimated over time progress' },
+  { key: 'body-trends', label: 'Composition Trends', note: 'Weight, body fat, muscle & InBody score over time', route: '/(client)/body-trends', icon: 'trending', area: 'progress', keywords: 'body composition trend weight body fat skeletal muscle inbody score graph over time' },
+  // The long view, and the only screen in the app that shows more than ten
+  // weeks. 'year' and 'months' are in the keywords because that is what the
+  // question sounds like when a member asks it.
+  { key: 'history', label: 'Your History', note: 'Months and years, not weeks', route: '/(client)/history', icon: 'clock', area: 'progress', keywords: 'history long view year years months all time how far have i come past archive' },
 
   // ── Coaching & Account ────────────────────────────────────
   { key: 'trainers', label: 'Find a Trainer', note: 'Browse coaches · online or in-person', route: '/(client)/trainers', icon: 'people', area: 'me', keywords: 'coach hire book' },
   { key: 'coach', label: 'AI Coach', note: 'Chat with your AI coach', route: '/(client)/coach', icon: 'chat', area: 'me', keywords: 'ai assistant chat' },
   { key: 'messages', label: 'Messages', note: 'Chat with your coach', route: '/(client)/messages', icon: 'message', area: 'me', keywords: 'chat dm coach', soloHide: true },
-  { key: 'social', label: 'Share & Social', note: 'Post progress to Instagram / TikTok', route: '/(client)/social', icon: 'share', area: 'me', keywords: 'instagram tiktok share' },
+  // The note used to read "Post progress to Instagram / TikTok". It never did.
+  // social.tsx has one `Share.share()` call and nothing else — the NETWORKS
+  // list whose Connect button flipped a local boolean and relabelled itself
+  // "Connected" was deleted from that screen as fabricated state, and the two
+  // registries went on advertising the thing that had just been removed. The
+  // note now describes the OS share sheet, which is all that happens.
+  //
+  // 'instagram' and 'tiktok' stay in the KEYWORDS deliberately: that is what
+  // somebody types when they want to put a result on Instagram, and this screen
+  // is what gets them there, via the share sheet Instagram appears in. Searching
+  // for a word must not be the same thing as being promised a feature.
+  { key: 'social', label: 'Share & Social', note: 'Share your progress from the share sheet', route: '/(client)/social', icon: 'share', area: 'me', keywords: 'instagram tiktok share social post story sheet' },
+  { key: 'packages', label: 'Memberships & Packs', note: 'What you have bought, and what is left', route: '/(client)/packages', icon: 'trophy', area: 'me', keywords: 'package packages pack sessions left remaining credits subscription membership purchase bought paid renew' },
+  { key: 'offers', label: 'Offers', note: 'Redeem a code from your gym', route: '/(client)/offers', icon: 'grid', area: 'me', keywords: 'offer offers code promo promotion discount voucher redeem coupon' },
   { key: 'referral', label: 'Invite Friends', note: 'Share the app with a friend', route: '/(client)/referral', icon: 'share', area: 'me', keywords: 'refer referral invite friend share code' },
   { key: 'devices', label: 'Watch & Devices', note: 'Apple Watch, WHOOP, Garmin…', route: '/(client)/devices', icon: 'clock', area: 'me', keywords: 'apple watch wearable heart rate' },
   { key: 'music', label: 'Music & Playlists', note: 'AI workout playlists', route: '/(client)/music', icon: 'play', area: 'me', keywords: 'spotify playlist songs' },
@@ -92,16 +155,63 @@ export interface NavItem {
   key: string; label: string; note: string; route: string; icon: IconName; keywords?: string;
 }
 
+// ── The coach's directory ───────────────────────────────────────────────────
+//
+// This had nine entries against thirty-two screens in app/(trainer)/, and
+// Explore is the coach app's only search. So a coach looking for the screen that
+// records what they were paid, or their own training log, or the queue of
+// sessions nobody has marked off yet, searched, found nothing, and reasonably
+// concluded the app did not do it. Every one of those screens existed.
+//
+// The same rule as the client list applies and is why this is not simply all
+// thirty-two: Explore pushes `route` with no params, so a screen that needs one
+// is not listed. Deliberately absent for that reason —
+//
+//   · client, client-body, client-week, client-photos, chat  — all need
+//     `clientId`; they are reached by tapping the person on the roster, which is
+//     the only place the id exists.
+//   · exercise            — needs `name`; the Exercise Library is the way in.
+//   · class-checkin       — needs the class `id`. Opened without one it falls
+//     back to UNLINKED_CLASS, which both classRoster and setAttendance refuse by
+//     name, so the row would lead to a screen that cannot save anything.
+//   · log-session         — needs `clientId`, and it does NOT have a client
+//     picker. A coach can type out a whole session on it and is only told there
+//     is "nobody to log against" when they press save, which is the worst
+//     possible moment. It is reached from the client's own screen. Listing it
+//     would turn a search result into lost work; give it a picker and it belongs
+//     here.
+//
+// checklists and client-goals both DO have a roster picker built in and open
+// perfectly well with no params, which is why they are listed and the rest of
+// the per-client screens are not.
 export const TRAINER_NAV: NavItem[] = [
   { key: 'clients', label: 'Clients', note: 'Your roster, progress & detail', route: '/(trainer)/dashboard', icon: 'people', keywords: 'roster invite add' },
   { key: 'builder', label: 'Programs', note: 'Build & assign training programs', route: '/(trainer)/builder', icon: 'train', keywords: 'program template workout' },
   { key: 'templates', label: 'Program Templates', note: 'Build once, assign to many clients', route: '/(trainer)/templates', icon: 'grid', keywords: 'template library bulk assign program reuse' },
   { key: 'schedule', label: 'Schedule', note: 'Calendar, availability & bookings', route: '/(trainer)/calendar', icon: 'calendar', keywords: 'sessions availability booking' },
+  { key: 'sessions', label: 'Mark What Happened', note: 'Past sessions nobody has recorded yet', route: '/(trainer)/sessions', icon: 'check', keywords: 'sessions outcome mark attended no show noshow completed queue payroll unrecorded' },
+  { key: 'classes', label: 'Classes', note: 'Create and manage group classes', route: '/(trainer)/classes', icon: 'calendar', keywords: 'class classes group schedule branch capacity room instructor hiit spin yoga' },
   { key: 'videos', label: 'Videos', note: 'Exercise video library', route: '/(trainer)/videos', icon: 'video', keywords: 'exercise demo upload' },
+  { key: 'library', label: 'Exercise Library', note: 'What you can programme, and what you have filmed', route: '/(trainer)/library', icon: 'grid', keywords: 'exercise library catalogue movements coverage filmed clips muscles' },
+  { key: 'checklists', label: 'Client Checklists', note: 'The daily lines you set one client', route: '/(trainer)/checklists', icon: 'check', keywords: 'checklist checklists daily tasks habits client adherence ticked' },
+  { key: 'client-goals', label: 'Working Toward', note: 'What a client is aiming at, and how it is going', route: '/(trainer)/client-goals', icon: 'target', keywords: 'goal goals target working toward client aim weight measurement' },
+  { key: 'broadcast', label: 'Broadcast', note: 'Message a whole segment of clients at once', route: '/(trainer)/broadcast', icon: 'message', keywords: 'broadcast announce message all clients bulk segment tag push' },
+  { key: 'broadcast-session', label: 'Publish a Session', note: 'One clip, one caption, every platform', route: '/(trainer)/broadcast-session', icon: 'share', keywords: 'publish post social clip session caption platforms share marketing' },
   { key: 'analytics', label: 'Analytics', note: 'Adherence, revenue & at-risk clients', route: '/(trainer)/analytics', icon: 'chart', keywords: 'stats retention revenue' },
+  { key: 'ad-spend', label: 'Ad Spend', note: 'What your ads cost, and what they brought in', route: '/(trainer)/ad-spend', icon: 'trending', keywords: 'ads ad spend marketing cost cac attribution campaign meta google leads' },
   { key: 'leaderboard', label: 'Leaderboard', note: 'Rank clients by consistency', route: '/(trainer)/leaderboard', icon: 'trophy', keywords: 'ranking standings' },
+  { key: 'payments', label: 'Payments & Packages', note: 'Get paid, and set what you sell', route: '/(trainer)/payments', icon: 'grid', keywords: 'payments payouts stripe connect packages packs memberships sell price get paid earnings' },
+  { key: 'billing', label: 'Billing & Subscription', note: 'Your own plan and invoices', route: '/(trainer)/billing', icon: 'grid', keywords: 'billing subscription plan invoice card payment method upgrade downgrade cancel my plan' },
+  // The coach's own training, food and body. Three separate screens because a
+  // coach looking for their own workout log does not search "nutrition" — and
+  // this app spent a long time assuming a trainer never trains.
+  { key: 'my-training', label: 'My Training', note: 'Your own workout log', route: '/(trainer)/my-training', icon: 'train', keywords: 'my training own workout log lift my workouts personal record myself' },
+  { key: 'my-nutrition', label: 'My Nutrition', note: 'Your own food log, calories & macros', route: '/(trainer)/my-nutrition', icon: 'meals', keywords: 'my nutrition own food log calories macros diet eating myself' },
+  { key: 'my-progress', label: 'My Progress', note: 'Your own body stats, weight trend & scans', route: '/(trainer)/my-progress', icon: 'trending', keywords: 'my progress own body weight scan inbody stats trend myself' },
   { key: 'feedback', label: 'Send Feedback', note: 'Report a bug or share an idea', route: '/(trainer)/feedback', icon: 'message', keywords: 'feedback bug idea report suggest' },
-  { key: 'profile', label: 'Profile', note: 'Your bio, offers & rate', route: '/(trainer)/profile', icon: 'me', keywords: 'bio rate offers settings' },
+  { key: 'profile', label: 'Profile', note: 'Your bio, offers & rate', route: '/(trainer)/profile', icon: 'me', keywords: 'bio rate offers public profile' },
+  // Sign out lives here, and it was findable from nowhere.
+  { key: 'settings', label: 'Settings', note: 'Account, sign out, your data & version', route: '/(trainer)/settings', icon: 'settings', keywords: 'settings account sign out signout log out logout export my data delete account version build units' },
 ];
 
 export const OWNER_NAV: NavItem[] = [

@@ -116,8 +116,14 @@ export default function TrainerBilling() {
                 <View key={pl.name} style={{ paddingVertical: sp.lg, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' }}>
                     <Text style={{ ...ty.head, color: t.ink }}>{pl.name}</Text>
+                    {/* No dollar sign. `PLANS` in ownerMock carries a number
+                        and no currency at all, and Repple is white-labelled —
+                        a coach in London reading "$49" for a plan Stripe will
+                        bill them in sterling has been quoted a figure in a
+                        currency nobody chose. The unit is stated under the
+                        list, where the truth is that Stripe decides it. */}
                     <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
-                      <Text style={{ ...value(20), color: t.ink }}>${pl.price}</Text>
+                      <Text style={{ ...value(20), color: t.ink }}>{pl.price}</Text>
                       <Text style={{ ...ty.caption, color: t.ink3, marginLeft: 2 }}>/mo</Text>
                     </View>
                   </View>
@@ -140,6 +146,11 @@ export default function TrainerBilling() {
         <Rule />
 
         <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.lg }}>
+          Plan prices are stated without a currency because Repple&apos;s plan config does not record
+          one — Stripe shows the exact amount and currency before you pay. This is your Repple
+          subscription; what your own clients pay you is on Payments.
+        </Text>
+        <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.sm }}>
           Payments are processed securely by Stripe. Repple never sees or stores your card details.
         </Text>
 

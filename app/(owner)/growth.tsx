@@ -27,7 +27,7 @@ const DISCOUNTS = [10, 20, 30, 50];
 
 export default function OwnerGrowth() {
   const t = useTheme();
-  const { promos, addPromo, toggleActive, removePromo } = usePromos();
+  const { promos, status: promoStatus, addPromo, toggleActive, removePromo } = usePromos();
   // The roster read has to be waited on. Every count on this screen — new this
   // month, idle, the whole funnel — is derived from `trainers`, so before it
   // returns the hero read "+0 new trainers" over "No trainers yet" and the
@@ -76,8 +76,11 @@ export default function OwnerGrowth() {
     ['Delivering sessions', roll.trainers - idle, funnelPct(roll.trainers - idle)],
   ];
 
-  const create = () => {
-    const r = addPromo(code, disc);
+  // Awaited now that a code is a row rather than a number in memory. The old
+  // synchronous call told the owner "is now live" the instant they tapped,
+  // which was true of nothing outside this process.
+  const create = async () => {
+    const r = await addPromo(code, disc);
     if (!r.ok) { Alert.alert('Cannot create', r.reason ?? 'Try a different code.'); return; }
     setCode('');
     Alert.alert('Code created', `${code.trim().toUpperCase()} · ${disc}% off is now live.`);
@@ -210,7 +213,13 @@ export default function OwnerGrowth() {
 
         {/* ── promo / referral codes ─────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Promo & Referral Codes" note="Trainer subscriptions" />
+          {/* The note read "Trainer subscriptions", which is what these codes
+              were for in the subscription console this app used to be. They are
+              redeemed by MEMBERS now — `offers.tsx` in the client app calls
+              `redeem_promo` against this same `promos` table — so the label
+              named the wrong audience entirely, on the one screen an owner
+              reads aloud when explaining a promotion to somebody. */}
+          <SectionHead title="Promo & Referral Codes" note="Redeemed by members" />
           <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.md }}>
             <TextInput value={code} onChangeText={setCode} placeholder="CODE" placeholderTextColor={t.ink3}
               autoCapitalize="characters" autoCorrect={false}
@@ -225,13 +234,19 @@ export default function OwnerGrowth() {
               </Pressable>); })}
           </View>
 
-          {promos.length === 0 ? <Text style={{ ...ty.label, color: t.ink3 }}>No codes yet — create one above.</Text> : null}
+          {promoStatus === 'error' ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>Your codes could not be read just now — this is not a statement that you have none.</Text>
+          ) : promos.length === 0 ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>{promoStatus === 'loading' ? 'Loading.' : 'No codes yet — create one above.'}</Text>
+          ) : null}
           {promos.map((p, i) => (
             <View key={p.id} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md,
                                       borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
               <View style={{ flex: 1 }}>
                 <Text style={{ ...value(15), letterSpacing: 1, color: t.ink }}>{p.code}</Text>
-                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{p.discountPct}% off</Text>
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                  {p.discountPct}% off · {p.redeemed < 0 ? '—' : p.redeemed} used
+                </Text>
               </View>
               <Pressable onPress={() => toggleActive(p.id)} accessibilityRole="button"
                 style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: 11, paddingVertical: 6 }}>

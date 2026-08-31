@@ -5,8 +5,7 @@
 // rendered `sampleFinances()` — an invented AED 214,000/mo, 1,940-member gym —
 // behind a one-line footnote, so a real owner opened it and was told, with a
 // grade and an AI verdict, that their business was in strong financial health.
-// Until figures are entered (or accounting is connected) it now shows an entry
-// form and no analysis at all.
+// Until figures are entered it now shows an entry form and no analysis at all.
 //
 // Rebuilt on the instrument-panel kit (`src/ui/kit`) and the scale
 // (`src/theme/scale`). Every provider, conditional, handler, route and the
@@ -52,7 +51,6 @@ const FIELDS: { key: keyof FinInputs; label: string; hint: string }[] = [
 export default function Financials() {
   const t = useTheme();
   const router = useRouter();
-  const [connected] = useState(false);
   const { tenant } = useTenant();
   const [fin, setFin] = useState<FinInputs>(emptyFinances);
   const [hydrated, setHydrated] = useState(false);
@@ -161,15 +159,22 @@ export default function Financials() {
     </View>
   ));
 
-  const connectRow = (
-    <ListRow
-      icon="chart"
-      title={connected ? 'Accounting Connected' : 'Connect Accounting'}
-      note={connected ? 'Syncing from Xero' : 'Xero · QuickBooks — pull real P&L'}
-      tone={connected ? t.good : undefined}
-      onPress={() => Alert.alert('Connect accounting', 'Link Xero or QuickBooks to pull real revenue, expenses and P&L automatically. Setup uses your accounting login — ask us to enable it for your account.')}
-    />
-  );
+  // ── "Connect Accounting" is gone ───────────────────────────────────────
+  //
+  // It was a ListRow over `const [connected] = useState(false)` — a variable
+  // with no setter, which nothing could ever set — whose only behaviour was an
+  // Alert describing an integration that does not exist. Two states were
+  // rendered ("Accounting Connected", "Syncing from Xero") that were
+  // unreachable by construction.
+  //
+  // A control that explains what it would do if it were built is worse than no
+  // control: it is indistinguishable from one that is merely misconfigured, so
+  // an owner who wants it goes looking for the setting, or asks for help
+  // enabling something nobody has written. The manual entry beside it is real
+  // and works.
+  //
+  // Xero and QuickBooks are each an OAuth app, a token store, a sync worker and
+  // a chart-of-accounts mapping. When that exists it earns a row here.
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
@@ -237,8 +242,8 @@ export default function Financials() {
           <Section>
             <SectionHead title="No Figures Yet" />
             <Text style={{ ...ty.body, color: t.ink2 }}>
-              Connect your accounting, or enter this month's revenue, expenses and membership
-              numbers. Nothing is shown until it comes from you.
+              Enter this month's revenue, expenses and membership numbers. Nothing is shown
+              until it comes from you.
             </Text>
             <View style={{ height: sp.lg }} />
             <Cta label="Enter My Figures" wide onPress={openEditor} />
@@ -318,7 +323,6 @@ export default function Financials() {
 
         <Rule />
 
-        <Section>{connectRow}</Section>
 
       </ScrollView>
     </SafeAreaView>

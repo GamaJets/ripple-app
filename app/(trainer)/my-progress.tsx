@@ -21,28 +21,46 @@
 // `useClientData`, and that provider is the wrong source here — not as a
 // judgement call, but because it cannot answer for a coach at all:
 //
-//   · `scans.client_id` references `clients(id)`, and `provision_profile()`
-//     gives a role='trainer' signup a `trainers` row and no `clients` row.
-//     Confirmed against the live database: no trainer or owner profile has
-//     one. So the scans read matches nothing, and a scan INSERT would be
-//     refused on the foreign key however well-formed it is.
-//   · `useClientData` reads the rest of the profile with `.single()` on that
-//     same missing `clients` row, so `profileStatus` — and therefore its
-//     combined `status` — is 'error' for every coach, permanently. Its
-//     `weightKg` and `bodyFatPct` are null for the same reason.
+//   · `useClientData` reads the rest of the profile from `clients`, and
+//     `provision_profile()` gives a role='trainer' signup a `trainers` row and
+//     no `clients` row. Confirmed against the live database: none of the eight
+//     trainer profiles and none of the three owner profiles has one. So the
+//     goal, diet and height on that provider are constructed defaults for a
+//     coach rather than answers a coach gave.
+//   · That read is `.maybeSingle()`, and it must STAY `.maybeSingle()`. It was
+//     once `.single()`, which reports a missing row as the error PGRST116 —
+//     and a coach's missing `clients` row is structural and permanent, so
+//     `profileStatus` (and the combined `status` built from it) went to
+//     'error' on every coach launch and never cleared. The whole coach app ran
+//     on a profile read it believed had failed.
 //
 // A weigh-in is not: `check_ins` carries `weight_kg` beside the four scores,
 // keyed to `profiles`, and a coach can write one. So the trend on this screen
-// is the coach's own weigh-ins, which is a real series they can actually add
-// to, rather than a scan history that would be permanently empty and a scan
-// form that could only ever fail.
+// is the coach's own weigh-ins — a weekly series, which is the grain a weight
+// trend wants — rather than the handful of scans a person takes in a year.
+// That stays true now that scans work, and is why the hero is unchanged.
 //
-// The scans section below is therefore READ-ONLY and says why. It lists
-// anything the account does have — an account that is also a member has real
-// scans and they show up here untouched — and where there are none it names
-// the reason instead of offering an entry form that the server would refuse.
-// Closing that properly needs a migration, and supabase/ is not this screen's
-// to change.
+// ── Body composition, which used to be read-only ───────────────────────────
+//
+// `scans.client_id` was `references clients(id)` too, so a scan INSERT was
+// refused on the foreign key however well-formed it was, and this section
+// listed whatever the account happened to have and offered no way to add to
+// it. supabase/parts/95-own-food-and-scans.sql repointed it at `profiles(id)`,
+// and that part is APPLIED to the live database — read off pg_constraint, not
+// taken from the file:
+//
+//     scans_client_id_fkey  FOREIGN KEY (client_id)
+//                           REFERENCES profiles(id) ON DELETE CASCADE
+//
+// and an insert run as a real role='trainer' account, under RLS
+// (`scans_owner` is `for all using (client_id = auth.uid())`, which a coach
+// passes), is accepted and reads back. So the section below now takes an
+// entry, and it is the same `useClientData.addScan` the client app writes
+// through — not a second write path with its own idea of what a scan is.
+//
+// A scan here is what feeds `weightKg` and `bodyFatPct` on `useClientData`,
+// which is what My Nutrition needs before it can build a daily calorie target.
+// That is the whole chain a coach could not complete: scan → body → target.
 import { useMemo, useState } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -73,6 +91,14 @@ import { num1 } from '../../src/lib/format';
 // field validated 20–400 wrote 180 kg to the record.
 const MIN_KG = 20;
 const MAX_KG = 400;
+
+// The range a body-fat percentage can be. A percentage is a percentage in
+// every unit system, so unlike the weight above these need no conversion — but
+// they are still bounds rather than a coercion: a mistyped 155 is refused, not
+// clamped to 70, because a clamped figure is a measurement nobody took and it
+// would go straight into the calorie target My Nutrition builds from it.
+const MIN_BF = 3;
+const MAX_BF = 70;
 
 /** How many weigh-ins the trend draws. Beyond this the line is a history
  *  screen rather than a trend a coach reads at a glance. */
@@ -257,6 +283,82 @@ export default function MyProgress() {
     // rows are on the server.
     Alert.alert('Saved on this phone only',
       'These are on screen but could not be sent to your account, so they will be gone at the next launch. Check your connection and save again.');
+  };
+
+  /* ── logging a body scan ─────────────────────────────────────────────── */
+
+  const [scanWt, setScanWt] = useState('');
+  const [scanBf, setScanBf] = useState('');
+  const [scanSm, setScanSm] = useState('');
+  const [scanProblem, setScanProblem] = useState<string | null>(null);
+  const [scanBusy, setScanBusy] = useState(false);
+
+  /**
+   * Record a body-composition scan.
+   *
+   * Structured exactly like `logWeighIn` above, and for the same reasons: the
+   * conversion happens BEFORE the range check, so the number being judged and
+   * the number being stored are the same one. This is the write that, in the
+   * client app, once filed a 180 lb reading as 180 kg — and because the newest
+   * scan is what `useClientData` reports as the body, the wrong body was in the
+   * calorie target before the screen had finished closing.
+   *
+   * Skeletal muscle is OPTIONAL and stays null when it is blank. `parseFloat`
+   * on an empty box gives NaN and `|| 0` turns that into a 0 kg muscle reading
+   * — a figure nobody measured, filed as if they had, which the chart then
+   * draws as a cliff. Blank means "the scale did not report one".
+   *
+   * Awaited, and believed only when the row is on the server. `addScan` adds
+   * the scan optimistically — it moves weight, body fat, muscle, every chart on
+   * this screen and the macro target on My Nutrition — so a refused write has
+   * to be said rather than left driving all of that until the next launch drops
+   * it. The client app's own scan screen does not await this and says "Scan
+   * saved" either way; that is the bug this does not repeat.
+   */
+  const saveScan = async () => {
+    setScanProblem(null);
+    const kg = weightToKg(scanWt, wu);
+    if (kg == null) { setScanProblem(`Enter your weight in ${wu}.`); return; }
+    if (kg < MIN_KG || kg > MAX_KG) {
+      setScanProblem(`That weight is outside the range this records — ${minShown} to ${maxShown} ${wu}.`);
+      return;
+    }
+    const bf = Number(scanBf.trim());
+    if (!scanBf.trim() || !Number.isFinite(bf)) { setScanProblem('Enter your body fat as a percentage.'); return; }
+    if (bf < MIN_BF || bf > MAX_BF) {
+      setScanProblem(`That body-fat percentage is outside the range this records — ${MIN_BF} to ${MAX_BF}%.`);
+      return;
+    }
+    // Blank is absent, not zero. A typed figure that will not read is refused
+    // rather than dropped: silently discarding it would store a scan missing
+    // the number the coach thought they had just entered.
+    let muscle: number | null = null;
+    if (scanSm.trim()) {
+      const m = weightToKg(scanSm, wu);
+      if (m == null || m <= 0) { setScanProblem(`Muscle mass is not a number this can read. Leave it empty if your scan did not report one.`); return; }
+      if (m >= kg) { setScanProblem('Muscle mass has to be less than your total weight.'); return; }
+      muscle = m;
+    }
+    setScanBusy(true);
+    const stored = await cd.addScan({
+      id: 's' + Date.now(), takenAt: today, weightKg: kg, bodyFatPct: bf,
+      skeletalMuscleKg: muscle,
+      // Free text, shown as typed wherever a scan is listed. Named for what it
+      // actually was — a coach reading their own figures off a machine and
+      // typing them in — rather than borrowed from the client app's 'InBody
+      // (OCR)', which would claim a sheet was scanned when none was.
+      source: 'Entered by me',
+    });
+    setScanBusy(false);
+    if (stored) {
+      notifySuccess();
+      setScanWt(''); setScanBf(''); setScanSm('');
+      Alert.alert('Scan saved', 'It is on your own record, and your daily calorie target on My Nutrition is now built from it.');
+      return;
+    }
+    // Not cleared. What was typed is the only copy of it, and this is the one
+    // path where the coach may want to try again.
+    setScanProblem('Not saved — we could not reach your record. This scan is on this phone only and will be gone when you next open the app, along with anything built from it.');
   };
 
   /* ── presentation ────────────────────────────────────────────────────── */
@@ -549,22 +651,58 @@ export default function MyProgress() {
                 {cd.scansStatus === 'loading'
                   ? 'Reading your scans…'
                   : cd.scansStatus === 'error'
+                    // Not "you have never been scanned" — an empty list under a
+                    // failed read is unknown, and this is the coach's own body.
                     ? 'Your scans could not be read, so none are listed. That is not the same as having none.'
-                    : 'No InBody scan on this account.'}
+                    : 'No scan of your own yet. Add the first below and your weight, body fat and muscle build from it.'}
               </Text>
             )}
-            {/* Read-only, and the reason is named rather than left as a missing
-                button. An InBody scan is stored against a member record
-                (`scans.client_id` references `clients`), and a coach account is
-                not given one — so an entry form here could accept a scan sheet
-                and would then be refused by the server every time. A coach who
-                also holds a member record sees their real scans listed above;
-                everybody else is told why the list is empty instead of being
-                shown "no scans yet" and left to conclude their history is gone. */}
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
-              Scans are read here, not entered. A scan is stored against a member record and a coach
-              account does not have one, so there is nowhere on the server to put a new one. Your
-              weigh-ins and tape measurements above are stored against your profile and are unaffected.
+            {cd.scansStatus === 'partial' ? (
+              <View style={{ marginTop: sp.md }}>
+                <PartialRead what="scans of your own" shown={cd.scans.length} />
+              </View>
+            ) : null}
+          </Section>
+
+          <Rule />
+
+          {/* ── log a body scan ──────────────────────────────────────────── */}
+          <Section>
+            <SectionHead title="Log a Body Scan" note={dayLabel(today)} />
+            <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
+              The figures off your scale or InBody sheet, dated today. Stored against your own account,
+              and this is what your daily calorie target on My Nutrition is built from — no client and
+              no other coach can read it.
+            </Text>
+            {[
+              { key: 'wt', label: 'Weight', unit: wu, value: scanWt, set: setScanWt, a11y: `Your weight in ${wu === 'kg' ? 'kilograms' : 'pounds'}` },
+              { key: 'bf', label: 'Body Fat', unit: '%', value: scanBf, set: setScanBf, a11y: 'Your body fat percentage' },
+              { key: 'sm', label: 'Muscle', unit: wu, value: scanSm, set: setScanSm, a11y: `Your skeletal muscle mass in ${wu === 'kg' ? 'kilograms' : 'pounds'}, optional` },
+            ].map((f) => (
+              <View key={f.key} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: sp.sm }}>
+                <Text style={{ ...ty.body, fontWeight: '500', color: t.ink2 }}>
+                  {f.label}
+                  {/* Said on the row rather than in a footnote. The two required
+                      figures are the two the calorie target needs; muscle is
+                      what a basic scale does not report, and a form that looks
+                      like it wants three numbers gets a guess for the third. */}
+                  {f.key === 'sm' ? <Text style={{ ...ty.caption, color: t.ink3 }}>  optional</Text> : null}
+                </Text>
+                <TextInput value={f.value} onChangeText={f.set} keyboardType="numeric"
+                  accessibilityLabel={f.a11y} placeholder={f.unit} placeholderTextColor={t.ink3}
+                  style={tapeInp} />
+              </View>
+            ))}
+            {weightNote ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{weightNote}</Text> : null}
+            {scanProblem ? <Flag style={{ marginTop: sp.md }}>{scanProblem}</Flag> : null}
+            <View style={{ marginTop: sp.md }}>
+              <Cta wide label={scanBusy ? 'Saving…' : 'Save My Scan'} onPress={saveScan} disabled={scanBusy} />
+            </View>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+              Leave muscle empty if your scan did not report one — it is stored as absent rather than as
+              a zero, so the history never shows a reading nobody took. Weight is stored in kilograms
+              whichever unit you read in, so switching the unit in Settings never changes what you
+              measured.
             </Text>
           </Section>
 

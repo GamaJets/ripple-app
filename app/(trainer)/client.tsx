@@ -39,12 +39,18 @@
 //
 // ── Where the dashes come from ─────────────────────────────────────────────
 //
-// Six independent reads feed this, and each carries its own LoadStatus, because
-// they fail independently and mean different things when they do. A refused
-// read is never rendered as an empty answer, and a truncated one is never
-// counted — see src/lib/rowCap.ts and src/ui/loadStatus.ts. Where a figure
-// cannot be supported it is an em-dash with a reason beside it, never a zero:
-// a zero here is a specific claim about somebody's month.
+// Seven independent reads feed this, and each carries its own LoadStatus,
+// because they fail independently and mean different things when they do. A
+// refused read is never rendered as an empty answer, and a truncated one is
+// never counted — see src/lib/rowCap.ts and src/ui/loadStatus.ts. Where a
+// figure cannot be supported it is an em-dash with a reason beside it, never a
+// zero: a zero here is a specific claim about somebody's month.
+//
+// The seventh is the newest, and it closed the largest hole in the coach app.
+// Until it existed no coach-side query anywhere read a client's `workouts` rows
+// for anything but a timestamp, so the app could say WHEN somebody trained and
+// never WHAT they did — see the row it feeds, and app/(trainer)/client-training.tsx
+// behind it.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, ScrollView, Pressable, Modal, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -87,8 +93,18 @@ import {
   lastSeenLine, goalsLine, weekLine, photosLine, listLine, programmeLine,
   attention, noAccountNote, unaskedNote,
 } from '../../src/lib/clientBrief';
+import { sessionsOf, trainingBoard, trainingLine } from '../../src/lib/clientTraining';
+import type { WorkoutEntry } from '../../src/lib/mockData';
 
 const GOAL_COLS = 'id, kind, target_value, title, target_date, achieved_at, created_at';
+// The summary row's read, and no more: enough to count the days trained, date
+// the newest and say who put them there. The sets and the loads belong to
+// client-training.tsx, and dragging every set of a year's training across a
+// gym's wifi to render one sentence is how a summary row becomes the slowest
+// thing on the page. Declared here rather than shared with that screen because
+// scripts/check-schema.mjs only follows a named select list inside the file
+// that names it.
+const TRAINING_SUMMARY_COLS = 'performed_at, exercise, logged_by';
 const ITEM_COLS = 'id, label, icon, active, created_at, updated_at';
 
 /**
@@ -250,6 +266,54 @@ export default function ClientScreen() {
   const week = useMemo(
     () => coachWeek(weekStatus === 'error' ? null : days, todayISO, focusOn),
     [weekStatus, days, todayISO, focusOn],
+  );
+
+  /* ── what they have actually done ───────────────────────────────────────── */
+
+  // The seventh read on this screen, and the one that had no reader at all
+  // until now. Every coach-side query against `workouts` in this codebase
+  // selected `(user_id, performed_at)` — src/ui/roster.tsx for "last active",
+  // src/lib/clientDrift.ts for the hero above — so the coach app could say WHEN
+  // somebody trained and never WHAT they did. The row this feeds opens
+  // client-training.tsx, which is the reader.
+  //
+  // Three columns, not ten. This line needs a count of the days trained, the
+  // newest of them, and who logged them; the sets and the loads are the other
+  // screen's job, and dragging every set of a year's training across a gym's
+  // wifi to render one sentence is how a summary row becomes the slowest thing
+  // on the page.
+  const [trained, setTrained] = useState<WorkoutEntry[] | null>(null);
+  const [trainedStatus, setTrainedStatus] = useState<LoadStatus>('loading');
+  useEffect(() => {
+    if (!canRead || !id) return;
+    let live = true;
+    setTrained(null); setTrainedStatus('loading');
+    (async () => {
+      // Newest first with `id` settling the ties: one session writes every
+      // exercise with the same `performed_at`, so an order on the timestamp
+      // alone has ties in it by construction.
+      const { data, error } = await supabase.from('workouts').select(TRAINING_SUMMARY_COLS)
+        .eq('user_id', id)
+        .order('performed_at', { ascending: false }).order('id', { ascending: false })
+        .limit(capLimit());
+      if (!live) return;
+      if (error) {
+        reportError('client.training', error);
+        setTrained(null); setTrainedStatus('error'); return;
+      }
+      const page = capped((data ?? []) as unknown as { performed_at: string; exercise: string; logged_by: string | null }[]);
+      setTrained(page.rows.map((row) => ({ t: row.performed_at, exercise: row.exercise, loggedBy: row.logged_by ?? undefined })));
+      setTrainedStatus(page.truncated ? 'partial' : 'ready');
+    })();
+    return () => { live = false; };
+  }, [canRead, id]);
+
+  // Null under 'error', for the same reason every other board on this screen
+  // gets one: an empty list is the only shape "they have never trained" and
+  // "we could not ask" would otherwise share.
+  const trainingBoardValue = useMemo(
+    () => trainingBoard(trainedStatus === 'error' ? null : (trained ? sessionsOf(trained) : null), trainedStatus),
+    [trainedStatus, trained],
   );
 
   /* ── their list, and the days they were in the app ──────────────────────── */
@@ -858,6 +922,16 @@ export default function ClientScreen() {
             )}
             tone={scansFailed ? t.warn : undefined}
             onPress={go('/(trainer)/client-body')} />
+
+          {/* Directly under the body composition and above the plan, because
+              this is the only row on the screen about what has already
+              happened. Everything else here is an intention — a goal, a marked
+              day, a list, a programme — and a coach standing in front of
+              somebody wants the record before the plan. */}
+          <ListRow icon="train" title="What They've Actually Done"
+            note={unasked ?? trainingLine(trainedStatus, trainingBoardValue, who)}
+            tone={trainedStatus === 'error' ? t.warn : undefined}
+            onPress={go('/(trainer)/client-training')} />
 
           <ListRow icon="calendar" title="The Week They've Planned"
             note={unasked ?? weekLine(weekStatus, week, who)}

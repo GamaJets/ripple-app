@@ -157,9 +157,20 @@ export default function CoachProfile() {
                 They used to be the same value, so an unset rate rendered as a
                 confident "$0 / session" on the coach's own profile — and on the
                 client's calendar as a "$0 late fee". */}
+            {/* No currency symbol, because this app has not been told one.
+                `trainers` has a `session_fee numeric` and no currency column at
+                all, and part 99 (supabase/parts/99-tenant-currency.sql) made
+                `tenants.currency` NULLABLE on purpose: Repple is white-labelled,
+                a gym that has not said which money it charges in is not to be
+                guessed at, and an independent coach has no gym to ask. A '$'
+                stood here regardless — so a trainer in London or Dubai read
+                their own rate back in dollars, which is not a formatting slip
+                but a different number. The figure is the coach's own and they
+                know what it is denominated in; the app does not, and says so by
+                not saying. */}
             {p.sessionFee == null
               ? <Text style={{ ...ty.body, color: t.ink3 }}>— no rate set</Text>
-              : <Text style={{ ...value(20), color: t.ink }}>${p.sessionFee}<Text style={{ ...ty.caption, color: t.ink3 }}> / session</Text></Text>}
+              : <Text style={{ ...value(20), color: t.ink }}>{p.sessionFee}<Text style={{ ...ty.caption, color: t.ink3 }}> / session</Text></Text>}
           </View>
         </Card>
 
@@ -218,7 +229,7 @@ export default function CoachProfile() {
               box. And `|| 0` meant clearing the field set a real rate of zero
               rather than clearing it, so a coach could not un-set a rate once
               they had typed one. */}
-          <Field t={t} label="Session Rate ($)"
+          <Field t={t} label="Session Rate, per session"
             value={p.sessionFee == null ? '' : String(p.sessionFee)}
             onChangeText={(v) => {
               const digits = v.replace(/[^0-9]/g, '');
@@ -226,12 +237,11 @@ export default function CoachProfile() {
               p.setSessionFee(digits === '' || !Number.isFinite(n) ? null : n);
             }}
             placeholder="75" keyboardType="numeric" />
-          {p.sessionFee == null ? (
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-              Leave this empty and nothing quotes a rate for you — your figures show a dash
-              rather than a zero.
-            </Text>
-          ) : null}
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+            {p.sessionFee == null
+              ? 'Leave this empty and nothing quotes a rate for you — your figures show a dash rather than a zero.'
+              : 'Shown to clients as a number, in whatever currency you charge in. Repple does not print a symbol it has not been told.'}
+          </Text>
         </Section>
 
         <Rule />

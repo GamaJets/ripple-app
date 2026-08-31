@@ -58,6 +58,7 @@ import { guardInjuries } from '../../src/lib/injuryGate';
 import { supabase } from '../../src/lib/supabase';
 import { reportError } from '../../src/lib/reportError';
 import { useInjuryAcks } from '../../src/ui/injuryAcks';
+import type { LoadStatus } from '../../src/ui/loadStatus';
 import { areaLabel, injuryFlag, type Injury } from '../../src/lib/injuries';
 import { goalToEnum, goalsDisagree } from '../../src/lib/rosterMerge';
 
@@ -189,7 +190,27 @@ export default function Builder() {
     id: `${clientId}-${n}`, area: i.area, severity: i.severity as Injury['severity'],
     status: 'active', note: i.note, at: '',
   }));
+  // How the read of the DISCLOSURES themselves went, which is a different
+  // question from how the read of the acknowledgements went and was the one
+  // nobody asked. `client?.injuries ?? []` is an empty list under a roster that
+  // failed exactly as it is under a client who has nothing wrong with them, and
+  // the gate opened on both — so an outage handed the coach a clean Assign
+  // button for somebody with a severe shoulder. This is the injuries half of
+  // the same discipline the rest of the screen already applies to `roster`.
+  //
+  // A client we DID find is trustworthy under 'partial': that status means the
+  // roster was truncated, not that this row came back half-read, and their
+  // injuries travelled on the row. Under 'error' the `clients` read is the one
+  // that failed and anybody still in the list came from the manual half, so
+  // even a client we can see is a client whose disclosures we did not read.
+  const disclosureStatus: LoadStatus =
+    !clientId ? 'ready'
+    : rosterStatus === 'error' ? 'error'
+    : client ? 'ready'
+    : rosterStatus === 'loading' ? 'loading'
+    : 'error';
   const injuryGate = guardInjuries(
+    disclosureStatus,
     acks.status,
     clientInjuries,
     clientId ? acks.acknowledged(clientId) : null,
@@ -383,9 +404,19 @@ export default function Builder() {
       const { data: auth } = await supabase.auth.getUser();
       const uid = auth?.user?.id;
       if (!uid) return false;
-      const { error } = await supabase.from('program_injury_acknowledgements')
-        .insert({ trainer_id: uid, client_id: clientId, movements });
+      // The row is counted, not merely un-errored. This record is the only
+      // thing that will ever say the coach knew, and "no error" is not the same
+      // sentence as "it is there" — a manually-added client has no `profiles`
+      // row for the foreign key to find, and the whole point of the record is
+      // that it survives to be read back by somebody arguing about it later.
+      const { data, error } = await supabase.from('program_injury_acknowledgements')
+        .insert({ trainer_id: uid, client_id: clientId, movements })
+        .select('id');
       if (error) { reportError('builder.injuryChoice', error, { clientId }); return false; }
+      if (!data || !data.length) {
+        reportError('builder.injuryChoice', new Error('acknowledgement insert returned no row'), { clientId });
+        return false;
+      }
       return true;
     } catch (e) { reportError('builder.injuryChoice', e, { clientId }); return false; }
   };

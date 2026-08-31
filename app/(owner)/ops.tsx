@@ -1,4 +1,13 @@
-// Owner · Operations. Announcements to trainers, support inbox, activity log.
+// Owner · Operations. The session fee, announcements to trainers, a support
+// inbox and the gym's activity log.
+//
+// The session fee is here because three other screens have always said it is.
+// Overview, Revenue and Trainers each carry the line "set a session fee in Ops"
+// and Ops had no such control — the only caller of `updateTenant` in the whole
+// repository was app/onboarding.tsx, so the number every payroll figure is
+// multiplied by could be set once, before the owner had used the product, and
+// never again. See the note beside the control for what the column held in the
+// meantime.
 //
 // Rebuilt on the instrument-panel kit (`src/ui/kit`) and the scale
 // (`src/theme/scale`). Same three tabs, same providers, same actions — the
@@ -13,26 +22,51 @@
 // Nothing is seeded, so each tab now says so honestly instead of rendering a
 // blank stretch of screen.
 //
-// The Activity tab is the exception, and says so on itself. Its `activity` is
-// `seedActivity` in src/ui/ownerOps.tsx — a module-level `[]` that no code path
-// in this repository writes to — while the copy over it promised that "trials,
-// plan changes and suspensions land here as they happen". They cannot: the
-// actions it names were deleted when this app stopped being a subscription
-// console, and nothing replaced them with a write. So an owner was watching an
-// empty feed for events that were never coming, and would have read the silence
-// as a quiet month. The tab now states what it is rather than inventing rows to
-// fill it.
+// The Activity tab used to be the exception. Its `activity` was `seedActivity`
+// in src/ui/ownerOps.tsx — a module-level `[]` that no code path in this
+// repository wrote to — while the copy over it promised that "trials, plan
+// changes and suspensions land here as they happen". They could not: the
+// actions it named were deleted when this app stopped being a subscription
+// console, and nothing replaced them with a write. So an owner watched an empty
+// feed for events that were never coming, and would have read the silence as a
+// quiet month. It then said so plainly, which was honest and still useless.
+//
+// It now reads `gym_events` (supabase/parts/105), which is written by DATABASE
+// TRIGGERS on the tables that already record the facts — a member joining, a
+// coach joining, a session getting an outcome, a promo code being used. Not by
+// app code: a log written next to each action is a log with a hole wherever
+// somebody forgot one, and an owner reading a gap cannot tell a quiet Tuesday
+// from a missing writer. Nothing holds insert rights on it, so it cannot be
+// forged either.
 import { useState, useEffect } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Cta, ListRow } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { useOwnerOps } from '../../src/ui/ownerOps';
 import { fetchAllFeedback, type FeedbackRow } from '../../src/ui/appFeedback';
 import { usePlatformTrainers } from '../../src/ui/trainers';
+import { useTenant, gymMoney, GYM_CURRENCY } from '../../src/ui/tenant';
+import { parseSessionFee, sessionFeeFieldValue } from '../../src/lib/gymSettings';
+import { capLimit } from '../../src/lib/rowCap';
 import { reportError } from '../../src/lib/reportError';
+import { supabase } from '../../src/lib/supabase';
+import { USE_SUPABASE } from '../../src/lib/config';
+import type { LoadStatus } from '../../src/ui/loadStatus';
+
+/** One row of the gym's event feed. */
+interface GymEvent { id: string; kind: string; summary: string; at: string }
+
+/** The mark beside an event — the kinds are a closed set in the CHECK. */
+const EVENT_DOT: Record<string, 'brand' | 'good' | 'warn' | 'ink3'> = {
+  'member-joined': 'good',
+  'trainer-joined': 'brand',
+  'session-delivered': 'good',
+  'session-missed': 'warn',
+  'promo-redeemed': 'brand',
+};
 
 function ago(iso: string) {
   const h = Math.round((Date.now() - Date.parse(iso)) / 3600000);
@@ -52,7 +86,115 @@ export default function OwnerOps() {
   // module-level empty array nothing writes to, and reading it here is what made
   // the Activity tab look like a feed waiting for its first event.
   const { anns, addAnn, tickets, resolveTicket, openTickets } = useOwnerOps();
-  const [localResolved, setLocalResolved] = useState<Record<string, boolean>>({});
+
+  // ── the session fee ──────────────────────────────────────────────────────
+  //
+  // Overview, Revenue and Trainers have all told the owner to "set a session
+  // fee in Ops" since the day they were written, and Ops has never had a
+  // control. `updateTenant` had exactly one caller in the repository —
+  // app/onboarding.tsx — so the fee was settable once, on the single screen an
+  // owner sees before they have any idea what a session is worth to them, and
+  // never again.
+  //
+  // It was worse than unset. `tenants.session_fee` was `not null default 75`
+  // until part 118, so every gym in the live database held a 75 (checked: all
+  // 31 of them, none of them chosen) and payroll, value-per-client and the
+  // revenue hero were all quietly multiplying by it. The fallback copy those
+  // three screens carry for a null fee could never have drawn.
+  const { tenant, status: tenantStatus, updateTenant } = useTenant();
+  const cur = tenant?.currency ?? null;
+  // Null means "the owner has not touched the field", so it mirrors the tenant
+  // as that read lands. A useState seeded from `tenant` would seed from null —
+  // the provider is still in flight when this screen mounts — and then never
+  // catch up.
+  const [feeDraft, setFeeDraft] = useState<string | null>(null);
+  const feeField = feeDraft ?? sessionFeeFieldValue(tenant?.sessionFee ?? null);
+  const [feeBusy, setFeeBusy] = useState(false);
+  const [feeMsg, setFeeMsg] = useState<{ bad: boolean; text: string } | null>(null);
+  // Under 'error' the fee we hold is not the gym's answer, so the field must not
+  // be offered as one: saving over it would write a value read off a failed
+  // read. 'partial' cannot happen here — it is a single row — but worstStatus
+  // semantics are respected by asking for 'ready' rather than not-'error'.
+  const feeKnown = tenantStatus === 'ready' && !!tenant;
+  const saveFee = async () => {
+    const parsed = parseSessionFee(feeField);
+    if (parsed.kind === 'bad') { setFeeMsg({ bad: true, text: parsed.reason }); return; }
+    const next = parsed.kind === 'clear' ? null : parsed.fee;
+    setFeeBusy(true); setFeeMsg(null);
+    // updateTenant checks the row COUNT, not just the absence of an error — a
+    // refused UPDATE under RLS raises nothing and touches nothing.
+    const saved = await updateTenant({ sessionFee: next });
+    setFeeBusy(false);
+    if (!saved) {
+      setFeeMsg({ bad: true, text: 'Not saved. Your session fee is unchanged — nothing on the other screens has moved.' });
+      return;
+    }
+    setFeeDraft(null);
+    setFeeMsg({
+      bad: false,
+      text: next == null
+        ? 'Session fee cleared. Delivered sessions are shown as a count until you set one again.'
+        : `Saved. Every delivered session is now valued at ${gymMoney(next, cur)}.`,
+    });
+  };
+
+  // ── resolving a support ticket ───────────────────────────────────────────
+  //
+  // `localResolved` below was the whole of it: a key in component state, no
+  // write anywhere, so every ticket an owner marked resolved came back on the
+  // next open. An inbox you cannot work through is an inbox nobody works
+  // through. Part 118 adds `feedback.resolved_at` and a resolve_feedback() RPC
+  // — an RPC rather than an UPDATE policy because RLS cannot restrict which
+  // columns an update touches, and the value of this inbox is that the words in
+  // it are the tester's.
+  //
+  // Read separately from fetchAllFeedback() rather than through it: that
+  // function is shared with the Feedback screen and its row shape is not this
+  // screen's to change.
+  //
+  // null is "not known", not "none resolved" — the same distinction the inbox
+  // read itself carries three lines down.
+  const [resolvedAt, setResolvedAt] = useState<Record<string, string> | null>(null);
+  // Which of the two nulls that is — still reading, or refused. Same pair the
+  // inbox read carries, for the same reason.
+  const [resolvedFailed, setResolvedFailed] = useState(false);
+  useEffect(() => {
+    if (!USE_SUPABASE) { setResolvedAt({}); return; }
+    let off = false;
+    (async () => {
+      const { data, error } = await supabase.from('feedback').select('id, resolved_at')
+        .order('created_at', { ascending: false }).limit(capLimit());
+      if (off) return;
+      if (error) { reportError('ownerOps.resolved', error); setResolvedAt(null); setResolvedFailed(true); return; }
+      const map: Record<string, string> = {};
+      for (const r of data ?? []) { if (r.resolved_at) map[String(r.id)] = String(r.resolved_at); }
+      setResolvedAt(map); setResolvedFailed(false);
+    })();
+    return () => { off = true; };
+  }, []);
+
+  // The feed. Read here rather than through a provider because exactly one
+  // screen shows it, and a provider would be a second place for it to go stale.
+  const [events, setEvents] = useState<GymEvent[]>([]);
+  const [evStatus, setEvStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
+  useEffect(() => {
+    if (!USE_SUPABASE) { setEvStatus('ready'); return; }
+    let off = false;
+    (async () => {
+      // No tenant filter: `gym_events_owner_read` is `is_owner_of(tenant_id)`,
+      // so the policy already returns this owner's gym and nobody else's.
+      const { data, error } = await supabase
+        .from('gym_events').select('id, kind, summary, created_at')
+        .order('created_at', { ascending: false }).limit(100);
+      if (off) return;
+      if (error) { reportError('ownerOps.events', error); setEvStatus('error'); return; }
+      setEvents((data ?? []).map((r: any) => ({
+        id: String(r.id), kind: String(r.kind), summary: String(r.summary), at: String(r.created_at),
+      })));
+      setEvStatus('ready');
+    })();
+    return () => { off = true; };
+  }, []);
   // null is the inbox we do not have: it is the initial value AND what
   // fetchAllFeedback returns for a refused read, which is deliberate — see the
   // note on that function. It used to be collapsed here with `d ?? []`, one line
@@ -75,10 +217,33 @@ export default function OwnerOps() {
     })();
     return () => { c = true; };
   }, []);
-  const inboxKnown = fbRows != null;
-  const fbTickets = (fbRows ?? []).map((r) => ({ id: 'fb' + r.id, subject: (r.category || 'Feedback') + (r.rating ? ' · ' + '★'.repeat(r.rating) : ''), from: (r.role || 'Client') + (r.appVersion ? ' · v' + r.appVersion : ''), body: r.body, resolved: !!localResolved['fb' + r.id] }));
+  // BOTH reads. Which tickets there are, and which of them are dealt with, are
+  // two questions and the tab answers with both — "3 open" over a resolved-state
+  // read that failed is every ticket counted as open, which reads as a backlog
+  // that is not there.
+  const inboxKnown = fbRows != null && resolvedAt != null;
+  const fbTickets = (fbRows ?? []).map((r) => ({
+    id: 'fb' + r.id,
+    subject: (r.category || 'Feedback') + (r.rating ? ' · ' + '★'.repeat(r.rating) : ''),
+    from: (r.role || 'Client') + (r.appVersion ? ' · v' + r.appVersion : ''),
+    body: r.body,
+    resolved: !!resolvedAt?.[r.id],
+  }));
   const allTickets = [...fbTickets, ...tickets];
-  const resolveAny = (id: string) => { if (id.startsWith('fb')) setLocalResolved((p) => ({ ...p, [id]: true })); else resolveTicket(id); };
+  // 'fb' + the feedback row's id is the ticket id this screen shows; the RPC
+  // wants the row's own id back.
+  const resolveAny = async (id: string) => {
+    if (!id.startsWith('fb')) { resolveTicket(id); return; }
+    const rowId = id.slice(2);
+    if (!USE_SUPABASE) { setResolvedAt((p) => ({ ...(p ?? {}), [rowId]: new Date().toISOString() })); return; }
+    const { data, error } = await supabase.rpc('resolve_feedback', { p_id: rowId, p_resolved: true });
+    if (error || !data) {
+      if (error) reportError('ownerOps.resolveTicket', error);
+      Alert.alert('Not resolved', 'This ticket is still open — nothing was saved. Try again in a moment.');
+      return;
+    }
+    setResolvedAt((p) => ({ ...(p ?? {}), [rowId]: String(data) }));
+  };
   const openCount = allTickets.filter((x) => !x.resolved).length;
   const [tab, setTab] = useState<'announce' | 'support' | 'activity'>('announce');
   const [text, setText] = useState('');
@@ -92,7 +257,7 @@ export default function OwnerOps() {
         <View style={{ paddingTop: sp.md }}>
           <Text style={{ ...ty.micro, color: t.ink3 }}>Platform</Text>
           <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Operations</Text>
-          <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>Talk to trainers · support · platform activity</Text>
+          <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>Your session fee · talk to trainers · support · gym activity</Text>
         </View>
 
         {/* ── the three jobs this screen does ────────────────────────────── */}
@@ -109,6 +274,62 @@ export default function OwnerOps() {
 
         {tab === 'announce' ? (
           <View>
+            {/* ── the session fee three other screens send owners here for ──── */}
+            <Section>
+              <SectionHead title="Session Fee"
+                note={feeKnown && tenant?.sessionFee != null ? (gymMoney(tenant.sessionFee, cur) ?? undefined) : undefined} />
+              <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
+                What one delivered session is worth. Payroll, value per client and every "at your session fee"
+                figure on Overview, Revenue and Trainers is counted against this.
+              </Text>
+              {tenantStatus === 'loading' ? (
+                <Empty tone={t.ink3}>Reading your gym…</Empty>
+              ) : tenantStatus === 'error' ? (
+                // An empty field under a failed read is not "no fee set", and
+                // saving over it would write a value read off a failure.
+                <Empty tone={t.warn}>
+                  Your gym could not be read, so the fee it currently holds is not known — this is not a
+                  statement that none is set. Nothing can be changed until it can be read.
+                </Empty>
+              ) : !tenant ? (
+                <Empty tone={t.ink3}>This account is not attached to a gym, so there is no fee to set.</Empty>
+              ) : (<>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+                  <Text style={{ ...ty.label, color: t.ink3 }}>{cur ?? GYM_CURRENCY}</Text>
+                  <TextInput value={feeField} onChangeText={(v) => { setFeeDraft(v); if (feeMsg) setFeeMsg(null); }}
+                    placeholder="Not set" placeholderTextColor={t.ink3} keyboardType="decimal-pad"
+                    accessibilityLabel={`Session fee in ${cur ?? GYM_CURRENCY}`}
+                    style={{ ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11, flex: 1 }} />
+                </View>
+                {cur ? null : (
+                  // The gym has not set `tenants.currency`, so the code above the
+                  // field is the operating record's default rather than the
+                  // gym's own answer. Said out loud rather than left to look
+                  // chosen — part 99 exists because a defaulted currency reads
+                  // as a considered one.
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                    Your gym has not told us what it charges in, so figures are shown in {GYM_CURRENCY} — what
+                    the rest of its operating record is recorded in.
+                  </Text>
+                )}
+                {feeMsg ? (
+                  <Text style={{ ...ty.caption, color: feeMsg.bad ? t.warn : t.ink3, marginTop: sp.sm }}>{feeMsg.text}</Text>
+                ) : (
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                    {tenant.sessionFee == null
+                      ? 'Not set. Until it is, delivered sessions are counted but not valued.'
+                      : 'Clear the field and save to withdraw it — an empty fee is not a fee of zero.'}
+                  </Text>
+                )}
+                <View style={{ marginTop: sp.lg }}>
+                  <Cta wide label={feeBusy ? 'Saving…' : 'Save Session Fee'} disabled={feeBusy}
+                    onPress={() => { void saveFee(); }} />
+                </View>
+              </>)}
+            </Section>
+
+            <Rule />
+
             <Section>
           <ListRow icon="calendar" title="Trainer Rota" note="Who is on the floor when, against what is booked"
             onPress={() => router.push('/(owner)/rota')} />
@@ -160,6 +381,14 @@ export default function OwnerOps() {
                   The support inbox could not be read. This is not "no tickets" — feedback sent from inside the app
                   may be waiting, and nothing on this screen has ruled that out.
                 </Empty>
+              ) : resolvedFailed ? (
+                // The tickets below are real and complete; which of them are
+                // dealt with is not known. Every one of them is therefore drawn
+                // as open, and that is a claim this read cannot support.
+                <Empty tone={t.warn}>
+                  Which of these you have already dealt with could not be read, so they are all shown as open.
+                  Some of them may not be.
+                </Empty>
               ) : !inboxKnown ? (
                 <Empty tone={t.ink3}>Reading the support inbox…</Empty>
               ) : allTickets.length === 0 ? (
@@ -182,7 +411,7 @@ export default function OwnerOps() {
                         <Text style={{ ...ty.label, color: t.ink2 }}>{tk.body}</Text>
                         {!tk.resolved ? (
                           <View style={{ flexDirection: 'row', marginTop: sp.md }}>
-                            <Cta label="Mark Resolved" onPress={() => resolveAny(tk.id)} />
+                            <Cta label="Mark Resolved" onPress={() => { void resolveAny(tk.id); }} />
                           </View>
                         ) : null}
                       </View>
@@ -195,22 +424,39 @@ export default function OwnerOps() {
         ) : (
           <View>
             <Section>
-              <SectionHead title="Platform Activity" />
-              {/* No feed exists to be empty. The previous copy — "Nothing yet —
-                  trials, plan changes and suspensions land here as they happen"
-                  — described a stream that is not being written: the array
-                  behind it has no writer anywhere in the app, and the three
-                  events it named were removed with the subscription console.
-                  An owner reading it would take an empty screen for a quiet
-                  month at their gym. Saying so plainly is the fix; inventing a
-                  feed to fill it is not. */}
-              <Empty tone={t.ink3}>
-                Nothing records platform activity yet. This is not a quiet stretch at your gym — no event log
-                is being written at all, so this tab will stay empty until one is.
-              </Empty>
+              <SectionHead title="Your Gym" note={evStatus === 'ready' && events.length ? String(events.length) : undefined} />
+              {evStatus === 'error' ? (
+                // An empty list under 'error' means the read failed. Saying "no
+                // activity" there would tell an owner their gym was quiet, which
+                // is the single most misleading thing this screen could say.
+                <Empty tone={t.ink3}>
+                  The feed could not be read just now. This is not a statement that nothing happened.
+                </Empty>
+              ) : evStatus === 'loading' ? (
+                <Empty tone={t.ink3}>Loading.</Empty>
+              ) : events.length === 0 ? (
+                <Empty tone={t.ink3}>
+                  Nothing yet. Members joining, coaches joining, sessions marked delivered or missed, and
+                  promo codes being used all land here as they happen.
+                </Empty>
+              ) : events.map((e, i) => {
+                const tone = EVENT_DOT[e.kind] === 'good' ? t.good
+                  : EVENT_DOT[e.kind] === 'warn' ? t.warn
+                    : EVENT_DOT[e.kind] === 'brand' ? t.brand : t.ink3;
+                return (
+                  <View key={e.id} style={{
+                    flexDirection: 'row', alignItems: 'center', gap: sp.md,
+                    paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
+                  }}>
+                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: tone }} />
+                    <Text style={{ ...ty.body, color: t.ink, flex: 1 }}>{e.summary}</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3 }}>{ago(e.at)}</Text>
+                  </View>
+                );
+              })}
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-                What your gym actually did is on the screens that read it: sessions on Revenue, staff on
-                Trainers, memberships and payments on Members.
+                Written by the database as things happen, so nothing here was typed by anyone and nothing
+                can be missed by a screen forgetting to record it. The most recent hundred.
               </Text>
             </Section>
           </View>

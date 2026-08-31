@@ -28,27 +28,25 @@ import type { LoadStatus } from './loadStatus';
 import { useAuthRevision } from './authRevision';
 
 /**
- * The currency this gym's books are kept in.
+ * The currency to fall back on when the gym has not named its own.
  *
- * There is no `tenants.currency` column — see 01-schema.sql, which gives a
- * tenant a name, a brand colour, a plan and a `session_fee numeric` and stops
- * there. So the currency is not something the owner has told us and it cannot
- * be read per gym; it is a property of the operating record itself. Every money
- * column in that record declares it: `currency text not null default 'AED'` in
- * membership_plans, gym_payments, pass_types, guest_passes and payroll
- * settlements, and `money()` in src/lib/gymRecord.ts defaults to the same. The
- * Members screen already prints the gym's recurring revenue through that
- * default, so 'AED' is what the database has been recording all along.
+ * This constant used to say there was no `tenants.currency` column. There is
+ * one — part 99 added it, nullable on purpose, and `myTenantCurrency()` in
+ * src/lib/subscriptions.ts already reads it. So the sentence this file was
+ * built on ("the currency cannot be read per gym") stopped being true and the
+ * comment did not, which is how a white-label product came to have its
+ * currency hardcoded in the one module named after the tenant.
  *
- * It is named once, here, because it was not. Financials and Class Analytics
- * typed 'AED' by hand, Revenue and Trainers typed '$', and all four were
- * reading the SAME `tenants.session_fee` — so tabbing from Revenue to
- * Financials in a demo showed one gym's takings in two currencies, with nothing
- * on either screen to say which one was the mistake.
+ * What is still true is why 'AED' is the fallback rather than a guess: every
+ * money column in the gym operating record declares `currency text not null
+ * default 'AED'` — membership_plans, gym_payments, pass_types, guest_passes,
+ * payroll settlements — and `money()` in src/lib/gymRecord.ts defaults to the
+ * same. It is what this database has been recording all along, and part 99
+ * backfilled the existing tenants to it for exactly that reason.
  *
- * When a gym that is not billed in dirhams signs up this becomes a column and a
- * setting. Until then it is one constant, stated where anyone changing it can
- * see what it is a copy of.
+ * Read it as "what the operating record is denominated in when nobody has said
+ * otherwise", never as "the currency". `Tenant.currency` below is the gym's own
+ * answer and outranks this wherever it is known.
  */
 export const GYM_CURRENCY = 'AED';
 
@@ -65,17 +63,36 @@ export const GYM_CURRENCY = 'AED';
  * Null in, null out, exactly as `money()` does it: a caller must not be handed
  * "AED 0.00" for an amount nobody has established. Pair it with `fig()` to draw
  * the dash.
+ *
+ * `currency` is optional and defaults to GYM_CURRENCY, so every existing call
+ * site means precisely what it meant. Pass `tenant.currency` where the tenant
+ * is in hand — a London gym's takings printed in dirhams is a wrong number in
+ * front of a paying customer, and it looks like a considered one.
  */
-export const gymMoney = (whole: number | null | undefined): string | null =>
-  whole == null || !Number.isFinite(whole) ? null : money(Math.round(whole * 100), GYM_CURRENCY);
+export const gymMoney = (whole: number | null | undefined, currency?: string | null): string | null =>
+  whole == null || !Number.isFinite(whole) ? null : money(Math.round(whole * 100), currency || GYM_CURRENCY);
 
 export interface Tenant {
   id: string;
   name: string;
   brandColor: string | null;
   plan: string | null;
-  /** What one delivered session is worth. Payroll is counted against this. */
+  /**
+   * What one delivered session is worth, in `currency`. Payroll is counted
+   * against this.
+   *
+   * Null means the gym has not set one, and until part 118 that was
+   * unreachable: the column was `not null default 75`, so every gym in the live
+   * database held a 75 nobody had chosen and every screen spent it as though
+   * somebody had. Ops now offers the control the copy has always pointed at.
+   */
   sessionFee: number | null;
+  /**
+   * ISO 4217, from `tenants.currency` (part 99). Null means the gym has not
+   * told us — render a dash or fall back to GYM_CURRENCY explicitly, never
+   * assume one.
+   */
+  currency: string | null;
 }
 
 interface TenantValue {
@@ -170,7 +187,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
         if (!tid) { setTenant(null); setStatus('ready'); setLoading(false); return; }
 
         const { data: t, error: tErr } = await supabase
-          .from('tenants').select('id, name, brand_color, plan, session_fee').eq('id', tid).maybeSingle();
+          .from('tenants').select('id, name, brand_color, plan, session_fee, currency').eq('id', tid).maybeSingle();
         if (cancelled) return;
         if (tErr) { reportError('tenant.load.tenant', tErr); setStatus('error'); setLoading(false); return; }
         setTenant(t ? {
@@ -179,6 +196,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
           brandColor: t.brand_color ?? null,
           plan: t.plan ?? null,
           sessionFee: t.session_fee == null ? null : Number(t.session_fee),
+          currency: t.currency ?? null,
         } : null);
         setStatus('ready');
       } catch (e) {
@@ -190,6 +208,21 @@ export function TenantProvider({ children }: { children: ReactNode }) {
     return () => { cancelled = true; };
   }, [tick, authRev]);
 
+  // Owner-only, and the row count is the proof of it.
+  //
+  // This used to be `const { error } = await …update(…)` and `if (error) return
+  // false`. RLS does not raise on a refused UPDATE — `tenants_owner_rw` is a
+  // USING clause, so a caller who is not the owner of that row simply matches
+  // nothing and PostgREST answers 204 with no error at all. Every caller then
+  // read `true`, the local state was patched to the value that had NOT been
+  // written, and the screen showed a gym name, brand colour or session fee that
+  // existed on that one device and nowhere else — until the next reload put the
+  // old value back with no explanation. Verified against the live database: an
+  // owner updating their own tenant touches 1 row, the same statement aimed at
+  // another gym touches 0 and returns no error.
+  //
+  // `.select('id')` makes the answer countable. Owners can SELECT their own
+  // tenant under the same policy, so a successful write always returns its row.
   const updateTenant: TenantValue['updateTenant'] = useCallback(async (patch) => {
     if (!USE_SUPABASE || !tenant) return false;
     const row: Record<string, unknown> = {};
@@ -198,8 +231,9 @@ export function TenantProvider({ children }: { children: ReactNode }) {
     if (patch.sessionFee !== undefined) row.session_fee = patch.sessionFee;
     if (!Object.keys(row).length) return true;
     try {
-      const { error } = await supabase.from('tenants').update(row).eq('id', tenant.id);
-      if (error) return false;
+      const { data, error } = await supabase.from('tenants').update(row).eq('id', tenant.id).select('id');
+      if (error) { reportError('tenant.update', error); return false; }
+      if (!data || data.length !== 1) return false;
       setTenant({ ...tenant, ...patch } as Tenant);
       return true;
     } catch (e) { reportError('tenant.update', e); return false; }

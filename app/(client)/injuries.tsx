@@ -17,6 +17,9 @@ import { Rule, Section, SectionHead, Notice, Cta, Ghost, ListRow, Flag } from '.
 import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
 import { INJURY_AREAS, areaLabel, newInjuryId, type InjurySeverity } from '../../src/lib/injuries';
+import { ackState } from '../../src/lib/injuryGate';
+import { useMyInjuryAcks } from '../../src/ui/injuryAcks';
+import { fmtDay, num } from '../../src/lib/format';
 
 const SEVS: { id: InjurySeverity; label: string }[] = [
   { id: 'mild', label: 'Mild' }, { id: 'moderate', label: 'Moderate' }, { id: 'severe', label: 'Severe' },
@@ -34,6 +37,18 @@ export default function Injuries() {
   const active = c.injuries.filter((i) => i.status === 'active');
   const past = c.injuries.filter((i) => i.status === 'recovered');
   const sevColor = (s: InjurySeverity) => (s === 'severe' ? t.crit : s === 'moderate' ? t.s3 : t.ink3);
+
+  // Disclosing an injury has, until now, looked from this side exactly like a
+  // form that went nowhere. The client had no way of knowing their coach ever
+  // saw it, and no way of seeing what the coach then did about it — even though
+  // both records were written to be readable by them (injury_ack_client_read
+  // and program_inj_ack_client_r), and the second one exists specifically so
+  // somebody who disclosed a knee can see that leg press was assigned knowing.
+  const mine = useMyInjuryAcks();
+  // The coach's side asks the same function. Two screens, one definition of
+  // "read": a confirmation covers the disclosures it was made against, so a
+  // client who has added one since is told it is waiting rather than read.
+  const coachRead = ackState(mine.status, active, mine.read?.keys ?? null);
 
   const save = () => {
     c.addInjury({ id: newInjuryId(), area, severity: sev, status: 'active', note: note.trim() || undefined, at: new Date().toISOString() });
@@ -119,11 +134,86 @@ export default function Injuries() {
           </View>
         ) : null}
 
-        {c.injuries.length === 0 ? (
+        {/* ── has the coach read them? ─────────────────────────────────────
+            Only where there is something to have read. Every branch below is a
+            different sentence, including the one that says we could not find
+            out — "your coach has read these" is a claim about another person's
+            attention and is never made on the strength of a read that failed. */}
+        {/* `!== false`, not `=== true`: null means the coach link could not be
+            read, and hiding this on an unread answer would take the whole point
+            of the section away from exactly the person a failure is worst for.
+            Somebody genuinely uncoached is not told about a coach. */}
+        {active.length > 0 && c.coachLinked !== false ? (
+          <View>
+            <Rule />
+            <Section>
+              <SectionHead title="Your Coach" />
+              {coachRead === 'unknown' ? (
+                <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
+                  We couldn't check whether your coach has read these just now. Open this screen again in a moment.
+                </Text>
+              ) : coachRead === 'none' ? (
+                <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
+                  Not read yet. Your coach is shown these before they can assign you a programme, and can't assign one until they confirm they have read them.
+                </Text>
+              ) : coachRead === 'stale' ? (
+                <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>
+                  Your coach read your injuries on {mine.read?.at ? fmtDay(mine.read.at) : 'an earlier date'}. You have disclosed something since, so they will be asked to read it again before they can assign you anything.
+                </Text>
+              ) : (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.sm }}>
+                  <Icon name="check" size={16} color={t.good} />
+                  <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}>
+                    Your coach confirmed they have read these{mine.read?.at ? ` on ${fmtDay(mine.read.at)}` : ''}.
+                  </Text>
+                </View>
+              )}
+
+              {/* What they did about it. A coach may put a movement that loads
+                  a disclosure into a programme on purpose — that is their
+                  judgement — but not without saying so, and this is where the
+                  saying-so is addressed to the person it is about. */}
+              {mine.choices.length > 0 ? (
+                <View style={{ marginTop: sp.lg, gap: sp.md }}>
+                  <Text style={{ ...ty.micro, color: t.ink3 }}>Assigned knowing about these</Text>
+                  {mine.choices.slice(0, 5).map((ch, i) => (
+                    <View key={i}>
+                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{fmtDay(ch.at)}</Text>
+                      <Text style={{ ...ty.label, color: t.ink2, marginTop: 2 }}>
+                        {ch.movements.slice(0, 6).map((m) => `${m.exercise} (${areaLabel(m.area).toLowerCase()})`).join(', ')}
+                        {ch.movements.length > 6 ? ` and ${num(ch.movements.length - 6)} more` : ''}
+                      </Text>
+                    </View>
+                  ))}
+                  <Text style={{ ...ty.caption, color: t.ink3 }}>
+                    If any of these hurt, stop and tell your coach.
+                  </Text>
+                </View>
+              ) : null}
+            </Section>
+          </View>
+        ) : null}
+
+        {/* An empty list is "you have disclosed nothing" only when the read
+            that produced it finished. Under a failed one it means we do not
+            know what you disclosed — and this screen printing "No injuries
+            disclosed" over that would be the app telling somebody their coach
+            has been given a clean sheet it never read. */}
+        {c.injuries.length === 0 && c.profileStatus === 'ready' ? (
           <View style={{ alignItems: 'center', paddingVertical: sp.huge }}>
             <Icon name="check" size={30} color={t.ink3} />
             <Text style={{ ...ty.body, fontWeight: '500', color: t.ink2, marginTop: sp.md }}>No injuries disclosed</Text>
             <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: sp.xs, maxWidth: 260 }}>If something's bothering you, add it here so your plan can adapt.</Text>
+          </View>
+        ) : c.injuries.length === 0 && c.profileStatus === 'loading' ? (
+          <View style={{ alignItems: 'center', paddingVertical: sp.huge }}>
+            <Text style={{ ...ty.label, color: t.ink3 }}>Reading what you have disclosed…</Text>
+          </View>
+        ) : c.injuries.length === 0 ? (
+          <View style={{ marginTop: sp.lg }}>
+            <Flag tone={t.crit}>
+              Your injuries could not be read, so this is not your list — it is an empty screen standing in for one. Anything you add now will save, but check back before you rely on what is here.
+            </Flag>
           </View>
         ) : null}
       </ScrollView>

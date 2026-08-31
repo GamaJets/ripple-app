@@ -26,7 +26,11 @@
 // screen renders one person's data as another's.
 import { useEffect, useState } from 'react';
 import { num } from '../../src/lib/format';
-import { fetchAwaitingOutcome } from '../../src/lib/gymSessions';
+import {
+  DELIVERED_WINDOW_DAYS, MARK_WINDOW_DAYS, awaitingOutcome, deliveredBetween, fetchMySessions, windowStart,
+} from '../../src/lib/trainerSessions';
+import type { PtSession } from '../../src/lib/gymSessions';
+import { useAuth } from '../../src/ui/auth';
 import {
   assessDrift, fetchClientActivity, compareDrift, summariseDrift, bandTitle, bandNote,
   DRIFT_LABEL, DEFAULT_WINDOWS, type Drift,
@@ -212,29 +216,23 @@ const SHORTCUTS: [IconName, string, string][] = [
  * to produce that silence — a coach who sees no card concludes payroll is clear
  * and settles it, when the app simply never found out. Zero hides the card;
  * unknown says so.
+ *
+ * ── and why it no longer reads anything itself ─────────────────────────────
+ *
+ * It used to open its own effect with `if (!tenant?.id) return;`. A coach with
+ * no gym has no tenant, so the effect returned immediately, `n` stayed null,
+ * and null hides the card — which on this dashboard is the sentence "nothing is
+ * outstanding". An independent trainer was told, silently and by omission, that
+ * every session he had ever delivered was accounted for. There was no error to
+ * see and nothing on screen to disbelieve.
+ *
+ * The count is now read by `trainer_id` (src/lib/trainerSessions.ts) in the
+ * screen below, alongside the delivered figure, because both come from the same
+ * rows and one read is enough. The card takes what that read found.
  */
-function UnmarkedSessions() {
+function UnmarkedSessions({ n, failed, hasGym }: { n: number | null; failed: boolean; hasGym: boolean }) {
   const t = useTheme();
   const router = useRouter();
-  const { tenant } = useTenant();
-  const [n, setN] = useState<number | null>(null);
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    let live = true;
-    (async () => {
-      if (!tenant?.id) return;
-      try {
-        const since = new Date(Date.now() - 90 * 86400_000).toISOString();
-        const rows = await fetchAwaitingOutcome(supabase, tenant.id, since);
-        if (live) { setN(rows.length); setFailed(false); }
-      } catch (e) {
-        reportError('dashboard.awaiting', e);
-        if (live) { setN(null); setFailed(true); }
-      }
-    })();
-    return () => { live = false; };
-  }, [tenant?.id]);
 
   if (failed) {
     return (
@@ -243,7 +241,7 @@ function UnmarkedSessions() {
           Could not check for unmarked sessions
         </Text>
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
-          This is not the same as none outstanding. Open Mark sessions to try again before payroll.
+          This is not the same as none outstanding. Open Mark sessions to try again{hasGym ? ' before payroll' : ''}.
         </Text>
       </Card>
     );
@@ -255,7 +253,7 @@ function UnmarkedSessions() {
         {n} session{n === 1 ? '' : 's'} need an outcome
       </Text>
       <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
-        Payroll cannot be worked out until {n === 1 ? 'it is' : 'they are'} marked. One tap each.
+        {hasGym ? 'Payroll cannot be worked out' : 'Your delivered count is incomplete'} until {n === 1 ? 'it is' : 'they are'} marked. One tap each.
       </Text>
     </Card>
   );
@@ -272,6 +270,10 @@ export default function TrainerClients() {
   const { roster, status: rosterStatus, addClient, removeClient, setClientMode } = useRoster();
   const rosterUnread = rosterStatus === 'error';
   const { tenant } = useTenant();
+  // The signed-in coach. Their own sessions are keyed on this, not on a gym —
+  // which is the whole reason an independent trainer saw nothing here.
+  const { user: authUser, loading: authLoading } = useAuth();
+  const coachId = authUser?.id ?? null;
 
   // ── who is drifting ───────────────────────────────────────────────────────
   //
@@ -331,12 +333,16 @@ export default function TrainerClients() {
   const driftFor = (c: RosterClient): Drift | null => (drift ? drift[c.id] ?? null : null);
   const bands = summariseDrift(drift ? roster.map((c) => drift[c.id]).filter((d): d is Drift => !!d) : null);
 
-  const { sessionFee, name: coachName } = useMyTrainerProfile();
+  const { name: coachName } = useMyTrainerProfile();
   const { getFeedback, addFeedback } = useCoachFeedback();
   const { get: getNutri, setAdjust: setNutri, clear: clearNutri, status: nutriStatus } = useCoachNutrition();
   const [mealPick, setMealPick] = useState<{ pos: number; slot: Slot } | null>(null);
   const [mealQuery, setMealQuery] = useState('');
-  const { getNotes, addNote, removeNote } = useCoachNotes();
+  const { getNotes, addNote, removeNote, status: notesStatus } = useCoachNotes();
+  // Saving a private note is now a round trip (see src/ui/coachNotes.tsx: it
+  // used to be a `useState` that lost every note on relaunch), so the Save
+  // button has to be able to say "in flight" and "that did not save".
+  const [noteBusy, setNoteBusy] = useState(false);
   const { addAnnouncement } = useAnnouncements();
   const { sent: sentInvites, sendInvite, revokeInvite } = useInvites();
   const { received: trainerInvites, acceptTrainerInvite, declineTrainerInvite } = useTrainerInvites();
@@ -518,11 +524,41 @@ export default function TrainerClients() {
     return () => { cancelled = true; };
   }, [sel]);
   const active = roster.length;
-  // Null when no session rate is known, and null all the way to the render. The
-  // rate used to be a number that started at 0, so an estimate of "$0/mo"
-  // arrived looking like arithmetic somebody had done rather than a rate nobody
-  // had ever set — see src/lib/trainerProfileAccess.ts.
-  const revenue = sessionFee == null ? null : active * sessionFee * 4;
+
+  // ── the coach's own sessions, read once for the two figures that need them ─
+  //
+  // By `trainer_id`, not by `tenant_id`: see src/lib/trainerSessions.ts. Both
+  // the unmarked-sessions card above and the delivered figure below come out of
+  // this one read, because they are the same rows asked two questions.
+  //
+  // Three states, and the third is the one that matters. `null` under
+  // `sessionsUnread` means the read failed and NOTHING is known — not zero.
+  // Zero would hide the card and print a confident "0" in a KPI row, which are
+  // both claims this screen would have no basis for.
+  const [mySessions, setMySessions] = useState<PtSession[] | null>(null);
+  const [sessionsUnread, setSessionsUnread] = useState(false);
+  useEffect(() => {
+    if (authLoading) return;
+    let live = true;
+    if (!coachId) { setMySessions(null); setSessionsUnread(true); return; }
+    (async () => {
+      try {
+        const rows = await fetchMySessions(supabase, coachId, windowStart(MARK_WINDOW_DAYS), new Date().toISOString());
+        if (live) { setMySessions(rows); setSessionsUnread(false); }
+      } catch (e) {
+        reportError('dashboard.mySessions', e);
+        if (live) { setMySessions(null); setSessionsUnread(true); }
+      }
+    })();
+    return () => { live = false; };
+  }, [coachId, authLoading]);
+
+  const unmarked = mySessions === null ? null : awaitingOutcome(mySessions).length;
+  /** Sessions actually delivered in the last month — a count of recorded
+   *  outcomes, not an inference from the clock. Null until the read lands. */
+  const delivered = mySessions === null
+    ? null
+    : deliveredBetween(mySessions, Date.now() - DELIVERED_WINDOW_DAYS * 86_400_000);
   // One unknown count makes the TOTAL unknown. Summing the nulls as zero would
   // quietly report fewer waiting messages than there are, on the tile a coach
   // reads to decide whether anybody needs them.
@@ -699,21 +735,53 @@ export default function TrainerClients() {
         {/* Clients who found this coach in the public directory and asked to
             be coached. Renders nothing at all when there are none. */}
         <CoachRequests />
-        <UnmarkedSessions />
+        <UnmarkedSessions n={unmarked} failed={sessionsUnread} hasGym={!!tenant?.id} />
 
         {/* ── interrupts: things that need a decision now ─────────────────── */}
         <View style={{ marginTop: sp.lg }}>
-          {trial && !billingAvailable() ? (
-            <Card onPress={() => router.push('/(trainer)/billing')} tone={trial.expired ? t.crit : t.brand} style={{ marginBottom: sp.md }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
-                <Icon name="sparkle" size={20} color={trial.expired ? t.ink3 : t.brand} />
-                <View style={{ flex: 1 }}>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{trial.expired ? 'Your free trial has ended' : `${trial.daysLeft} day${trial.daysLeft === 1 ? '' : 's'} left in your free trial`}</Text>
-                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{trial.expired ? 'Upgrade to keep coaching your clients.' : 'Upgrade any time to unlock everything.'}</Text>
+          {/* ── the trial card, and the condition that was exactly backwards ──
+              This read `trial && !billingAvailable()`.
+
+              `billingAvailable()` (src/lib/billing.ts) is true when at least
+              one plan has a Stripe price id — i.e. when subscribing is
+              actually possible. So the negation meant the card appeared ONLY
+              on builds where checkout cannot be started, and vanished on the
+              builds where it can. Both halves are wrong and they are wrong in
+              opposite directions: a coach who could have upgraded was never
+              asked, and a coach who could not was shown "Upgrade ›", sent to
+              the billing screen, and left there with nothing to buy — which is
+              the worse of the two, because it happens at the moment their
+              trial has just expired and they are trying to keep working.
+
+              It is now two states rather than one condition. The trial is
+              worth telling a coach about either way; what changes is whether
+              this card is allowed to promise them a way out of it. Where
+              billing is not configured it says what is true — their trial is
+              running, or has ended — and does not offer a door that opens onto
+              a wall. */}
+          {trial ? (
+            billingAvailable() ? (
+              <Card onPress={() => router.push('/(trainer)/billing')} tone={trial.expired ? t.crit : t.brand} style={{ marginBottom: sp.md }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+                  <Icon name="sparkle" size={20} color={trial.expired ? t.ink3 : t.brand} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{trial.expired ? 'Your free trial has ended' : `${trial.daysLeft} day${trial.daysLeft === 1 ? '' : 's'} left in your free trial`}</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{trial.expired ? 'Upgrade to keep coaching your clients.' : 'Upgrade any time to unlock everything.'}</Text>
+                  </View>
+                  <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>Upgrade ›</Text>
                 </View>
-                <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>Upgrade ›</Text>
-              </View>
-            </Card>
+              </Card>
+            ) : (
+              <Card tone={trial.expired ? t.crit : t.brand} style={{ marginBottom: sp.md }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+                  <Icon name="sparkle" size={20} color={trial.expired ? t.ink3 : t.brand} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{trial.expired ? 'Your free trial has ended' : `${trial.daysLeft} day${trial.daysLeft === 1 ? '' : 's'} left in your free trial`}</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>Subscriptions are not open yet — keep coaching, and we will be in touch before anything changes.</Text>
+                  </View>
+                </View>
+              </Card>
+            )
           ) : null}
 
           {trainerInvites.length > 0 ? (
@@ -766,21 +834,45 @@ export default function TrainerClients() {
         <Section>
           <SectionHead title="This Month" note="Analytics" onPress={() => router.push('/(trainer)/analytics')} />
           <KpiRow items={[
-            // A dash, not $0, when no session rate is set: the estimate is
-            // unknowable rather than nil, and "$0/mo" reads as a fact about the
-            // business. Same rule as the "To contact" figure beside it.
-            { label: 'Est. Revenue', value: revenue == null ? '—' : '$' + revenue.toLocaleString(), unit: revenue == null ? undefined : '/mo' },
+            // ── what used to be here, and why it is gone ────────────────
+            //
+            // "Est. Revenue", computed as `active clients × 4 × session fee`
+            // and printed with a hardcoded '$'.
+            //
+            // The 4 was a number nobody chose. No client of this app has ever
+            // been asked how often they train, nothing anywhere records it, and
+            // four a month is not a default — it is an invention, multiplied by
+            // a real headcount and a real fee to produce something with the
+            // shape of a measurement. A coach with eight clients and a £60 rate
+            // read "£1,920/mo" and had no way to tell it apart from a figure
+            // derived from their actual work.
+            //
+            // The '$' was the second invention, and part 99
+            // (supabase/parts/99-tenant-currency.sql) exists precisely to stop
+            // it: Repple is white-labelled, `tenants.currency` is nullable
+            // because a gym that has not said is not to be guessed at, and
+            // there is no currency column on `trainers` at all. So an
+            // independent coach's rate is a number whose unit this app does not
+            // know. Printing a dollar sign in front of it in front of a London
+            // trainer is not a formatting slip; it is a wrong number.
+            //
+            // What replaces it is a count of sessions with a RECORDED outcome
+            // of 'completed' in the last month — real work, really marked,
+            // needing no currency to state. A dash until the read lands.
+            { label: 'Delivered', value: fig(delivered), unit: delivered == null ? undefined : `/${DELIVERED_WINDOW_DAYS}d` },
             { label: 'Unread', value: fig(unread) },
             // Null until the record has been read: an em-dash, never a zero
             // that would tell a coach nobody needs them this week.
             { label: 'To Contact', value: fig(toContact) },
           ]} />
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-            {active === 0
-              ? 'Revenue estimates once you have clients and a session rate.'
-              : sessionFee == null
-                ? `${active} client${active > 1 ? 's' : ''} × 4 sessions — set a session rate in your profile to price it.`
-                : `${active} client${active > 1 ? 's' : ''} × 4 sessions × $${sessionFee}.`}
+            {sessionsUnread
+              ? 'Your sessions could not be read, so this is not a count of none.'
+              : delivered == null
+                ? 'Reading your sessions…'
+                : unmarked
+                  ? `Sessions marked as delivered in the last ${DELIVERED_WINDOW_DAYS} days. ${unmarked} more ${unmarked === 1 ? 'is' : 'are'} waiting on an outcome and ${unmarked === 1 ? 'is' : 'are'} not counted here.`
+                  : `Sessions marked as delivered in the last ${DELIVERED_WINDOW_DAYS} days.`}
           </Text>
         </Section>
 
@@ -1157,7 +1249,7 @@ export default function TrainerClients() {
                     : 'No program assigned yet.'}
                 </Text>
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>
-                  Last active {sel.lastActive} · next session {sel.next}. Session history appears here once {sel.name.split(' ')[0]} logs workouts.
+                  Last active {sel.lastActive} · next session {sel.next}. What they have actually trained is under What They've Actually Done on their profile.
                 </Text>
               </View>
 
@@ -1300,10 +1392,45 @@ export default function TrainerClients() {
 
               <View style={{ marginBottom: sp.xl }}>
                 <SheetHead t={t} title="Private Notes (only You)" />
+                {/* Three renders, and the middle one is the whole point.
+                    'error' with an empty list means the notes could NOT be
+                    read — it is not a coach who has written nothing. Say so,
+                    because the alternative is a coach concluding they never
+                    wrote down the thing they are half-remembering, and writing
+                    it again, or worse, deciding it did not happen. */}
+                {notesStatus === 'error' ? (
+                  <Text style={{ ...ty.label, color: t.crit, marginBottom: sp.sm }}>
+                    Your notes could not be read — this is not "no notes". Anything you save now
+                    will still be stored, but check back once you have a connection.
+                  </Text>
+                ) : notesStatus === 'loading' ? (
+                  <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.sm }}>Reading your notes…</Text>
+                ) : getNotes(sel.id).length === 0 ? (
+                  <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.sm }}>
+                    Nothing here yet. Only you can see what you write below.
+                  </Text>
+                ) : null}
                 {getNotes(sel.id).map((n, i) => (
                   <View key={n.id} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.sm, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-                    <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}>{n.body}</Text>
-                    <Pressable onPress={() => removeNote(sel.id, n.id)} hitSlop={8}
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ ...ty.label, color: t.ink2 }}>{n.body}</Text>
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>{new Date(n.at).toLocaleDateString()}</Text>
+                    </View>
+                    {/* The delete is confirmed and its RESULT is read. A
+                        PostgREST delete that matches no rows returns no error,
+                        so removeNote reports the row count instead — and a note
+                        that is still on the server must not disappear from this
+                        list as though it were gone. */}
+                    <Pressable onPress={() => {
+                      const cid = sel.id;
+                      Alert.alert('Delete this note?', 'It is only visible to you, and this cannot be undone.', [
+                        { text: 'Cancel', style: 'cancel' },
+                        { text: 'Delete', style: 'destructive', onPress: () => { void (async () => {
+                          const gone = await removeNote(cid, n.id);
+                          if (!gone) Alert.alert('Not deleted', 'That note is still saved. Check your connection and try again.');
+                        })(); } },
+                      ]);
+                    }} hitSlop={8}
                           accessibilityRole="button" accessibilityLabel="Remove note">
                       <Icon name="minus" size={14} color={t.ink3} />
                     </Pressable>
@@ -1311,7 +1438,22 @@ export default function TrainerClients() {
                 ))}
                 <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm }}>
                   <TextInput value={pnote} onChangeText={setPnote} placeholder="Private note (client can't see this)…" placeholderTextColor={t.ink3} multiline style={{ ...field(t, 44), flex: 1 }} />
-                  <Ghost label="Save" onPress={() => { const id = sel.id; if (pnote.trim()) { addNote(id, pnote); setPnote(''); } }} />
+                  {/* The text is cleared only once the note is stored. It used
+                      to be cleared immediately, which is how a note that was
+                      never saved anywhere also stopped being recoverable by
+                      the person who had just typed it. */}
+                  <Ghost label={noteBusy ? 'Saving…' : 'Save'} onPress={() => {
+                    const cid = sel.id;
+                    const draft = pnote;
+                    if (!draft.trim() || noteBusy) return;
+                    setNoteBusy(true);
+                    void (async () => {
+                      const saved = await addNote(cid, draft);
+                      setNoteBusy(false);
+                      if (saved) setPnote('');
+                      else Alert.alert('Not saved', 'That note was not stored, so it is still in the box. Check your connection and tap Save again.');
+                    })();
+                  }} />
                 </View>
               </View>
 
@@ -1462,17 +1604,41 @@ export default function TrainerClients() {
           <Pressable style={SCRIM} onPress={() => setBcOpen(false)} />
           <View style={sheet(t)}>
             <Text style={{ ...ty.title, color: t.ink }}>Broadcast to All Clients</Text>
-            {/* This pins an announcement on this device. useAnnouncements is an
-                in-memory store with no Supabase table behind it — see the note
-                at the top of src/ui/announcements.tsx — so nothing here reaches
-                anybody else's phone. The modal used to promise "Everyone on your
-                roster sees this on their dashboard" and then confirm "Sent",
-                which is a coach believing they told forty clients about a
-                cancelled class. Broadcast writes real message rows; this does
-                not, and now says so. */}
-            <Text style={{ ...ty.label, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>Pins a note on your own dashboard. It is not delivered to your clients — use Broadcast for that.</Text>
+            {/* This copy has now been wrong in both directions, which is worth
+                recording.
+
+                It first promised "Everyone on your roster sees this on their
+                dashboard" and confirmed "Sent" over an in-memory store with no
+                table behind it — a coach believing they had told forty clients
+                about a cancelled class. It was corrected to say the note stayed
+                on this device, which was true of the store as it then was.
+
+                `announcements` is real now (part 109): a row addressed to this
+                coach's current roster, which their clients read on their own
+                dashboards. So the correction became the lie — a coach could pin
+                a note believing it private and put it in front of every client
+                they have. That is worse than the original, because the original
+                over-promised reach and this one under-promised it.
+
+                The rule this file keeps relearning: the sentence describes what
+                the write does TODAY, and it moves when the write moves. */}
+            <Text style={{ ...ty.label, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>Every client on your roster sees this on their dashboard. For a message in someone’s own thread, use Broadcast.</Text>
             <TextInput value={bcText} onChangeText={setBcText} placeholder="Your announcement…" placeholderTextColor={t.ink3} multiline style={{ ...field(t, 90), marginBottom: sp.lg }} />
-            <Cta label="Pin on My Dashboard" wide onPress={() => { if (!bcText.trim()) { Alert.alert('Write something', 'Enter your announcement.'); return; } addAnnouncement(bcText); setBcOpen(false); Alert.alert('Pinned', 'Kept on this device only — your clients have not been sent it. To reach them, use Broadcast, which writes to each client’s message thread.', [{ text: 'Open Broadcast', onPress: () => router.push('/(trainer)/broadcast') }, { text: 'Done', style: 'cancel' }]); }} />
+            {/* Awaited, and the answer read. `addAnnouncement` reaches a server
+                now, so announcing "Posted" on the tap would be the same class of
+                claim this modal has already made twice. */}
+            <Cta label="Post to My Clients" wide onPress={async () => {
+              if (!bcText.trim()) { Alert.alert('Write something', 'Enter your announcement.'); return; }
+              const posted = await addAnnouncement(bcText);
+              if (!posted) {
+                // The sheet stays open with the text in it: they wrote it once.
+                Alert.alert('Not posted', 'That could not be posted, so your clients have not seen it. Your words are still here — try again in a moment.');
+                return;
+              }
+              setBcText(''); setBcOpen(false);
+              Alert.alert('Posted', 'It is on your clients’ dashboards. For something that belongs in one person’s thread, use Broadcast.',
+                [{ text: 'Open Broadcast', onPress: () => router.push('/(trainer)/broadcast') }, { text: 'Done', style: 'cancel' }]);
+            }} />
           </View>
         </KeyboardAvoidingView>
       </Modal>

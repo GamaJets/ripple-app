@@ -11,8 +11,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
-import { capLimit } from '../lib/rowCap';
-import type { LoadStatus } from './loadStatus';
+import { capLimit, capped } from '../lib/rowCap';
+import { worstStatus, type LoadStatus } from './loadStatus';
 import { injuryKey } from '../lib/injuryGate';
 import type { Injury } from '../lib/injuries';
 import { useAuthRevision } from './authRevision';
@@ -71,13 +71,21 @@ export function InjuryAcksProvider({ children }: { children: ReactNode }) {
       const { data: auth } = await supabase.auth.getUser();
       const uid = auth?.user?.id;
       if (!uid) return false;
-      const { error } = await supabase.from('injury_acknowledgements').upsert({
+      // Counted, not merely un-errored. A row the policy filtered out is not an
+      // error in PostgREST, and this is the write a coach is told opened the
+      // gate — reporting a confirmation the server does not hold is the one
+      // failure this provider must not have.
+      const { data, error } = await supabase.from('injury_acknowledgements').upsert({
         trainer_id: uid,
         client_id: clientId,
         acknowledged_injuries: keys,
         acknowledged_at: new Date().toISOString(),
-      }, { onConflict: 'trainer_id,client_id' });
+      }, { onConflict: 'trainer_id,client_id' }).select('client_id');
       if (error) { reportError('injuryAcks.write', error); return false; }
+      if (!data || !data.length) {
+        reportError('injuryAcks.write', new Error('acknowledgement upsert returned no row'));
+        return false;
+      }
       // Only after the write landed. Local state that runs ahead of the server
       // is how a coach ends up believing they confirmed something nobody
       // recorded.
@@ -105,4 +113,118 @@ export function useInjuryAcks(): Value {
   const v = useContext(Ctx);
   if (!v) throw new Error('useInjuryAcks must be used inside <InjuryAcksProvider>');
   return v;
+}
+
+/* ── the same two facts, read from the client's side ─────────────────────── */
+//
+// Both tables have always been readable by the client they are about — the
+// policies are `injury_ack_client_read` and `program_inj_ack_client_r`, written
+// deliberately, with a comment in part 96 saying somebody who disclosed a knee
+// is entitled to see that their coach included leg press knowing about it.
+// Nothing ever read them. So the client disclosed an injury into what looked,
+// from their side, exactly like a form that went nowhere: no sign their coach
+// had seen it, and no sign of what they did about it.
+//
+// This is a hook rather than a provider because one screen wants it and it is
+// two small reads. It is deliberately NOT part of InjuryAcksProvider above —
+// that one is the coach's own roster of acknowledgements and is mounted for the
+// whole app.
+
+/** What this client's coach has confirmed reading, most recent coach first. */
+export interface CoachRead {
+  /** ISO. Null only if the column came back empty, which it cannot. */
+  at: string | null;
+  /** The disclosures the confirmation was made against — feed to `ackState`. */
+  keys: string[];
+}
+
+/** One programme the coach assigned that loaded something disclosed. */
+export interface ProgrammeChoice {
+  at: string;
+  movements: { exercise: string; area: string; severity: string }[];
+}
+
+export interface MyInjuryAcks {
+  /** The worse of the two reads. Under anything but 'ready' the client is told
+   *  nothing about their coach either way — see ackState. */
+  status: LoadStatus;
+  read: CoachRead | null;
+  choices: ProgrammeChoice[];
+}
+
+export function useMyInjuryAcks(): MyInjuryAcks {
+  const [state, setState] = useState<MyInjuryAcks>({
+    status: USE_SUPABASE ? 'loading' : 'ready', read: null, choices: [],
+  });
+  const authRev = useAuthRevision();
+
+  useEffect(() => {
+    if (!USE_SUPABASE) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        // getSession, not getUser: getUser REJECTS with nobody signed in, and
+        // treating that as a failure would latch this into 'error' before
+        // anybody had logged in. No session is a true answer.
+        const { data: sess } = await supabase.auth.getSession();
+        if (cancelled) return;
+        const uid = sess?.session?.user?.id;
+        if (!uid) { setState({ status: 'ready', read: null, choices: [] }); return; }
+
+        const [ackRes, progRes] = await Promise.all([
+          supabase.from('injury_acknowledgements')
+            .select('acknowledged_at, acknowledged_injuries')
+            .eq('client_id', uid)
+            .order('acknowledged_at', { ascending: false })
+            .limit(capLimit()),
+          supabase.from('program_injury_acknowledgements')
+            .select('acknowledged_at, movements')
+            .eq('client_id', uid)
+            .order('acknowledged_at', { ascending: false })
+            .limit(capLimit()),
+        ]);
+        if (cancelled) return;
+
+        // Reported separately and folded into one status, because a client
+        // shown "your coach has read these" off a half-failed pair would be
+        // being told something on the strength of a read that did not happen.
+        if (ackRes.error) reportError('injuryAcks.mine.read', ackRes.error);
+        if (progRes.error) reportError('injuryAcks.mine.choices', progRes.error);
+
+        const ackRows = capped(ackRes.data ?? []);
+        const progRows = capped(progRes.data ?? []);
+        const status = worstStatus(
+          ackRes.error ? 'error' : ackRows.truncated ? 'partial' : 'ready',
+          progRes.error ? 'error' : progRows.truncated ? 'partial' : 'ready',
+        );
+
+        // The most recent coach's, not a merge of every coach who ever had
+        // them. Merging would let a previous coach's confirmation cover a
+        // disclosure the current one has never been shown.
+        const top = ackRows.rows[0] as any | undefined;
+        const read: CoachRead | null = top
+          ? {
+              at: typeof top.acknowledged_at === 'string' ? top.acknowledged_at : null,
+              keys: Array.isArray(top.acknowledged_injuries) ? top.acknowledged_injuries : [],
+            }
+          : null;
+
+        const choices: ProgrammeChoice[] = progRows.rows
+          .map((r: any) => ({
+            at: typeof r.acknowledged_at === 'string' ? r.acknowledged_at : '',
+            movements: Array.isArray(r.movements) ? r.movements : [],
+          }))
+          .filter((c) => c.at && c.movements.length);
+
+        setState({ status, read: ackRes.error ? null : read, choices: progRes.error ? [] : choices });
+      } catch (e) {
+        if (cancelled) return;
+        reportError('injuryAcks.mine', e);
+        setState({ status: 'error', read: null, choices: [] });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [authRev]);
+
+  return state;
 }

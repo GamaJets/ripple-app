@@ -51,8 +51,7 @@ const CLIENT_TABS: GuideSection[] = [
     summary: 'Where your day starts — how recovered you are and what is next.',
     points: [
       'Readiness needs a night of sleep behind it, either logged here or brought in from a watch. Until there is one it stays blank rather than guessing.',
-      'Body shows weight, body fat and muscle from your most recent scan, with the change since the one before it.',
-      'The weight line is built from your check-ins, so it only moves when you log one.',
+      'Body shows body fat and muscle from your most recent scan, with the change since the one before it, beside your latest weight.',
       'While something you have disclosed is severe, a card here names the muscle groups your plan has eased off and why.',
     ],
   },
@@ -63,7 +62,7 @@ const CLIENT_TABS: GuideSection[] = [
       'Tap a day to see that session. Start Workout walks you through it exercise by exercise.',
       'Log each set as you go — reps and weight. What you log is what feeds your history and progress.',
       'Book Session opens the times your coach has offered. The month grid shows what is already booked.',
-      'A movement that loads an injury you have disclosed is marked with which injury it loads, and can be swapped in one tap.',
+      'A movement that loads an injury you have disclosed is marked with which injury it loads, and offers you the alternatives in your plan that clear it.',
       'Where that injury is severe the swap is already made, if your plan has a safe alternative to swap to. Where it has none the movement is hidden and the row says so rather than quietly dropping it.',
       'Cardio, HIIT, Mobility and Recovery sit alongside your main program.',
     ],
@@ -73,7 +72,7 @@ const CLIENT_TABS: GuideSection[] = [
     summary: 'Your calorie and macro targets, and what you actually ate.',
     points: [
       'Targets are scaled from your body — they need a weight and a body fat to work from, so add a scan or a check-in first.',
-      'Log food four ways: photograph it, scan a barcode, search for it, or describe it in words.',
+      'Log food four ways: photograph it, type in the number under a barcode, search for it, or describe it in words.',
       'Mark the day as training, standard or rest and the targets move with it.',
     ],
   },
@@ -93,7 +92,7 @@ const CLIENT_TABS: GuideSection[] = [
     summary: 'Your account, your coach and your settings.',
     points: [
       'Connect a wearable to bring heart rate and sleep in automatically.',
-      'Find a Trainer lists coaches who have switched themselves on in the directory, and sends them a request. A code from your coach goes in at the top of that same screen.',
+      'Find a Trainer lists coaches who have switched themselves on in the directory, and sends them a request. A code from your coach goes in on that same screen, above the list.',
       'Injuries & Limitations, under Training, is where you disclose what you are working around.',
       'Memberships & Packs shows what you have bought, how much of it is left, and anything you are subscribed to.',
       'Everything you log belongs to your account and follows you across devices.',
@@ -107,11 +106,21 @@ const CLIENT_TOPICS: GuideSection[] = [
     summary: 'Readings from a continuous glucose monitor, beside what you ate.',
     points: [
       'Meals › Blood Sugar. Repple does not talk to Dexcom or Abbott — a monitor writes into Apple Health and Repple reads it from there, so any monitor that reaches Health reaches Repple.',
-      'Apple Health asks about blood glucose separately, the first time you open this screen. Nothing else in the app asks for it, and declining it changes nothing else.',
+      'Import from Health is on iPhone only. Apple Health asks about blood glucose on its own, the first time you import — nothing else in the app asks for it, and declining it changes nothing else.',
       'You can type a meter reading in by hand as well. It is stored in mmol/L whichever unit you read in, and a number that is only sensible in the other unit is refused rather than saved wrong.',
-      'Every meal you have logged is shown with the reading before it and the highest one in the two hours after — or a dash where there was no reading, never a zero.',
+      'Each meal is shown with the reading before it and the highest one after — up to two hours, or until the next thing you ate. A dash where there was no reading, never a zero.',
       'Your coach sees none of this until you turn on Let my coach see these. Turning it off again hides the history as well as the next reading.',
+      'The screen covers the last fourteen days. A share in range is withheld until there are enough readings for one to mean anything.',
       'Repple shows what your monitor recorded and stops there. It does not tell you what to eat, and the range it names is the one commonly quoted for adults, not a target set for you — those come from your clinician.',
+    ],
+  },
+  {
+    title: 'Offers',
+    summary: 'Membership › Offers, where a code from your gym is redeemed.',
+    points: [
+      'Type the code in and Redeem. It works once per person, and only at the gym that issued it.',
+      'Repple records that you used it and tells your gym. It does not take anything off a payment — the discount comes off through your gym’s own billing, so a price in the app does not change when you redeem.',
+      'Codes you have already used are listed underneath, with the discount and the day. A list that could not be read says so rather than telling you that you have used none.',
     ],
   },
   {
@@ -171,7 +180,7 @@ const TRAINER_TABS: GuideSection[] = [
     points: [
       'Add Client enters somebody by hand. Invite a Client opens your coaching code, and can also record an invite against an email address.',
       'Repple sends no email. An invite waits for that address to sign in, so tell them yourself that it is there.',
-      'Filters split the roster by at-risk, online and in-person, and by any tag you have put on somebody.',
+      'Filters split the roster by how somebody is going — drifting, or nothing recorded — by online, in-person or hybrid, and by any tag you have put on somebody.',
       'Tap a client for their page: what they have disclosed, how long since anything was recorded, what is outstanding, and the programme you assigned.',
       'Coaching Tools is also where your own training, nutrition and progress live.',
     ],
@@ -185,7 +194,7 @@ const TRAINER_TABS: GuideSection[] = [
       'Save any program you like as a template to reuse.',
       'Where a client has disclosed an injury, Assign is withheld until you have read the list and confirmed it. The confirmation covers what you were shown, so recovering does not ask you again but a new disclosure does.',
       'Exercises that load what they disclosed are marked while you build, and named again before the programme goes out.',
-      'You can programme those on purpose. Confirming records that you chose to, with the date, and your client can see that record too. If the record cannot be saved the programme is not assigned either.',
+      'You can programme those on purpose. Confirming records that you chose to, with the date. If the record cannot be saved the programme is not assigned either.',
     ],
   },
   {
@@ -193,7 +202,7 @@ const TRAINER_TABS: GuideSection[] = [
     summary: 'Your coaching week.',
     points: [
       'Add a Session books a client, or opens a slot they can take themselves. Starts are on the quarter hour, at any hour of the day.',
-      'Weekly Availability sets the times you offer every week, and generates open slots from them for the next four weeks.',
+      'Weekly Availability sets the times you offer every week — on the quarter hour, at any hour of the day — and generates open slots from them for the next four weeks.',
       'Block Out Time marks a period you are not available and withdraws the open slots inside it, so nothing stays advertised that the server will refuse.',
       'A session already booked inside a block is never removed for you. Cancel it yourself — that is what tells the client.',
       'Cancelling a booked session frees the slot. Re-offer pushes your other clients that the time is open.',
@@ -205,17 +214,18 @@ const TRAINER_TABS: GuideSection[] = [
     summary: 'The clips your clients see inside their program.',
     points: [
       'Record a clip, upload one, or paste a hosted link.',
-      'Each clip is set to only you, your clients, everyone at your gym, or anyone on Repple.',
-      'You can also name individual clients on a clip. A named client can watch it whatever that setting says, including one set to only you.',
-      'A clip is matched to the exercise by name and shows against that movement for the clients who can see it, ahead of anything Repple would otherwise have shown them.',
-      'What Your Programmes Need lists the movements in your own templates that you have never filmed.',
+      'Each clip is set to Only Me, My Clients, Everyone at the Gym, or Anyone on Repple.',
+      'You can also name individual clients on a clip. A named client can watch it whatever that setting says, including one set to Only Me.',
+      'Somebody you typed in by hand rather than somebody who signed up cannot be named on a clip. The list says which of your clients those are rather than failing at them quietly.',
+      'A clip is matched to the movement and shows against it for the clients who can see it, ahead of anything Repple would otherwise have shown them.',
+      'What Your Programmes Need lists the movements in your own templates that you have never filmed, and separates the ones the catalogue already illustrates from the ones a client would see nothing for.',
     ],
   },
   {
     title: 'Analytics',
     summary: 'How the coaching business is actually going.',
     points: [
-      'Sessions delivered counts what you have actually run this month, not what was booked.',
+      'Sessions Delivered counts this month’s sessions whose time has already gone by. It is not attendance — somebody who did not turn up is still in it.',
       'Roster health splits your clients into on track, watch and at risk.',
       'What those sessions are worth is your own session rate multiplied out. Repple does not process that money and is not told it, so it is arithmetic rather than a payout.',
       'Figures stay empty until there is real activity behind them, and a read that failed says so rather than showing you a zero.',
@@ -250,7 +260,7 @@ const TRAINER_TOPICS: GuideSection[] = [
     summary: 'How somebody actually gets onto your roster.',
     points: [
       'Your main code is six characters. Tap it to send it to the person in front of you; Copy Link for Your Bio gives the bare address instead, for a caption, a bio, or the destination of an ad.',
-      'They enter the code in the client app under Find a Trainer, at the top. You still approve them before they join your roster.',
+      'They enter the code in the client app under Find a Trainer, above the list of coaches. You still approve them before they join your roster.',
       'Named codes run alongside the main one — one for the gym flyer, one for the Instagram bio, both live at once — so you can see which of the things you did brought somebody in.',
       'Turning a named code off stops it taking anybody new and keeps its count, so a campaign that is over still tells you what it did.',
       'New Code replaces your main code and stops the old one working straight away. It is the remedy for a code that has got somewhere you did not put it, not a way to run a second campaign.',
@@ -275,7 +285,7 @@ const TRAINER_TOPICS: GuideSection[] = [
     title: 'Getting paid',
     summary: 'Payments, reached from Profile.',
     points: [
-      'Set Up Payouts connects a Stripe account. Nothing goes on sale until Stripe has verified it, and you never handle card details.',
+      'Set Up Payouts connects a Stripe account, and you never handle card details. A client cannot check out until Stripe has verified you, so connect it before you put anything on sale.',
       'A one-off package is a membership, or a pack of a set number of sessions.',
       'A recurring package charges every month or every year until the client cancels. A session count is not offered on one: nothing renews a balance, so the second month would charge again for credits already spent.',
       'Prices are in your gym’s currency and in nothing else. A gym that has not set one cannot put a package on sale, and the screen says so instead of picking a currency for you.',
@@ -288,8 +298,8 @@ const TRAINER_TOPICS: GuideSection[] = [
     summary: 'The three things you could track for everybody except yourself.',
     points: [
       'My Training logs and reviews your own sessions, by text or one lift at a time. It does not program — Programs is for that.',
-      'My Nutrition logs your own meals against your own target. Where a coach account has no member record behind it a meal cannot be stored at all, and the screen says so up front rather than taking one it is going to lose.',
-      'My Progress holds your own weigh-ins and tape measurements. Its weight trend is built from check-ins rather than scans, because a coach account cannot hold a scan.',
+      'My Nutrition logs your own meals against your own target. Where there is nothing behind the account to store one, the screen says so up front rather than taking a meal it is going to lose.',
+      'My Progress holds your own weigh-ins and tape measurements. Its weight trend is built from your check-ins, which are the weekly grain a trend wants.',
       'All three read and write your own rows and cannot show a client’s. Whose they are is stated on the tab, the heading and every empty state.',
     ],
   },
@@ -310,9 +320,10 @@ const OWNER_TABS: GuideSection[] = [
     title: 'Overview',
     summary: 'The gym at a glance.',
     points: [
-      'Recurring revenue, how it moved on last month, and how much of it is attached to a trainer who has been flagged.',
+      'Sessions delivered over the last thirty days, and how that compares with the month before.',
+      'How many of your trainers are flagged, and how many clients are with them.',
       'Trainer Health ranks your coaches worst first. Tap one for the detail behind the score.',
-      'Sessions trend and client load per trainer sit under it.',
+      'A sessions trend sits above that ranking, and client load per trainer below it.',
       'Revenue Analytics, Financial Health, Promotions and Classes & Payroll open from the foot of the screen.',
     ],
   },
@@ -321,16 +332,16 @@ const OWNER_TABS: GuideSection[] = [
     summary: 'The coaching staff working under your brand.',
     points: [
       'Who they carry and what they actually delivered, per trainer.',
-      'Invite a trainer and they accept it in their own app.',
-      'Delivered sessions can only be given a value once a session fee is set in Ops.',
+      'Invite a trainer by email and they accept it in their own app.',
+      'Delivered sessions can only be given a value once your gym has a session fee. Until it has one, no figure is shown rather than a nought.',
     ],
   },
   {
     title: 'Brand',
     summary: 'How the app looks to your members.',
     points: [
-      'Set the app name and pick a palette. It applies live and carries through the client and coach apps.',
-      'A custom accent colour on top of the palette is optional.',
+      'Set the app name and pick a palette. It applies live.',
+      'The choice is held on this device. It is not pushed to your members’ phones, so a second Studio handset is set up on its own.',
     ],
   },
   {
@@ -338,20 +349,21 @@ const OWNER_TABS: GuideSection[] = [
     summary: 'Where new members are coming from.',
     points: [
       'Retention, clients across every trainer, cohort retention by signup month, and the trainer acquisition funnel.',
-      'Promo and referral codes can be created here and switched on or off.',
-      'A promo row shows its discount and nothing else. Nothing in Repple counts redemptions, so no redemption figure is printed.',
+      'Promo and referral codes can be created here and switched on or off. A code you create is still there next time, and on your other devices.',
+      'A code row shows its discount and how many members have redeemed it. Where that count could not be read the row shows a dash, which is not the same as nobody.',
     ],
   },
   {
     title: 'Ops',
     summary: 'The day-to-day running of the gym.',
     points: [
-      'Write an announcement to your trainers, and triage the support inbox — tickets and real in-app feedback in one list.',
+      'Activity is your gym’s own feed: members joining, coaches joining, sessions marked delivered or missed, and codes being redeemed, as they happen.',
+      'Triage the support inbox — the feedback people send from inside the app, in one list.',
       'Trainer Rota: who is on the floor when, against what is booked.',
       'Equipment Register: what the gym owns, and what is due a service.',
       'Deletion Requests: members who asked to be erased, and the 30-day clock on each.',
       'Every list starts empty and fills from real activity. Nothing is seeded to make a screen look busy.',
-      'Platform Activity is the exception and says so on itself: no event log is being written yet, so it stays empty. What your gym did is on Revenue, Trainers and Members.',
+      'The feed holds the most recent hundred, and a read that failed says so rather than reporting a quiet month.',
     ],
   },
 ];

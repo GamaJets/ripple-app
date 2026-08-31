@@ -25,7 +25,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase, loadMe, type Me } from '@/lib/supabase';
 import { Shell } from '@/components/Shell';
 import { DataTable, type Column } from '@/components/DataTable';
-import { money } from '@lib/gymRecord';
+import { amount, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
+// `money()` is reached through lib/currency's `amount()` here: every figure on
+// this page is priced from the gym's session fee and has no currency of its own,
+// so none of them may be written without `tenants.currency`.
 import { fetchSessions, PAY_DELIVERED_ONLY, type PayPolicy, type PayrollLine } from '@lib/gymSessions';
 import { fetchShifts, fetchDemand, type DemandBlock } from '@lib/gymRota';
 import { fetchClientActivity, DRIFT_LABEL, DEFAULT_WINDOWS, type Drift } from '@lib/clientDrift';
@@ -53,6 +56,10 @@ export default function Staff() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
   const [gymName, setGymName] = useState<string | null>(null);
   const [sessionFee, setSessionFee] = useState<number | null>(null);
+  // `tenants.currency`. Every figure on this page is priced from the gym's own
+  // session fee and carries no currency of its own, so a null here means the
+  // amounts are unprintable rather than printable in a guessed money.
+  const [ccy, setCcy] = useState<TenantCurrency>(null);
   const [feeRead, setFeeRead] = useState<'ok' | 'failed'>('ok');
   const [rec, setRec] = useState<StaffRecord>(EMPTY);
   const [sel, setSel] = useState<string | null>(null);
@@ -110,13 +117,14 @@ export default function Staff() {
         return;
       }
       const { data: t, error: tErr } = await supabase
-        .from('tenants').select('name, session_fee').eq('id', who.tenantId).single();
+        .from('tenants').select('name, session_fee, currency').eq('id', who.tenantId).single();
       if (!live) return;
       // Checked, not assumed. supabase-js resolves on a database error, so a
       // null fee from a failed read would price every unrated session at nothing
       // and quietly shrink what the gym owes its staff.
       setGymName(tErr ? null : t?.name ?? null);
       setSessionFee(tErr ? null : t?.session_fee ?? null);
+      setCcy(tErr ? null : ((((t as any)?.currency ?? '') as string).trim().toUpperCase() || null));
       setFeeRead(tErr ? 'failed' : 'ok');
       await load(who.tenantId);
     })();
@@ -196,6 +204,16 @@ export default function Staff() {
           own snapshotted rate is left unpriced rather than valued at nothing.
         </Banner>
       ) : null}
+      {/* Beside the fee banner because it is the same shape of gap: a number
+          this page cannot state. A figure with no currency is not a figure —
+          "6,300.00" beside a trainer's name is read in whatever money the
+          reader happens to be thinking in. */}
+      {feeRead === 'ok' && !ccy ? (
+        <Banner tone="crit">
+          This gym has not set its currency, so no amount on this page can be
+          written down. Set it on the gym record and every figure below fills in.
+        </Banner>
+      ) : null}
       {view.caveat ? <Banner tone="crit">{view.caveat}</Banner> : null}
 
       <div
@@ -249,20 +267,21 @@ export default function Staff() {
         />
         <Kpi
           label="Payable now"
-          text={money(view.rollup.outstandingCents)}
+          text={amount(view.rollup.outstandingCents, ccy)}
           note={
             rec.sessions.state !== 'ready' ? stateNote(rec.sessions, 'the one-to-ones')
               : view.rollup.outstandingCents == null
                 ? 'nothing marked, priced and unsettled'
+                : !ccy ? NO_CURRENCY_NOTE
                 : 'settle it under Sessions'
           }
         />
       </div>
 
-      <Roster view={view} rec={rec} sel={sel} onPick={setSel} />
+      <Roster view={view} rec={rec} sel={sel} onPick={setSel} ccy={ccy} />
 
       {chosen ? (
-        <Person m={chosen} rec={rec} onClose={() => setSel(null)} />
+        <Person m={chosen} rec={rec} onClose={() => setSel(null)} ccy={ccy} />
       ) : (
         <Section title="One person" sub="Pick somebody above to open their record.">
           <p style={{ padding: '26px 20px', margin: 0, color: 'var(--ink3)', fontSize: 13.5 }}>
@@ -271,15 +290,16 @@ export default function Staff() {
         </Section>
       )}
 
-      <OffRoster view={view} />
+      <OffRoster view={view} ccy={ccy} />
     </Shell>
   );
 }
 
 /* ── the roster ────────────────────────────────────────────────────────────── */
 
-function Roster({ view, rec, sel, onPick }: {
+function Roster({ view, rec, sel, onPick, ccy }: {
   view: StaffView; rec: StaffRecord; sel: string | null; onPick: (id: string) => void;
+  ccy: TenantCurrency;
 }) {
   const cols: Column<StaffMember>[] = [
     {
@@ -325,9 +345,10 @@ function Roster({ view, rec, sel, onPick }: {
       render: (m) => {
         if (rec.sessions.state !== 'ready') return <span className="dash">not read</span>;
         if (m.outstandingCents == null) return <span className="dash">nothing to settle</span>;
+        if (!ccy) return <span className="dash">{NO_CURRENCY_NOTE}</span>;
         return (
           <span style={{ color: m.settleable ? 'var(--ink2)' : 'var(--warn)' }}>
-            {money(m.outstandingCents)}
+            {amount(m.outstandingCents, ccy)}
           </span>
         );
       },
@@ -402,7 +423,9 @@ function StatusDot({ m }: { m: StaffMember }) {
 
 /* ── one person ────────────────────────────────────────────────────────────── */
 
-function Person({ m, rec, onClose }: { m: StaffMember; rec: StaffRecord; onClose: () => void }) {
+function Person({ m, rec, onClose, ccy }: {
+  m: StaffMember; rec: StaffRecord; onClose: () => void; ccy: TenantCurrency;
+}) {
   return (
     <section style={{ border: '1px solid var(--ring)', borderRadius: 0, background: 'var(--surface)', marginBottom: 22 }}>
       <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--ring)', display: 'flex', gap: 10, alignItems: 'baseline' }}>
@@ -458,18 +481,21 @@ function Person({ m, rec, onClose }: { m: StaffMember; rec: StaffRecord; onClose
         />
         <Kpi
           label="Payable now"
-          text={money(m.outstandingCents)}
+          text={amount(m.outstandingCents, ccy)}
           note={
             rec.sessions.state !== 'ready' ? stateNote(rec.sessions, 'the one-to-ones')
-              : m.settleBlocker ?? `${m.outstandingSessions} session${m.outstandingSessions === 1 ? '' : 's'} ready to settle`
+              : m.settleBlocker
+                ?? (m.outstandingCents != null && !ccy ? NO_CURRENCY_NOTE : null)
+                ?? `${m.outstandingSessions} session${m.outstandingSessions === 1 ? '' : 's'} ready to settle`
           }
         />
         <Kpi
           label={`Earned · ${WINDOW_DAYS}d`}
-          text={money(m.owedCents)}
+          text={amount(m.owedCents, ccy)}
           note={
             rec.sessions.state !== 'ready' ? stateNote(rec.sessions, 'the one-to-ones')
               : m.owedCents == null ? 'no payable session carried a rate'
+              : !ccy ? NO_CURRENCY_NOTE
               : m.priced != null && m.payable != null && m.priced < m.payable
                 ? `${m.payable - m.priced} payable session${m.payable - m.priced === 1 ? '' : 's'} carry no rate and are NOT in this`
                 : `${m.payable} payable session${m.payable === 1 ? '' : 's'}, all priced`
@@ -578,7 +604,7 @@ function Book({ m, rec }: { m: StaffMember; rec: StaffRecord }) {
 
 /* ── money owed to somebody who is not on the roster ───────────────────────── */
 
-function OffRoster({ view }: { view: StaffView }) {
+function OffRoster({ view, ccy }: { view: StaffView; ccy: TenantCurrency }) {
   const rows = view.offRoster;
   if (!rows || !rows.length) return null;
 
@@ -588,7 +614,9 @@ function OffRoster({ view }: { view: StaffView }) {
     { key: 'delivered', header: 'Delivered', value: (l) => l.delivered, numeric: true },
     { key: 'unmarked', header: 'Unmarked', value: (l) => l.unmarked, numeric: true },
     { key: 'cents', header: 'Pay', value: (l) => l.cents, numeric: true,
-      render: (l) => l.cents == null ? <span className="dash">no rate</span> : <>{money(l.cents)}</> },
+      render: (l) => l.cents == null
+        ? <span className="dash">no rate</span>
+        : (amount(l.cents, ccy) ?? <span className="dash">{NO_CURRENCY_NOTE}</span>) },
   ];
 
   return (

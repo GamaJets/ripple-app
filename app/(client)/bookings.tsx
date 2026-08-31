@@ -31,9 +31,10 @@ import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Cta, Ghost } from '../../src/ui/kit';
 import { sp, layout, type as ty, numeric } from '../../src/theme/scale';
 import { useClasses } from '../../src/ui/classes';
-import { useSessions } from '../../src/ui/sessions';
+import { useSessions, cancelBookedSession, ptCancelLines } from '../../src/ui/sessions';
 import { useBrand } from '../../src/ui/brand';
 import { useClientData } from '../../src/ui/clientData';
+import type { TrainingSession } from '../../src/lib/types';
 import { buildIcs, shareIcs, type IcsEvent } from '../../src/lib/exportShare';
 import { peerHeading } from '../../src/lib/threadPeer';
 import { useThreadPeerName } from '../../src/ui/messaging';
@@ -47,7 +48,38 @@ const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const timeLabel = (iso: string) => { const d = new Date(iso); let h = d.getHours(); const m = d.getMinutes(); const ap = h >= 12 ? 'pm' : 'am'; h = h % 12 || 12; return `${h}${m ? ':' + String(m).padStart(2, '0') : ''}${ap}`; };
 const dayLabel = (iso: string) => { const d = new Date(iso); const t = new Date(); const tm = new Date(); tm.setDate(t.getDate() + 1); if (d.toDateString() === t.toDateString()) return 'Today'; if (d.toDateString() === tm.toDateString()) return 'Tomorrow'; return `${DOW[d.getDay()]} ${d.getDate()}/${d.getMonth() + 1}`; };
 
-type Item = { id: string; kind: 'class' | 'pt'; title: string; sub: string; startsAt: string; durationMin: number; location?: string; waitlist?: boolean; onCancel: () => void };
+// `onCancel` resolves TRUE only when the server actually took the cancellation.
+//
+// It used to be `() => void`, wrapping two calls that both return
+// `Promise<boolean>` — `useClasses().cancel` and `useSessions().releaseSession`
+// — and throwing the answer away at the call site. Both of those booleans exist
+// for one reason: a cancellation the server refuses still empties the row off
+// this screen for a moment, because both providers paint optimistically and
+// then put the booking back when the write does not land. So the member watched
+// their booking vanish, saw no message of any kind, and left believing they had
+// cancelled. Class no-shows are charged by the gym and a missed PT session is
+// charged off the member's pack, so the cost of that silence lands on them.
+//
+// app/(client)/calendar.tsx has done this correctly since the re-offer bug:
+// await the release, and say plainly that nothing changed when it comes back
+// false. This screen now does the same.
+//
+// ── The divergence that made the same tap cost different money ─────────────
+//
+// `onCancel` was the whole of a cancellation on this screen, and for a class it
+// still is. For a PT session it was not enough, and the note that used to sit
+// beside the PT row said so: cancelling here freed the slot and stopped, while
+// app/(client)/calendar.tsx also returned the pack credit when the cancellation
+// was more than 24h out, offered the freed slot to the coach's other clients,
+// and told the coach. So the member lost a paid session by cancelling from the
+// list instead of from the calendar, and nothing on either screen suggested the
+// two buttons were different.
+//
+// `pt` is what carries that. It is not a second copy of those writes — the fix
+// the note asked for was a shared helper, and `cancelBookedSession` in
+// src/ui/sessions.tsx is it, called by both screens with the same arguments in
+// the same order. This screen keeps only the wording of its own alerts.
+type Item = { id: string; kind: 'class' | 'pt'; title: string; sub: string; startsAt: string; durationMin: number; location?: string; waitlist?: boolean; onCancel: () => Promise<boolean>; pt?: TrainingSession };
 
 export default function Bookings() {
   const t = useTheme();
@@ -81,16 +113,67 @@ export default function Bookings() {
         // than one named after what it is. The location is simply omitted for
         // the same reason: `IcsEvent.location` is optional, and an absent line
         // in a calendar entry says nothing, where a dash says something wrong.
-        out.push({ id: 'p' + s.id, kind: 'pt', title: coachName ? `PT with ${coachName}` : 'PT session', sub: `${s.durationMin} min session`, startsAt: s.startsAt, durationMin: s.durationMin, location: coachName ? `with ${coachName}` : undefined, onCancel: () => releaseSession(s.id) });
+        // The divergence the note above this type described is closed: `pt`
+        // routes this row's cancellation through the same helper the Book
+        // screen calls, so the credit, the re-offer and the coach's push happen
+        // whichever screen the member cancelled from. `onCancel` stays as the
+        // release the helper itself performs, so a class row and a PT row still
+        // share one shape.
+        out.push({ id: 'p' + s.id, kind: 'pt', title: coachName ? `PT with ${coachName}` : 'PT session', sub: `${s.durationMin} min session`, startsAt: s.startsAt, durationMin: s.durationMin, location: coachName ? `with ${coachName}` : undefined, onCancel: () => releaseSession(s.id), pt: s });
       }
     }
     return out.sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt));
   }, [classes, myStatus, sessions, coachName]);
 
   const confirmCancel = (it: Item) => {
+    // Captured before either alert, so the 24-hour rule the member is warned
+    // about is the same one that decides whether their credit comes back.
+    const asked = Date.now();
+    // The booking is named in the failure sentence as well as the question. By
+    // the time this alert appears the row has already blinked out and back, and
+    // "that didn't save" over an unnamed booking leaves the member checking the
+    // list to work out which one it meant.
+    const failed = () => Alert.alert(
+      it.waitlist ? 'Still on the waitlist' : 'Not cancelled',
+      it.waitlist
+        ? `You are still on the waitlist for ${it.title} — that did not save, so nothing has changed. Check your connection and try again.`
+        : `${it.title} on ${dayLabel(it.startsAt)} at ${timeLabel(it.startsAt)} is still booked — that did not save, so nothing has changed and you are still expected. Check your connection and try again.`,
+      [{ text: 'OK' }],
+    );
+    const doCancel = async () => {
+      // A PT session is not just a row coming off a list: there is a pack credit
+      // to return, a slot to re-offer, and a coach expecting somebody. All of it
+      // is in `cancelBookedSession` so that this screen and the Book screen
+      // cannot drift into settling the same cancellation differently — and the
+      // sentences about the member's money come back from `ptCancelLines`, for
+      // the same reason.
+      if (it.pt) {
+        const out = await cancelBookedSession(it.pt, releaseSession, asked);
+        if (!out.freed) { failed(); return; }
+        Alert.alert('Cancelled', ptCancelLines(out, timeLabel(it.startsAt)).join('\n\n'), [{ text: 'OK' }]);
+        return;
+      }
+      const ok = await it.onCancel();
+      if (ok) return;
+      failed();
+    };
+    // The 24-hour warning is part of the cancellation, not part of the calendar
+    // screen. Asked without it, a member cancelling from this list agreed to
+    // something they were not told the price of — and the price is a session off
+    // a pack they paid for. Same rule, same wording, and only for PT: a class is
+    // the gym's own no-show policy and this app does not know it.
+    const late = !!it.pt && Date.parse(it.startsAt) - asked < 24 * 3600 * 1000;
+    if (late) {
+      Alert.alert(
+        'Within 24 hours',
+        `This is inside 24 hours, so the session is charged from your package, and your coach's late-cancellation fee may apply — Repple does not charge it, so check with them what it is. The slot is offered to your coach's other clients. Continue?`,
+        [{ text: 'Keep it', style: 'cancel' }, { text: 'Cancel anyway', style: 'destructive', onPress: () => { void doCancel(); } }],
+      );
+      return;
+    }
     Alert.alert('Cancel this booking?', `${it.title} · ${dayLabel(it.startsAt)} ${timeLabel(it.startsAt)}`, [
       { text: 'Keep it', style: 'cancel' },
-      { text: 'Cancel', style: 'destructive', onPress: it.onCancel },
+      { text: 'Cancel', style: 'destructive', onPress: () => { void doCancel(); } },
     ]);
   };
 

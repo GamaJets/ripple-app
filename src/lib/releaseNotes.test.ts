@@ -144,7 +144,12 @@ for (const r of RELEASES) {
     ok(e.apps.length > 0, `"${e.title}" names at least one app`);
     ok(e.apps.every((a) => ALL.includes(a)), `"${e.title}" names only apps that exist`);
     // The house voice: say what the reader can do, not what we changed inside.
-    ok(!/\bRLS\b|supabase|postgrest|policy|constraint|webhook/i.test(`${e.title} ${e.note ?? ''}`),
+    //
+    // The list grew when the release that added a database-written activity
+    // feed and a redemption row was being described: every one of those words
+    // was the obvious way to write the sentence, and none of them is something
+    // a coach or an owner can do anything with.
+    ok(!/\bRLS\b|supabase|postgrest|policy|constraint|webhook|trigger|\bRPC\b|column|migration|row.level|\bindex\b|\btable\b|endpoint/i.test(`${e.title} ${e.note ?? ''}`),
       `"${e.title}" names a mechanism the reader cannot act on`);
     ok(!/exciting|amazing|revolutionary|delighted|!/i.test(`${e.title} ${e.note ?? ''}`),
       `"${e.title}" is written at a volume the rest of the app does not use`);
@@ -173,6 +178,31 @@ ok(!titlesFor('client').some((t) => /renews every month/i.test(t)), 'a client is
 ok(titlesFor('client').some((t) => /release of liability/i.test(t)), 'a client is told about the release they will be asked to sign');
 ok(!titlesFor('owner').some((t) => /release of liability/i.test(t)), 'an owner does not sign it and is not told about it');
 ok(titlesFor('owner').some((t) => /dash/i.test(t)), 'the owner console’s unread figures are the owner’s news');
+
+// The gym's own activity feed is the owner's screen. A coach has no Ops tab and
+// a client is not shown a log of who joined the gym.
+ok(titlesFor('owner').some((t) => /activity/i.test(t)), 'an owner is told their Ops feed now has something in it');
+ok(!titlesFor('trainer').some((t) => /activity/i.test(t)), 'a coach has no Ops tab and is not told about its feed');
+ok(!titlesFor('client').some((t) => /activity/i.test(t)), 'nor is a member, who cannot see who else joined');
+
+// A promo code has two halves in two different apps, and each app is told only
+// its own: the member spends one, the owner counts them. Neither is the coach's.
+ok(titlesFor('client').some((t) => /redeem/i.test(t)), 'a member is told they can redeem a code from their gym');
+ok(!titlesFor('owner').some((t) => /redeem/i.test(t)), 'an owner does not redeem their own codes');
+ok(titlesFor('owner').some((t) => /promo codes/i.test(t)), 'an owner is told the codes persist and are counted');
+for (const t of titlesFor('trainer')) {
+  ok(!/redeem|promo code/i.test(t), `a coach runs no gym promotions and is not told about them ("${t}")`);
+}
+
+// One release, one sentence per change. Two entries with the same title is the
+// shape a stale note takes when a second person describes what already landed.
+for (const r of RELEASES) {
+  const seen = new Set<string>();
+  for (const e of r.entries) {
+    ok(!seen.has(e.title), `${r.version}: "${e.title}" is listed twice`);
+    seen.add(e.title);
+  }
+}
 
 // The same source feeds App Store Connect, and its field has a limit.
 for (const aud of ALL) {

@@ -109,6 +109,18 @@ export default function Habits() {
               <Cta label="Add a Glass" wide onPress={h.addWater} />
             </View>
           </View>
+          {/* Which copy of the count these glasses are drawn from.
+              Before part 109 the count lived in this device's storage and
+              nowhere else, so it could not be wrong about the server — there
+              was no server copy to be wrong about. Now there is, and the count
+              still has to work with no signal (this is a gym), so the honest
+              state is "counted here, unconfirmed" rather than either a reset to
+              zero or a number presented as though it had been checked. */}
+          {h.waterStatus === 'error' ? (
+            <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>
+              Counted on this phone. We couldn’t check it against your account just now, so if you have logged water on another device today this may not be the whole picture.
+            </Text>
+          ) : null}
         </Section>
 
         <Rule />

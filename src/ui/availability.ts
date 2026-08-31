@@ -26,6 +26,9 @@ import { useAuthRevision } from './authRevision';
 
 export interface AvailSlot { id: string; dow: number; hour: number; minute: number; dur: number }
 
+/** The outcome of `addSlot`. See the note on it for why this is not a boolean. */
+export type AddSlotResult = 'saved' | 'duplicate' | 'local';
+
 /** Slot ordering, in one place: day, then hour, then minute. Written once
  *  because it is applied in four (the server read, `persist`, and both sorts
  *  that used to stop at the hour and therefore shuffled 9:45 above 9:15). */
@@ -105,8 +108,25 @@ export function useAvailability() {
           // Server has nothing, this device does: push the device copy up. Until
           // that insert lands the local slots are still unconfirmed, so a
           // failure here leaves the status at 'error' rather than 'ready'.
-          const { error: upErr } = await supabase.from('trainer_availability').insert(local.map((sl) => ({ trainer_id: u, dow: sl.dow, hour: sl.hour, minute: Number(sl.minute) || 0, dur: sl.dur })));
-          setStatus(upErr ? 'error' : 'ready');
+          //
+          // The rows come BACK, and that is the fix rather than a tidy-up. The
+          // insert used to discard them, so the slots on screen kept the local
+          // ids they were created with — and `removeSlot` treats an id with no
+          // dash as one that never reached the server and deletes it locally
+          // only. So a coach who set their week offline, came back into signal,
+          // and then removed a Tuesday had it deleted from the phone, left on
+          // the server, and read back onto the phone at the next launch. The
+          // slot they had closed kept re-appearing, and the sessions generated
+          // from it were real.
+          const { data: up, error: upErr } = await supabase.from('trainer_availability')
+            .insert(local.map((sl) => ({ trainer_id: u, dow: sl.dow, hour: sl.hour, minute: Number(sl.minute) || 0, dur: sl.dur })))
+            .select('id, dow, hour, minute, dur');
+          if (cancelled) return;
+          if (upErr || !up) { setStatus('error'); return; }
+          const synced: AvailSlot[] = up.map((r: any) => ({ id: String(r.id), dow: r.dow, hour: r.hour, minute: Number(r.minute) || 0, dur: r.dur })).sort(byTime);
+          setSlots(synced);
+          try { AsyncStorage.setItem(KEY, JSON.stringify(synced)); } catch { /* the slots are correct this session either way */ }
+          setStatus('ready');
         } else {
           // Server confirmed: this coach genuinely has no availability set.
           setStatus('ready');
@@ -122,25 +142,40 @@ export function useAvailability() {
     try { AsyncStorage.setItem(KEY, JSON.stringify(sorted)); } catch { /* ignore */ }
   };
 
-  /** Resolves true only once the slot is on the server, where the coach's other
-   *  devices and the session generator will see it. False means this phone only. */
-  const addSlot = async (dow: number, hour: number, minute: number, dur: number): Promise<boolean> => {
+  /** What happened to a weekly slot the coach just added.
+   *
+   *  This used to be a bare `Promise<boolean>` and the one caller ignored it,
+   *  which was reasonable of them: `false` was returned for three different
+   *  things — the slot is already in the list, the slot is on this phone but not
+   *  on the server, and there is nobody signed in — and only one sentence could
+   *  ever have been written about all three. So nothing was said at all, and a
+   *  weekly slot that never reached the server sat in the sheet looking saved.
+   *  It is the template the coach generates their month from, so a slot that is
+   *  only on this phone is four sessions that never open.
+   *
+   *  'saved'     the slot is on the server, where the generator and the coach's
+   *              other devices can see it.
+   *  'duplicate' they already offer that day and time; nothing changed.
+   *  'local'     it is on this phone only. Kept and shown, because a coach in a
+   *              basement gym still gets to write their week down — but not
+   *              claimed as saved. */
+  const addSlot = async (dow: number, hour: number, minute: number, dur: number): Promise<AddSlotResult> => {
     // The duplicate check runs on the minute as well. On the hour alone it
     // refused a coach who already offered 9:00 from adding 9:30 — silently,
     // since the caller only sees false, which also means "saved on this phone
     // only". A unique index says the same thing server-side so two of their
     // devices cannot race past it.
-    if (slots.some((s) => s.dow === dow && s.hour === hour && s.minute === minute)) return false;
+    if (slots.some((s) => s.dow === dow && s.hour === hour && s.minute === minute)) return 'duplicate';
     const localId = 'av' + Date.now().toString(36) + SEQ++;
     persist([...slots, { id: localId, dow, hour, minute, dur }]);
-    if (!USE_SUPABASE || !uid) return false;
+    if (!USE_SUPABASE || !uid) return 'local';
     try {
       const { data, error } = await supabase.from('trainer_availability').insert({ trainer_id: uid, dow, hour, minute, dur }).select('id').single();
       const sid = data?.id;
-      if (error || !sid) return false;
+      if (error || !sid) return 'local';
       setSlots((p) => p.map((sl) => (sl.id === localId ? { ...sl, id: String(sid) } : sl)));
-      return true;
-    } catch { return false; }
+      return 'saved';
+    } catch { return 'local'; }
   };
   /** Resolves true only when the slot is gone server-side. A refused delete
    *  leaves the coach bookable at an hour they thought they had closed. */

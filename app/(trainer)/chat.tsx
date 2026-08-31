@@ -19,13 +19,14 @@
 // the header resolves the client's own — or says it could not, rather than
 // labelling a real conversation with a category noun.
 import { useRef, useState } from 'react';
-import { View, Text, TextInput, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, TextInput, ScrollView, KeyboardAvoidingView, Platform, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Rule, Cta, Ghost } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty } from '../../src/theme/scale';
 import { peerHeading, type PeerHeading } from '../../src/lib/threadPeer';
+import { peerMonogram } from '../../src/lib/peerAvatar';
 import { useThread, useThreadPeerName } from '../../src/ui/messaging';
 
 export default function CoachChat() {
@@ -55,6 +56,17 @@ export default function CoachChat() {
       {/* ── header ───────────────────────────────────────────────────────── */}
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingHorizontal: G, paddingVertical: sp.md }}>
         <Ghost icon="back" onPress={() => router.back()} />
+        {/* The client's face, read for the CLIENT's id via
+            `profiles_trainer_read` and from nowhere else. On the roster path the
+            hook is handed no id and does no work, so there is nothing to draw
+            and the monogram is taken from the name the roster passed — never
+            from the coach's own profile, which is the readable one on this app
+            and therefore the one TF-32 would have reached for. */}
+        <View style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+          {peer.avatar
+            ? <Image source={{ uri: peer.avatar }} style={{ width: 38, height: 38 }} accessibilityIgnoresInvertColors />
+            : <Text style={{ ...ty.label, fontWeight: '600', color: head.isName ? t.brand : t.ink3 }}>{peerMonogram(head)}</Text>}
+        </View>
         <View style={{ flex: 1 }}>
           {/* Casing and full ink are for a real name only; a dash gets neither,
               so the header never dresses a placeholder up as a person. */}

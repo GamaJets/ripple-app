@@ -39,6 +39,27 @@ interface WorkoutLogValue {
    *  must not tell the user it is saved. */
   addWorkout: (entry: WorkoutEntry) => Promise<boolean>;
   addWorkouts: (entries: WorkoutEntry[]) => Promise<boolean>;
+  /**
+   * Send entries that are ALREADY in `log` to the server again.
+   *
+   * `addWorkouts` puts its entries into `log` before it asks the server, which
+   * is right — the sets are on screen the instant they are typed. But it makes
+   * a second attempt at the same session impossible without duplicating them
+   * locally: retrying through `addWorkouts` prepends a second copy of every
+   * exercise, so a client on gym wifi who taps "Try again" watches their
+   * workout appear twice and cannot tell which one is real.
+   *
+   * This is the insert on its own. Same rules as `addWorkouts` — resolves true
+   * only once the rows are on the server, and adopts the ids it gets back so
+   * the entries become editable — with nothing added to `log`, because the
+   * caller's entries are in there already.
+   *
+   * Only ever for entries whose first write was REFUSED. An entry that has an
+   * `id` is on the server and must not be sent again; those are filtered out
+   * here rather than trusted to the caller, because a duplicated session is
+   * indistinguishable from two real ones the day after.
+   */
+  retryWorkouts: (entries: WorkoutEntry[]) => Promise<boolean>;
   /** Correct an entry that is already logged. Resolves true only once the
    *  server holds the correction, and `log` is left untouched when it does not
    *  — so the screen never shows a figure the row disagrees with. */
@@ -141,6 +162,13 @@ export function WorkoutLogProvider({ children }: { children: React.ReactNode }) 
   };
 
   const addWorkout = (entry: WorkoutEntry) => { setLog((p) => [entry, ...p]); return persist([entry]); };
+  // The insert with no optimistic add — see the contract above. `id` present
+  // means the row already exists, and re-inserting it is how one session
+  // becomes two.
+  const retryWorkouts = (entries: WorkoutEntry[]) => {
+    const unsaved = entries.filter((e) => !e.id);
+    return unsaved.length ? persist(unsaved) : Promise.resolve(false);
+  };
   const addWorkouts = (entries: WorkoutEntry[]) => {
     if (!entries.length) return Promise.resolve(false);
     setLog((p) => [...entries, ...p]);
@@ -238,7 +266,7 @@ export function WorkoutLogProvider({ children }: { children: React.ReactNode }) 
 
   const reload = () => { setStatus('loading'); setReloadTick((n) => n + 1); };
 
-  return <Ctx.Provider value={{ log, status, addWorkout, addWorkouts, updateWorkout, removeWorkout, setSessionMins, reload }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ log, status, addWorkout, addWorkouts, retryWorkouts, updateWorkout, removeWorkout, setSessionMins, reload }}>{children}</Ctx.Provider>;
 }
 
 export function useWorkoutLog(): WorkoutLogValue {

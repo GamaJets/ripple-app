@@ -594,11 +594,17 @@ function AddClass({ tenantId, onChange }: { tenantId: string; onChange: () => vo
   // exactly what this data exists to prevent, and the moment to say so is while
   // the number is still being typed — not after twenty people have booked.
   const [kit, setKit] = useState<Equipment[] | null>(null);
+  // Kept, because a failed read used to be swallowed into `setKit([])` and an
+  // empty register is not an unread one: capacityFor on an empty list answers
+  // "No rower recorded in the register, so this capacity cannot be checked",
+  // which is a confident statement about a register nobody managed to read.
+  // The owner then goes and re-registers kit that was there all along.
+  const [kitErr, setKitErr] = useState<string | null>(null);
   useEffect(() => {
     let live = true;
     fetchEquipment(supabase, tenantId)
-      .then((rows) => { if (live) setKit(rows); })
-      .catch(() => { if (live) setKit([]); });
+      .then((rows) => { if (live) { setKit(rows); setKitErr(null); } })
+      .catch((e: any) => { if (live) { setKit(null); setKitErr(e?.message ?? 'The equipment register could not be read.'); } });
     return () => { live = false; };
   }, [tenantId]);
 
@@ -660,6 +666,13 @@ function AddClass({ tenantId, onChange }: { tenantId: string; onChange: () => vo
                  style={{ ...field, width: 210 }} />
         <button type="submit" disabled={busy} style={primaryBtn}>Add</button>
       </form>
+      {kitErr && needs.trim() ? (
+        <div style={{ padding: '0 14px 12px', fontSize: 12.5, color: '#f0c04e' }}>
+          The equipment register could not be read, so this capacity is unchecked rather than
+          checked and found fine: {kitErr}. Adding the class is still allowed — the check is a
+          warning, not a gate.
+        </div>
+      ) : null}
       {check ? (
         <div style={{ padding: '0 14px 12px', fontSize: 12.5,
                       color: check.supported === false ? '#f0c04e' : 'var(--ink3)' }}>
@@ -680,10 +693,15 @@ function AddClass({ tenantId, onChange }: { tenantId: string; onChange: () => vo
 function Roster({ gymClass, onClose }: { gymClass: GymClass; onClose: () => void }) {
   const [rows, setRows] = useState<RosterEntry[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // A failed read used to land in `setRows([])`, and rows.length === 0 is the
+  // branch that says "Nobody has booked this class" — to a desk about to turn
+  // away people who did. Three states, not two: null with no readErr is still
+  // reading, null with one is a read that failed, and only a list is a fact.
+  const [readErr, setReadErr] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    try { setRows(await fetchRoster(supabase, gymClass.id)); }
-    catch (e: any) { setErr(e?.message ?? 'Could not read the roster.'); setRows([]); }
+    try { setRows(await fetchRoster(supabase, gymClass.id)); setReadErr(null); }
+    catch (e: any) { setRows(null); setReadErr(e?.message ?? 'Could not read the roster.'); }
   }, [gymClass.id]);
 
   useEffect(() => { load(); }, [load]);
@@ -731,7 +749,13 @@ function Roster({ gymClass, onClose }: { gymClass: GymClass; onClose: () => void
 
         {err ? <Banner tone="crit">{err}</Banner> : null}
 
-        {rows === null ? <Loading /> : rows.length === 0 ? (
+        {rows === null && readErr ? (
+          <div style={{ padding: '26px 18px', color: 'var(--ink3)', fontSize: 13.5 }}>
+            The roster could not be read, so this is not a class nobody booked — it is a class
+            whose bookings did not arrive: {readErr}.{' '}
+            <button onClick={load} style={{ ...linkBtn, color: 'var(--brand)' }}>Try again</button>
+          </div>
+        ) : rows === null ? <Loading /> : rows.length === 0 ? (
           <div style={{ padding: '26px 18px', color: 'var(--ink3)', fontSize: 13.5 }}>
             Nobody has booked this class. Members book from the Repple app; a walk-in can be added
             once member sign-up is wired to the desk.

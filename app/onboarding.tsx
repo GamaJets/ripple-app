@@ -27,6 +27,7 @@ import { Cta, Ghost } from '../src/ui/kit';
 import { sp, layout, radius, type as ty } from '../src/theme/scale';
 import { VARIANT } from '../src/lib/variant';
 import { useTenant } from '../src/ui/tenant';
+import { peekJoinCode } from '../src/ui/pendingJoinCode';
 
 const GOALS: { id: Goal; label: string }[] = [
   { id: 'fatloss', label: 'Fat Loss' },
@@ -91,19 +92,33 @@ export default function Onboarding() {
     if (!res.canceled && res.assets && res.assets[0]) cd.setPhoto(res.assets[0].uri);
   };
 
-  const finish = () => {
+  const finish = async () => {
     const w = parseFloat(weight); if (w > 20 && w < 400) cd.setWeightKg(w);
     const h = parseFloat(height); if (h > 80 && h < 260) cd.setHeightCm(h);
     cd.setCoachingMode(cmode);
+    // A code is waiting when this account was created off the back of a coach's
+    // invite link: app/join.tsx stored it before sending them to sign up, and
+    // /(client)/trainers is the only screen that spends it. Routing on `cmode`
+    // alone dropped it — somebody who tapped their coach's link and then
+    // answered "Training on my own" (the honest answer for a client with no
+    // coach YET) landed on the dashboard with their coach's code sitting
+    // unspent in storage and nothing on screen mentioning it. The code is not
+    // consumed here and their answer is not overridden; they are simply shown
+    // the screen that can act on what they arrived with.
+    //
+    // A failed read is treated as no code, which is the behaviour before this
+    // line existed: it costs the prefill, never the account.
+    let pending: string | null = null;
+    try { pending = await peekJoinCode(); } catch { pending = null; }
     // Connect-a-coach on first run: coached clients land on Find a Trainer so they
     // can pick a coach right away; solo clients go straight to their dashboard.
-    router.replace(cmode === 'solo' ? '/(client)/dashboard' : '/(client)/trainers');
+    router.replace(cmode === 'solo' && !pending ? '/(client)/dashboard' : '/(client)/trainers');
   };
 
   const next = () => {
     if (role === 'owner') { void saveGym(); return; }
     if (role !== 'client') { router.replace('/(trainer)/dashboard'); return; }
-    if (step >= clientSteps - 1) { finish(); return; }
+    if (step >= clientSteps - 1) { void finish(); return; }
     setStep(step + 1);
   };
   const back = () => { if (step > 0) setStep(step - 1); };

@@ -15,6 +15,7 @@ import { classFillState } from '../../src/lib/gymSchedule';
 import { Rule, Section, SectionHead, Cta, Ghost } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
 import { useClasses } from '../../src/ui/classes';
+import { useSettings } from '../../src/ui/settings';
 import { scheduleLocal } from '../../src/ui/pushNotifications';
 import type { GymClass } from '../../src/lib/classesMock';
 
@@ -26,6 +27,12 @@ export default function Classes() {
   const t = useTheme();
   const router = useRouter();
   const { classes, myStatus, book, cancel, countsKnown } = useClasses();
+  // The class reminder below is a notification, so it answers to the switch on
+  // the Settings screen like every other one. That switch used to be wired to
+  // nothing at all; now that it means something, a member who has turned
+  // notifications off must not be told "we'll remind you an hour before" —
+  // which is the sentence this screen has always printed, unconditionally.
+  const { notifPush } = useSettings();
   const [branch, setBranch] = useState<string | null>(null);
 
   const branches = useMemo(() => Array.from(new Set(classes.map((c) => c.branch).filter(Boolean))).sort(), [classes]);
@@ -53,15 +60,46 @@ export default function Classes() {
     }
     if (st === 'waitlist') Alert.alert('Added to waitlist', `${c.title} is full — you're on the waitlist and we'll move you up if a spot opens.`);
     else {
-      const when = new Date(Date.parse(c.startsAt) - 60 * 60 * 1000);
-      scheduleLocal(`${c.title} in 1 hour`, `${timeLabel(c.startsAt)} at ${c.branch}${c.room ? ' · ' + c.room : ''} with ${c.instructor}.`, when, { route: '/(client)/bookings' });
-      Alert.alert('Booked', `You're in for ${c.title} at ${c.branch}, ${dayLabel(c.startsAt)} ${timeLabel(c.startsAt)}. We'll remind you an hour before.`);
+      if (notifPush) {
+        const when = new Date(Date.parse(c.startsAt) - 60 * 60 * 1000);
+        scheduleLocal(`${c.title} in 1 hour`, `${timeLabel(c.startsAt)} at ${c.branch}${c.room ? ' · ' + c.room : ''} with ${c.instructor}.`, when, { route: '/(client)/bookings' });
+      }
+      // The reminder sentence is only printed when a reminder was actually
+      // scheduled. The alternative is not silence: a member who has switched
+      // notifications off is told the booking is theirs and that nothing will
+      // arrive to remind them, which is what makes the switch trustworthy
+      // rather than merely obeyed.
+      Alert.alert('Booked', `You're in for ${c.title} at ${c.branch}, ${dayLabel(c.startsAt)} ${timeLabel(c.startsAt)}.`
+        + (notifPush ? " We'll remind you an hour before." : ' Notifications are off, so there will be no reminder.'));
     }
   };
   const onCancel = (c: GymClass) => {
+    // `cancel()` resolves false when the server did not take the cancellation,
+    // and that answer was being thrown away here — the exact mirror of the
+    // book() bug fixed directly above, and the same shape of harm pointing the
+    // other way.
+    //
+    // useClasses().cancel drops the seat off this screen FIRST and puts it back
+    // when the write does not land (see the `restore` closure in
+    // src/ui/classes.tsx). So a refused cancellation showed the member their
+    // seat disappear, then quietly reappear, with no sentence anywhere saying
+    // which of the two was true. They stop turning up, and the gym charges the
+    // no-show. app/(client)/calendar.tsx has awaited its release and said so
+    // since the re-offer fix; this now does the same.
+    const doCancel = async () => {
+      const wasWaitlist = myStatus[c.id] === 'waitlist';
+      if (await cancel(c.id)) return;
+      Alert.alert(
+        wasWaitlist ? 'Still on the waitlist' : 'Not cancelled',
+        wasWaitlist
+          ? `You are still on the waitlist for ${c.title} — that did not save, so nothing has changed. Check your connection and try again.`
+          : `Your seat in ${c.title} on ${dayLabel(c.startsAt)} at ${timeLabel(c.startsAt)} is still booked — that did not save, so nothing has changed and the gym still expects you. Check your connection and try again.`,
+        [{ text: 'OK' }],
+      );
+    };
     Alert.alert('Cancel booking?', `${c.title} · ${c.branch} · ${dayLabel(c.startsAt)} ${timeLabel(c.startsAt)}`, [
       { text: 'Keep it', style: 'cancel' },
-      { text: 'Cancel booking', style: 'destructive', onPress: () => cancel(c.id) },
+      { text: 'Cancel booking', style: 'destructive', onPress: () => { void doCancel(); } },
     ]);
   };
 

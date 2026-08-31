@@ -42,9 +42,11 @@
     "src/lib/photoCompare.test.ts",
     "src/lib/units.test.ts",
     "src/lib/workoutParse.test.ts",
+    "src/lib/progression.test.ts",
     "src/lib/goalEnergy.test.ts",
     "src/lib/spotifyPlayback.test.ts",
     "src/lib/threadPeer.test.ts",
+    "src/lib/peerAvatar.test.ts",
     "src/lib/liftingMacros.test.ts",
     "src/lib/dayPlan.test.ts",
     "src/lib/sleepMerge.test.ts",
@@ -76,6 +78,11 @@
     "src/lib/waiver.test.ts",
     "src/lib/injuryExtract.test.ts",
     "src/lib/releaseNotes.test.ts",
-    "src/lib/glucose.test.ts"
+    "src/lib/glucose.test.ts",
+    "src/lib/clientTraining.test.ts",
+    "src/lib/wellnessSync.test.ts",
+    "src/lib/coachMoney.test.ts",
+    "src/lib/trainerSessions.test.ts",
+    "src/lib/gymSettings.test.ts"
   ]
 }

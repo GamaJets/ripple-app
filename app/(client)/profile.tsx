@@ -173,7 +173,12 @@ const HUB_GROUPS: { title: string; items: { label: string; note: string; route: 
     { label: 'Memberships & Packs', note: 'Your session packs & payments', route: '/(client)/packages' },
     { label: 'AI Coach', note: 'Chat with your AI coach', route: '/(client)/coach' },
     { label: 'Messages', note: 'Chat with your coach', route: '/(client)/messages' },
-    { label: 'Share & Social', note: 'Post progress to Instagram / TikTok', route: '/(client)/social' },
+    // Not "Post progress to Instagram / TikTok". Nothing in this app is
+    // connected to a social network — the NETWORKS list whose Connect button
+    // flipped a local boolean was removed from social.tsx as fabricated state,
+    // and what is left is one React Native `Share.share()` call. The row now
+    // describes the OS share sheet, which is the whole of what happens.
+    { label: 'Share & Social', note: 'Share your progress from the share sheet', route: '/(client)/social' },
   ] },
   { title: 'Devices & Media', items: [
     { label: 'Watch & Devices', note: 'Apple Watch, WHOOP, Garmin…', route: '/(client)/devices' },
@@ -330,8 +335,39 @@ export default function Profile() {
   const statsLine = [age != null ? age + ' yrs' : null, heightLabel(cd.heightCm, lu), weightLabel(cd.weightKg, wu)]
     .filter(Boolean).join(' · ') || 'Add your height and weight';
   const soloHidden = new Set(['/(client)/messages', '/(client)/checkin']);
-  const HUB_KEEP = new Set(['Connect', 'Devices & Media', 'Account']);
-  const hubGroups = HUB_GROUPS.filter((g) => HUB_KEEP.has(g.title)).map((g) => ({ ...g, items: g.items.filter((it) => cd.coachingMode !== 'solo' || !soloHidden.has(it.route)) }));
+  // Every group renders. There used to be a `HUB_KEEP` set here, one line above
+  // this, that filtered HUB_GROUPS down to Connect · Devices & Media · Account
+  // and dropped Progress & Insights, Training and Daily on the floor.
+  //
+  // ── Why it was there ───────────────────────────────────────────────────────
+  //
+  // The IA rebalance that introduced Explore moved "find any screen" to a
+  // search field, and the Me tab was slimmed to match: the hub was meant to
+  // hold the things you go to Me FOR — your coach, your devices, your account —
+  // while everything else was to be found by searching. src/lib/features.ts
+  // still describes the result in its own header as "the slimmed Me hub".
+  //
+  // ── Why it is gone ─────────────────────────────────────────────────────────
+  //
+  // The slimming was safe only if Explore really did list everything, and it
+  // never did. CLIENT_FEATURES was missing Reminders outright, so the row in the
+  // Daily group was Reminders' ONLY link anywhere in the app and hiding the
+  // group made the screen unreachable — not hard to find, unreachable, with no
+  // route into it from any tab, hub, banner or search result. Eighteen or so
+  // screens whose own headers say "reachable from the profile hub" were in the
+  // same position or one banner away from it, all of them describing a hub that
+  // had stopped rendering them.
+  //
+  // Search is a second way to reach a screen. It is not a first one: it only
+  // finds what somebody already knows to type, and a member who has never seen
+  // "Strength Standards" will not search for it. So the hub lists everything
+  // again, collapsed by default group-by-group state (see `collapsed` above) so
+  // the length costs nothing, and Explore is the shortcut rather than the door.
+  //
+  // Every route below was checked against app/(client)/ before this shipped —
+  // all 28 resolve to a real file. A row pointing at nothing is worse than no
+  // row, so if one is ever deleted, delete its row here in the same change.
+  const hubGroups = HUB_GROUPS.map((g) => ({ ...g, items: g.items.filter((it) => cd.coachingMode !== 'solo' || !soloHidden.has(it.route)) }));
   const G = layout.gutter;
 
   return (

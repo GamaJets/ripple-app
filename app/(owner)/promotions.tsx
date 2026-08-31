@@ -27,7 +27,7 @@ import { sendPushChecked } from '../../src/ui/pushNotifications';
 export default function Promotions() {
   const t = useTheme();
   const router = useRouter();
-  const { promos, addPromo, removePromo } = usePromos();
+  const { promos, status, addPromo, removePromo } = usePromos();
   const [title, setTitle] = useState('');
   const [code, setCode] = useState('');
   const [disc, setDisc] = useState(20);
@@ -70,7 +70,7 @@ export default function Promotions() {
     if (!title.trim() || !c || busy) { Alert.alert('Add details', 'Enter a title and a promo code.'); return; }
     setBusy(true);
     try {
-      const res = addPromo(c, disc);
+      const res = await addPromo(c, disc);
       if (!res.ok) { Alert.alert('Could not create', res.reason || 'Try a different code.'); return; }
       const body = (msg.trim() || `${disc}% off with code ${c}`);
       const pushRes = push ? await pushToMembers(body) : null;
@@ -144,9 +144,16 @@ export default function Promotions() {
         {/* ── active promotions ──────────────────────────────────────────── */}
         <Section>
           <SectionHead title="Active Promotions" note={promos.length ? String(promos.length) : undefined} />
-          {promos.length === 0 ? (
+          {status === 'error' ? (
+            // An empty list under 'error' is unknown, not "no promotions" —
+            // and offering to create the first code to somebody who may
+            // already have six is how a gym ends up with two of everything.
             <Text style={{ ...ty.label, color: t.ink3 }}>
-              No promotions yet. Create a code above and it appears here, ready to push to every member.
+              Your promotions could not be read just now. This is not a statement that you have none.
+            </Text>
+          ) : promos.length === 0 ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>
+              {status === 'loading' ? 'Loading.' : 'No promotions yet. Create a code above and it appears here, ready to push to every member.'}
             </Text>
           ) : promos.map((p, i) => (
             <View key={p.id} style={{
@@ -155,7 +162,13 @@ export default function Promotions() {
             }}>
               <View style={{ flex: 1 }}>
                 <Text style={{ ...ty.body, ...numeric, fontWeight: '600', color: t.ink, letterSpacing: 1 }}>{p.code}</Text>
-                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{p.discountPct}% off</Text>
+                {/* The count is rows in promo_redemptions, not a stored
+                    counter — so a 0 here means nobody has used it, and -1
+                    means the count itself could not be read, which renders as
+                    a dash rather than as nobody. */}
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                  {p.discountPct}% off · {p.redeemed < 0 ? '—' : p.redeemed} used
+                </Text>
               </View>
               <Ghost label="Push" onPress={() => { const body = `${p.discountPct}% off with code ${p.code}`; pushToMembers(body).then((r) => Alert.alert(r.ok ? 'Queued' : 'Not sent', r.ok ? `Queued to ${r.queued} member${r.queued === 1 ? '' : 's'}.` : (r.error || 'The push did not go out.'))); }} />
               <Pressable onPress={() => removePromo(p.id)} hitSlop={6} accessibilityRole="button" accessibilityLabel={'Remove ' + p.code}>

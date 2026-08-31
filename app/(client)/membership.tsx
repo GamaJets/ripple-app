@@ -60,7 +60,9 @@ export default function Membership() {
     { label: 'Personal Training', note: 'Approve sessions your trainer delivered', icon: 'people', route: '/(client)/pt-sessions' },
     { label: 'My Bookings', note: 'Everything you have booked', icon: 'check', route: '/(client)/bookings' },
     { label: 'Memberships & Packs', note: 'What you have bought and what is left', icon: 'trophy', route: '/(client)/packages' },
-    { label: 'Offers', note: 'What else the app can do', icon: 'sparkle', route: '/(client)/explore' },
+    // Pointed at Explore — "what else the app can do" — which is not an offer.
+    // There is a real offers screen now, where a gym code is redeemed.
+    { label: 'Offers', note: 'Redeem a code from your gym', icon: 'sparkle', route: '/(client)/offers' },
     { label: 'Refer a Friend', note: 'Share Repple with someone', icon: 'share', route: '/(client)/referral' },
   ];
   const heroAction = actions.find((a) => a.hero);

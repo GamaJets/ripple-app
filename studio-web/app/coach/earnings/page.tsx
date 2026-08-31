@@ -32,6 +32,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase, loadMe, type Me } from '@/lib/supabase';
 import { Shell } from '@/components/Shell';
 import { DataTable, type Column } from '@/components/DataTable';
+import { amount, currencyNote, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
 import {
   isDelivered, isAwaitingOutcome, isPayable,
   payrollByTrainer, payrollTotal, settlementBlocker,
@@ -208,6 +209,10 @@ export default function CoachEarnings() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
   const [gymName, setGymName] = useState<string | null>(null);
   const [sessionFee, setSessionFee] = useState<number | null>(null);
+  // `tenants.currency`, null when the gym has not set one. The settlement rows
+  // at the bottom carry their own currency and use it; everything derived from
+  // the session fee has none of its own and inherits the gym's.
+  const [ccy, setCcy] = useState<TenantCurrency>(null);
 
   // "The gym has not set a session fee" and "we could not read the gym" both
   // leave sessionFee null, and they are different errands: one is a setting the
@@ -272,10 +277,11 @@ export default function CoachEarnings() {
       setMe(who);
       if (!who?.tenantId) return;
       const { data: g, error } = await supabase
-        .from('tenants').select('name, session_fee').eq('id', who.tenantId).single();
+        .from('tenants').select('name, session_fee, currency').eq('id', who.tenantId).single();
       if (!live) return;
       setGymName(error ? null : g?.name ?? null);
       setSessionFee(error ? null : g?.session_fee ?? null);
+      setCcy(error ? null : ((((g as any)?.currency ?? '') as string).trim().toUpperCase() || null));
       setGymError(error ? (error.message || 'Could not read your gym.') : null);
     })();
     return () => { live = false; };
@@ -379,7 +385,7 @@ export default function CoachEarnings() {
   const outstandingText =
     sessions === null || outstanding === null || blocker !== null
       ? null
-      : money(settlementAmount(outstanding));
+      : amount(settlementAmount(outstanding), ccy);
 
   // Sessions in this month already stamped with a payment, and what their own
   // snapshotted rates say those were worth. A rate missing on a settled session
@@ -473,7 +479,7 @@ export default function CoachEarnings() {
         />
         <Kpi
           label="Already settled"
-          text={settledCents == null ? null : money(settledCents)}
+          text={amount(settledCents, ccy)}
           note={
             settledSessions === null
               ? undefined
@@ -481,7 +487,8 @@ export default function CoachEarnings() {
                 ? `${settledUnpriced} of ${settledSessions.length} paid sessions carry no rate, so this month's paid total cannot be added up`
                 : settledSessions.length === 0
                   ? 'no session this month carries a payment yet'
-                  : `${settledSessions.length} session${settledSessions.length === 1 ? '' : 's'} stamped with a payment`
+                  : currencyNote(settledCents, ccy)
+                    ?? `${settledSessions.length} session${settledSessions.length === 1 ? '' : 's'} stamped with a payment`
           }
         />
         <Kpi
@@ -495,6 +502,7 @@ export default function CoachEarnings() {
               : blocker
                 ? blocker
                 : settleBlocker(outstanding ?? [], total.unmarked)
+                  ?? currencyNote(settlementAmount(outstanding ?? []), ccy)
                   ?? `${outstanding?.length ?? 0} session${(outstanding?.length ?? 0) === 1 ? '' : 's'} marked, priced, and not yet paid`
           }
         />
@@ -525,9 +533,9 @@ export default function CoachEarnings() {
         </Banner>
       ) : null}
 
-      <Blocking sessions={awaiting} unread={sessionsUnread} />
+      <Blocking sessions={awaiting} unread={sessionsUnread} ccy={ccy} />
 
-      <LineItems sessions={marked} unread={sessionsUnread} policy={policy} />
+      <LineItems sessions={marked} unread={sessionsUnread} policy={policy} ccy={ccy} />
 
       <Paid runs={paidHere} unread={runsUnread} sessionsUnread={sessionsUnread} period={period} />
 
@@ -544,7 +552,9 @@ export default function CoachEarnings() {
 
 /* ── what is holding the rest up ───────────────────────────────────────────── */
 
-function Blocking({ sessions, unread }: { sessions: PtSession[] | null; unread: Unread }) {
+function Blocking({ sessions, unread, ccy }: {
+  sessions: PtSession[] | null; unread: Unread; ccy: TenantCurrency;
+}) {
   const cols: Column<PtSession>[] = [
     { key: 'when', header: 'When', value: (s) => s.startsAt,
       render: (s) => new Date(s.startsAt).toLocaleString([], {
@@ -559,7 +569,7 @@ function Blocking({ sessions, unread }: { sessions: PtSession[] | null; unread: 
     { key: 'worth', header: 'If delivered', value: (s) => s.rateCents ?? -1, numeric: true,
       render: (s) => s.rateCents == null
         ? <span className="dash">not rated</span>
-        : <span className="dash">{money(s.rateCents)}</span> },
+        : <span className="dash">{amount(s.rateCents, ccy) ?? NO_CURRENCY_NOTE}</span> },
   ];
   return (
     <Section
@@ -602,8 +612,8 @@ const OUTCOME_LABEL: Record<string, string> = {
  * August short" is to trust the number, which is the position this screen
  * exists to get a coach out of.
  */
-function LineItems({ sessions, unread, policy }: {
-  sessions: PtSession[] | null; unread: Unread; policy: PayPolicy;
+function LineItems({ sessions, unread, policy, ccy }: {
+  sessions: PtSession[] | null; unread: Unread; policy: PayPolicy; ccy: TenantCurrency;
 }) {
   const cols: Column<PtSession>[] = [
     { key: 'when', header: 'When', value: (s) => s.startsAt,
@@ -626,7 +636,7 @@ function LineItems({ sessions, unread, policy }: {
       // free hour.
       render: (s) => s.rateCents == null
         ? <span className="dash">not rated</span>
-        : money(s.rateCents) },
+        : (amount(s.rateCents, ccy) ?? <span className="dash">{NO_CURRENCY_NOTE}</span>) },
     { key: 'paid', header: 'Paid', value: (s) => (s.settlementId ? 1 : 0), numeric: true,
       render: (s) => s.settlementId
         ? <span style={{ color: 'var(--ink2)' }}>settled</span>

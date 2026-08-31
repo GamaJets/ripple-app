@@ -366,9 +366,23 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
         // Both results are now inspected. Refusing to look was what let a
         // client's edited goal, diet or allergen list disappear at the next
         // launch with the screen having said nothing.
+        // An UPDATE that matched NO ROWS is not an error in PostgREST — it
+        // resolves with `error: null` and an empty result. So checking only
+        // `error` catches a refused write and misses a write that was allowed
+        // to run and then filtered away to nothing by row-level security, or
+        // aimed at an id that has no row. Both leave the screen saying the
+        // change is saved.
+        //
+        // That is the more dangerous half here, because one of the columns is
+        // `injuries`. A client discloses a knee, the update matches zero rows,
+        // `saveFailed` stays false, and they are told their coach has been
+        // informed. Nothing downstream can tell that apart from a disclosure
+        // that landed.
+        //
+        // `count: 'exact'` makes the row count the answer instead.
         try {
-          const [{ error: pErr }, { error: cErr }] = await Promise.all([
-            supabase.from('profiles').update({ full_name: name, avatar: photo }).eq('id', sbUid),
+          const [{ error: pErr, count: pCount }, { error: cErr, count: cCount }] = await Promise.all([
+            supabase.from('profiles').update({ full_name: name, avatar: photo }, { count: 'exact' }).eq('id', sbUid),
             supabase.from('clients').update({
               dob: dob || null,
               height_cm: heightCm,
@@ -388,11 +402,19 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
               manual_weight_kg: manualWeight ?? null,
               manual_body_fat_pct: manualBodyFat ?? null,
               manual_at: manualAt || null,
-            }).eq('id', sbUid),
+            }, { count: 'exact' }).eq('id', sbUid),
           ]);
           if (pErr) reportError('clientData.push.profiles', pErr);
           if (cErr) reportError('clientData.push.clients', cErr);
-          setSaveFailed(!!(pErr || cErr));
+          // A zero count is reported the same way a refusal is, because to the
+          // person on the screen it is the same thing: what they typed is not
+          // on the server. `null` means the count was not returned at all,
+          // which is not evidence of failure and must not be treated as one.
+          const pMissed = pCount === 0;
+          const cMissed = cCount === 0;
+          if (pMissed) reportError('clientData.push.profiles', new Error('update matched no rows'));
+          if (cMissed) reportError('clientData.push.clients', new Error('update matched no rows'));
+          setSaveFailed(!!(pErr || cErr || pMissed || cMissed));
         } catch (e) { reportError('clientData.push', e); setSaveFailed(true); }
       })();
     }, 600);

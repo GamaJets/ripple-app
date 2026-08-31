@@ -19,16 +19,23 @@
 // who may read it, so this was the label lying, not the message going astray.
 //
 // The name now comes from a read for the COACH's id and from nowhere else, via
-// `useThreadPeerName`. A client cannot usually read their coach's profile row —
-// no policy on `profiles` runs client → coach — so the honest answer here is
-// often a dash with the reason beside it, and that is what it draws.
+// `useThreadPeerName`, and so does the face beside it. Both arrive from
+// `my_coach()` — a security-definer function that takes no argument, so it can
+// only answer about the caller's own coach, and returns two columns, so it
+// cannot hand over the rest of a `profiles` row on the way (supabase/parts/67
+// and 115).
+//
+// When either does not come back, the dash and its reason are still what draws.
+// That is the ordinary case for a coach who has set no picture, and it stays
+// the honest one: nothing here falls back to a name or a face that belongs to
+// somebody else, which is the entire lesson of TF-32.
 //
 // While the header was being made truthful, two things the thread hook has long
 // exposed and this screen ignored were connected: `status`, so a thread that
 // failed to load stops saying "No messages yet", and `unsent`, so a bubble the
 // server refused stops looking exactly like a delivered one.
 import { useRef } from 'react';
-import { View, Text, TextInput, Pressable, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, TextInput, Pressable, ScrollView, KeyboardAvoidingView, Platform, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
@@ -37,6 +44,7 @@ import { Icon } from '../../src/ui/Icon';
 import { Rule } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty } from '../../src/theme/scale';
 import { peerHeading } from '../../src/lib/threadPeer';
+import { peerMonogram } from '../../src/lib/peerAvatar';
 import { useThread, useThreadPeerName } from '../../src/ui/messaging';
 
 export default function Messages() {
@@ -56,6 +64,17 @@ export default function Messages() {
         <Pressable onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Go back" hitSlop={8}>
           <Icon name="back" size={20} color={t.ink2} />
         </Pressable>
+        {/* The face, under the same rule as the name: `peer.avatar` is only
+            ever what came back from the read for the COACH's id, so there is no
+            input on which this is the reader's own photograph — which is what
+            it used to be. With no picture it falls back to their initials, and
+            with no name to take initials from it falls back to the same dash
+            the header shows, in the same muted ink. */}
+        <View style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+          {peer.avatar
+            ? <Image source={{ uri: peer.avatar }} style={{ width: 38, height: 38 }} accessibilityIgnoresInvertColors />
+            : <Text style={{ ...ty.label, fontWeight: '600', color: head.isName ? t.brand : t.ink3 }}>{peerMonogram(head)}</Text>}
+        </View>
         <View style={{ flex: 1 }}>
           <Text style={{ ...ty.micro, color: t.ink3 }}>Your coach</Text>
           {/* `capitalize` is applied only to a real name. A dash needs no

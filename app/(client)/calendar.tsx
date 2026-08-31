@@ -69,7 +69,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Hero, KpiRow, Card, ListRow, Cta, Ghost, Notice, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../../src/theme/scale';
-import { useSessions } from '../../src/ui/sessions';
+import { useSessions, cancelBookedSession, ptCancelLines } from '../../src/ui/sessions';
 import { useClientData } from '../../src/ui/clientData';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import type { TrainingSession } from '../../src/lib/types';
@@ -87,7 +87,10 @@ import {
 import { fetchPlannedDays, savePlannedDay, clearPlannedDay, PLAN_NOTE_MAX } from '../../src/lib/plannedDays';
 import type { LoadStatus } from '../../src/ui/loadStatus';
 import type { IconName } from '../../src/ui/Icon';
-import { sessionsRemaining, redeemSession, refundSession, reofferSlot } from '../../src/lib/connect';
+// `refundSession` and `reofferSlot` moved with the cancellation into
+// `cancelBookedSession` (src/ui/sessions.tsx), so that My Bookings runs the same
+// writes in the same order. They are no longer called from this screen.
+import { sessionsRemaining, redeemSession } from '../../src/lib/connect';
 import { buildIcs, shareIcs } from '../../src/lib/exportShare';
 import { sendPush, sendPushChecked } from '../../src/ui/pushNotifications';
 import { peerHeading } from '../../src/lib/threadPeer';
@@ -167,7 +170,17 @@ export default function Calendar() {
   const t = useTheme();
   const router = useRouter();
   const now = new Date();
-  const { sessions, bookSession, releaseSession, refresh } = useSessions();
+  const { sessions, status: sessionsStatus, bookSession, releaseSession, refresh } = useSessions();
+  // Same rule this screen already applies to the workout log and to planned
+  // days (`logKnown`, `planStatus`), applied at last to the sessions themselves.
+  // An empty `sessions` means either "your coach has opened nothing and you have
+  // booked nothing" or "the calendar could not be read", and this screen stated
+  // the first: "Booked with Your Coach — 0 sessions" over "No open slots yet —
+  // your coach adds them here". A member who reads that the morning of a session
+  // does not think the network is down; they think they were never booked in,
+  // and they do not turn up.
+  const sessionsKnown = sessionsStatus !== 'error';
+  const sessionsCountable = sessionsStatus === 'ready';
   // The other side of this booking happens on somebody else's phone. Re-read on
   // focus so what is on screen is the diary as it stands, not as it stood at
   // launch — including a slot that has just been taken.
@@ -441,22 +454,19 @@ export default function Calendar() {
     Alert.alert('Session booked', lines.join('\n\n'), [{ text: 'Great' }]);
   }
   function cancel(s: TrainingSession) {
-    const late = Date.parse(s.startsAt) - Date.now() < 24 * 3600 * 1000;
+    // Captured once and passed through, so the 24-hour rule the member is
+    // warned about below is the same one that decides whether their credit
+    // comes back. See `cancelBookedSession`.
+    const asked = Date.now();
+    const late = Date.parse(s.startsAt) - asked < 24 * 3600 * 1000;
+    // The whole of this used to live here, and only here — which is how My
+    // Bookings came to cancel the SAME session for different money. It now runs
+    // through `cancelBookedSession`, which does exactly what these lines did, in
+    // the same order, for both screens. The long notes explaining WHY that order
+    // is what it is moved with the code; see src/ui/sessions.tsx.
     const doCancel = async () => {
-      // Offer the freed slot to the trainer's other clients (server-side lookup + push).
-      // Both halves used to be fired and forgotten, and the alert below then told
-      // the client the slot "was offered to your coach's other clients" whether
-      // anyone had been found or anyone had been reached. Three outcomes, not one:
-      // offered, nobody to offer it to, or we tried and could not.
-      // Free the slot BEFORE telling anyone it is free. This ran the other way
-      // round: every other client on the coach's book was pushed "first to book
-      // it gets it" while the session was still booked, so whoever moved
-      // quickest was refused by a slot that had not been released yet. And the
-      // release was fired and forgotten on top of that, so a cancellation the
-      // server refused still sent that push and still told this client they
-      // were cancelled.
-      const freed = await releaseSession(s.id);
-      if (!freed) {
+      const out = await cancelBookedSession(s, releaseSession, asked);
+      if (!out.freed) {
         Alert.alert(
           'Not cancelled',
           `Your ${timeLabel(s.startsAt)} session is still booked — that did not save, so nothing has changed and nobody has been told. Check your connection and try again.`,
@@ -464,42 +474,11 @@ export default function Calendar() {
         );
         return;
       }
-      const others = await reofferSlot(s.id);
-      // TF-32, and the worst of it: this sentence lands on OTHER people's
-      // phones. It used to interpolate `coach.name`, which on the client app is
-      // the signed-in client — so the trainer's other clients were pushed the
-      // name of whoever had just cancelled, under a heading about their coach.
-      // That is the reader's own name leaving their phone as well as the wrong
-      // name arriving on somebody else's.
-      //
-      // It stays nameless now even when the coach's name IS readable. The
-      // recipients come from `reofferSlot`, a server-side lookup on THIS
-      // session's trainer, while the only name we can resolve belongs to the
-      // trainer on the sender's own `clients` row. Those are normally the same
-      // person and nothing here proves it, and a message going to other people
-      // is the last place to bet on that. "Your coach" is true for every
-      // recipient by construction, because that is how the list was built.
-      const offered = others.length === 0
-        ? null
-        : (await sendPushChecked(others, 'A PT slot just opened', `${timeLabel(s.startsAt)} with your coach just opened up — first to book it gets it.`, { route: '/(client)/calendar' })).ok;
-      // Late cancel (within 24h): the session is charged — keep the credit drawn. Otherwise refund it.
-      // `refundSession` returns `{ok:false}` when there is no pack to credit and
-      // when the server refused the update, and its answer was discarded — so
-      // "returned to your package" was printed either way, which is how a client
-      // comes to believe they are holding a credit they do not have.
-      const refund = late ? { ok: false } : await refundSession(s.trainerId);
-      { const n = await sessionsRemaining(); if (n != null) setPackLeft(n); }
-      const toldCoach = await sendPushChecked([s.trainerId], 'Session cancelled', `A client cancelled ${DOW[new Date(s.startsAt).getDay()]} ${timeLabel(s.startsAt)}. The slot re-opened.${late ? ' (Late cancel — charged.)' : ''}`, { route: '/(trainer)/calendar' });
-
-      const lines: string[] = [];
-      if (late) lines.push('Cancelled within 24 hours — this session is charged from your package.');
-      else if (refund.ok) lines.push(`Your ${timeLabel(s.startsAt)} session was cancelled and returned to your package.`);
-      else lines.push(`Your ${timeLabel(s.startsAt)} session was cancelled. Nothing was returned to a session pack — if you booked it with a pack credit, check your package before booking again.`);
-      lines.push(offered === true ? `The freed slot was offered to your coach's other clients.`
-        : offered === false ? `The slot is open again, but we couldn't tell your coach's other clients about it.`
-        : `The slot is open again on your coach's calendar.`);
-      if (!toldCoach.ok) lines.push('We couldn’t notify your coach — message them if this session is soon.');
-      Alert.alert('Cancelled', lines.join('\n\n'), [{ text: 'OK' }]);
+      // Only replace the shown balance with a real count. A failed re-read is
+      // not news about the balance, and blanking the row would hide a number we
+      // still have every reason to believe.
+      if (out.packLeft != null) setPackLeft(out.packLeft);
+      Alert.alert('Cancelled', ptCancelLines(out, timeLabel(s.startsAt)).join('\n\n'), [{ text: 'OK' }]);
     };
     // No figure: the amount is between the client and their coach, and this app
     // neither knows it nor charges it. Saying a late fee "may apply" is true and
@@ -526,11 +505,17 @@ export default function Calendar() {
         {/* ── the hero: what you have booked ──────────────────────────────── */}
         <Hero
           label="Booked with Your Coach"
-          figure={fig(mine.length)}
-          unit={mine.length === 1 ? 'session' : 'sessions'}
-          note={open.length > 0
-            ? `${open.length} open slot${open.length === 1 ? '' : 's'} — tap a day to book`
-            : 'No open slots yet — your coach adds them here'}
+          figure={sessionsCountable ? fig(mine.length) : fig(null)}
+          unit={sessionsCountable && mine.length === 1 ? 'session' : 'sessions'}
+          note={!sessionsKnown
+            ? 'Your sessions could not be read, so this is a dash rather than a count. Nothing has been cancelled — pull down to refresh.'
+            : sessionsStatus === 'loading'
+              ? 'Reading your sessions…'
+              : !sessionsCountable
+                ? 'Only part of your calendar loaded, so it cannot be counted. The days below show what did come back.'
+                : open.length > 0
+                  ? `${open.length} open slot${open.length === 1 ? '' : 's'} — tap a day to book`
+                  : 'No open slots yet — your coach adds them here'}
         />
 
         <Rule />
@@ -538,10 +523,18 @@ export default function Calendar() {
         {/* ── availability ───────────────────────────────────────────────── */}
         <Section>
           <SectionHead title="Availability" />
+          {/* A dash rather than a zero when the read failed or was cut short.
+              "Open Slots 0" is a statement about the coach's diary, and under
+              'error' this screen has not seen it. */}
           <KpiRow items={[
-            { label: 'Open Slots', value: fig(open.length) },
+            { label: 'Open Slots', value: sessionsCountable ? fig(open.length) : fig(null) },
             ...(packLeft != null && packLeft > 0 ? [{ label: 'Pack Credits', value: fig(packLeft) }] : []),
           ]} />
+          {!sessionsKnown ? (
+            <Text style={{ ...ty.caption, color: t.warn, marginTop: sp.md }}>
+              Your sessions could not be read, so no open slot or booking of yours is shown here or on the grid below. This is a connection problem, not an empty calendar.
+            </Text>
+          ) : null}
           {mine.length > 0 ? (
             <View style={{ alignSelf: 'flex-start', marginTop: sp.lg }}>
               <Ghost label="Add to Calendar" icon="calendar"
@@ -742,8 +735,14 @@ export default function Calendar() {
           ) : null}
 
           {/* An empty day may only be called empty when the log actually
-              answered. Under 'error' the Notice above stands in its place. */}
-          {logKnown && selDaySessions.length === 0 && selDayLog.length === 0 && !selPlan ? (
+              answered. Under 'error' the Notice above stands in its place.
+              `sessionsKnown` belongs in the same guard for the same reason and
+              was missing from it: with the sessions unread, "Nothing on this
+              day" was being said over a day that may hold the member's booked
+              session — and this sentence goes on to explain the grey dot for
+              slots that are not being drawn either. The warning in Availability
+              above is what stands in its place. */}
+          {logKnown && sessionsKnown && selDaySessions.length === 0 && selDayLog.length === 0 && !selPlan ? (
             <View style={{ alignItems: 'center', paddingVertical: sp.lg }}>
               <Icon name="calendar" size={24} color={t.ink3} />
               <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: sp.md }}>Nothing on this day. Days with a grey dot have open slots you can book; a coloured dot is a workout you logged, and a hollow ring is a day you planned.</Text>

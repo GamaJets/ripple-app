@@ -342,7 +342,7 @@ export default function Scans() {
       } else { setOcrMsg((r.error || 'Could not read automatically' + (lastVisionError ? ' — ' + lastVisionError : '')) + ' Please type the numbers in.'); }
     }
   };
-  const saveScan = () => {
+  const saveScan = async () => {
     // The two weights come back as the kilograms the scan row stores, whatever
     // unit they were typed in. This is the write that used to file a client's
     // 180 lb as 180 kg — and because the newest scan re-tunes the meal plan,
@@ -366,7 +366,22 @@ export default function Scans() {
       : null;
     const after = macrosFor({ weightKg: w, bodyFatPct: f, activity: cd.activity, goal: cd.goal, diet: cd.diet });
     const pw = cd.weightKg, pf = cd.bodyFatPct;
-    cd.addScan({ id: 's' + Date.now(), takenAt: newISO, weightKg: w, bodyFatPct: f, skeletalMuscleKg: m, source: scanMx ? 'InBody (OCR)' : 'InBody (manual)', image: img || undefined, metrics: scanMx ?? undefined });
+    // Awaited, and the answer read. `addScan` returns Promise<boolean> for
+    // exactly this reason and the call used to discard it, so every branch
+    // below announced "Scan saved" — and, worse, recited the new calorie and
+    // protein targets — over an insert the server may have refused. The client
+    // then closed the sheet believing a body composition was on record, and
+    // would find out weeks later when the graph had a hole in it.
+    //
+    // Nothing is cleared and no verdict is given until the row exists.
+    const saved = await cd.addScan({ id: 's' + Date.now(), takenAt: newISO, weightKg: w, bodyFatPct: f, skeletalMuscleKg: m, source: scanMx ? 'InBody (OCR)' : 'InBody (manual)', image: img || undefined, metrics: scanMx ?? undefined });
+    if (!saved) {
+      // The sheet stays open with the numbers still in it: the person typed
+      // them off a printout they may no longer be holding, and clearing the
+      // form on a failure would make them find it again.
+      Alert.alert('Not saved', 'That scan could not be saved, so it is not on your record and your targets are unchanged. Your numbers are still here — try again in a moment.');
+      return;
+    }
     setImg(null); setWt(''); setBf(''); setSm(''); setScanMx(null); setShowAdd(false);
     if (!isNewest) {
       Alert.alert('Scan saved to history', 'This scan is dated ' + fmt(newISO) + ', earlier than your most recent scan (' + fmt(curLatestISO) + '). It\'s added to your progress tracking and graphs — but your meal plan stays on your most recent scan. Only a newer scan re-tunes your plan.');

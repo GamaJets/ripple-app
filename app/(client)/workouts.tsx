@@ -5,7 +5,7 @@
 // sections and list rows instead of eighteen bordered cards, and accent spent
 // only on the live metric and the primary action.
 // Guided session runner, cardio logging & month calendar preserved.
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { maintenanceFor } from '../../src/lib/nutrition';
 import { num } from '../../src/lib/format';
 import { View, Text, TextInput, Pressable, ScrollView, Modal, Alert, KeyboardAvoidingView, Platform } from 'react-native';
@@ -15,7 +15,7 @@ import { useRouter, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { tapLight } from '../../src/ui/haptics';
 import { Icon } from '../../src/ui/Icon';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, Notice, fig, ChipGrid } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, Notice, Flag, fig, ChipGrid } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../../src/theme/scale';
 import type { Theme } from '../../src/theme/tokens';
 import { buildProgram, type ProgramExercise } from '../../src/lib/programs';
@@ -31,7 +31,17 @@ import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { importSources, withHr, useImportedIds, isLogged, fetchRecent } from '../../src/ui/watchImport';
 import { parseWorkoutText } from '../../src/lib/workoutParse';
 import { useExerciseVideos, type VideoItem, type LibraryStatus } from '../../src/ui/exerciseVideos';
-import { ExerciseVideoBlock } from '../../src/ui/ExerciseVideo';
+import { ExerciseVideo } from '../../src/ui/ExerciseVideo';
+// The same catalogue lookup and the same renderers the standalone exercise
+// screen uses. Imported rather than reimplemented: a second copy of the
+// media order is a second chance for the plan screen and the runner to show
+// a member two different pictures of the lift they are about to do.
+import { useExerciseDetail } from '../../src/ui/exerciseDetail';
+import { useExerciseMedia } from '../../src/ui/useExerciseMedia';
+import { DemoAnimation, FrameLoop } from '../../src/ui/ExerciseDemo';
+import { demoCaption } from '../../src/lib/exerciseMedia';
+import { RepdbInlineCredit } from '../../src/ui/Attribution';
+import { Image as ExpoImage } from 'expo-image';
 import { videoForExercise } from '../../src/lib/exerciseId';
 import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
@@ -51,6 +61,13 @@ import { useSettings } from '../../src/ui/settings';
 import { liftIn, liftLabel, readLift, plain, volumeHeadline, convertedNote, type WeightUnit } from '../../src/lib/units';
 
 const WEEK = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+/** Where the guided runner's sets live between the moment they are typed and
+ *  the moment the server takes them. One key, not one per day: only one guided
+ *  session can be running, and the day it belongs to is stored inside so a
+ *  stale one cannot be poured into a different session. See the restore in
+ *  SessionRunner for why it is not deleted when it cannot be read. */
+const GUIDED_DRAFT_KEY = 'repple.guidedSession';
 // Session catalog. Each activity carries its own MET value, because the two used
 // to live in separate structures keyed by the display string: renaming a label
 // silently detached it from its MET, and `cardioKcal` falls back to 7 for an
@@ -159,7 +176,7 @@ export default function Train() {
   const _cp = useAssignedPrograms().getProgram(cd.id);
   const coachProgram = cd.coachingMode === 'solo' ? null : _cp;
   const w = useWearables();
-  const { log: workoutLog, addWorkouts, updateWorkout, removeWorkout } = useWorkoutLog();
+  const { log: workoutLog, addWorkouts, retryWorkouts, updateWorkout, removeWorkout } = useWorkoutLog();
   // The unit the member reads a LOAD in. Deliberately left out of TF-37 —
   // barbell plates are metric hardware and tools.tsx does its plate maths
   // against a metric rack — and asked for since: "Need to be able to select kg
@@ -197,7 +214,10 @@ export default function Train() {
     // The example is written in the member's own unit.
     if (!lifts.length) { Alert.alert('Could not read that', wu === 'lb' ? 'Try e.g. "bench 3x8 135lb, squat 225lb 5 5 5".' : 'Try e.g. "bench 3x8 60kg, squat 100kg 5 5 5".'); return; }
     const nowISO = new Date().toISOString();
-    const saved = await addWorkouts(lifts.map((l) => ({ t: nowISO, exercise: l.exercise, sets: l.sets, kcal: Math.round(l.sets.reduce((a, [r, w]) => a + r * (w || 0), 0) / 60) + l.sets.length * 8 })));
+    // No kcal — see `buildEntries` in the session runner. The figure this
+    // used to carry was `volume / 60 + sets * 8`, which knows nothing about
+    // the person doing the lifting.
+    const saved = await addWorkouts(lifts.map((l) => ({ t: nowISO, exercise: l.exercise, sets: l.sets })));
     setNlw('');
     // "Logged" was said before anybody had asked the server. `addWorkouts`
     // resolves false on a refused write, and this is the sentence that stops it
@@ -405,7 +425,13 @@ export default function Train() {
   const dayEntries = workoutLog.filter((l) => dayKeyOf(l.t) === activeCalDay);
   const dayVolume = dayEntries.reduce((a, l) => a + (l.sets ? l.sets.reduce((x: number, s: number[]) => x + (s[0] || 0) * (s[1] || 0), 0) : 0), 0);
   const daySets = dayEntries.reduce((a, l) => a + (l.sets ? l.sets.length : 0), 0);
-  const dayKcal = dayEntries.reduce((a, l) => a + (l.kcal || 0), 0);
+  // Null, not 0, when nothing in the day carries a measured figure.
+  // Strength entries no longer invent one (see `buildEntries`), so a pure
+  // lifting day has no calories to total — and a column reading "0" over an
+  // hour under a barbell is a measurement claim, and a wrong one. A dash is
+  // the same answer the cardio rows already give for a sauna.
+  const dayKcalEntries = dayEntries.filter((l) => l.kcal != null);
+  const dayKcal = dayKcalEntries.length ? dayKcalEntries.reduce((a, l) => a + (l.kcal || 0), 0) : null;
   const dayHeadline = volumeHeadline(dayVolume, wu);
   const prettyDay = (ds: string) => { const [y, m, d] = ds.split('-').map(Number); return new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' }); };
 
@@ -551,7 +577,7 @@ export default function Train() {
   // way to record a set was to expand the row and type the two numbers the app
   // had already worked out and was showing you. It is offered next to that
   // suggestion, so the number you tap is the number you are looking at.
-  const quickLog = (e: ProgramExercise) => { const sg = suggestForExercise(workoutLog, nameOf(e), e.reps); logSet(e, String(parseInt(e.reps, 10) || 8), sg ? sg.weight : null); };
+  const quickLog = (e: ProgramExercise) => { const sg = suggestForExercise(workoutLog, nameOf(e), e.reps, 2.5, wu); logSet(e, String(parseInt(e.reps, 10) || 8), sg ? sg.weight : null); };
   // One write path for every non-strength session, whether it was timed live in
   // the runner below or typed in afterwards. History, the calendar and the
   // trends all read this one shape, so a second writer would only be a second
@@ -632,7 +658,7 @@ export default function Train() {
       const setPairs = s.map((x) => [parseInt(x.reps, 10) || 0, parseFloat(x.kg) || 0] as [number, number]);
       const bestE1 = Math.max(0, ...setPairs.map(([r, kg]) => (r && kg ? est1RM(kg, r) : 0)));
       if (bestE1 > priorBest1RM(workoutLog, nameOf(e))) pr = true;
-      return { t: nowISO, exercise: nameOf(e), sets: setPairs, kcal: Math.round(setPairs.reduce((a, [r, kg]) => a + r * kg, 0) / 60) + s.length * 8 };
+      return { t: nowISO, exercise: nameOf(e), sets: setPairs };
     }).filter(Boolean) as WorkoutEntry[];
     if (!entries.length) return;
     const saved = await addWorkouts(entries);
@@ -766,7 +792,7 @@ export default function Train() {
                   );
                 }
                 const sets = logged[_id] || []; const done = sets.length >= e.sets;
-                const sug = suggestForExercise(workoutLog, nameOf(e), e.reps);
+                const sug = suggestForExercise(workoutLog, nameOf(e), e.reps, 2.5, wu);
                 const flag = injuryFlag(nameOf(e), e.group, cd.injuries);
                 const autoFrom = injAutoMap[_id];
                 const open = expanded[_id] ?? (_id === firstOpenId);
@@ -1232,7 +1258,7 @@ export default function Train() {
       </Modal>
 
       <Modal visible={session} animationType="slide" onRequestClose={() => setSession(false)}>
-        <SessionRunner t={t} unit={wu} exercises={planEx.filter((e) => !isInjHidden(e))} focus={workout.focus} nameOf={nameOf} age={ageFromDob(cd.dob)} restingKcalPerMin={restingKcalPerMin} log={workoutLog} injuries={cd.injuries} videos={exVideos} videoStatus={exVideoStatus} preferTrainerId={coachId} onComplete={addWorkouts} onClose={() => setSession(false)} />
+        <SessionRunner t={t} unit={wu} exercises={planEx.filter((e) => !isInjHidden(e))} focus={workout.focus} nameOf={nameOf} age={ageFromDob(cd.dob)} restingKcalPerMin={restingKcalPerMin} log={workoutLog} injuries={cd.injuries} videos={exVideos} videoStatus={exVideoStatus} preferTrainerId={coachId} onComplete={addWorkouts} onRetry={retryWorkouts} onClose={() => setSession(false)} />
       </Modal>
 
       {/* Mounted only while a session is running, so its clock starts at zero
@@ -1246,7 +1272,10 @@ export default function Train() {
             age={ageFromDob(cd.dob)}
             restingKcalPerMin={restingKcalPerMin}
             defaultUnit={unit}
-            onSave={(v) => { void commitSession(timed.kind, timed.activity, v.mins, v); setTimed(null); }}
+            // Closed only once the row is on the server. `commitSession`
+            // already says so when it is not; leaving the sheet up is what
+            // makes saying so useful, because the Save button is still there.
+            onSave={async (v) => { const ok = await commitSession(timed.kind, timed.activity, v.mins, v); if (ok) setTimed(null); return ok; }}
             onClose={() => setTimed(null)}
           />
         ) : null}
@@ -1307,12 +1336,20 @@ function LogRow({ t, unit, onLog }: { t: Theme; unit: WeightUnit; onLog: (reps: 
     <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
       <TextInput value={reps} onChangeText={setReps} keyboardType="numeric" placeholder="reps" placeholderTextColor={t.ink3} style={inp} />
       <TextInput value={kg} onChangeText={setKg} keyboardType="numeric" placeholder={unit} placeholderTextColor={t.ink3} style={inp} />
-      <Pressable onPress={() => {
+      <Pressable accessibilityRole="button" accessibilityLabel="Log set" onPress={() => {
+        // The reps are checked HERE and said out loud. `logSet` guarded with a
+        // bare `if (!reps) return`, so tapping this with an empty reps box —
+        // which is what happens when somebody types the load first and then
+        // reaches for the button — did nothing at all: no set, no haptic, no
+        // reason. And `parseInt` on anything unparseable is what would have put
+        // a zero-rep set in the log.
+        const r = parseInt(reps, 10);
+        if (!Number.isFinite(r) || r <= 0) { Alert.alert('How many reps?', `Type the reps you did before logging the set. The ${unit} box can stay empty for a bodyweight set.`); return; }
         const read = readLift(kg, unit);
         // Left in the box on a refusal, with the reason said, rather than
         // cleared — the number was typed once and the app has no better guess.
         if (!read.ok) { Alert.alert('Check that load', read.reason); return; }
-        onLog(reps, read.kg); setReps(''); setKg('');
+        onLog(String(r), read.kg); setReps(''); setKg('');
       }} style={{ backgroundColor: t.brand, borderRadius: radius.sm, paddingHorizontal: sp.lg, justifyContent: 'center' }}>
         <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>Log set</Text>
       </Pressable>
@@ -1452,7 +1489,11 @@ function ZonePanel({ t, liveZone, liveSample, zoneSecs }: {
  */
 function TimedSessionRunner({ t, kind, activity, age, restingKcalPerMin, defaultUnit, onSave, onClose }: {
   t: Theme; kind: SessionKind; activity: string; age: number | null; restingKcalPerMin: number | null; defaultUnit: string;
-  onSave: (v: { mins: number; dist: number; unit: string; watts: number; kcal: number | null; zones: ZoneSeconds }) => void;
+  /** Resolves whether the server took it. It used to return void and the
+   *  caller closed the modal on the tap, so a refused write shut the one
+   *  screen holding the session's heart-rate zones — the single thing in
+   *  this app nobody can retype. It stays open on false. */
+  onSave: (v: { mins: number; dist: number; unit: string; watts: number; kcal: number | null; zones: ZoneSeconds }) => Promise<boolean>;
   onClose: () => void;
 }) {
   const insets = useSafeAreaInsets();
@@ -1466,6 +1507,7 @@ function TimedSessionRunner({ t, kind, activity, age, restingKcalPerMin, default
   // blank one is written as "no figure" rather than as a zero.
   const [dist, setDist] = useState(''); const [unit, setUnit] = useState(defaultUnit);
   const [watts, setWatts] = useState(''); const [kcalIn, setKcalIn] = useState('');
+  const [saving, setSaving] = useState(false);
   const recovery = kind === 'recovery';
   const clock = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
@@ -1548,14 +1590,21 @@ function TimedSessionRunner({ t, kind, activity, age, restingKcalPerMin, default
           )}
 
           {finalMins > 0 ? (
-            <Cta label="Save to Your Log" wide onPress={() => onSave({
-              mins: finalMins,
-              dist: parseFloat(dist) || 0,
-              unit,
-              watts: parseInt(watts, 10) || 0,
-              kcal: parseInt(kcalIn, 10) || 0,
-              zones: zoneSecs,
-            })} />
+            // Guarded against a second tap. The sheet no longer closes on the
+            // tap itself, so an impatient double-press on gym wifi would
+            // otherwise insert the same session twice.
+            <Cta label={saving ? 'Saving…' : 'Save to Your Log'} wide onPress={() => {
+              if (saving) return;
+              setSaving(true);
+              void onSave({
+                mins: finalMins,
+                dist: parseFloat(dist) || 0,
+                unit,
+                watts: parseInt(watts, 10) || 0,
+                kcal: parseInt(kcalIn, 10) || 0,
+                zones: zoneSecs,
+              }).finally(() => setSaving(false));
+            }} />
           ) : (
             <View>
               <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginBottom: sp.md }}>
@@ -1626,7 +1675,124 @@ function TimedSessionRunner({ t, kind, activity, age, restingKcalPerMin, default
   );
 }
 
-function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerMin, log, injuries, videos, videoStatus, preferTrainerId, onComplete, onClose }: { t: Theme; unit: WeightUnit; exercises: ProgramExercise[]; focus: string; nameOf: (e: ProgramExercise) => string; age: number | null; restingKcalPerMin: number | null; log: WorkoutEntry[]; injuries: Injury[]; videos: VideoItem[]; videoStatus: LibraryStatus; preferTrainerId: string | null; onComplete: (entries: WorkoutEntry[]) => void; onClose: () => void }) {
+/**
+ * The movement, shown mid-session, through the whole chain rather than the
+ * first link of it.
+ *
+ * ── What this screen was actually showing ─────────────────────────────────
+ *
+ * The runner rendered <ExerciseVideoBlock> and nothing else, which asks one
+ * question: has anybody uploaded a CLIP of this. `exercise_videos` has never
+ * held a single row on this platform — not one, for any gym — so the answer
+ * mid-set was always "No demonstration for this exercise yet", under a toggle
+ * that had just offered to show them one. Meanwhile the catalogue holds a
+ * bought, commercially licensed animation for 489 of its movements and
+ * reference frames for 601, including every lift in every programme this app
+ * builds. The demonstration existed; the session runner was the one screen in
+ * the app that did not look for it.
+ *
+ * app/(client)/exercise.tsx has resolved the full order for a year:
+ *
+ *   1. the client's OWN coach's clip;
+ *   2. the platform Academy clip;
+ *   3. the bought animation;
+ *   4. the catalogue's reference frames;
+ *   5. a sentence saying there is nothing.
+ *
+ * Same order here, off the same hooks and the same renderers, so the movement a
+ * member sees standing at the rack is the movement they saw on the plan screen
+ * ten seconds earlier.
+ *
+ * Deliberately still no "look one up on the web": a live session's sets live in
+ * this component tree and a browser hand-off risks the OS reclaiming the app
+ * with the workout inside it. Rule 5 stays an honest sentence.
+ *
+ * Mounted only while it is open, so a five-exercise session does not fire five
+ * catalogue reads at the moment somebody presses Start.
+ */
+function SessionDemo({ t, name, videos, videoStatus, preferTrainerId }: {
+  t: Theme; name: string; videos: VideoItem[]; videoStatus: LibraryStatus; preferTrainerId: string | null;
+}) {
+  const { detail, status, signedOut } = useExerciseDetail(name);
+  const { frames, animUrl, equipmentUrl } = useExerciseMedia(detail);
+  const clip = useMemo(() => videoForExercise(name, videos, preferTrainerId), [name, videos, preferTrainerId]);
+  const caption = demoCaption(detail?.source, frames.length);
+
+  if (clip) {
+    return (
+      <View style={{ paddingVertical: sp.sm }}>
+        <ExerciseVideo video={clip} exerciseName={name} />
+        <Text style={{ ...ty.caption, color: t.ink3, paddingTop: sp.xs }}>
+          {clip.trainerId ? 'Recorded by your coach' : 'From the Repple library'}
+        </Text>
+      </View>
+    );
+  }
+  if (animUrl) {
+    return (
+      <View style={{ paddingVertical: sp.sm }}>
+        <DemoAnimation uri={animUrl} label={name} />
+        {detail?.demoLicence !== 'commercial' ? (
+          <View style={{ marginTop: sp.sm }}>
+            <Flag tone={t.warn}>Evaluation asset — licensed for review only, never for release.</Flag>
+          </View>
+        ) : null}
+      </View>
+    );
+  }
+  if (frames.length) {
+    return (
+      <View style={{ paddingVertical: sp.sm }}>
+        <FrameLoop urls={frames} label={name} />
+        {caption ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 6 }}>{caption}</Text> : null}
+        {detail?.source === 'repdb' ? <RepdbInlineCredit /> : null}
+      </View>
+    );
+  }
+  if (equipmentUrl) {
+    // A machine rather than a movement — Cable Machine, Ski Erg. Shown still
+    // and captioned as kit, never cross-faded as though somebody were
+    // performing it.
+    return (
+      <View style={{ paddingVertical: sp.sm }}>
+        <ExpoImage
+          source={{ uri: equipmentUrl }}
+          contentFit="contain"
+          cachePolicy="disk"
+          accessibilityLabel={`${name}, equipment`}
+          style={{ width: '100%', aspectRatio: 4 / 3, borderRadius: radius.md, backgroundColor: t.surface2 }}
+        />
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: 6 }}>
+          The equipment, not a demonstration — this is a machine rather than a movement.
+        </Text>
+      </View>
+    );
+  }
+
+  // Nothing to show. Which of the several reasons it is matters: "we could not
+  // look" and "there is nothing" are different sentences, and a member told the
+  // second when the first is true concludes their coach has left them to guess.
+  const note = status === 'loading'
+    ? 'Looking for a demonstration…'
+    : status === 'error'
+    ? 'We could not reach the exercise catalogue, so we cannot tell you whether there is a demonstration for this one.'
+    : videoStatus === 'error'
+    ? 'We could not read the video library, so we cannot tell you whether your coach has a clip for this.'
+    : videoStatus === 'partial'
+    ? 'We could only read part of the video library, so we cannot tell you whether there is a clip for this one.'
+    : signedOut
+    ? 'The exercise library is only available once you are signed in, so this could not be looked up.'
+    : detail
+    ? 'No demonstration for this one yet — no clip from your coach and no reference frames in the catalogue. Ask your coach how they want it done.'
+    : 'This movement is not in our catalogue, so there is no guide for it. If your coach wrote it into your programme, ask them how they want it done.';
+  return (
+    <View style={{ paddingVertical: sp.md }}>
+      <Text style={{ ...ty.label, color: t.ink3 }}>{note}</Text>
+    </View>
+  );
+}
+
+function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerMin, log, injuries, videos, videoStatus, preferTrainerId, onComplete, onRetry, onClose }: { t: Theme; unit: WeightUnit; exercises: ProgramExercise[]; focus: string; nameOf: (e: ProgramExercise) => string; age: number | null; restingKcalPerMin: number | null; log: WorkoutEntry[]; injuries: Injury[]; videos: VideoItem[]; videoStatus: LibraryStatus; preferTrainerId: string | null; onComplete: (entries: WorkoutEntry[]) => Promise<boolean>; onRetry: (entries: WorkoutEntry[]) => Promise<boolean>; onClose: () => void }) {
   const insets = useSafeAreaInsets();
   const topPad = Math.max(insets.top, 44);
   const { w, elapsed, liveSample, liveHr, hrPeak, sessionKcal, zoneSecs, liveZone } = useLiveVitals(age, restingKcalPerMin);
@@ -1653,16 +1819,49 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
   const [finished, setFinished] = useState(false);
   const [confetti, setConfetti] = useState(false);
   const [prMsg, setPrMsg] = useState<string | null>(null);
+  // What happened when the session was written. 'saving' is a real state on a
+  // gym's wifi and the Done button must not be tappable through it; 'failed'
+  // is the one this screen used to have no word for at all.
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'failed'>('idle');
+  // The entries built at the finish, kept so a refused write can be retried
+  // with exactly what was logged rather than rebuilt from state that has since
+  // been re-rendered. Also what the draft below is cleared against.
+  const [pendingEntries, setPendingEntries] = useState<WorkoutEntry[]>([]);
   const rid = useRef<ReturnType<typeof setInterval> | null>(null);
+  // When the rest period ENDS, as a wall-clock instant, rather than a count of
+  // seconds ticked down.
+  //
+  // A phone in a pocket between sets stops delivering setInterval — iOS
+  // suspends timers in a backgrounded app — so the countdown froze wherever it
+  // happened to be and the member came back to "0:47" that never moved again.
+  // A rest timer that stops counting during the rest is the one moment it had
+  // to work. Same reasoning as `startedAtRef` in useLiveVitals: the clock is the
+  // wall, the interval only decides how often we look at it.
+  const restEndsAt = useRef<number | null>(null);
+  const startRest = (secs: number) => {
+    restEndsAt.current = secs > 0 ? Date.now() + secs * 1000 : null;
+    setRest(secs);
+  };
 
   useEffect(() => {
-    if (rest <= 0) { if (rid.current) clearInterval(rid.current); return; }
-    rid.current = setInterval(() => setRest((r) => (r <= 1 ? 0 : r - 1)), 1000);
+    if (rest <= 0) { if (rid.current) clearInterval(rid.current); restEndsAt.current = null; return; }
+    rid.current = setInterval(() => {
+      const end = restEndsAt.current;
+      if (end == null) { setRest(0); return; }
+      const left = Math.max(0, Math.ceil((end - Date.now()) / 1000));
+      // A buzz at zero, because the phone is face-down on a bench and the
+      // countdown is the one thing on this screen nobody is watching. Fired on
+      // the TRANSITION, tracked in a ref rather than inside the state updater —
+      // React may run an updater more than once, and a haptic is a side effect
+      // that must happen exactly as often as the thing it announces.
+      if (left === 0 && restEndsAt.current != null) { restEndsAt.current = null; tapLight(); }
+      setRest(left);
+    }, 500);
     return () => { if (rid.current) clearInterval(rid.current); };
   }, [rest > 0]);
 
   useEffect(() => {
-    const sug = suggestForExercise(log, nameOf(exercises[idx]), exercises[idx].reps);
+    const sug = suggestForExercise(log, nameOf(exercises[idx]), exercises[idx].reps, 2.5, unit);
     setLoad(sug ? showLoad(sug.weight) : '');
     setReps('');
     setPrMsg(null);
@@ -1671,10 +1870,77 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [idx]);
 
+  // ── Surviving the phone ───────────────────────────────────────────────────
+  //
+  // Every set logged in here lived in `results` and nowhere else until the
+  // finish, so an hour of work existed only in one React component's state. A
+  // phone that runs out of battery, a call that comes in, iOS reclaiming a
+  // backgrounded app to make room for the camera — any of those and the whole
+  // session is gone with nothing to recover from. The plan screen below already
+  // learned this the hard way ("it wipes out as u go back", see `draftKey`);
+  // the guided runner, which is where a member spends the actual hour, never
+  // did.
+  //
+  // So the sets go to disk as they are typed. One key, because only one guided
+  // session can be running, and it carries the day and the exercise names it
+  // was recorded against: restoring Tuesday's Push sets on top of Thursday's
+  // Legs would be worse than losing them. A draft that does not match today's
+  // list is left where it is rather than deleted — it is somebody's training,
+  // and it costs nothing to keep until it can be read.
+  const [draftChecked, setDraftChecked] = useState(false);
+  // A draft that belongs to some other day or some other plan. It cannot be
+  // poured into this session, but it is still somebody's training, so the
+  // "nothing logged yet" branch below leaves it alone rather than deleting
+  // it on the way past. The first set logged here does overwrite it — by
+  // then there is a live session with a better claim on the one key.
+  const staleDraft = useRef(false);
+  const planNames = exercises.map((e) => nameOf(e));
+  const planKey = planNames.join('|');
+  const todayKey = dayKeyOf(new Date().toISOString());
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(GUIDED_DRAFT_KEY);
+        if (!live || !raw) return;
+        const d = JSON.parse(raw) as { day?: string; plan?: string; results?: unknown; rpes?: unknown; idx?: number };
+        // Same day and the same movements in the same order, or it is not this
+        // session and must not be poured into it.
+        if (d.day !== todayKey || d.plan !== planKey) { staleDraft.current = true; return; }
+        const rs = Array.isArray(d.results) ? (d.results as { reps: number; kg: number }[][]) : null;
+        if (!rs || rs.length !== exercises.length) { staleDraft.current = true; return; }
+        if (!rs.some((a) => Array.isArray(a) && a.length)) return;
+        setResults(rs.map((a) => (Array.isArray(a) ? a : [])));
+        const fs = Array.isArray(d.rpes) ? (d.rpes as ('easy' | 'ok' | 'hard')[][]) : null;
+        if (fs && fs.length === exercises.length) setRpes(fs.map((a) => (Array.isArray(a) ? a : [])));
+        if (typeof d.idx === 'number' && d.idx >= 0 && d.idx < exercises.length) setIdx(d.idx);
+        Alert.alert(
+          'Picked up where you left off',
+          `${rs.reduce((a, x) => a + (x ? x.length : 0), 0)} set${rs.reduce((a, x) => a + (x ? x.length : 0), 0) === 1 ? '' : 's'} from this session were still on this phone and are back on screen. They have not reached your log yet — finishing the session is what saves them.`,
+        );
+      } catch { /* an unreadable draft is not worth an error the member cannot act on */ }
+      finally { if (live) setDraftChecked(true); }
+    })();
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    // Only after the restore has run, or the first render writes the empty
+    // arrays it starts from straight over the draft it was about to read.
+    if (!draftChecked || saveState === 'saved') return;
+    const any = results.some((a) => a.length);
+    if (!any) { if (!staleDraft.current) AsyncStorage.removeItem(GUIDED_DRAFT_KEY).catch(() => {}); return; }
+    AsyncStorage.setItem(GUIDED_DRAFT_KEY, JSON.stringify({ day: todayKey, plan: planKey, results, rpes, idx })).catch(() => {});
+  }, [results, rpes, idx, draftChecked, saveState, todayKey, planKey]);
+
   const ex = exercises[idx];
   const done = results[idx] || [];
   const logSet = () => {
-    const r = parseInt(reps, 10) || 0; if (!r) return;
+    const r = parseInt(reps, 10) || 0;
+    // Said, not swallowed. This returned silently, so tapping the tick with an
+    // empty reps box — the commonest thing to do after typing only the load —
+    // did nothing at all, gave no haptic and left the member tapping harder.
+    if (!r) { Alert.alert('How many reps?', `Type the reps you did before logging the set. The ${unit} box can stay empty for a bodyweight set.`); return; }
     // Refused rather than coerced: `parseFloat(kg) || 0` is what this shipped
     // with, and a mistyped load silently becoming 0 records a bodyweight set
     // in the middle of a session and drags the volume, the PR check and the
@@ -1690,7 +1956,7 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
     // Only after the first set of an exercise. By set three they have done the
     // movement three times and do not need it offered again.
     if (done.length === 0) setDemoOpen(true);
-    setReps(''); setRest(90); setPendingFeel(wkg);
+    setReps(''); startRest(90); setPendingFeel(wkg);
   };
   // Kilograms, in both unit systems, and deliberately. This is the same
   // increment ladder `suggestForExercise` and the Targets screen work in, and
@@ -1707,23 +1973,98 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
     setPendingFeel(null);
     tapLight();
   };
-  const finish = () => {
+  const buildEntries = (): WorkoutEntry[] => {
     const nowISO = new Date().toISOString();
-    const entries: WorkoutEntry[] = results
+    return results
       .map((sets, i) => (sets.length ? {
         t: nowISO,
         exercise: nameOf(exercises[i]),
         sets: sets.map((s) => [s.reps, s.kg]) as [number, number][],
         feel: (rpes[i] && rpes[i].length) ? rpes[i] : undefined,
-        kcal: Math.round(sets.reduce((a, s) => a + s.reps * (s.kg || 0), 0) / 60) + sets.length * 8,
+        // No `kcal`. It used to carry `volume / 60 + sets * 8` — an expression
+        // with no body weight, no heart rate and no measurement of any kind in
+        // it, printed afterwards beside the real ones as "184 kcal" under the
+        // exercise. `cardioKcal` at the top of this file was rewritten to
+        // return null rather than guess, and recovery was stripped of calories
+        // entirely, for exactly this reason; the strength path was the last
+        // place still inventing one. The session's real burn is measured by the
+        // watch and shown on the finish screen as `sessionKcal`, which is not
+        // divided up between exercises here because apportioning it would be a
+        // second invention on top of a real number.
+        //
+        // Absent, not zero: `kcal` is nullable in `workouts`, every reader
+        // guards on it, and a dash is what "nobody measured this" looks like.
         // Only attach zones when a heart-rate source actually fed the session.
         zones: zoneSecondsTotal(zoneSecs) > 0 ? zoneSecs : undefined,
       } : null))
       .filter(Boolean) as WorkoutEntry[];
-    onComplete(entries);
-    setFinalElapsed(elapsed); setFinished(true); setConfetti(true);
   };
-  const next = () => { if (idx < exercises.length - 1) { setIdx(idx + 1); setRest(0); } else finish(); };
+
+  /**
+   * End the session and write it.
+   *
+   * `onComplete` resolves false on a refused write and its result was dropped
+   * on the floor: the trophy, the confetti and the sentence "Logged to your
+   * history — strength trends and your coach's dashboard update automatically"
+   * were shown to somebody whose hour of training existed on one phone and
+   * nowhere else. This is the single most expensive lie in the app, because the
+   * one place it fires is a gym, which is where the signal is worst.
+   *
+   * So the finish screen is not reached until the server has answered, and it
+   * says which answer it got. On a refusal the sets stay on screen, the draft
+   * stays on disk, and there is a button that tries again.
+   */
+  const save = async (entries: WorkoutEntry[]) => {
+    setSaveState('saving');
+    const ok = await onComplete(entries);
+    setSaveState(ok ? 'saved' : 'failed');
+    if (ok) { AsyncStorage.removeItem(GUIDED_DRAFT_KEY).catch(() => {}); setConfetti(true); }
+  };
+  const finish = () => {
+    if (saveState === 'saving') return;
+    const entries = buildEntries();
+    setFinalElapsed(elapsed);
+    setPendingEntries(entries);
+    setFinished(true);
+    // Nothing logged is not a failed write — there was nothing to write. The
+    // finish screen says so rather than claiming a save that never happened.
+    if (!entries.length) { setSaveState('idle'); return; }
+    void save(entries);
+  };
+  /** Try the same entries again. Through `retryWorkouts`, not `addWorkouts` —
+   *  the first attempt already put them in the local log, and a second
+   *  optimistic add would show the member their session twice. */
+  const retry = async () => {
+    if (saveState === 'saving' || !pendingEntries.length) return;
+    setSaveState('saving');
+    const ok = await onRetry(pendingEntries);
+    setSaveState(ok ? 'saved' : 'failed');
+    if (ok) { AsyncStorage.removeItem(GUIDED_DRAFT_KEY).catch(() => {}); setConfetti(true); tapLight(); }
+  };
+  const next = () => { if (idx < exercises.length - 1) { setIdx(idx + 1); startRest(0); } else finish(); };
+  const loggedSets = results.reduce((a, r) => a + r.length, 0);
+  /**
+   * The "End" in the header.
+   *
+   * It called `onClose` straight through. Mid-session, with sets on screen,
+   * that threw away everything logged so far with no confirmation and no
+   * mention that anything was being lost — one mis-tap next to the top of the
+   * scroll and the workout was gone. Ending a session someone is halfway
+   * through is a real thing to want; ending it silently is not, and the useful
+   * half of it — saving what they did do — was not offered at all.
+   */
+  const endSession = () => {
+    if (!loggedSets) { onClose(); return; }
+    Alert.alert(
+      'End this session?',
+      `${loggedSets} set${loggedSets === 1 ? '' : 's'} logged so far. Save them to your log, or discard the session.`,
+      [
+        { text: 'Keep going', style: 'cancel' },
+        { text: 'Save and end', onPress: () => finish() },
+        { text: 'Discard', style: 'destructive', onPress: () => { AsyncStorage.removeItem(GUIDED_DRAFT_KEY).catch(() => {}); onClose(); } },
+      ],
+    );
+  };
   const inp = { color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 12, flex: 1, ...ty.head, fontWeight: '400' } as const;
 
   if (!exercises || exercises.length === 0) return null;
@@ -1740,9 +2081,32 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
         <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40, paddingTop: topPad + 10 }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
-          <View style={{ alignItems: 'center', marginTop: sp.xl }}><Icon name="trophy" size={40} color={t.brand} /></View>
-          <Text style={{ ...ty.title, color: t.ink, textAlign: 'center', marginTop: sp.md }}>Session Complete</Text>
+          {/* The trophy is for a session that is actually IN the log. A
+              refused write gets the same figures — they are true, the training
+              happened — under a heading that does not congratulate anybody. */}
+          <View style={{ alignItems: 'center', marginTop: sp.xl }}>
+            <Icon name={saveState === 'failed' ? 'info' : 'trophy'} size={40} color={saveState === 'failed' ? t.crit : t.brand} />
+          </View>
+          <Text style={{ ...ty.title, color: t.ink, textAlign: 'center', marginTop: sp.md }}>
+            {saveState === 'saving' ? 'Saving…' : saveState === 'failed' ? 'Not Saved Yet' : 'Session Complete'}
+          </Text>
           <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: sp.xs, textTransform: 'capitalize' }}>{focus}</Text>
+          {saveState === 'failed' ? (
+            <View style={{ marginTop: sp.lg }}>
+              <Notice tone={t.crit} kicker="Your training log" title="This session has not reached the server"
+                note={`${num(totalSets)} set${totalSets === 1 ? '' : 's'} are still on this phone and are listed below, but they are not recorded yet and will not survive closing the app. Stay on this screen, find signal, and try again.`}>
+                <View style={{ alignSelf: 'flex-start', marginTop: sp.md }}>
+                  <Ghost label="Try Saving Again" onPress={() => { void retry(); }} />
+                </View>
+              </Notice>
+            </View>
+          ) : null}
+          {saveState === 'idle' && totalSets === 0 ? (
+            <View style={{ marginTop: sp.lg }}>
+              <Notice tone={t.ink3} kicker="Nothing logged" title="No sets were recorded"
+                note="Nothing has been written to your log, because nothing was entered. Close this and the session is simply not there — no empty workout, no dot on the calendar." />
+            </View>
+          ) : null}
           <Section>
             <KpiRow items={[
               { label: 'Exercises', value: `${exDone}/${exercises.length}` },
@@ -1765,8 +2129,37 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
             </Section>
             <Rule />
           </>) : null}
-          <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.xl, marginBottom: sp.xl }}>Logged to your history — strength trends and your coach's dashboard update automatically.</Text>
-          <Cta label="Done" wide onPress={onClose} />
+          {/* Said only when it is true. This sentence was printed
+              unconditionally, including over a write the server had refused —
+              which is how an hour of training becomes a screenshot of a
+              promise. */}
+          <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.xl, marginBottom: sp.xl }}>
+            {saveState === 'saved'
+              ? "Logged to your history — strength trends and your coach's dashboard update automatically."
+              : saveState === 'saving'
+              ? 'Writing this session to your log…'
+              : saveState === 'failed'
+              ? 'Nothing here has reached your history yet, so your trends and your coach’s dashboard do not know about it.'
+              : 'Nothing was logged, so there is nothing to save.'}
+          </Text>
+          {/* Closing on a refused write is what throws the session away, so the
+              button says what it does and asks again. */}
+          <Cta
+            label={saveState === 'saving' ? 'Saving…' : saveState === 'failed' ? 'Close and Lose These Sets' : 'Done'}
+            wide
+            onPress={() => {
+              if (saveState === 'saving') return;
+              if (saveState !== 'failed') { AsyncStorage.removeItem(GUIDED_DRAFT_KEY).catch(() => {}); onClose(); return; }
+              Alert.alert(
+                'Close without saving?',
+                'These sets have not reached your log. Closing loses them — there is no copy anywhere else.',
+                [
+                  { text: 'Try saving again', onPress: () => { void retry(); } },
+                  { text: 'Close and lose them', style: 'destructive', onPress: () => { AsyncStorage.removeItem(GUIDED_DRAFT_KEY).catch(() => {}); onClose(); } },
+                ],
+              );
+            }}
+          />
         </ScrollView>
         <Confetti show={confetti} onDone={() => setConfetti(false)} />
       </SafeAreaView>
@@ -1785,7 +2178,7 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40, paddingTop: topPad + 4 }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sp.lg }}>
           <Text style={{ ...ty.micro, color: t.ink3 }}>Exercise {idx + 1} of {exercises.length}</Text>
-          <Ghost label="End" onPress={onClose} />
+          <Ghost label="End" onPress={endSession} />
         </View>
         <View style={{ flexDirection: 'row', gap: 5, marginBottom: sp.xl }}>
           {exercises.map((_, i) => <View key={i} style={{ flex: 1, height: 3, borderRadius: 2, backgroundColor: i < idx ? t.good : i === idx ? t.brand : t.surface3 }} />)}
@@ -1830,7 +2223,7 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
           <View style={{ backgroundColor: t.brand, borderRadius: radius.md, padding: sp.xl, alignItems: 'center', marginTop: sp.xl }}>
             <Text style={{ ...ty.micro, color: t.brandInk }}>Rest</Text>
             <Text style={{ ...value(40), color: t.brandInk, marginTop: sp.xs }}>{Math.floor(rest / 60)}:{String(rest % 60).padStart(2, '0')}</Text>
-            <Pressable accessibilityRole="button" accessibilityLabel="Skip the rest timer" onPress={() => setRest(0)} hitSlop={8} style={{ marginTop: sp.sm }}><Text style={{ ...ty.label, fontWeight: '500', color: t.brandInk }}>Skip rest</Text></Pressable>
+            <Pressable accessibilityRole="button" accessibilityLabel="Skip the rest timer" onPress={() => startRest(0)} hitSlop={8} style={{ marginTop: sp.sm }}><Text style={{ ...ty.label, fontWeight: '500', color: t.brandInk }}>Skip rest</Text></Pressable>
           </View>
         ) : null}
 
@@ -1840,12 +2233,12 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
             leaving the session. */}
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={(demoOpen ? 'Hide the demonstration of ' : 'Watch a demonstration of ') + nameOf(ex)}
+          accessibilityLabel={(demoOpen ? 'Hide the demonstration of ' : 'See a demonstration of ') + nameOf(ex)}
           onPress={() => { setDemoOpen((v) => !v); tapLight(); }}
           style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.xl }}
         >
           <Icon name="video" size={14} color={t.ink3} />
-          <Text style={{ ...ty.micro, color: t.ink3, flex: 1 }}>{demoOpen ? 'Hide the demo' : 'Watch this movement'}</Text>
+          <Text style={{ ...ty.micro, color: t.ink3, flex: 1 }}>{demoOpen ? 'Hide the demo' : 'See how this is done'}</Text>
           <View style={{ transform: [{ rotate: demoOpen ? '90deg' : '0deg' }] }}><Icon name="chevron" size={14} color={t.ink3} /></View>
         </Pressable>
         {/* No onSearch here, unlike the plan screen. A live session's sets live
@@ -1854,11 +2247,7 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
             session with it. "No demonstration yet" is the honest answer; losing
             an hour of logged work to a web search is not a fair price for it. */}
         {demoOpen ? (
-          <ExerciseVideoBlock
-            video={videoForExercise(nameOf(ex), videos, preferTrainerId)}
-            exerciseName={nameOf(ex)}
-            status={videoStatus}
-          />
+          <SessionDemo t={t} name={nameOf(ex)} videos={videos} videoStatus={videoStatus} preferTrainerId={preferTrainerId} />
         ) : null}
 
         {done.length > 0 ? (

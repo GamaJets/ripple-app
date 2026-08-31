@@ -42,7 +42,7 @@ import { RECOVERY_ACTIVITIES, isRecoveryActivity } from '../../src/lib/recoveryA
 import { linkFor, useLinkRevision } from '../../src/lib/wearableLinkLedger';
 import { requestHealthAuth } from '../../src/lib/wearables/appleHealth';
 import { mergeSleepNights, recentNights, formatSleepHours, type MergedNight, type SleepRead } from '../../src/lib/sleepMerge';
-import type { LoadStatus } from '../../src/ui/loadStatus';
+import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
 
 const MOBILITY = [
  { name: 'Full-body warm-up', dur: '6 min', moves: ['Leg swings ×10/side', 'World’s greatest stretch ×5/side', 'Cat-cow ×10', 'Band pull-aparts ×15', 'Bodyweight squats ×10'] },
@@ -103,8 +103,13 @@ function Quality({ n, of = 5, color, dim }: { n: number; of?: number; color: str
 export default function Recovery() {
  const t = useTheme();
  const router = useRouter();
- const { sleep, addSleep } = useWellness();
- const { water: cups, waterGoal: goalCups, addWater: addCup, removeWater: removeCup } = useHabits();
+ // `status` and `unsent` arrived with part 109, which gave the typed sleep log
+ // and the water count real tables. Both stores keep working with no signal —
+ // the app is used in gyms with no reception — so what they hold can now be
+ // either a server-confirmed answer or this device's cached copy, and the
+ // screen has to say which. See src/ui/loadStatus.ts.
+ const { sleep, addSleep, status: sleepStatus, unsent: unsentNights } = useWellness();
+ const { water: cups, waterGoal: goalCups, waterStatus, addWater: addCup, removeWater: removeCup } = useHabits();
  const cd = useClientData();
  const wear = useWearables();
  // Bumped whenever the server proves something new about a device — including
@@ -243,7 +248,14 @@ export default function Recovery() {
  const [q, setQ] = useState(0);
  const [openRoutine, setOpenRoutine] = useState<number | null>(0);
 
- const avgSleep = sleep.length ? (sleep.reduce((a, s) => a + s.hours, 0) / sleep.length).toFixed(1) : '—';
+ // An average is a figure computed over a WHOLE set, so it may only be stated
+ // when the whole set is known. Under 'partial' it would be a mean over an
+ // unknown fraction of the client's nights; under 'error' it would be a mean
+ // over whatever this device happened to have cached, printed in the same
+ // typeface as a confirmed one. Both render as a dash, which is the standing
+ // rule for a number the record cannot stand behind.
+ const sleepWhole = isWhole(sleepStatus);
+ const avgSleep = sleepWhole && sleep.length ? (sleep.reduce((a, s) => a + s.hours, 0) / sleep.length).toFixed(1) : '—';
  // Null when the client has not set a goal, because there is no percentage of
  // a goal that does not exist. Left as it was, `cups / goalCups` coerces the
  // null to 0: any glass logged divides by zero and gives Infinity, which
@@ -282,6 +294,18 @@ export default function Recovery() {
    <Ghost icon="minus" onPress={removeCup} />
    <View style={{ flex: 1 }}><Cta label="Add a Glass" wide onPress={addCup} /></View>
   </View>
+  {/* Which copy of the count is on screen.
+      The figure above is REAL either way — it is this phone's tally, and a
+      client who drank six glasses drank them whether or not the server heard.
+      What a failed read costs is the ability to say it is the only tally: the
+      client may have logged glasses on another device this morning. Saying so
+      is cheaper than a silently divergent number, and it is the same thing
+      availability.ts learnt to say about a coach's cached week. */}
+  {waterStatus === 'error' ? (
+   <Text style={{ ...ty.label, color: t.ink3, paddingBottom: layout.section }}>
+    Counted on this phone. We couldn’t check it against your account just now, so if you have logged water on another device today this may not be the whole picture.
+   </Text>
+  ) : null}
 
   <Rule />
 
@@ -311,7 +335,12 @@ export default function Recovery() {
 
   {/* ── sleep ───────────────────────────────────────────────────────── */}
   <Section>
-   <SectionHead title="Sleep" note={sleep.length ? `avg ${avgSleep} h logged` : undefined} />
+   <SectionHead
+    title="Sleep"
+    note={sleepWhole && sleep.length ? `avg ${avgSleep} h logged`
+      : sleepStatus === 'error' ? 'not confirmed — showing this device’s copy'
+      : sleepStatus === 'partial' ? 'more nights than are shown here'
+      : undefined} />
 
    {/* ── what the devices recorded ──────────────────────────────────
        Kept above and apart from the hand-typed log below, and never
@@ -401,8 +430,28 @@ export default function Recovery() {
    </View>
    <View style={{ height: sp.md }} />
    <Cta label="Log Sleep" wide disabled={!(parseFloat(hrs) > 0) || q < 1} onPress={() => { addSleep(parseFloat(hrs) || 0, q); setHrs(''); setQ(0); }} />
+   {/* An empty list is three different sentences, and it used to be one.
+       "No nights logged yet" is a claim about the client's own history, and
+       under a failed read it is a claim nobody can make — the nights may be
+       sitting on the server, unread. This is the exact bug class
+       src/ui/loadStatus.ts exists to remove, arriving on the one screen where
+       the client would then re-type a night they had already logged. */}
    {sleep.length === 0 ? (
-    <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.lg }}>No nights logged yet — log one above and your average appears here.</Text>
+    <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.lg }}>
+     {sleepStatus === 'error'
+      ? 'We couldn’t read your sleep log just now, so this is blank rather than empty — any nights you have already logged are not shown here.'
+      : sleepStatus === 'loading'
+      ? 'Reading your sleep log…'
+      : 'No nights logged yet — log one above and your average appears here.'}
+    </Text>
+   ) : null}
+   {/* A night logged with no signal. It is on screen, it is on this phone, and
+       it goes up on its own — the client is told rather than left to wonder
+       why it has not reached their coach's view of the week. */}
+   {unsentNights > 0 ? (
+    <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>
+     {unsentNights === 1 ? 'One night is saved on this phone only' : `${unsentNights} nights are saved on this phone only`} — they’ll be sent the next time you’re online. Nothing to re-enter.
+    </Text>
    ) : null}
    {sleep.slice(0, 4).map((sx) => (
     <View key={sx.id} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: sp.sm, marginTop: sp.sm, borderTopWidth: hairline, borderTopColor: t.ring }}>

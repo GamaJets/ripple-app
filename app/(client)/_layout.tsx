@@ -82,6 +82,12 @@ export default function ClientLayout() {
       <Tabs.Screen name="activity" options={{ href: null, title: 'Activity' }} />
       <Tabs.Screen name="measurements" options={{ href: null, title: 'Body Measurements' }} />
       <Tabs.Screen name="injuries" options={{ href: null, title: 'Injuries & Limitations' }} />
+      {/* href: null is not decoration. A route file in this directory with no
+          Tabs.Screen entry gets a TAB BUTTON — expo-router's default — so
+          adding a screen and forgetting this line puts it in the bar beside
+          Home and Train. Glucose shipped that way in one OTA. */}
+      <Tabs.Screen name="glucose" options={{ href: null, title: 'Blood Sugar' }} />
+      <Tabs.Screen name="offers" options={{ href: null, title: 'Offers' }} />
       <Tabs.Screen name="injury-doc" options={{ href: null, title: 'Read a Document' }} />
       <Tabs.Screen name="reminders" options={{ href: null, title: 'Reminders' }} />
       <Tabs.Screen name="packages" options={{ href: null, title: 'Memberships & Packs' }} />

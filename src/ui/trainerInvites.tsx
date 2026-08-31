@@ -1,8 +1,10 @@
 // Owner → trainer invites by email. The owner invites a trainer to join the
 // platform; the trainer signs in with that email, sees the invitation, and
 // accepts (accept_trainer_invite → attaches them to the owner tenant as a
-// trainer + trial) then completes their profile. Supabase-backed with a
-// defensive in-memory fallback so the UI never blanks or crashes.
+// trainer + trial) then completes their profile. Supabase-backed, and every
+// mutation here resolves true only once the SERVER holds the change — there is
+// no in-memory invitation, because an invitation that exists only on the
+// owner's phone is a person waiting for an email nobody sent.
 //
 // Same shape of bug as the coach→client invites, one level up. Accepting is what
 // attaches a trainer to an owner's tenant and starts their trial; it dismissed
@@ -48,7 +50,10 @@ interface TrainerInvitesValue {
   declineTrainerInvite: (id: string) => Promise<boolean>;
 }
 
-let SEQ = 600;
+// The `SEQ` counter that minted `local-…` ids for optimistic invitations is
+// gone with them. Nothing in this provider invents an invitation any more, so
+// there are no ids here that the server has never seen — which is also why
+// `revokeTrainerInvite` no longer has to special-case one.
 
 const rowTo = (r: any): TrainerInvite => ({
   id: String(r.id),
@@ -146,14 +151,24 @@ export function TrainerInvitesProvider({ children }: { children: ReactNode }) {
     return () => { cancelled = true; };
   }, [authRev]);
 
+  // Nothing goes on the list until the server has it.
+  //
+  // The optimistic row used to be inserted BEFORE the upsert, and every exit
+  // below it returns false while leaving that row on screen. So an invitation
+  // that was refused — no session, RLS, no network, a duplicate the constraint
+  // rejected — still put "their@email.com · Awaiting sign-up / accept" in the
+  // owner's Pending Invites, permanently, for somebody who had not been
+  // invited. The owner's next move is to wait for a person who is never coming,
+  // and the invite screen is the one place in the app where that costs a hire.
+  //
+  // An optimistic row is the right pattern where the thing is already true
+  // locally and the server is being told; it is the wrong one where the server
+  // IS the fact, and a trainer_invites row is the whole of what an invitation
+  // is. So there is no local invitation any more: the row that appears is the
+  // row that came back.
   const sendTrainerInvite: TrainerInvitesValue['sendTrainerInvite'] = async (rawEmail) => {
     const e = (rawEmail || '').trim().toLowerCase();
     if (!e) return false;
-    const optimistic: TrainerInvite = {
-      id: `local-${SEQ++}`, ownerId: uid ?? 'me', ownerName: myName,
-      email: e, status: 'pending', createdAt: new Date().toISOString(),
-    };
-    setSent((p) => [optimistic, ...p.filter((i) => i.email.toLowerCase() !== e)]);
     if (!USE_SUPABASE || !uid) return false;
     try {
       const { data, error } = await supabase
@@ -162,17 +177,25 @@ export function TrainerInvitesProvider({ children }: { children: ReactNode }) {
         .select()
         .single();
       if (error || !data) return false;
-      setSent((p) => [rowTo(data), ...p.filter((i) => i.id !== optimistic.id && i.email.toLowerCase() !== e)]);
+      setSent((p) => [rowTo(data), ...p.filter((i) => i.email.toLowerCase() !== e)]);
       return true;
     } catch { return false; }
   };
 
+  // Same shape one row along: the invitation was dropped from the list first and
+  // the update's outcome discarded, so a revoke the server refused took the
+  // invitation off the owner's screen and left it live in the invitee's app —
+  // where accepting it still attaches them to the gym. Under RLS a refused
+  // update raises nothing at all, it matches zero rows, so the row count is the
+  // only thing that can tell the two apart.
   const revokeTrainerInvite: TrainerInvitesValue['revokeTrainerInvite'] = async (id) => {
-    setSent((p) => p.filter((i) => i.id !== id));
-    if (!USE_SUPABASE || id.startsWith('local-')) return true;
+    if (!USE_SUPABASE) { setSent((p) => p.filter((i) => i.id !== id)); return true; }
     try {
-      const { error } = await supabase.from('trainer_invites').update({ status: 'revoked' }).eq('id', id);
-      return !error;
+      const { data, error } = await supabase.from('trainer_invites')
+        .update({ status: 'revoked' }).eq('id', id).select('id');
+      if (error || !data || data.length !== 1) return false;
+      setSent((p) => p.filter((i) => i.id !== id));
+      return true;
     } catch { return false; }
   };
 

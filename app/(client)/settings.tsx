@@ -1,6 +1,6 @@
 // Client · Settings & About. Who you are signed in as (and the way back out),
-// notification prefs, unit preference, legal, your data (GDPR export /
-// erasure), and the build this phone is actually running. Profile hub.
+// the push switch, unit preference, legal, your data (GDPR export / erasure),
+// and the build this phone is actually running. Profile hub.
 //
 // The "Signed in as" section was missing here while the trainer and owner
 // screens both had it, so the client app had no sign-out anywhere at all — the
@@ -134,6 +134,51 @@ export default function Settings() {
       Alert.alert('Not turned on', `${lock.label} was not confirmed, so the lock is still off.`);
     }
   };
+  // ── The notification switches ─────────────────────────────────────────────
+  //
+  // There were two here, and neither did anything. Nothing in the app read
+  // `notifPush` or `notifEmail` — a grep across app/ and src/ found the
+  // declaration, this screen, and no third mention — so both switches slid
+  // across, persisted their new position and changed nothing whatsoever. A
+  // member could turn push off and go on receiving every notification Repple
+  // sends, for ever, with the app showing them their own choice not being
+  // honoured.
+  //
+  // "Email Updates · Weekly summary & tips" is gone rather than wired up.
+  // Repple sends no email: there is no mail provider key, no mail edge function
+  // and no code anywhere that composes a message. That row was not an
+  // unimplemented preference, it was a description of a product feature that
+  // does not exist, and a switch cannot be connected to a system nobody has
+  // built. Bring the row back on the day the weekly email does.
+  //
+  // Push is now real, gated at `push_tokens` in src/ui/settings.tsx — see the
+  // long note there for why the gate lives at the token rather than at each
+  // sender. This handler exists because the answer takes a round trip and can
+  // come back "no": a switch that slides across and then quietly delivers
+  // nothing is the bug being fixed, so each outcome gets a sentence.
+  const togglePush = async () => {
+    const want = !st.notifPush;
+    const res = await st.setPushEnabled(want);
+    if (res === 'on' || res === 'off') return;
+    if (res === 'no-build') {
+      Alert.alert('Not on this build yet',
+        'This version of the app cannot receive push notifications at all — that needs a new build from the App Store, not a setting. Your choice has been saved and will apply as soon as you have one.');
+      return;
+    }
+    if (res === 'os-refused') {
+      Alert.alert('Turned off on your phone',
+        // Not "…switched off for Repple". This is a white-label build and the
+        // app on this phone may not be called Repple at all.
+        "Notifications are switched off for this app in your phone's own Settings, so nothing can be delivered until you turn them back on there. Your choice here has been saved.");
+      return;
+    }
+    // 'off-pending'. Said out loud rather than hoped over: somebody who has just
+    // turned notifications off and then gets one needs to have been told it
+    // might happen.
+    Alert.alert('Saved, but not confirmed',
+      "Push notifications are off from now on, but we couldn't confirm this phone has been taken off the list — you may still get one until the next time you open the app. Nothing else has changed.");
+  };
+
   const signOut = () => {
     Alert.alert('Sign out', 'You will need your email and password to sign back in.', [
       { text: 'Cancel', style: 'cancel' },
@@ -265,8 +310,8 @@ export default function Settings() {
 
         <Section>
           <SectionHead title="Notifications" />
-          <Row t={t} first label="Push Notifications" sub="Session reminders, PRs, coach messages" right={<Toggle t={t} on={st.notifPush} onPress={() => st.set({ notifPush: !st.notifPush })} />} />
-          <Row t={t} label="Email Updates" sub="Weekly summary & tips" right={<Toggle t={t} on={st.notifEmail} onPress={() => st.set({ notifEmail: !st.notifEmail })} />} />
+          <Row t={t} first label="Push Notifications" sub="Session reminders, class reminders, coach messages"
+            right={<Toggle t={t} on={st.notifPush} onPress={() => { void togglePush(); }} />} />
         </Section>
 
         <Rule />

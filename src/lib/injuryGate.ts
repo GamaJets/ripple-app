@@ -53,19 +53,74 @@ export function injuryKey(i: Pick<Injury, 'area' | 'severity'>): string {
   return `${i.area}:${i.severity}`;
 }
 
+/** How a set of acknowledged keys stands against the disclosures of the day.
+ *
+ *  Split out of `guardInjuries` because the CLIENT is shown the same fact from
+ *  the other side — "your coach has read these" — and the two sides must not be
+ *  able to disagree about what "read" means. One function, two readers.
+ *
+ *   'unknown' — the read did not finish or did not land. Nothing may be
+ *               claimed in either direction, least of all to the client.
+ *   'none'    — nothing has ever been acknowledged for them.
+ *   'stale'   — something was, and something has been disclosed since.
+ *   'covered' — every current disclosure is inside what was acknowledged.
+ */
+export type AckState = 'unknown' | 'none' | 'stale' | 'covered';
+
+export function ackState(
+  status: LoadStatus,
+  active: Injury[],
+  acknowledged: string[] | null,
+): AckState {
+  // 'partial' is not 'ready' here for the same reason it is not anywhere else:
+  // a list that is some of the acknowledged keys cannot tell a disclosure that
+  // was never acknowledged from one whose key did not come back.
+  if (status !== 'ready') return 'unknown';
+  if (!acknowledged || !acknowledged.length) return 'none';
+  const seen = new Set(acknowledged);
+  return active.every((i) => seen.has(injuryKey(i))) ? 'covered' : 'stale';
+}
+
 /**
  * May this coach assign a programme to this client?
  *
- * `status` is how the read of the acknowledgement went. Unknown is refused for
- * the same reason the overwrite guard refuses it: a programme built without
- * seeing an injury is not undone by finding out later.
+ * `disclosures` is how the read of the client's OWN injury list went, and
+ * `status` is how the read of the acknowledgement went. Both unknowns are
+ * refused for the same reason the overwrite guard refuses one: a programme
+ * built without seeing an injury is not undone by finding out later.
  */
 export function guardInjuries(
+  disclosures: LoadStatus,
   status: LoadStatus,
   active: Injury[],
   acknowledged: string[] | null,
   clientName: string,
 ): InjuryGate {
+  // Asked before the empty-list shortcut below, and that order is the whole
+  // point. An empty `active` means "they have disclosed nothing" only when the
+  // read that produced it finished; under a failed one it means we did not find
+  // out. The builder read its client out of the roster, and a roster read that
+  // failed left no client, no injuries, and a gate that opened on the silence —
+  // the coach was free to assign around disclosures nobody had shown them. It
+  // is the same mistake as printing "no injuries disclosed" over a read that
+  // never landed, made where it costs somebody their training.
+  if (disclosures === 'loading') {
+    return {
+      allowed: false,
+      label: 'Checking Injuries…',
+      reason: `Still reading whether ${clientName} has disclosed any injuries. This takes a moment.`,
+      outstanding: [],
+    };
+  }
+  if (disclosures === 'error' || disclosures === 'partial') {
+    return {
+      allowed: false,
+      label: 'Injuries Could Not Be Read',
+      reason: `${clientName}'s injuries could not be read, so this screen cannot tell whether they have disclosed any. Assigning on the assumption that they have not is exactly what this check exists to stop, so it is held until they load.`,
+      outstanding: [],
+    };
+  }
+
   if (!active.length) return ALLOWED;
 
   if (status === 'loading') {

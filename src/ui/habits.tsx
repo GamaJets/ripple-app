@@ -1,7 +1,39 @@
 // Daily habits + water tracker (Phase 7). Habit done-states persist to Supabase
 // `habit_logs` per user per day (hydrate-or-fallback + optimistic write) with a
-// defensive in-memory fallback so it never blanks/crashes. Water glass count is
-// session-local (no counter column); its 'done' state persists like the rest.
+// defensive in-memory fallback so it never blanks/crashes.
+//
+// ── The water count used to be the odd one out ─────────────────────────────
+//
+// This header read "Water glass count is session-local (no counter column); its
+// 'done' state persists like the rest", and that sentence describes the worst
+// possible half-state: the TICK survived a relaunch and the NUMBER it was
+// derived from did not. A client who drank six of eight glasses, hit the goal,
+// and reopened the app got a green water habit sitting above a counter reading
+// zero — two rows of the same screen disagreeing about the same morning. And on
+// the Recovery screen, where hydration is the one hero figure, the count simply
+// went back to nothing every launch.
+//
+// The count now persists to `hydration_logs` (supabase/parts/109), one row per
+// person per local day, owner-scoped by auth.uid().
+//
+// ── Why its own table and not a counter column on habit_logs ───────────────
+//
+// The migration argues this at length; the short version is that in
+// `habit_logs` THE ROW IS THE TICK. This provider reads that table as
+// `new Set(rows.map(r => r.habit))` — presence means done — and src/lib/
+// adherence.ts counts rows over four weeks to tell a coach how often a client
+// kept a habit. A client on their third of eight glasses is not done, so a
+// running count stored there would need a row to exist before the habit was
+// complete, and that row would tick the habit green at one glass here and count
+// the day as adhered-to on the coach's screen. There is also no habit row to
+// hang it on when the client has set no goal — `buildChecklist` only emits a
+// 'water' item once `waterGoal` is non-null — and they still drink water.
+//
+// Two of a client's devices can each hold a count for today, so the two are
+// reconciled on recency rather than by taking the larger (`mergeCount` in
+// src/lib/wellnessSync.ts, and the test there for why `Math.max` silently
+// refuses to let a miscount be corrected). `waterStatus` says whether the
+// number on screen has been confirmed by the server or is this device's alone.
 //
 // The habit list is seeded from a constant, so it is never empty and a failed
 // read looked completely healthy — five habits, all unticked. A client who had
@@ -46,7 +78,7 @@
 //    adjustment: coachNutrition.tsx documents that a failed read there hands
 //    back the uncorrected generic targets, and "Hit 152 g protein" is a worse
 //    thing to put in front of a client whose coach cut them 40 g than no line.
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
@@ -55,6 +87,7 @@ import { buildProgram } from '../lib/programs';
 import { buildChecklist, scheduledFocus, type ChecklistGap, type ChecklistSource, type CoachChecklistItem } from '../lib/checklist';
 import { worstStatus, type LoadStatus } from './loadStatus';
 import { capLimit, capped } from '../lib/rowCap';
+import { WATER_CAP, clampGlasses, mergeCount, type CountAt } from '../lib/wellnessSync';
 import { useAuthRevision } from './authRevision';
 import { useClientData } from './clientData';
 import { useCoachNutrition } from './coachNutrition';
@@ -82,9 +115,63 @@ interface HabitsValue {
    *  a screen must not divide by this, fill a row of that many glasses, or
    *  print it — see the four callers, all of which now branch on it. */
   waterGoal: number | null;
+  /** Whether the count above was confirmed by the server.
+   *
+   *  Deliberately separate from `status`, for the reason `coachStatus` is
+   *  separate from `ticksStatus`: a hydration read failing and a checklist read
+   *  failing are two different holes, and folding them into one flag means a
+   *  working read gets reported as broken depending on which query happened to
+   *  fail. A screen that draws a row of glasses or a percentage against the
+   *  goal should check this one.
+   *
+   *  Under 'error' the count is still REAL — it is this device's tally, and a
+   *  client who drank six glasses drank them whether or not the server heard.
+   *  What is unknown is whether another device has since moved it. */
+  waterStatus: LoadStatus;
   addWater: () => void;
   removeWater: () => void;
 }
+
+/** Where today's count is cached on this device.
+ *
+ *  Keyed by account as well as by day, so signing in as somebody else on a
+ *  shared phone cannot show one client another's morning. The key without an
+ *  account is the one older builds used, and it is still read as a fallback
+ *  below — see `readLocalWater`. */
+const waterKey = (uid: string | null, day: string) => (uid ? `repple.water:${uid}:${day}` : `repple.water:${day}`);
+
+/** Today's cached count, from whichever key holds it.
+ *
+ *  Two formats exist. The current one is `{"count":6,"at":"…"}`; builds before
+ *  part 109 wrote a bare integer, because there was nothing to reconcile
+ *  against and so no need for a timestamp. A legacy value is read as the epoch,
+ *  which means a server row — any server row — wins over it. That is the right
+ *  way round: the legacy value has no idea when it was written, and the whole
+ *  merge rests on being able to say which copy is more recent. In practice it
+ *  almost never arises, because `hydration_logs` is new and the first launch
+ *  after this update finds no server row at all, so the device's count is the
+ *  one that gets pushed up. */
+const readLocalWater = async (uid: string | null, day: string): Promise<CountAt | null> => {
+  const parse = (raw: string | null): CountAt | null => {
+    if (!raw) return null;
+    try {
+      const v = JSON.parse(raw);
+      if (typeof v === 'number') return { count: clampGlasses(v), at: new Date(0).toISOString() };
+      if (v && typeof v === 'object' && 'count' in v) return { count: clampGlasses(Number(v.count)), at: String(v.at ?? new Date(0).toISOString()) };
+    } catch { /* a bare integer from an older build is not JSON on every path */ }
+    const n = parseInt(raw, 10);
+    return Number.isFinite(n) ? { count: clampGlasses(n), at: new Date(0).toISOString() } : null;
+  };
+  try {
+    const own = parse(await AsyncStorage.getItem(waterKey(uid, day)));
+    if (own) return own;
+    // Nothing under the per-account key: this may be the first launch after the
+    // update that introduced it. Falling back to the old key is what stops a
+    // client who has already drunk four glasses this morning watching the
+    // counter reset to zero the moment the update installs.
+    return uid ? parse(await AsyncStorage.getItem(waterKey(null, day))) : null;
+  } catch { return null; }
+};
 
 const today = () => {
   const d = new Date();
@@ -110,8 +197,17 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
   const [doneIds, setDoneIds] = useState<Set<string>>(() => new Set());
   const [coachItems, setCoachItems] = useState<CoachChecklistItem[]>([]);
   const [water, setWater] = useState(0);
-  const [wHydrated, setWHydrated] = useState(false);
+  const [waterStatus, setWaterStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
   const [uid, setUid] = useState<string | null>(null);
+  // The account and the count as they stand right now, for the async paths.
+  //
+  // A tap resolves its write a second or two after the render that produced it,
+  // and the alternative to a ref is a functional updater — which is exactly the
+  // shape both of the bugs documented further down this file had: React
+  // double-invokes updaters in development, so a network call placed inside one
+  // fires twice, and an updater is no place for one regardless.
+  const uidRef = useRef<string | null>(null);
+  const waterRef = useRef(0);
   const [ticksStatus, setTicksStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
   // Separate from the ticks on purpose: a coach's items failing to load and
   // today's ticks failing to load are two different holes, and folding them
@@ -127,8 +223,59 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
   // set one on the Daily habits screen, and null all the way out: no caller
   // substitutes a figure for it.
   const waterGoal = c.waterGoalGlasses;
-  useEffect(() => { AsyncStorage.getItem('repple.water:' + today()).then((r) => { const n = r ? parseInt(r, 10) : 0; if (Number.isFinite(n) && n > 0) setWater(n); setWHydrated(true); }); }, []);
-  useEffect(() => { if (!wHydrated) return; AsyncStorage.setItem('repple.water:' + today(), String(water)).catch(() => {}); }, [water, wHydrated]);
+  // Today's count off this device, before anything is asked of the network.
+  //
+  // This runs with no account, under the legacy key, and it is what a client
+  // with no signal — or no session yet — sees. The account-scoped read and the
+  // reconcile against the server happen in the main effect below, once there is
+  // an account to scope to.
+  useEffect(() => {
+    let cancelled = false;
+    readLocalWater(null, today()).then((w) => {
+      // `w.count > 0` deliberately, not `w != null`: this fires before the
+      // account-scoped read and must not overwrite a count that read has
+      // already established. A cached zero carries no information anybody is
+      // missing, and the account-scoped path handles a real zero properly.
+      if (!cancelled && w && w.count > 0 && waterRef.current === 0) { waterRef.current = w.count; setWater(w.count); }
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  /** Write today's count to this device. Cheap, synchronous from the caller's
+   *  point of view, and the thing that has to happen before the network is even
+   *  attempted — a glass logged in a basement gym has to survive the app being
+   *  killed before signal comes back. */
+  //
+  // One key, the account-scoped one when there is an account. Mirroring the
+  // count into the unscoped key as well was tried and removed: it would have
+  // meant a signed-in client's morning sitting under a key any other account on
+  // that phone reads first, and the first effect above runs before the session
+  // resolves — so on a shared gym phone the previous client's count would flash
+  // up as the next one's. The unscoped key is read once as a migration
+  // fallback (see readLocalWater) and otherwise belongs to the signed-out case
+  // alone, which is exactly what it held before part 109.
+  const cacheWater = (n: number, at: string) => {
+    AsyncStorage.setItem(waterKey(uidRef.current, today()), JSON.stringify({ count: n, at }))
+      .catch(() => { /* the count is correct this session either way */ });
+  };
+
+  /** Send today's count up. Resolves true only when the server holds this
+   *  number — which is what separates 'ready' from 'error' on a screen about to
+   *  draw six glasses as filled.
+   *
+   *  The row count is checked, not just `error`. PostgREST does not fail an
+   *  upsert that RLS silently narrows to zero rows, so "no error" on its own is
+   *  not evidence that anything was written. */
+  const pushWater = async (owner: string, day: string, n: number): Promise<boolean> => {
+    try {
+      const { data, error } = await supabase.from('hydration_logs')
+        .upsert({ user_id: owner, logged_on: day, glasses: n }, { onConflict: 'user_id,logged_on' })
+        .select('glasses');
+      if (error || !data || data.length !== 1) { setWaterStatus('error'); return false; }
+      setWaterStatus('ready');
+      return true;
+    } catch { setWaterStatus('error'); return false; }
+  };
 
   useEffect(() => {
     if (!USE_SUPABASE) return;
@@ -141,13 +288,54 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
         // in — where it stayed, because the effect never ran a second time.
         const { data: sess } = await supabase.auth.getSession();
         if (cancelled) return;
-        if (!sess?.session) { setTicksStatus('ready'); setCoachStatus('ready'); return; }
+        // Signed out: this device IS the store for all three of these, so what
+        // is on screen is authoritative and there is no absent server to
+        // misreport. That includes the water count, which is why waterStatus is
+        // set on every one of these branches rather than left at 'loading' —
+        // a status stuck on 'loading' forever is a screen that never renders
+        // its figure.
+        if (!sess?.session) { setTicksStatus('ready'); setCoachStatus('ready'); setWaterStatus('ready'); return; }
         const { data: auth, error: authErr } = await supabase.auth.getUser();
         if (cancelled) return;
-        if (authErr) { setTicksStatus('error'); setCoachStatus('error'); return; }
+        if (authErr) { setTicksStatus('error'); setCoachStatus('error'); setWaterStatus('error'); return; }
         const id = auth?.user?.id;
-        if (!id) { setTicksStatus('ready'); setCoachStatus('ready'); return; }
+        if (!id) { setTicksStatus('ready'); setCoachStatus('ready'); setWaterStatus('ready'); return; }
         setUid(id);
+        uidRef.current = id;
+
+        // ── today's water count ────────────────────────────────────────────
+        //
+        // Local first, then the server, then whichever is more recent — the
+        // same order availability.ts settled on, for the same reason: a client
+        // in a basement gym still sees their morning.
+        const day = today();
+        const localWater = await readLocalWater(id, day);
+        if (cancelled) return;
+        if (localWater && localWater.count !== waterRef.current) { waterRef.current = localWater.count; setWater(localWater.count); }
+        const { data: hy, error: hyErr } = await supabase.from('hydration_logs')
+          .select('glasses, updated_at')
+          .eq('user_id', id).eq('logged_on', day)
+          .maybeSingle();
+        if (cancelled) return;
+        // The cached count stays on screen and the status records that it was
+        // not checked — rather than the screen resetting to zero, which is what
+        // a client would read as "the app lost my glasses".
+        if (hyErr) { setWaterStatus('error'); }
+        else {
+          // No row is a true answer here, not a missing one: a day nobody has
+          // logged has no row, and `mergeCount` treats a null server side as
+          // "the server knows nothing about today" rather than as zero.
+          const server: CountAt | null = hy
+            ? { count: clampGlasses(Number((hy as any).glasses)), at: String((hy as any).updated_at ?? new Date(0).toISOString()) }
+            : null;
+          const m = mergeCount(server, localWater);
+          waterRef.current = m.count;
+          setWater(m.count);
+          cacheWater(m.count, new Date().toISOString());
+          if (m.push) await pushWater(id, day, m.count);
+          else setWaterStatus('ready');
+          if (cancelled) return;
+        }
 
         // One row per habit ticked today by one person: a handful, and it cannot
         // grow with the business the way the roster reads do. Capped because the
@@ -186,7 +374,13 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
         const ciPage = capped(ci);
         setCoachItems(ciPage.rows.map((r: any) => ({ id: String(r.id), label: String(r.label ?? ''), icon: r.icon ?? null })));
         setCoachStatus(ciPage.truncated ? 'partial' : 'ready');
-      } catch { if (!cancelled) { setTicksStatus('error'); setCoachStatus('error'); } }
+      } catch {
+        // Offline, or the client threw before any of the reads landed. The
+        // cached water count and the optimistic ticks stay on screen; all three
+        // statuses say they are unconfirmed. `waterStatus` is included because
+        // leaving it at 'loading' here is how a figure never renders at all.
+        if (!cancelled) { setTicksStatus('error'); setCoachStatus('error'); setWaterStatus('error'); }
+      }
     })();
     return () => { cancelled = true; };
   }, [authRev]);
@@ -289,9 +483,23 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
   // Recovery hero would have sat at 80% for the rest of their life. It tracks
   // clients_water_goal_glasses_check (part 70): whatever goal the database will
   // accept must be reachable here.
-  const WATER_CAP = 30;
+  //
+  // Moved to src/lib/wellnessSync.ts, because `hydration_logs_glasses_check`
+  // (part 109) now enforces the same range server-side and there are three
+  // numbers that have to agree rather than two. A local copy of a constant that
+  // has to match a column is a copy that will one day not match it, and the
+  // symptom would be writes the client never sees refused.
   const addWater = () => {
-    setWater((w) => Math.min(w + 1, WATER_CAP));
+    // Local, cached, then sent — in that order, and never conditional on the
+    // send. The count on screen is this device's tally and it is real whether
+    // or not the server hears about it; `waterStatus` is where "the server has
+    // not confirmed this" is recorded, not in a glass that refuses to fill.
+    const next = clampGlasses(waterRef.current + 1);
+    const hit = waterRef.current !== next;
+    waterRef.current = next;
+    setWater(next);
+    cacheWater(next, new Date().toISOString());
+    if (uidRef.current && USE_SUPABASE) void pushWater(uidRef.current, today(), next);
     // No goal means there is nothing to complete. Without this the comparison
     // coerces the null to 0, so the very first glass reads as hitting the goal.
     // markWaterDone would currently refuse it — there is no 'water' row on a
@@ -299,15 +507,33 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
     // the guard there is about a row the coach or a read took away, and leaning
     // on it here means a change to it silently starts ticking a target nobody
     // set. The condition says what it means.
-    if (waterGoal != null && water + 1 >= waterGoal) markWaterDone();
+    //
+    // `hit` is new with the clamp: at the ceiling the count does not move, and
+    // firing the goal tick off an unchanged number would be reporting a glass
+    // nobody drank. WATER_CAP is at or above every goal the database accepts,
+    // so a client who can reach their goal reaches it before this bites.
+    if (hit && waterGoal != null && next >= waterGoal) markWaterDone();
   };
-  const removeWater = () => setWater((w) => Math.max(0, w - 1));
+  const removeWater = () => {
+    const next = clampGlasses(waterRef.current - 1);
+    if (next === waterRef.current) return;
+    waterRef.current = next;
+    setWater(next);
+    cacheWater(next, new Date().toISOString());
+    // The habit tick is deliberately NOT un-done here. Dropping back below the
+    // goal after hitting it is a correction to the count, and whether the day
+    // counts as a day the client hit their water is a question habit_logs
+    // already answers on its own terms — un-ticking it from a minus button
+    // would delete a row the coach's adherence figures are counting, from a
+    // control whose label is "remove a glass".
+    if (uidRef.current && USE_SUPABASE) void pushWater(uidRef.current, today(), next);
+  };
   // Counted over today's list, not over doneIds: a tick against an item the
   // coach has since retired is still in habit_logs and would otherwise push the
   // count past the number of rows on screen.
   const doneCount = habits.filter((h) => h.done).length;
 
-  return <Ctx.Provider value={{ habits, toggleHabit, status, gaps, doneCount, water, waterGoal, addWater, removeWater }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ habits, toggleHabit, status, gaps, doneCount, water, waterGoal, waterStatus, addWater, removeWater }}>{children}</Ctx.Provider>;
 }
 
 export function useHabits(): HabitsValue {

@@ -353,10 +353,20 @@ export default function Analytics() {
    * `silent` is the case this page exists to guard: the log has no entries, so
    * every member has zero visits and every cohort retains nobody. That is a
    * fact about the terminal, not about the gym.
+   *
+   * BOTH door reads gate it, not just the probe. `lastVisitAt` and the windowed
+   * `fetchVisits` are separate promises against `gym_visits`, and the windowed
+   * scan is the one every per-member count is actually made of. When it failed
+   * and the probe did not — a statement timeout on the range, exactly the shape
+   * where a `limit(1)` still answers — this said `live` over an empty
+   * `visitsByMember`, and the cohort table printed "Still coming 0" and
+   * "Retained 0%" in the warning colour against every cohort of ten or more.
+   * That is the silent-log disaster this state exists to prevent, arriving
+   * through the read the guard was not watching.
    */
   const doorState: 'loading' | 'failed' | 'silent' | 'stale' | 'live' =
-    door.state === 'loading' ? 'loading'
-      : door.state === 'failed' ? 'failed'
+    door.state === 'loading' || visits.state === 'loading' ? 'loading'
+      : door.state === 'failed' || visits.state === 'failed' ? 'failed'
       : door.at == null ? 'silent'
       : door.at < windowStart ? 'stale'
       : 'live';
@@ -393,6 +403,10 @@ export default function Analytics() {
 
   const lastFull = months?.find((m) => !m.running) ?? null;
 
+  // `doorState` now folds `visits.state` in, so the second clause is belt and
+  // braces rather than the guard — kept because the name of this value is the
+  // sentence a reader needs, and losing it would invite the next author to
+  // reach for `doorState` alone the way the cohort table used to.
   const visitsCounted = doorState === 'live' && visits.state === null;
 
   /**

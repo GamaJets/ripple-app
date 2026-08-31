@@ -47,7 +47,11 @@ type Kind = 'payments' | 'members' | 'plans';
 type Outcome = 'all' | 'partial' | 'none';
 
 export default function ImportPage() {
-  const [me, setMe] = useState<Me | null>(null);
+  // Three states, like every other screen in the console: undefined is "we have
+  // not asked yet", null is "nobody is signed in". Collapsing them into one null
+  // meant a visitor who was still loading and a visitor with no account were
+  // shown the same blank page, and neither was ever told to sign in.
+  const [me, setMe] = useState<Me | null | undefined>(undefined);
   const [gymName, setGymName] = useState<string | null>(null);
   const [tenantId, setTenantId] = useState<string | null>(null);
 
@@ -97,8 +101,8 @@ export default function ImportPage() {
   useEffect(() => {
     (async () => {
       const who = await loadMe();
-      if (!who) return;
       setMe(who);
+      if (!who) return;
       setTenantId(who.tenantId);
       if (who.tenantId) {
         // supabase-js resolves on a database error rather than rejecting, so
@@ -276,7 +280,37 @@ export default function ImportPage() {
     ? (preview.ready as PaymentRow[]).filter((r) => matchMember(r) !== null).length
     : null;
 
-  if (!me) return null;
+  if (me === undefined) return <div style={{ padding: 40, color: 'var(--ink3)' }}>Loading…</div>;
+  if (me === null) return <div style={{ padding: 40 }}><a href="/">Sign in</a></div>;
+
+  if (me.roleUnknown) {
+    return (
+      <Shell me={me} gymName={gymName} current="/import">
+        <h1>We could not read your account</h1>
+        <p style={{ color: 'var(--ink2)', marginTop: 8, maxWidth: '62ch' }}>
+          Your profile did not load, so this console does not know what you are —
+          which is not the same as you not having access. Reload the page; if it
+          keeps happening the database refused the read rather than you.
+        </p>
+      </Shell>
+    );
+  }
+
+  // The database refuses these writes to anybody else anyway, but a screen that
+  // offers a button and lets the row bounce is a worse answer than a sentence:
+  // this one prices the gym's plans and records money it has taken, and half a
+  // refused run still leaves the half that landed. Said here, before the form.
+  if (me.role !== 'owner') {
+    return (
+      <Shell me={me} gymName={gymName} current="/import">
+        <h1>Not your console</h1>
+        <p style={{ color: 'var(--ink2)', marginTop: 10 }}>
+          Importing writes the gym&rsquo;s price book and its payment record, so it
+          is owner-only.
+        </p>
+      </Shell>
+    );
+  }
 
   return (
     <Shell me={me} gymName={gymName} current="/import">

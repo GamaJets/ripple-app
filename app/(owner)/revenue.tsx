@@ -41,6 +41,9 @@ export default function OwnerRevenue() {
   const trainersUnread = trainersStatus === 'error';
   const trainersUnknown = loading || trainersUnread;
   const { tenant } = useTenant();
+  // The gym's own currency (`tenants.currency`, part 99). Null until the tenant
+  // read returns, and gymMoney falls back to GYM_CURRENCY for that window.
+  const cur = tenant?.currency ?? null;
   const roll = gymRollup(trainers as TrainerLike[], tenant?.sessionFee ?? null);
   // The history hook PERSISTS what it is given, so this month's snapshot has to
   // be null rather than a zero we cannot vouch for — once "0 sessions" is in
@@ -110,9 +113,9 @@ export default function OwnerRevenue() {
             : trainersUnread
             ? unreadNote
             : delta !== 0
-            ? `${delta > 0 ? '+' : '−'}${num(Math.abs(delta))} vs last month${revenue30 != null ? ` · ${gymMoney(revenue30)} at your fee` : ''}`
+            ? `${delta > 0 ? '+' : '−'}${num(Math.abs(delta))} vs last month${revenue30 != null ? ` · ${gymMoney(revenue30, cur)} at your fee` : ''}`
             : revenue30 != null
-              ? `${gymMoney(revenue30)} at your session fee`
+              ? `${gymMoney(revenue30, cur)} at your session fee`
               : 'Set a session fee in Ops to value these'}
         />
 
@@ -139,8 +142,8 @@ export default function OwnerRevenue() {
           {/* The session fee is the tenant's own row, not a roll-up, so it
               survives a failed roster read and is still worth stating. */}
           <KpiRow items={[
-            { label: 'Session Fee', value: fig(gymMoney(fee)), delta: fee == null ? 'not set' : 'per delivered session' },
-            { label: 'Value / Client', value: trainersUnknown ? '—' : fig(gymMoney(valuePerClient)),
+            { label: 'Session Fee', value: fig(gymMoney(fee, cur)), delta: fee == null ? 'not set' : 'per delivered session' },
+            { label: 'Value / Client', value: trainersUnknown ? '—' : fig(gymMoney(valuePerClient, cur)),
               delta: loading ? 'not read yet' : trainersUnread ? unreadNote : valuePerClient == null ? 'needs a session fee' : 'last 30 days' },
             { label: 'Clients', value: trainersUnknown ? '—' : fig(roll.clients),
               delta: loading ? 'not read yet' : trainersUnread ? unreadNote : roll.avgClientsPerTrainer == null ? 'no trainers yet' : `${roll.avgClientsPerTrainer} avg / trainer` },

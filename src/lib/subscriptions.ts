@@ -14,6 +14,7 @@ import { appLink } from './deepLink';
 import { supabase } from './supabase';
 import { reportError } from './reportError';
 import { capLimit, capped } from './rowCap';
+import { minorMoney } from './coachMoney';
 import type { LoadStatus } from '../ui/loadStatus';
 
 export type BillingInterval = 'month' | 'year';
@@ -55,12 +56,6 @@ export const statusLabel = (s: string | null | undefined): string => (s ? STATUS
 export const intervalLabel = (i: string | null | undefined): string =>
   i === 'month' ? 'month' : i === 'year' ? 'year' : '';
 
-// Currencies Stripe bills in whole units — there are no fils in a yen, so the
-// amount is not divided by a hundred. Getting this backwards prints ¥50,000 as
-// ¥500, which is the same class of mistake as the AED 63 that should have been
-// AED 6,300, in the other direction.
-const ZERO_DECIMAL = new Set(['bif', 'clp', 'djf', 'gnf', 'jpy', 'kmf', 'krw', 'mga', 'pyg', 'rwf', 'ugx', 'vnd', 'vuv', 'xaf', 'xof', 'xpf']);
-
 /**
  * A package price, in MINOR units, in the currency that package is actually
  * sold in.
@@ -83,16 +78,14 @@ const ZERO_DECIMAL = new Set(['bif', 'clp', 'djf', 'gnf', 'jpy', 'kmf', 'krw', '
  * The code is printed rather than a symbol ("AED 600.00", "GBP 90.00") because
  * $ is only unambiguous when it is the only currency on screen, and in a
  * white-label product it never is.
+ *
+ * The body moved to `minorMoney` in coachMoney.ts, which is pure and therefore
+ * testable — including the zero-decimal list, which used to exist here only and
+ * had no test anywhere. Behaviour is unchanged; this stays as the name every
+ * screen already imports.
  */
 export function pkgMoney(minorUnits: number | null | undefined, currency: string | null | undefined): string | null {
-  if (minorUnits == null || !Number.isFinite(minorUnits)) return null;
-  const cur = (currency || '').trim().toLowerCase();
-  // A currency we were not told is not a currency we may guess. An amount with
-  // the wrong code on it is worse than an amount with no code.
-  if (!cur) return null;
-  const whole = ZERO_DECIMAL.has(cur) ? minorUnits : minorUnits / 100;
-  const dp = ZERO_DECIMAL.has(cur) ? 0 : 2;
-  return `${cur.toUpperCase()} ${whole.toLocaleString('en-GB', { minimumFractionDigits: dp, maximumFractionDigits: dp })}`;
+  return minorMoney(minorUnits, currency);
 }
 
 /** "AED 600.00 / month" — the whole price of a recurring package as it is read

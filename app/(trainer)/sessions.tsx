@@ -15,6 +15,20 @@
 //
 // An empty queue is the good state and says so, rather than rendering a blank
 // stretch of screen that looks like a loading failure.
+//
+// ── It is the coach's queue, not the gym's ─────────────────────────────────
+//
+// This screen read the queue by `tenant_id` and opened with
+// `if (!tenant?.id) return;`. A coach who works for himself has no gym and
+// therefore no tenant, so that line returned before anything was read — and
+// because the unread state IS null, the screen sat on "Loading…" indefinitely
+// with no error and no retry. He could not mark a single session.
+//
+// The rows are now read by `trainer_id`, which is what `sessions_trainer` in
+// supabase/parts/09-sessions-access.sql has always scoped them by. A gym
+// trainer sees exactly what they saw before; an independent one can finally
+// work. See src/lib/trainerSessions.ts for why that is the right key rather
+// than a convenient one.
 import { useState, useEffect, useCallback } from 'react';
 import { View, Text, Pressable, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -25,13 +39,15 @@ import { Rule, Section, SectionHead, Hero, KpiRow, fig, Flag } from '../../src/u
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import type { Theme } from '../../src/theme/tokens';
 import { useTenant } from '../../src/ui/tenant';
+import { useAuth } from '../../src/ui/auth';
+import { useMyTrainerProfile } from '../../src/ui/coachProfile';
 import { supabase } from '../../src/lib/supabase';
 import { reportError } from '../../src/lib/reportError';
 import { tapLight } from '../../src/ui/haptics';
+import { type PtSession, type SessionOutcome } from '../../src/lib/gymSessions';
 import {
-  fetchAwaitingOutcome, markOutcome, clearOutcome,
-  type PtSession, type SessionOutcome,
-} from '../../src/lib/gymSessions';
+  MARK_WINDOW_DAYS, awaitingOutcome, clearMyOutcome, fetchMySessions, markMyOutcome, windowStart,
+} from '../../src/lib/trainerSessions';
 
 /** The four outcomes, in the order a person would consider them. */
 const OUTCOMES: { id: SessionOutcome; label: string; short: string; tone: (t: Theme) => string }[] = [
@@ -72,6 +88,37 @@ export default function TrainerSessions() {
   const t = useTheme();
   const router = useRouter();
   const { tenant } = useTenant();
+  // ── who these sessions belong to ──────────────────────────────────────────
+  //
+  // The coach, by `trainer_id` — NOT the gym, by `tenant_id`.
+  //
+  // This screen opened with `if (!tenant?.id) return;`, and a coach with no gym
+  // has no tenant, so `load` returned before doing anything at all. `queue`
+  // stays null, and null is this screen's "not read yet" state — so it sat on
+  // "Loading…" for ever, with no error, no retry and nothing to say why. An
+  // independent trainer could not mark a single session outcome, which is the
+  // one thing this screen exists to do.
+  //
+  // `sessions_trainer` in supabase/parts/09-sessions-access.sql has always
+  // scoped these rows by the trainer who owns the slot; the tenant filter was
+  // an extra narrowing the coach app had no reason to apply to its own
+  // sessions. See src/lib/trainerSessions.ts.
+  const { user, loading: authLoading } = useAuth();
+  const uid = user?.id ?? null;
+  // The rate to snapshot when an outcome is recorded. A gym's fee where there
+  // is a gym, and otherwise the coach's own — an independent trainer's sessions
+  // are priced by the rate on their profile, and there is nowhere else for that
+  // figure to come from. Null stays null: `markMyOutcome` then leaves rate_cents
+  // untouched rather than writing a zero that reads as "this was free".
+  const { sessionFee: ownFee } = useMyTrainerProfile();
+  const feeToSnapshot = tenant?.sessionFee ?? ownFee;
+
+  // Whether there is a gym behind these sessions, which decides only what the
+  // screen CALLS the thing it is asking for. A gym trainer is holding up a
+  // payroll run; an independent coach is holding up their own record of what
+  // they delivered. The work is identical, and telling a self-employed trainer
+  // that "payroll can be settled" names a process he does not have.
+  const hasGym = !!tenant?.id;
 
   const [queue, setQueue] = useState<PtSession[] | null>(null);
   // Separate from `queue === null`, which only means "not read yet". A refused
@@ -87,13 +134,25 @@ export default function TrainerSessions() {
   const [justMarked, setJustMarked] = useState<{ s: PtSession; outcome: SessionOutcome }[]>([]);
 
   const load = useCallback(async () => {
-    if (!tenant?.id) return;
+    // Still working out who is signed in. Not an answer either way, so leave
+    // the queue unread — the effect runs again when auth settles.
+    if (authLoading) return;
+    if (!uid) {
+      // Nobody signed in. This screen has no way to know whose sessions to
+      // ask for, and an empty queue would say "nothing outstanding" — which is
+      // the one thing it must never say without having looked.
+      reportError('sessions.awaiting', new Error('no signed-in coach to read sessions for'));
+      setQueue(null);
+      setFailed(true);
+      return;
+    }
     setFailed(false);
     try {
       // 90 days back: far enough to catch a forgotten fortnight, short enough
       // that the query stays cheap and the list stays readable.
-      const since = new Date(Date.now() - 90 * 86400_000).toISOString();
-      setQueue(await fetchAwaitingOutcome(supabase, tenant.id, since));
+      const since = windowStart(MARK_WINDOW_DAYS);
+      const mine = await fetchMySessions(supabase, uid, since, new Date().toISOString());
+      setQueue(awaitingOutcome(mine));
     } catch (e) {
       reportError('sessions.awaiting', e);
       // Leave the queue unknown rather than empty. [] here would be read as
@@ -102,7 +161,7 @@ export default function TrainerSessions() {
       setQueue(null);
       setFailed(true);
     }
-  }, [tenant?.id]);
+  }, [uid, authLoading]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -111,11 +170,15 @@ export default function TrainerSessions() {
   const days = byDay(rows);
 
   const mark = async (s: PtSession, outcome: SessionOutcome) => {
+    // Unreachable in practice — with no uid the queue is `failed` and no row is
+    // drawn to tap — but the write is scoped by the coach's id and a `!` here
+    // would be a claim rather than a check.
+    if (!uid) return;
     setBusy(s.id);
     try {
       // Snapshot the gym's fee at the moment of marking, so a later fee change
       // cannot rewrite what this session was worth.
-      await markOutcome(supabase, s.id, outcome, tenant?.sessionFee != null ? tenant.sessionFee * 100 : undefined);
+      await markMyOutcome(supabase, uid, s.id, outcome, feeToSnapshot != null ? feeToSnapshot * 100 : undefined);
       setQueue((prev) => (prev ?? []).filter((x) => x.id !== s.id));
       setJustMarked((prev) => [{ s, outcome }, ...prev].slice(0, 8));
       tapLight();
@@ -126,8 +189,9 @@ export default function TrainerSessions() {
   };
 
   const undo = async (entry: { s: PtSession; outcome: SessionOutcome }) => {
+    if (!uid) return;
     try {
-      await clearOutcome(supabase, entry.s.id);
+      await clearMyOutcome(supabase, uid, entry.s.id);
       setJustMarked((prev) => prev.filter((x) => x.s.id !== entry.s.id));
       setQueue((prev) => [entry.s, ...(prev ?? [])]);
       tapLight();
@@ -176,8 +240,8 @@ export default function TrainerSessions() {
             : !loaded
               ? 'Reading your sessions…'
               : rows.length === 0
-                ? 'Nothing outstanding — payroll can be settled.'
-                : 'Payroll cannot be worked out until every one of these is marked.'}
+                ? (hasGym ? 'Nothing outstanding — payroll can be settled.' : 'Nothing outstanding — every session you have delivered is on the record.')
+                : (hasGym ? 'Payroll cannot be worked out until every one of these is marked.' : 'Your delivered-sessions count is incomplete until every one of these is marked.')}
         />
 
         <Rule />
@@ -196,8 +260,8 @@ export default function TrainerSessions() {
           <View style={{ alignItems: 'center', paddingVertical: sp.xl }}>
             <Flag tone={t.crit}>Could not read your sessions</Flag>
             <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: sp.xs }}>
-              There may or may not be sessions waiting on an outcome — the app could not reach the
-              server to find out. Do not settle payroll on this screen until it loads.
+              There may or may not be sessions waiting on an outcome — the app could not find out.
+              {hasGym ? ' Do not settle payroll on this screen until it loads.' : ' Do not treat this as a clear queue until it loads.'}
             </Text>
             <Pressable onPress={() => void load()} hitSlop={8}
               accessibilityRole="button" accessibilityLabel="Try reading your sessions again"
@@ -212,8 +276,7 @@ export default function TrainerSessions() {
             <Icon name="check" size={26} color={t.brand} />
             <Text style={{ ...ty.head, color: t.ink, marginTop: sp.md }}>All caught up</Text>
             <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: sp.xs }}>
-              Every session that has already happened has an outcome recorded, so nothing is
-              holding payroll up.
+              Every session that has already happened has an outcome recorded{hasGym ? ', so nothing is holding payroll up.' : '.'}
             </Text>
           </View>
         ) : days.map((day, di) => (

@@ -6,6 +6,7 @@
 // and unit-testable. Cardio and bodyweight-only entries are skipped.
 import type { WorkoutEntry } from './mockData';
 import { est1RM } from './streaks';
+import { liftLabel, liftDeltaIn, type WeightUnit } from './units';
 
 export type ProgressAction = 'increase' | 'reps' | 'hold' | 'deload';
 
@@ -127,6 +128,7 @@ export function suggestNextWeight(
   lastSets: [number, number][] | undefined,
   range: RepRange | null,
   increment = 2.5,
+  unit: WeightUnit = 'kg',
 ): Suggestion | null {
   if (!lastSets || lastSets.length === 0) return null;
   let topW = 0, repsAtTop = 0;
@@ -136,15 +138,36 @@ export function suggestNextWeight(
   }
   if (topW <= 0) return null;
   const round = (n: number) => Math.round(n * 2) / 2;
+  // `weight` stays kilograms — it is fed straight back into the log, the
+  // warm-up ramp and the PR check, all of which are metric. Only `reason` is
+  // prose, and prose is read rather than computed on.
+  const read = (kg: number) => liftLabel(kg, unit) ?? `${kg} ${unit}`;
   if (range && repsAtTop >= range.high) {
-    return { weight: round(topW + increment), up: true, reason: `You hit ${repsAtTop} reps at ${topW}kg — add ${increment}kg` };
+    return { weight: round(topW + increment), up: true, reason: `You hit ${repsAtTop} reps at ${read(topW)} — add ${liftDeltaIn(increment, unit) ?? increment} ${unit}` };
   }
-  return { weight: round(topW), up: false, reason: range ? `Match ${topW}kg, aim for ${range.high} reps` : `Match last: ${topW}kg` };
+  return { weight: round(topW), up: false, reason: range ? `Match ${read(topW)}, aim for ${range.high} reps` : `Match last: ${read(topW)}` };
 }
 
-/** Convenience: suggestion for one program exercise given the log. */
-export function suggestForExercise(log: WorkoutEntry[], exerciseName: string, reps: string, increment = 2.5): Suggestion | null {
-  return suggestNextWeight(lastSetsFor(log, exerciseName), parseRepRange(reps), increment);
+/**
+ * Convenience: suggestion for one program exercise given the log.
+ *
+ * ── Why this takes a unit ───────────────────────────────────────────────────
+ *
+ * `weight` has always been kilograms and the Train tab has always rendered it
+ * through `liftLabel`, so the number a pounds member reads was right. The
+ * SENTENCE beside it was not: `reason` was built here with "kg" written into
+ * it, so a member set to pounds saw "132 lb" and, immediately to its right,
+ * "You hit 8 reps at 60kg — add 2.5kg". Two figures for the same lift, in two
+ * units, on one line, in front of their coach — and the one in kilograms looks
+ * like the app has lost track of what they lift.
+ *
+ * The unit is a reading convention only. Nothing about the DECISION changes:
+ * the increment ladder stays metric (see `feelStep` in the session runner for
+ * why a second, imperial ladder would be a second progression model), and what
+ * moves is the wording.
+ */
+export function suggestForExercise(log: WorkoutEntry[], exerciseName: string, reps: string, increment = 2.5, unit: WeightUnit = 'kg'): Suggestion | null {
+  return suggestNextWeight(lastSetsFor(log, exerciseName), parseRepRange(reps), increment, unit);
 }
 
 /** Best estimated-1RM ever recorded for an exercise (for live PR detection). */

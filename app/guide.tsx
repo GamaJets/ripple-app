@@ -13,6 +13,9 @@
 // The two lists are separated by a heading rather than run together, because a
 // section headed "Injuries" sitting in a list of tab names reads as a tab that
 // has gone missing from the bar.
+//
+// The tour is reopened from the foot of this screen, which is where its own
+// closing sentence has always said it would be.
 import { View, Text, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -66,7 +69,13 @@ export default function Guide() {
           </>
         ) : null}
 
-        <Section style={{ alignItems: 'center' }}>
+        {/* The tour's own last card says "You can reopen this any time from the
+            user guide." Nothing here offered that: /tour was reachable only from
+            app/index.tsx on the first launch of an install, so the sentence was
+            false the moment somebody went looking for it. This is the control it
+            was promising. */}
+        <Section style={{ alignItems: 'center', gap: sp.sm }}>
+          <Ghost label="Take the Tour Again" onPress={() => router.push('/tour')} />
           <Ghost label="Done" onPress={() => router.back()} />
         </Section>
       </ScrollView>

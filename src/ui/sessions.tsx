@@ -24,7 +24,8 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { overlaps } from '../lib/booking';
 import type { TrainingSession } from '../lib/types';
-import { scheduleLocal } from './pushNotifications';
+import { scheduleLocal, sendPushChecked } from './pushNotifications';
+import { reofferSlot, refundSession, sessionsRemaining } from '../lib/connect';
 import { useAuthRevision } from './authRevision';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
@@ -176,8 +177,21 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
     const s = sessions.find((x) => x.id === id);
     // Drawing the booking and scheduling the reminder are what a CONFIRMED
     // booking looks like, so neither happens until the server has confirmed one.
-    const apply = () => {
-      setSessions((p) => p.map((x) => (x.id === id ? { ...x, status: 'booked', clientId, released: false } : x)));
+    //
+    // `who` is the id the SERVER booked it for, not the one the caller passed.
+    // `book_session` writes `auth.uid()` and can write nothing else, so on the
+    // server path those two are the same id — except when they are not, and the
+    // one case where they are not is the one that shows. app/(client)/calendar.tsx
+    // passes `useClientData().id`, which is `sbUid ?? 'unknown'`: a real string,
+    // not a null, for the window between mount and the auth read landing. A
+    // booking made in that window was recorded locally against 'unknown', and
+    // the client's own screen filters its calendar on `s.clientId === cd.id` —
+    // so the session they had just successfully booked, and been told was
+    // confirmed, was on neither the grid nor the day list until the next
+    // refresh. Falling back to `clientId` keeps the offline branch below, where
+    // there is no `uid` and nothing has been confirmed by anybody, unchanged.
+    const apply = (who: string = clientId) => {
+      setSessions((p) => p.map((x) => (x.id === id ? { ...x, status: 'booked', clientId: who, released: false } : x)));
       if (s && s.startsAt) {
         const start = new Date(s.startsAt);
         scheduleLocal('Session in 1 hour', 'Your training session starts at ' + start.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) + '.', new Date(start.getTime() - 60 * 60 * 1000));
@@ -207,7 +221,7 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
         booked = !readErr && !!row && row.status === 'booked' && row.client_id === uid;
       }
     } catch { return false; }
-    if (booked) apply();
+    if (booked) apply(uid);
     return booked;
   };
 
@@ -277,4 +291,137 @@ export function useSessions(): SessionsValue {
   const v = useContext(Ctx);
   if (!v) throw new Error('useSessions must be used inside <SessionsProvider>');
   return v;
+}
+
+// ── Cancelling a PT session, once, for every screen that offers it ─────────
+//
+// A client can cancel the same booked session from two places: the Book screen
+// (app/(client)/calendar.tsx) and My Bookings (app/(client)/bookings.tsx). Only
+// the first of them did the whole job. My Bookings called `releaseSession` and
+// stopped, so the same tap on the same session had different consequences
+// depending on which screen the member happened to be on:
+//
+//   · the pack credit was NOT returned on a cancellation more than 24h out, so
+//     cancelling from My Bookings quietly cost the member a session they had
+//     paid for and cancelling from Book did not. That is the whole of the bug
+//     worth caring about: it is money, it is the member's, and nothing on
+//     either screen said the two buttons were different.
+//   · the freed slot was not offered to the coach's other clients, so the
+//     coach lost the hour as well.
+//   · the coach was not told at all.
+//
+// The fix is this function rather than a second copy of those twenty-five
+// lines, because a second copy is how the two screens came apart in the first
+// place and would be how they came apart again. The screens keep their own
+// alerts — they are worded for where the reader is standing — but the writes,
+// their order, and the sentences that describe money are here.
+//
+// Deliberately NOT a hook: `releaseSession` comes from the provider and is
+// passed in, so this stays a plain async function that can be called from an
+// Alert handler on either screen.
+export interface PtCancelOutcome {
+  /** The server actually freed the slot. Everything else is meaningless when
+   *  this is false, and nothing below it was attempted. */
+  freed: boolean;
+  /** Inside the 24-hour window, so the session is charged and no credit is
+   *  returned. See the note on `late` in `cancelBookedSession`. */
+  late: boolean;
+  /** A credit was actually put back on a pack. False also covers "there was no
+   *  pack", which is the ordinary case for a member who pays per session. */
+  refunded: boolean;
+  /** How many of the coach's other clients the freed slot was offered to.
+   *  null means there were none to offer it to — which is not the same as a
+   *  push that failed, and the two get different sentences. */
+  offeredTo: number | null;
+  /** Whether that offer actually went out. null when there was nobody to send
+   *  it to. */
+  offerPushed: boolean | null;
+  /** Whether the coach was told their slot re-opened. */
+  coachTold: boolean;
+  /** The pack balance re-read after the refund, or null when it could not be
+   *  read. Never write null over a balance already on screen — a failed re-read
+   *  is not news about the balance. */
+  packLeft: number | null;
+}
+
+/**
+ * Free a booked PT session and settle everything that goes with it.
+ *
+ * The order is the one app/(client)/calendar.tsx has used since the re-offer
+ * bug, and it is load-bearing: the slot is freed FIRST, and only then is anyone
+ * told it is free. Told first, the quickest client to respond was refused by a
+ * slot that had not been released yet.
+ *
+ * `now` is the instant the CALLER decided this was or was not a late cancel —
+ * not the instant this function runs. Both screens warn the member before they
+ * confirm ("inside 24 hours, so the session is charged from your package"), and
+ * the deal they were shown has to be the deal they get. Left to default, a
+ * member who read that warning at 24h01m and thought about it for two minutes
+ * would be charged under a rule that said they would not be, and the only
+ * direction the drift runs is against them, because time only moves one way.
+ */
+export async function cancelBookedSession(
+  session: Pick<TrainingSession, 'id' | 'startsAt' | 'trainerId'>,
+  release: (id: string) => Promise<boolean>,
+  now: number = Date.now(),
+): Promise<PtCancelOutcome> {
+  // `Date.parse(...) - now < 24h`, which is also true of a session that has
+  // already started. That is deliberate and is NOT `isLateCancellation` from
+  // src/lib/booking.ts, which requires the session to still be in the future.
+  //
+  // The difference is a refund. Under this rule a member cancelling a session
+  // that has already begun is charged for it, which is what both screens have
+  // always done and what a coach standing in an empty gym would expect. Under
+  // `isLateCancellation` that same cancellation would come back "not late" and
+  // this function would hand the credit BACK. Lifting the shared helper is not
+  // the place to change who pays for a missed session, and a wrong refund is
+  // worse than a missing one — so the existing rule is carried over exactly.
+  const late = Date.parse(session.startsAt) - now < 24 * 3600 * 1000;
+  const start = new Date(session.startsAt);
+  let h = start.getHours(); const ap = h >= 12 ? 'pm' : 'am'; h = h % 12 || 12;
+  const mm = start.getMinutes();
+  const at = `${h}${mm ? ':' + String(mm).padStart(2, '0') : ''}${ap}`;
+  const dow = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][start.getDay()];
+
+  const freed = await release(session.id);
+  if (!freed) {
+    return { freed: false, late, refunded: false, offeredTo: null, offerPushed: null, coachTold: false, packLeft: null };
+  }
+
+  // Server-side lookup on THIS session's trainer, so no other client's identity
+  // reaches the caller beyond opaque ids.
+  const others = await reofferSlot(session.id);
+  const offerPushed = others.length === 0
+    ? null
+    : (await sendPushChecked(others, 'A PT slot just opened', `${at} with your coach just opened up — first to book it gets it.`, { route: '/(client)/calendar' })).ok;
+
+  // `refundSession` answers ok:false both when there is no pack to credit and
+  // when the server refused the update. Its answer is carried, not discarded —
+  // discarding it is how a member comes to believe they are holding a credit
+  // they do not have.
+  const refund = late ? { ok: false } : await refundSession(session.trainerId);
+  const packLeft = await sessionsRemaining();
+
+  const coachTold = (await sendPushChecked([session.trainerId], 'Session cancelled', `A client cancelled ${dow} ${at}. The slot re-opened.${late ? ' (Late cancel — charged.)' : ''}`, { route: '/(trainer)/calendar' })).ok;
+
+  return { freed: true, late, refunded: refund.ok, offeredTo: others.length || null, offerPushed, coachTold, packLeft };
+}
+
+/**
+ * What to tell the member afterwards. Here rather than on either screen because
+ * these are the sentences about their money, and two screens wording those
+ * differently is the same defect as two screens doing different things.
+ *
+ * `at` is the session's time as that screen already renders it.
+ */
+export function ptCancelLines(o: PtCancelOutcome, at: string): string[] {
+  const lines: string[] = [];
+  if (o.late) lines.push('Cancelled within 24 hours — this session is charged from your package.');
+  else if (o.refunded) lines.push(`Your ${at} session was cancelled and returned to your package.`);
+  else lines.push(`Your ${at} session was cancelled. Nothing was returned to a session pack — if you booked it with a pack credit, check your package before booking again.`);
+  lines.push(o.offerPushed === true ? `The freed slot was offered to your coach's other clients.`
+    : o.offerPushed === false ? `The slot is open again, but we couldn't tell your coach's other clients about it.`
+    : `The slot is open again on your coach's calendar.`);
+  if (!o.coachTold) lines.push('We couldn’t notify your coach — message them if this session is soon.');
+  return lines;
 }
