@@ -71,7 +71,8 @@ import { useClientTags } from '../../src/ui/clientTags';
 import { useProgramTemplates } from '../../src/ui/programTemplates';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
 import { fetchPhotosSharedWithMe, missingSharedFiles, SHARED_URL_TTL_S, type SharedPhoto } from '../../src/lib/photoShare';
-import { inviteMessage } from '../../src/lib/joinCode';
+import { inviteMessage, joinLink } from '../../src/lib/joinCode';
+import * as Clipboard from 'expo-clipboard';
 
 /* ── local presentation ───────────────────────────────────────────────────── */
 
@@ -336,6 +337,21 @@ export default function TrainerClients() {
   const [newGoal, setNewGoal] = useState('Fat loss');
   const [newMode, setNewMode] = useState<CoachedMode>('online');
   const [invOpen, setInvOpen] = useState(false);
+  // Copying the bare link, for the places an online coach actually earns
+  // clients: an Instagram bio, a TikTok link-in-bio, a YouTube description.
+  // Those fields take a URL and nothing else, so `inviteMessage` — a whole
+  // sentence, and right for WhatsApp — is unusable in them. Reported, because
+  // a coach who is told it copied and then pastes nothing has lost the post.
+  const copyJoinLink = async (code: string, label: string) => {
+    try {
+      await Clipboard.setStringAsync(joinLink(code));
+    } catch {
+      Alert.alert('Not copied', `The link for ${label} could not be copied. It is ${joinLink(code)} — write it down, or use Share instead.`, [{ text: 'OK' }]);
+      return;
+    }
+    Alert.alert('Link copied', `Paste it into your bio, a caption or a description. Anybody who joins through it is attributed to ${label}, so you can see which post brought them.`, [{ text: 'Done' }]);
+  };
+
   // The coach's own join code. Read when the sheet opens rather than on every
   // dashboard mount: it is only ever looked at here, and allocating one is a
   // write.
@@ -1447,8 +1463,13 @@ export default function TrainerClients() {
                     <Text style={{ ...value(30), color: t.ink, letterSpacing: 6 }}>{myCode}</Text>
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>Tap to send it to them</Text>
                   </Pressable>
+                  <View style={{ marginTop: sp.sm }}>
+                    <Ghost label="Copy Link for Your Bio" icon="share" onPress={() => copyJoinLink(myCode, 'your main code')} />
+                  </View>
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
                     They enter this in the Repple app under Find a trainer, at the top. You still approve them before they join your roster.
+                    Tapping the code sends a message with the link in it; Copy Link gives you the bare address, for a bio or a caption
+                    that will not take a sentence.
                   </Text>
                   <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: sp.md }}>
                     {/* "Is the code working?" is the first thing anybody asks
@@ -1528,6 +1549,9 @@ export default function TrainerClients() {
                     style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 8, opacity: c.isLive ? 1 : 0.5 }}>
                     <Text style={{ ...ty.label, ...numeric, color: t.ink, letterSpacing: 2 }}>{c.code}</Text>
                   </Pressable>
+                  {c.isLive ? (
+                    <Ghost label="Copy Link" icon="share" onPress={() => copyJoinLink(c.code, c.label)} />
+                  ) : null}
                   {c.isLive && c.id ? (
                     <Ghost label="Turn Off" onPress={() => {
                       const id = c.id as string;

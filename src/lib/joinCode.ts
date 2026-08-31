@@ -60,6 +60,23 @@ export function inviteMessage(code: string): string {
     + `Then tap Find a trainer and enter my code: ${c}`;
 }
 
+/**
+ * The bare link, and nothing else.
+ *
+ * `inviteMessage` writes a sentence, which is right for WhatsApp and wrong
+ * everywhere an online coach actually puts this: an Instagram bio, a TikTok
+ * link-in-bio, a YouTube description. Those fields take a URL and reject or
+ * mangle prose around it. A coach who cannot paste a clean link cannot convert
+ * an audience, and for somebody coaching online that audience IS the business.
+ *
+ * Same URL either way, so a client arriving from a bio and a client arriving
+ * from a forwarded message land in the same place and are attributed to the
+ * same named code.
+ */
+export function joinLink(code: string): string {
+  return `${JOIN_LINK_BASE}?c=${encodeURIComponent(normaliseCode(code))}`;
+}
+
 export function isPlausibleCode(input: string): boolean {
   const c = normaliseCode(input);
   return c.length === CODE_LENGTH && [...c].every((ch) => CODE_ALPHABET.includes(ch));
