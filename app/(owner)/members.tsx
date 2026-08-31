@@ -24,7 +24,7 @@ import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import type { Theme } from '../../src/theme/tokens';
-import { useTenant } from '../../src/ui/tenant';
+import { useTenant, GYM_CURRENCY } from '../../src/ui/tenant';
 import { supabase } from '../../src/lib/supabase';
 import { reportError } from '../../src/lib/reportError';
 import {
@@ -432,10 +432,13 @@ export default function OwnerMembers() {
               {payFor?.memberName ?? 'Member'} · recorded at the desk, not charged to a card.
             </Text>
 
-            <Text style={lab}>Amount (AED)</Text>
+            {/* The currency comes from the one place the owner app keeps it,
+                so this label cannot drift from what money() prints two lines up
+                the screen. */}
+            <Text style={lab}>Amount ({GYM_CURRENCY})</Text>
             <TextInput value={amount} onChangeText={setAmount} autoFocus keyboardType="numeric"
               placeholder="0.00" placeholderTextColor={t.ink3} returnKeyType="done"
-              onSubmitEditing={() => { void commitPayment(); }} style={inp} accessibilityLabel="Amount in dirhams" />
+              onSubmitEditing={() => { void commitPayment(); }} style={inp} accessibilityLabel={`Amount in ${GYM_CURRENCY}`} />
 
             <Text style={{ ...lab, marginTop: sp.md }}>Method</Text>
             <View style={{ flexDirection: 'row', gap: sp.sm, flexWrap: 'wrap' }}>

@@ -14,7 +14,8 @@ import { Icon } from '../../src/ui/Icon';
 import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Card, Cta, Ghost, QuickRow, Spark, Notice, fig } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty, numeric, value } from '../../src/theme/scale';
-import { useTenant } from '../../src/ui/tenant';
+import { useTenant, gymMoney } from '../../src/ui/tenant';
+import { num } from '../../src/lib/format';
 import { usePlatformTrainers } from '../../src/ui/trainers';
 import { gymRollup, trainerHealth, type TrainerLike } from '../../src/lib/ownerAnalytics';
 import { riskLabel } from '../../src/lib/status';
@@ -46,7 +47,12 @@ export default function OwnerOverview() {
   const trainersUnknown = loading || trainersUnread;
   const { tenant } = useTenant();
   const roll = gymRollup(trainers as TrainerLike[], tenant?.sessionFee ?? null);
-  const { series, labels, delta, months } = useSessionsHistory(sessions30);
+  // This hook PERSISTS what it is handed, so a figure we are unsure of is not
+  // wrong for a second — it is saved as this month's history and nothing later
+  // can tell it from a month that really was quiet. `sessions30` is already null
+  // under a failed read; the `loading` half is added here because a sum over a
+  // roster still in flight is a zero for the same reason and keeps for as long.
+  const { series, labels, delta, months } = useSessionsHistory(trainersUnknown ? null : sessions30);
   const [sel, setSel] = useState<TrainerLike | null>(null);
 
   // Client load per trainer. The old version split revenue by Repple plan,
@@ -75,6 +81,24 @@ export default function OwnerOverview() {
   }, []);
   const dunningTotal = (dunning ?? []).reduce((a, i) => a + (i.amount_due || 0), 0);
   const exportReport = async () => {
+    // The one artefact on this screen that leaves the app. Every figure in it
+    // is a roll-up of `trainers`, and ownerReportDoc prints each one as a bare
+    // String(...) with no way to render an unknown — so a refused roster read
+    // produced a document headed with the gym's name reading "Trainers: 0 /
+    // Clients: 0 / Sessions · 30d: 0", which the owner then sent to a bank, a
+    // landlord or a board. On screen a wrong figure is corrected by the next
+    // refresh; in somebody else's inbox it is permanent, and nothing in the
+    // document says where the zeroes came from. So the share is refused rather
+    // than dashed: there is no honest version of this report to send yet.
+    if (trainersUnknown) {
+      Alert.alert(
+        loading ? 'Still reading your roster' : 'Roster could not be read',
+        loading
+          ? 'Your trainers have not come back yet, so every figure in the report would be a zero this app has not confirmed. Try again in a moment.'
+          : 'Your trainers could not be read, so a report built now would state that your gym has no trainers, no clients and no sessions — none of which this app found out. Reload the roster and share it then.',
+      );
+      return;
+    }
     const doc = ownerReportDoc({
       trainers: roll.trainers, clients: roll.clients, sessions30: roll.sessions30,
       payroll30: roll.payroll30, atRiskCount: roll.atRiskCount, atRiskClients: roll.atRiskClients,
@@ -171,16 +195,16 @@ export default function OwnerOverview() {
         {/* ── the hero ───────────────────────────────────────────────────── */}
         <Hero
           label="Sessions Delivered · 30 Days"
-          figure={trainersUnknown ? '—' : fig(roll.sessions30)}
+          figure={trainersUnknown ? '—' : num(roll.sessions30)}
           note={loading
             ? 'Reading your roster…'
             : trainersUnread
             ? 'Your trainers could not be read'
             : delta !== 0
-            ? `${delta > 0 ? '+' : '−'}${Math.abs(delta)} vs last month`
+            ? `${delta > 0 ? '+' : '−'}${num(Math.abs(delta))} vs last month`
             : roll.payroll30 == null
               ? 'Set a session fee in Ops to value these'
-              : `Worth $${roll.payroll30.toLocaleString()} at your session fee`}
+              : `Worth ${gymMoney(roll.payroll30)} at your session fee`}
           onPress={() => router.push('/(owner)/revenue')}
         />
 
@@ -190,9 +214,9 @@ export default function OwnerOverview() {
         <Section>
           <SectionHead title="Your Gym" note="Trainers" onPress={() => router.push('/(owner)/trainers')} />
           <KpiRow items={[
-            { label: 'Trainers', value: loading ? '—' : fig(roll.trainers), delta: loading ? 'not read yet' : roll.avgSessionsPerTrainer == null ? 'no trainers yet' : `${roll.avgSessionsPerTrainer} sessions avg` },
-            { label: 'Clients', value: loading ? '—' : fig(roll.clients), delta: loading ? 'not read yet' : roll.avgClientsPerTrainer == null ? 'no trainers yet' : `${roll.avgClientsPerTrainer} avg / trainer` },
-            { label: 'Payroll · 30d', value: loading || roll.payroll30 == null ? '—' : '$' + roll.payroll30.toLocaleString(), delta: loading ? 'not read yet' : roll.payroll30 == null ? 'no session fee set' : 'at your session fee' },
+            { label: 'Trainers', value: trainersUnknown ? '—' : fig(roll.trainers), delta: loading ? 'not read yet' : trainersUnread ? 'could not be read' : roll.avgSessionsPerTrainer == null ? 'no trainers yet' : `${roll.avgSessionsPerTrainer} sessions avg` },
+            { label: 'Clients', value: trainersUnknown ? '—' : fig(num(roll.clients)), delta: loading ? 'not read yet' : trainersUnread ? 'could not be read' : roll.avgClientsPerTrainer == null ? 'no trainers yet' : `${roll.avgClientsPerTrainer} avg / trainer` },
+            { label: 'Payroll · 30d', value: trainersUnknown ? '—' : fig(gymMoney(roll.payroll30)), delta: loading ? 'not read yet' : trainersUnread ? 'could not be read' : roll.payroll30 == null ? 'no session fee set' : 'at your session fee' },
           ]} />
         </Section>
 
@@ -200,8 +224,12 @@ export default function OwnerOverview() {
 
         {/* ── MRR trend (real, accumulating) ─────────────────────────────── */}
         <Section>
+          {/* `delta` is a count of SESSIONS — useSessionsHistory keeps its own
+              key precisely so session counts and the old dollar history cannot
+              be drawn as one line. It was printed with a dollar sign in front
+              of it, so a month up twelve sessions read "+$12 vs last mo". */}
           <SectionHead title="Sessions Trend"
-            note={delta !== 0 ? `${delta > 0 ? '+' : '−'}$${Math.abs(delta).toLocaleString()} vs last mo` : 'Tracking started'}
+            note={delta !== 0 ? `${delta > 0 ? '+' : '−'}${num(Math.abs(delta))} session${Math.abs(delta) === 1 ? '' : 's'} vs last mo` : 'Tracking started'}
             onPress={() => router.push('/(owner)/revenue')} />
           {months >= 2 ? (
             <>
@@ -224,6 +252,10 @@ export default function OwnerOverview() {
           <SectionHead title="Trainer Health" note="Worst first" />
           {loading ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Reading your roster…</Text>
+          ) : trainersUnread ? (
+            // Ahead of the empty branch: an unread roster scores nobody, which
+            // is not the same as there being nobody to score.
+            <Text style={{ ...ty.label, color: t.ink3 }}>Your trainers could not be read, so none of them were scored — nobody here has been cleared.</Text>
           ) : ranked.length === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>No trainers to score yet.</Text>
           ) : ranked.map(({ tr, h }, i) => (

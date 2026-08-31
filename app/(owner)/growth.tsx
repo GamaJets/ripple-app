@@ -33,7 +33,18 @@ export default function OwnerGrowth() {
   // returns the hero read "+0 new trainers" over "No trainers yet" and the
   // retention row reported 0% idle. An owner checking whether their growth push
   // worked was shown a month with no signups by a query that had not finished.
-  const { trainers, loading } = usePlatformTrainers();
+  const { trainers, loading, status: trainersStatus } = usePlatformTrainers();
+  // And having waited on it, the read can still have FAILED — which leaves
+  // `trainers` empty with `loading` false, i.e. exactly the state the paragraph
+  // above describes, permanently. "+0 new trainers" over "No trainers yet", and
+  // a retention row of Idle 0% · Sessions 0 · Clients 0, are then not a slow
+  // query being caught mid-flight but a settled answer about the gym, and the
+  // owner who came here to see whether their growth push worked is told it did
+  // not. Overview tells the two apart; this is that check.
+  const trainersUnread = trainersStatus === 'error';
+  const trainersUnknown = loading || trainersUnread;
+  // One sentence for every dash on the screen that is a dash for this reason.
+  const unreadNote = 'could not be read';
   const roll = gymRollup(trainers as TrainerLike[], null);
   const coh = cohorts(trainers as TrainerLike[]);
   const ca = clientAnalytics(trainers as TrainerLike[]);
@@ -49,7 +60,9 @@ export default function OwnerGrowth() {
   // Idle = carrying no clients and delivering nothing. That is the gym's
   // equivalent of churn; a subscription "suspended" flag never existed here.
   const idle = trainers.filter((x) => (x.clients || 0) === 0 && (x.sessions30 || 0) === 0).length;
-  const idlePct = trainers.length ? Math.round((idle / trainers.length) * 100) : 0;
+  // Null, not 0, over a roster we do not have: "0% idle" is the best possible
+  // reading of a retention figure and was what a refused read produced.
+  const idlePct = trainersUnknown || !trainers.length ? null : Math.round((idle / trainers.length) * 100);
   const [code, setCode] = useState('');
   const [disc, setDisc] = useState(20);
   // Trainer funnel, derived from the real roster. There is no analytics on
@@ -98,9 +111,11 @@ export default function OwnerGrowth() {
         {/* ── the hero ───────────────────────────────────────────────────── */}
         <Hero
           label={`New trainers · ${now.toLocaleString(undefined, { month: 'short' })} ${now.getFullYear()}`}
-          figure={loading ? '—' : '+' + newThisMonth}
+          figure={trainersUnknown ? '—' : '+' + newThisMonth}
           note={loading
             ? 'Reading your roster…'
+            : trainersUnread
+            ? 'Your roster could not be read — this is not a month with no signups in it.'
             : roll.trainers > 0
             ? `${roll.trainers} on the roster · ${roll.trainers - idle} delivering sessions`
             : 'No trainers yet — this fills in as they join your gym.'}
@@ -112,9 +127,12 @@ export default function OwnerGrowth() {
         <Section>
           <SectionHead title="Retention" />
           <KpiRow items={[
-            { label: 'Idle', value: loading ? '—' : fig(idlePct), unit: loading ? undefined : '%', delta: loading ? 'not read yet' : `${idle} of ${roll.trainers}` },
-            { label: 'Sessions · 30d', value: loading ? '—' : fig(roll.sessions30), delta: loading ? 'not read yet' : `${roll.avgSessionsPerTrainer} avg / trainer` },
-            { label: 'Clients', value: loading ? '—' : fig(ca.total), delta: loading ? 'not read yet' : ca.avgPerTrainer == null ? 'no trainers yet' : `${ca.avgPerTrainer} avg / trainer` },
+            { label: 'Idle', value: trainersUnknown ? '—' : fig(idlePct), unit: trainersUnknown || idlePct == null ? undefined : '%',
+              delta: loading ? 'not read yet' : trainersUnread ? unreadNote : `${idle} of ${roll.trainers}` },
+            { label: 'Sessions · 30d', value: trainersUnknown ? '—' : fig(num(roll.sessions30)),
+              delta: loading ? 'not read yet' : trainersUnread ? unreadNote : `${roll.avgSessionsPerTrainer} avg / trainer` },
+            { label: 'Clients', value: trainersUnknown ? '—' : fig(num(ca.total)),
+              delta: loading ? 'not read yet' : trainersUnread ? unreadNote : ca.avgPerTrainer == null ? 'no trainers yet' : `${ca.avgPerTrainer} avg / trainer` },
           ]} />
         </Section>
 
@@ -124,29 +142,36 @@ export default function OwnerGrowth() {
         <Section>
           <SectionHead title="Platform Clients" note="Across every trainer" />
           <KpiRow items={[
-            { label: 'Active Clients', value: loading ? '—' : fig(ca.total) },
-            { label: 'Engaged', value: loading ? '—' : fig(ca.engagementPct), unit: loading || ca.engagementPct == null ? undefined : '%' },
-            { label: 'Avg / Trainer', value: loading ? '—' : fig(ca.avgPerTrainer) },
+            { label: 'Active Clients', value: trainersUnknown ? '—' : fig(num(ca.total)) },
+            { label: 'Engaged', value: trainersUnknown ? '—' : fig(ca.engagementPct), unit: trainersUnknown || ca.engagementPct == null ? undefined : '%' },
+            { label: 'Avg / Trainer', value: trainersUnknown ? '—' : fig(ca.avgPerTrainer) },
           ]} />
-          <View style={{ marginTop: sp.xl }}>
-            <DistBar segments={[
-              { label: 'Engaged', value: ca.engaged, color: t.brand },
-              { label: 'At Risk', value: ca.atRisk, color: t.warn },
-            ]} />
-            <View style={{ flexDirection: 'row', gap: sp.lg, marginTop: sp.md }}>
-              {([['Engaged', ca.engaged, t.brand], ['At risk', ca.atRisk, t.warn]] as const).map(([l, v, col]) => (
-                <View key={l} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: col }} />
-                  <Text style={{ ...ty.caption, color: t.ink2 }}>{l} {v}</Text>
-                </View>
-              ))}
+          {/* The split is drawn from the same roster. Under a failed read both
+              segments are 0, which DistBar has no way to distinguish from a gym
+              where nobody is engaged and nobody is at risk — so the picture is
+              withheld rather than drawn empty. */}
+          {trainersUnknown ? null : (
+            <View style={{ marginTop: sp.xl }}>
+              <DistBar segments={[
+                { label: 'Engaged', value: ca.engaged, color: t.brand },
+                { label: 'At Risk', value: ca.atRisk, color: t.warn },
+              ]} />
+              <View style={{ flexDirection: 'row', gap: sp.lg, marginTop: sp.md }}>
+                {([['Engaged', ca.engaged, t.brand], ['At risk', ca.atRisk, t.warn]] as const).map(([l, v, col]) => (
+                  <View key={l} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: col }} />
+                    <Text style={{ ...ty.caption, color: t.ink2 }}>{l} {num(v)}</Text>
+                  </View>
+                ))}
+              </View>
             </View>
-          </View>
+          )}
           <View style={{ marginTop: sp.xl }}>
             <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.md }}>Clients by trainer</Text>
             {loading ? <Text style={{ ...ty.label, color: t.ink3 }}>Reading your roster…</Text>
+              : trainersUnread ? <Text style={{ ...ty.label, color: t.ink3 }}>Your trainers could not be read, so their clients could not be counted.</Text>
               : ca.byTrainer.length === 0 ? <Text style={{ ...ty.label, color: t.ink3 }}>No clients on the roster yet.</Text> : null}
-            {ca.byTrainer.map((bt) => (
+            {trainersUnread ? null : ca.byTrainer.map((bt) => (
               <Bar key={bt.id} label={bt.name} right={`${bt.clients} · ${bt.pct}%`} pct={bt.pct} />
             ))}
           </View>
@@ -158,6 +183,7 @@ export default function OwnerGrowth() {
         <Section>
           <SectionHead title="Cohort Retention" note="By signup month" />
           {loading ? <Text style={{ ...ty.label, color: t.ink3 }}>Reading your roster…</Text>
+            : trainersUnread ? <Text style={{ ...ty.label, color: t.ink3 }}>Your trainers could not be read, so there was nothing to group into cohorts.</Text>
             : coh.length === 0 ? <Text style={{ ...ty.label, color: t.ink3 }}>No signups to group yet.</Text> : null}
           {coh.map((c) => (
             <Bar key={c.label} label={c.label} right={`${c.pct}% · ${num(c.active)}/${num(c.total)}`} pct={c.pct} dim={c.pct < 60} />
@@ -171,10 +197,12 @@ export default function OwnerGrowth() {
           <SectionHead title="Trainer Acquisition Funnel" note="From signup" />
           {loading ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Reading your roster…</Text>
+          ) : trainersUnread ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>Your trainers could not be read — an empty funnel here would say nobody signed up, which is not something this screen found out.</Text>
           ) : roll.trainers === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>No trainers on the platform yet — the funnel fills in as they sign up.</Text>
           ) : funnel.map(([label, count, pct]) => (
-            <Bar key={label} label={label} right={`${count} · ${pct}%`} pct={pct} />
+            <Bar key={label} label={label} right={`${num(count)} · ${pct}%`} pct={pct} />
           ))}
         </Section>
 

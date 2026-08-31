@@ -21,6 +21,7 @@ import { progressChangeLines, progressSpanLabel, progressSummary, figure, dayLab
 // anybody west of Greenwich, and a scan dated the day before it happened is
 // exactly the sort of thing a coach notices and the app never would.
 import { localDate } from './localDate';
+import { money } from './gymRecord';
 // The client's unit reaches these builders as an argument. Nothing here reads a
 // provider, so a report can be built for whoever's row is in hand.
 import { weightIn, convertedNote, type WeightUnit } from './units';
@@ -327,7 +328,15 @@ export function ownerReportDoc(d: OwnerReportData, brand = 'Repple'): { html: st
     ['Trainers', String(d.trainers)],
     ['Clients', String(d.clients)],
     ['Sessions · 30d', String(d.sessions30)],
-    ['Value of those sessions', d.payroll30 == null ? '—' : '$' + d.payroll30.toLocaleString()],
+    // The last surface in the owner app that still said "$". Everything the
+    // gym is denominated in is AED — every money column in the operating record
+    // defaults to it and `money()` does too — so a report that went out with a
+    // dollar sign was the one artefact of the lot that leaves the app and gets
+    // forwarded. `payroll30` is a MAJOR-unit amount (session_fee is whole
+    // currency and payroll30For multiplies by it) and `money()` takes minor
+    // units, which is the mismatch that once printed AED 63.00 for a gym owed
+    // AED 6,300 — so it is converted here rather than assumed either way.
+    ['Value of those sessions', money(d.payroll30 == null ? null : Math.round(d.payroll30 * 100)) ?? '\u2014'],
     ['Avg clients / trainer', d.avgClientsPerTrainer == null ? '\u2014' : String(d.avgClientsPerTrainer)],
     ['Trainers needing a look', String(d.atRiskCount)],
     ['Clients with those trainers', String(d.atRiskClients)],

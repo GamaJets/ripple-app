@@ -20,6 +20,7 @@ import type { Theme } from '../../src/theme/tokens';
 import { Rule, Section, SectionHead, Hero, KpiRow, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { classSummary, summariseClassRows, type ClassSummaryRow } from '../../src/lib/classAttendance';
+import { gymMoney, GYM_CURRENCY } from '../../src/ui/tenant';
 import { reportError } from '../../src/lib/reportError';
 
 type Range = 'week' | 'month' | 'season';
@@ -114,8 +115,8 @@ export default function OwnerClassAnalytics() {
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginBottom: sp.md }}>
       <Text style={{ ...ty.label, color: t.ink3, flex: 1 }}>Pay per attendee</Text>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md }}>
-        <Text style={{ ...ty.label, color: t.ink3 }}>AED</Text>
-        <TextInput value={rate} onChangeText={setRate} keyboardType="numeric" accessibilityLabel="Pay per attendee in dirhams"
+        <Text style={{ ...ty.label, color: t.ink3 }}>{GYM_CURRENCY}</Text>
+        <TextInput value={rate} onChangeText={setRate} keyboardType="numeric" accessibilityLabel={`Pay per attendee in ${GYM_CURRENCY}`}
           style={{ ...ty.body, ...numeric, color: t.ink, paddingVertical: 9, minWidth: 44 }} />
       </View>
     </View>
@@ -161,11 +162,15 @@ export default function OwnerClassAnalytics() {
         ) : (<>
 
           {/* ── the hero: what this screen is for ────────────────────────── */}
+          {/* "(AED)" is out of the label because the figure carries it now:
+              every amount on this screen goes through the one formatter, so
+              the currency is stated by the number rather than typed beside it
+              — which is how Revenue came to say $ about the same gym. */}
           <Hero
-            label="Trainer Payroll (AED)"
-            figure={rate$ > 0 ? totals.payroll.toLocaleString() : '—'}
+            label="Trainer Payroll"
+            figure={rate$ > 0 ? fig(gymMoney(totals.payroll)) : '—'}
             note={rate$ > 0
-              ? `${totals.attended} check-ins × AED ${rate$} · ${totals.classes} classes · ${totals.showPct ?? '—'}% turned up`
+              ? `${totals.attended} check-ins × ${gymMoney(rate$)} · ${totals.classes} classes · ${totals.showPct ?? '—'}% turned up`
               : `${totals.attended} check-ins · ${totals.classes} classes · ${totals.showPct ?? '—'}% turned up · enter your per-check-in rate below`}
           />
 
@@ -187,7 +192,7 @@ export default function OwnerClassAnalytics() {
 
           {/* ── payroll by trainer ───────────────────────────────────────── */}
           <Section>
-            <SectionHead title="Payroll by Trainer" note={rate$ > 0 ? `AED ${totals.payroll.toLocaleString()}` : undefined} />
+            <SectionHead title="Payroll by Trainer" note={rate$ > 0 ? (gymMoney(totals.payroll) ?? undefined) : undefined} />
             {rateField}
             {byTrainer.map(([name, v], i) => (
               <View key={name} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
@@ -195,7 +200,7 @@ export default function OwnerClassAnalytics() {
                   <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{name}</Text>
                   <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{v.classes} classes · {v.attended} check-ins</Text>
                 </View>
-                <Text style={{ ...ty.body, fontWeight: '600', ...numeric, color: t.ink }}>{rate$ > 0 ? `AED ${(v.attended * rate$).toLocaleString()}` : '—'}</Text>
+                <Text style={{ ...ty.body, fontWeight: '600', ...numeric, color: t.ink }}>{rate$ > 0 ? fig(gymMoney(v.attended * rate$)) : '—'}</Text>
               </View>
             ))}
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>

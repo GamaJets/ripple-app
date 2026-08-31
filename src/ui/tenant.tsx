@@ -22,8 +22,51 @@ import { createContext, useContext, useCallback, useEffect, useState, type React
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
+import { money } from '../lib/gymRecord';
 import type { LoadStatus } from './loadStatus';
 import { useAuthRevision } from './authRevision';
+
+/**
+ * The currency this gym's books are kept in.
+ *
+ * There is no `tenants.currency` column — see 01-schema.sql, which gives a
+ * tenant a name, a brand colour, a plan and a `session_fee numeric` and stops
+ * there. So the currency is not something the owner has told us and it cannot
+ * be read per gym; it is a property of the operating record itself. Every money
+ * column in that record declares it: `currency text not null default 'AED'` in
+ * membership_plans, gym_payments, pass_types, guest_passes and payroll
+ * settlements, and `money()` in src/lib/gymRecord.ts defaults to the same. The
+ * Members screen already prints the gym's recurring revenue through that
+ * default, so 'AED' is what the database has been recording all along.
+ *
+ * It is named once, here, because it was not. Financials and Class Analytics
+ * typed 'AED' by hand, Revenue and Trainers typed '$', and all four were
+ * reading the SAME `tenants.session_fee` — so tabbing from Revenue to
+ * Financials in a demo showed one gym's takings in two currencies, with nothing
+ * on either screen to say which one was the mistake.
+ *
+ * When a gym that is not billed in dirhams signs up this becomes a column and a
+ * setting. Until then it is one constant, stated where anyone changing it can
+ * see what it is a copy of.
+ */
+export const GYM_CURRENCY = 'AED';
+
+/**
+ * A whole-currency amount as money() renders it — the owner app's one formatter.
+ *
+ * The gym's own figures come in MAJOR units: `tenants.session_fee` is a numeric
+ * in whole currency and `payroll30For` multiplies by it, so a payroll of 6,300
+ * is 6,300 dirhams, not 63. `money()` takes MINOR units, so the conversion
+ * belongs here rather than at five call sites — one of which is how the console
+ * once showed AED 63.00 where the gym owed AED 6,300 (see the note on
+ * `payroll30For` in src/lib/gymTrainers.ts).
+ *
+ * Null in, null out, exactly as `money()` does it: a caller must not be handed
+ * "AED 0.00" for an amount nobody has established. Pair it with `fig()` to draw
+ * the dash.
+ */
+export const gymMoney = (whole: number | null | undefined): string | null =>
+  whole == null || !Number.isFinite(whole) ? null : money(Math.round(whole * 100), GYM_CURRENCY);
 
 export interface Tenant {
   id: string;

@@ -13,17 +13,26 @@ import { View, Text, ScrollView, Pressable, Modal, TextInput, KeyboardAvoidingVi
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
+import { num } from '../../src/lib/format';
 import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, Notice, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../../src/theme/scale';
 import { usePlatformTrainers, type GymTrainer } from '../../src/ui/trainers';
 import { useTrainerInvites } from '../../src/ui/trainerInvites';
-import { useTenant } from '../../src/ui/tenant';
+import { useTenant, gymMoney } from '../../src/ui/tenant';
 import { trainerHealth, gymRollup } from '../../src/lib/ownerAnalytics';
 
 export default function OwnerTrainers() {
   const t = useTheme();
   const router = useRouter();
-  const { trainers, loading, sessions30, payroll30 } = usePlatformTrainers();
+  const { trainers, loading, status: trainersStatus, sessions30, payroll30, refresh } = usePlatformTrainers();
+  // `trainers.length === 0` was read straight off as "the gym has no trainers",
+  // and a refused read leaves exactly that. This is the screen where that costs
+  // most: an owner with a full roster was shown an empty one and told "No
+  // trainers yet. Invite one by email" — an instruction to fix a problem they
+  // do not have, on the one screen whose job is to list the staff they employ.
+  // Every branch that says something about the roster now asks this first.
+  const trainersUnread = trainersStatus === 'error';
+  const trainersUnknown = loading || trainersUnread;
   const { tenant } = useTenant();
   const { sent: sentInvites, sendTrainerInvite, revokeTrainerInvite } = useTrainerInvites();
   const [invOpen, setInvOpen] = useState(false);
@@ -51,25 +60,41 @@ export default function OwnerTrainers() {
         {/* Sessions delivered leads, because it is the number that moves. */}
         <Hero
           label="Sessions Delivered · 30 Days"
-          figure={loading || sessions30 == null ? '—' : String(sessions30)}
+          figure={trainersUnknown ? '—' : num(sessions30)}
           note={
             loading ? 'Loading your roster…'
+            : trainersUnread ? 'Your roster could not be read'
             : trainers.length === 0 ? 'Invite a trainer and their delivered sessions start counting here.'
             : payroll30 == null
               ? `Across ${trainers.length} trainer${trainers.length === 1 ? '' : 's'} · set a session fee to see what that is worth`
-              : `Across ${trainers.length} trainer${trainers.length === 1 ? '' : 's'} · $${payroll30.toLocaleString()} at your session fee`
+              : `Across ${trainers.length} trainer${trainers.length === 1 ? '' : 's'} · ${gymMoney(payroll30)} at your session fee`
           }
           onPress={() => router.push('/(owner)/revenue')}
         />
+
+        {/* The whole screen is one list and the figures over it, so the reason
+            they are all dashes is worth one sentence rather than seven. */}
+        {trainersUnread ? (
+          <Notice tone={t.warn} kicker="Roster unread"
+            title="Your trainers could not be read"
+            note="Nothing below is a statement about your staff — an empty roster here means the read failed, not that nobody works for you.">
+            <View style={{ marginTop: sp.lg }}>
+              <Cta label="Try Again" wide onPress={refresh} />
+            </View>
+          </Notice>
+        ) : null}
 
         <Rule />
 
         <Section>
           <SectionHead title="Roster" note="Revenue" onPress={() => router.push('/(owner)/revenue')} />
+          {/* All three are counts over `trainers`, which is empty under a failed
+              read as well as under an empty gym — hence fig() behind the same
+              flag rather than String() behind `loading` alone. */}
           <KpiRow items={[
-            { label: 'Trainers', value: loading ? '—' : String(roll.trainers) },
-            { label: 'Clients', value: loading ? '—' : String(roll.clients) },
-            { label: 'Need a Look', value: loading ? '—' : String(roll.atRiskCount) },
+            { label: 'Trainers', value: trainersUnknown ? '—' : fig(roll.trainers) },
+            { label: 'Clients', value: trainersUnknown ? '—' : fig(num(roll.clients)) },
+            { label: 'Need a Look', value: trainersUnknown ? '—' : fig(roll.atRiskCount) },
           ]} />
           <View style={{ marginTop: sp.xl }}>
             <Cta label="Invite a Trainer by Email" wide onPress={() => { setInvEmail(''); setInvOpen(true); }} />
@@ -95,9 +120,17 @@ export default function OwnerTrainers() {
         <Rule />
 
         <Section>
-          <SectionHead title="Trainers" note={trainers.length ? `${roll.clients} clients` : undefined} />
+          <SectionHead title="Trainers" note={!trainersUnknown && trainers.length ? `${num(roll.clients)} clients` : undefined} />
           {loading ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Loading…</Text>
+          ) : trainersUnread ? (
+            // Ahead of the empty branch, because they are the same empty array.
+            // This one used to fall through to "No trainers yet. Invite one by
+            // email", which is the app telling a staffed gym it has no staff.
+            <Text style={{ ...ty.label, color: t.ink3 }}>
+              Your roster could not be read, so nobody could be listed. This is a failed read,
+              not an empty gym — do not invite anyone on the strength of it.
+            </Text>
           ) : trainers.length === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>
               No trainers yet. Invite one by email — they appear here with their clients and
@@ -170,7 +203,7 @@ export default function OwnerTrainers() {
                   />
                 ) : tenant?.sessionFee != null ? (
                   <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: sp.lg }}>
-                    ${Math.round(current.delivered30 * tenant.sessionFee).toLocaleString()} at your ${tenant.sessionFee}/session fee
+                    {gymMoney(current.delivered30 * tenant.sessionFee)} at your {gymMoney(tenant.sessionFee)}/session fee
                   </Text>
                 ) : (
                   <Notice kicker="No session fee" title="Set a session fee in Ops to value delivered sessions." />

@@ -26,22 +26,27 @@ import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale'
 import { emptyFinances, hasFigures, reviewFinances, type FinInputs, type FinFlag } from '../../src/lib/financialAI';
 import { reconcile, reconcileNote } from '../../src/lib/finReconcile';
 import { fetchPlans, fetchMemberships, fetchPayments, summarise } from '../../src/lib/gymRecord';
-import { useTenant } from '../../src/ui/tenant';
+import { useTenant, gymMoney, GYM_CURRENCY } from '../../src/ui/tenant';
 import { supabase } from '../../src/lib/supabase';
 import { reportError } from '../../src/lib/reportError';
 
 const KEY = 'repple.owner.financials';
-const money = (n: number) => 'AED ' + Math.round(n).toLocaleString();
+// One formatter for the whole owner app, rather than 'AED ' typed here and '$'
+// typed on Revenue — the two screens read the same gym, and a demo that tabs
+// between them showed one business in two currencies. Every figure on this
+// screen is one the owner typed into the form below, so it is never null; the
+// dash is there because gymMoney refuses to render an unknown as 0.00.
+const money = (n: number) => gymMoney(n) ?? '—';
 
 const FIELDS: { key: keyof FinInputs; label: string; hint: string }[] = [
-  { key: 'revenue', label: 'Total Revenue / Mo', hint: 'AED' },
-  { key: 'expenses', label: 'Total Expenses / Mo', hint: 'AED' },
-  { key: 'mrr', label: 'Recurring Membership Revenue', hint: 'AED' },
+  { key: 'revenue', label: 'Total Revenue / Mo', hint: GYM_CURRENCY },
+  { key: 'expenses', label: 'Total Expenses / Mo', hint: GYM_CURRENCY },
+  { key: 'mrr', label: 'Recurring Membership Revenue', hint: GYM_CURRENCY },
   { key: 'members', label: 'Active Members', hint: 'count' },
   { key: 'newMembers', label: 'Joined This Month', hint: 'count' },
   { key: 'churnedMembers', label: 'Left This Month', hint: 'count' },
-  { key: 'ptRevenue', label: 'Personal-training Revenue', hint: 'AED' },
-  { key: 'classRevenue', label: 'Class Revenue', hint: 'AED' },
+  { key: 'ptRevenue', label: 'Personal-training Revenue', hint: GYM_CURRENCY },
+  { key: 'classRevenue', label: 'Class Revenue', hint: GYM_CURRENCY },
 ];
 
 export default function Financials() {

@@ -19,11 +19,9 @@ import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, Spark, Notice, fig } from '../../src/ui/kit';
 import { sp, layout, type as ty, numeric } from '../../src/theme/scale';
 import { usePlatformTrainers } from '../../src/ui/trainers';
-import { useTenant } from '../../src/ui/tenant';
+import { useTenant, gymMoney } from '../../src/ui/tenant';
 import { gymRollup, type TrainerLike } from '../../src/lib/ownerAnalytics';
 import { useSessionsHistory } from '../../src/ui/useMrrHistory';
-
-const usd = (n: number) => '$' + Math.round(n).toLocaleString();
 
 export default function OwnerRevenue() {
   const t = useTheme();
@@ -33,10 +31,24 @@ export default function OwnerRevenue() {
   // the screen opened on "Sessions delivered · 30 days · 0" and a value per
   // client of a dash — a revenue console reporting no revenue, which is the one
   // thing an owner would act on and the one thing it had not yet asked.
-  const { trainers, loading } = usePlatformTrainers();
+  const { trainers, loading, status: trainersStatus, sessions30, refresh } = usePlatformTrainers();
+  // `loading` was only half of it. A REFUSED roster read also leaves `trainers`
+  // empty with `loading` false, and every roll-up below then computes a
+  // confident 0 over it: "Sessions Delivered · 30 Days — 0", "Clients 0", a
+  // forecast drawn from nothing. That is the same wrong screen the loading flag
+  // was added to prevent, arriving a second later and staying. Overview already
+  // tells the two apart; this is that check, here.
+  const trainersUnread = trainersStatus === 'error';
+  const trainersUnknown = loading || trainersUnread;
   const { tenant } = useTenant();
   const roll = gymRollup(trainers as TrainerLike[], tenant?.sessionFee ?? null);
-  const { series, labels, delta, months } = useSessionsHistory(roll.sessions30);
+  // The history hook PERSISTS what it is given, so this month's snapshot has to
+  // be null rather than a zero we cannot vouch for — once "0 sessions" is in
+  // AsyncStorage nothing afterwards can tell it from a month that really was
+  // quiet, and the trend carries it forever. `sessions30` off the provider is
+  // already null under a failed read; the `loading` half is ours, because a read
+  // still in flight is no more a zero than a refused one is.
+  const { series, labels, delta, months } = useSessionsHistory(trainersUnknown ? null : sessions30);
 
   // Monthly growth rate from the accumulating history (geometric, clamped).
   // `n` is the number of months ACTUALLY recorded, not the window length. It
@@ -47,7 +59,11 @@ export default function OwnerRevenue() {
   const recorded = series.filter((v): v is number => v != null);
   const first = recorded.find((v) => v > 0) ?? roll.sessions30;
   const n = months;
-  const canForecast = n >= 2 && first > 0;
+  // Stored history survives a failed read, so `months` can still be 2 while
+  // today's figure is unknown — and the growth rate divides by today's figure.
+  // Forecasting from an unread month projects the gym to zero and puts a
+  // confident "−50%/mo" on the screen.
+  const canForecast = !trainersUnknown && n >= 2 && first > 0;
   let growth = canForecast ? Math.pow(roll.sessions30 / first, 1 / (n - 1)) - 1 : 0;
   growth = Math.max(-0.5, Math.min(0.5, growth));
   const forecast = Array.from({ length: 6 }, (_, i) => Math.round(roll.sessions30 * Math.pow(1 + growth, i + 1)));
@@ -64,8 +80,13 @@ export default function OwnerRevenue() {
   // is empty until payments are switched on, so this stays null rather than
   // dividing by a number nobody has earned.
   const fee = tenant?.sessionFee ?? null;
-  const revenue30 = roll.payroll30;
+  // `roll.payroll30` is delivered × fee over an empty roster, which is a real 0
+  // when the gym delivered nothing and an unknown when we could not ask.
+  const revenue30 = trainersUnknown ? null : roll.payroll30;
   const valuePerClient = revenue30 != null && roll.clients > 0 ? Math.round(revenue30 / roll.clients) : null;
+  // Said the same way wherever a figure is missing for the same reason, so an
+  // owner reading three dashes is told once what they mean.
+  const unreadNote = 'Your trainers could not be read';
 
   const G = layout.gutter;
 
@@ -83,25 +104,46 @@ export default function OwnerRevenue() {
         {/* ── the hero ───────────────────────────────────────────────────── */}
         <Hero
           label="Sessions Delivered · 30 Days"
-          figure={loading ? '—' : fig(roll.sessions30)}
+          figure={trainersUnknown ? '—' : num(roll.sessions30)}
           note={loading
             ? 'Reading your roster…'
+            : trainersUnread
+            ? unreadNote
             : delta !== 0
-            ? `${delta > 0 ? '+' : '−'}${Math.abs(delta)} vs last month${revenue30 != null ? ` · ${usd(revenue30)} at your fee` : ''}`
+            ? `${delta > 0 ? '+' : '−'}${num(Math.abs(delta))} vs last month${revenue30 != null ? ` · ${gymMoney(revenue30)} at your fee` : ''}`
             : revenue30 != null
-              ? `${usd(revenue30)} at your session fee`
+              ? `${gymMoney(revenue30)} at your session fee`
               : 'Set a session fee in Ops to value these'}
         />
+
+        {/* Said once, at the top, rather than left for an owner to infer from a
+            screen of dashes: the dashes are unknowns, not a quiet month. The
+            retry is the provider's own `refresh` — this screen has no
+            pull-to-refresh, so without a button there is nothing an owner can
+            actually do about it. */}
+        {trainersUnread ? (
+          <Notice tone={t.warn} kicker="Nothing here is your gym's"
+            title="Your roster could not be read"
+            note="Every figure on this screen is a roll-up of your trainers, so none of them can be stated.">
+            <View style={{ marginTop: sp.lg }}>
+              <Cta label="Try Again" wide onPress={refresh} />
+            </View>
+          </Notice>
+        ) : null}
 
         <Rule />
 
         {/* ── unit economics ─────────────────────────────────────────────── */}
         <Section>
           <SectionHead title="Unit Economics" note="Per client" />
+          {/* The session fee is the tenant's own row, not a roll-up, so it
+              survives a failed roster read and is still worth stating. */}
           <KpiRow items={[
-            { label: 'Session Fee', value: fee == null ? '—' : usd(fee), delta: fee == null ? 'not set' : 'per delivered session' },
-            { label: 'Value / Client', value: loading || valuePerClient == null ? '—' : usd(valuePerClient), delta: loading ? 'not read yet' : valuePerClient == null ? 'needs a session fee' : 'last 30 days' },
-            { label: 'Clients', value: loading ? '—' : fig(roll.clients), delta: loading ? 'not read yet' : roll.avgClientsPerTrainer == null ? 'no trainers yet' : `${roll.avgClientsPerTrainer} avg / trainer` },
+            { label: 'Session Fee', value: fig(gymMoney(fee)), delta: fee == null ? 'not set' : 'per delivered session' },
+            { label: 'Value / Client', value: trainersUnknown ? '—' : fig(gymMoney(valuePerClient)),
+              delta: loading ? 'not read yet' : trainersUnread ? unreadNote : valuePerClient == null ? 'needs a session fee' : 'last 30 days' },
+            { label: 'Clients', value: trainersUnknown ? '—' : fig(roll.clients),
+              delta: loading ? 'not read yet' : trainersUnread ? unreadNote : roll.avgClientsPerTrainer == null ? 'no trainers yet' : `${roll.avgClientsPerTrainer} avg / trainer` },
           ]} />
         </Section>
 
@@ -109,8 +151,14 @@ export default function OwnerRevenue() {
 
         {/* ── trend ──────────────────────────────────────────────────────── */}
         <Section>
+          {/* `delta` counts SESSIONS — it comes out of useSessionsHistory,
+              whose whole point is that it is a different unit from the MRR
+              history it sits next to. It was printed through a dollar
+              formatter, so a month that gained twelve sessions read "+$12 vs
+              last mo" under a heading saying Sessions, and an owner had no way
+              to know which of the two the screen meant. */}
           <SectionHead title="Sessions Trend"
-            note={delta !== 0 ? `${delta > 0 ? '+' : '−'}${usd(Math.abs(delta))} vs last mo` : 'Tracking started'} />
+            note={delta !== 0 ? `${delta > 0 ? '+' : '−'}${num(Math.abs(delta))} session${Math.abs(delta) === 1 ? '' : 's'} vs last mo` : 'Tracking started'} />
           {months >= 2 ? (
             <>
               <Spark data={series.filter((v): v is number => v != null)} />
@@ -134,14 +182,18 @@ export default function OwnerRevenue() {
           {canForecast ? (<>
             <Spark data={[roll.sessions30, ...forecast]} h={58} />
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: sp.sm }}>
-              <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>Now {roll.sessions30}</Text>
-              <Text style={{ ...ty.caption, ...numeric, color: t.ink }}>6 mo → {forecast[5]}</Text>
+              <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>Now {num(roll.sessions30)}</Text>
+              <Text style={{ ...ty.caption, ...numeric, color: t.ink }}>6 mo → {num(forecast[5])}</Text>
             </View>
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
               Projected from {n} months of your own history — a guide, not a guarantee.
             </Text>
           </>) : (
-            <Text style={{ ...ty.label, color: t.ink3 }}>A forecast needs at least two months of recorded sessions. Come back next month.</Text>
+            <Text style={{ ...ty.label, color: t.ink3 }}>
+              {trainersUnknown
+                ? 'A forecast is drawn from this month against the months before it, and this month is not known yet.'
+                : 'A forecast needs at least two months of recorded sessions. Come back next month.'}
+            </Text>
           )}
         </Section>
 
@@ -152,6 +204,11 @@ export default function OwnerRevenue() {
           <SectionHead title="Sessions by Trainer" note={byTrainer.length > 0 ? `${num(trainerTotal)} in 30d` : undefined} />
           {loading ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Reading your roster…</Text>
+          ) : trainersUnread ? (
+            // Before this branch an empty `byTrainer` — which is what a refused
+            // read leaves behind — printed a flat statement about the gym's
+            // last thirty days.
+            <Text style={{ ...ty.label, color: t.ink3 }}>Your trainers could not be read, so what they delivered is not known — this is not a month with no sessions in it.</Text>
           ) : byTrainer.length === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>No sessions delivered in the last 30 days.</Text>
           ) : byTrainer.map((p) => {
@@ -185,6 +242,7 @@ export default function OwnerRevenue() {
             <SectionHead title="Revenue at Risk" note="Trainers" onPress={() => router.push('/(owner)/trainers')} />
             <Text style={{ ...ty.label, color: t.ink3 }}>
               {loading ? 'Reading your roster…'
+                : trainersUnread ? 'Your trainers could not be read, so none of them could be scored — nobody has been cleared here.'
                 : roll.trainers === 0 ? 'No trainers on the platform yet.'
                 : 'No trainers flagged watch or high risk.'}
             </Text>
