@@ -373,7 +373,18 @@ export default function TrainerClients() {
       Alert.alert('Not copied', `The link for ${label} could not be copied. It is ${joinLink(code)} — write it down, or use Share instead.`, [{ text: 'OK' }]);
       return;
     }
-    Alert.alert('Link copied', `Paste it into your bio, a caption or a description. Anybody who joins through it is attributed to ${label}, so you can see which post brought them.`, [{ text: 'Done' }]);
+    // The destination sentence is not a nicety. If a coach points a paid ad at
+    // their profile instead of at this link, the click is untracked and the
+    // money that produced it can never be tied to the clients it produced — and
+    // no amount of work afterwards recovers it, because the join simply arrives
+    // with no code on it. Saying so at the moment they copy is the only point
+    // where it is still free to get right.
+    Alert.alert(
+      'Link copied',
+      `Paste it into your bio, a caption or a description. Anybody who joins through it is attributed to ${label}, so you can see which post brought them.\n\n` +
+        'Running an ad? Use this as the ad’s destination — not your profile. It is what lets what you spent be matched to the clients it actually brought.',
+      [{ text: 'Done' }],
+    );
   };
 
   // The coach's own join code. Read when the sheet opens rather than on every
@@ -1527,8 +1538,8 @@ export default function TrainerClients() {
                   </View>
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
                     They enter this in the Repple app under Find a trainer, at the top. You still approve them before they join your roster.
-                    Tapping the code sends a message with the link in it; Copy Link gives you the bare address, for a bio or a caption
-                    that will not take a sentence.
+                    Tapping the code sends a message with the link in it; Copy Link gives you the bare address, for a bio, a caption,
+                    or the destination of an ad — which is the one that lets what you spend be matched to who it brought.
                   </Text>
                   <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: sp.md }}>
                     {/* "Is the code working?" is the first thing anybody asks
