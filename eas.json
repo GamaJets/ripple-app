@@ -159,6 +159,51 @@
         "EXPO_PUBLIC_APP_VARIANT": "owner"
       },
       "node": "26.7.0"
+    },
+    "production-example": {
+      "autoIncrement": true,
+      "channel": "example-production",
+      "env": {
+        "EXPO_PUBLIC_ENABLE_VISION": "1",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://phgfwzpkkwdysftlgkoq.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_Td-L1IVNMzPpQsa30hUExQ_K--w76RZ",
+        "EXPO_PUBLIC_SPOTIFY_CLIENT_ID": "c9bc84b448254e1c831b953d670f1de7",
+        "EXPO_PUBLIC_OURA_CLIENT_ID": "b13f6e4a-da3a-43ba-820b-ff1e43306747",
+        "EXPO_PUBLIC_WHOOP_CLIENT_ID": "4b281c54-db5e-41fd-9e2c-7c70abc54932",
+        "EXPO_PUBLIC_APP_VARIANT": "client",
+        "EXPO_PUBLIC_BRAND": "example"
+      },
+      "node": "26.7.0"
+    },
+    "production-example-coach": {
+      "autoIncrement": true,
+      "channel": "example-coach-production",
+      "env": {
+        "EXPO_PUBLIC_ENABLE_VISION": "1",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://phgfwzpkkwdysftlgkoq.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_Td-L1IVNMzPpQsa30hUExQ_K--w76RZ",
+        "EXPO_PUBLIC_SPOTIFY_CLIENT_ID": "c9bc84b448254e1c831b953d670f1de7",
+        "EXPO_PUBLIC_OURA_CLIENT_ID": "b13f6e4a-da3a-43ba-820b-ff1e43306747",
+        "EXPO_PUBLIC_WHOOP_CLIENT_ID": "4b281c54-db5e-41fd-9e2c-7c70abc54932",
+        "EXPO_PUBLIC_APP_VARIANT": "trainer",
+        "EXPO_PUBLIC_BRAND": "example"
+      },
+      "node": "26.7.0"
+    },
+    "production-example-owner": {
+      "autoIncrement": true,
+      "channel": "example-owner-production",
+      "env": {
+        "EXPO_PUBLIC_ENABLE_VISION": "1",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://phgfwzpkkwdysftlgkoq.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_Td-L1IVNMzPpQsa30hUExQ_K--w76RZ",
+        "EXPO_PUBLIC_SPOTIFY_CLIENT_ID": "c9bc84b448254e1c831b953d670f1de7",
+        "EXPO_PUBLIC_OURA_CLIENT_ID": "b13f6e4a-da3a-43ba-820b-ff1e43306747",
+        "EXPO_PUBLIC_WHOOP_CLIENT_ID": "4b281c54-db5e-41fd-9e2c-7c70abc54932",
+        "EXPO_PUBLIC_APP_VARIANT": "owner",
+        "EXPO_PUBLIC_BRAND": "example"
+      },
+      "node": "26.7.0"
     }
   },
   "submit": {

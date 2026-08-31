@@ -16,6 +16,8 @@
 // So nothing is substituted. The excluded characters are named in the failure
 // message instead, where they help the reader find the real error themselves.
 
+import { BRAND } from './brands';
+
 /** Characters a generated code can contain. Must match the SQL alphabet. */
 export const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 export const CODE_LENGTH = 6;
@@ -49,8 +51,15 @@ export function normaliseCode(input: string): string {
  * opened, which is the only moment the answer is knowable, and it carries the
  * code so a reader who cannot install yet still lands somewhere that shows them
  * what their coach sent.
+ *
+ * The origin is the BRAND's, from src/lib/brands.ts. A coach at a white-label
+ * gym handing out repplefitness.com links is advertising their gym's supplier
+ * to their gym's members, and the page they would land on offers a download of
+ * an app that is not the one their coach uses. For Repple this resolves to the
+ * same literal string it always was — see the note there on why Repple is
+ * spelled out rather than derived.
  */
-export const JOIN_LINK_BASE = 'https://www.repplefitness.com/join';
+export const JOIN_LINK_BASE = `${BRAND.joinOrigin}/join`;
 
 /** The invite a coach shares. One place, so the two share buttons on the coach
  *  dashboard cannot drift into saying different things. */

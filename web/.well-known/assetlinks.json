@@ -4,7 +4,7 @@
     "target": {
       "namespace": "android_app",
       "package_name": "com.washateria.repple",
-      "sha256_cert_fingerprints": ["REPLACE_WITH_PLAY_APP_SIGNING_SHA256"]
+      "sha256_cert_fingerprints": ["B6:A5:51:92:3D:9C:4F:8A:2F:E1:0E:06:E6:81:90:2D:A7:DA:88:84:F8:07:CB:DB:35:9E:5B:61:40:C8:A6:6A"]
     }
   }
 ]

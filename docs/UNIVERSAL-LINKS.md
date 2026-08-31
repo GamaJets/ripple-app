@@ -11,11 +11,12 @@ paths the OS would hand the link to whichever it liked, and a coach resetting
 their password could land in the client app. Joining is something only a client
 does, so `/join` has exactly one honest owner.
 
-## assetlinks.json still contains a placeholder and will NOT verify
+## Both files are complete
 
-That is deliberate and it is safe: a file that fails verification means the link
-opens the browser, which is exactly what happens today. It does not break
-anything. It just does not work yet.
+Both the Apple Team ID and the client app's signing fingerprint are filled in.
+What remains is mechanical: the site has to be deployed so the files are
+reachable, and the apps rebuilt so they carry the matching native declarations.
+Neither file does anything until both have happened.
 
 ### `apple-app-site-association`
 
@@ -67,7 +68,7 @@ in `assetlinks.json` today, because `/join` is scoped to the client app.
 
 | App | Package | SHA-256 (Play app signing) |
 | --- | --- | --- |
-| Repple (client) | `com.washateria.repple` | **still needed** — this is the one `/join` requires |
+| Repple (client) | `com.washateria.repple` | `B6:A5:51:92:3D:9C:4F:8A:2F:E1:0E:06:E6:81:90:2D:A7:DA:88:84:F8:07:CB:DB:35:9E:5B:61:40:C8:A6:6A` — **the one `/join` uses** |
 | Repple Coach | `com.washateria.repple.coach` | `E6:A1:5C:00:C9:36:7A:99:B2:DD:15:25:72:1F:38:5E:B0:E1:AC:C9:8C:89:B5:31:F8:BB:6C:09:93:CD:8C:DE` |
 | Repple Studio | `com.washateria.repple.studio` | `96:90:E2:2D:D3:B1:25:88:6C:C4:BE:CE:F8:EB:2C:B6:D8:4F:C7:EA:38:4E:AD:2C:D9:CE:33:CD:2A:9D:DF:2F` |
 
