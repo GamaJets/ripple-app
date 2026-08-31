@@ -17,11 +17,25 @@ import { Cta } from './kit';
 import { sp, layout, radius, type as ty } from '../theme/scale';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuthRevision } from './authRevision';
 import {
-  WAIVER_CLAUSES, WAIVER_VERSION, bothGiven, waiverState,
+  WAIVER_CLAUSES, WAIVER_VERSION, bothGiven, waiverGate, waiverState,
   type WaiverRead, type WaiverState,
 } from '../lib/waiver';
+
+// Remembers only that this person was once seen to accept the CURRENT wording,
+// per account, on this device. It is not the record — `liability_waivers` is —
+// and it can never let somebody past a release the server says is unsigned. Its
+// one job is to keep a client who signed months ago out of a modal they cannot
+// clear when the connection is down. See waiverGate().
+const seenKey = (uid: string) => `waiver:accepted:${uid}`;
+async function readSeen(uid: string): Promise<boolean> {
+  try { return (await AsyncStorage.getItem(seenKey(uid))) === WAIVER_VERSION; } catch { return false; }
+}
+async function writeSeen(uid: string) {
+  try { await AsyncStorage.setItem(seenKey(uid), WAIVER_VERSION); } catch { /* a convenience, not the record */ }
+}
 
 export function useWaiver() {
   const authRev = useAuthRevision();
@@ -30,6 +44,7 @@ export function useWaiver() {
   // Whether this gate has anybody to ask. Nobody signed in means the auth guard
   // elsewhere has the floor, not this screen.
   const [applies, setApplies] = useState(false);
+  const [seenAccept, setSeenAccept] = useState(false);
 
   const load = useCallback(async () => {
     if (!USE_SUPABASE) { setApplies(false); return; }
@@ -44,12 +59,15 @@ export function useWaiver() {
       if (authErr || !id) { setApplies(false); setUid(null); return; }
       setUid(id);
       setApplies(true);
+      setSeenAccept(await readSeen(id));
       const { data, error } = await supabase
         .from('liability_waivers').select('version').eq('user_id', id);
       // An unreadable record is not an unsigned one. `ok: false` keeps it
       // distinguishable all the way to the screen.
       if (error) { setRead({ ok: false, versions: [] }); return; }
-      setRead({ ok: true, versions: (data ?? []).map((r: any) => String(r.version)) });
+      const versions = (data ?? []).map((r: any) => String(r.version));
+      if (versions.includes(WAIVER_VERSION)) { setSeenAccept(true); void writeSeen(id); }
+      setRead({ ok: true, versions });
     } catch {
       setRead({ ok: false, versions: [] });
     }
@@ -72,11 +90,13 @@ export function useWaiver() {
     // Only after the server has it. An agreement that exists on this phone
     // alone is not a record of anything.
     setRead((p) => ({ ok: true, versions: [...(p?.versions ?? []), WAIVER_VERSION] }));
+    setSeenAccept(true);
+    void writeSeen(uid);
     return { ok: true };
   }, [uid]);
 
   const state: WaiverState = waiverState(read);
-  return { state, applies, accept, reload: load };
+  return { state, applies, gate: waiverGate(state, seenAccept), accept, reload: load };
 }
 
 function Tick({ on, label, detail, onPress }: {
@@ -185,11 +205,9 @@ function WaiverScreen({ state, accept, reload, insets }: {
 export function WaiverGate({ children }: { children: React.ReactNode }) {
   const t = useTheme();
   const insets = useSafeAreaInsets();
-  const { state, applies, accept, reload } = useWaiver();
-  // 'loading' does not block and does not pass: the app is already behind a
-  // splash at this point, and the read is one query.
-  const blocked = applies && (state === 'needed' || state === 'unknown');
-  const waiting = applies && state === 'loading';
+  const { state, applies, gate, accept, reload } = useWaiver();
+  const blocked = applies && gate === 'block';
+  const waiting = applies && gate === 'wait';
   return (
     <>
       {children}

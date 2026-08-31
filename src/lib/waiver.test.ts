@@ -5,7 +5,7 @@
 // A failed read of `liability_waivers` is not evidence that somebody signed,
 // and it is not evidence that they didn't — and this gate is on the wrong side
 // of a legal record if it ever treats it as either.
-import { waiverState, bothGiven, WAIVER_VERSION, WAIVER_CLAUSES } from './waiver';
+import { waiverState, waiverGate, bothGiven, WAIVER_VERSION, WAIVER_CLAUSES } from './waiver';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -47,6 +47,24 @@ ok(WAIVER_CLAUSES.some((c) => /physician|doctor/i.test(c.label + c.detail)),
   'the release tells them to consult a physician first');
 ok(WAIVER_CLAUSES.some((c) => /release|liabilit/i.test(c.label + c.detail)),
   'the release actually releases liability');
+
+// ── what the gate actually does with each of those ──────────────────────────
+eq(waiverGate('loading', false), 'wait', 'a read in flight neither blocks nor passes');
+eq(waiverGate('accepted', false), 'pass', 'a signed release is let through');
+eq(waiverGate('needed', false), 'block', 'an unsigned release is asked for');
+
+// A confirmed "not signed" is never waved through, however familiar the reader
+// looks to this device. This is the assertion that stops the offline allowance
+// below from quietly becoming "signed once, never asked again".
+eq(waiverGate('needed', true), 'block', 'a confirmed unsigned release is asked for even on a known device');
+
+// An unreadable record is not grounds to lock out somebody this device has
+// already watched accept — they are let through and re-checked next launch.
+eq(waiverGate('unknown', true), 'pass', 'a known signer is not locked out by a failed read');
+
+// But somebody this device has never seen accept might be signing for the
+// first time, so an unreadable record is not a way past the release.
+eq(waiverGate('unknown', false), 'block', 'an unknown reader cannot get in on a failed read');
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log(`waiver: ok (${WAIVER_CLAUSES.length} clauses, version ${WAIVER_VERSION})`);

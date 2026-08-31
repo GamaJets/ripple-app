@@ -60,3 +60,20 @@ export function waiverState(read: WaiverRead | null): WaiverState {
 export function bothGiven(ticked: Record<string, boolean>): boolean {
   return WAIVER_CLAUSES.every((c) => ticked[c.key] === true);
 }
+
+/** What the gate should do, given the read and whether THIS DEVICE has seen
+ *  this person accept before.
+ *
+ *  The interesting case is 'unknown'. Blocking somebody whose record simply
+ *  could not be read does not create consent — it only denies them the app on
+ *  a bad connection, which in a gym basement is the normal case rather than the
+ *  edge one, and the Try Again behind that modal cannot reach the server
+ *  either. So a reader this device has already watched accept is let through
+ *  and re-checked next launch. Anybody else might be signing for the first
+ *  time, and is asked. */
+export function waiverGate(state: WaiverState, seenAcceptBefore: boolean): 'pass' | 'block' | 'wait' {
+  if (state === 'loading') return 'wait';
+  if (state === 'accepted') return 'pass';
+  if (state === 'needed') return 'block';
+  return seenAcceptBefore ? 'pass' : 'block';
+}
