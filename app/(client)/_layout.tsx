@@ -88,6 +88,12 @@ export default function ClientLayout() {
           Home and Train. Glucose shipped that way in one OTA. */}
       <Tabs.Screen name="glucose" options={{ href: null, title: 'Blood Sugar' }} />
       <Tabs.Screen name="offers" options={{ href: null, title: 'Offers' }} />
+      <Tabs.Screen name="notifications" options={{ href: null, title: 'Notifications' }} />
+      <Tabs.Screen name="account" options={{ href: null, title: 'Account & Security' }} />
+      <Tabs.Screen name="receipts" options={{ href: null, title: 'Payments & Receipts' }} />
+      <Tabs.Screen name="intake" options={{ href: null, title: 'Your Intake' }} />
+      <Tabs.Screen name="my-coach" options={{ href: null, title: 'Your Coach' }} />
+      <Tabs.Screen name="compare" options={{ href: null, title: 'Before & After' }} />
       <Tabs.Screen name="injury-doc" options={{ href: null, title: 'Read a Document' }} />
       <Tabs.Screen name="reminders" options={{ href: null, title: 'Reminders' }} />
       <Tabs.Screen name="packages" options={{ href: null, title: 'Memberships & Packs' }} />

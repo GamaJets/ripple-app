@@ -40,6 +40,7 @@ import { useRoster } from '../../src/ui/roster';
 import { DistBar } from '../../src/ui/charts';
 import { askCoach } from '../../src/lib/coach';
 import { useTrainerGoals, goalPct } from '../../src/ui/trainerGoals';
+import { goalsEmptyLine, parseGoal, goalText } from '../../src/lib/coachPrefs';
 import { useMonthlyHistory } from '../../src/ui/useMrrHistory';
 import { useSessions } from '../../src/ui/sessions';
 import { myTenantCurrency } from '../../src/lib/subscriptions';
@@ -142,7 +143,7 @@ export default function TrainerAnalytics() {
    *  and never a dollar. `fig()` renders the null as a dash. */
   const priced = (n: number | null | undefined) => wholeMoney(n, gymCur);
 
-  const { goals, setGoals } = useTrainerGoals();
+  const { goals, setGoals, status: goalsStatus } = useTrainerGoals();
   const [goalOpen, setGoalOpen] = useState(false);
   const [gRev, setGRev] = useState('');
   const [gCli, setGCli] = useState('');
@@ -184,6 +185,8 @@ export default function TrainerAnalytics() {
     { label: 'Active Clients', cur: clients, goal: goals.clients, money: false },
   ] as { label: string; cur: number | null; goal: number; money: boolean }[])
     .filter((g): g is typeof g & { cur: number } => g.goal > 0 && g.cur != null);
+  // Null once there is a target to draw — the bars then speak for themselves.
+  const goalsLine = goalsEmptyLine(goalsStatus, goals.revenue, goals.clients);
   const G = layout.gutter;
 
   return (
@@ -255,13 +258,20 @@ export default function TrainerAnalytics() {
         {/* ── goals ──────────────────────────────────────────────────────── */}
         <Section>
           <SectionHead title="Your Goals" note="Edit"
-            onPress={() => { setGRev(String(goals.revenue)); setGCli(String(goals.clients)); setGoalOpen(true); }} />
-          {goals.revenue <= 0 && goals.clients <= 0 ? (
-            // Was a heading with nothing under it. A section that renders
-            // empty looks broken; this one is simply not set up yet.
-            <Text style={{ ...ty.label, color: t.ink3 }}>
-              No targets set. Tap Edit to give yourself a monthly revenue or client number to work towards.
-            </Text>
+            // goalText, not String(): an unset target is 0 in the app, and
+            // String(0) put the digit "0" in the box — which reads as a target
+            // of nothing and saved straight back as one the moment the coach
+            // filled in only the other field.
+            onPress={() => { setGRev(goalText(goals.revenue)); setGCli(goalText(goals.clients)); setGoalOpen(true); }} />
+          {/* Was a heading with nothing under it, then a heading that said "No
+              targets set" whatever the reason there was nothing to show. The
+              targets follow the account now (part 129), so {0, 0} arrives from
+              two different situations and the second is a read that failed —
+              telling that coach they have no targets is both false and an
+              invitation to type them in again over the top of the stored ones.
+              goalsEmptyLine picks the sentence, and is tested. */}
+          {goalsLine ? (
+            <Text style={{ ...ty.label, color: goalsStatus === 'error' ? t.crit : t.ink3 }}>{goalsLine}</Text>
           ) : null}
           {/* A revenue target set with no session rate has a goal but no
               progress, and drawing that bar at 0% would tell a coach who has
@@ -403,9 +413,28 @@ export default function TrainerAnalytics() {
               <Text key={i} style={{ ...ty.micro, letterSpacing: 0.4, color: t.ink3 }}>{revHist.series[i] != null ? l : ''}</Text>
             ))}
           </View>
-          </>) : (
+          </>) : revHist.status === 'loading' ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>Reading the months you have recorded…</Text>
+          ) : revHist.status === 'error' ? (
+            // "Not enough history yet" is a statement about this coach's
+            // trading, and under a failed read it is one the app cannot make.
+            // The months live on the account now (part 129) — a phone that
+            // cannot reach them has not established that there are none.
+            <Text style={{ ...ty.label, color: t.crit }}>
+              Your recorded months could not be read, so this is not "no history yet" — there may be months on your account this phone has not got. Nothing has been lost; open this screen again once you have signal.
+            </Text>
+          ) : (
             <Text style={{ ...ty.label, color: t.ink3 }}>Not enough history yet — a snapshot is recorded each month, and the trend appears from the second one.</Text>
           )}
+          {/* A chart drawn from the device cache alone is real as far as it
+              goes and is not the whole of the account. Said under the line
+              rather than in place of it: withholding a trend the coach has
+              genuinely recorded would be its own kind of wrong. */}
+          {revHist.months >= 2 && revHist.status === 'error' ? (
+            <Text style={{ ...ty.caption, color: t.crit, marginTop: sp.sm }}>
+              Drawn from what this phone recorded — your account's months could not be read just now, so there may be more than this.
+            </Text>
+          ) : null}
         </Section>
 
         <Rule />
@@ -499,7 +528,11 @@ export default function TrainerAnalytics() {
           <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Client target</Text>
           <TextInput value={gCli} onChangeText={setGCli} keyboardType="number-pad" placeholder="12" placeholderTextColor={t.ink3}
             style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 11, marginBottom: sp.xl }} />
-          <Cta label="Save Goals" wide onPress={() => { setGoals({ revenue: parseInt(gRev, 10) || 0, clients: parseInt(gCli, 10) || 0 }); setGoalOpen(false); }} />
+          {/* Targets follow the account now, so this tap leaves the phone.
+              parseGoal, not parseInt: parseInt('12abc') is 12 and
+              parseInt('-12') is -12, and both of those become a target the
+              coach did not type — one of them a bar drawn backwards. */}
+          <Cta label="Save Goals" wide onPress={() => { setGoals({ revenue: parseGoal(gRev), clients: parseGoal(gCli) }); setGoalOpen(false); }} />
           <View style={{ height: sp.sm }} />
           <Ghost label="Cancel" onPress={() => setGoalOpen(false)} />
         </View>

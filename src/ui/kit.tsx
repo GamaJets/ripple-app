@@ -12,6 +12,10 @@ import Svg, { Circle, Polyline, Line } from 'react-native-svg';
 import { useTheme } from './components';
 import { Icon, type IconName } from './Icon';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../theme/scale';
+import {
+  axisLabel, pointLabel, tickIndices, maxTicksForWidth,
+  segments, readablePoints, hasInteriorGap, nearestPoint,
+} from '../lib/chartAxis';
 
 /* ── structure ────────────────────────────────────────────────────────────── */
 
@@ -434,56 +438,112 @@ export function Meter({ label, val, target, unit = 'g', dim }: {
  * series needs no legend — the section title says what is plotted.
  */
 /**
- * The line chart used across seven screens.
+ * The line chart used across seven screens, and the one that says WHEN.
  *
- * Touch it and it reads out the point you are on. Before, a chart was shape
- * only — a member could see weight had gone down and had no way to ask by how
- * much, or when. It was reported twice, from two different screens: "points on
- * the graph have a numerical value to use to see how much of a change has
- * happened" and "should be able to tap on any given chart and see the numerical
- * value and the date associated with the value".
+ * ── What "show the date" means here, and why this shape ────────────────────
  *
- * `labels` is optional and parallel to `data`. Callers that have dates pass
- * them and get "72.9 kg · 14 Aug"; callers that do not still get the value.
- * Every existing call site keeps working untouched.
+ * Two readings, because a reader has two different questions and one answer
+ * cannot serve both:
+ *
+ *   the axis      first and last always, and as many evenly spaced between
+ *                 them as the measured width takes without the labels
+ *                 touching. This answers "what period am I looking at",
+ *                 scanned in a glance, without anybody touching anything.
+ *   the readout   the exact date and value of one point, when a reader puts a
+ *                 finger on it. It carries the year; the axis does not, because
+ *                 six "14 Aug 2026"s across 320px is a smear.
+ *
+ * The axis is drawn HERE rather than by each caller. Four screens had already
+ * hand-rolled a label row under a <Spark>, all four differently, and two of
+ * them were wrong in the same way (see below). Fixing the component fixes every
+ * caller at once and there is one date formatter left in the app instead of
+ * five.
+ *
+ * ── A gap is a gap ────────────────────────────────────────────────────────
+ *
+ * `data` may contain nulls, and a null means NOBODY RECORDED THIS. It does not
+ * mean zero, and it must not be deleted. src/lib/monthlyHistory.ts produces
+ * those nulls deliberately and says so in capitals; three screens then drew the
+ * series as `data.filter((v) => v != null)`, which did two things:
+ *
+ *   1. closed the line over the hole, so a gym with no February looked like a
+ *      gym that traded through February;
+ *   2. left the hand-rolled label row underneath rendering all six month slots
+ *      evenly spaced, while the line now had four points across the same width.
+ *      **Every point sat above the wrong month.** Not a missing date — a wrong
+ *      one, which is worse, because there is nothing on screen to doubt.
+ *
+ * So x is a function of the ORIGINAL index, always. A hole keeps its slot, the
+ * line breaks across it, a run of one is drawn as a lone dot, and the label
+ * under a point is that point's own label because both come from one index.
+ *
+ * ── And it may not invent a date ──────────────────────────────────────────
+ *
+ * A label whose timestamp cannot be read is an em dash. Not today, not the
+ * neighbour's, not the raw string printed as if it were a date — which is what
+ * the formatter this replaced did. src/lib/chartAxis.ts holds that rule and the
+ * test that keeps putting the bug back.
+ *
+ * `labels` stays optional and parallel to `data`. A caller with dates gets an
+ * axis and "72.9 kg · 14 Aug 2026"; a caller without still gets the value, and
+ * the hint line says only what is actually on offer.
  */
 export function Spark({ data, h = 74, w = 320, labels, unit = '' }: {
-  data: number[]; h?: number; w?: number;
-  /** ISO dates (or any short label) parallel to `data`. */
+  data: (number | null | undefined)[]; h?: number; w?: number;
+  /** ISO dates ('2026-08-14' or '2026-08'), or short labels, parallel to `data`. */
   labels?: string[];
   unit?: string;
 }) {
   const t = useTheme();
   const [sel, setSel] = useState<number | null>(null);
-  if (data.length < 2) return null;
-  const min = Math.min(...data), max = Math.max(...data), rng = max - min || 1;
+  const [boxW, setBoxW] = useState(w);
+
+  const runs = segments(data);
+  const drawn = readablePoints(data);
+  const n = data.length;
+  if (n < 2 || drawn.length < 1) return null;
+
+  const vals = drawn.map((p) => p.v);
+  const min = Math.min(...vals), max = Math.max(...vals), rng = max - min || 1;
   const top = 8, bottom = h - 18;
-  const x = (i: number) => 6 + (i / (data.length - 1)) * (w - 12);
+  const x = (i: number) => 6 + (i / (n - 1)) * (w - 12);
   const y = (v: number) => bottom - ((v - min) / rng) * (bottom - top);
-  const pts = data.map((v, i) => `${x(i)},${y(v)}`).join(' ');
-  const lx = x(data.length - 1), ly = y(data[data.length - 1]);
+  const last = drawn[drawn.length - 1];
 
   // The SVG is drawn in viewBox units and stretched to the real width, so a
-  // touch has to be scaled back before it means anything.
-  const [boxW, setBoxW] = useState(w);
+  // touch has to be scaled back before it means anything. It then SNAPS to the
+  // nearest point that exists: a touch landing on a hole reports the real
+  // reading beside it, at that reading's own date, rather than reporting a
+  // value for a slot nobody measured.
   const pick = (px: number) => {
     const vx = (px / (boxW || w)) * w;
-    const i = Math.round(((vx - 6) / (w - 12)) * (data.length - 1));
-    setSel(Math.max(0, Math.min(data.length - 1, i)));
+    const raw = Math.round(((vx - 6) / (w - 12)) * (n - 1));
+    const near = nearestPoint(data, Math.max(0, Math.min(n - 1, raw)));
+    setSel(near ? near.i : null);
   };
 
-  const at = sel == null ? null : sel;
-  const shown = at == null ? null : data[at];
-  const when = at == null || !labels ? null : sparkLabel(labels[at]);
+  const at = sel != null && sel >= 0 && sel < n ? sel : null;
+  const shownPoint = at == null ? null : nearestPoint(data, at);
+  // toLocaleString, not a bare number: a weekly tonnage reaches five digits and
+  // the house rule is that anything which can pass a thousand is separated.
+  const shownValue = shownPoint == null ? null
+    : (Math.round(shownPoint.v * 10) / 10).toLocaleString('en-GB');
+  const when = shownPoint == null || !labels ? null : pointLabel(labels[shownPoint.i]);
+
+  // How many dates the axis carries is decided by the width it was actually
+  // given, measured — not by the viewBox, which is a drawing unit and the same
+  // 320 on every handset.
+  const ticks = labels ? tickIndices(n, maxTicksForWidth(boxW || w)) : [];
+  const gapped = hasInteriorGap(data);
 
   return (
     <View onLayout={(e) => setBoxW(e.nativeEvent.layout.width)}>
       {/* The readout sits above the line rather than floating on it: a tooltip
           over a 74px chart covers the thing it is describing. */}
       <View style={{ height: 16, justifyContent: 'center' }}>
-        {shown != null ? (
+        {shownValue != null ? (
           <Text style={{ ...ty.caption, ...numeric, color: t.ink }}>
-            {Math.round(shown * 10) / 10}{unit}{when ? ` · ${when}` : ''}
+            {shownValue}{unit}{when ? ` · ${when}` : ''}
           </Text>
         ) : (
           <Text style={{ ...ty.caption, color: t.ink3 }}>
@@ -493,7 +553,9 @@ export function Spark({ data, h = 74, w = 320, labels, unit = '' }: {
       </View>
       <View
         accessibilityRole="adjustable"
-        accessibilityLabel="Trend line — touch to read a point"
+        accessibilityLabel={labels
+          ? `Trend line, ${axisLabel(labels[drawn[0].i])} to ${axisLabel(labels[last.i])} — touch to read a point`
+          : 'Trend line — touch to read a point'}
         onStartShouldSetResponder={() => true}
         onMoveShouldSetResponder={() => true}
         onResponderGrant={(e) => pick(e.nativeEvent.locationX)}
@@ -502,29 +564,59 @@ export function Spark({ data, h = 74, w = 320, labels, unit = '' }: {
       >
         <Svg width="100%" height={h} viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
           <Line x1={0} y1={h - 8} x2={w} y2={h - 8} stroke={t.ring} strokeWidth={1} />
-          <Polyline points={pts} fill="none" stroke={t.brand} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
-          {at != null ? (
+          {/* One polyline per unbroken run. Two runs are two lines with air
+              between them, and that air is the honest picture of a month
+              nobody recorded. A run of one cannot be a line and is drawn as
+              the dot it is — deleting it would erase the only evidence that
+              the reading was ever taken. */}
+          {runs.map((run, ri) => run.length >= 2 ? (
+            <Polyline key={ri} points={run.map((p) => `${x(p.i)},${y(p.v)}`).join(' ')}
+              fill="none" stroke={t.brand} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+          ) : (
+            <Circle key={ri} cx={x(run[0].i)} cy={y(run[0].v)} r={2.5} fill={t.brand} />
+          ))}
+          {shownPoint != null ? (
             <>
-              <Line x1={x(at)} y1={top} x2={x(at)} y2={bottom} stroke={t.ring} strokeWidth={1} />
-              <Circle cx={x(at)} cy={y(data[at])} r={6} fill={t.bg} />
-              <Circle cx={x(at)} cy={y(data[at])} r={4} fill={t.ink} />
+              <Line x1={x(shownPoint.i)} y1={top} x2={x(shownPoint.i)} y2={bottom} stroke={t.ring} strokeWidth={1} />
+              <Circle cx={x(shownPoint.i)} cy={y(shownPoint.v)} r={6} fill={t.bg} />
+              <Circle cx={x(shownPoint.i)} cy={y(shownPoint.v)} r={4} fill={t.ink} />
             </>
           ) : null}
-          <Circle cx={lx} cy={ly} r={6} fill={t.bg} />
-          <Circle cx={lx} cy={ly} r={4} fill={t.brand} />
+          <Circle cx={x(last.i)} cy={y(last.v)} r={6} fill={t.bg} />
+          <Circle cx={x(last.i)} cy={y(last.v)} r={4} fill={t.brand} />
         </Svg>
       </View>
+      {/* The axis. Each label is placed at its own point's x fraction, so it
+          sits under the thing it names; the two ends are pulled flush to the
+          edges, where a centred box would be clipped by the container. */}
+      {ticks.length ? (
+        <View style={{ height: 14, marginTop: 3 }}>
+          {ticks.map((i) => {
+            const end = i === 0 ? 'first' : i === n - 1 ? 'last' : null;
+            const frac = (6 + (i / (n - 1)) * (w - 12)) / w;
+            const place: StyleProp<ViewStyle> = end === 'first' ? { left: 0, alignItems: 'flex-start' }
+              : end === 'last' ? { right: 0, alignItems: 'flex-end' }
+                : { left: `${frac * 100}%`, marginLeft: -27, width: 54, alignItems: 'center' };
+            return (
+              <View key={i} style={[{ position: 'absolute', top: 0 }, place]}>
+                <Text numberOfLines={1} style={{ ...ty.micro, letterSpacing: 0.4, color: t.ink3 }}>
+                  {axisLabel(labels![i])}
+                </Text>
+              </View>
+            );
+          })}
+        </View>
+      ) : null}
+      {/* Said only where it is true. An even axis over an uneven series is the
+          claim this whole component was rebuilt to stop making, so where the
+          series really does have a hole the chart says which kind of hole. */}
+      {gapped ? (
+        <Text style={{ ...ty.micro, letterSpacing: 0.4, color: t.ink3, marginTop: 2 }}>
+          A break in the line is a period with no reading — not a reading of zero.
+        </Text>
+      ) : null}
     </View>
   );
-}
-
-/** "2026-08-14" → "14 Aug". Anything unparseable is shown as given. */
-function sparkLabel(raw: string | undefined): string {
-  if (!raw) return '';
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(raw).trim());
-  const d = m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date(raw);
-  if (isNaN(d.getTime())) return String(raw);
-  return `${d.getDate()} ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()]}`;
 }
 
 /** Seven day-cells; filled ones are days trained. */

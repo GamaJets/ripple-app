@@ -48,7 +48,7 @@ export default function Tour() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingTop: sp.xl, paddingBottom: 32, flexGrow: 1 }}>
-        <Text style={{ ...ty.micro, color: t.ink3 }}>GETTING STARTED</Text>
+        <Text style={{ ...ty.micro, color: t.ink3 }}>Getting started</Text>
         <Text style={{ ...ty.title, color: t.ink, marginTop: 2 }}>{VARIANT_LABEL[VARIANT]}</Text>
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, marginBottom: sp.xl }}>{GUIDE_INTRO[VARIANT]}</Text>
 

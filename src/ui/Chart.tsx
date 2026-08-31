@@ -4,6 +4,7 @@ import { View, Text } from 'react-native';
 import Svg, { Polyline, Path, Circle, Line, Defs, LinearGradient, Stop } from 'react-native-svg';
 import { useTheme } from './components';
 import { type as ty, numeric } from '../theme/scale';
+import { axisLabel } from '../lib/chartAxis';
 
 export interface Point { t: string; v: number }
 
@@ -55,8 +56,21 @@ export function TrendChart({ data, unit = '', color, height = 150, goodDown = fa
   );
 }
 
-function fmt(iso: string): string {
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return '';
-  return `${d.getDate()}/${d.getMonth() + 1}`;
-}
+/**
+ * The end dates under the line.
+ *
+ * Was a fourth hand-rolled date formatter: `new Date(iso)` then getDate() and
+ * getMonth(). Two things wrong with it, both shipped.
+ *
+ * A bare 'YYYY-MM-DD' — which is what every `date` column in this schema comes
+ * back as — is resolved by Date.parse to UTC midnight, and every local getter
+ * then reads it back in the reader's own zone, so west of Greenwich the chart
+ * reported both ends a day early. That is the trap src/lib/localDate.ts exists
+ * for, and it was sitting in a chart axis.
+ *
+ * And an unreadable date returned '', which renders as a blank where a date
+ * belongs. A blank reads as "no label here"; the true statement is "this
+ * point's date is not known", which is a dash. src/lib/chartAxis.ts makes both
+ * of those the same call the rest of the app's charts make.
+ */
+const fmt = axisLabel;

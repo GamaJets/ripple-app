@@ -1,0 +1,128 @@
+-- ─────────────────────────────────────────────────────────────────────────
+-- A coach can write a client a meal plan — and there is one table for it.
+--
+-- ── What existed ───────────────────────────────────────────────────────────
+--
+-- Two things, and only one of them was alive.
+--
+-- `coach_nutrition` (02-domain-schema, widened by 04 and 05) carries a coach's
+-- calorie and macro deltas, a note, and `meal_override` — a flat jsonb map of
+-- position → catalogue index that pins ONE meal per slot for ONE day. The
+-- client's Meals tab reads it on every render. It works, and it is narrow: it
+-- cannot express Tuesday.
+--
+-- `meal_plans` (01-schema, the first file in this project) has columns for
+-- exactly what a plan is: `targets` and `meals`, per client, with a
+-- `generated_at`. Nothing in this repository has ever read it or written it.
+-- Confirmed against the live database before this file was written: zero rows,
+-- and no code path in app/, src/, studio-web/ or supabase/functions/ names it.
+--
+-- ── Why the plan goes on `coach_nutrition`, and `meal_plans` is dropped ─────
+--
+-- The tempting move is the opposite one: `meal_plans` already has plan-shaped
+-- columns, so use the table that was built for this and leave `coach_nutrition`
+-- to its deltas. Three things make that wrong, in increasing order of how much
+-- they cost:
+--
+--  1. `meal_plans.client_id` references `clients(id)`. Every live coaching
+--     table — `coach_nutrition`, `assigned_programs`, `coach_feedback` —
+--     references `profiles(id)`. There is no `coach_id` column at all, so the
+--     policy on it (`meal_plans_trainer_rw`) has to go looking for
+--     `clients.trainer_id`, and cannot express the thing part 69 was written to
+--     express: THIS coach wrote THIS row. A plan with no author cannot be
+--     scoped to one.
+--
+--  2. Its comment in 01-schema says what it is: "generated, cached;
+--     regenerated on stat change". It is a cache of a computation, not a record
+--     of a decision. A plan a coach composed is the second thing.
+--
+--  3. And the one that decides it. `meal_plans.targets` is a frozen jsonb copy
+--     of {kcal, protein, carbs, fat}. Storing it would put a SECOND calorie
+--     figure in this product, beside the one `macrosFor()` derives live from
+--     the client's own weight, body fat, activity and goal, with the coach's
+--     deltas layered on. The moment the client weighs in, the two disagree —
+--     and the client's Meals tab would then be reading its target from one and
+--     its plan from the other. Two calorie figures for one day, on one screen,
+--     is precisely the defect `caloriesLeft()` in src/lib/nutrition.ts was
+--     written to end, and its comment records what it cost: 3,948 kcal on one
+--     tab and 2,860 on another, reported twice by testers.
+--
+-- So the plan is stored as the coach's CHOICE OF MEALS and nothing else — a
+-- `plan` jsonb on `coach_nutrition`, beside the deltas it is composed against,
+-- on the one row per client the client's Meals tab already reads. The calories
+-- and macros are computed from those meals, live, on both sides, by the same
+-- `buildPlan()` both sides already call. There is no stored target because
+-- there is no second target.
+--
+-- Dropped rather than left: `meal_plans` empty and unused is a table the next
+-- reader will reasonably assume is the home for a meal plan, and put one in.
+-- It also holds SELECT/INSERT/UPDATE/DELETE for `anon` — narrowed to nothing by
+-- its policies, and still a grant on a table nobody is watching. Zero rows, no
+-- readers, no foreign keys pointing at it. Dropping it is the only way "do not
+-- leave two" is actually true.
+--
+-- ── Shape of `plan` ────────────────────────────────────────────────────────
+--
+--   { "v": 1,
+--     "diet": "meat",              -- what the indices below MEAN
+--     "avoid": ["nuts"],           -- ditto: the allergen filter renumbers
+--     "mealsPerDay": 4,            -- ditto: it decides the slots
+--     "days": [ { "meals": [ { "slot": "Breakfast", "idx": 812,
+--                              "n": "…", "k": 0, "p": 0, "c": 0, "f": 0 } ] } ],
+--     "writtenAt": "2026-08-31T09:00:00.000Z" }
+--
+-- Seven days, Monday first. `idx` is an index into the procedural catalogue in
+-- src/lib/meals.ts, which is the same value `meal_override` already stores, so
+-- the plan reaches the client down the path that already exists rather than a
+-- second one drawn beside it.
+--
+-- `diet`, `avoid` and `mealsPerDay` are stored WITH the plan because
+-- `mealAt(diet, slot, idx, avoid)` resolves an index through pools that `avoid`
+-- has filtered: shrink a pool and every index after it means a different meal.
+-- A client who discloses a nut allergy after their plan was written has not
+-- changed a single row here, and is being served different food. src/lib/
+-- mealPlan.ts (`planStale`) is what notices, and `guardPlan` is what stops a
+-- coach sending a plan over an allergen list that did not load. `n` and the
+-- four macros are the coach's record of what they committed to — the evidence
+-- that makes that comparison possible.
+--
+-- ── Access ─────────────────────────────────────────────────────────────────
+--
+-- Nothing is added, and that is the point of choosing this table. A column
+-- inherits its row's policies, and `coach_nutrition` already carries exactly
+-- the pair part 69 argued for:
+--
+--   coach_nutrition_coach_rw     all    coach_id = auth.uid()
+--                                       AND is_my_client(client_id)
+--   coach_nutrition_client_read  select client_id = auth.uid()
+--
+-- So an unrelated coach can neither read nor write this plan — `is_my_client()`
+-- is false for them — and a former coach loses it the moment `end_coaching()`
+-- clears `clients.trainer_id`, with nothing extra to remember. The client
+-- reads, always, and cannot write: a plan somebody is following does not stop
+-- being theirs because they changed coach.
+--
+-- The `anon` grants go, on the same reasoning as part 129. Every policy on this
+-- table resolves through `auth.uid()`, so `anon` can reach no row through any
+-- of them; a grant that can only ever be refused by a policy is better removed
+-- than left for somebody to rely on. RLS narrows a GRANT — it does not confer
+-- one — and this table's rows are reached by `authenticated` alone.
+--
+-- Idempotent; safe to re-run.
+-- ─────────────────────────────────────────────────────────────────────────
+
+alter table public.coach_nutrition add column if not exists plan jsonb;
+
+comment on column public.coach_nutrition.plan is
+  'The week of meals this client''s coach composed. {v, diet, avoid, mealsPerDay, days[7].meals[], writtenAt} — see src/lib/mealPlan.ts. Carries no calorie or macro TARGET: those are derived live by macrosFor() plus the deltas on this same row, so there is only ever one of them.';
+
+-- The dead table. See the argument above; verified empty and unreferenced
+-- before this was written.
+drop table if exists public.meal_plans cascade;
+
+revoke all on public.coach_nutrition from anon, public;
+grant select, insert, update, delete on public.coach_nutrition to authenticated;
+grant all on public.coach_nutrition to service_role;
+
+
+-- ─────────────────────────────────────────────────────────────────────────

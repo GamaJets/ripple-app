@@ -28,7 +28,15 @@
 // No formatted date is asserted against a literal: `npm test` runs three times
 // under three timezones (`test:zones`), and `monthStart` is a LOCAL boundary,
 // so the expectations here are computed with the same helper the code uses.
-import { sumTaken, sumRecurring, since, monthStart, packLeft, packRunOut, moneyIn, minorMoney, wholeMoney, type TakenRow, type PackRow } from './coachMoney';
+// 5. A coach's takings come from two tables and are added up in one figure.
+//    One-off sales live in `client_purchases`; renewals live in
+//    `client_subscription_payments` (part 132), which did not exist until the
+//    webhook was taught to write it. `combineTaken` merges the two subtotals,
+//    and it has to keep every rule above while doing it: currencies stay apart,
+//    the counts of unlabelled and unpriced rows ADD rather than being taken
+//    from whichever side had more, and neither subtotal is modified — the
+//    screen renders both of them beside the total.
+import { sumTaken, combineTaken, sumRecurring, since, monthStart, packLeft, packRunOut, moneyIn, minorMoney, wholeMoney, type TakenRow, type PackRow } from './coachMoney';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -93,6 +101,50 @@ sumTaken(rows);
 eq(rows.map((r) => r.amount_cents).join(','), before, 'sumTaken leaves the caller’s array in the order it arrived');
 eq(rows.length, 2, 'and does not add or remove rows from it');
 
+/* ── the two halves of what a coach has taken ─────────────────────────────── */
+
+// A month of one-off sales and a month of renewals, added into one figure per
+// currency. This is the arithmetic behind "earned this month".
+const oneOff = sumTaken([
+  T({ amount_cents: 60000, currency: 'aed' }),
+  T({ amount_cents: 9000, currency: 'gbp' }),
+]);
+const renewed = sumTaken([
+  T({ amount_cents: 60000, currency: 'aed' }),
+  T({ amount_cents: 60000, currency: 'aed' }),
+]);
+const earned = combineTaken(oneOff, renewed);
+eq(earned.pots.length, 2, 'the two halves merge per currency, not into one number');
+eq(earned.pots[0].currency, 'AED', 'the bigger pot still leads after merging');
+eq(earned.pots[0].minorUnits, 180000, 'one sale and two renewals in AED add to all three');
+eq(earned.pots[0].count, 3, 'and the pot counts every payment in it, from either half');
+eq(earned.pots[1].currency, 'GBP', 'a currency that only one half has survives the merge');
+eq(earned.pots[1].minorUnits, 9000, 'at its own amount, untouched');
+eq(minorMoney(earned.pots[0].minorUnits, earned.pots[0].currency), 'AED 1,800.00', 'and the total prints in its own currency');
+
+// The holes add. A sale with no unit and a renewal with no amount are two
+// different amounts missing from one total, and the screen says how many.
+const holes = combineTaken(
+  sumTaken([T({ amount_cents: 1000, currency: null })]),
+  sumTaken([T({ amount_cents: null, currency: 'aed' })]),
+);
+eq(holes.pots.length, 0, 'neither half contributed a pot, so neither does the total');
+eq(holes.unlabelled, 1, 'an unlabelled amount from either half is unlabelled in the total');
+eq(holes.unpriced, 1, 'and so is one with no amount at all');
+
+eq(combineTaken().pots.length, 0, 'nothing to combine is no pots, not a crash');
+eq(combineTaken(oneOff).pots.length, 2, 'one half alone combines to itself');
+
+// Mutation check, and the one that matters most here: the payments screen
+// renders `oneOff` and `renewed` as the breakdown UNDERNEATH the combined
+// total, so a merge that added into the inputs' own pots would silently double
+// the figure a coach reads beside it.
+const oneOffAedBefore = oneOff.pots.find((p) => p.currency === 'AED')!.minorUnits;
+combineTaken(oneOff, renewed);
+eq(oneOff.pots.find((p) => p.currency === 'AED')!.minorUnits, oneOffAedBefore,
+  'combineTaken does not add into the subtotals it was handed');
+eq(oneOff.pots.length, 2, 'and does not add pots to them either');
+
 /* ── what is priced to recur ──────────────────────────────────────────────── */
 
 const rec = sumRecurring([
@@ -149,4 +201,4 @@ ok(!packRunOut(P({ sessions_total: null })), 'a membership never runs out of cre
 ok(!packRunOut(P({ sessions_used: 10, status: 'refunded' })), 'an unpaid pack is not a client to chase');
 
 if (errors.length) { console.error(`coachMoney: ${errors.length} failure(s)\n` + errors.map((e) => '  - ' + e).join('\n')); process.exit(1); }
-console.log('coachMoney ok — currencies stay apart, unlabelled amounts stay counted, memberships have no balance');
+console.log('coachMoney ok — currencies stay apart, the two halves of a coach’s takings add without merging currencies, unlabelled amounts stay counted, memberships have no balance');

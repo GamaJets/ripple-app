@@ -1177,7 +1177,7 @@ export default function Train() {
                     {pending.length ? (
                       <View style={{ marginBottom: sp.lg }}>
                         <Notice
-                          kicker="FROM YOUR WATCH"
+                          kicker="From your watch"
                           title={`${pending.length} workout${pending.length > 1 ? 's' : ''} not in your log`}
                           note={pending.slice(0, 3).map((sm) => sm.activity).join(' · ') + (pending.length > 3 ? ` and ${pending.length - 3} more` : '')}
                         >
@@ -2473,7 +2473,7 @@ function EditEntrySheet({ t, unit, entry, suggestions, onClose, onSave }: {
               Logged on {dayLabel}. Correcting it leaves it on that day — your calendar, streak and history all read it from there.
             </Text>
           ) : null}
-          <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 6 }}>EXERCISE</Text>
+          <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 6 }}>Exercise</Text>
           <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'center' }}>
             <TextInput value={name} onChangeText={setName} style={{ ...inp, flex: 1 }} placeholder="Exercise" placeholderTextColor={t.ink3} />
             {/* The affordance the report was missing. The field underneath has
@@ -2535,7 +2535,7 @@ function EditEntrySheet({ t, unit, entry, suggestions, onClose, onSave }: {
 
           {isCardio ? (
             <View style={{ marginTop: sp.xl }}>
-              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 6 }}>CARDIO</Text>
+              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 6 }}>Cardio</Text>
               <View style={{ flexDirection: 'row', gap: sp.sm }}>
                 <TextInput value={mins} onChangeText={setMins} keyboardType="numeric" placeholder="Minutes" placeholderTextColor={t.ink3} style={{ ...inp, flex: 1 }} />
                 <TextInput value={dist} onChangeText={setDist} keyboardType="numeric" placeholder={`Distance (${entry.cardio!.unit})`} placeholderTextColor={t.ink3} style={{ ...inp, flex: 1 }} />
@@ -2548,7 +2548,7 @@ function EditEntrySheet({ t, unit, entry, suggestions, onClose, onSave }: {
                   placeholder, which disappears the moment a row has a number
                   in it — and a column of loads with no unit over it is exactly
                   how somebody types pounds into a kilogram field. */}
-              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 6 }}>SETS · REPS × {unit.toUpperCase()}</Text>
+              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 6 }}>Sets · reps × {unit.toUpperCase()}</Text>
               {rows.map((r, i) => (
                 <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginBottom: sp.sm }}>
                   <Text style={{ ...ty.caption, color: t.ink3, width: 22 }}>{i + 1}</Text>
@@ -2568,7 +2568,7 @@ function EditEntrySheet({ t, unit, entry, suggestions, onClose, onSave }: {
           )}
 
           <View style={{ marginTop: sp.xl }}>
-            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 6 }}>CALORIES</Text>
+            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 6 }}>Calories</Text>
             <TextInput value={kcal} onChangeText={setKcal} keyboardType="numeric" placeholder="Leave blank if unknown" placeholderTextColor={t.ink3} style={inp} />
           </View>
         </ScrollView>

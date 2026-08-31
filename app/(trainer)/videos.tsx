@@ -602,7 +602,7 @@ export default function TrainerVideos() {
           <ListRow icon="grid" title="Browse the Exercise Library" note="Every movement you can programme, and whether you have filmed it"
             onPress={() => router.push('/(trainer)/library')} />
           <Rule />
-          <ListRow icon="share" title="Broadcast a Session to Social" note="Share a session from your library"
+          <ListRow icon="share" title="Share a Session" note="Your clip and caption, into any app you post from"
             onPress={() => router.push('/(trainer)/broadcast-session')} />
         </Section>
 

@@ -110,7 +110,7 @@ export default function Offers() {
           </View>
         </Section>
 
-        <Notice tone={t.ink3} kicker="How this works" title="Repple Records It, Your Gym Applies It"
+        <Notice tone={t.ink3} kicker="How this works" title="Repple records it, your gym applies it"
           note="Redeeming tells your gym you have used the code. The discount comes off through their billing, not through the app — Repple never touches the payment." />
 
         <Rule />

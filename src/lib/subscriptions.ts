@@ -205,6 +205,67 @@ export async function fetchMySubscribers(): Promise<{ rows: Subscriber[]; status
   } catch (e) { reportError('subscriptions.fetchMySubscribers', e); return { rows: [], status: 'error' }; }
 }
 
+/**
+ * One paid renewal invoice — a row of `client_subscription_payments` (part
+ * 132), which is the only place in this database where a subscription renewal
+ * is recorded as an AMOUNT rather than as a status.
+ */
+export interface SubscriptionPayment {
+  id: string;
+  client_id: string | null;
+  trainer_id: string | null;
+  stripe_subscription_id: string | null;
+  stripe_invoice_id: string;
+  /** Minor units, GROSS — what the client was charged. Stripe's processing fee
+   *  and the platform's application fee are not deducted and are not known.
+   *  Null when Stripe stated no amount, and null stays null: a renewal printed
+   *  as "AED 0.00" is a lie about somebody's income. */
+  amount_cents: number | null;
+  currency: string | null;
+  /** Stripe's own word — 'subscription_create' for the first payment,
+   *  'subscription_cycle' for a renewal. Stored raw and never translated. */
+  billing_reason: string | null;
+  /** When Stripe says the money moved. Every period figure filters on this and
+   *  never on `created_at`, so a webhook retried days later still counts in the
+   *  month the client was actually charged. Null if Stripe stated none, in
+   *  which case the payment is real but belongs to no month we can name. */
+  paid_at: string | null;
+  created_at: string;
+}
+
+/**
+ * Every renewal the signed-in coach has actually been paid, newest first.
+ *
+ * The other half of `fetchClientPurchases` in connect.ts. That one is the
+ * one-off sales; this is the recurring ones, and until part 132 it could not
+ * exist — the webhook wrote a subscription's STATUS on a paid invoice and no
+ * money row at all, so a year of a client paying AED 600 a month left nothing
+ * that could be added up. The payments screen said so out loud rather than
+ * print a figure it could not stand behind.
+ *
+ * Returns the rows AND how far they can be trusted, and it matters more here
+ * than almost anywhere else in the app. 'ready' with nothing is a coach nobody
+ * has renewed with. 'error' with nothing is a coach we could not ask. 'partial'
+ * is more renewals than one read returns, on which no total may be quoted at
+ * all — a subtotal of somebody's income printed as a month's earnings is a
+ * plausible number with nothing about it to doubt.
+ *
+ * No policy was added for this: `client_sub_pay_read` in part 132 grants SELECT
+ * where `trainer_id = auth.uid()` (and to the client who paid, and to the owner
+ * of that coach's gym, through the tenant). Verified live.
+ */
+export async function fetchMySubscriptionPayments(): Promise<{ rows: SubscriptionPayment[]; status: LoadStatus }> {
+  try {
+    const { data: auth } = await supabase.auth.getUser();
+    const uid = auth?.user?.id; if (!uid) return { rows: [], status: 'error' };
+    const { data, error } = await supabase.from('client_subscription_payments').select('*')
+      .eq('trainer_id', uid).order('paid_at', { ascending: false }).limit(capLimit());
+    if (error) { reportError('subscriptions.fetchMySubscriptionPayments', error); return { rows: [], status: 'error' }; }
+    const page = capped((data as SubscriptionPayment[]) ?? []);
+    return { rows: page.rows, status: page.truncated ? 'partial' : 'ready' };
+  } catch (e) { reportError('subscriptions.fetchMySubscriptionPayments', e); return { rows: [], status: 'error' }; }
+}
+
 /** Client subscribes to a recurring package → Stripe Checkout in subscription
  *  mode. Same edge function as a one-off buy; the package's billing_interval is
  *  what decides which mode it opens, and the app is not trusted to say. */

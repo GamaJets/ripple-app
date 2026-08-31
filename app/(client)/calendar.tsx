@@ -69,7 +69,8 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Hero, KpiRow, Card, ListRow, Cta, Ghost, Notice, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../../src/theme/scale';
-import { useSessions, cancelBookedSession, ptCancelLines } from '../../src/ui/sessions';
+import { useSessions, cancelBookedSession, ptCancelLines, useCancellationPolicy, useSlotWaitlist, useLateCancelCharges, cancelWarningFor, waitlistLine } from '../../src/ui/sessions';
+import { feeAmountLine } from '../../src/lib/booking';
 import { useClientData } from '../../src/ui/clientData';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import type { TrainingSession } from '../../src/lib/types';
@@ -170,7 +171,27 @@ export default function Calendar() {
   const t = useTheme();
   const router = useRouter();
   const now = new Date();
-  const { sessions, status: sessionsStatus, bookSession, releaseSession, refresh } = useSessions();
+  const { sessions, status: sessionsStatus, bookSession, cancelMyBooking, refresh } = useSessions();
+  // The coach's own cancellation policy — the notice period this member is held
+  // to, what a late cancellation costs and in what money — rather than the
+  // hardcoded 24 hours and the fee this screen used to have no way of knowing.
+  // `policyStatus === 'error'` is NOT "no fee": the warning below says the
+  // policy could not be read, which is a different sentence and a different
+  // thing to do about it.
+  const { policy: cancelPolicy, status: policyStatus } = useCancellationPolicy();
+  // Slots of this coach that somebody ELSE holds. They are invisible to the
+  // sessions store by design (RLS shows a client their own sessions and their
+  // coach's open ones), so waiting for one was not previously expressible.
+  // `mine` is deliberately not taken here: this screen shows a queue against
+  // the DAY (each taken slot carries the member's own place in it), and My
+  // Bookings is where the list of every queue they are in lives.
+  const { taken: takenSlots, status: waitStatus, reload: reloadWait, join: joinWait, leave: leaveWait } = useSlotWaitlist();
+  // What this member has actually been charged. `charges` is written by
+  // `cancel_my_session` and by nothing else, and `charges_client_r` has always
+  // let a client read their own — there was simply never a row to read, and
+  // nowhere to read it. The alert at the moment of cancelling is not a record;
+  // this is.
+  const { charges: myFees, status: feeStatus, reload: reloadFees } = useLateCancelCharges();
   // Same rule this screen already applies to the workout log and to planned
   // days (`logKnown`, `planStatus`), applied at last to the sessions themselves.
   // An empty `sessions` means either "your coach has opened nothing and you have
@@ -311,6 +332,13 @@ export default function Calendar() {
   const [selY, selM, selD] = selKey.split('-').map(Number);
   const selDate = new Date(selY, selM, selD);
   const selDaySessions = (byDay.get(selKey) ?? []).sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt));
+  // Slots of this coach that somebody else holds, on the day being looked at.
+  // They are not sessions of this member's, so they are kept out of
+  // `selDaySessions` entirely — a taken hour is not a booking and must not be
+  // counted as one anywhere on this screen.
+  const selDayTaken = takenSlots
+    .filter((k) => dayKey(k.startsAt) === selKey)
+    .sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt));
   const selDayLog = (logByDay.get(selKey) ?? []).sort((a, b) => Date.parse(a.t) - Date.parse(b.t));
   // Only counts we can stand behind. With the log unread the workout half of
   // this day is unknown, so the header states the slots and stays quiet about
@@ -454,18 +482,23 @@ export default function Calendar() {
     Alert.alert('Session booked', lines.join('\n\n'), [{ text: 'Great' }]);
   }
   function cancel(s: TrainingSession) {
-    // Captured once and passed through, so the 24-hour rule the member is
-    // warned about below is the same one that decides whether their credit
-    // comes back. See `cancelBookedSession`.
+    // Captured once and passed through, so the rule the member is warned about
+    // below is the same one that decides whether their credit comes back. See
+    // `cancelBookedSession`.
     const asked = Date.now();
-    const late = Date.parse(s.startsAt) - asked < 24 * 3600 * 1000;
+    // The coach's notice period, not a hardcoded day, and the coach's fee, not
+    // a number this screen made up. `cancelWarningFor` is the one place the
+    // sentence is written — My Bookings shows the same one, because the same
+    // tap must not describe different money depending on where it was made.
+    const warn = cancelWarningFor(s.startsAt, cancelPolicy, asked);
+    const late = warn.late;
     // The whole of this used to live here, and only here — which is how My
     // Bookings came to cancel the SAME session for different money. It now runs
     // through `cancelBookedSession`, which does exactly what these lines did, in
     // the same order, for both screens. The long notes explaining WHY that order
     // is what it is moved with the code; see src/ui/sessions.tsx.
     const doCancel = async () => {
-      const out = await cancelBookedSession(s, releaseSession, asked);
+      const out = await cancelBookedSession(s, cancelMyBooking, asked, cancelPolicy);
       if (!out.freed) {
         Alert.alert(
           'Not cancelled',
@@ -478,13 +511,51 @@ export default function Calendar() {
       // not news about the balance, and blanking the row would hide a number we
       // still have every reason to believe.
       if (out.packLeft != null) setPackLeft(out.packLeft);
+      // The waitlist for this slot moved, and so may the member's own queues.
+      reloadWait();
+      reloadFees();
       Alert.alert('Cancelled', ptCancelLines(out, timeLabel(s.startsAt)).join('\n\n'), [{ text: 'OK' }]);
     };
-    // No figure: the amount is between the client and their coach, and this app
-    // neither knows it nor charges it. Saying a late fee "may apply" is true and
-    // actionable; saying it is $0 is neither.
-    if (late) Alert.alert('Within 24 hours', `This is inside 24 hours, so the session is charged from your package, and your coach's late-cancellation fee may apply — Repple does not charge it, so check with them what it is. The slot is offered to your coach's other clients. Continue?`, [{ text: 'Keep it', style: 'cancel' }, { text: 'Cancel anyway', style: 'destructive', onPress: doCancel }]);
-    else Alert.alert('Cancel session?', 'This is more than 24h away, so no fee. The slot re-opens for others.', [{ text: 'Keep it', style: 'cancel' }, { text: 'Cancel', style: 'destructive', onPress: doCancel }]);
+    // The figure comes from the coach's stated policy or it is not printed at
+    // all — never a 0, never a currency nobody chose, and never "a fee may
+    // apply" over a policy this app has not read. `cancelWarningFor` carries
+    // all five of those cases; this screen only decides the title and what
+    // happens to the slot afterwards.
+    // Written to be true either way, because this side cannot know which it
+    // will be: how many people are waiting on a slot THIS member holds is not
+    // readable from here — `waitlistable_slots` excludes their own sessions and
+    // `session_waitlist_client_r` shows them their own row and nobody else's.
+    // Guessing "the slot re-opens for your coach's other clients" was the old
+    // sentence and is now sometimes false. What actually happened is said
+    // afterwards, by `ptCancelLines`, from the server's own answer.
+    const slotLine = ` If anyone is waiting for this slot it goes straight to whoever is first in line; otherwise it re-opens for your coach's other clients.`;
+    if (late) {
+      Alert.alert('Cancelling late', `${warn.line}${slotLine} Continue?`, [{ text: 'Keep it', style: 'cancel' }, { text: 'Cancel anyway', style: 'destructive', onPress: doCancel }]);
+    } else {
+      Alert.alert('Cancel session?', `${warn.line}${slotLine}`, [{ text: 'Keep it', style: 'cancel' }, { text: 'Cancel', style: 'destructive', onPress: doCancel }]);
+    }
+  }
+
+  async function joinWaitlist(slot: { sessionId: string; startsAt: string }) {
+    const res = await joinWait(slot.sessionId);
+    if (!res.ok) {
+      Alert.alert('Not added', res.error || `We couldn't put you on the waitlist for ${timeLabel(slot.startsAt)}. Nothing has changed — try again.`, [{ text: 'OK' }]);
+      return;
+    }
+    Alert.alert(
+      'On the waitlist',
+      `${waitlistLine(res.position ?? 1, res.waiting ?? 1)}\n\nIf whoever has ${timeLabel(slot.startsAt)} cancels, it is booked for you automatically — you don't have to be quick, and nobody can take it ahead of you.`,
+      [{ text: 'OK' }],
+    );
+  }
+
+  async function leaveWaitlist(slot: { sessionId: string; startsAt: string }) {
+    const res = await leaveWait(slot.sessionId);
+    if (!res.ok) {
+      Alert.alert('Still on the waitlist', `${res.error || 'That did not save.'} You are still in line for ${timeLabel(slot.startsAt)}, so it could still be booked for you.`, [{ text: 'OK' }]);
+      return;
+    }
+    Alert.alert('Left the waitlist', `You're no longer in line for ${timeLabel(slot.startsAt)}.`, [{ text: 'OK' }]);
   }
 
   const G = layout.gutter;
@@ -533,6 +604,16 @@ export default function Calendar() {
           {!sessionsKnown ? (
             <Text style={{ ...ty.caption, color: t.warn, marginTop: sp.md }}>
               Your sessions could not be read, so no open slot or booking of yours is shown here or on the grid below. This is a connection problem, not an empty calendar.
+            </Text>
+          ) : null}
+          {/* The policy is what the Cancel button on this screen will hold the
+              member to, so a policy that could not be read is worth saying
+              before they get as far as tapping it. Deliberately not softened
+              into "no fee": that is the sentence this whole feature exists to
+              stop being printed by accident. */}
+          {policyStatus === 'error' ? (
+            <Text style={{ ...ty.caption, color: t.warn, marginTop: sp.md }}>
+              We couldn’t read your coach’s cancellation policy, so we can’t tell you whether cancelling would cost you anything. Cancelling still works — check with your coach what their notice period and fee are.
             </Text>
           ) : null}
           {mine.length > 0 ? (
@@ -742,7 +823,7 @@ export default function Calendar() {
               session — and this sentence goes on to explain the grey dot for
               slots that are not being drawn either. The warning in Availability
               above is what stands in its place. */}
-          {logKnown && sessionsKnown && selDaySessions.length === 0 && selDayLog.length === 0 && !selPlan ? (
+          {logKnown && sessionsKnown && selDaySessions.length === 0 && selDayTaken.length === 0 && selDayLog.length === 0 && !selPlan ? (
             <View style={{ alignItems: 'center', paddingVertical: sp.lg }}>
               <Icon name="calendar" size={24} color={t.ink3} />
               <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: sp.md }}>Nothing on this day. Days with a grey dot have open slots you can book; a coloured dot is a workout you logged, and a hollow ring is a day you planned.</Text>
@@ -769,6 +850,57 @@ export default function Calendar() {
               </View>
             );
           })}
+
+          {/* ── the hours somebody else has ────────────────────────────────
+              A PT slot is one person's, so a "full" slot is a booked one — and
+              until now a client could not see that it existed, let alone ask
+              for it. `sessions_client_read` shows them their own sessions and
+              their coach's OPEN ones, so a taken hour was simply absent from
+              this day and the member concluded their coach was free.
+
+              What is shown is the hour and nothing else: no name, no "booked
+              by", no initials. `waitlistable_slots` returns no client identity
+              for exactly that reason.
+
+              The button is the whole point of the feature. Before it, a freed
+              slot went out as a push to every client of the coach and the
+              fastest tap won — the app created a race and then lost it. A
+              waitlist is a queue: whoever is first in line gets the slot the
+              moment it frees, decided by the database inside the same
+              transaction that frees it, and nobody has to be quick. */}
+          {waitStatus === 'error' ? (
+            <View style={{ paddingVertical: sp.md }}>
+              <Text style={{ ...ty.caption, color: t.warn }}>
+                We couldn’t read your coach’s taken hours or your place in any waitlist, so neither is shown on this day. This is a connection problem — nothing has been lost, and any waitlist you are on still stands.
+              </Text>
+            </View>
+          ) : selDayTaken.length > 0 ? (
+            <View style={{ marginTop: selDaySessions.length > 0 ? sp.lg : 0 }}>
+              {selDaySessions.length > 0 ? <Rule /> : null}
+              <Text style={{ ...ty.micro, color: t.ink3, marginTop: selDaySessions.length > 0 ? sp.lg : 0, marginBottom: sp.sm }}>Taken</Text>
+              {selDayTaken.map((k, ki) => {
+                const mine = k.myPosition > 0;
+                return (
+                  <View key={k.sessionId}>
+                    {ki > 0 ? <Rule /> : null}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
+                      <View style={{ width: 3, height: 34, borderRadius: 2, backgroundColor: mine ? t.warn : t.surface3 }} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: t.ink2 }}>{timeLabel(k.startsAt)} · {k.durationMin} min</Text>
+                        {/* The sentence is the same one `waitlistLine` writes
+                            everywhere else, and it never promises the slot to
+                            anybody who is not actually at the front. */}
+                        <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{waitlistLine(k.myPosition, k.waiting)}</Text>
+                      </View>
+                      {mine
+                        ? <Ghost label="Leave" onPress={() => leaveWaitlist(k)} />
+                        : <Ghost label="Wait For It" icon="plus" onPress={() => joinWaitlist(k)} />}
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+          ) : null}
 
           {/* What TF-18 says is missing: the workouts logged under Activity,
               on the day they were performed. Presented as Activity presents
@@ -846,6 +978,50 @@ export default function Calendar() {
         </Section>
 
         <Rule />
+
+        {/* ── what a late cancellation cost ──────────────────────────────
+            Only drawn when there is something to say. Repple does not take
+            these payments and never has — the row says what is owed and to
+            whom, and the member settles it with their coach. The section
+            exists because a fee somebody was told about in an alert three
+            weeks ago, and can no longer find anywhere, is not a record. */}
+        {feeStatus === 'error' || myFees.length > 0 ? (
+          <>
+            <Section>
+              <SectionHead title="Late-Cancellation Fees" note={feeStatus === 'error' ? 'Not read' : feeStatus === 'partial' ? 'Part of the list' : undefined} />
+              {feeStatus === 'error' ? (
+                <Text style={{ ...ty.label, color: t.ink3 }}>
+                  We couldn’t read your late-cancellation fees. That is not a statement that you have none — anything already recorded still stands.
+                </Text>
+              ) : (<>
+                <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
+                  Recorded when you cancelled inside your coach’s notice period. Repple doesn’t take these payments — settle them with your coach.
+                </Text>
+                {myFees.map((c, ci) => (
+                  <View key={c.id}>
+                    {ci > 0 ? <Rule /> : null}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
+                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: c.waivedAt ? t.surface3 : t.warn }} />
+                      <View style={{ flex: 1 }}>
+                        {/* A dash, never a zero: the fee exists and its figure
+                            did not come back, which is not the same as owing
+                            nothing. */}
+                        <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: c.waivedAt ? t.ink3 : t.ink }}>
+                          {c.amount == null ? fig(null) : feeAmountLine(c.amount, c.currency)}
+                        </Text>
+                        <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                          {new Date(c.createdAt).toLocaleDateString()}{c.waivedAt ? ' · your coach waived this — nothing to pay' : ' · outstanding with your coach'}
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+                ))}
+              </>)}
+            </Section>
+
+            <Rule />
+          </>
+        ) : null}
 
         {/* ── your coach + the rest ──────────────────────────────────────── */}
         <Section>

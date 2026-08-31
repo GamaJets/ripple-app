@@ -8,6 +8,8 @@
 // the timezone case that would turn a real reading into a dash.
 import {
   sameDay,
+  selectionFromParams,
+  compareSummary,
   readingOn,
   compareDelta,
   compareRows,
@@ -21,6 +23,7 @@ import {
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
+const eq = (a: unknown, b: unknown, msg: string) => { if (a !== b) errors.push(`${msg} — got ${JSON.stringify(a)}, wanted ${JSON.stringify(b)}`); };
 
 const scan = (takenAt: string, weightKg: number, bodyFatPct: number, smm: number | null = null): ScanReading =>
   ({ takenAt, weightKg, bodyFatPct, skeletalMuscleKg: smm });
@@ -249,6 +252,60 @@ ok(spanLabel(null) === '—', 'an unparseable interval is a dash, not "0 days ap
   ok(deltaText(rows[2].delta, rows[2].unit) === '+2 lb', 'a gain still prints with an explicit plus in pounds');
   ok(readingText(rows[1].before, rows[1].unit) === '24.1 %', 'body fat still carries its own unit through unchanged');
   ok(!rows.some((r) => r.unit === 'kg'), 'and no row in a pounds reader\'s table is labelled kg');
+}
+
+/* ── the selection that arrives from a link ─────────────────────────────────
+   The panel is a screen now, so the pair is named in the URL and can therefore
+   arrive from outside the app's own state — a deep link, a restored session, a
+   param naming a photo that has since been deleted. Every assertion below is
+   about refusing one of those rather than about accepting a good one. */
+
+{
+  const known = [{ id: 'p1' }, { id: 'p2' }, { id: 'p3' }];
+
+  eq(selectionFromParams(['p1', 'p3'], known).join(','), 'p1,p3', 'two real ids come through in the order given');
+  eq(selectionFromParams('p2', known).join(','), 'p2', 'a single param arrives as a string, not an array, and still works');
+
+  eq(selectionFromParams(['p1', 'nope'], known).join(','), 'p1', 'an id naming no photo is dropped rather than left as a half-made comparison nobody can clear');
+  eq(selectionFromParams(['nope', 'gone'], known).length, 0, 'and a link naming only deleted photos selects nothing at all');
+  eq(selectionFromParams(['p1', 'p1'], known).join(','), 'p1', 'the same photo twice is one photo, not a full-looking selection that renders nothing');
+  eq(selectionFromParams(['p1', 'p2', 'p3'], known).join(','), 'p1,p2', 'more than two takes the first two rather than failing');
+
+  eq(selectionFromParams(undefined, known).length, 0, 'no param is no selection');
+  eq(selectionFromParams(['p1'], null).length, 0, 'and nothing is selected before the photo list has loaded — an id cannot be checked against a list that is not there');
+  // A route param is a string that came off a URL. Nothing about it is trusted.
+  eq(selectionFromParams(['', 'p1'], known).join(','), 'p1', 'an empty id is not a photo');
+  eq(selectionFromParams(['constructor', 'toString'], known).length, 0, 'and a param naming a prototype member resolves to nothing, because the lookup is over the list rather than an object');
+}
+
+/* ── what leaves the phone when the comparison is shared ────────────────────
+   The figures may go. Neither photograph may, and no URL to one may — the
+   bucket is private and its signed URLs expire in an hour, so a link in a
+   message leaks an object path to everyone it is forwarded to AND is dead
+   before any of them taps it. */
+
+{
+  const rows = compareRows(PHOTO_A, PHOTO_B, SCANS);
+  const s = compareSummary('1 Aug 2026', '11 Aug 2026', 10, rows);
+
+  ok(s.includes('1 Aug 2026 → 11 Aug 2026'), 'both dates are in it, in the order they happened');
+  ok(s.includes('10 days apart'), 'and the interval between them');
+  ok(s.includes('Weight: 82.4 kg → 80.1 kg (-2.3 kg)'), 'each row carries both readings AND the change, so no figure stands alone');
+  ok(s.includes(COMPARE_DISCLAIMER), 'the standing sentence goes with the figures rather than staying behind on the screen');
+  ok(s.includes('not attached'), 'and it says outright that the pictures did not go');
+
+  ok(!/https?:\/\//i.test(s), 'no URL of any kind — a signed photo URL would arrive as one');
+  ok(!/token=|X-Amz-|supabase\.co|\.jpg/i.test(s), 'nothing that looks like an object path or the query half of a signed URL');
+  ok(!/data:image|file:|blob:/i.test(s), 'and no embedded or local image reference');
+}
+
+{
+  // The unmeasured case has to survive the trip. A share that quietly dropped
+  // the dashes would read as a comparison of two measured days.
+  const rows = compareRows('2026-08-06T10:00:00.000Z', PHOTO_B, SCANS);
+  const s = compareSummary('6 Aug 2026', '11 Aug 2026', 5, rows);
+  ok(s.includes('Weight: — → 80.1 kg (—)'), 'an unscanned day goes out as a dash on both the reading and the change');
+  ok(s.includes('Only the later day has an InBody scan'), 'and the reason is sent with it, not left on the screen');
 }
 
 declare const process: { exit(code: number): void };

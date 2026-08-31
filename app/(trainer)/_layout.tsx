@@ -86,6 +86,11 @@ export default function TrainerLayout() {
       <Tabs.Screen name="broadcast" options={{ href: null, title: 'Broadcast' }} />
       <Tabs.Screen name="broadcast-session" options={{ href: null, title: 'Broadcast a Session' }} />
       <Tabs.Screen name="settings" options={{ href: null, title: 'Settings' }} />
+      <Tabs.Screen name="notifications" options={{ href: null, title: 'Notifications' }} />
+      <Tabs.Screen name="client-intake" options={{ href: null, title: 'Their Intake' }} />
+      <Tabs.Screen name="client-nutrition" options={{ href: null, title: 'Their Nutrition' }} />
+      <Tabs.Screen name="group" options={{ href: null, title: 'Group Programme' }} />
+      <Tabs.Screen name="share-kit" options={{ href: null, title: 'Share Kit' }} />
       <Tabs.Screen name="profile" options={{ title: 'Profile', tabBarIcon: ({ color }) => <Icon name="me" size={23} color={color} /> }} />
     </Tabs>
     <WhatsNewSheet visible={whatsNew.visible} releases={whatsNew.releases} onClose={whatsNew.onClose} />

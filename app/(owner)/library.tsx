@@ -215,11 +215,11 @@ export default function OwnerLibrary() {
           ) : null}
         </View>
 
-        <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.md }}>MUSCLE GROUP</Text>
+        <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.md }}>Muscle group</Text>
         <Chips options={groups} value={group} onChange={setGroup}
           a11y={(g) => (g === ALL ? 'Show every muscle group' : `Show ${g} only`)} />
 
-        <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.sm }}>EQUIPMENT</Text>
+        <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.sm }}>Equipment</Text>
         <Chips options={kits} value={kit} onChange={setKit}
           a11y={(k) => (k === ALL ? 'Show every kind of equipment'
             : k === UNRECORDED ? 'Show movements whose equipment the catalogue does not record'

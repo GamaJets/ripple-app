@@ -18,8 +18,34 @@ import {
   type ZoneNo, type ZoneSeconds,
 } from '../lib/hr';
 import { ZoneBoard } from './ZoneBoard';
+import { DASH, readDate, pointLabel } from '../lib/chartAxis';
+import { fmtTime } from '../lib/format';
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+
+/**
+ * The clock time of a sample, or a dash.
+ *
+ * A dash and not a guess. `fmtTime` runs `new Date(iso)` and would render an
+ * unparseable timestamp as "NaN:NaNam", and the tempting patch — falling back
+ * to now — would print the time the member happened to open the screen as the
+ * time their heart rate was recorded. The house rule is the one in
+ * src/lib/chartAxis.ts: an unknown time is stated as unknown.
+ */
+const clockLabel = (iso: string | undefined): string => {
+  if (!iso) return DASH;
+  const ms = Date.parse(String(iso));
+  return Number.isFinite(ms) ? fmtTime(String(iso)) : DASH;
+};
+
+/** True when the first and last sample fall on different calendar days — an
+ *  overnight session, or an import with a bad clock. Only then is the day
+ *  worth repeating at both ends rather than stated once underneath. */
+const spansTwoDays = (a: string | undefined, b: string | undefined): boolean => {
+  const x = readDate(a), y = readDate(b);
+  if (!x || !y) return false;
+  return x.y !== y.y || x.m !== y.m || x.day !== y.day;
+};
 const mmss = (sec: number) => {
   const m = Math.round(sec / 60);
   return m >= 1 ? `${m} min` : `${Math.round(sec)}s`;
@@ -69,6 +95,7 @@ export function HrZoneChart({ samples, zoneSeconds, avgBpm, maxBpm, age, title, 
   const peakZone: ZoneNo | null = hasSeries ? zoneOf(stats!.high, age) : null;
   const avgY = hasSeries ? yOf(stats!.avg) : 0;
   const peakI = pts.length ? pts.reduce((best, p, i) => (p.bpm > pts[best].bpm ? i : best), 0) : 0;
+  const spansDays = spansTwoDays(pts[0]?.t, pts[n - 1]?.t);
 
   // Stat row: derived from the series, or from whatever the provider reported.
   const showLow = hasSeries ? stats!.low : null;
@@ -116,6 +143,27 @@ export function HrZoneChart({ samples, zoneSeconds, avgBpm, maxBpm, age, title, 
             <Circle cx={xOf(peakI)} cy={yOf(pts[peakI].bpm)} r={6} fill={t.surface} />
             <Circle cx={xOf(peakI)} cy={yOf(pts[peakI].bpm)} r={4} fill={t.crit} />
           </Svg>
+          {/* When the session was, under the line that plots it.
+              This axis is minutes rather than months, so it carries the clock
+              and — only when the two ends fall on different calendar days, as
+              an overnight or a badly clocked import can — the day too.
+              `pointLabel` and `fmtTime` are the app's own formatters; a fifth
+              hand-rolled one is what put a day-early date on the other charts.
+              A sample whose timestamp cannot be read is a dash, never a
+              guessed time: the readout would otherwise say the session started
+              at whatever o'clock it is now. */}
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 3 }}>
+            <Text style={{ ...ty.micro, letterSpacing: 0.4, color: t.ink3 }}>{clockLabel(pts[0]?.t)}</Text>
+            {spansDays ? (
+              <Text style={{ ...ty.micro, letterSpacing: 0.4, color: t.ink3 }}>{pointLabel(pts[0]?.t)}</Text>
+            ) : null}
+            <Text style={{ ...ty.micro, letterSpacing: 0.4, color: t.ink3 }}>{clockLabel(pts[n - 1]?.t)}</Text>
+          </View>
+          {!spansDays ? (
+            <Text style={{ ...ty.micro, letterSpacing: 0.4, color: t.ink3, marginTop: 2, textAlign: 'center' }}>
+              {pointLabel(pts[0]?.t)}
+            </Text>
+          ) : null}
         </View>
       ) : null}
 

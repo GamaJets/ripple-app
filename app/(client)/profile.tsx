@@ -138,7 +138,7 @@ const HUB_ICON: Record<string, IconName> = {
   '/(client)/standards': 'chart', '/(client)/goal': 'target', '/(client)/measurements': 'ruler',
   '/(client)/achievements': 'trophy', '/(client)/cards': 'share', '/(client)/activity': 'bell',
   '/(client)/week': 'calendar', '/(client)/library': 'video', '/(client)/tools': 'settings',
-  '/(client)/recovery': 'water', '/(client)/habits': 'check', '/(client)/checkin': 'pencil', '/(client)/injuries': 'heart',
+  '/(client)/recovery': 'water', '/(client)/habits': 'check', '/(client)/checkin': 'pencil', '/(client)/injuries': 'heart', '/(client)/intake': 'pencil', '/(client)/my-coach': 'people',
   '/(client)/foodlog': 'meals', '/(client)/coach': 'chat', '/(client)/messages': 'message', '/(client)/reminders': 'bell', '/(client)/packages': 'trophy',
   '/(client)/social': 'share', '/(client)/devices': 'clock', '/(client)/music': 'play',
   '/(client)/appearance': 'palette', '/(client)/settings': 'settings', '/(client)/trainers': 'people', '/(client)/feedback': 'message',
@@ -161,6 +161,11 @@ const HUB_GROUPS: { title: string; items: { label: string; note: string; route: 
     { label: 'Lifting Tools', note: '1RM, plate math & macro reference', route: '/(client)/tools' },
     { label: 'Recovery', note: 'Hydration, sleep & mobility', route: '/(client)/recovery' },
     { label: 'Injuries & Limitations', note: 'Train around injuries — safer swaps', route: '/(client)/injuries' },
+    // The intake had no in-app entry point at all: the coach's "Ask Them to
+    // Finish It" push deep-linked to it and nothing else reached it. It sits
+    // beside Injuries because they are the same kind of thing — what your coach
+    // needs to know about your body, owned by you and written only by you.
+    { label: 'Your Intake', note: 'What your coach should know before they train you', route: '/(client)/intake' },
   ] },
   { title: 'Daily', items: [
     { label: 'Daily Habits', note: 'Habits & water tracker', route: '/(client)/habits' },
@@ -169,6 +174,9 @@ const HUB_GROUPS: { title: string; items: { label: string; note: string; route: 
     { label: 'Reminders', note: 'Hydration & supplement nudges', route: '/(client)/reminders' },
   ] },
   { title: 'Connect', items: [
+    // The coach you HAVE, above the directory of coaches you do not. There was
+    // no screen for the former until part 130 made one possible.
+    { label: 'Your Coach', note: 'Who is coaching you, and what they can see', route: '/(client)/my-coach' },
     { label: 'Find a Trainer', note: 'Have a code from your coach? Enter it here', route: '/(client)/trainers' },
     { label: 'Memberships & Packs', note: 'Your session packs & payments', route: '/(client)/packages' },
     { label: 'AI Coach', note: 'Chat with your AI coach', route: '/(client)/coach' },

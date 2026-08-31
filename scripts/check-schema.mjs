@@ -569,6 +569,7 @@ function blankSql(src) {
 }
 
 const declared = new Map();     // table -> Map(column -> part file)
+const dropped = new Map();      // table -> the part that dropped it
 const opaque = new Map();       // table -> why its columns cannot be listed
 const unparsed = [];            // SQL this file admits it does not understand
 
@@ -603,8 +604,13 @@ function parseSetup(raw) {
     return schema === 'public' ? rest : null;
   };
 
+  // Where each table was last created, so that a DROP later in the bundle can
+  // be told from one that a later part undoes by building it again.
+  const createdAt = new Map();
+
   for (const m of code.matchAll(/\bcreate\s+table\s+(?:if\s+not\s+exists\s+)?([\w".]+)\s*\(/gi)) {
     const table = publicName(m[1]);
+    if (table) createdAt.set(table, m.index);
     const open = m.index + m[0].length - 1;
     const body = code.slice(open + 1, readBalanced(code, open) - 1);
     if (!table) continue;
@@ -631,6 +637,34 @@ function parseSetup(raw) {
     const stmt = code.slice(m.index, semi === -1 ? code.length : semi);
     for (const c of stmt.matchAll(/\badd\s+column\s+(?:if\s+not\s+exists\s+)?("[^"]+"|[A-Za-z_][\w]*)/gi)) {
       declare(table, bare(c[1]), partAt(m.index));
+    }
+  }
+
+  // ── A later part may RETIRE a table ────────────────────────────────────
+  //
+  // The convention in supabase/parts is that an early part is never rewritten
+  // — it keeps describing the schema it created — and a later one supersedes
+  // it (69-coach-content-scope.sql says so in as many words). Dropping is that
+  // convention applied to a whole table: part 133 drops `meal_plans`, which
+  // 01-schema.sql created and which nothing in this repository has ever read.
+  //
+  // Without this, the repo would go on declaring a table the bundle itself
+  // deletes, and the live half below would report the absence as "a migration
+  // has not been run" — the check pointing at a correctly-run migration and
+  // calling it missing.
+  //
+  // The last DDL wins, so a part that drops and a later part that re-creates
+  // resolve to created. A dropped table the app still NAMES is untouched by
+  // this: it stays in `used`, is declared nowhere, and is reported as such,
+  // which is the loud failure that case deserves. And where credentials allow
+  // the whole live schema to be listed, a dropped table still sitting in the
+  // database is reported by the listing as declared nowhere.
+  for (const m of code.matchAll(/\bdrop\s+table\s+(?:if\s+exists\s+)?([\w".]+)/gi)) {
+    const table = publicName(m[1]);
+    if (!table) continue;
+    if (m.index > (createdAt.get(table) ?? -1)) {
+      declared.delete(table);
+      dropped.set(table, partAt(m.index));
     }
   }
 
@@ -903,6 +937,11 @@ if (unparsed.length) {
   for (const u of [...new Set(unparsed)].sort()) console.error(`  ${u}`);
   console.error('\nColumns they add or take away are not in the repo-side answer above.');
   console.error('');
+}
+// A table the bundle retires is not compared, and saying so is the difference
+// between a check that skipped something and a check that forgot to.
+for (const [table, part] of dropped) {
+  notes.push(`${table} is dropped by ${part}, so it is not compared — the repo builds a database without it.`);
 }
 for (const [table, why] of opaque) {
   if (used.has(table) || declared.has(table)) notes.push(`${table} was not compared: ${why}.`);

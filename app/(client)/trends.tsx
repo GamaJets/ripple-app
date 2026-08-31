@@ -50,13 +50,18 @@ export default function Trends() {
   // Weekly training volume (last 10 weeks, oldest → newest).
   const weeks = useMemo(() => {
     const thisMon = mondayOf(new Date());
-    const out: { label: string; vol: number; sessions: number }[] = [];
+    const out: { label: string; iso: string; vol: number; sessions: number }[] = [];
     for (let w = WEEKS - 1; w >= 0; w--) {
       const start = new Date(thisMon); start.setDate(thisMon.getDate() - w * 7);
       const end = new Date(start); end.setDate(start.getDate() + 7);
       const inWk = log.filter((e) => { const d = new Date(e.t); return d >= start && d < end; });
       const days = new Set(inWk.map((e) => new Date(e.t).toDateString()));
-      out.push({ label: `${start.getDate()}/${start.getMonth() + 1}`, vol: inWk.reduce((a, e) => a + volumeOf(e), 0), sessions: days.size });
+      // `label` is the terse "12/8" the Best Week chip has always shown;
+      // `iso` is the same Monday as data, for the chart axis to format. Built
+      // from local getters, never from a string, so the week a member is
+      // standing in is the week they are shown — see src/lib/localDate.ts.
+      const iso = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`;
+      out.push({ label: `${start.getDate()}/${start.getMonth() + 1}`, iso, vol: inWk.reduce((a, e) => a + volumeOf(e), 0), sessions: days.size });
     }
     return out;
   }, [log]);
@@ -129,7 +134,15 @@ export default function Trends() {
         <Section>
           <SectionHead title={`Weekly volume · last ${WEEKS} weeks`} note={`Total ${wu} lifted`} />
           {anyVolume ? (
-            <Spark data={weeks.map((w) => w.vol)} />
+            /* The week each column belongs to. Ten bars of tonnage with no
+               dates under them told a member the shape of their training and
+               not when any of it happened. */
+            /* Converted, because the readout now carries a unit. `w.vol` is
+               kilograms; labelling it "lb" without passing it through
+               volumeIn would put the reader's unit on somebody else's number,
+               which is the one thing the units module exists to prevent. The
+               KpiRow beside it converts the same way. */
+            <Spark data={weeks.map((w) => volumeIn(w.vol, wu))} labels={weeks.map((w) => w.iso)} unit={` ${wu}`} />
           ) : (
             <Text style={{ ...ty.label, color: t.ink3 }}>
               {logKnown
@@ -188,11 +201,13 @@ export default function Trends() {
                   ]} />
                   {series.length >= 2 ? (<>
                     <View style={{ height: sp.lg }} />
+                    {/* The hand-rolled end labels that used to sit here are
+                        gone: <Spark> draws its own axis from the same dates it
+                        plots. They also ran `new Date(s.t).getDate()` over a
+                        bare 'YYYY-MM-DD', which is UTC midnight read through a
+                        local getter — so west of Greenwich the first and last
+                        sessions were both reported a day early. */}
                     <Spark data={series.map((s) => s.v)} labels={series.map((s) => s.t)} />
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: sp.sm }}>
-                      <Text style={{ ...ty.caption, color: t.ink3 }}>{new Date(series[0].t).getDate()}/{new Date(series[0].t).getMonth() + 1}</Text>
-                      <Text style={{ ...ty.caption, color: t.ink3 }}>{new Date(series[series.length - 1].t).getDate()}/{new Date(series[series.length - 1].t).getMonth() + 1}</Text>
-                    </View>
                   </>) : null}
                 </>
               ) : (

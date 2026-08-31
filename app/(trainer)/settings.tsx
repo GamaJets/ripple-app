@@ -27,6 +27,29 @@
 //  · Deleting a coach is not the same as deleting a member. The coach's clients
 //    belong to the gym and stay; what goes is the coach and everything written
 //    only by them. The confirmation says so rather than leaving it implied.
+//
+// ── The coach had no notification preference at all ────────────────────────
+//
+// Not a broken switch — no switch. The coach app sends and receives the same
+// pushes as everybody else (session booked, session cancelled, a client's
+// message), `push_tokens` has carried a row for every signed-in coach since
+// src/ui/auth.tsx started registering unconditionally, and there was nowhere in
+// Repple Coach to say no. A member could opt out and a coach could not.
+//
+// This is the CLIENT's mechanism, reused rather than reimplemented. `useSettings()`
+// is mounted app-wide in app/_layout.tsx — it already wraps these routes, and
+// this screen already consumes it for the unit picker — so the toggle is the
+// same `st.notifPush` / `st.setPushEnabled` pair app/(client)/settings.tsx
+// drives, with the same four outcomes spoken aloud.
+//
+// The important half is where the gate lives, and it is worth restating because
+// it is the reason a second implementation would have been wrong: the switch
+// does not filter sends. It takes this handset's row OUT of `push_tokens`. The
+// send-push edge function resolves recipients by reading that table, so a
+// handset with no row there receives nothing whatever the sending screen
+// believes it is doing — and there are two dozen sendPush() call sites, none of
+// them this file's to edit, any one of which a call-site check would have been
+// forgotten at. src/ui/settings.tsx carries the long note.
 import { useState, useEffect, useCallback } from 'react';
 import { View, Text, ScrollView, Alert, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -53,6 +76,26 @@ function Line({ t, label, value, first }: { t: Theme; label: string; value: stri
       <Text style={{ ...ty.label, color: t.ink3 }}>{label}</Text>
       <Text style={{ ...ty.body, color: t.ink, flex: 1, textAlign: 'right' }} numberOfLines={1}>{value}</Text>
     </View>
+  );
+}
+
+/** A label, a sentence under it, and a switch. Lifted out of the app-lock row
+ *  when the push row arrived so the two cannot drift apart visually — the
+ *  markup is byte-for-byte what the lock row already rendered. */
+function SwitchRow({ t, label, note, on, onPress, first }: {
+  t: Theme; label: string; note: string; on: boolean; onPress: () => void; first?: boolean;
+}) {
+  return (
+    <Pressable onPress={onPress} accessibilityRole="switch" accessibilityState={{ checked: on }}
+      style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: first ? 0 : sp.lg }}>
+      <View style={{ flex: 1 }}>
+        <Text style={{ ...ty.body, color: t.ink }}>{label}</Text>
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{note}</Text>
+      </View>
+      <View style={{ width: 46, height: 27, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface3, borderWidth: hairline, borderColor: on ? t.brand : t.ring, justifyContent: 'center', paddingHorizontal: 3 }}>
+        <View style={{ width: 21, height: 21, borderRadius: radius.pill, backgroundColor: on ? t.brandInk : t.ink3, alignSelf: on ? 'flex-end' : 'flex-start' }} />
+      </View>
+    </Pressable>
   );
 }
 
@@ -86,6 +129,36 @@ export default function TrainerSettings() {
       Alert.alert('Not turned on', `${lock.label} was not confirmed, so the lock is still off.`);
     }
   };
+
+  // The push switch. Identical handling to app/(client)/settings.tsx, and
+  // deliberately so — the answer takes a round trip and can come back "no", and
+  // a switch that slides across and then quietly delivers nothing is the exact
+  // bug the client screen was fixing. Each outcome gets its own sentence
+  // because they are fixed in three different places: nowhere, the phone's own
+  // Settings, and by waiting.
+  const togglePush = async () => {
+    const want = !st.notifPush;
+    const res = await st.setPushEnabled(want);
+    if (res === 'on' || res === 'off') return;
+    if (res === 'no-build') {
+      Alert.alert('Not on this build yet',
+        'This version of the app cannot receive push notifications at all — that needs a new build from the App Store, not a setting. Your choice has been saved and will apply as soon as you have one.');
+      return;
+    }
+    if (res === 'os-refused') {
+      // Not "…switched off for Repple Coach". This is a white-label build and
+      // the app on this phone may not be called Repple at all.
+      Alert.alert('Turned off on your phone',
+        "Notifications are switched off for this app in your phone's own Settings, so nothing can be delivered until you turn them back on there. Your choice here has been saved.");
+      return;
+    }
+    // 'off-pending'. Said out loud rather than hoped over: a coach who has just
+    // turned notifications off and then gets one needs to have been told it
+    // might happen. The reconciler in src/ui/settings.tsx retries every launch.
+    Alert.alert('Saved, but not confirmed',
+      "Push notifications are off from now on, but we couldn't confirm this phone has been taken off the list — you may still get one until the next time you open the app. Nothing else has changed.");
+  };
+
   const { tenant, loading: tenantLoading } = useTenant();
 
   // null = not read yet. `requestedAt: null` inside a loaded object means
@@ -238,17 +311,31 @@ export default function TrainerSettings() {
 
           {/* A phone left on a bench is a phone left on a bench, whichever of
               the three apps is installed. */}
-          <Pressable onPress={() => { void toggleLock(); }} accessibilityRole="switch"
-            accessibilityState={{ checked: lock.enabled }}
-            style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.lg }}>
-            <View style={{ flex: 1 }}>
-              <Text style={{ ...ty.body, color: t.ink }}>{lock.available ? `Require ${lock.label}` : 'Require Face ID'}</Text>
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{lockSettingNote(lock.available, lock.enabled, lock.label)}</Text>
-            </View>
-            <View style={{ width: 46, height: 27, borderRadius: radius.pill, backgroundColor: lock.enabled ? t.brand : t.surface3, borderWidth: hairline, borderColor: lock.enabled ? t.brand : t.ring, justifyContent: 'center', paddingHorizontal: 3 }}>
-              <View style={{ width: 21, height: 21, borderRadius: radius.pill, backgroundColor: lock.enabled ? t.brandInk : t.ink3, alignSelf: lock.enabled ? 'flex-end' : 'flex-start' }} />
-            </View>
-          </Pressable>
+          <SwitchRow t={t}
+            label={lock.available ? `Require ${lock.label}` : 'Require Face ID'}
+            note={lockSettingNote(lock.available, lock.enabled, lock.label)}
+            on={lock.enabled} onPress={() => { void toggleLock(); }} />
+        </Section>
+
+        <Rule />
+
+        {/* Notifications.
+            The coach app had no notification preference at all — not a broken
+            one, none — while auth.tsx has been registering every signed-in
+            coach's handset in `push_tokens` since long before this screen
+            existed. A member could opt out and a coach could not.
+            The switch is the client app's, not a second implementation: it
+            removes this handset's row from `push_tokens`, which is the table
+            the send-push edge function resolves recipients from, so it reaches
+            every sender at once rather than each of two dozen call sites. */}
+        <Section>
+          <SectionHead title="Notifications" />
+          <SwitchRow t={t} first label="Push Notifications"
+            note="Session bookings and cancellations, client messages, and requests to coach"
+            on={st.notifPush} onPress={() => { void togglePush(); }} />
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+            Turning this off takes this phone off the list entirely. Your clients can still message you and book with you — you will see it next time you open the app rather than as it happens, and your other devices are unaffected.
+          </Text>
         </Section>
 
         <Rule />

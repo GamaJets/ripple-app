@@ -14,14 +14,29 @@
 //    currency, and never a single figure.
 //
 // 2. An amount we cannot put a unit on is never added either — and never
-//    silently dropped. `client_purchases` has no currency column (checked
-//    against the live schema: id, client_id, trainer_id, package_id,
-//    stripe_session_id, amount_cents, sessions_total, sessions_used, status,
-//    created_at). The only record of what a past purchase was priced in is the
-//    `trainer_packages` row it was bought from, so a purchase whose package has
-//    been deleted has an amount and no unit forever. Dropping those quietly
-//    would make every total short by an amount nobody could see. They are
-//    counted instead, and the screen says how many are missing from the total.
+//    silently dropped. `client_purchases` carries a `currency` only from part
+//    132 onward, written from the Checkout Session by the stripe-webhook. Every
+//    sale made BEFORE that has whatever the backfill could copy from the
+//    `trainer_packages` row it came from — and null if that package had already
+//    been deleted, because the unit lived nowhere else and no fallback would be
+//    anything but a guess. Dropping those quietly would make every total short
+//    by an amount nobody could see. They are counted instead, and the screen
+//    says how many are missing from the total.
+//
+// ── What a coach's takings are made of ────────────────────────────────────
+//
+// Two tables, both gross, both in minor units, and never one query:
+//
+//   client_purchases              a one-off sale — a membership or a session pack.
+//   client_subscription_payments  one PAID renewal invoice (part 132).
+//
+// Until part 132 the second did not exist. The webhook handled a paid renewal
+// by re-reading the subscription and writing its STATUS, so a year of a client
+// paying AED 600 a month left one row saying "active, AED 600 / month" and no
+// record that twelve payments had happened — and this file had to say, in
+// `sumRecurring` below, that renewals could not be added up at all. They can
+// now, and `combineTaken` is what puts the two halves together without letting
+// a short read on either one be printed as a total.
 //
 // The word used on screen for what this produces is "taken", not "earned" and
 // not "paid out". It is the gross a client was charged. Stripe's fee, the
@@ -64,13 +79,23 @@ export const minorMoney = (amount: number | null | undefined, currency: string |
 /** A whole-unit amount somebody typed — a session rate, a revenue target. */
 export const wholeMoney = (amount: number | null | undefined, currency: string | null | undefined): string | null => moneyIn(amount, currency, false);
 
-/** One purchase, reduced to the three things a total depends on. */
+/** One payment — a one-off sale or a renewal — reduced to the three things a
+ *  total depends on. */
 export interface TakenRow {
   /** Minor units. Null when Stripe never told us one. */
   amount_cents: number | null;
-  /** From the PACKAGE, because the purchase row has no currency of its own.
-   *  Null when the package is gone or could not be read. */
+  /** What that amount is denominated in. Stripe's own word on the sale for
+   *  anything recorded since part 132; for older purchases, whatever could be
+   *  recovered from the package it was bought from, and null when that package
+   *  is gone or could not be read. */
   currency: string | null;
+  /**
+   * When the money moved. A renewal passes its `paid_at`, not the row's
+   * `created_at` — a webhook retried three days late must not land somebody's
+   * payment in the wrong month — and a payment whose date is unknown passes a
+   * value that will not parse, which keeps it out of every period rather than
+   * sweeping it into the current one.
+   */
   created_at: string;
 }
 
@@ -121,6 +146,45 @@ export function sumTaken(rows: readonly TakenRow[]): Taken {
   return { pots, unlabelled, unpriced };
 }
 
+/**
+ * Two periods of selling, added together — one currency at a time.
+ *
+ * A coach's takings come from two tables that can never be one query:
+ * `client_purchases` is a one-off sale, `client_subscription_payments` (part
+ * 132) is a paid renewal. Both are gross amounts in minor units and both are
+ * money the same coach was paid, so the figure a coach actually wants is the
+ * two of them together — but the merging has to happen HERE rather than by
+ * concatenating the rows, because the two sides are read separately and either
+ * one can come back short. The caller holds both subtotals and the total, and
+ * prints the total only when both reads were whole.
+ *
+ * The pots still never merge across currencies, and `unlabelled` / `unpriced`
+ * still add up rather than being taken from whichever side had more: an amount
+ * missing from either half is missing from the total, and the count of them is
+ * the only thing that keeps the printed figure honest.
+ *
+ * Neither argument is modified — the caller renders both of them beside the
+ * result — and the pots that come out are fresh objects, not shared with the
+ * inputs. Sharing them would make a later `combineTaken` on the same subtotal
+ * add into a pot the screen is already displaying.
+ */
+export function combineTaken(...parts: readonly Taken[]): Taken {
+  const by = new Map<string, Pot>();
+  let unlabelled = 0;
+  let unpriced = 0;
+  for (const part of parts) {
+    unlabelled += part.unlabelled;
+    unpriced += part.unpriced;
+    for (const p of part.pots) {
+      const pot = by.get(p.currency);
+      if (pot) { pot.minorUnits += p.minorUnits; pot.count += p.count; }
+      else by.set(p.currency, { currency: p.currency, minorUnits: p.minorUnits, count: p.count });
+    }
+  }
+  const pots = [...by.values()].sort((a, b) => (b.minorUnits - a.minorUnits) || a.currency.localeCompare(b.currency));
+  return { pots, unlabelled, unpriced };
+}
+
 /** One live subscription, reduced to what it is priced at. */
 export interface RecurringRow { amount_cents: number | null; currency: string | null; billing_interval: string | null }
 
@@ -130,13 +194,14 @@ export interface RecurringPot { currency: string; interval: string; minorUnits: 
 /**
  * What the coach's live subscriptions are PRICED at — not what has been taken.
  *
- * The distinction is the whole point of a separate function. No renewal is
- * recorded as an amount anywhere in this database: the Stripe webhook handles
- * `invoice.*` on a coaching subscription by re-reading the subscription and
- * writing its STATUS, and writes no money row at all (a one-off checkout writes
- * `client_purchases`; a renewal writes nothing). So a month of renewals cannot
- * be added up here, and this figure must never be printed as though it had
- * been. It is the standing price of what is running today.
+ * The distinction is the whole point of a separate function, and it survives
+ * part 132 unchanged. Renewals ARE now recorded as money, in
+ * `client_subscription_payments`, and `sumTaken` over those rows is what a
+ * coach has actually been paid. This is a different statement: it is the
+ * standing price of the subscriptions running TODAY — what is expected to be
+ * charged next, at today's prices, if nobody cancels and no card fails. A
+ * forward-looking price added to a backward-looking takings figure would be a
+ * number about neither, so the two are printed apart and labelled apart.
  *
  * Monthly and yearly are kept apart rather than divided into each other. A
  * yearly package spread over twelve is a number this app invented, and the

@@ -510,7 +510,7 @@ export default function Devices() {
      {/* Ready — every one of these has a length that came from somewhere real. */}
      {hkPlan.writable.length ? (
       <View style={{ marginTop: sp.lg }}>
-       <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>READY TO WRITE</Text>
+       <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Ready to write</Text>
        {hkPlan.writable.map((p, i) => (
         <View key={p.key} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
          <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{p.activityLabel}</Text>
@@ -534,7 +534,7 @@ export default function Devices() {
      {/* Blocked — stated plainly, with the one thing that would unblock it. */}
      {hkPlan.skipped.length ? (
       <View style={{ marginTop: sp.xl }}>
-       <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>NO LENGTH RECORDED — NOT WRITTEN</Text>
+       <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>No length recorded — not written</Text>
        {hkPlan.skipped.map((sk, i) => (
         <View key={sk.key} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
          <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{sk.exercises[0] || 'Session'}{sk.exercises.length > 1 ? ` +${sk.exercises.length - 1}` : ''}</Text>

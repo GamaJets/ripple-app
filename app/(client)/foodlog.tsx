@@ -34,6 +34,8 @@ import { mergeFoodResults } from '../../src/lib/foodSearch';
 import { BarcodeSheet } from '../../src/ui/BarcodeSheet';
 import { notifySuccess } from '../../src/ui/haptics';
 import { useFoodLog, type FoodEntry } from '../../src/ui/foodLog';
+import { isWhole } from '../../src/ui/loadStatus';
+import { unsentNote } from '../../src/lib/offlineQueue';
 import { readFoodEdit, foodChanged } from '../../src/lib/entryEdit';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
 import { useWearables } from '../../src/ui/wearables';
@@ -145,13 +147,26 @@ export default function FoodLog() {
  // the calories remaining, and was gone at the next launch with the day's
  // figures silently different. So a write that did not land is now said out
  // loud, in the one place that can say it.
- const warnUnsaved = (what: string) =>
-  Alert.alert('Not saved',
-   `${what} is on this phone only — we could not reach your food log. It is counting toward today here, but it will be gone when you next open the app.`);
+ // Two different things used to share one sentence, and the sentence was
+ // wrong about both of them once the provider started keeping the meal.
+ //
+ // 'unsent' — nobody answered. The meal is on this phone, it counts toward
+ //   today, and it goes up on its own. Nothing is lost and the client does not
+ //   need to do anything, which is the opposite of what "it will be gone when
+ //   you next open the app" told them.
+ // 'refused' — the food log read it and declined. It is NOT kept, because the
+ //   same row offered again gets the same answer, and a meal sitting in the
+ //   list that nothing will ever store is the silent version of this bug.
+ const warnUnsaved = (what: string, out: 'unsent' | 'refused') =>
+  out === 'unsent'
+   ? Alert.alert('Saved on this phone',
+     `No connection, so ${what} is not in your food log on the server yet. It is counting toward today and goes up on its own next time you have signal.`)
+   : Alert.alert('Not logged',
+     `${what} was rejected by your food log, so it is not saved and it is not counting toward today. Adding it again as it is will be rejected again.`);
  const add = async (f: Food, via: string) => {
-  const saved = await fl.addFood({ name: f.n, kcal: f.k, protein: f.p, carbs: f.c, fat: f.f, via: via as any });
-  if (!saved) warnUnsaved(f.n);
-  return saved;
+  const out = await fl.logFood({ name: f.n, kcal: f.k, protein: f.p, carbs: f.c, fat: f.f, via: via as any });
+  if (out !== 'stored') warnUnsaved(f.n, out);
+  return out === 'stored';
  };
  const logNL = async () => {
    const text = nl.trim(); if (!text) return;
@@ -168,14 +183,19 @@ export default function FoodLog() {
     // was discarded, the described meal appeared in the list, counted against
     // the day, and existed nowhere. A person typing here logged it by hand, so
     // manual is what it is; the reader in rowToEntry already coerces to that.
-    let failed = 0;
+    let queued = 0;
+    let refused = 0;
     for (const it of items) {
-     const saved = await fl.addFood({ name: it.name, kcal: it.kcal, protein: it.protein, carbs: it.carbs, fat: it.fat, via: 'manual' });
-     if (!saved) failed++;
+     const out = await fl.logFood({ name: it.name, kcal: it.kcal, protein: it.protein, carbs: it.carbs, fat: it.fat, via: 'manual' });
+     if (out === 'unsent') queued++;
+     else if (out === 'refused') refused++;
     }
     setNlBusy(false);
     setNl('');
-    if (failed) warnUnsaved(failed === items.length ? 'What you described' : `${failed} of the ${items.length} foods`);
+    // Refusal is reported ahead of the queue, because it is the one the client
+    // has to do something about: those foods are not logged anywhere.
+    if (refused) warnUnsaved(refused === items.length ? 'What you described' : `${refused} of the ${items.length} foods`, 'refused');
+    else if (queued) warnUnsaved(queued === items.length ? 'What you described' : `${queued} of the ${items.length} foods`, 'unsent');
     else notifySuccess();
     return;
    }
@@ -231,6 +251,12 @@ export default function FoodLog() {
  };
 
  const tot = { k: fl.consumed.kcal, p: fl.consumed.protein, c: fl.consumed.carbs, f: fl.consumed.fat };
+ // Whether that is a TOTAL or a floor. Under 'error' there may be meals we
+ // could not read, and under 'partial' there certainly are — so "calories
+ // remaining" is an overestimate, and it is the number a person eats the rest
+ // of their day against. The provider has said this in its own doc comment
+ // since `status` was added; this screen was not listening.
+ const dayWhole = isWhole(fl.status);
  const wToday = useWearables().today;
  const burn = target ? dayBurn(target, wToday) : null;
  const burned = burn?.burned ?? 0;
@@ -306,12 +332,14 @@ export default function FoodLog() {
  {/* ── the hero: what is left in the day ──────────────────────────── */}
  <Hero
  label={remK >= 0 ? 'Calories Remaining' : 'Calories Over'}
- figure={fig(Math.abs(remK))}
+ figure={dayWhole ? fig(Math.abs(remK)) : fig(null)}
  unit="kcal"
- note={target ? `${num(tot.k)} of ${num(target.kcal)} kcal eaten${burned ? ` · ${num(burned)} kcal burned` : ''}` : `${num(tot.k)} kcal eaten${burned ? ` · ${num(burned)} kcal burned` : ''} · add your weight for a target`}
- arc={target && target.kcal ? tot.k / target.kcal : undefined}
+ note={!dayWhole
+  ? "We couldn't read all of today's log, so anything already eaten may be missing from this. What is listed below is real; the number left in the day is not something we can work out yet."
+  : (target ? `${num(tot.k)} of ${num(target.kcal)} kcal eaten${burned ? ` · ${num(burned)} kcal burned` : ''}` : `${num(tot.k)} kcal eaten${burned ? ` · ${num(burned)} kcal burned` : ''} · add your weight for a target`)}
+ arc={dayWhole && target && target.kcal ? tot.k / target.kcal : undefined}
  arcLabel="of today's calories eaten"
- tone={remK < 0 ? t.crit : undefined}
+ tone={dayWhole && remK < 0 ? t.crit : undefined}
  />
 
  <Rule />
@@ -319,9 +347,15 @@ export default function FoodLog() {
  {/* ── macros against target ──────────────────────────────────────── */}
  <Section>
  <SectionHead title="Macros" />
- {target ? macroRow('Protein', tot.p, target.protein) : null}
- {target ? macroRow('Carbs', tot.c, target.carbs, true) : null}
- {target ? macroRow('Fat', tot.f, target.fat, true) : null}
+ {/* Same rule as the hero: these bars are "how much of your protein have you
+     had", and a sum over a day we could not read whole answers a question
+     nobody asked. The meals themselves are still listed further down. */}
+ {target && dayWhole ? macroRow('Protein', tot.p, target.protein) : null}
+ {target && dayWhole ? macroRow('Carbs', tot.c, target.carbs, true) : null}
+ {target && dayWhole ? macroRow('Fat', tot.f, target.fat, true) : null}
+ {target && !dayWhole ? (
+  <Text style={{ ...ty.label, color: t.ink3 }}>Today’s log didn’t load in full, so we can’t say how much of your protein, carbs and fat you have had.</Text>
+ ) : null}
  </Section>
 
  <Rule />
@@ -429,9 +463,19 @@ export default function FoodLog() {
 
  {/* ── today's entries, or an honest empty state ──────────────────── */}
  <Section>
- <SectionHead title="Logged Today" note={`${tot.k} kcal`} />
+ <SectionHead title="Logged Today" note={dayWhole ? `${tot.k} kcal` : undefined} />
+ {/* Meals on this phone that the server has not taken. They count toward
+     today here and they are not lost — but they are not in the log a coach
+     or another device reads, and only one of those two things is obvious
+     from looking at the list. */}
+ {unsentNote(fl.unsent, 'meal') ? (
+ <Text style={{ ...ty.label, color: t.warn, marginBottom: sp.sm }}>{unsentNote(fl.unsent, 'meal')}</Text>
+ ) : null}
  {fl.entries.length === 0 ? (
- <Text style={{ ...ty.label, color: t.ink3 }}>Nothing logged yet today.</Text>
+ // An empty list under 'error' means we could not ask, never that nobody
+ // ate anything — and "Nothing logged yet today" is exactly the sentence
+ // that sends somebody to log their breakfast a second time.
+ <Text style={{ ...ty.label, color: t.ink3 }}>{dayWhole ? 'Nothing logged yet today.' : 'We couldn’t read today’s log just now, so we don’t know what is in it. Anything you add here is kept and goes up when you have signal.'}</Text>
  ) : (<>
  <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.xs }}>Tap a meal to correct what it was worth.</Text>
  {fl.entries.map((fe, i) => (
@@ -546,7 +590,7 @@ export default function FoodLog() {
    </KeyboardAvoidingView>
  </Modal>
  <BarcodeSheet visible={bcOpen} onClose={() => setBcOpen(false)}
-   onLogged={async (f) => { if (!(await fl.addFood({ ...f, via: 'barcode' }))) warnUnsaved(f.name); }} />
+   onLogged={async (f) => { const out = await fl.logFood({ ...f, via: 'barcode' }); if (out !== 'stored') warnUnsaved(f.name, out); }} />
  </SafeAreaView>
  );
 }

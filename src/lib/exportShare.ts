@@ -2,11 +2,13 @@
 // summary out of one set of rows, and hands whichever the client picked to the
 // phone's share sheet.
 //
-// This header used to promise that the PDF would "upgrade automatically once
-// rebuilt". It has not, through thirty-five builds, and the section below
-// headed "Why the file share degrades" is the post-mortem of why not. Read it
-// before changing anything here: the answer is not what the previous comment
-// assumed, and half of it is a probe that has been asking the wrong question.
+// This header once promised that the PDF would "upgrade automatically once
+// rebuilt". It did not, through thirty-five builds, and the section below
+// headed "Why the file share degraded" is the post-mortem of why not — the
+// answer was not what that comment assumed, and half of it was a probe asking
+// the wrong question. Both causes are fixed and the PDF is produced; read the
+// post-mortem anyway before changing anything here, because the probes it
+// explains still have to stay for anybody on an older binary.
 import { Share } from 'react-native';
 // The CSV writer is not written again here. gymExport.ts already quotes on
 // every delimiter src/lib/csv.ts is willing to sniff — not just the comma — so
@@ -26,25 +28,39 @@ import { money } from './gymRecord';
 // provider, so a report can be built for whoever's row is in hand.
 import { weightIn, convertedNote, type WeightUnit } from './units';
 
-// ── Why the file share degrades, and what it takes to stop it ───────────────
+// ── Why the file share degraded, and what it took to stop it ────────────────
 //
 // TestFlight, build 35: "Why can't it share it?", over a screenshot of the
 // share sheet reading "this build cannot attach a file". The sentence was true.
 // It was true for TWO separate reasons, and only one of them was the one
 // everybody assumed.
 //
-//   1. expo-print and expo-sharing are not dependencies of this app. Not in
-//      package.json, not in node_modules, not in ios/Podfile.lock. Every
-//      `require` below has therefore always thrown, `Print` and `Sharing` have
-//      always been null, and the PDF button has never once been offered to
-//      anybody. Nothing caught it, and each thing that might have has a reason:
-//      Metro marks a `require` inside a `try/catch` as an OPTIONAL dependency,
-//      so an unresolvable one throws at runtime into the catch instead of
-//      failing the bundle; the typecheck never sees an untyped `require`; and
-//      scripts/check-native.mjs lists the native modules the app DEPENDS on,
-//      which a module nobody ever declared is not on the list to be missed by.
-//      The pattern reads as "not built in YET", and this file was written on
-//      the expectation of a rebuild that then never happened.
+//   1. expo-print and expo-sharing were not dependencies of this app at all.
+//      Not in package.json, not in node_modules, not in ios/Podfile.lock. Every
+//      `require` below therefore threw, `Print` and `Sharing` were null, and
+//      the PDF button was never once offered to anybody. Nothing caught it, and
+//      each thing that might have has a reason: Metro marks a `require` inside
+//      a `try/catch` as an OPTIONAL dependency, so an unresolvable one throws at
+//      runtime into the catch instead of failing the bundle; the typecheck never
+//      sees an untyped `require`; and scripts/check-native.mjs listed the native
+//      modules the app DEPENDS on, which a module nobody ever declared is not on
+//      the list to be missed by.
+//
+//      THIS ONE IS FIXED. Both packages are dependencies now, both are in
+//      ios/Podfile.lock (ExpoPrint 57.0.1, ExpoSharing 57.0.16), and
+//      `check:native` counts them among the 29 native modules in the binary and
+//      confirms this machine's Podfile.lock has all 29. `pdfExportAvailable()`
+//      answers true on a build made from that lock, and the PDF that three
+//      releases of release notes promised is actually produced.
+//
+//      What must NOT be deleted along with the bug is the probe. A native
+//      module reaches a phone in a binary and this file also ships over the air;
+//      an OTA update landing on an older binary still finds no expo-print, and
+//      the honest answer there is still the text fallback and a sentence saying
+//      why. The check is cheap and the alternative is a button that does
+//      nothing on a build somebody has not updated. scripts/check-runtime-traps
+//      .mjs now fails the preflight if either package is ever removed while
+//      these requires remain, so the original state cannot come back unnoticed.
 //
 //   2. The capability probe was wrong for the version of expo-file-system that
 //      IS in the binary. That module ships transitively with `expo` and is in
@@ -63,12 +79,18 @@ import { weightIn, convertedNote, type WeightUnit } from './units';
 // cannot be attached is a value the screen can print rather than a fixed
 // parenthetical apology.
 //
-// What is still needed from the release: `expo-print` and `expo-sharing` as
-// dependencies, and a new native binary. Neither reaches a phone over the air.
+// Both causes are dealt with. What remains true, and is the reason every probe
+// below stays: neither module reaches a phone over the air, so a client on an
+// older binary gets the text fallback and a sentence explaining it rather than
+// a PDF button that quietly does nothing.
 
 let Print: any = null;
 let Sharing: any = null;
-try { Print = require('expo-print'); } catch { /* not a dependency of this app — see the note above */ }
+// Both ARE dependencies and both are in the binary today (see the post-mortem
+// above). The try/catch stays because this file also ships over the air, and an
+// OTA update can land on a binary built before they were added — where the
+// honest answer is the text fallback and a sentence saying why, not a throw.
+try { Print = require('expo-print'); } catch { /* an OTA update on a pre-57 binary */ }
 try { Sharing = require('expo-sharing'); } catch { /* likewise */ }
 
 // Ships transitively with `expo` and is in the binary today. What changed under
@@ -210,6 +232,30 @@ export async function shareText(message: string, title: string): Promise<void> {
   try { await Share.share({ message, title }); } catch { /* dismissed */ }
 }
 
+/**
+ * Text into HTML, for every value that came from a person rather than from this
+ * file.
+ *
+ * These builders have interpolated raw since they were written, and three of the
+ * values they interpolate are typed by somebody: the client's own name, the
+ * names a coach gives the meals on a plan, and the tenant's brand — this is a
+ * white-label app, so the brand IS a customer's typed string. "Ann & Bob"
+ * renders as "Ann Bob" in a PDF; "R&D Fitness" the same; a meal called
+ * "Fish <chips>" takes the rest of the table with it. Nothing here has ever
+ * carried deliberate markup, so escaping is a strict improvement rather than a
+ * behaviour change.
+ *
+ * The BODY fragments below are markup this file built and are not passed
+ * through it. Only leaf values are.
+ */
+const esc = (v: string | number | null | undefined): string =>
+  String(v ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
 const page = (title: string, body: string, brand = 'Repple', accent?: string) =>
   `<html><head><meta name="viewport" content="width=device-width, initial-scale=1"><style>
    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#0f172a;padding:26px;margin:0}
@@ -220,16 +266,16 @@ const page = (title: string, body: string, brand = 'Repple', accent?: string) =>
    th{color:#64748b;font-size:11px;text-transform:uppercase;letter-spacing:.5px}
    .r{text-align:right} .tot td{font-weight:800;border-top:2px solid #0f172a}
    .foot{margin-top:20px;color:#94a3b8;font-size:11px}
-   </style></head><body><div class="h"><h1>${title}</h1><p>${brand}</p></div>${body}<p class="foot">Generated by ${brand}</p></body></html>`;
+   </style></head><body><div class="h"><h1>${esc(title)}</h1><p>${esc(brand)}</p></div>${body}<p class="foot">Generated by ${esc(brand)}</p></body></html>`;
 
 export interface PlanMealRow { slot: string; name: string; K: number; P: number; C: number; F: number }
 
 export function mealPlanDoc(name: string, targetKcal: number, meals: PlanMealRow[], avoid: string[] = [], brand = 'Repple', accent?: string): { html: string; text: string } {
   const first = (name || '').split(' ')[0] || 'Your';
-  const rows = meals.map((m) => `<tr><td><b>${m.slot}</b><br><span style="color:#64748b">${m.name}</span></td><td class="r">${m.K}</td><td class="r">${m.P}g</td><td class="r">${m.C}g</td><td class="r">${m.F}g</td></tr>`).join('');
+  const rows = meals.map((m) => `<tr><td><b>${esc(m.slot)}</b><br><span style="color:#64748b">${esc(m.name)}</span></td><td class="r">${m.K}</td><td class="r">${m.P}g</td><td class="r">${m.C}g</td><td class="r">${m.F}g</td></tr>`).join('');
   const totK = meals.reduce((a, m) => a + m.K, 0), totP = meals.reduce((a, m) => a + m.P, 0), totC = meals.reduce((a, m) => a + m.C, 0), totF = meals.reduce((a, m) => a + m.F, 0);
-  const avoidLine = avoid.length ? `<p style="color:#64748b;font-size:13px;margin-top:10px">Excludes: ${avoid.join(', ')}</p>` : '';
-  const body = `<h2 style="margin-top:20px">${first}'s meal plan</h2><p style="color:#64748b;margin:0">Daily target ~${targetKcal.toLocaleString()} kcal</p>${avoidLine}
+  const avoidLine = avoid.length ? `<p style="color:#64748b;font-size:13px;margin-top:10px">Excludes: ${esc(avoid.join(', '))}</p>` : '';
+  const body = `<h2 style="margin-top:20px">${esc(first)}'s meal plan</h2><p style="color:#64748b;margin:0">Daily target ~${targetKcal.toLocaleString()} kcal</p>${avoidLine}
     <table><tr><th>Meal</th><th class="r">Kcal</th><th class="r">P</th><th class="r">C</th><th class="r">F</th></tr>
     ${rows}<tr class="tot"><td>Total</td><td class="r">${totK}</td><td class="r">${totP}g</td><td class="r">${totC}g</td><td class="r">${totF}g</td></tr></table>`;
   const text = `${first}'s meal plan (${brand}) — target ~${targetKcal} kcal\n` +
@@ -287,7 +333,7 @@ export function progressDoc(name: string, rows: ProgressRow[], brand = 'Repple',
   // scan of somebody nobody weighed that day. Body fat goes past untouched —
   // a percentage of a body is the same percentage in pounds.
   const w = (kg: number | null) => figure(weightIn(kg, unit));
-  const tr = rows.map((r) => `<tr><td>${dayLabel(r.date)}</td><td class="r">${w(r.weightKg)}</td><td class="r">${figure(r.bodyFatPct, '%')}</td><td class="r">${w(r.muscleKg)}</td></tr>`).join('');
+  const tr = rows.map((r) => `<tr><td>${esc(dayLabel(r.date))}</td><td class="r">${w(r.weightKg)}</td><td class="r">${figure(r.bodyFatPct, '%')}</td><td class="r">${w(r.muscleKg)}</td></tr>`).join('');
   const lines = progressChangeLines(rows, unit);
   // A single scan gets a sentence saying so. The previous version printed a
   // delta line built from `rows[0]` and `rows[last]` being the same row, which
@@ -301,8 +347,8 @@ export function progressDoc(name: string, rows: ProgressRow[], brand = 'Repple',
   // pounds in it were measured in kilograms — otherwise the report and the
   // client's own scan sheet look like two different readings.
   const converted = convertedNote(unit);
-  const body = `<h2 style="margin-top:20px">${first}'s progress</h2><p style="color:#64748b;margin:0">${note}</p>
-    <p style="color:#94a3b8;margin:6px 0 0;font-size:12px">${progressSpanLabel(rows)}. A dash means that scan did not record the figure.${converted ? ' ' + converted : ''}</p>
+  const body = `<h2 style="margin-top:20px">${esc(first)}'s progress</h2><p style="color:#64748b;margin:0">${esc(note)}</p>
+    <p style="color:#94a3b8;margin:6px 0 0;font-size:12px">${esc(progressSpanLabel(rows))}. A dash means that scan did not record the figure.${converted ? ' ' + esc(converted) : ''}</p>
     <table><tr><th>Date</th><th class="r">Weight (${unit})</th><th class="r">Body fat</th><th class="r">Muscle (${unit})</th></tr>${tr}</table>`;
   const text = progressSummary(name, rows, brand, unit) + '\n\n' +
     rows.map((r) => `• ${dayLabel(r.date)}: ${figure(weightIn(r.weightKg, unit), ' ' + unit)} · ${figure(r.bodyFatPct, '%')} BF · ${figure(weightIn(r.muscleKg, unit), ' ' + unit)} muscle`).join('\n');
@@ -342,8 +388,8 @@ export function ownerReportDoc(d: OwnerReportData, brand = 'Repple'): { html: st
     ['Clients with those trainers', String(d.atRiskClients)],
   ];
 
-  const mRows = metrics.map(([k, v]) => `<tr><td>${k}</td><td class="r">${v}</td></tr>`).join('');
-  const cRows = d.cohorts.map((c) => `<tr><td>${c.label}</td><td class="r">${c.active}/${c.total}</td><td class="r">${c.pct}%</td></tr>`).join('');
+  const mRows = metrics.map(([k, v]) => `<tr><td>${esc(k)}</td><td class="r">${esc(v)}</td></tr>`).join('');
+  const cRows = d.cohorts.map((c) => `<tr><td>${esc(c.label)}</td><td class="r">${c.active}/${c.total}</td><td class="r">${c.pct}%</td></tr>`).join('');
   const body = `
     <table><thead><tr><th>Metric</th><th class="r">Value</th></tr></thead><tbody>${mRows}</tbody></table>
     <table><thead><tr><th>Cohort (signup)</th><th class="r">Active</th><th class="r">Retention</th></tr></thead><tbody>${cRows || '<tr><td colspan="3">No cohorts yet</td></tr>'}</tbody></table>`;

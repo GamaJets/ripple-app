@@ -61,6 +61,8 @@ import { useInjuryAcks } from '../../src/ui/injuryAcks';
 import type { LoadStatus } from '../../src/ui/loadStatus';
 import { areaLabel, injuryFlag, type Injury } from '../../src/lib/injuries';
 import { goalToEnum, goalsDisagree } from '../../src/lib/rosterMerge';
+import { useProgramGroups } from '../../src/ui/groupProgram';
+import { listNames } from '../../src/lib/groupProgram';
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const LIB: { name: string; group: string }[] = [
@@ -216,6 +218,21 @@ export default function Builder() {
     clientId ? acks.acknowledged(clientId) : null,
     client?.name.split(' ')[0] ?? 'This client',
   );
+  // ── This builder edits ONE person's copy ─────────────────────────────────
+  //
+  // A programme sent to a group is a fan-out: each member gets their own
+  // `assigned_programs` row, so a client who turns up with a shoulder is
+  // changed here without touching the other seven. That is the whole reason
+  // groups own the list and not the plan (app/(trainer)/group.tsx), and it is
+  // worth saying on the screen where the coach is about to do it — otherwise
+  // the honest fear is that editing a bootcamp client rewrites the bootcamp.
+  //
+  // Said only off a whole read. Under any other status this client's group
+  // membership is unknown, and "in no groups" is not a thing to imply from a
+  // read that did not land — so the line is simply absent rather than wrong.
+  const clientGroups = useProgramGroups();
+  const inGroups = clientId && clientGroups.status === 'ready' ? clientGroups.groupsForClient(clientId) : [];
+
   const [ackBusy, setAckBusy] = useState(false);
   const [ackFailed, setAckFailed] = useState(false);
   const confirmInjuries = async () => {
@@ -617,8 +634,14 @@ export default function Builder() {
               coach-assigned programme to display, because that case has a plan
               to show and needs no goal at all. */}
           {client && planGuard.allowed && !assignedNow && !autoGoal ? (
-            <Notice tone={t.ink3} kicker="Goal" title="No Goal On Record"
+            <Notice tone={t.ink3} kicker="Goal" title="No goal on record"
               note={`${client.name.split(' ')[0]}'s goal is not one this app recognises${client.goal ? ` — their roster row reads “${client.goal}”` : ''}, so no auto-generated plan has been built: the plan a goal produces is a fat-loss block, a toning block or a muscle block, and picking one on their behalf is a guess about somebody's training. Ask them to set a goal in their app, or build the week yourself below and assign it.`} />
+          ) : null}
+
+          {inGroups.length ? (
+            <Flag tone={t.brand} style={{ marginBottom: sp.lg }}>
+              {`${client?.name.split(' ')[0] ?? 'This client'} is in ${listNames(inGroups.map((g) => g.name))}. Assigning here changes only their copy — nobody else in ${inGroups.length === 1 ? 'the group' : 'those groups'} is touched.`}
+            </Flag>
           ) : null}
 
           <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Program name</Text>
@@ -747,7 +770,7 @@ export default function Builder() {
               a wall, not a check. */}
           {!injuryGate.allowed && injuryGate.outstanding.length ? (
             <View style={{ marginBottom: sp.lg }}>
-              <Notice tone={t.s3} kicker={`${client?.name.split(' ')[0] ?? 'This client'} has disclosed`} title="Injuries and Limitations">
+              <Notice tone={t.s3} kicker={`${client?.name.split(' ')[0] ?? 'This client'} has disclosed`} title="Injuries & Limitations">
                 <View style={{ marginTop: sp.md, gap: sp.sm }}>
                   {injuryGate.outstanding.map((inj, i) => (
                     <View key={i}>

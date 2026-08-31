@@ -14232,3 +14232,4752 @@ create policy cp_trainer_read on public.client_purchases
 -- the row directly: `cp_trainer_read` is SELECT deliberately, and there is no
 -- coach-side write policy. Redemption is the client's own action, and a refund
 -- follows their cancellation.
+
+-- ▶ a-bell-that-goes-somewhere.sql
+
+-- The notification inbox: a table that has existed since part 01 with almost
+-- nothing behind it.
+--
+-- ── What was there before this part ────────────────────────────────────────
+--
+-- `notifications` (user_id, icon, body, session_id, read, created_at) was
+-- created in 01-schema.sql and given one policy, `notif_self`, in the same
+-- file. In the whole repository exactly ONE statement touched it: the
+-- `notify-message` edge function's `insert({ user_id, icon: 'message', body })`
+-- after a chat message. Nothing read it. Not one screen in the three apps, not
+-- the web console, nothing. The client dashboard grew a bell icon that routed
+-- to the message thread because there was nowhere else for it to go.
+--
+-- So the product's entire notification story was a push: fire-and-forget, lost
+-- the moment it was swiped away, invisible to anyone who had the app closed on
+-- a phone with notifications off — which, on the current binary, is EVERYBODY,
+-- because expo-notifications is not in the build yet and src/ui/pushNotifications.ts
+-- no-ops. Every "Session cancelled" and "A new offer" sent to date reached
+-- nobody and left no trace that it had been sent.
+--
+-- ── Why a SECURITY DEFINER function and not a plain insert ─────────────────
+--
+-- `notif_self` is `for all using (user_id = auth.uid())` with no `with check`,
+-- and Postgres uses the USING expression as the check when one is omitted from
+-- a FOR ALL policy. So an authenticated client may insert notifications for
+-- THEMSELVES and nobody else — which is exactly backwards for this feature.
+-- Every notification worth having is addressed to someone other than the person
+-- who caused it: the coach cancels, the CLIENT needs the row; the client books,
+-- the COACH needs the row.
+--
+-- Loosening `notif_self` was the wrong fix and was not done. A policy wide
+-- enough to let a coach write to a client's inbox would, written naively, let
+-- anybody write to anybody's, and an inbox that strangers can post into is a
+-- spam channel with the gym's name on it. So the write goes through one
+-- function that decides, per recipient, whether the caller is allowed to reach
+-- them — and the table's own policy stays as narrow as it was.
+--
+-- The relationships it accepts are the ones the product already has, and each
+-- mirrors a rule that exists elsewhere in this schema rather than inventing a
+-- second version of it:
+--
+--   self          — a user may write to their own inbox. `notif_self` already
+--                   allows this directly; it is here so callers need only one
+--                   path.
+--   my client     — `clients.trainer_id = auth.uid()`, the same join
+--                   `is_my_coach()` reads from the other end, and the same one
+--                   `end_coaching()` clears. A coach a client has left stops
+--                   being able to reach them, deliberately.
+--   my coach      — the mirror, so a booking reaches the trainer.
+--   my member     — `is_owner_of(clients.tenant_id)`, character-for-character
+--                   the test inside `all_member_ids()`, which is the function
+--                   the owner's promotions screen already uses to choose who to
+--                   push to. If the two ever disagree, an owner is told an
+--                   offer went to N members and N inbox rows do not appear.
+--   my staff      — `is_owner_of(profiles.tenant_id)` for a trainer or owner in
+--                   the gym, who has no `clients` row to be found by.
+--
+-- Recipients that match none of them are SKIPPED, not rejected. A coach
+-- broadcasting to forty clients, two of whom left last week, should reach the
+-- thirty-eight; failing the statement would mean one stale roster entry silently
+-- costing everybody else their notification. The function returns how many rows
+-- it actually wrote, so a caller can never be told "recorded" for a write that
+-- reached nobody — the count is the only honest answer to "did that land".
+--
+-- ── Why the two new columns ────────────────────────────────────────────────
+--
+-- `title` and `route`. Both nullable, so the existing writer (`notify-message`,
+-- which sets neither) keeps working untouched and every row already in the
+-- table stays valid.
+--
+--   title  Every push in this codebase is a title AND a body — 'Session
+--          cancelled' / 'Your 6:30 session on Tuesday was cancelled.' The table
+--          had one text column, so the alternative was gluing them together and
+--          hoping the seam never showed. An inbox is a list, and a list needs
+--          something short and bold on the first line.
+--
+--   route  Every push already carries `data.route`, which is what
+--          addNotificationTapListener() navigates to when the banner is tapped.
+--          Without somewhere to keep it, an inbox row is a dead end: the
+--          notification you tapped from the lock screen takes you to the
+--          session, and the same notification read a day later in the app takes
+--          you nowhere. The client validates it before navigating (see
+--          src/lib/notifyInbox.ts) — this column holds a string a caller
+--          supplied, and is not trusted on the way out.
+--
+-- ── Grants ─────────────────────────────────────────────────────────────────
+--
+-- `revoke ... from public` is NOT sufficient here and the file says so out
+-- loud, because getting this wrong opened a real hole in this project. Supabase
+-- has ALTER DEFAULT PRIVILEGES in the public schema granting EXECUTE to `anon`,
+-- `authenticated` and `service_role` by name. A default grant to PUBLIC and an
+-- explicit grant to `anon` are two separate entries in the ACL; revoking the
+-- first leaves the second standing, and a SECURITY DEFINER function callable by
+-- `anon` runs as its owner for anybody holding the publishable key. So `anon`
+-- is revoked explicitly and by name, and only `authenticated` is granted back.
+--
+-- Idempotent; safe to re-run.
+
+-- ── Columns ────────────────────────────────────────────────────────────────
+
+alter table public.notifications
+  add column if not exists title text,
+  add column if not exists route text;
+
+-- The inbox reads `where user_id = ? order by created_at desc`. The index from
+-- part 01 is (user_id, read), which serves the unread COUNT and not the list.
+create index if not exists notifications_user_recent
+  on public.notifications (user_id, created_at desc);
+
+-- ── The write path ─────────────────────────────────────────────────────────
+
+create or replace function public.notify_users(
+  p_user_ids   uuid[],
+  p_title      text,
+  p_body       text,
+  p_icon       text default null,
+  p_route      text default null,
+  p_session_id uuid default null
+)
+returns integer
+language plpgsql
+security definer
+-- Pinned. A SECURITY DEFINER function without this resolves `clients`,
+-- `profiles` and `is_owner_of` against the CALLER's search_path, and a caller
+-- who can create a schema of their own can therefore choose which tables the
+-- authorisation check reads.
+set search_path to 'public', 'pg_temp'
+as $function$
+declare
+  v_me    uuid    := (select auth.uid());
+  v_title text    := nullif(btrim(coalesce(p_title, '')), '');
+  v_body  text    := nullif(btrim(coalesce(p_body,  '')), '');
+  v_icon  text    := nullif(btrim(coalesce(p_icon,  '')), '');
+  v_route text    := nullif(btrim(coalesce(p_route, '')), '');
+  v_n     integer := 0;
+begin
+  -- No session, or nothing to say. Zero, not an exception: this is called
+  -- alongside a push that is itself best-effort, and a signed-out caller is a
+  -- condition the UI already handles by saying nothing was recorded.
+  if v_me is null or v_body is null then
+    return 0;
+  end if;
+
+  with wanted as (
+    -- DISTINCT because a roster can list the same person twice (the merge in
+    -- src/lib/rosterMerge.ts joins two sources), and two identical rows in an
+    -- inbox read as the message having been sent twice.
+    select distinct u as uid
+      from unnest(coalesce(p_user_ids, '{}'::uuid[])) as u
+     where u is not null
+     limit 2000
+  ),
+  allowed as (
+    select w.uid
+      from wanted w
+      -- The join is the reason a recipient with no account cannot break the
+      -- statement. The coach's roster merges real `clients` with hand-added
+      -- `coach_clients`, whose ids have no profile behind them, and
+      -- notifications.user_id is a foreign key to profiles(id) — a single
+      -- multi-row insert containing one of them would be rejected in full.
+      -- This is the same trap broadcast.tsx hit with `messages`.
+      join public.profiles p on p.id = w.uid
+     where w.uid = v_me
+        or exists (select 1 from public.clients c where c.id = w.uid and c.trainer_id = v_me)
+        or exists (select 1 from public.clients c where c.id = v_me  and c.trainer_id = w.uid)
+        or exists (select 1 from public.clients c where c.id = w.uid and public.is_owner_of(c.tenant_id))
+        or public.is_owner_of(p.tenant_id)
+  )
+  insert into public.notifications (user_id, title, body, icon, route, session_id)
+  select a.uid,
+         left(v_title, 120),
+         left(v_body, 500),
+         left(v_icon, 40),
+         left(v_route, 200),
+         p_session_id
+    from allowed a;
+
+  get diagnostics v_n = row_count;
+  return v_n;
+end;
+$function$;
+
+revoke all on function public.notify_users(uuid[], text, text, text, text, uuid) from public;
+revoke all on function public.notify_users(uuid[], text, text, text, text, uuid) from anon;
+grant execute on function public.notify_users(uuid[], text, text, text, text, uuid) to authenticated;
+
+-- ── Marking read ───────────────────────────────────────────────────────────
+--
+-- `notif_self` already permits the UPDATE, so this is not about permission —
+-- it is about being able to say what happened. PostgREST does not error on an
+-- UPDATE that matches zero rows; it answers 200 with an empty body, which is
+-- indistinguishable from "there was nothing unread" and from "the read that
+-- built this screen was refused". The client asks for the changed ids back
+-- (`.select('id')`) and counts them, and this function is the same answer for
+-- the mark-everything case, where sending 200 ids up the wire to change them
+-- all is the wasteful way to ask.
+--
+-- Deliberately NOT security definer, unlike notify_users() above. This one has
+-- no cross-user work to do, so it needs no privilege the caller does not
+-- already have, and running as the invoker keeps `notif_self` in force
+-- underneath the `where user_id = v_me` rather than making that WHERE clause
+-- the only thing standing between one user and another's rows. search_path is
+-- pinned anyway: it costs nothing and the next person to add `security
+-- definer` to this function should not have to remember it too.
+create or replace function public.mark_notifications_read()
+returns integer
+language plpgsql
+set search_path to 'public', 'pg_temp'
+as $function$
+declare
+  v_me uuid    := (select auth.uid());
+  v_n  integer := 0;
+begin
+  if v_me is null then
+    return 0;
+  end if;
+  update public.notifications
+     set read = true
+   where user_id = v_me
+     and read = false;
+  get diagnostics v_n = row_count;
+  return v_n;
+end;
+$function$;
+
+revoke all on function public.mark_notifications_read() from public;
+revoke all on function public.mark_notifications_read() from anon;
+grant execute on function public.mark_notifications_read() to authenticated;
+
+-- ▶ a-credit-is-spent-once.sql
+
+-- ── A credit is spent once, and the app is told whether it was ─────────────
+--
+-- Session packs are the one thing in this product a client pays for up front
+-- and draws down later, and until now the drawing down was two round trips of
+-- client-side arithmetic:
+--
+--     select * from client_purchases where client_id = uid …   -- read
+--     update client_purchases set sessions_used = <read + 1>   -- write
+--         where id = <the row we read>
+--
+-- Three things are wrong with that, and all three were confirmed against this
+-- live database before this file was written.
+--
+-- 1. THE WRITE CANNOT REPORT THAT IT DID NOTHING. PostgREST answers an UPDATE
+--    that matched no rows with `error: null` and an empty body — identical, to
+--    the caller, to one that matched. Proven here: as the signed-in client,
+--    an UPDATE aimed at another client's purchase reported success and changed
+--    nothing, because `cp_self` filtered the row away rather than raising.
+--    `redeemSession` read that as ok and returned a `remaining` it had
+--    calculated locally — a balance the app printed and the database had never
+--    agreed to.
+--
+-- 2. IT IS A LOST UPDATE WAITING TO HAPPEN. Two bookings in flight both read
+--    `sessions_used = 3`, both write 4, and two sessions come off one credit.
+--    Nothing about the outcome looks wrong afterwards.
+--
+-- 3. NOTHING BOUNDED THE COLUMN. Also proven live: as the client, an UPDATE
+--    setting `sessions_used = 500` on a ten-session pack was ACCEPTED. There
+--    was no constraint. A pack could go past its own total, or negative, and
+--    the only thing between a client's balance and an arbitrary number was
+--    application code being careful.
+--
+-- What was NOT wrong, and is worth recording because a review claimed it was:
+-- the write DOES match its own row. `cp_self` is FOR ALL (part 121), and an
+-- UPDATE by the client on their own purchase returned 1 row here. Redemption
+-- has always actually decremented. The bug was never that it did nothing; it
+-- was that nothing could tell the difference.
+--
+-- ── What this part does about it ───────────────────────────────────────────
+--
+-- The arithmetic moves into the database, where a row count is a fact rather
+-- than an inference:
+--
+--   · one statement, so there is no window between reading a balance and
+--     writing it;
+--   · `for update` on the chosen pack, so a second booking waits rather than
+--     reading the same number;
+--   · `get diagnostics n = row_count` after the write, and n <> 1 RAISES.
+--     Silence is not success anywhere in this file;
+--   · a CHECK constraint, so no caller — these functions, a hand-written
+--     update, a future webhook — can leave a balance outside 0..total.
+--
+-- `cp_self` is deliberately NOT narrowed here. It is what the currently
+-- shipped app writes through, and taking the write away tonight would stop
+-- redemption dead in every build already in the field while the functions
+-- below went unused. Once every build calls these two functions, `cp_self`
+-- should become SELECT-only and the write should exist only here — until then
+-- a client can still set their own `sessions_used`, bounded by the constraint
+-- but not otherwise supervised. That is a pre-existing exposure this part
+-- narrows rather than closes, and it is written down so the next pass can
+-- finish it.
+
+-- ── the floor and the ceiling ──────────────────────────────────────────────
+--
+-- A membership (`sessions_total is null`) has no credits and is unconstrained
+-- beyond the floor. A pack may never be drawn past its size, and may never go
+-- negative — "-1 sessions left" is not a sentence anyone should read about
+-- their own money, and `packLeft` in src/lib/coachMoney.ts clamping it on the
+-- way to the screen only hides it.
+--
+-- Verified before adding: zero rows in this table violate it.
+alter table public.client_purchases
+  drop constraint if exists client_purchases_sessions_used_ck;
+alter table public.client_purchases
+  add constraint client_purchases_sessions_used_ck
+  check (
+    sessions_used >= 0
+    and (sessions_total is null or sessions_used <= sessions_total)
+  );
+
+comment on constraint client_purchases_sessions_used_ck on public.client_purchases is
+  'A pack cannot be drawn past its size or below zero. The last line of defence under redeem_pack_session/refund_pack_session, and the only one that also covers a direct write through cp_self.';
+
+-- ── spend one credit ───────────────────────────────────────────────────────
+--
+-- Draws from the OLDEST pack with room. That ordering is the client's money:
+-- packs do not expire in this schema, but the oldest is the one they have been
+-- carrying longest, and spending it first is the order a person expects and
+-- the order that leaves the newest purchase intact if anything is refunded.
+--
+-- The three answers are distinct on purpose, because the app says a different
+-- sentence for each and two of them are about somebody's money:
+--
+--   'drawn'      a credit came off; `sessions_left` is what the database now
+--                holds, not what the caller calculated.
+--   'exhausted'  they hold packs from this coach and every one is used up.
+--   'no_pack'    they hold no pack from this coach at all — a pay-per-session
+--                client, for whom nothing went wrong.
+--
+-- A read that FAILS is none of the three. It raises, and the caller reports
+-- "could not be drawn down", which is not "you have none left".
+create or replace function public.redeem_pack_session(p_trainer uuid)
+returns table (outcome text, purchase_id uuid, sessions_left int, pack_total int)
+language plpgsql
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+declare v_id uuid; v_used int; v_total int; n int;
+begin
+  if auth.uid() is null then
+    raise exception 'Not signed in.' using errcode = '42501';
+  end if;
+  if p_trainer is null then
+    raise exception 'No coach given.' using errcode = '22004';
+  end if;
+
+  -- `for update` is the whole difference between this and the two round trips
+  -- it replaces. A second booking arriving here blocks until this transaction
+  -- commits, then re-reads — rather than reading the balance this one is about
+  -- to change.
+  select cp.id, cp.sessions_used, cp.sessions_total
+    into v_id, v_used, v_total
+    from public.client_purchases cp
+   where cp.client_id = (select auth.uid())
+     and cp.trainer_id = p_trainer
+     and cp.status = 'paid'
+     and cp.sessions_total is not null
+     and cp.sessions_used < cp.sessions_total
+   order by cp.created_at asc, cp.id asc
+   limit 1
+     for update;
+
+  if v_id is null then
+    -- Holding a used-up pack and never having bought one are different facts
+    -- about a person, and the booking screen only warns the first of them.
+    if exists (
+      select 1 from public.client_purchases cp
+       where cp.client_id = (select auth.uid())
+         and cp.trainer_id = p_trainer
+         and cp.status = 'paid'
+         and cp.sessions_total is not null
+    ) then
+      return query select 'exhausted'::text, null::uuid, 0, null::int;
+    else
+      return query select 'no_pack'::text, null::uuid, null::int, null::int;
+    end if;
+    return;
+  end if;
+
+  update public.client_purchases cp
+     set sessions_used = cp.sessions_used + 1
+   where cp.id = v_id
+     and cp.sessions_used = v_used;
+  get diagnostics n = row_count;
+
+  -- The line this function exists for. Zero rows here means the row moved or
+  -- vanished between the lock and the write, and reporting that as a
+  -- successful redemption is how a client comes to be charged for a session
+  -- their pack still shows as unspent.
+  if n <> 1 then
+    raise exception 'Your session pack was not drawn down — nothing was changed.'
+      using errcode = '40001';
+  end if;
+
+  return query select 'drawn'::text, v_id, (v_total - v_used - 1), v_total;
+end $fn$;
+
+revoke all on function public.redeem_pack_session(uuid) from public, anon;
+grant execute on function public.redeem_pack_session(uuid) to authenticated;
+
+comment on function public.redeem_pack_session(uuid) is
+  'Spend one credit from the caller''s oldest pack with room for this coach, atomically. Returns outcome drawn/exhausted/no_pack and the balance the DATABASE holds. Raises rather than reporting success on a write that changed nothing.';
+
+-- ── put one credit back ────────────────────────────────────────────────────
+--
+-- Returns to the NEWEST pack that has usage, which is the exact inverse of
+-- drawing from the oldest with room: under oldest-first, the most recent
+-- credit spent came off the newest pack that had been reached. Refunding
+-- oldest-first instead would move credits from a pack a client bought last
+-- year onto one they bought last week, and the totals would still add up — so
+-- nothing would ever surface it.
+--
+-- The caller decides WHETHER a refund is owed (the 24-hour rule lives in
+-- src/ui/sessions.tsx and is not duplicated here). This decides where it goes.
+create or replace function public.refund_pack_session(p_trainer uuid)
+returns table (outcome text, purchase_id uuid, sessions_left int, pack_total int)
+language plpgsql
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+declare v_id uuid; v_used int; v_total int; n int;
+begin
+  if auth.uid() is null then
+    raise exception 'Not signed in.' using errcode = '42501';
+  end if;
+  if p_trainer is null then
+    raise exception 'No coach given.' using errcode = '22004';
+  end if;
+
+  select cp.id, cp.sessions_used, cp.sessions_total
+    into v_id, v_used, v_total
+    from public.client_purchases cp
+   where cp.client_id = (select auth.uid())
+     and cp.trainer_id = p_trainer
+     and cp.status = 'paid'
+     and cp.sessions_total is not null
+     and cp.sessions_used > 0
+   order by cp.created_at desc, cp.id desc
+   limit 1
+     for update;
+
+  if v_id is null then
+    if exists (
+      select 1 from public.client_purchases cp
+       where cp.client_id = (select auth.uid())
+         and cp.trainer_id = p_trainer
+         and cp.status = 'paid'
+         and cp.sessions_total is not null
+    ) then
+      -- They hold a pack and have spent nothing off it. There is no credit to
+      -- give back, and inventing one would hand them a session they never paid
+      -- for — the same defect as swallowing one, pointed the other way.
+      return query select 'nothing_to_return'::text, null::uuid, null::int, null::int;
+    else
+      return query select 'no_pack'::text, null::uuid, null::int, null::int;
+    end if;
+    return;
+  end if;
+
+  update public.client_purchases cp
+     set sessions_used = cp.sessions_used - 1
+   where cp.id = v_id
+     and cp.sessions_used = v_used;
+  get diagnostics n = row_count;
+
+  if n <> 1 then
+    raise exception 'Your session credit was not returned — nothing was changed.'
+      using errcode = '40001';
+  end if;
+
+  return query select 'returned'::text, v_id, (v_total - v_used + 1), v_total;
+end $fn$;
+
+revoke all on function public.refund_pack_session(uuid) from public, anon;
+grant execute on function public.refund_pack_session(uuid) to authenticated;
+
+comment on function public.refund_pack_session(uuid) is
+  'Return one credit to the caller''s newest pack that has usage for this coach, atomically — the inverse of redeem_pack_session. Whether a refund is owed is decided by the caller; this decides which pack it lands on. Raises rather than reporting success on a write that changed nothing.';
+
+-- ── the index the two functions read through ───────────────────────────────
+--
+-- `idx_purchases_client` (part 21) is (client_id, created_at desc), which
+-- serves the refund ordering and the client's own history. The redemption
+-- picks the OLDEST, and both filter on trainer_id, so neither existing index
+-- is the one being asked for.
+create index if not exists idx_purchases_client_trainer_packs
+  on public.client_purchases (client_id, trainer_id, created_at asc)
+  where sessions_total is not null;
+
+-- ▶ a-photo-of-the-machine.sql
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- Message attachments — a photo of the machine, and a clip of the third rep.
+--
+-- The coach↔client thread has been text since part 10. Everything the two of
+-- them actually need to say to each other is visual: "is this the right
+-- machine", "is my back rounding here", "this is what I ate". Until now the
+-- answer was a screenshot sent through some other app, which is the one place
+-- a coaching conversation goes where neither the plan nor the injury record
+-- nor anything else in this product can see it.
+--
+-- This part is the storage half. It adds one reference to `messages` and one
+-- PRIVATE bucket whose policies name the two people on the thread and nobody
+-- else.
+--
+-- ── WHO CAN SEE AN ATTACHMENT ────────────────────────────────────────────
+--
+-- The client, and the coach who coaches them. That is the whole list, and it
+-- is deliberately the SAME list `messages` itself already uses — part 10's
+-- msg_client (`client_id = auth.uid()`) and msg_coach (`is_my_client(...)`).
+-- One rule for the row and the file it points at, asked in one place
+-- (`can_use_message_thread` below), because two copies of a permission drift
+-- and the copy that drifts wider is the one nobody notices.
+--
+-- This is a different stance from 91-injury-documents.sql, and the difference
+-- is consent, not squeamishness. A physio report is a medical record the
+-- client uploaded for the app to read; nobody agreed to hand it to their coach,
+-- so those policies are own-folder at every verb. An attachment on a message
+-- is a thing one person deliberately SENT to the other. Withholding it from
+-- the recipient would not be privacy, it would be a broken feature.
+--
+-- What is NOT on the list, and must never be added by pattern-matching on
+-- 19-trainer-read-access.sql or 38-tenant-isolation.sql: the gym owner, other
+-- trainers at the same tenant, a previous coach, or `role = 'owner'` in any
+-- form. Part 120's lesson stands — `role = 'owner'` is never an authorisation.
+-- A gym owner reading the photographs two people sent each other in a private
+-- conversation is the single worst outcome this file can have, and there is no
+-- product reason that reaches it.
+--
+-- ── OBJECT KEY SHAPE ─────────────────────────────────────────────────────
+--
+--   message-media/<client_id>/<sender_uid>/<millis>-<token>.<ext>
+--
+-- Two segments carry meaning and both are checked by the policies:
+--
+--   [1] client_id  — the THREAD. It is what the read policy asks about, so an
+--                    object's folder is what decides who may sign a URL for it.
+--   [2] sender_uid — WHO PUT IT THERE. Only its owner may write into it.
+--
+-- The second segment exists because of part 83. There, a missing DROP left a
+-- policy standing that let a client insert a row with `sender = 'coach'` — a
+-- message their own coach appeared to have written. The same forgery is
+-- available on a bucket keyed only by thread: both participants can write to
+-- the thread folder, so either could upload a file and then point a row at it.
+-- The row's `sender` is pinned by the table policies; segment [2] pins the
+-- object's provenance the same way, at the same moment, in the same statement.
+--
+-- src/lib/messageAttachments.ts builds and validates this exact shape client
+-- side, so a mismatch fails somewhere with a readable sentence rather than as
+-- a bare 403 the app renders as "sent".
+--
+-- The bucket is PRIVATE. A file is read through a short-lived signed URL minted
+-- by a participant — never getPublicUrl(), which hands back a working-looking
+-- string for a private object that then 400s. Signing is itself checked against
+-- the SELECT policy below, which is what makes the policy the only way in.
+--
+-- ── OPERATOR NOTE: THE FILE DOES NOT FOLLOW THE ROW ──────────────────────
+--
+-- `messages.client_id` cascades from `clients`, so deleting a client deletes
+-- their thread. It does not delete the objects: storage rows are not deleted by
+-- a foreign key on a different table, and bytes only go when something calls
+-- the Storage API (the account of `protect_objects_delete` in
+-- 45-progress-photos.sql is the long version).
+--
+-- That gap is the same one 91 leaves open and it wants the same follow-up — a
+-- purge queue plus a `purge_message_media(path)` over pg_net with the Vault
+-- secret `storage_service_key`. It is not in this file for the reason 91 gives:
+-- a second copy of that machine deserves its own review rather than riding
+-- along at the bottom of another part.
+--
+-- Until it exists, what is outstanding is visible with:
+--
+--     select (storage.foldername(name))[1] as thread, name, created_at
+--       from storage.objects
+--      where bucket_id = 'message-media'
+--        and (storage.foldername(name))[1]::uuid not in (select id from public.clients)
+--      order by created_at;
+--
+-- Those are attachments whose thread no longer exists.
+-- ─────────────────────────────────────────────────────────────────────────
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 1 · The reference on the message
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- Two columns and nothing else. `attachment_path` is the storage key;
+-- `attachment_kind` is what to draw with it, because an app cannot tell an
+-- image from a video by looking at a path it has not fetched, and guessing
+-- from the extension is how a video ends up in an <Image> as a grey box.
+--
+-- No width, no height, no duration, no caption, no thumbnail column. Each of
+-- those is a number the app would have to measure and could get wrong, and a
+-- figure this product states without having read it is the fault
+-- check-numbers.mjs exists for.
+alter table public.messages add column if not exists attachment_path text;
+alter table public.messages add column if not exists attachment_kind text;
+
+alter table public.messages drop constraint if exists messages_attachment_kind_chk;
+alter table public.messages add constraint messages_attachment_kind_chk
+  check (attachment_kind is null or attachment_kind in ('image', 'video'));
+
+-- Both or neither. A path with no kind is a file the app will not draw; a kind
+-- with no path is a bubble claiming a photo that does not exist — which is
+-- precisely the "it says it sent an image and did not" failure this feature was
+-- written to make impossible.
+alter table public.messages drop constraint if exists messages_attachment_pair_chk;
+alter table public.messages add constraint messages_attachment_pair_chk
+  check ((attachment_path is null) = (attachment_kind is null));
+
+-- A row may only ever point INTO ITS OWN THREAD'S FOLDER.
+--
+-- Reading someone else's attachment is already refused by the storage policy,
+-- so this is not the thing standing between a stranger and the file. It is what
+-- stops a legitimate participant from AIMING a row somewhere else: without it,
+-- a client could insert a message in their own thread carrying the path of an
+-- object in another thread, and while nothing would render it for them, the
+-- database would be storing a reference that means something it does not say.
+-- Structural is better than refused-later, and the cast is immutable so this
+-- survives a dump and restore.
+alter table public.messages drop constraint if exists messages_attachment_thread_chk;
+alter table public.messages add constraint messages_attachment_thread_chk
+  check (attachment_path is null or attachment_path like client_id::text || '/%');
+
+-- `body` stays NOT NULL and an attachment-only message carries ''. Nothing
+-- invents a caption from a filename: "IMG_4821.HEIC" under a photograph is not
+-- a thing the sender said.
+comment on column public.messages.attachment_path is
+  'Storage key in the private `message-media` bucket: <client_id>/<sender_uid>/<file>. '
+  'Read through a short-lived signed URL. See supabase/parts/124.';
+comment on column public.messages.attachment_kind is
+  'image | video — what to draw with the path. Null exactly when the path is null.';
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 2 · The bucket
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- Private, and re-asserted private on every run: `public = false` sits in the
+-- DO UPDATE rather than being left to the insert, so a bucket somebody flipped
+-- public in the dashboard is flipped back by re-running setup.sql rather than
+-- quietly kept that way. `exercise-videos` was public for months for exactly
+-- that reason — created by hand, written down nowhere (part 49).
+--
+-- 64 MB. An image is downscaled to 1600px and re-encoded as JPEG before upload,
+-- so it lands at a fraction of that; the limit is sized for the video half,
+-- where the picker caps recording at 30 seconds. The app checks the byte length
+-- against the same figure BEFORE uploading, because a 413 from storage arrives
+-- as an opaque failure and "that clip is too long to send" is a sentence
+-- somebody can act on.
+--
+-- MIME types are a real limit rather than a default. JPEG and PNG because that
+-- is what the manipulator emits and what <Image> draws; MP4 and QuickTime
+-- because that is what the two pickers hand back. No PDF, no HEIC: a HEIC
+-- would upload happily under an image/jpeg content type that is a lie, and the
+-- re-encode in src/ui/messaging.ts is what stops one ever getting here.
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('message-media', 'message-media', false, 67108864,
+        array['image/jpeg', 'image/png', 'video/mp4', 'video/quicktime'])
+on conflict (id) do update
+  set public = false,
+      file_size_limit = excluded.file_size_limit,
+      allowed_mime_types = excluded.allowed_mime_types;
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 3 · One definition of "you are on this thread"
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- Takes the FIRST PATH SEGMENT as text and answers whether the caller is one of
+-- the two people on that thread. Three things about the shape are deliberate.
+--
+-- It takes text, not uuid, because that is what `storage.foldername(name)`
+-- returns and casting in the policy would raise 22P02 on any object whose
+-- folder is not a uuid — including one in another bucket, since nothing
+-- guarantees Postgres evaluates the `bucket_id` arm of an AND first. The CASE
+-- below is the guard: CASE does not evaluate the branches it does not take, so
+-- a junk folder name returns false instead of erroring the whole statement.
+--
+-- It is SECURITY DEFINER so the storage policy does not depend on the caller's
+-- own visibility of `clients`, and so it cannot re-enter a policy and recurse —
+-- the fault part 54 had to undo across the whole video library, where every
+-- read failed 42P17 for everybody and looked like an empty library.
+--
+-- And its body is the union of msg_client and msg_coach, spelled out rather
+-- than approximated: `is_my_client()` is what msg_coach evaluates, so the
+-- storage rule and the table rule cannot answer differently about the same two
+-- people.
+create or replace function public.can_use_message_thread(p_thread text)
+returns boolean
+language sql
+stable
+security definer
+set search_path to 'public', 'pg_temp'
+as $function$
+  select case
+    when p_thread is null then false
+    when p_thread !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then false
+    when p_thread::uuid = (select auth.uid()) then true
+    else exists (
+      select 1 from public.clients c
+       where c.id = p_thread::uuid
+         and c.trainer_id = (select auth.uid()))
+  end;
+$function$;
+
+comment on function public.can_use_message_thread(text) is
+  'Is the caller one of the two people on this message thread? Takes the first '
+  'path segment of a message-media object key. SECURITY DEFINER so the storage '
+  'policies do not depend on the caller''s own read of clients. See parts 124, 54.';
+
+-- `revoke ... from public` alone leaves BOTH API roles standing — Supabase
+-- grants execute to anon and authenticated separately, which is exactly how
+-- part 105 shipped an unauthenticated cross-tenant write (part 120). anon has
+-- no business asking; a policy is evaluated as the querying role, so
+-- authenticated needs it.
+revoke all on function public.can_use_message_thread(text) from public, anon;
+grant execute on function public.can_use_message_thread(text) to authenticated;
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 4 · Storage policies — the two people on the thread, and nobody else
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- RLS on storage.objects is enabled by Supabase itself. Asserted rather than
+-- assumed, because a policy on a table with RLS off is inert and would look
+-- exactly like a working restriction — the same guard parts 45 and 91 open
+-- with.
+do $$
+begin
+  if not exists (
+    select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'storage' and c.relname = 'objects' and c.relrowsecurity
+  ) then
+    raise exception 'storage.objects does not have RLS enabled — the policies below would be inert.';
+  end if;
+end $$;
+
+-- Write: into a thread you are on, and only into your own folder within it.
+-- The second condition is the anti-forgery one described in the header. An
+-- object key with fewer than two segments indexes past the end of the array,
+-- which is NULL, which is not true — so a short key is refused rather than
+-- accidentally matching.
+drop policy if exists msgmedia_obj_insert on storage.objects;
+create policy msgmedia_obj_insert on storage.objects for insert to authenticated
+  with check (
+    bucket_id = 'message-media'
+    and public.can_use_message_thread((storage.foldername(name))[1])
+    and (storage.foldername(name))[2] = (select auth.uid())::text
+  );
+
+-- Read. This is the policy that decides who may sign a URL, so it is the whole
+-- of who can see the photograph. Membership of the thread, and nothing else —
+-- no tenant branch, no owner branch, no `or` that would survive the end of the
+-- coaching relationship. When a client changes coach, `clients.trainer_id`
+-- moves and the old coach stops being able to read the thread, which is the
+-- behaviour the messages themselves already have.
+drop policy if exists msgmedia_obj_read on storage.objects;
+create policy msgmedia_obj_read on storage.objects for select to authenticated
+  using (
+    bucket_id = 'message-media'
+    and public.can_use_message_thread((storage.foldername(name))[1])
+  );
+
+-- Delete: your own upload, in a thread you are still on. Not "anything in the
+-- thread" — a coach must not be able to remove a photograph their client sent
+-- them, and a client must not be able to remove the form-check clip their coach
+-- recorded. Membership is required as well as ownership so somebody who is no
+-- longer on the thread cannot reach back into it.
+drop policy if exists msgmedia_obj_delete on storage.objects;
+create policy msgmedia_obj_delete on storage.objects for delete to authenticated
+  using (
+    bucket_id = 'message-media'
+    and public.can_use_message_thread((storage.foldername(name))[1])
+    and (storage.foldername(name))[2] = (select auth.uid())::text
+  );
+
+-- No UPDATE policy, on purpose, and for the reason 91 gives: an UPDATE policy
+-- allows the bytes behind an already-signed key to be replaced, which is a
+-- change nobody could see afterwards. The app uploads with upsert:false and a
+-- fresh key every time, so there is nothing legitimate to overwrite.
+
+-- ── DELIBERATELY ABSENT ──────────────────────────────────────────────────
+-- A tenant or owner read branch. Dropped by name as well as never created, so
+-- one added live by hand and written down nowhere — the drift that produced
+-- parts 121 and 23–25 — does not survive a re-run of setup.sql.
+drop policy if exists msgmedia_obj_tenant_read on storage.objects;
+drop policy if exists msgmedia_obj_owner_read on storage.objects;
+
+-- ▶ a-member-can-read-their-own-membership.sql
+
+-- ── The plan a member is still paying for, which they could not read ────────
+--
+-- The client app had nowhere to show a member their plan, whether it is
+-- current, or when it runs out — app/(client)/membership.tsx had a fabricated
+-- "Plan · Member" and "Valid until <today + 1 year>" removed and replaced with
+-- nothing. Wiring the real record up meant checking first whether a member can
+-- read it at all, because RLS narrows a GRANT and the GRANT on all four tables
+-- in part 29 is the blanket `authenticated` one every table in this project has.
+--
+-- ── What the audit found (run against the live project, not read off) ───────
+--
+-- Part 29 already carries the three self-scoped SELECT policies, and they are
+-- live and they work. Proved with two real client profiles in two different
+-- tenants, each holding a scratch membership and a scratch payment, queried
+-- under `set local role authenticated` with the other member's uid in
+-- request.jwt.claims:
+--
+--   member A: own membership 1, own payment 1, other member's 0 and 0.
+--   member B: A's membership row by primary key 0. A's payment by primary key
+--             0. A's payments by member_id 0. A's gym's memberships 0. A's
+--             gym's plans [].
+--   anon:     cannot read any of it — the read does not even reach a policy,
+--             it dies at `permission denied for function is_owner_of` /
+--             `my_tenant`, which are the SECURITY DEFINER helpers anon has no
+--             EXECUTE on. It fails closed.
+--
+-- So the suspicion that a member cannot see their own membership row was
+-- wrong, and nothing here re-grants what already works.
+--
+-- ── What it could not read, and this is the whole point of this part ────────
+--
+-- The membership row names a plan_id and nothing else. Every human-readable
+-- fact about the plan — its NAME, its PRICE and, in a white-label product, THE
+-- CURRENCY THAT PRICE IS IN — lives in `membership_plans`, and the only
+-- member-facing policy on that table is
+--
+--     membership_plans_tenant_r  for select using (tenant_id = my_tenant() and active)
+--
+-- `and active`. That is right for a price book — nobody should be sold a
+-- retired plan — and it is wrong for the plan somebody is still on. Part 29
+-- says so itself, four lines above the column:
+--
+--     -- A plan may be retired while a membership sold on it is still running,
+--     -- so this goes null rather than taking the membership with it.
+--
+-- The membership survives the retirement; the member's ability to read what
+-- they are paying for does not. Proved live: member A holds a membership on a
+-- plan with active = false, and
+--
+--     select ... from memberships m left join membership_plans p on p.id = m.plan_id
+--
+-- returned their membership with plan, price and currency all NULL.
+--
+-- That is not a blank field, it is a wrong answer. Over PostgREST the embedded
+-- row comes back as `membership_plans: null`, which is byte-identical to a
+-- membership that genuinely has no plan attached (plan_id is nullable — part 29
+-- sets it null when a plan is deleted). A screen cannot tell "your gym has not
+-- recorded a plan for you" from "your plan is one we won't let you see", and
+-- the first sentence is a lie told to somebody being charged every month. The
+-- app distinguishes them by reading plan_id itself; this policy removes the
+-- need to.
+--
+-- ── The policy ─────────────────────────────────────────────────────────────
+--
+-- Narrow on both axes at once, and additive: it grants SELECT on a plan row
+-- only where a membership held BY THE CALLER, IN THAT PLAN'S OWN TENANT,
+-- points at it. Not "plans in my gym" — that is the existing policy and it
+-- already covers the active ones. Not "plans I could ask about". The exact set
+-- of rows is: the plans this person is on, or has been on. Retiring a plan no
+-- longer hides it from the people still on it, and nothing else moves.
+--
+-- The tenant equality is belt-and-braces rather than decoration: nothing in the
+-- schema forces memberships.tenant_id to equal membership_plans.tenant_id
+-- (they are two independent FKs to `tenants`), so an owner-side mistake that
+-- attached a membership to another gym's plan would otherwise become a
+-- cross-tenant read of that gym's price list. With this clause it reads as
+-- nothing at all.
+--
+-- No recursion. The subquery is subject to RLS on `memberships`, whose policies
+-- are `member_id = auth.uid()` and `is_owner_of(tenant_id)` — neither of which
+-- mentions `membership_plans`, so this does not re-enter the table it is
+-- protecting. (28-fix-profiles-recursion.sql is the incident that rule comes
+-- from.) The `m.member_id = auth.uid()` predicate is written out anyway rather
+-- than left to the memberships policy to supply, so the row set this policy
+-- admits does not silently widen if a future part adds a broader read policy
+-- to `memberships`.
+--
+-- `(select auth.uid())` and not bare `auth.uid()`: the scalar subquery is
+-- evaluated once per statement instead of once per row, the form part 29 and
+-- part 121 already use.
+drop policy if exists membership_plans_mine_r on public.membership_plans;
+create policy membership_plans_mine_r on public.membership_plans
+  for select using (
+    exists (
+      select 1
+        from public.memberships m
+       where m.plan_id   = membership_plans.id
+         and m.tenant_id = membership_plans.tenant_id
+         and m.member_id = (select auth.uid())
+    )
+  );
+
+-- The lookup this policy performs on every candidate plan row. idx_memberships_member
+-- (part 29) is on member_id alone; this pairs it with plan_id so the EXISTS is
+-- an index probe rather than a scan of the member's whole membership history.
+create index if not exists idx_memberships_member_plan
+  on public.memberships (member_id, plan_id);
+
+-- ── Two things deliberately NOT done here ──────────────────────────────────
+--
+-- 1. `memberships_own_r` and `gym_payments_own_r` are NOT tenant-scoped, and
+--    are left that way on purpose. Adding `and tenant_id = my_tenant()` would
+--    narrow nothing that matters — `member_id = auth.uid()` is already the
+--    tightest predicate available, and no row it admits belongs to anyone else
+--    — while breaking the one case where the difference shows: a member who
+--    moves gyms. profiles.tenant_id follows them, so my_tenant() becomes the
+--    NEW gym, and the added clause would hide the membership they used to hold
+--    and every payment they ever made to the old one. That is their own money
+--    disappearing out of their own receipts. Which gym a membership belongs to
+--    is a question for the SCREEN, which reads tenant_id off the row and says
+--    so; it is not a reason to refuse them the row.
+--
+-- 2. `memberships.note` and `gym_payments.note` stay readable by the member,
+--    because they already are and this part does not widen or narrow that.
+--    Worth writing down: those are free-text columns the OWNER console writes,
+--    and an owner who types a private remark about a member into one is typing
+--    it somewhere that member can read. Column-level revokes cannot fix it —
+--    owners authenticate as `authenticated` too, so revoking the column takes
+--    it from the console as well. The client app therefore does not select
+--    either column, and anything genuinely private needs a column the member
+--    has no policy on rather than an assumption about this one.
+
+comment on policy membership_plans_mine_r on public.membership_plans is
+  'A member may read a plan their own membership points at, in that plan''s own tenant, whether or not it is still on sale. membership_plans_tenant_r covers the live price book and excludes retired plans, which hid the plan name, price and currency from the people still paying for it.';
+
+-- ▶ the-late-fee-and-the-waitlist.sql
+
+-- ── The cancellation policy, the late fee, and the waitlist ────────────────
+--
+-- Three roadmap items that are one feature, and all three of them were already
+-- half-built in part 01 and then left.
+--
+--   · `charges` has existed since the first schema and is written by NOTHING.
+--     A late cancellation was detected on the calendar, warned about in an
+--     alert, recorded as an outcome — and never billed, anywhere, by anything.
+--     The coach's own screen said "your late-cancel policy would apply", which
+--     described a charge no code in this repo makes.
+--   · `session_waitlist` has existed just as long and is referenced in ONE
+--     COMMENT (src/lib/gymSessions.ts, explaining an ambiguous PostgREST
+--     embed). When a slot freed, the app pushed every client of that coach
+--     "first to book it gets it" and let them race for it — a race the app
+--     creates and then loses, because the loser was told to hurry.
+--   · the policy itself was `trainers.session_fee`: a bare number, with no
+--     notice period, no way to say the fee does not apply, and no way to
+--     forgive one after the fact.
+--
+-- Repple does not take the money. It never has and this part does not start:
+-- there is no payment intent, no Stripe call, no balance. The coach settles the
+-- fee with their client. What Repple owes them is the RECORD — a row that says
+-- who, when, which session, how much and in what currency — and the record is
+-- the product. Every sentence the apps print about it says exactly that.
+--
+-- ── Why the promotion happens INSIDE the cancellation ──────────────────────
+--
+-- The freed slot is never observable as 'available' when somebody is waiting
+-- for it. `cancel_my_session` locks the session row, frees it, and hands it to
+-- the head of the waitlist in one transaction, so there is no window for a
+-- racing `book_session` to win — a racer either sees the row before the commit
+-- (still booked by the canceller, so `status = 'available'` matches nothing) or
+-- after it (booked by the head of the list, same). The waitlist is a queue
+-- because the queue is resolved by the database, not by whoever taps first.
+
+
+-- ── 1. A policy a coach can express ────────────────────────────────────────
+--
+-- `trainers`, not `tenants`: a late-cancellation policy is the coach's, not the
+-- gym's. Two coaches in one gym can and do run different ones, and an
+-- independent coach has no gym at all. The gym still owns the CURRENCY
+-- (`tenants.currency`, part 99) because that is what the money is denominated
+-- in, and a coach does not get to pick that per policy.
+--
+-- Three columns rather than one number, because all three are separate facts a
+-- coach states and any of them alone is unusable:
+--
+--   applies       whether there is a policy at all. Default FALSE — a coach who
+--                 has said nothing has not agreed to charge anybody, and the
+--                 apps say "your coach has not set one" rather than assuming.
+--   notice_hours  the notice period. 24 is the default because it is what the
+--                 apps have always warned about, so an existing coach's policy
+--                 is unchanged the moment they switch it on.
+--   fee           the amount, in the gym's currency, in major units like every
+--                 other money column a human types into (`trainers.session_fee`,
+--                 `tenants.session_fee`). NULL means unstated.
+alter table public.trainers
+  add column if not exists late_cancel_applies boolean not null default false,
+  add column if not exists late_cancel_notice_hours int not null default 24,
+  add column if not exists late_cancel_fee numeric(8,2);
+
+alter table public.trainers drop constraint if exists trainers_late_cancel_notice_range;
+alter table public.trainers add constraint trainers_late_cancel_notice_range
+  check (late_cancel_notice_hours between 1 and 168);
+
+-- A policy that applies must name its amount. This is the constraint that stops
+-- the old bug coming back in a new shape: "the fee applies" with no fee behind
+-- it is what produced "a $0 late fee may apply" on a client's screen, and a
+-- figure about somebody's money that nobody chose is worse than no figure.
+-- Zero is excluded deliberately — a fee of nothing is a policy that does not
+-- apply, and it has its own switch.
+alter table public.trainers drop constraint if exists trainers_late_cancel_fee_stated;
+alter table public.trainers add constraint trainers_late_cancel_fee_stated
+  check (not late_cancel_applies or (late_cancel_fee is not null and late_cancel_fee > 0));
+
+comment on column public.trainers.late_cancel_applies is
+  'Whether this coach charges for a late cancellation at all. FALSE by default — never assume a policy nobody stated.';
+comment on column public.trainers.late_cancel_notice_hours is
+  'Hours of notice required to cancel free of charge. Inside this window the fee is recorded.';
+comment on column public.trainers.late_cancel_fee is
+  'The fee in MAJOR units of tenants.currency. NULL means unstated; a policy that applies may not have one.';
+
+
+-- ── 2. A fee that is actually recorded ─────────────────────────────────────
+--
+-- `charges` gains what a record of a fee needs and did not have:
+--
+--   session_id  what the fee is FOR. Without it a client sees an amount and a
+--               date and has to take it on trust, and the coach cannot answer
+--               "which session was this?" either.
+--   currency    snapshotted, not derived. `tenants.currency` is the gym's today
+--               and a gym may change it; a fee raised last March was raised in
+--               last March's money, and re-reading it through today's tenant
+--               row would silently restate the amount.
+--   waived_at   the forgiveness the policy never had. A coach who lets one off
+--               needs to say so ON the record — deleting the row loses the fact
+--               that it happened, and leaving it standing bills somebody the
+--               coach already excused.
+alter table public.charges
+  add column if not exists session_id uuid references public.sessions(id) on delete set null,
+  add column if not exists currency text,
+  add column if not exists waived_at timestamptz,
+  add column if not exists waived_by uuid references public.profiles(id) on delete set null;
+
+alter table public.charges drop constraint if exists charges_currency_is_iso;
+alter table public.charges add constraint charges_currency_is_iso
+  check (currency is null or currency ~ '^[A-Z]{3}$');
+
+-- Deliberately NOT unique. The same slot can be booked and late-cancelled twice
+-- by the same client, and that is two fees, not one duplicate. A double tap on
+-- Cancel cannot produce a second row because the second call finds the session
+-- no longer booked to them and does nothing at all.
+create index if not exists charges_session_idx on public.charges (session_id);
+create index if not exists charges_client_created_idx on public.charges (client_id, created_at desc);
+
+comment on column public.charges.session_id is
+  'The session this fee is for. NULL for charges that are not about a session.';
+comment on column public.charges.currency is
+  'ISO 4217, snapshotted when the charge was raised. NULL means unknown — render a dash, never a symbol.';
+comment on column public.charges.waived_at is
+  'Set when the coach forgave this fee. The row stays: a waived charge is a fact about what happened, not an absence.';
+
+
+-- ── 3. A waitlist that is a queue ──────────────────────────────────────────
+--
+-- `joined_at` defaults to now(), which is the TRANSACTION timestamp, so two
+-- clients joining in the same microsecond would tie and the order of a queue
+-- would depend on whatever the planner felt like. `seq` is a total order behind
+-- it; the pair is what every ordering below sorts on, and what the app's
+-- `nextWaitlistClaim` in src/lib/booking.ts mirrors so the rule is stated in
+-- both places and tested in one.
+alter table public.session_waitlist add column if not exists seq bigserial;
+
+create index if not exists session_waitlist_order_idx
+  on public.session_waitlist (session_id, joined_at, seq);
+
+comment on column public.session_waitlist.seq is
+  'Tiebreak behind joined_at so the queue has a total order. Never shown to anybody.';
+
+-- The old policy was `for all using (auth.uid() = client_id)` with no WITH
+-- CHECK, so its USING clause doubled as the insert check: a client could insert
+-- a waitlist row for ANY session id in the database, including sessions
+-- belonging to coaches they have never met. Nothing bad followed from it
+-- because nothing read the table — which is exactly the state this part ends.
+--
+-- Joining now goes through `join_session_waitlist`, which checks the slot is
+-- their own coach's, is actually taken, and has not already started. Reading
+-- and leaving stay direct, because both are about the client's own row.
+drop policy if exists session_waitlist_client_rw on public.session_waitlist;
+
+create policy session_waitlist_client_r on public.session_waitlist
+  for select using (client_id = (select auth.uid()));
+
+create policy session_waitlist_client_d on public.session_waitlist
+  for delete using (client_id = (select auth.uid()));
+
+
+-- ── 4. The queue, resolved by the database ─────────────────────────────────
+
+-- Internal. No authorisation of its own and therefore executable by NOBODY: it
+-- is called only by the two SECURITY DEFINER functions below, which have
+-- already established who may free this slot. Revoked from public, anon AND
+-- authenticated — part 120 is the record of what happens when only `public` is
+-- revoked and the two API roles are left holding their separate grants.
+create or replace function public._promote_session_waitlist(p_session uuid)
+returns uuid
+language plpgsql
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+declare
+  v_sess record;
+  v_cand record;
+  v_pack uuid;
+begin
+  select s.id, s.trainer_id, s.starts_at, s.status
+    into v_sess
+    from sessions s
+   where s.id = p_session
+   for update;
+  if not found or v_sess.status <> 'available' then
+    return null;
+  end if;
+
+  -- A session that has already started is not promoted. Handing somebody a slot
+  -- that began ten minutes ago books them into a session they cannot attend and
+  -- draws a credit off their pack for it. The slot simply stays open.
+  if v_sess.starts_at <= now() then
+    return null;
+  end if;
+
+  for v_cand in
+    select w.client_id
+      from session_waitlist w
+      join clients c on c.id = w.client_id
+     where w.session_id = p_session
+       and c.trainer_id = v_sess.trainer_id
+     order by w.joined_at, w.seq
+     for update of w
+  loop
+    begin
+      update sessions
+         set client_id = v_cand.client_id, status = 'booked', released = false
+       where id = p_session;
+
+      -- The credit. A client promoted off a waitlist is booked by the server
+      -- while their phone is in their pocket, so the draw-down `redeemSession`
+      -- does at the moment somebody taps Book has to happen here instead —
+      -- otherwise the queue is the cheapest way to book, and the coach delivers
+      -- a session nobody paid for. Oldest pack first, exactly as redeemSession
+      -- orders them. No pack is the ordinary case for a client who pays per
+      -- session, and it is not an error.
+      select p.id into v_pack
+        from client_purchases p
+       where p.client_id = v_cand.client_id
+         and p.trainer_id = v_sess.trainer_id
+         and p.status = 'paid'
+         and p.sessions_total is not null
+         and p.sessions_total - p.sessions_used > 0
+       order by p.created_at asc
+       limit 1
+         for update;
+      if v_pack is not null then
+        update client_purchases set sessions_used = sessions_used + 1 where id = v_pack;
+      end if;
+
+      delete from session_waitlist
+       where session_id = p_session and client_id = v_cand.client_id;
+
+      return v_cand.client_id;
+    exception when exclusion_violation then
+      -- They are already booked with this coach across that hour. Their place
+      -- in the queue is kept and the next person is tried, rather than the slot
+      -- silently failing to move.
+      continue;
+    end;
+  end loop;
+
+  return null;
+end $fn$;
+
+revoke all on function public._promote_session_waitlist(uuid) from public, anon, authenticated;
+
+comment on function public._promote_session_waitlist(uuid) is
+  'Internal. Hands a freed slot to the head of its waitlist. Callers must authorise first; this function does not.';
+
+
+-- The client cancelling their own booked session: free it, record the fee if
+-- the coach's policy says so, and hand the slot to whoever is first in line —
+-- one transaction, one row lock, no window.
+--
+-- Returns a jsonb report rather than a boolean because every one of these facts
+-- is something the member is then told, and a screen that has to re-read the
+-- row to find out what happened is a screen that can be told a different story
+-- than the one that was written.
+--
+-- `freed: false` is a refusal, not an error: it means the session is not this
+-- caller's, or is not booked. The apps treat it as "nothing changed", which is
+-- true, and say so.
+create or replace function public.cancel_my_session(p_session uuid)
+returns jsonb
+language plpgsql
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+declare
+  v_uid uuid := auth.uid();
+  v_sess record;
+  v_applies boolean := false;
+  v_notice int := 24;
+  v_fee numeric;
+  v_currency text;
+  v_late boolean := false;
+  v_charge uuid;
+  v_promoted uuid;
+  v_waiting int := 0;
+begin
+  if v_uid is null then
+    raise exception 'Not signed in.' using errcode = '42501';
+  end if;
+
+  select s.id, s.trainer_id, s.starts_at, s.duration_min
+    into v_sess
+    from sessions s
+   where s.id = p_session
+     and s.client_id = v_uid
+     and s.status = 'booked'
+   for update;
+
+  if not found then
+    return jsonb_build_object(
+      'freed', false, 'late', false, 'notice_hours', null, 'policy_applies', false,
+      'fee', null, 'currency', null, 'charged', false, 'charge_id', null,
+      'promoted', null, 'waiting', 0);
+  end if;
+
+  select coalesce(t.late_cancel_applies, false),
+         coalesce(t.late_cancel_notice_hours, 24),
+         t.late_cancel_fee,
+         tn.currency
+    into v_applies, v_notice, v_fee, v_currency
+    from trainers t
+    left join tenants tn on tn.id = t.tenant_id
+   where t.id = v_sess.trainer_id;
+
+  -- The rule is `starts_at - now() < notice`, with NO lower bound, and that is
+  -- deliberate: a session that has already begun is inside the window. The app
+  -- has always worked this way (see the note on `late` in cancelBookedSession,
+  -- src/ui/sessions.tsx) and `isLateCancellation` in src/lib/booking.ts does
+  -- NOT, because it requires the session to still be in the future — under that
+  -- rule somebody cancelling a session already in progress comes back "not
+  -- late", is charged nothing and is handed their credit back while their coach
+  -- stands in an empty gym.
+  v_late := (v_sess.starts_at - now()) < make_interval(hours => v_notice);
+
+  update sessions
+     set client_id = null, status = 'available', released = true
+   where id = p_session;
+
+  -- The whole of the billing. No payment intent, no capture, no balance: a row
+  -- that says what is owed to whom for which session, which the coach settles
+  -- themselves. `stripe_payment_intent` stays NULL and that is the point.
+  if v_late and v_applies and v_fee is not null and v_fee > 0
+     and exists (select 1 from clients c where c.id = v_uid) then
+    insert into charges (client_id, amount, reason, session_id, currency)
+    values (v_uid, v_fee, 'late_cancellation', p_session, v_currency)
+    returning id into v_charge;
+  end if;
+
+  v_promoted := public._promote_session_waitlist(p_session);
+
+  select count(*) into v_waiting from session_waitlist where session_id = p_session;
+
+  return jsonb_build_object(
+    'freed', true,
+    'late', v_late,
+    'notice_hours', v_notice,
+    'policy_applies', v_applies,
+    -- Null unless the policy is live. A fee a coach has typed but switched off
+    -- is not a sum anybody owes, and a screen handed the number will print it.
+    'fee', case when v_applies then v_fee else null end,
+    'currency', v_currency,
+    'charged', v_charge is not null,
+    'charge_id', v_charge,
+    'promoted', v_promoted,
+    'waiting', v_waiting);
+end $fn$;
+
+revoke all on function public.cancel_my_session(uuid) from public, anon;
+grant execute on function public.cancel_my_session(uuid) to authenticated;
+
+
+-- The coach freeing a slot themselves. Their cancellation goes through RLS on
+-- `sessions` (they own the row), so the promotion cannot ride along inside it —
+-- this is the explicit second step their screen takes, and it is authorised on
+-- the one fact that matters: the session is theirs.
+create or replace function public.promote_session_waitlist(p_session uuid)
+returns uuid
+language plpgsql
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+declare v_uid uuid := auth.uid();
+begin
+  if v_uid is null then
+    raise exception 'Not signed in.' using errcode = '42501';
+  end if;
+  if not exists (select 1 from sessions s where s.id = p_session and s.trainer_id = v_uid) then
+    raise exception 'That session is not yours.' using errcode = '42501';
+  end if;
+  return public._promote_session_waitlist(p_session);
+end $fn$;
+
+revoke all on function public.promote_session_waitlist(uuid) from public, anon;
+grant execute on function public.promote_session_waitlist(uuid) to authenticated;
+
+
+-- ── 5. Joining, leaving, and seeing the queue ──────────────────────────────
+
+-- Joining is an RPC and not an insert because none of what makes a waitlist
+-- entry legitimate is visible to the client: they cannot read the session row
+-- of a slot somebody else has booked (sessions_client_read shows them their own
+-- sessions and their coach's OPEN ones), so they cannot check whose it is, or
+-- whether it is taken, or whether it has already run.
+create or replace function public.join_session_waitlist(p_session uuid)
+returns jsonb
+language plpgsql
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+declare
+  v_uid uuid := auth.uid();
+  v_sess record;
+  v_pos int;
+  v_waiting int;
+begin
+  if v_uid is null then
+    raise exception 'Not signed in.' using errcode = '42501';
+  end if;
+
+  select s.id, s.trainer_id, s.starts_at, s.client_id, s.status
+    into v_sess
+    from sessions s where s.id = p_session;
+  if not found then
+    raise exception 'That session no longer exists.' using errcode = '42501';
+  end if;
+  if not exists (select 1 from clients c where c.id = v_uid and c.trainer_id = v_sess.trainer_id) then
+    raise exception 'That slot belongs to another coach.' using errcode = '42501';
+  end if;
+  if v_sess.client_id = v_uid then
+    raise exception 'That session is already yours.' using errcode = '22023';
+  end if;
+  if v_sess.status <> 'booked' then
+    raise exception 'That slot is open — book it rather than waiting for it.' using errcode = '22023';
+  end if;
+  if v_sess.starts_at <= now() then
+    raise exception 'That session has already started.' using errcode = '22023';
+  end if;
+
+  insert into session_waitlist (session_id, client_id)
+  values (p_session, v_uid)
+  on conflict (session_id, client_id) do nothing;
+
+  select count(*) into v_pos
+    from session_waitlist w
+   where w.session_id = p_session
+     and (w.joined_at, w.seq) <= (
+       select w2.joined_at, w2.seq from session_waitlist w2
+        where w2.session_id = p_session and w2.client_id = v_uid);
+  select count(*) into v_waiting from session_waitlist w where w.session_id = p_session;
+
+  return jsonb_build_object('joined', true, 'position', v_pos, 'waiting', v_waiting);
+end $fn$;
+
+revoke all on function public.join_session_waitlist(uuid) from public, anon;
+grant execute on function public.join_session_waitlist(uuid) to authenticated;
+
+
+-- Leaving is a plain delete under the client's own policy, wrapped so the
+-- screen gets a straight answer: PostgREST reports a delete that matched no
+-- rows as a success, and "you have left the waitlist" over a row that is still
+-- there is the failure mode this repo keeps finding.
+create or replace function public.leave_session_waitlist(p_session uuid)
+returns boolean
+language plpgsql
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+declare v_uid uuid := auth.uid(); n int;
+begin
+  if v_uid is null then
+    raise exception 'Not signed in.' using errcode = '42501';
+  end if;
+  delete from session_waitlist where session_id = p_session and client_id = v_uid;
+  get diagnostics n = row_count;
+  return n > 0;
+end $fn$;
+
+revoke all on function public.leave_session_waitlist(uuid) from public, anon;
+grant execute on function public.leave_session_waitlist(uuid) to authenticated;
+
+
+-- What the signed-in client is waiting for, with their place in each queue.
+-- Position cannot be computed client-side: `session_waitlist_client_r` shows a
+-- client their own row and nobody else's, so from the app the queue is a set of
+-- one and every position is 1.
+create or replace function public.my_waitlist()
+returns table (
+  session_id uuid,
+  starts_at timestamptz,
+  duration_min int,
+  trainer_id uuid,
+  -- `position` is a reserved word in a function's OUT list; Postgres rejects
+  -- `position int` outright. The queue is what it is.
+  queue_position int,
+  waiting int,
+  still_taken boolean
+)
+language sql
+stable
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+  select w.session_id,
+         s.starts_at,
+         s.duration_min,
+         s.trainer_id,
+         (select count(*)::int from session_waitlist w2
+           where w2.session_id = w.session_id
+             and (w2.joined_at, w2.seq) <= (w.joined_at, w.seq)) as queue_position,
+         (select count(*)::int from session_waitlist w3 where w3.session_id = w.session_id) as waiting,
+         (s.status = 'booked') as still_taken
+    from session_waitlist w
+    join sessions s on s.id = w.session_id
+   where w.client_id = auth.uid()
+   order by s.starts_at asc
+   limit 500;
+$fn$;
+
+revoke all on function public.my_waitlist() from public, anon;
+grant execute on function public.my_waitlist() to authenticated;
+
+
+-- The coach's taken slots, so a client has something to WAIT FOR. Their own
+-- booked sessions are excluded — there is nothing to wait for in a slot you
+-- hold — and no client identity is returned for any of them: a member learns
+-- that an hour is taken, which is what any booking calendar shows, and not by
+-- whom.
+create or replace function public.waitlistable_slots(p_from timestamptz, p_to timestamptz)
+returns table (
+  session_id uuid,
+  starts_at timestamptz,
+  duration_min int,
+  waiting int,
+  my_position int
+)
+language sql
+stable
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+  select s.id,
+         s.starts_at,
+         s.duration_min,
+         (select count(*)::int from session_waitlist w where w.session_id = s.id) as waiting,
+         -- 0 when the caller is not on it: the row comparison against an empty
+         -- subquery is NULL, which nothing counts. 1 is the head of the queue.
+         (select count(*)::int from session_waitlist w2
+           where w2.session_id = s.id
+             and (w2.joined_at, w2.seq) <= (
+               select w3.joined_at, w3.seq from session_waitlist w3
+                where w3.session_id = s.id and w3.client_id = auth.uid())) as my_position
+    from sessions s
+    join clients c on c.id = auth.uid() and c.trainer_id = s.trainer_id
+   where s.status = 'booked'
+     and s.client_id is distinct from auth.uid()
+     and s.starts_at > greatest(p_from, now())
+     and s.starts_at <= p_to
+   order by s.starts_at asc
+   limit 500;
+$fn$;
+
+revoke all on function public.waitlistable_slots(timestamptz, timestamptz) from public, anon;
+grant execute on function public.waitlistable_slots(timestamptz, timestamptz) to authenticated;
+
+
+-- The coach's policy, as the CLIENT is entitled to read it: the notice period
+-- they are held to, the fee they would be charged, and the money it is in.
+-- Returns null when the caller has no coach — which is not a policy of "no
+-- fee", and the app words it differently.
+create or replace function public.my_cancellation_policy()
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+declare v_uid uuid := auth.uid(); v_row record;
+begin
+  if v_uid is null then return null; end if;
+  select t.id as trainer_id,
+         coalesce(t.late_cancel_applies, false) as applies,
+         coalesce(t.late_cancel_notice_hours, 24) as notice_hours,
+         t.late_cancel_fee as fee,
+         tn.currency as currency
+    into v_row
+    from clients c
+    join trainers t on t.id = c.trainer_id
+    left join tenants tn on tn.id = t.tenant_id
+   where c.id = v_uid;
+  if not found then return null; end if;
+  return jsonb_build_object(
+    'trainer_id', v_row.trainer_id,
+    'applies', v_row.applies,
+    'notice_hours', v_row.notice_hours,
+    'fee', case when v_row.applies then v_row.fee else null end,
+    'currency', v_row.currency);
+end $fn$;
+
+revoke all on function public.my_cancellation_policy() from public, anon;
+grant execute on function public.my_cancellation_policy() to authenticated;
+
+-- ▶ intake-is-the-clients.sql
+
+-- ── The form a coach takes before they train somebody ──────────────────────
+--
+-- There was no intake. `app/(client)/onboarding.tsx` asks a goal, a height, a
+-- diet and a list of allergens and stops, which is enough to build a meal plan
+-- and not enough to put a stranger under a barbell. No readiness questions, no
+-- training history, no account of what they have already tried and abandoned,
+-- no idea which days of the week they can actually be in a gym. Every coach in
+-- the trade takes this on paper on day one; Repple asked a coach to start
+-- without it and then gated their programme on injuries the client had thought
+-- to volunteer.
+--
+-- It lands on `clients` rather than in a table of its own, and that is a
+-- decision about who can see it as much as about shape. The row already carries
+-- the rest of what a coach is entitled to know about the person they coach, and
+-- it already has the reads that answer the question correctly: `client_self`
+-- for the person it is about, `clients_trainer_read` for the one coach whose
+-- `trainer_id` is on the row, and nobody else — a coach at the next gym cannot
+-- read it, because there is no policy under which they could.
+--
+-- (`clients_owner_r` also reads the row, for the gym that owns the tenant. That
+-- is pre-existing and it is the same access an owner already has to the
+-- client's disclosed injuries. It is named here so that it is a fact somebody
+-- decided rather than one they inherited: if intake is ever to be narrower than
+-- injuries, that policy is where it would be said, and it is not this part's to
+-- change.)
+--
+-- One column, not two. A completed-at timestamp in a column beside the document
+-- is a second place to say the same thing and therefore a place for the two to
+-- disagree; the document carries its own `updatedAt` and the app reads it from
+-- there. `null` is "never opened it" and is different from `{}`, which is
+-- somebody who started.
+alter table public.clients
+  add column if not exists intake jsonb;
+
+-- Survivability, not validation. The shape belongs to src/lib/intake.ts, which
+-- parses tolerantly because a document written by an older build of the app has
+-- to keep opening. What the database will not accept is an array or a bare
+-- string in a column every reader treats as an object.
+alter table public.clients
+  drop constraint if exists clients_intake_is_object;
+alter table public.clients
+  add constraint clients_intake_is_object
+  check (intake is null or jsonb_typeof(intake) = 'object');
+
+
+-- ── And it belongs to the person who answered it ───────────────────────────
+--
+-- The same rule as `clients.injuries` in part 96 and `clients.glucose_shared`
+-- in part 102, for the same reason and by the same mechanism: row-level
+-- security cannot restrict WHICH COLUMNS an update touches, and
+-- `clients_trainer_update` lets a coach write their own client's row. Without a
+-- trigger, the coach the intake is addressed to could rewrite it — or empty it
+-- — and nothing in the record would say it had happened.
+--
+-- That matters more here than it does for a delivery mode. This document holds
+-- what somebody said about their own heart, their medication, their dizziness
+-- and their joints. It is health information about a person, disclosed by that
+-- person, and its whole value to the coach reading it is that it is what the
+-- client actually said. A field the reader can edit is not a disclosure; it is
+-- a note the reader wrote.
+--
+-- It also has the shape of the injuries gate: a coach who could type an intake
+-- in could type a "no" over every readiness answer and hand themselves a clean
+-- sheet. The client can always change their own answers — that is the point of
+-- them being theirs — and the coach sees what changed because they are reading
+-- the same document.
+--
+-- auth.uid() IS NULL is the service role and migrations, which are server-side
+-- and trusted; every request through PostgREST carries a uid, so a coach is
+-- always caught.
+create or replace function public.clients_intake_is_the_clients()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $fn$
+begin
+  if new.intake is distinct from old.intake
+     and auth.uid() is not null
+     and auth.uid() <> old.id then
+    raise exception 'Only the client may fill in or change their own intake'
+      using errcode = '42501';
+  end if;
+  return new;
+end $fn$;
+
+-- A trigger fires on the table's own authority and never checks EXECUTE, so
+-- nothing here needs to be callable by a request. Revoked from both roles
+-- rather than left at the default so that a SECURITY DEFINER function is not
+-- sitting on the API surface waiting for somebody to find a use for it.
+revoke execute on function public.clients_intake_is_the_clients() from public;
+revoke execute on function public.clients_intake_is_the_clients() from anon;
+
+drop trigger if exists clients_intake_guard on public.clients;
+create trigger clients_intake_guard
+  before update on public.clients
+  for each row execute function public.clients_intake_is_the_clients();
+
+-- ▶ a-cohort-and-a-credit.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- A cohort, and a credit.
+--
+-- Two client screens shipped as shells, and both were shells for the same
+-- reason: the fact each one needed had nowhere to live in the database.
+--
+--   · Challenges had no other athletes. `src/ui/challenges.tsx` was a
+--     three-entry constant with `field: []` on every one of them, because the
+--     six invented athletes that used to be in there ("Maya R.", "Devin K.")
+--     shipped to real clients with invented scores and a rank measured against
+--     people who do not exist. Emptying the array was the right emergency fix
+--     and it left a leaderboard with one person on it.
+--   · Referrals had no referrer. `referrals` records (referred_user, code) and
+--     nothing anywhere maps a code back to the person whose code it is — the
+--     code is derived in JavaScript on the phone, from a name and a uuid, and
+--     the server has never seen the derivation. `referral_count(p_code)`
+--     therefore counts rows carrying a STRING, for whoever asks, about
+--     whatever code they type. Nothing could be credited to anybody because
+--     nothing knew who anybody was.
+--
+-- This part gives both of them the missing fact, and nothing more than that.
+-- In particular it does not decide what a referral is worth: see the last
+-- section.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 1 · challenges — who a client is measured against
+-- ═══════════════════════════════════════════════════════════════════════════
+--
+-- ── The cohort is a gym or a coach's roster, and never the platform ────────
+--
+-- The obvious shape is one global board per challenge. It is wrong here three
+-- times over.
+--
+--   * Repple is white-label. A client of one gym has no relationship with a
+--     client of another, has never met them, and cannot be shown their name —
+--     38-tenant-isolation.sql exists to keep those two populations apart, and
+--     a leaderboard is precisely a list of other people's names and activity.
+--     A global board would be the one screen in the product that walks through
+--     that wall.
+--   * A global board is not a competition, it is a distribution. Ranking a
+--     member who trains three times a week 4,000th out of 9,000 tells them
+--     nothing they can act on and takes something away from them.
+--   * The people a client will actually keep pace with are the ones they see
+--     on a Tuesday evening: the rest of the gym, or the handful of athletes
+--     their coach is training. That is the group a "challenge" already means
+--     when a coach says the word out loud.
+--
+-- So the cohort is exactly one of two things, and which one is a COLUMN rather
+-- than a convention, for the reason 109-wellness-and-announcements gives about
+-- `announcements.coach_id`: a rule that has to ask what role the author had is
+-- a rule that changes meaning when somebody's role changes.
+--
+--     tenant_id not null, coach_id null   every member of that gym
+--     coach_id not null, tenant_id null   that coach's current roster
+--
+-- Exactly one, enforced by a check. `coach_id` rows carry no tenant on purpose
+-- and by precedent — a solo coach with no gym must be able to run a challenge,
+-- and filling in a tenant for them would mean choosing one, which is inventing
+-- one. See the note in src/ui/announcements.tsx that says the same thing.
+--
+-- ── The score is computed here, from `workouts`, and never submitted ───────
+--
+-- The provider used to compute the client's score on the phone from their own
+-- log. That was fine while the only reader was the person themselves. The
+-- moment it becomes a rank against other people it is a number one athlete can
+-- type — a POST of `{score: 900}` is all it would take — and the first person
+-- to notice would quietly own every board in their gym. Nobody would be able
+-- to tell, because a fabricated score looks exactly like a real one.
+--
+-- So every figure on every board is derived here from rows the athlete cannot
+-- forge either: `workouts`, written under `workouts_own` (their own user_id) or
+-- by their coach under `logged_by`. There is no score column anywhere in this
+-- part, and no way to write one.
+--
+-- ── Days belong to the challenge, not to the phone ────────────────────────
+--
+-- Two of the three metrics count CALENDAR DAYS, and a calendar day is a
+-- question about a time zone. src/lib/streaks.ts deliberately uses the phone's
+-- local day, which is right for a personal streak — an evening session must
+-- count as tonight even after its ISO timestamp has rolled into tomorrow in
+-- UTC. It is wrong for a shared board: two athletes in the same gym on
+-- different sides of midnight would be counting different days, and their ranks
+-- would not be comparable.
+--
+-- `challenges.time_zone` is therefore the board's own zone, applied to
+-- everybody on it. The gym picks it once. A trigger checks that it is a zone
+-- this database actually knows, because the symptom of a typo is not a bad
+-- value in a column — it is every read of that board raising, forever.
+
+create table if not exists public.challenges (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid references public.tenants(id) on delete cascade,
+  coach_id uuid references public.profiles(id) on delete cascade,
+  title text not null,
+  blurb text,
+  -- 'days'   distinct training days inside the window
+  -- 'streak' longest run of consecutive training days inside the window
+  -- 'volume' tonnes lifted inside the window (Σ reps × kg ÷ 1000)
+  metric text not null,
+  unit text not null default 'days',
+  goal numeric not null,
+  starts_at timestamptz not null,
+  ends_at timestamptz not null,
+  time_zone text not null default 'UTC',
+  icon text,
+  created_by uuid references public.profiles(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+
+-- Constraints added separately and idempotently so this part re-runs against a
+-- table an earlier run already created.
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'challenges_one_cohort') then
+    alter table public.challenges add constraint challenges_one_cohort
+      check (num_nonnulls(tenant_id, coach_id) = 1);
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'challenges_metric_known') then
+    alter table public.challenges add constraint challenges_metric_known
+      check (metric in ('days', 'streak', 'volume'));
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'challenges_window') then
+    alter table public.challenges add constraint challenges_window
+      check (ends_at > starts_at);
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'challenges_goal_positive') then
+    -- A goal of zero is completed by standing still, and a negative one can
+    -- never be completed at all. Both render a progress meter that lies.
+    alter table public.challenges add constraint challenges_goal_positive
+      check (goal > 0);
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'challenges_title_nonblank') then
+    alter table public.challenges add constraint challenges_title_nonblank
+      check (btrim(title) <> '' and length(title) <= 80);
+  end if;
+end $$;
+
+comment on column public.challenges.tenant_id is
+  'Not null = the cohort is every member of this gym. Mutually exclusive with coach_id.';
+comment on column public.challenges.coach_id is
+  'Not null = the cohort is this coach''s current roster. Mutually exclusive with tenant_id.';
+comment on column public.challenges.time_zone is
+  'The zone whose calendar days the day-counting metrics use, for everyone on the board.';
+
+create index if not exists idx_challenges_tenant_ends
+  on public.challenges (tenant_id, ends_at desc) where tenant_id is not null;
+create index if not exists idx_challenges_coach_ends
+  on public.challenges (coach_id, ends_at desc) where coach_id is not null;
+
+-- A zone Postgres does not know is not a bad column value, it is an outage:
+-- `performed_at at time zone 'Europe/Lodnon'` raises, so one typo at creation
+-- time makes every read of that board fail for every athlete on it. Caught on
+-- the way in, where exactly one person is looking at an error message.
+create or replace function public.challenges_zone_is_real()
+returns trigger
+language plpgsql
+set search_path to 'public', 'pg_temp'
+as $fn$
+begin
+  begin
+    perform now() at time zone new.time_zone;
+  exception when others then
+    raise exception 'Not a time zone this database knows: %', new.time_zone
+      using errcode = '22023';
+  end;
+  return new;
+end $fn$;
+
+-- Trigger functions are reachable by nobody; see 51-advisor-tidy.sql. Named
+-- rather than left at the default because PUBLIC carries both API roles, and
+-- revoking only `anon` (or only `public`) is what left a hole here before.
+revoke execute on function public.challenges_zone_is_real() from public;
+revoke execute on function public.challenges_zone_is_real() from anon;
+revoke execute on function public.challenges_zone_is_real() from authenticated;
+
+drop trigger if exists challenges_zone_guard on public.challenges;
+create trigger challenges_zone_guard
+  before insert or update on public.challenges
+  for each row execute function public.challenges_zone_is_real();
+
+
+-- ── Joining is the consent, and it is the only consent there is ────────────
+--
+-- A leaderboard shows one person's activity to another. Nothing in this schema
+-- puts anybody on a board: `challenge_participants` has exactly one writer per
+-- row, the person themselves, and a client who never taps Join never appears
+-- to anyone. Leaving deletes the row and takes them off it.
+--
+-- The row is readable by its owner and by nobody else — deliberately not by
+-- the other participants. Everything a co-participant is shown comes out of
+-- `challenge_board()` below, which returns a first name and a number and does
+-- not return user ids, so there is nothing on the board to join back to a
+-- profile, a tenant, or another table. That is the same argument
+-- 115-the-face-that-goes-with-the-name makes and it is worth restating: RLS
+-- chooses ROWS, never columns, so "they may see the name and the score" is not
+-- a sentence a policy can say. Only a select list can say it.
+create table if not exists public.challenge_participants (
+  challenge_id uuid not null references public.challenges(id) on delete cascade,
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  joined_at timestamptz not null default now(),
+  primary key (challenge_id, user_id)
+);
+
+create index if not exists idx_challenge_participants_user
+  on public.challenge_participants (user_id);
+
+alter table public.challenges enable row level security;
+alter table public.challenge_participants enable row level security;
+
+-- RLS narrows a GRANT, it does not confer one. Both tables are new, so the
+-- grants below are the whole of what either API role may attempt, and `anon`
+-- is given nothing at all rather than being left to a policy that happens to
+-- evaluate false.
+grant select, insert, update, delete on public.challenges to authenticated;
+grant select, insert, delete on public.challenge_participants to authenticated;
+revoke all on public.challenges from anon;
+revoke all on public.challenge_participants from anon;
+
+-- Who can see that a challenge exists. The two cohort arms are the client's;
+-- the two after them are so the coach and the owner apps can list what they
+-- themselves are running.
+drop policy if exists challenges_read on public.challenges;
+create policy challenges_read on public.challenges for select
+  using (
+    (coach_id is null and tenant_id = public.my_tenant())
+    or (coach_id is not null and public.is_my_coach(coach_id))
+    or (coach_id is not null and coach_id = (select auth.uid()))
+    or (tenant_id is not null and public.is_owner_of(tenant_id))
+  );
+
+-- The gym's own board is the owner's to run. `created_by` must be the writer:
+-- an account cannot put somebody else's name on a challenge.
+drop policy if exists challenges_owner_rw on public.challenges;
+create policy challenges_owner_rw on public.challenges for all
+  using      (coach_id is null and public.is_owner_of(tenant_id))
+  with check (coach_id is null and public.is_owner_of(tenant_id)
+              and created_by = (select auth.uid()));
+
+-- And a coach's board is the coach's, including the ability to delete one they
+-- set up wrong — the same reasoning `ann_coach_rw` gives: a wrong challenge
+-- left on forty dashboards permanently is worse than the write being possible.
+--
+-- Note what is NOT required: that `profiles.role` says 'trainer'. A row whose
+-- `coach_id` is the writer is readable only by accounts whose
+-- `clients.trainer_id` points at that writer, so an account nobody has as their
+-- coach can write these all day and no other person can read one.
+drop policy if exists challenges_coach_rw on public.challenges;
+create policy challenges_coach_rw on public.challenges for all
+  using      (coach_id = (select auth.uid()))
+  with check (coach_id = (select auth.uid()) and tenant_id is null
+              and created_by = (select auth.uid()));
+
+-- One row, one owner, one reader.
+drop policy if exists cp_self_read on public.challenge_participants;
+create policy cp_self_read on public.challenge_participants for select
+  using (user_id = (select auth.uid()));
+
+-- You may put yourself on a board you can see, while it is still running.
+-- `exists (… from challenges …)` is evaluated with RLS applied, so
+-- `challenges_read` above is the eligibility rule and there is not a second
+-- copy of it here to drift out of step with the first.
+drop policy if exists cp_self_join on public.challenge_participants;
+create policy cp_self_join on public.challenge_participants for insert
+  with check (
+    user_id = (select auth.uid())
+    and exists (select 1 from public.challenges c
+                 where c.id = challenge_id and now() < c.ends_at)
+  );
+
+-- And take yourself off one at any time, running or finished.
+drop policy if exists cp_self_leave on public.challenge_participants;
+create policy cp_self_leave on public.challenge_participants for delete
+  using (user_id = (select auth.uid()));
+
+
+-- ── The two reads the client app makes ─────────────────────────────────────
+--
+-- Both are SECURITY DEFINER and both restate the visibility rule from
+-- `challenges_read` in their own bodies, because a definer function does not
+-- consult policies. That duplication is deliberate and is the only duplication
+-- in this file that is: the alternative is a function that reads every gym's
+-- challenges and trusts its arguments.
+--
+-- The scoring CTEs are also written out twice, once in each function, and that
+-- is deliberate for a different and less obvious reason. The natural shape is a
+-- shared helper returning (user_id, score) — and a helper is a function, and
+-- 40-function-grants.sql loops over the catalogue granting EXECUTE on every
+-- non-trigger function to `authenticated`, by design, because a hand-kept list
+-- of names is what let thirty-two definer functions sit on the API surface. A
+-- helper here would be re-granted by that loop the next time anybody runs it,
+-- and it would hand out participant user ids to any caller who asked. Fifteen
+-- duplicated lines are cheaper than a function that is one re-run away from
+-- being a leak.
+
+-- What the Challenges screen lists: the challenges this client can see, whether
+-- they have joined, how many people are on each board, and their OWN score.
+--
+-- Own score, for a challenge they have not joined, is their own data and is
+-- shown to them before they commit to anything — which is the point: "here is
+-- what your last thirty days would look like on this board" is the honest
+-- invitation, and it exposes nobody.
+drop function if exists public.my_challenges();
+create function public.my_challenges()
+returns table (
+  id uuid, title text, blurb text, metric text, unit text, goal numeric,
+  starts_at timestamptz, ends_at timestamptz, time_zone text, icon text,
+  coach_id uuid, joined boolean, participants int, my_score numeric
+)
+language sql
+stable
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+  with vis as (
+    select c.*
+      from challenges c
+     where (
+             (c.coach_id is null and c.tenant_id = my_tenant())
+             or (c.coach_id is not null and is_my_coach(c.coach_id))
+           )
+       -- A board nobody can still reach falls off the screen a month after it
+       -- ends. It is not deleted: the rows are the record of what was run.
+       and c.ends_at > now() - interval '30 days'
+  ),
+  day_rows as (
+    select vis.id as cid,
+           (w.performed_at at time zone vis.time_zone)::date as d
+      from vis
+      join workouts w
+        on w.user_id = (select auth.uid())
+       and w.performed_at >= vis.starts_at
+       and w.performed_at <  vis.ends_at
+     where vis.metric in ('days', 'streak')
+     group by 1, 2
+  ),
+  -- Gaps and islands: consecutive days share (day − their position), so the
+  -- longest run is the largest group.
+  runs as (
+    select day_rows.cid, day_rows.d,
+           day_rows.d - (row_number() over (partition by day_rows.cid order by day_rows.d))::int as grp
+      from day_rows
+  ),
+  streaks as (
+    select x.cid, max(x.n) as best
+      from (select runs.cid, runs.grp, count(*) as n from runs group by 1, 2) x
+     group by 1
+  ),
+  day_counts as (
+    select day_rows.cid, count(*)::numeric as n from day_rows group by 1
+  ),
+  vol as (
+    select vis.id as cid,
+           sum(((s->>0)::numeric) * ((s->>1)::numeric)) / 1000.0 as tonnes
+      from vis
+      join workouts w
+        on w.user_id = (select auth.uid())
+       and w.performed_at >= vis.starts_at
+       and w.performed_at <  vis.ends_at
+      -- `sets` is nullable and is jsonb, so it can hold anything a past build
+      -- ever wrote. Anything that is not an array of two numbers contributes
+      -- nothing rather than raising: a board that 500s because one row from
+      -- 2025 holds a string is a board nobody can see.
+      cross join lateral jsonb_array_elements(
+        case when jsonb_typeof(w.sets) = 'array' then w.sets else '[]'::jsonb end) s
+     where vis.metric = 'volume'
+       and jsonb_typeof(s->0) = 'number'
+       and jsonb_typeof(s->1) = 'number'
+     group by 1
+  ),
+  head_count as (
+    select cp.challenge_id as cid, count(*)::int as n
+      from challenge_participants cp
+     where cp.challenge_id in (select vis.id from vis)
+     group by 1
+  )
+  select vis.id, vis.title, vis.blurb, vis.metric, vis.unit, vis.goal,
+         vis.starts_at, vis.ends_at, vis.time_zone, vis.icon, vis.coach_id,
+         exists (select 1 from challenge_participants cp
+                  where cp.challenge_id = vis.id and cp.user_id = (select auth.uid())),
+         coalesce(head_count.n, 0),
+         case vis.metric
+           when 'days'   then coalesce(day_counts.n, 0)
+           when 'streak' then coalesce(streaks.best, 0)::numeric
+           when 'volume' then round(coalesce(vol.tonnes, 0), 1)
+           else 0
+         end
+    from vis
+    left join day_counts on day_counts.cid = vis.id
+    left join streaks    on streaks.cid    = vis.id
+    left join vol        on vol.cid        = vis.id
+    left join head_count on head_count.cid = vis.id
+   order by vis.ends_at asc, vis.title asc;
+$fn$;
+
+revoke execute on function public.my_challenges() from public;
+revoke execute on function public.my_challenges() from anon;
+grant execute on function public.my_challenges() to authenticated;
+
+
+-- The board itself. A place, a first name, a score, and whether the row is
+-- yours. That list is the entire exposure of this feature and it is stated in
+-- a select list rather than left to a policy, for the reason above.
+--
+-- Three refusals before a single row is computed, each raising 42501 rather
+-- than returning nothing — an empty answer would be indistinguishable from a
+-- board with nobody on it, which is the exact confusion src/ui/loadStatus.ts
+-- exists to end:
+--
+--   1. not signed in;
+--   2. signed in, but this challenge is not in your gym and not your coach's;
+--   3. eligible, but not on the board. You see the people you are standing
+--      beside; you do not get to read a roster you are not part of.
+--
+-- `first name only`: no surname, no avatar, no id. Two athletes called Sam
+-- appear as two Sams, and that ambiguity is the price and is worth paying —
+-- the alternative is a screen that tells forty people which Sam.
+drop function if exists public.challenge_board(uuid);
+create function public.challenge_board(p_challenge uuid)
+returns table (place int, display_name text, score numeric, is_me boolean)
+language plpgsql
+stable
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+declare
+  uid uuid := (select auth.uid());
+  c_row public.challenges%rowtype;
+begin
+  if uid is null then
+    raise exception 'Sign in to see a challenge board' using errcode = '42501';
+  end if;
+
+  select * into c_row from public.challenges c where c.id = p_challenge;
+  -- Same message for "no such challenge" and "not yours": the difference
+  -- between them is itself an answer about another gym's data.
+  if not found
+     or not ((c_row.coach_id is null and c_row.tenant_id = my_tenant())
+             or (c_row.coach_id is not null and is_my_coach(c_row.coach_id))) then
+    raise exception 'No such challenge' using errcode = '42501';
+  end if;
+
+  if not exists (select 1 from challenge_participants cp
+                  where cp.challenge_id = c_row.id and cp.user_id = uid) then
+    raise exception 'Join the challenge to see who else is on the board'
+      using errcode = '42501';
+  end if;
+
+  return query
+  with p as (
+    select cp.user_id as u from challenge_participants cp where cp.challenge_id = c_row.id
+  ),
+  day_rows as (
+    select w.user_id as u, (w.performed_at at time zone c_row.time_zone)::date as d
+      from workouts w
+     where c_row.metric in ('days', 'streak')
+       and w.user_id in (select p.u from p)
+       and w.performed_at >= c_row.starts_at
+       and w.performed_at <  c_row.ends_at
+     group by 1, 2
+  ),
+  runs as (
+    select day_rows.u, day_rows.d,
+           day_rows.d - (row_number() over (partition by day_rows.u order by day_rows.d))::int as grp
+      from day_rows
+  ),
+  streaks as (
+    select x.u, max(x.n) as best
+      from (select runs.u, runs.grp, count(*) as n from runs group by 1, 2) x
+     group by 1
+  ),
+  day_counts as (
+    select day_rows.u, count(*)::numeric as n from day_rows group by 1
+  ),
+  vol as (
+    select w.user_id as u,
+           sum(((s->>0)::numeric) * ((s->>1)::numeric)) / 1000.0 as tonnes
+      from workouts w
+      cross join lateral jsonb_array_elements(
+        case when jsonb_typeof(w.sets) = 'array' then w.sets else '[]'::jsonb end) s
+     where c_row.metric = 'volume'
+       and w.user_id in (select p.u from p)
+       and w.performed_at >= c_row.starts_at
+       and w.performed_at <  c_row.ends_at
+       and jsonb_typeof(s->0) = 'number'
+       and jsonb_typeof(s->1) = 'number'
+     group by 1
+  ),
+  scored as (
+    select p.u,
+           case c_row.metric
+             when 'days'   then coalesce(day_counts.n, 0)
+             when 'streak' then coalesce(streaks.best, 0)::numeric
+             when 'volume' then round(coalesce(vol.tonnes, 0), 1)
+             else 0
+           end as sc
+      from p
+      left join day_counts on day_counts.u = p.u
+      left join streaks    on streaks.u    = p.u
+      left join vol        on vol.u        = p.u
+  )
+  select rank() over (order by scored.sc desc)::int,
+         coalesce(nullif(btrim(split_part(btrim(pr.full_name), ' ', 1)), ''), 'Athlete'),
+         scored.sc,
+         scored.u = uid
+    from scored
+    left join profiles pr on pr.id = scored.u
+   -- Ties are ordered by name, not by id or join time: a stable order that
+   -- carries no information about who anybody is.
+   order by scored.sc desc,
+            coalesce(nullif(btrim(split_part(btrim(pr.full_name), ' ', 1)), ''), 'Athlete') asc
+   limit 200;
+end $fn$;
+
+revoke execute on function public.challenge_board(uuid) from public;
+revoke execute on function public.challenge_board(uuid) from anon;
+grant execute on function public.challenge_board(uuid) to authenticated;
+
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 2 · referrals — the map from a code to the person whose code it is
+-- ═══════════════════════════════════════════════════════════════════════════
+--
+-- ── What was missing ───────────────────────────────────────────────────────
+--
+-- `app/(client)/referral.tsx` builds a code on the phone: the first name, a
+-- dash, and four base-36 characters of a hash of the user's id. It shares that
+-- string through the OS sheet, a friend types it at sign-up, and
+-- `record_referral` stores (referred_user, code). At no point does anything
+-- record whose code it was. `referral_count(p_code)` closes the loop by
+-- counting rows carrying that string — which means two things, both bad:
+--
+--   * nothing is attributed. A row saying "somebody arrived with the string
+--     SAM-4F2A" cannot pay anybody, because the string is not a person.
+--   * anybody can count anybody. The function takes a code as an argument and
+--     answers for any code any signed-in caller types, including one they
+--     watched somebody else share.
+--
+-- ── The server derives the code, so a code cannot be claimed ──────────────
+--
+-- The obvious fix is to let the phone register whatever code it derived. That
+-- creates a land grab: codes are short, deterministic and shared publicly, so
+-- the first account to register a string it did not derive inherits the
+-- referrals that string earns.
+--
+-- Instead `referral_code_for()` below is the phone's derivation, transcribed
+-- into SQL, over `profiles.full_name` and the user's own id. A caller cannot
+-- ask for a code — they can only be given theirs. That also keeps continuity
+-- with every code already shared before this shipped, because it produces the
+-- same string the phone did for the same person.
+--
+-- It is stored once, on first claim, and never re-derived. A person who
+-- changes their display name keeps the code they have already printed on
+-- something.
+
+create table if not exists public.referral_codes (
+  user_id uuid primary key references public.profiles(id) on delete cascade,
+  code text not null,
+  created_at timestamptz not null default now()
+);
+
+create unique index if not exists idx_referral_codes_code
+  on public.referral_codes (upper(code));
+
+alter table public.referral_codes enable row level security;
+
+-- Nobody reads this table through PostgREST, in either role. It is the map
+-- from a public string to a person, so a select on it is a directory of who
+-- holds which code; every legitimate read goes through a function below that
+-- answers only about the caller. No grant, and therefore no policy is needed —
+-- but RLS is enabled anyway so that a grant added later by somebody in a hurry
+-- is not immediately a directory.
+revoke all on public.referral_codes from anon;
+revoke all on public.referral_codes from authenticated;
+
+-- The referrer, resolved at the moment the referral is recorded.
+--
+-- Kept as a column rather than re-resolved from `code` on every read, because
+-- the code is a string a person can be given and attribution is a fact about a
+-- person. If a code were ever reassigned, the referrals already earned under it
+-- must not move.
+alter table public.referrals
+  add column if not exists referrer_id uuid references public.profiles(id) on delete set null;
+
+create index if not exists idx_referrals_referrer
+  on public.referrals (referrer_id) where referrer_id is not null;
+
+-- ── The phone's derivation, in SQL ─────────────────────────────────────────
+--
+-- Transcribed from `codeFrom(name, id)` in app/(client)/referral.tsx:
+--
+--   first = (name.trim().split(' ')[0] || 'REP').toUpperCase()
+--             .replace(/[^A-Z]/g, '').slice(0, 6) || 'REP'
+--   h     = 0; for each char of id: h = (h * 31 + charCode) >>> 0
+--   tag   = h.toString(36).toUpperCase().slice(0, 4).padStart(4, '0')
+--   code  = first + '-' + tag
+--
+-- `>>> 0` is a wrap to 32 bits, which is the modulo below. IMMUTABLE because it
+-- is a pure function of its two arguments; it reads no table and calls nothing
+-- that does.
+--
+-- It is revoked from every role, including `authenticated`, so it is not on the
+-- API surface. One honest caveat: 40-function-grants.sql loops over the whole
+-- catalogue granting EXECUTE to `authenticated`, and running that part ON ITS
+-- OWN after this one would put this function back on the surface. In file order
+-- 40 runs before 128, so a full build of setup.sql leaves the revoke standing —
+-- and if the loop ever did reach it, all a caller could do is compute the code
+-- of a user whose id AND display name they already have. That is a gift, not a
+-- leak: a code can only ever credit its owner.
+create or replace function public.referral_code_for(p_id uuid, p_name text)
+returns text
+language plpgsql
+immutable
+set search_path to 'pg_catalog'
+as $fn$
+declare
+  seed text := p_id::text;
+  h bigint := 0;
+  i int;
+  b text := '';
+  first text;
+begin
+  for i in 1 .. length(seed) loop
+    h := (h * 31 + ascii(substr(seed, i, 1))) % 4294967296;
+  end loop;
+
+  if h = 0 then
+    b := '0';
+  end if;
+  while h > 0 loop
+    b := substr('0123456789abcdefghijklmnopqrstuvwxyz', (h % 36)::int + 1, 1) || b;
+    h := h / 36;
+  end loop;
+
+  first := substr(upper(regexp_replace(split_part(btrim(coalesce(p_name, '')), ' ', 1),
+                                       '[^A-Za-z]', '', 'g')), 1, 6);
+  if first = '' then
+    first := 'REP';
+  end if;
+
+  return first || '-' || upper(lpad(substr(b, 1, 4), 4, '0'));
+end $fn$;
+
+revoke execute on function public.referral_code_for(uuid, text) from public;
+revoke execute on function public.referral_code_for(uuid, text) from anon;
+revoke execute on function public.referral_code_for(uuid, text) from authenticated;
+
+-- The caller's own code, created on first ask. Takes no argument, so there is
+-- nothing to point at anybody else.
+--
+-- The collision loop matters more than it looks: two people called Sam whose
+-- ids hash to the same four characters would otherwise share a code and share
+-- each other's referrals. A suffix is appended until the insert takes.
+create or replace function public.my_referral_code()
+returns text
+language plpgsql
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+declare
+  uid uuid := (select auth.uid());
+  base text;
+  candidate text;
+  n int := 0;
+begin
+  if uid is null then
+    return null;
+  end if;
+
+  select rc.code into candidate from referral_codes rc where rc.user_id = uid;
+  if candidate is not null then
+    return candidate;
+  end if;
+
+  select referral_code_for(uid, p.full_name) into base from profiles p where p.id = uid;
+  if base is null then
+    base := referral_code_for(uid, null);
+  end if;
+
+  candidate := base;
+  loop
+    begin
+      insert into referral_codes (user_id, code) values (uid, candidate);
+      -- Rows recorded before this account had a registered code carry the
+      -- string and no referrer. They are adopted here, and only here, and only
+      -- by the account the string DERIVES from — which is why the derivation is
+      -- server-side. Never overwrites a referrer that is already set, and never
+      -- adopts the caller's own row.
+      update referrals r
+         set referrer_id = uid
+       where r.referrer_id is null
+         and upper(r.code) = upper(candidate)
+         and r.referred_user_id <> uid;
+      return candidate;
+    exception when unique_violation then
+      -- Either another session created this caller's row a moment ago, or the
+      -- string is taken by somebody else. The first case is answered by
+      -- re-reading; the second by trying the next suffix.
+      select rc.code into candidate from referral_codes rc where rc.user_id = uid;
+      if candidate is not null then
+        return candidate;
+      end if;
+      n := n + 1;
+      if n > 20 then
+        raise exception 'Could not allocate a referral code' using errcode = '55000';
+      end if;
+      candidate := base || n::text;
+    end;
+  end loop;
+end $fn$;
+
+revoke execute on function public.my_referral_code() from public;
+revoke execute on function public.my_referral_code() from anon;
+grant execute on function public.my_referral_code() to authenticated;
+
+-- ── Recording one ──────────────────────────────────────────────────────────
+--
+-- Same signature and same idempotence as 02-domain-schema's version, because
+-- `app/welcome.tsx` on already-installed phones calls it and will keep calling
+-- it. What is new: the referrer is resolved and stored, and an account cannot
+-- refer itself — a code is deterministic from your own id, so without this
+-- check the first thing anybody would do is type their own.
+create or replace function public.record_referral(p_code text)
+returns void
+language plpgsql
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+declare
+  uid uuid := (select auth.uid());
+  c text := upper(btrim(coalesce(p_code, '')));
+  ref uuid;
+begin
+  if uid is null or c = '' then
+    return;
+  end if;
+
+  select rc.user_id into ref from referral_codes rc where upper(rc.code) = c;
+  if ref = uid then
+    return;
+  end if;
+
+  -- First code wins. A second call with a different code changes nothing:
+  -- somebody arrived once, and which invitation brought them is not a thing
+  -- they get to revise later.
+  insert into referrals (referred_user_id, code, referrer_id)
+  values (uid, c, ref)
+  on conflict (referred_user_id) do nothing;
+end $fn$;
+
+revoke execute on function public.record_referral(text) from public;
+revoke execute on function public.record_referral(text) from anon;
+grant execute on function public.record_referral(text) to authenticated;
+
+-- ── What counts as converted, and why it is not stored ─────────────────────
+--
+-- A signup, a first session and a first payment are three different promises,
+-- and the screen has to make exactly one of them. This picks the middle one:
+--
+--     A referral has CONVERTED when the person who used the code has logged
+--     their first workout.
+--
+-- A signup is not a conversion. An install that never trains costs the gym
+-- money and brings it nothing, and a referral scheme that pays for installs is
+-- a scheme that pays for nothing — which is also how it becomes a scheme people
+-- game. A first PAYMENT would be the strongest claim and it is not one this
+-- database can make honestly today: money arrives through Stripe Connect, which
+-- is not live for coaches yet (see 21-connect.sql), and a great many members
+-- train under a gym membership that never produces a per-client charge at all.
+-- Promising "when they pay" and then reporting on something else is worse than
+-- promising less.
+--
+-- A logged workout is observable, unambiguous, and already in the database for
+-- an honest reason. It also happens to be the thing the referrer actually did:
+-- they got somebody training.
+--
+-- It is DERIVED at read time rather than stamped into a column by a trigger,
+-- for two reasons. A stored `converted_at` is a second copy of a fact
+-- `workouts` already holds, and the only thing a second copy can do is
+-- disagree. And the trigger would have to sit on `workouts` — the hottest write
+-- path in the product, where an exception means a client's sets do not save.
+-- Nothing about a referral is worth putting in front of that.
+--
+-- The honest edge: a referred member who deletes every workout they logged
+-- reverts to unconverted. That is right — the record says what is true now —
+-- and it is stated here so that nobody reads it later as a bug.
+
+-- The list: one row per person who arrived with the caller's code.
+--
+-- A first name and two timestamps. Not a surname, not an email, not an avatar,
+-- not a user id: the referrer is being told which of their invitations worked,
+-- and that needs a name they can recognise and nothing else. A code shared
+-- publicly can be used by a stranger, and this is what a stranger's row shows.
+create or replace function public.my_referrals()
+returns table (friend_name text, joined_at timestamptz, started_at timestamptz)
+language sql
+stable
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+  select coalesce(nullif(btrim(split_part(btrim(p.full_name), ' ', 1)), ''), 'A friend'),
+         r.created_at,
+         (select min(w.performed_at) from workouts w where w.user_id = r.referred_user_id)
+    from referrals r
+    left join profiles p on p.id = r.referred_user_id
+   where r.referrer_id = (select auth.uid())
+   order by r.created_at desc
+   limit 200;
+$fn$;
+
+revoke execute on function public.my_referrals() from public;
+revoke execute on function public.my_referrals() from anon;
+grant execute on function public.my_referrals() to authenticated;
+
+-- The two counts, computed over ALL of the caller's referrals rather than over
+-- the page `my_referrals()` returns.
+--
+-- Separate on purpose. A total computed from a capped list is a subtotal
+-- presented as a total — see src/lib/rowCap.ts, which is the same failure
+-- arriving through PostgREST's silent 1000-row limit. The list may be cut; the
+-- counts never are.
+create or replace function public.my_referral_summary()
+returns table (joined int, converted int)
+language sql
+stable
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+  select count(*)::int,
+         count(*) filter (
+           where exists (select 1 from workouts w where w.user_id = r.referred_user_id)
+         )::int
+    from referrals r
+   where r.referrer_id = (select auth.uid());
+$fn$;
+
+revoke execute on function public.my_referral_summary() from public;
+revoke execute on function public.my_referral_summary() from anon;
+grant execute on function public.my_referral_summary() to authenticated;
+
+-- The old function, narrowed rather than dropped.
+--
+-- Dropping it would break the build that is on phones today: `referralCount`
+-- in src/lib/referrals.ts calls it, and a missing RPC there would make the
+-- Invite screen stop reporting anything until that phone took the update.
+-- Narrowed, an old build keeps working for the caller's OWN code and answers
+-- NULL for anybody else's — which src/lib/referrals.ts already maps to "say
+-- nothing", because null there has always meant "could not be read" rather
+-- than zero.
+--
+-- It also now counts what the new screen counts: rows ATTRIBUTED to the caller,
+-- not rows carrying a string.
+create or replace function public.referral_count(p_code text)
+returns int
+language sql
+stable
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+  select case
+    when exists (select 1 from referral_codes rc
+                  where rc.user_id = (select auth.uid())
+                    and upper(rc.code) = upper(btrim(coalesce(p_code, ''))))
+    then (select count(*)::int from referrals r where r.referrer_id = (select auth.uid()))
+    else null
+  end;
+$fn$;
+
+revoke execute on function public.referral_count(text) from public;
+revoke execute on function public.referral_count(text) from anon;
+grant execute on function public.referral_count(text) to authenticated;
+
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 3 · What this part deliberately does not do
+-- ═══════════════════════════════════════════════════════════════════════════
+--
+-- There is no rewards table, no credit balance, no discount, no free session
+-- and no column anywhere holding what a referral is worth. That is not an
+-- omission to be filled in by whoever reads this next.
+--
+-- Nobody has agreed a reward. Repple is white-label: what a converted referral
+-- is worth is a commercial decision belonging to each gym and each coach, in
+-- their own currency (see the standing rule about never assuming one), against
+-- their own margins. A schema that shipped "one free session per referral"
+-- would be this codebase deciding how somebody else's business spends its
+-- money, and the client screen would then be making a promise on their behalf
+-- to a member who would hold them to it.
+--
+-- What is here is the fact, recorded truthfully and durably: this person
+-- brought that person, and that person started training on this date. Anyone
+-- who later agrees a reward has an attribution to hang it on. The client screen
+-- says exactly this and promises nothing else.
+
+-- ▶ a-coach-keeps-their-own-numbers.sql
+
+-- ── Everything a coach told the app about themselves stayed on the handset ──
+--
+-- Three roadmap items, one defect. A coach's own settings and their own figures
+-- were written to AsyncStorage and nowhere else, so a reinstall erased them, a
+-- second phone had a different set, and nothing the coach had said about their
+-- own business survived a new device:
+--
+--   1. app/(trainer)/class-checkin.tsx held the per-attendee pay rate in
+--      `useState('')`. It was never persisted anywhere at all — not even to the
+--      device — so payroll arithmetic restarted from an empty box on every
+--      single visit to the screen, and a coach checking in four classes a day
+--      retyped their own rate four times.
+--
+--   2. src/ui/trainerGoals.ts kept the monthly revenue target and the client
+--      target under 'repple.trainer.goals'. A coach who set a target, reinstalled
+--      and opened Analytics was told "No targets set" — a sentence about them,
+--      produced by a wiped keychain.
+--
+--   3. src/ui/useMrrHistory.ts kept the whole monthly trend under
+--      'repple.trainer.revHistory' / 'repple.owner.sessionsHistory'. That one is
+--      the worst of the three, because the trend is the only record of the past
+--      that exists: nothing recomputes March from source. A reinstall did not
+--      degrade the chart, it deleted five months of a business's history with no
+--      way to get them back.
+--
+-- ── Two tables, and why they are not one ───────────────────────────────────
+--
+-- `coach_prefs` is one row per account: settings, overwritten in place.
+-- `metric_history` is one row per account per metric per month: a ledger, only
+-- ever appended to and never rewritten backwards. Folding the second into a
+-- jsonb column on the first would make a month's snapshot a read-modify-write
+-- of the whole history, which is exactly how two devices open in the same week
+-- lose one device's months.
+--
+-- ── Neither table carries a currency, deliberately ─────────────────────────
+--
+-- `coach_prefs.class_rate` is a bare number. The check-in screen says so out
+-- loud — "Your own arithmetic — Repple is not told your rate and does not
+-- process this payment" — and the version before it printed "You'll be paid AED
+-- {rate × present}", a payout figure, in a currency left over from a deleted
+-- branch list, for a payment this product does not make. Storing the number is
+-- what stops the retyping; storing it WITH an assumed unit would put the
+-- deleted bug back in the database, where it would outlive the screen. The unit
+-- of a coach's pay rate is between the coach and whoever pays them.
+--
+-- `metric_history.value` is the same: a bare number whose unit is whatever the
+-- metric_key means. 'repple.trainer.revHistory' happens to be money — priced at
+-- render time from `tenants.currency` (part 99), which may be null, in which
+-- case the app shows a dash and asks the owner to set one. Nothing here may
+-- ever be printed with a currency this table did not record.
+--
+-- ── Access ─────────────────────────────────────────────────────────────────
+--
+-- Self-only, on both, on every verb. There is no coach-reads-coach case and no
+-- owner-reads-coach case: a coach's revenue target is not their employer's
+-- business, and the class rate is a private number about their own pay. That is
+-- narrower than most of this schema and it is meant to be — nothing else needs
+-- to read either table, so nothing else may.
+--
+-- Keyed on auth.users rather than on `trainers`, and not restricted to the
+-- trainer role. `metric_history` is used by the OWNER dashboard as well (the
+-- sessions trend on app/(owner)/dashboard.tsx and revenue.tsx), and a role
+-- check would have needed a SECURITY DEFINER helper to avoid recursing through
+-- profiles — a whole new hole to get right for no gain, when `user_id =
+-- auth.uid()` already admits exactly one person's rows whatever their role.
+--
+-- The GRANT is written out rather than left to Supabase's stock default
+-- privileges, which hand `anon` the full DML set on every table created in this
+-- project (part 119 found that on 80 of 89 tables). RLS narrows a GRANT; it
+-- does not confer one, and it is not the thing to lean on when the grant itself
+-- has no business existing. `anon` cannot reach either table at all — not
+-- refused by a policy, refused at the grant.
+
+create table if not exists public.coach_prefs (
+  user_id      uuid primary key references auth.users(id) on delete cascade,
+  -- Per-attendee class pay rate. NULL means the coach has not set one, which is
+  -- a different fact from 0 and must render as an empty box, never as a rate of
+  -- nothing. numeric, not integer: half-unit rates are ordinary.
+  class_rate   numeric(12,2),
+  -- Monthly revenue target and client-count target. NULL means never set. The
+  -- app's own DEFAULT for an unset goal is 0 and it renders as "no target",
+  -- which is the same statement; NULL is kept as the storage form so a coach who
+  -- deliberately clears a target is distinguishable from one who never had one.
+  goal_revenue integer,
+  goal_clients integer,
+  updated_at   timestamptz not null default now()
+);
+
+alter table public.coach_prefs drop constraint if exists coach_prefs_class_rate_sane;
+alter table public.coach_prefs add constraint coach_prefs_class_rate_sane
+  check (class_rate is null or class_rate >= 0);
+alter table public.coach_prefs drop constraint if exists coach_prefs_goals_sane;
+alter table public.coach_prefs add constraint coach_prefs_goals_sane
+  check ((goal_revenue is null or goal_revenue >= 0) and (goal_clients is null or goal_clients >= 0));
+
+alter table public.coach_prefs enable row level security;
+
+drop policy if exists coach_prefs_self on public.coach_prefs;
+create policy coach_prefs_self on public.coach_prefs
+  for all
+  using (user_id = (select auth.uid()))
+  with check (user_id = (select auth.uid()));
+
+comment on table public.coach_prefs is
+  'One row per account: the coach''s own settings. Self-only on every verb — no owner and no other coach may read it. class_rate is a UNITLESS number; the app must never print it with an assumed currency.';
+comment on column public.coach_prefs.class_rate is
+  'Per-attendee class pay rate as the coach typed it. No currency: Repple is not the payer and does not know one. NULL = not set, which is not 0.';
+
+-- ── The month ledger ───────────────────────────────────────────────────────
+--
+-- `month` is the 'YYYY-MM' string the app already keys its history by, kept
+-- verbatim rather than converted to a date. It is a label for a calendar month
+-- in the reader's own local time — the app computes it with `new Date()` on the
+-- device — and turning it into a timestamptz would attach a timezone to
+-- something that does not have one, which is how a coach in Auckland gets their
+-- January filed under December.
+--
+-- The check constraint is the whole of the validation: a bad key here is a
+-- point on a trend chart in the wrong place forever, and there is nothing later
+-- that can spot it.
+--
+-- ON CONFLICT DO UPDATE is how the app writes this, so the current month's
+-- snapshot is refreshed as the month goes on and a closed month stops moving.
+create table if not exists public.metric_history (
+  user_id     uuid  not null references auth.users(id) on delete cascade,
+  -- The app's own storage key for the series, reused verbatim so there is no
+  -- translation table between what the device wrote and what the server holds.
+  metric_key  text  not null,
+  month       text  not null,
+  -- Bare. The unit is whatever metric_key means; see the note at the top.
+  value       numeric not null,
+  recorded_at timestamptz not null default now(),
+  primary key (user_id, metric_key, month)
+);
+
+alter table public.metric_history drop constraint if exists metric_history_month_is_ym;
+alter table public.metric_history add constraint metric_history_month_is_ym
+  check (month ~ '^[0-9]{4}-(0[1-9]|1[0-2])$');
+alter table public.metric_history drop constraint if exists metric_history_key_sane;
+alter table public.metric_history add constraint metric_history_key_sane
+  check (char_length(metric_key) between 1 and 64);
+
+alter table public.metric_history enable row level security;
+
+drop policy if exists metric_history_self on public.metric_history;
+create policy metric_history_self on public.metric_history
+  for all
+  using (user_id = (select auth.uid()))
+  with check (user_id = (select auth.uid()));
+
+-- No secondary index. Every read is `where user_id = ? and metric_key = ?`,
+-- which is a left-anchored prefix of the primary key.
+
+comment on table public.metric_history is
+  'One monthly snapshot per account per metric. Append-and-refresh: a month absent from this table is UNKNOWN, and the app renders it as a gap in the line rather than carrying the current figure backwards. Self-only on every verb.';
+comment on column public.metric_history.month is
+  'Calendar month as YYYY-MM in the recording device''s local time. Not a timestamp — it has no timezone.';
+comment on column public.metric_history.value is
+  'A bare number. Its unit is defined by metric_key and is NOT recorded here; never render it with an assumed currency.';
+
+-- ── The grants ─────────────────────────────────────────────────────────────
+--
+-- Stock Supabase default privileges would have given `anon` select/insert/
+-- update/delete on both of these the moment they were created. Nothing
+-- unauthenticated has any business at either table, and no policy above can
+-- resolve without auth.uid(), so the grant is removed rather than left to fail
+-- closed by luck. TRUNCATE goes with it for the reason part 119 gives: RLS does
+-- not apply to TRUNCATE at all.
+revoke all on public.coach_prefs    from anon, public;
+revoke all on public.metric_history from anon, public;
+grant select, insert, update, delete on public.coach_prefs    to authenticated;
+grant select, insert, update, delete on public.metric_history to authenticated;
+grant all    on public.coach_prefs    to service_role;
+grant all    on public.metric_history to service_role;
+
+-- ▶ a-client-can-see-their-own-coach.sql
+
+-- ── The one coach a client actually has ────────────────────────────────────
+--
+-- `app/(client)/trainers.tsx` is a DIRECTORY — the coaches who have opted in
+-- to being found. There is no screen anywhere for the coach a client is
+-- already working with, and there is no way to build one, because a client
+-- cannot read that coach's row: `trainers_peer_r` is trainer-to-trainer, and
+-- `profiles_public_directory_r` only covers `trainers.listed = true`, which
+-- defaults to false. So a client whose coach found THEM — by join code, which
+-- is the normal case — cannot see their coach's bio, their specialties, or
+-- what they offer, while a stranger browsing the directory can see all three
+-- for a listed coach.
+--
+-- ── Why a function and not a policy ────────────────────────────────────────
+--
+-- RLS chooses ROWS, never columns. A policy wide enough to show a bio also
+-- hands over `session_fee`, `join_code` and every column added to `trainers`
+-- later — a join code being the exact thing that lets somebody else attach
+-- themselves to that coach. Part 115 made this argument for `profiles` and it
+-- holds here for the same reason.
+--
+-- Taking no argument is the other half: there is nothing to probe. It can only
+-- ever answer about the caller's own coach, so it cannot be walked over the
+-- roster of a gym.
+--
+-- The relationship test is `my_coach()`'s, character for character: BOTH
+-- `clients.trainer_id` and an ACTIVE `coaching_relationships` row. When
+-- coaching ends, `end_coaching()` clears the first and this returns nothing —
+-- the profile goes when the relationship goes, which is what a client would
+-- expect and what a coach is entitled to.
+create or replace function public.my_coach_profile()
+returns table (
+  coach_id uuid,
+  coach_name text,
+  coach_avatar text,
+  tagline text,
+  bio text,
+  specialties text[],
+  offers text[]
+)
+language sql
+stable
+security definer
+set search_path to 'public'
+as $fn$
+  select c.trainer_id,
+         nullif(btrim(p.full_name), ''),
+         nullif(btrim(p.avatar), ''),
+         nullif(btrim(t.tagline), ''),
+         nullif(btrim(t.bio), ''),
+         t.specialties,
+         t.offers
+    from public.clients c
+    left join public.profiles p on p.id = c.trainer_id
+    left join public.trainers t on t.id = c.trainer_id
+   where c.id = (select auth.uid())
+     and c.trainer_id is not null
+     and exists (
+       select 1 from public.coaching_relationships r
+        where r.client_id = c.id
+          and r.coach_id = c.trainer_id
+          and r.status = 'active'
+     );
+$fn$;
+
+-- Deliberately NOT returned: `session_fee` (a coach's price is set with the
+-- client, not published to them), `join_code` (it would let the holder hand
+-- out an attachment to somebody else's coach), `listed`, `tenant_id`.
+--
+-- Revoked from `public` AND from `anon` by name. Supabase grants EXECUTE to
+-- the two API roles separately, so revoking from `public` alone leaves both
+-- standing — which is exactly how `log_gym_event` became an unauthenticated
+-- cross-tenant write earlier tonight.
+revoke all on function public.my_coach_profile() from public, anon;
+grant execute on function public.my_coach_profile() to authenticated;
+
+-- ▶ a-join-code-is-not-directory-information.sql
+
+-- ── A join code is not directory information ───────────────────────────────
+--
+-- `trainers_public_directory_r` is `SELECT USING (listed = true)` for every
+-- authenticated account, and `trainers_assigned_client_r` gives a client their
+-- own coach's row. Both are right as ROW rules — a directory has to be
+-- readable, and a client should see their coach.
+--
+-- But RLS chooses rows, never columns, and `trainers` carries `join_code`. So
+-- every signed-in account in the product could read the join code of every
+-- listed coach, by selecting the directory.
+--
+-- A join code is not a secret the way a password is: `join_by_code` only
+-- creates a PENDING request the coach must accept. But it is meant to be handed
+-- out deliberately, and this product MEASURES it — parts 81 and 98 give a coach
+-- named codes in parallel, per-code spend, per-code revenue and cost per
+-- client, with last-touch attribution. A code anybody can lift off the
+-- directory is a code whose numbers mean nothing, and rotating it does not help
+-- when the new one is equally readable.
+--
+-- ── The first attempt at this did nothing, and that is worth recording ──────
+--
+--     revoke select (join_code) on public.trainers from authenticated;
+--
+-- In PostgreSQL a TABLE-level SELECT grant supersedes a column-level revoke:
+-- you cannot subtract a column from a table-wide grant. It reported success and
+-- changed nothing. Proven by trying to read the column as a real client either
+-- side of it — "STILL READABLE" first, refused after the version below.
+revoke select on public.trainers from authenticated, anon;
+
+grant select (id, tenant_id, bio, tagline, offers, specialties, session_fee, listed)
+  on public.trainers to authenticated;
+
+-- `anon` gets nothing: it held a stock grant nobody wrote, and no
+-- unauthenticated path reads this table — the directory is behind sign-in.
+--
+-- Every live reader is covered by the columns granted above:
+--   app/(client)/trainers.tsx    id, bio, tagline, specialties, session_fee
+--   src/ui/coachProfile.tsx      bio, tagline, offers, specialties, session_fee, listed
+--   src/lib/gymTrainers.ts       id
+--   studio-web /revenue, /staff  id
+-- and every join-code path is a SECURITY DEFINER RPC (`my_join_code`,
+-- `my_join_codes`, `my_join_code_stats`, `create_join_code`,
+-- `rotate_join_code`, `revoke_join_code`, `my_code_returns`, `join_by_code`),
+-- which executes as the definer and keeps the privilege.
+--
+-- INSERT and UPDATE are untouched, so `trainers_self_rw` still lets a coach
+-- write their own row.
+--
+-- Verified live: the directory query returns its row, a client reading
+-- `join_code` is refused 42501, `my_coach_profile()` still answers, and the
+-- coach's own `my_join_code()` still returns their code.
+
+-- ▶ a-renewal-is-money.sql
+
+-- ── A coach could not be told what they had earned ─────────────────────────
+--
+-- Stripe Connect has worked for months. A client buys a package, the charge
+-- lands on the coach's Express account, and `client_purchases` records it. A
+-- client SUBSCRIBES to a package (part 97) and the charge repeats every month
+-- — and nothing anywhere in this database records a single one of those
+-- charges as an amount of money.
+--
+-- The webhook's `invoice.*` branch handles a paid renewal by re-reading the
+-- subscription from Stripe and writing its STATUS. That is the right thing to
+-- do with a status and it is not a ledger: after a year of a client paying AED
+-- 600 a month, this database holds one row saying "active, AED 600 / month"
+-- and no record that twelve payments happened. So the payments screen could
+-- only ever print a standing PRICE and say, honestly and uselessly, that
+-- renewals could not be added up. The one question a working coach asks about
+-- the app taking their money — how much have I earned — had no answer in here
+-- to give.
+--
+-- Two things are missing and both are in this part.
+--
+-- ── 1. A sale with no currency ─────────────────────────────────────────────
+--
+-- `client_purchases` records `amount_cents` and has never recorded what those
+-- cents ARE. The unit of a past sale lives in the `trainer_packages` row it was
+-- bought from, and a package deleted after the sale takes the unit with it —
+-- leaving an amount that can never be denominated again, in a white-label
+-- product where a London gym and a Dubai gym run the same code. The screen
+-- already counts those and reports them as missing from the total rather than
+-- summing them as dollars, which is the correct handling of a hole and not a
+-- reason to keep digging one.
+--
+-- The Checkout Session states its own currency — `sess.currency`, which is what
+-- Stripe actually charged in, not what a package row says today — so from now
+-- on the webhook writes it onto the purchase and the unit stops depending on a
+-- row the coach is free to delete.
+--
+-- Existing rows are backfilled FROM THEIR PACKAGE, and only where the package
+-- is still there. The rest stay NULL. There is no fallback and there must never
+-- be one: a currency this migration invented would be indistinguishable, on
+-- screen, from one Stripe confirmed, and it would be wrong for every gym
+-- outside whichever country the guess came from. NULL means "we cannot say",
+-- the screen says so, and Stripe still holds the truth.
+--
+-- ── 2. A renewal is money and has to be written down as money ──────────────
+--
+-- `client_subscription_payments` is a ledger: one row per paid Stripe invoice
+-- on a client's coaching subscription. It is what makes "earned this month"
+-- answerable at all.
+--
+-- Why one row per INVOICE, keyed on the Stripe invoice id:
+--
+--   · A subscription is a state; an invoice is an event that moved money. The
+--     first is overwritten every time Stripe says something new, the second
+--     must never be. Adding an `amount_paid_total` to `client_subscriptions`
+--     would be a running total nothing could audit, that a replayed webhook
+--     could double, and that could not answer "how much in August".
+--
+--   · The invoice id is the idempotency key. Stripe sends both `invoice.paid`
+--     and `invoice.payment_succeeded` for the same invoice, and retries either
+--     of them; all of that upserts onto one row instead of counting a month's
+--     rent two or three times. The replay ledger in part 97 is the belt — this
+--     is the braces, and it is the one that holds when a future event type is
+--     added and forgotten.
+--
+-- Why it is a separate table from `client_purchases` rather than more rows in
+-- it: `client_purchases` carries `sessions_total` / `sessions_used`, and
+-- `redeem_pack_session` (part 123) draws credits down from any row it finds
+-- there. A renewal filed in that table would be a purchase with no credits that
+-- every pack query would have to learn to skip — and the day one of them forgot
+-- would be the day a client's booking silently spent a credit that does not
+-- exist. Money that grants nothing is a different thing and gets its own table.
+--
+-- Why there is no `status` column: only PAID invoices are written here. A
+-- failed renewal is a fact about the subscription — `past_due` on
+-- `client_subscriptions`, which is where the client and the coach already read
+-- it — and a failed payment in a table of payments is exactly the row somebody
+-- eventually sums by accident.
+--
+-- ── What this still cannot say, and no column here will fix ────────────────
+--
+-- Everything below is GROSS: what the client was charged. Stripe's processing
+-- fee, the platform's application fee, whether the money has cleared, and when
+-- it lands in the coach's bank are all facts that live at Stripe and that no
+-- webhook in this repo has ever been told. There is deliberately no
+-- `net_cents`, no `fee_cents` and no `paid_out_at` — a column that exists is a
+-- column a screen will one day print, and every one of those three would be
+-- printed as a payout figure that this product invented. The screen says the
+-- figure is gross and points at the Stripe dashboard for the rest.
+
+-- ── 1. the unit of a sale ──────────────────────────────────────────────────
+alter table public.client_purchases add column if not exists currency text;
+
+-- Either case. Stripe states a currency in lower case ('aed') and that is what
+-- the webhook writes verbatim; `trainer_packages.currency` holds the gym's own
+-- in upper case, and that is what the backfill below copies. Both are the same
+-- currency and the app upper-cases before it prints or pots either of them, so
+-- normalising here would only add a way for the two writers to disagree with
+-- the constraint.
+alter table public.client_purchases drop constraint if exists client_purchases_currency_is_iso;
+alter table public.client_purchases add constraint client_purchases_currency_is_iso
+  check (currency is null or currency ~ '^[A-Za-z]{3}$');
+
+-- Only where the package survives. A sale whose package is gone keeps a NULL
+-- currency forever, and that is the honest state — see the note above.
+update public.client_purchases cp
+   set currency = tp.currency
+  from public.trainer_packages tp
+ where tp.id = cp.package_id
+   and cp.currency is null
+   and tp.currency is not null;
+
+comment on column public.client_purchases.currency is
+  'ISO 4217 as Stripe stated it on the Checkout Session (lower case), or as copied from the package for rows sold before this column existed (upper case). NULL means the unit is unrecoverable — the package it was sold from is gone. Never guess one: render a dash and leave the amount out of every total.';
+
+-- ── 2. the renewal ledger ──────────────────────────────────────────────────
+create table if not exists public.client_subscription_payments (
+  id uuid primary key default gen_random_uuid(),
+  -- Who paid and who was paid. Nullable and `on delete set null`, exactly like
+  -- `client_purchases`: a deleted account must not delete the record that money
+  -- changed hands. A row whose trainer_id is null is unreadable by anybody
+  -- except the service role, which is the correct outcome — it is still
+  -- evidence, it just no longer belongs to a coach's screen.
+  client_id  uuid references profiles(id) on delete set null,
+  trainer_id uuid references profiles(id) on delete set null,
+  -- The subscription this renewed, as Stripe's id and NOT as a foreign key to
+  -- `client_subscriptions`. Webhooks are not ordered: the money event can
+  -- arrive before the row that mirrors the subscription exists, and a foreign
+  -- key would refuse the write and lose the payment to preserve a join. The
+  -- join is a convenience; the payment is the record.
+  stripe_subscription_id text,
+  -- The idempotency key. Two event types and any number of retries describe the
+  -- same invoice, and all of them land on this one row.
+  stripe_invoice_id text not null unique,
+  -- What Stripe actually collected, in minor units, as `amount_paid` on the
+  -- invoice. NULL when Stripe stated nothing — which must render as a dash and
+  -- be counted out of the total, never as zero. A real zero (a fully discounted
+  -- renewal) is a real zero and is stored as one.
+  amount_cents integer,
+  -- The currency of that amount, from the invoice itself. NULL only if Stripe
+  -- somehow stated none; an amount with no unit joins no total.
+  currency text,
+  -- Stripe's own word for why this invoice existed: 'subscription_create' for
+  -- the first payment, 'subscription_cycle' for a renewal, 'subscription_update'
+  -- for a mid-period change. Stored raw and untranslated. It is here so that a
+  -- later reader can tell the first payment from the ones after it without
+  -- having to infer it from dates — and so that if the checkout branch is ever
+  -- changed to record the first payment too, the double count is visible in the
+  -- data rather than hidden in it.
+  billing_reason text,
+  -- When the money moved, per Stripe, not when this row was written. Every
+  -- "this month" figure filters on this: a webhook retried three days late must
+  -- not move a payment into a different month.
+  paid_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+alter table public.client_subscription_payments drop constraint if exists client_subscription_payments_currency_is_iso;
+alter table public.client_subscription_payments add constraint client_subscription_payments_currency_is_iso
+  check (currency is null or currency ~ '^[A-Za-z]{3}$');
+
+-- Nothing negative. A refund is not a payment with a minus in front of it — it
+-- is a different Stripe object with its own fees and its own timing, and until
+-- one is recorded properly a negative here would quietly reduce a total that
+-- nothing else in the app knows how to explain.
+alter table public.client_subscription_payments drop constraint if exists client_subscription_payments_amount_sane;
+alter table public.client_subscription_payments add constraint client_subscription_payments_amount_sane
+  check (amount_cents is null or amount_cents >= 0);
+
+-- The coach's screen reads `trainer_id = me, newest first`; the client's own
+-- receipts read the same shape from the other side.
+create index if not exists idx_client_sub_pay_trainer on public.client_subscription_payments (trainer_id, paid_at desc);
+create index if not exists idx_client_sub_pay_client  on public.client_subscription_payments (client_id, paid_at desc);
+create index if not exists idx_client_sub_pay_sub     on public.client_subscription_payments (stripe_subscription_id);
+
+alter table public.client_subscription_payments enable row level security;
+
+-- The same shape as `client_subs_read` on part 97 and `purch_read` on part 21,
+-- deliberately identical: the client who paid, the coach who was paid, and the
+-- owner OF THAT COACH'S GYM. The owner branch goes through the trainer's tenant
+-- rather than testing `role = 'owner'`, because the role test lets any owner
+-- read every payment on the platform — one white-label customer reading
+-- another's revenue, client by client. Part 97 records that mistake being
+-- caught; this is not the place to reintroduce it.
+drop policy if exists client_sub_pay_read on public.client_subscription_payments;
+create policy client_sub_pay_read on public.client_subscription_payments for select using (
+  client_id = (select auth.uid())
+  or trainer_id = (select auth.uid())
+  or exists (
+    select 1 from trainers tr
+     where tr.id = client_subscription_payments.trainer_id
+       and is_owner_of(tr.tenant_id)));
+
+-- No insert, update or delete policy, on purpose. RLS denies what no policy
+-- permits, so this table is read-only to every signed-in user and writable only
+-- by the service role the stripe-webhook runs as. Whether a payment happened is
+-- Stripe's to state and nobody else's — least of all the two parties to it.
+
+-- And the grants, without which none of the above does anything: RLS narrows a
+-- GRANT, it does not confer one, so a policy on a table `authenticated` cannot
+-- select from is inert in the direction that looks fine in review and returns
+-- nothing at runtime.
+--
+-- All three API roles are revoked first and then granted back exactly what they
+-- need, rather than left to Supabase's stock default privileges — which hand
+-- `anon` AND `authenticated` the full select/insert/update/delete set on every
+-- table created in this project (part 119 found that on 80 of 89 tables). This
+-- was confirmed here, on this table, immediately after creating it: both roles
+-- came out holding INSERT, UPDATE and DELETE that nothing in this file asked
+-- for.
+--
+-- `revoke ... from public` alone does NOT clear that. `anon` and
+-- `authenticated` are grantees in their own right and hold those privileges
+-- directly, so revoking the PUBLIC pseudo-role leaves both of them standing —
+-- which is the shape of the hole that opened in this project once already.
+-- Both are therefore named.
+--
+-- The writes would be refused by RLS anyway, there being no insert, update or
+-- delete policy above. That is not a reason to leave the grant: it makes the
+-- table one forgotten `for all` policy away from a client being able to write
+-- their own coach a payment. TRUNCATE goes with them, because RLS does not
+-- apply to TRUNCATE at all.
+revoke all on public.client_subscription_payments from anon, authenticated, public;
+grant select on public.client_subscription_payments to authenticated;
+grant all    on public.client_subscription_payments to service_role;
+
+comment on table public.client_subscription_payments is
+  'One row per PAID Stripe invoice on a client''s coaching subscription — the ledger that makes "earned this month" answerable. Written only by the stripe-webhook under the service role; read-only to everyone else. Every amount is GROSS: Stripe''s fee, the platform fee and payout state are not held here and must never be implied.';
+comment on column public.client_subscription_payments.stripe_invoice_id is
+  'Stripe''s invoice id, and the idempotency key. invoice.paid and invoice.payment_succeeded both describe it, and both upsert onto this one row rather than counting the month twice.';
+comment on column public.client_subscription_payments.paid_at is
+  'When Stripe says the invoice was paid. Every period total filters on this and never on created_at, so a webhook retried days later still lands in the month the money moved.';
+comment on column public.client_subscription_payments.amount_cents is
+  'Minor units, from the invoice''s amount_paid. GROSS — no fee of any kind is deducted, because none is known here. NULL means Stripe stated no amount: render a dash, count it out of the total, never zero.';
+
+-- ▶ a-coach-can-write-a-week.sql
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- A coach can write a client a meal plan — and there is one table for it.
+--
+-- ── What existed ───────────────────────────────────────────────────────────
+--
+-- Two things, and only one of them was alive.
+--
+-- `coach_nutrition` (02-domain-schema, widened by 04 and 05) carries a coach's
+-- calorie and macro deltas, a note, and `meal_override` — a flat jsonb map of
+-- position → catalogue index that pins ONE meal per slot for ONE day. The
+-- client's Meals tab reads it on every render. It works, and it is narrow: it
+-- cannot express Tuesday.
+--
+-- `meal_plans` (01-schema, the first file in this project) has columns for
+-- exactly what a plan is: `targets` and `meals`, per client, with a
+-- `generated_at`. Nothing in this repository has ever read it or written it.
+-- Confirmed against the live database before this file was written: zero rows,
+-- and no code path in app/, src/, studio-web/ or supabase/functions/ names it.
+--
+-- ── Why the plan goes on `coach_nutrition`, and `meal_plans` is dropped ─────
+--
+-- The tempting move is the opposite one: `meal_plans` already has plan-shaped
+-- columns, so use the table that was built for this and leave `coach_nutrition`
+-- to its deltas. Three things make that wrong, in increasing order of how much
+-- they cost:
+--
+--  1. `meal_plans.client_id` references `clients(id)`. Every live coaching
+--     table — `coach_nutrition`, `assigned_programs`, `coach_feedback` —
+--     references `profiles(id)`. There is no `coach_id` column at all, so the
+--     policy on it (`meal_plans_trainer_rw`) has to go looking for
+--     `clients.trainer_id`, and cannot express the thing part 69 was written to
+--     express: THIS coach wrote THIS row. A plan with no author cannot be
+--     scoped to one.
+--
+--  2. Its comment in 01-schema says what it is: "generated, cached;
+--     regenerated on stat change". It is a cache of a computation, not a record
+--     of a decision. A plan a coach composed is the second thing.
+--
+--  3. And the one that decides it. `meal_plans.targets` is a frozen jsonb copy
+--     of {kcal, protein, carbs, fat}. Storing it would put a SECOND calorie
+--     figure in this product, beside the one `macrosFor()` derives live from
+--     the client's own weight, body fat, activity and goal, with the coach's
+--     deltas layered on. The moment the client weighs in, the two disagree —
+--     and the client's Meals tab would then be reading its target from one and
+--     its plan from the other. Two calorie figures for one day, on one screen,
+--     is precisely the defect `caloriesLeft()` in src/lib/nutrition.ts was
+--     written to end, and its comment records what it cost: 3,948 kcal on one
+--     tab and 2,860 on another, reported twice by testers.
+--
+-- So the plan is stored as the coach's CHOICE OF MEALS and nothing else — a
+-- `plan` jsonb on `coach_nutrition`, beside the deltas it is composed against,
+-- on the one row per client the client's Meals tab already reads. The calories
+-- and macros are computed from those meals, live, on both sides, by the same
+-- `buildPlan()` both sides already call. There is no stored target because
+-- there is no second target.
+--
+-- Dropped rather than left: `meal_plans` empty and unused is a table the next
+-- reader will reasonably assume is the home for a meal plan, and put one in.
+-- It also holds SELECT/INSERT/UPDATE/DELETE for `anon` — narrowed to nothing by
+-- its policies, and still a grant on a table nobody is watching. Zero rows, no
+-- readers, no foreign keys pointing at it. Dropping it is the only way "do not
+-- leave two" is actually true.
+--
+-- ── Shape of `plan` ────────────────────────────────────────────────────────
+--
+--   { "v": 1,
+--     "diet": "meat",              -- what the indices below MEAN
+--     "avoid": ["nuts"],           -- ditto: the allergen filter renumbers
+--     "mealsPerDay": 4,            -- ditto: it decides the slots
+--     "days": [ { "meals": [ { "slot": "Breakfast", "idx": 812,
+--                              "n": "…", "k": 0, "p": 0, "c": 0, "f": 0 } ] } ],
+--     "writtenAt": "2026-08-31T09:00:00.000Z" }
+--
+-- Seven days, Monday first. `idx` is an index into the procedural catalogue in
+-- src/lib/meals.ts, which is the same value `meal_override` already stores, so
+-- the plan reaches the client down the path that already exists rather than a
+-- second one drawn beside it.
+--
+-- `diet`, `avoid` and `mealsPerDay` are stored WITH the plan because
+-- `mealAt(diet, slot, idx, avoid)` resolves an index through pools that `avoid`
+-- has filtered: shrink a pool and every index after it means a different meal.
+-- A client who discloses a nut allergy after their plan was written has not
+-- changed a single row here, and is being served different food. src/lib/
+-- mealPlan.ts (`planStale`) is what notices, and `guardPlan` is what stops a
+-- coach sending a plan over an allergen list that did not load. `n` and the
+-- four macros are the coach's record of what they committed to — the evidence
+-- that makes that comparison possible.
+--
+-- ── Access ─────────────────────────────────────────────────────────────────
+--
+-- Nothing is added, and that is the point of choosing this table. A column
+-- inherits its row's policies, and `coach_nutrition` already carries exactly
+-- the pair part 69 argued for:
+--
+--   coach_nutrition_coach_rw     all    coach_id = auth.uid()
+--                                       AND is_my_client(client_id)
+--   coach_nutrition_client_read  select client_id = auth.uid()
+--
+-- So an unrelated coach can neither read nor write this plan — `is_my_client()`
+-- is false for them — and a former coach loses it the moment `end_coaching()`
+-- clears `clients.trainer_id`, with nothing extra to remember. The client
+-- reads, always, and cannot write: a plan somebody is following does not stop
+-- being theirs because they changed coach.
+--
+-- The `anon` grants go, on the same reasoning as part 129. Every policy on this
+-- table resolves through `auth.uid()`, so `anon` can reach no row through any
+-- of them; a grant that can only ever be refused by a policy is better removed
+-- than left for somebody to rely on. RLS narrows a GRANT — it does not confer
+-- one — and this table's rows are reached by `authenticated` alone.
+--
+-- Idempotent; safe to re-run.
+-- ─────────────────────────────────────────────────────────────────────────
+
+alter table public.coach_nutrition add column if not exists plan jsonb;
+
+comment on column public.coach_nutrition.plan is
+  'The week of meals this client''s coach composed. {v, diet, avoid, mealsPerDay, days[7].meals[], writtenAt} — see src/lib/mealPlan.ts. Carries no calorie or macro TARGET: those are derived live by macrosFor() plus the deltas on this same row, so there is only ever one of them.';
+
+-- The dead table. See the argument above; verified empty and unreferenced
+-- before this was written.
+drop table if exists public.meal_plans cascade;
+
+revoke all on public.coach_nutrition from anon, public;
+grant select, insert, update, delete on public.coach_nutrition to authenticated;
+grant all on public.coach_nutrition to service_role;
+
+
+-- ─────────────────────────────────────────────────────────────────────────
+
+-- ▶ a-programme-written-once.sql
+
+-- ── A coach writes the bootcamp programme once ─────────────────────────────
+--
+-- A coach running a bootcamp of eight people was writing the same programme
+-- eight times, because `assigned_programs` is keyed one row per client and the
+-- builder assigns to exactly one of them. The library's bulk assign (the sheet
+-- in app/(trainer)/templates.tsx) sends one template to a tick-list, which is
+-- the same eight writes with fewer taps, and then forgets who was in the list —
+-- so "who is on the bootcamp programme" is a question nothing could answer the
+-- next morning.
+--
+-- ── What this stores, and the thing it deliberately does NOT store ─────────
+--
+-- A group owns the LIST. It does not own the PLAN any client is training.
+--
+-- The obvious alternative was a group that owns the programme, with clients
+-- pointing at it — one row of content for eight people, no duplication, an
+-- edit that reaches everybody at once. It was rejected, and the reason is the
+-- read path rather than the write path:
+--
+--   · Everything downstream of a training programme is per-client and already
+--     keyed that way — the client's Train tab, logged sets, adherence, the
+--     progression maths, the injury acknowledgement of a specific movement for
+--     a specific person. A group-owned programme would have to be reconciled
+--     against those on every read, in the client app as well as the coach's,
+--     and a reconciliation that runs on every read is a reconciliation that
+--     will be wrong somewhere.
+--
+--   · Divergence is not the exception here, it is the job. A client turns up
+--     with a shoulder on the Wednesday and gets a different row on the
+--     Thursday. Under a group-owned plan that is an override table — a second
+--     source of truth for the same question, and the moment there are two, the
+--     client's Train tab has to pick one and every screen has to agree about
+--     which.
+--
+--   · The client app is shipped. `assigned_programs` is what it reads. A group
+--     that owned the plan would need the client app taught about groups to
+--     show anybody anything, and this goes out over the air tonight.
+--
+-- So assignment stays a fan-out: one programme, written into each member's own
+-- `assigned_programs` row, exactly as if the coach had typed it eight times.
+-- Nothing downstream changes, one client's copy can be edited in the builder
+-- without touching anybody else's, and "who has it" is answered by comparing
+-- each member's actual row against the group's programme rather than by
+-- bookkeeping that can drift away from the truth it describes.
+--
+-- The cost is honest and is worth naming: editing the group's programme does
+-- NOT retroactively change what anybody is on. It changes what the next assign
+-- sends, and the group screen then shows the members as being on something
+-- different — which is a true statement about their training, and the coach
+-- decides who gets the new version. A group-owned plan would have made that
+-- silent, and silently rewriting the session somebody is doing this evening is
+-- the failure the overwrite guard exists to prevent.
+--
+-- ── Why there is no RPC here ────────────────────────────────────────────────
+--
+-- A `assign_group_program(group_id)` function would have been one call instead
+-- of eight, and it would have had to be SECURITY DEFINER to be worth writing.
+-- Every one of the writes it would perform is already permitted to the coach
+-- by the `assigned_programs` policies from part 69, which check
+-- `is_my_client()` per row — so a definer function would buy a round trip and
+-- take on the entire pinned-search_path / revoke-from-anon-as-well-as-public
+-- burden that opened a real hole in part 105. It would also do the fan-out
+-- server-side, where the per-client injury gate cannot be consulted. The gate
+-- is a coach-facing refusal made against what the coach has read; it belongs
+-- in front of the writes, not behind them.
+--
+-- ── Access ────────────────────────────────────────────────────────────────
+--
+-- The coach owns both tables and is the only party to either. A group is the
+-- coach's own filing, not content addressed to a client: the client sees their
+-- programme on their Train tab exactly as before and has nothing to gain from
+-- learning they were in a list of eight. So there is no client-read policy
+-- here, unlike `injury_acknowledgements` (part 79) where the client is
+-- entitled to see that what they disclosed was read.
+--
+-- auth.uid(), never current_user: under PostgREST every signed-in request runs
+-- as the shared `authenticated` role, so current_user is the same string for
+-- every person on the platform and a policy built on it grants everything to
+-- everyone.
+
+create table if not exists public.program_groups (
+  id         uuid        primary key default gen_random_uuid(),
+  coach_id   uuid        not null references public.profiles(id) on delete cascade,
+  name       text        not null,
+  -- The programme AS THE GROUP DEFINES IT, and not as anybody is training it.
+  -- Nullable: a coach names the group and picks its programme in either order,
+  -- and a group with no programme yet is a real state the screen has to hold
+  -- rather than a half-written row.
+  --
+  -- A snapshot rather than a reference to `program_templates`: a template the
+  -- coach later edits must not silently redefine what a named group of people
+  -- is understood to be doing.
+  program    jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists idx_program_groups_coach
+  on public.program_groups(coach_id, created_at desc);
+
+create table if not exists public.program_group_members (
+  group_id  uuid        not null references public.program_groups(id) on delete cascade,
+  client_id uuid        not null references public.profiles(id)       on delete cascade,
+  added_at  timestamptz not null default now(),
+  primary key (group_id, client_id)
+);
+-- Answers "which groups is this person in", which is what the builder asks
+-- before it lets a coach edit one member's copy.
+create index if not exists idx_program_group_members_client
+  on public.program_group_members(client_id);
+
+alter table public.program_groups        enable row level security;
+alter table public.program_group_members enable row level security;
+
+drop policy if exists program_groups_coach_rw on public.program_groups;
+create policy program_groups_coach_rw on public.program_groups
+  for all
+  to authenticated
+  using      (coach_id = (select auth.uid()))
+  with check (coach_id = (select auth.uid()));
+
+-- ── Why the two clauses are not the same ──────────────────────────────────
+--
+-- USING is group ownership alone. WITH CHECK is group ownership AND
+-- `is_my_client()`.
+--
+-- The asymmetry is deliberate and is the opposite way round from part 69. A
+-- coach may only ADD somebody who is their client right now — a group is not a
+-- place to accumulate the ids of people you do not coach. But a membership row
+-- is the coach's own filing, so when a client leaves them the row must stay
+-- READABLE and DELETABLE by the coach who wrote it. Had `is_my_client()` been
+-- in the USING clause as well, ending the relationship would have made that
+-- row invisible and undeletable — a name silently dropped from a group the
+-- coach can still see, and a row nobody can ever tidy up.
+drop policy if exists program_group_members_coach_rw on public.program_group_members;
+create policy program_group_members_coach_rw on public.program_group_members
+  for all
+  to authenticated
+  using (
+    exists (select 1 from public.program_groups g
+             where g.id = group_id and g.coach_id = (select auth.uid()))
+  )
+  with check (
+    exists (select 1 from public.program_groups g
+             where g.id = group_id and g.coach_id = (select auth.uid()))
+    and public.is_my_client(client_id)
+  );
+
+-- RLS narrows a GRANT; it does not confer access, and a GRANT nobody wrote is
+-- not an absence of one. Supabase's stock default privileges hand `anon` the
+-- full DML set on every table created in this schema (see part 119), so both
+-- of these arrived reachable by the publishable key with only the policies
+-- above standing between a stranger and the coach's filing. The policies do
+-- hold — every one of them resolves through auth.uid(), which is null for
+-- `anon` — but a privilege that is only ever refused is a privilege to remove.
+revoke all on public.program_groups        from anon;
+revoke all on public.program_group_members from anon;
+grant select, insert, update, delete on public.program_groups        to authenticated;
+grant select, insert, update, delete on public.program_group_members to authenticated;
+
+-- ▶ a-coachs-own-paperwork.sql
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- The coach's own paperwork — a document they can require a client to accept.
+--
+-- ── What was here before, and why it is not enough ───────────────────────
+--
+-- Part 84 gives Repple a liability waiver: one immutable row per person per
+-- version of the wording, with no UPDATE and no DELETE policy, and — the part
+-- that matters here — NO COACH READ. It is Repple's release, it is the
+-- client's legal record, and a coach has no business reading it through the
+-- app.
+--
+-- That is correct and this file does not touch a line of it.
+--
+-- It also leaves a working trainer with nowhere to put their own paperwork. A
+-- real PT has a par-form, a studio waiver, a cancellation agreement, a
+-- photography consent, house rules for the unit they rent. Today they email it,
+-- or they do not bother, and either way the app that holds the booking and the
+-- injuries and the payments holds no record that the client ever agreed to
+-- anything the COACH asked them to agree to.
+--
+-- So: a separate, coach-owned thing, sitting beside part 84 and sharing nothing
+-- with it. `liability_waivers` is untouched. Its policies are untouched. If you
+-- are here to make a coach able to read a Repple waiver, this is not that file
+-- and there is no such file.
+--
+-- ── The two halves ───────────────────────────────────────────────────────
+--
+--   coach_documents             the paperwork. Owned by the coach, immutable in
+--                               everything a person could have read.
+--   coach_document_acceptances  one row per person per document, insert-only,
+--                               modelled line for line on part 84.
+--
+-- ── WHAT IMMUTABLE MEANS HERE ────────────────────────────────────────────
+--
+-- Part 84's evidence is immutable because re-wording the waiver ADDS a row
+-- rather than editing what somebody actually agreed to. The same rule has to
+-- hold from the other end here: the acceptance points at a document, so the
+-- document's WORDING must be unable to change underneath it. A coach who could
+-- edit the title or swap the file behind an accepted document would hold a
+-- signed acceptance of something nobody read.
+--
+-- Three separate things enforce that and each one is load-bearing:
+--
+--   · no UPDATE or DELETE policy on either table, and no such grant either;
+--   · a guard trigger refusing any change to coach_id, title, path, mime or
+--     bytes, so the two SECURITY DEFINER functions below — which exist to flip
+--     `required` and to retire — cannot be widened by accident later;
+--   · a storage DELETE policy that refuses to remove the bytes of a document
+--     anybody has accepted.
+--
+-- Re-issuing amended paperwork is a NEW document plus retiring the old one,
+-- which is part 84's "add a row" in the shape this feature needs. Retiring
+-- never deletes an acceptance: that a client agreed to the March wording in
+-- March stays true after the coach moves everyone to the April one.
+--
+-- ── OBJECT KEY SHAPE ─────────────────────────────────────────────────────
+--
+--   coach-docs/<coach_uid>/<millis>-<token>-<slug>.pdf
+--
+-- One meaningful segment: the owning coach. It is what both storage policies
+-- read, and src/lib/coachDocs.ts builds and validates the same shape client
+-- side so a mismatch fails with a readable sentence rather than a bare 403.
+--
+-- The bucket is PRIVATE. A document is read through a short-lived signed URL,
+-- never getPublicUrl(), which hands back a working-looking string for a private
+-- object that then 400s.
+--
+-- ── OPERATOR NOTE: THE FILE DOES NOT FOLLOW THE ROW ──────────────────────
+--
+-- The same gap parts 45, 91 and 124 leave open, for the same reason: bytes only
+-- go when something calls the Storage API, and a purge queue over pg_net
+-- deserves its own review rather than riding along at the bottom of another
+-- part. Until it exists, what is outstanding is visible with:
+--
+--     select (storage.foldername(name))[1] as coach, name, created_at
+--       from storage.objects
+--      where bucket_id = 'coach-docs'
+--        and (storage.foldername(name))[1]::uuid not in (select id from public.trainers)
+--      order by created_at;
+-- ─────────────────────────────────────────────────────────────────────────
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 1 · The paperwork
+-- ═════════════════════════════════════════════════════════════════════════
+create table if not exists public.coach_documents (
+  id         uuid        primary key default gen_random_uuid(),
+  coach_id   uuid        not null references public.trainers(id) on delete cascade,
+  title      text        not null,
+  -- The storage key, and it is UNIQUE: two rows pointing at one file would be
+  -- two acceptance records of the same bytes under different titles, and the
+  -- storage delete guard below asks "has this PATH been accepted".
+  path       text        not null unique,
+  mime       text        not null,
+  bytes      bigint      not null,
+  -- Whether a client must accept it before carrying on, or may simply read it.
+  -- FALSE by default: requiring somebody to sign something is a decision a
+  -- coach makes, never one this table assumes for them.
+  required   boolean     not null default false,
+  created_at timestamptz not null default now(),
+  -- Withdrawn from circulation. The row and every acceptance of it stay.
+  retired_at timestamptz,
+  constraint coach_documents_title_chk check (length(btrim(title)) between 1 and 120),
+  constraint coach_documents_bytes_chk check (bytes > 0 and bytes <= 10485760),
+  constraint coach_documents_mime_chk  check (mime in ('application/pdf', 'image/jpeg', 'image/png')),
+  -- The key must sit in the owning coach's folder. Structural, so a row can
+  -- never name a file the storage policies would not let its own coach read.
+  constraint coach_documents_path_chk  check (path like coach_id::text || '/%')
+);
+
+create index if not exists coach_documents_coach_idx on public.coach_documents (coach_id, retired_at);
+
+comment on table public.coach_documents is
+  'A coach''s own waiver, par-form or terms. Nothing to do with `liability_waivers` (part 84), '
+  'which is Repple''s release and is deliberately unreadable to a coach. See supabase/parts/135.';
+comment on column public.coach_documents.retired_at is
+  'Withdrawn from circulation. Never a delete: acceptances of it remain true and remain readable.';
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 2 · The acceptance — part 84's shape, for the coach's document
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- One row per person per document. There is deliberately no UPDATE and no
+-- DELETE policy, so nobody — the coach included, the client included — can
+-- alter or withdraw the record after the fact. That is the sentence part 84
+-- opens with and it is the whole point of the table.
+create table if not exists public.coach_document_acceptances (
+  document_id uuid        not null references public.coach_documents(id) on delete restrict,
+  client_id   uuid        not null references public.clients(id) on delete cascade,
+  accepted_at timestamptz not null default now(),
+  primary key (document_id, client_id)
+);
+
+create index if not exists coach_doc_acceptances_client_idx
+  on public.coach_document_acceptances (client_id);
+
+-- `on delete restrict` above, and not cascade, is the second half of "the
+-- document cannot be deleted once accepted". Cascade would have made deleting
+-- the paperwork a way to erase the evidence that people signed it, which is
+-- the one thing an evidence table must not permit.
+comment on table public.coach_document_acceptances is
+  'Immutable: insert and select only, no UPDATE or DELETE policy anywhere. Modelled on part 84.';
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 3 · Nothing a person could have read may change
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- The two functions in section 5 flip `required` and set `retired_at`, and
+-- those are the only legitimate updates this table has. Stating that as a
+-- trigger rather than trusting the functions is the part-127 stance: a
+-- restriction that lives only inside the one caller that respects it is a
+-- restriction the next caller does not have.
+create or replace function public.coach_documents_immutable_guard()
+returns trigger
+language plpgsql
+set search_path to 'public', 'pg_temp'
+as $fn$
+begin
+  if new.coach_id is distinct from old.coach_id
+     or new.title  is distinct from old.title
+     or new.path   is distinct from old.path
+     or new.mime   is distinct from old.mime
+     or new.bytes  is distinct from old.bytes then
+    raise exception 'A document somebody may already have accepted cannot be rewritten. Upload a new one and retire this.'
+      using errcode = '42501';
+  end if;
+  return new;
+end $fn$;
+
+drop trigger if exists coach_documents_immutable on public.coach_documents;
+create trigger coach_documents_immutable
+  before update on public.coach_documents
+  for each row execute function public.coach_documents_immutable_guard();
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 4 · Who may see what
+-- ═════════════════════════════════════════════════════════════════════════
+alter table public.coach_documents            enable row level security;
+alter table public.coach_document_acceptances enable row level security;
+
+-- The coach owns theirs, at every verb they have. Their current clients read
+-- the ones still in circulation — a retired document stays readable to somebody
+-- who ACCEPTED it, because they are entitled to see what they agreed to, and
+-- disappears for everybody else.
+drop policy if exists coach_documents_coach_r on public.coach_documents;
+create policy coach_documents_coach_r on public.coach_documents
+  for select to authenticated
+  using (coach_id = (select auth.uid()));
+
+drop policy if exists coach_documents_client_r on public.coach_documents;
+create policy coach_documents_client_r on public.coach_documents
+  for select to authenticated
+  using (
+    exists (select 1 from public.clients c
+             where c.id = (select auth.uid()) and c.trainer_id = coach_documents.coach_id)
+    and (
+      retired_at is null
+      or exists (select 1 from public.coach_document_acceptances a
+                  where a.document_id = coach_documents.id
+                    and a.client_id = (select auth.uid()))
+    )
+  );
+
+-- Uploading is a plain insert, checked. Own row, own folder, and the folder
+-- check is the same fact the storage policy asserts about the object — two
+-- statements of one rule, in the two places a row and a file can disagree.
+drop policy if exists coach_documents_coach_i on public.coach_documents;
+create policy coach_documents_coach_i on public.coach_documents
+  for insert to authenticated
+  with check (
+    coach_id = (select auth.uid())
+    and path like (select auth.uid())::text || '/%'
+  );
+
+-- No UPDATE policy and no DELETE policy. Section 5's functions are the only
+-- way `required` and `retired_at` move, and there is no way at all to remove a
+-- document. Dropped by name as well, so one added live by hand and written
+-- down nowhere does not survive a re-run of setup.sql.
+drop policy if exists coach_documents_coach_u on public.coach_documents;
+drop policy if exists coach_documents_coach_d on public.coach_documents;
+drop policy if exists coach_documents_owner_r on public.coach_documents;
+
+-- ── The acceptance ───────────────────────────────────────────────────────
+--
+-- Read your own. The coach reads acceptances OF THEIR OWN DOCUMENTS, which is
+-- the difference from part 84 and is the point of the feature: they asked for
+-- the signature, so they get to see whether they have it. What they still
+-- cannot see is anything about Repple's waiver, or about another coach's.
+drop policy if exists coach_doc_accept_own_r on public.coach_document_acceptances;
+create policy coach_doc_accept_own_r on public.coach_document_acceptances
+  for select to authenticated
+  using (
+    client_id = (select auth.uid())
+    or exists (select 1 from public.coach_documents d
+                where d.id = coach_document_acceptances.document_id
+                  and d.coach_id = (select auth.uid()))
+  );
+
+-- Accept your own, for yourself, from your own coach, and only a document that
+-- is still in circulation. A coach cannot record an acceptance on somebody's
+-- behalf — `client_id = auth.uid()` is what makes the row evidence rather than
+-- an assertion by the person who benefits from it.
+drop policy if exists coach_doc_accept_own_i on public.coach_document_acceptances;
+create policy coach_doc_accept_own_i on public.coach_document_acceptances
+  for insert to authenticated
+  with check (
+    client_id = (select auth.uid())
+    and exists (
+      select 1 from public.coach_documents d
+        join public.clients c on c.id = (select auth.uid())
+       where d.id = coach_document_acceptances.document_id
+         and d.coach_id = c.trainer_id
+         and d.retired_at is null)
+  );
+
+-- Deliberately absent, and dropped by name: any UPDATE or DELETE policy.
+drop policy if exists coach_doc_accept_own_u on public.coach_document_acceptances;
+drop policy if exists coach_doc_accept_own_d on public.coach_document_acceptances;
+
+-- RLS narrows a GRANT; it does not confer access. Supabase's stock default
+-- privileges hand `anon` the full DML set on anything created in this schema
+-- (parts 119, 120, 134), so both of these arrived reachable by the publishable
+-- key. And the missing UPDATE/DELETE policies above only hold while there is no
+-- grant behind them to narrow: a policy that does not exist refuses, but a
+-- grant that does exist is one `create policy` away from being usable.
+revoke all on public.coach_documents            from anon;
+revoke all on public.coach_document_acceptances from anon;
+revoke update, delete on public.coach_documents            from authenticated;
+revoke update, delete on public.coach_document_acceptances from authenticated;
+grant select, insert on public.coach_documents            to authenticated;
+grant select, insert on public.coach_document_acceptances to authenticated;
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 5 · The two things a coach may change
+-- ═════════════════════════════════════════════════════════════════════════
+create or replace function public.set_coach_document_required(p_document uuid, p_required boolean)
+returns boolean
+language plpgsql
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+declare v_uid uuid := auth.uid(); n int;
+begin
+  if v_uid is null then
+    raise exception 'Not signed in.' using errcode = '42501';
+  end if;
+  update coach_documents set required = p_required
+   where id = p_document and coach_id = v_uid and retired_at is null;
+  get diagnostics n = row_count;
+  -- Zero rows is a refusal, not a success. PostgREST reports a write that
+  -- matched nothing as a 200 and the screen above it says "saved".
+  return n > 0;
+end $fn$;
+
+revoke all on function public.set_coach_document_required(uuid, boolean) from public, anon;
+grant execute on function public.set_coach_document_required(uuid, boolean) to authenticated;
+
+-- Retiring, not deleting. Everything anybody accepted stays accepted and stays
+-- readable to the person who accepted it.
+create or replace function public.retire_coach_document(p_document uuid)
+returns boolean
+language plpgsql
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+declare v_uid uuid := auth.uid(); n int;
+begin
+  if v_uid is null then
+    raise exception 'Not signed in.' using errcode = '42501';
+  end if;
+  update coach_documents set retired_at = now(), required = false
+   where id = p_document and coach_id = v_uid and retired_at is null;
+  get diagnostics n = row_count;
+  return n > 0;
+end $fn$;
+
+revoke all on function public.retire_coach_document(uuid) from public, anon;
+grant execute on function public.retire_coach_document(uuid) to authenticated;
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 6 · Reading the two lists
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- The client's side: what their coach asks of them, and what they have already
+-- signed. Retired documents appear only when this person accepted them.
+create or replace function public.my_coach_documents()
+returns table (
+  id          uuid,
+  coach_id    uuid,
+  title       text,
+  path        text,
+  mime        text,
+  bytes       bigint,
+  required    boolean,
+  retired     boolean,
+  created_at  timestamptz,
+  accepted_at timestamptz
+)
+language sql
+stable
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+  select d.id, d.coach_id, d.title, d.path, d.mime, d.bytes, d.required,
+         (d.retired_at is not null) as retired,
+         d.created_at,
+         a.accepted_at
+    from coach_documents d
+    join clients c on c.id = auth.uid() and c.trainer_id = d.coach_id
+    left join coach_document_acceptances a
+           on a.document_id = d.id and a.client_id = auth.uid()
+   where d.retired_at is null or a.accepted_at is not null
+   order by d.required desc, d.created_at desc
+   limit 200;
+$fn$;
+
+revoke all on function public.my_coach_documents() from public, anon;
+grant execute on function public.my_coach_documents() to authenticated;
+
+-- The coach's side: one document, and where every current client stands on it.
+-- A name and a timestamp; nothing else about the person, because this screen is
+-- about paperwork and not about them.
+create or replace function public.coach_document_standing(p_document uuid)
+returns table (
+  client_id   uuid,
+  client_name text,
+  accepted_at timestamptz
+)
+language sql
+stable
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+  select c.id,
+         p.full_name,
+         a.accepted_at
+    from coach_documents d
+    join clients c on c.trainer_id = d.coach_id
+    left join profiles p on p.id = c.id
+    left join coach_document_acceptances a
+           on a.document_id = d.id and a.client_id = c.id
+   where d.id = p_document
+     and d.coach_id = auth.uid()
+   order by a.accepted_at nulls first, p.full_name
+   limit 500;
+$fn$;
+
+revoke all on function public.coach_document_standing(uuid) from public, anon;
+grant execute on function public.coach_document_standing(uuid) to authenticated;
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 7 · The bucket
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- Private, and re-asserted private on every run: `public = false` sits in the
+-- DO UPDATE rather than being left to the insert, so a bucket somebody flipped
+-- public in the dashboard is flipped back by re-running setup.sql rather than
+-- quietly kept that way (parts 49, 91, 124).
+--
+-- 10 MB, matching `coach_documents_bytes_chk` so the row and the object agree
+-- about the limit and the app can say "that file is too large" before it
+-- uploads rather than rendering a 413 as a failure with no sentence.
+--
+-- PDF because that is what a waiver is, JPEG and PNG because a coach with a
+-- paper form photographs it. No Word document: a .docx is a file this app can
+-- neither render nor sign, and offering it would produce paperwork a client
+-- cannot read on the phone they are being asked to accept it on.
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('coach-docs', 'coach-docs', false, 10485760,
+        array['application/pdf', 'image/jpeg', 'image/png'])
+on conflict (id) do update
+  set public = false,
+      file_size_limit = excluded.file_size_limit,
+      allowed_mime_types = excluded.allowed_mime_types;
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 8 · One definition of "this coach's paperwork is addressed to you"
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- Takes the FIRST PATH SEGMENT as text and answers whether the caller is the
+-- coach who owns that folder, or one of their current clients. Same three
+-- deliberate properties as `can_use_message_thread` in part 124:
+--
+-- It takes text, not uuid, because that is what `storage.foldername(name)`
+-- returns, and casting inside the policy would raise 22P02 on any object whose
+-- folder is not a uuid — including one in another bucket, since nothing
+-- guarantees Postgres evaluates the `bucket_id` arm of an AND first. The CASE
+-- is the guard: CASE does not evaluate the branches it does not take.
+--
+-- It is SECURITY DEFINER so the storage policy does not depend on the caller's
+-- own visibility of `clients`, and so it cannot re-enter a policy and recurse —
+-- the 42P17 fault part 54 had to undo across the whole video library.
+--
+-- ANOTHER COACH IS NOT ON THE LIST. They are not the owner of the folder, and
+-- they are not a client of its owner, so both branches are false. There is no
+-- tenant branch and no owner branch and there must never be one: a gym owner
+-- reading the terms two other people agreed between themselves is the same
+-- class of thing part 124 refuses.
+create or replace function public.can_read_coach_doc(p_owner text)
+returns boolean
+language sql
+stable
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+  select case
+    when p_owner is null then false
+    when p_owner !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then false
+    when p_owner::uuid = (select auth.uid()) then true
+    else exists (
+      select 1 from public.clients c
+       where c.id = (select auth.uid())
+         and c.trainer_id = p_owner::uuid)
+  end;
+$fn$;
+
+comment on function public.can_read_coach_doc(text) is
+  'Is the caller the coach who owns this coach-docs folder, or one of their current clients? '
+  'SECURITY DEFINER so the storage policies do not depend on the caller''s own read of clients. See parts 135, 124, 54.';
+
+-- `revoke ... from public` alone leaves BOTH API roles standing — Supabase
+-- grants execute to anon and authenticated separately, which is exactly how
+-- part 105 shipped an unauthenticated cross-tenant write (part 120). anon has
+-- no business asking; a policy is evaluated as the querying role, so
+-- authenticated needs it.
+revoke all on function public.can_read_coach_doc(text) from public, anon;
+grant execute on function public.can_read_coach_doc(text) to authenticated;
+
+-- Whether the bytes at this key may still be removed. False the moment anybody
+-- has accepted the document that points at it: an acceptance of a file that no
+-- longer exists is a signature on a blank page.
+create or replace function public.coach_doc_unaccepted(p_path text)
+returns boolean
+language sql
+stable
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+  select not exists (
+    select 1
+      from public.coach_documents d
+      join public.coach_document_acceptances a on a.document_id = d.id
+     where d.path = p_path);
+$fn$;
+
+revoke all on function public.coach_doc_unaccepted(text) from public, anon;
+grant execute on function public.coach_doc_unaccepted(text) to authenticated;
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 9 · Storage policies — the coach, their clients, and nobody else
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- RLS on storage.objects is enabled by Supabase itself. Asserted rather than
+-- assumed, because a policy on a table with RLS off is inert and would look
+-- exactly like a working restriction — the same guard parts 45, 91 and 124
+-- open with.
+do $$
+begin
+  if not exists (
+    select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'storage' and c.relname = 'objects' and c.relrowsecurity
+  ) then
+    raise exception 'storage.objects does not have RLS enabled — the policies below would be inert.';
+  end if;
+end $$;
+
+-- Write: your own folder only. A client cannot put a file into their coach's
+-- paperwork and then be shown it as something the coach asked them to sign.
+drop policy if exists coachdoc_obj_insert on storage.objects;
+create policy coachdoc_obj_insert on storage.objects for insert to authenticated
+  with check (
+    bucket_id = 'coach-docs'
+    and (storage.foldername(name))[1] = (select auth.uid())::text
+  );
+
+-- Read. This is the policy signing a URL is checked against, so it is the whole
+-- of who can open the document. The coach, and the people they currently coach.
+-- When a client changes coach, `clients.trainer_id` moves and the old coach's
+-- paperwork stops being readable to them — which is the same behaviour their
+-- message thread and their plan already have.
+drop policy if exists coachdoc_obj_read on storage.objects;
+create policy coachdoc_obj_read on storage.objects for select to authenticated
+  using (
+    bucket_id = 'coach-docs'
+    and public.can_read_coach_doc((storage.foldername(name))[1])
+  );
+
+-- Delete: the owning coach, and only while nobody has accepted it. Retiring is
+-- what a coach does with paperwork that is in circulation; this covers the file
+-- uploaded by mistake thirty seconds ago, which nobody has seen.
+drop policy if exists coachdoc_obj_delete on storage.objects;
+create policy coachdoc_obj_delete on storage.objects for delete to authenticated
+  using (
+    bucket_id = 'coach-docs'
+    and (storage.foldername(name))[1] = (select auth.uid())::text
+    and public.coach_doc_unaccepted(name)
+  );
+
+-- No UPDATE policy, on purpose, and for the reason 91 and 124 give: an UPDATE
+-- policy allows the bytes behind an already-signed key to be replaced, which is
+-- a change nobody could see afterwards. Here it is not a general principle but
+-- the literal failure mode — the whole feature is a record of what somebody
+-- agreed to. The app uploads with upsert:false and a fresh key every time.
+
+-- ── DELIBERATELY ABSENT ──────────────────────────────────────────────────
+-- A tenant or owner read branch, and anything at all touching part 84.
+drop policy if exists coachdoc_obj_tenant_read on storage.objects;
+drop policy if exists coachdoc_obj_owner_read  on storage.objects;
+
+-- ▶ a-standing-appointment.sql
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- A standing appointment — every Tuesday at seven, for as long as they want it.
+--
+-- ── What was here before ─────────────────────────────────────────────────
+--
+-- `trainer_availability` (part 09 + the `minute` column) is a WEEKLY TEMPLATE:
+-- seven days by twenty-four hours of "I am free then". The coach's calendar
+-- screen turns it into concrete rows with a Generate button that walks four
+-- weeks forward and inserts open slots. That is availability, and availability
+-- is the right shape for it.
+--
+-- It is not a booking. Nothing in this product could express "Ana trains with
+-- me at 07:00 every Tuesday" — the single most common fact about a personal
+-- trainer's week. What a coach did instead was press Generate, wait for Ana to
+-- book each slot by hand, and press Generate again next month; and when they
+-- forgot, the standing appointment their client had had for a year simply
+-- stopped existing, silently, with no row anywhere that said it should have.
+--
+-- ── The model ────────────────────────────────────────────────────────────
+--
+-- One row in `session_series` is the ARRANGEMENT. Concrete `sessions` rows are
+-- its OCCURRENCES, and they are ordinary booked sessions in every respect —
+-- same table, same policies, same exclusion constraint, same waitlist, same
+-- cancellation RPC, same late-cancel policy. `sessions` gains exactly two
+-- columns (`series_id`, `occurrence_on`) and nothing else in the product needs
+-- to learn what a series is in order to keep working.
+--
+-- That is the whole reason for this shape rather than a separate recurring
+-- calendar. A recurring booking that lived in its own table would have to
+-- re-implement double-booking, the waitlist, the notice window, the fee, the
+-- outcome, payroll and the ICS export, and every one of those re-implementations
+-- would be the version that drifts.
+--
+-- ── WHY dow + hour + minute + tz, AND NOT "the first one, plus 7 days" ───
+--
+-- Because 07:00 is a fact about the clock on the wall and `starts_at + interval
+-- '7 days'` is a fact about elapsed seconds, and twice a year they disagree.
+-- A series stored as an instant plus a week silently becomes an 06:00 or an
+-- 08:00 appointment the Sunday the clocks move, for everybody in the country,
+-- and the client is told nothing. So the series stores the LOCAL time and the
+-- IANA zone it is local to, and each occurrence is computed as
+-- `(date + time) at time zone tz`. Seven in the morning stays seven in the
+-- morning.
+--
+-- The zone is validated against pg_timezone_names on the way in. An app that
+-- sends a name Postgres does not know gets a refusal, not an appointment
+-- silently pinned to UTC.
+--
+-- ── WHAT HAPPENS ON A CLASH ──────────────────────────────────────────────
+--
+-- `sessions_no_double_booking` (part 86, widened by part 89 to cover blocked
+-- time) is a real exclusion constraint and it WILL refuse an overlap. A year of
+-- Tuesdays crossing one already-booked hour is not a reason to refuse the
+-- arrangement, and an error that abandons the whole run at the first clash is
+-- the behaviour a coach would experience as "recurring bookings do not work".
+--
+-- So: THE CLASHING DATE IS SKIPPED, EVERY OTHER DATE IS CREATED, AND THE COACH
+-- IS TOLD WHICH DATES DID NOT TAKE. Each occurrence is written inside its own
+-- subtransaction, `exclusion_violation` is caught per-date, and the dates are
+-- returned in the report. This mirrors `_promote_session_waitlist` in part 126,
+-- which keeps a client's place in the queue and tries the next person rather
+-- than letting one clash sink the promotion.
+--
+-- A skipped date is not retried on the next materialiser run either — it would
+-- clash again for the same reason, and a coach who freed that hour deliberately
+-- can add the one session back by hand. The series is unharmed: next week is
+-- still next week.
+--
+-- ── WHAT A RECURRING OCCURRENCE DOES NOT DO: DRAW A PACK CREDIT ──────────
+--
+-- `redeemSession` draws a credit when a client taps Book, and part 126 draws
+-- one when the server promotes somebody off a waitlist — there, the reasoning
+-- is that otherwise the queue is the cheapest way to book. It does not carry
+-- over here, and the difference is timing.
+--
+-- The materialiser runs EIGHT WEEKS AHEAD. Drawing a credit per occurrence
+-- would take eight off a ten-session pack the moment a series is created, for
+-- sessions two months away that have not happened and may never happen, and
+-- ending the series would then have to hand every one of them back — a refund
+-- path this product does not have and should not grow in order to support a
+-- calendar feature. A standing appointment is an agreement about TIME. The
+-- money is settled by the coach, exactly as part 126 settles the late fee, and
+-- src/lib/recurring.ts holds the sentence the apps print about it so the two
+-- cannot drift.
+-- ─────────────────────────────────────────────────────────────────────────
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 1 · The arrangement
+-- ═════════════════════════════════════════════════════════════════════════
+create table if not exists public.session_series (
+  id           uuid        primary key default gen_random_uuid(),
+  trainer_id   uuid        not null references public.trainers(id) on delete cascade,
+  client_id    uuid        not null references public.clients(id)  on delete cascade,
+  -- Local weekly position. 0 = Sunday, matching extract(dow) and the app's
+  -- DOW array, so nothing has to translate between two conventions.
+  dow          smallint    not null,
+  hour         smallint    not null,
+  minute       smallint    not null default 0,
+  duration_min int         not null default 60,
+  -- The zone the hour above is an hour IN. See the header.
+  tz           text        not null,
+  starts_on    date        not null,
+  -- NULL is open-ended, which is what a standing appointment usually is. A
+  -- coach who wants "until Christmas" sets it; nobody has to.
+  ends_on      date,
+  status       text        not null default 'active',
+  created_at   timestamptz not null default now(),
+  ended_at     timestamptz,
+  ended_by     uuid        references public.profiles(id) on delete set null,
+  constraint session_series_status_chk   check (status in ('active', 'ended')),
+  constraint session_series_dow_chk      check (dow between 0 and 6),
+  constraint session_series_hour_chk     check (hour between 0 and 23),
+  -- Quarter hours, the same grid `trainer_availability.minute` uses. A series
+  -- that could start at 07:03 would be a slot no availability template can
+  -- ever express and no client could book alongside.
+  constraint session_series_minute_chk   check (minute in (0, 15, 30, 45)),
+  constraint session_series_duration_chk check (duration_min between 5 and 480),
+  constraint session_series_window_chk   check (ends_on is null or ends_on >= starts_on),
+  -- An ended series has an end date and an active one does not pretend to.
+  constraint session_series_ended_chk    check ((status = 'ended') = (ended_at is not null))
+);
+
+create index if not exists session_series_trainer_idx on public.session_series (trainer_id, status);
+create index if not exists session_series_client_idx  on public.session_series (client_id, status);
+
+comment on table public.session_series is
+  'A standing appointment: this client, this coach, this weekday and local time, every week. '
+  'Occurrences are ordinary rows in `sessions` carrying series_id. See supabase/parts/135.';
+comment on column public.session_series.tz is
+  'IANA zone the local hour is stated in. Validated against pg_timezone_names. '
+  'Without it an appointment moves by an hour twice a year and nobody is told.';
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 2 · The occurrence, on the table everything already understands
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- `on delete set null` rather than cascade, deliberately. Deleting a series
+-- must never delete a session that has already been DELIVERED — the coach is
+-- owed for it, payroll counts it, the client approved it. Detaching the row
+-- from the arrangement it came from is the correct erasure; removing the
+-- evidence that the work happened is not.
+alter table public.sessions
+  add column if not exists series_id uuid references public.session_series(id) on delete set null;
+-- The LOCAL date of the occurrence, not derivable from starts_at without
+-- knowing the zone. It is what makes materialising idempotent.
+alter table public.sessions
+  add column if not exists occurrence_on date;
+
+-- One row per series per date, forever. This is the whole of the idempotence:
+-- the materialiser runs daily and inserts only dates that are not already
+-- there, so a slot the client CANCELLED (part 126 leaves the row in place,
+-- freed, still carrying series_id and occurrence_on) is never silently
+-- re-booked underneath them the next morning.
+create unique index if not exists sessions_series_occurrence_uniq
+  on public.sessions (series_id, occurrence_on)
+  where series_id is not null;
+
+create index if not exists sessions_series_idx on public.sessions (series_id) where series_id is not null;
+
+comment on column public.sessions.series_id is
+  'The standing appointment this session is an occurrence of, or NULL for a one-off. See supabase/parts/135.';
+comment on column public.sessions.occurrence_on is
+  'The LOCAL date of the occurrence in the series'' zone. Not derivable from starts_at alone.';
+
+-- A session may only be attached to a series belonging to the SAME coach.
+--
+-- `sessions_trainer` is `for all` on `trainer_id = auth.uid()`, so a coach can
+-- update their own session rows directly — including this column. Without this
+-- guard one coach could point a row of theirs at another coach's series and,
+-- through the unique index above, stop that series materialising the date they
+-- claimed. Structural, and it costs one lookup on a column almost nothing
+-- writes.
+create or replace function public.session_series_same_coach()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+begin
+  if new.series_id is null then
+    new.occurrence_on := null;
+    return new;
+  end if;
+  if not exists (
+    select 1 from session_series ss
+     where ss.id = new.series_id and ss.trainer_id = new.trainer_id
+  ) then
+    raise exception 'That series belongs to another coach.' using errcode = '42501';
+  end if;
+  if new.occurrence_on is null then
+    raise exception 'A series occurrence must carry the date it is an occurrence of.' using errcode = '23514';
+  end if;
+  return new;
+end $fn$;
+
+revoke all on function public.session_series_same_coach() from public, anon, authenticated;
+
+drop trigger if exists sessions_series_same_coach on public.sessions;
+create trigger sessions_series_same_coach
+  before insert or update of series_id, occurrence_on, trainer_id on public.sessions
+  for each row execute function public.session_series_same_coach();
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 3 · Who may read an arrangement
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- The two people in it. No tenant branch and no owner branch: part 120's lesson
+-- is that `role = 'owner'` is never an authorisation, and a gym owner reading
+-- which of a coach's clients has a standing Tuesday is roster surveillance
+-- rather than anything the gym needs to run.
+--
+-- SELECT only. Every write below goes through a SECURITY DEFINER function,
+-- because none of what makes a series legitimate is expressible as a row
+-- predicate: creating one materialises eight weeks of sessions against an
+-- exclusion constraint, and ending one has to decide, per future occurrence,
+-- whether it belongs to the arrangement any more.
+alter table public.session_series enable row level security;
+
+drop policy if exists session_series_parties_r on public.session_series;
+create policy session_series_parties_r on public.session_series
+  for select to authenticated
+  using (trainer_id = (select auth.uid()) or client_id = (select auth.uid()));
+
+-- RLS narrows a GRANT; it does not confer access, and Supabase's stock default
+-- privileges hand `anon` the full DML set on anything created in this schema
+-- (parts 119, 120, 134). A privilege that is only ever refused is a privilege
+-- to remove.
+revoke all on public.session_series from anon;
+revoke insert, update, delete on public.session_series from authenticated;
+grant select on public.session_series to authenticated;
+
+-- Never created, and dropped by name as well, so one added live by hand and
+-- written down nowhere does not survive a re-run of setup.sql.
+drop policy if exists session_series_owner_r  on public.session_series;
+drop policy if exists session_series_tenant_r on public.session_series;
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 4 · Materialising — the thing nobody has to re-tap
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- Internal. No authorisation of its own and therefore executable by NOBODY:
+-- the callers below have already established who may touch this series.
+-- Revoked from public, anon AND authenticated — part 120 is the record of what
+-- happens when only `public` is revoked and the two API roles are left holding
+-- their separate grants.
+--
+-- Returns a report rather than a count because "created 7, skipped 1 on the
+-- 14th" and "created 8" are different things to say to a coach, and a caller
+-- that has to re-read the calendar to work out which happened can be told a
+-- different story than the one that was written.
+create or replace function public._materialise_session_series(p_series uuid, p_horizon_days int default 56)
+returns jsonb
+language plpgsql
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+declare
+  v_s        record;
+  v_today    date;
+  v_horizon  date;
+  v_date     date;
+  v_ts       timestamptz;
+  v_rows     int;
+  v_created  int := 0;
+  v_skipped  int := 0;
+  v_clashes  jsonb := '[]'::jsonb;
+  v_tenant   uuid;
+begin
+  select ss.* into v_s from session_series ss where ss.id = p_series for update;
+  if not found or v_s.status <> 'active' then
+    return jsonb_build_object('created', 0, 'skipped', 0, 'clashed_on', '[]'::jsonb);
+  end if;
+
+  select t.tenant_id into v_tenant from trainers t where t.id = v_s.trainer_id;
+
+  -- "Today" is today WHERE THE APPOINTMENT IS, not where the server is. A
+  -- coach in Auckland materialising at 11:00 UTC is on tomorrow's date, and a
+  -- horizon measured in the server's day would be a day short or a day long
+  -- for half the world.
+  v_today   := (now() at time zone v_s.tz)::date;
+  v_horizon := v_today + greatest(p_horizon_days, 0);
+
+  -- First candidate: the later of the series start and today, rolled forward
+  -- to the next matching weekday. `(target - actual + 7) % 7` is 0 when today
+  -- already is the day, which is right — this morning's occurrence is still
+  -- wanted if its hour has not passed.
+  v_date := greatest(v_s.starts_on, v_today);
+  v_date := v_date + ((v_s.dow - extract(dow from v_date)::int + 7) % 7);
+
+  while v_date <= v_horizon and (v_s.ends_on is null or v_date <= v_s.ends_on) loop
+    v_ts := (v_date + make_time(v_s.hour, v_s.minute, 0)) at time zone v_s.tz;
+
+    -- Never into the past. A materialiser that back-fills writes sessions
+    -- nobody attended and payroll then counts them.
+    -- Nor a second time: the unique index makes this check the difference
+    -- between idempotent and "re-books an occurrence the client cancelled".
+    if v_ts > now()
+       and not exists (select 1 from sessions s
+                        where s.series_id = v_s.id and s.occurrence_on = v_date) then
+      begin
+        -- Claim one of the coach's own OPEN slots at exactly this instant if
+        -- there is one, rather than adding a second row beside it. Otherwise
+        -- the coach's Generate and their standing appointment both draw an
+        -- 07:00 Tuesday, a client books the open one, and the exclusion
+        -- constraint refuses them at the moment of tapping — a slot the app
+        -- offered and the database then took away.
+        update sessions s
+           set client_id = v_s.client_id, status = 'booked', released = false,
+               series_id = v_s.id, occurrence_on = v_date
+         where s.id = (
+           select s2.id from sessions s2
+            where s2.trainer_id = v_s.trainer_id
+              and s2.starts_at = v_ts
+              and s2.duration_min = v_s.duration_min
+              and s2.status = 'available'
+              and s2.series_id is null
+            order by s2.created_at
+            limit 1
+              for update skip locked);
+        get diagnostics v_rows = row_count;
+
+        if v_rows = 0 then
+          insert into sessions (trainer_id, client_id, starts_at, duration_min,
+                                status, released, tenant_id, series_id, occurrence_on)
+          values (v_s.trainer_id, v_s.client_id, v_ts, v_s.duration_min,
+                  'booked', false, v_tenant, v_s.id, v_date);
+        end if;
+        v_created := v_created + 1;
+      exception when exclusion_violation then
+        -- The coach is already booked or blocked across that hour. Skip the
+        -- date, keep the arrangement, and say which date so somebody can act
+        -- on it. See the header.
+        v_skipped := v_skipped + 1;
+        v_clashes := v_clashes || to_jsonb(v_date::text);
+      end;
+    end if;
+
+    v_date := v_date + 7;
+  end loop;
+
+  return jsonb_build_object('created', v_created, 'skipped', v_skipped, 'clashed_on', v_clashes);
+end $fn$;
+
+revoke all on function public._materialise_session_series(uuid, int) from public, anon, authenticated;
+
+comment on function public._materialise_session_series(uuid, int) is
+  'Internal. Writes the missing occurrences of one series out to the horizon. '
+  'Callers must authorise first; this function does not.';
+
+
+-- The daily run. Also internal — it is called by cron, which runs as the table
+-- owner, and by nothing that a signed-in person can reach.
+--
+-- Every active series, every day, eight weeks ahead. This is the sentence the
+-- feature is: nobody re-taps Generate. A series created today is complete to
+-- the horizon within the minute; every morning after that it grows by the one
+-- day that just came into range.
+create or replace function public.run_session_series_materialiser(p_horizon_days int default 56)
+returns jsonb
+language plpgsql
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+declare
+  v_id      uuid;
+  v_rep     jsonb;
+  v_series  int := 0;
+  v_created int := 0;
+  v_skipped int := 0;
+begin
+  for v_id in
+    select ss.id from session_series ss
+     where ss.status = 'active'
+       and (ss.ends_on is null or ss.ends_on >= (now() at time zone ss.tz)::date)
+     order by ss.created_at
+  loop
+    -- One series failing must not stop the rest of the gym's week being
+    -- written. A clash is already handled per-date inside; this is the
+    -- backstop for anything else — a series whose coach row went away, a zone
+    -- removed from the tzdata between runs.
+    begin
+      v_rep := public._materialise_session_series(v_id, p_horizon_days);
+      v_series  := v_series + 1;
+      v_created := v_created + (v_rep->>'created')::int;
+      v_skipped := v_skipped + (v_rep->>'skipped')::int;
+    exception when others then
+      continue;
+    end;
+  end loop;
+  return jsonb_build_object('series', v_series, 'created', v_created, 'skipped', v_skipped);
+end $fn$;
+
+revoke all on function public.run_session_series_materialiser(int) from public, anon, authenticated;
+
+create extension if not exists pg_cron;
+
+-- Unschedule first so re-running this file does not accumulate duplicate jobs
+-- each firing the same run, exactly as part 48 does.
+do $$
+begin
+  if exists (select 1 from cron.job where jobname = 'materialise-session-series') then
+    perform cron.unschedule('materialise-session-series');
+  end if;
+end $$;
+
+-- 03:17 UTC, daily. Once a day is enough for a horizon measured in weeks, and
+-- the odd minute keeps it off the top of the hour where everything else in a
+-- Postgres runs. The job runs as the table owner, so nothing here widens what a
+-- signed-in person can reach.
+select cron.schedule(
+  'materialise-session-series',
+  '17 3 * * *',
+  $cron$ select public.run_session_series_materialiser(); $cron$
+);
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 5 · Making one
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- The coach's call. A client cannot create a standing appointment in somebody
+-- else's diary, which is why this is not an insert policy.
+create or replace function public.create_session_series(
+  p_client    uuid,
+  p_dow       int,
+  p_hour      int,
+  p_minute    int,
+  p_duration  int,
+  p_tz        text,
+  p_starts_on date default null,
+  p_ends_on   date default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+declare
+  v_uid    uuid := auth.uid();
+  v_id     uuid;
+  v_from   date;
+  v_rep    jsonb;
+begin
+  if v_uid is null then
+    raise exception 'Not signed in.' using errcode = '42501';
+  end if;
+  if not exists (select 1 from clients c where c.id = p_client and c.trainer_id = v_uid) then
+    raise exception 'They are not your client.' using errcode = '42501';
+  end if;
+  -- A name Postgres does not know would otherwise be taken as UTC by
+  -- `at time zone`, and the appointment would be at seven in the morning
+  -- somewhere nobody involved lives.
+  if p_tz is null or not exists (select 1 from pg_timezone_names z where z.name = p_tz) then
+    raise exception 'That is not a time zone this server knows.' using errcode = '22023';
+  end if;
+
+  v_from := coalesce(p_starts_on, (now() at time zone p_tz)::date);
+
+  insert into session_series (trainer_id, client_id, dow, hour, minute, duration_min, tz, starts_on, ends_on)
+  values (v_uid, p_client, p_dow, p_hour, p_minute, p_duration, p_tz, v_from, p_ends_on)
+  returning id into v_id;
+
+  -- Immediately, not at 03:17 tomorrow. A coach who agrees a standing Tuesday
+  -- with somebody standing in front of them expects to see it on the calendar
+  -- before they put the phone down.
+  v_rep := public._materialise_session_series(v_id);
+
+  return jsonb_build_object(
+    'series_id',  v_id,
+    'created',    v_rep->'created',
+    'skipped',    v_rep->'skipped',
+    'clashed_on', v_rep->'clashed_on');
+end $fn$;
+
+revoke all on function public.create_session_series(uuid, int, int, int, int, text, date, date) from public, anon;
+grant execute on function public.create_session_series(uuid, int, int, int, int, text, date, date) to authenticated;
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 6 · Ending one — and why this is NOT a year of cancellations
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- THIS IS THE DANGEROUS FUNCTION IN THIS FILE. Read the whole note.
+--
+-- Part 126 records a late-cancellation fee when a client frees a booked session
+-- inside their coach's notice window. It is per session, it is correct, and it
+-- is exactly what should happen when somebody cannot make next Tuesday.
+--
+-- If ending a SERIES were implemented as "call cancel_my_session for every
+-- future occurrence", a client stopping a standing appointment would be charged
+-- the late fee for every session in the horizon — and, once the materialiser
+-- had been running a while on a year-long series, for a year of sessions they
+-- were cancelling two months in advance. That is the single worst thing this
+-- feature could do to somebody, and it is the obvious implementation.
+--
+-- So ending a series CHARGES NOTHING, EVER, and it does not go anywhere near
+-- `cancel_my_session`.
+--
+--   · Occurrences on or before `p_effective` are untouched. The default is
+--     today, so ending a series never disturbs a session that has already
+--     happened or is happening.
+--
+--   · Occurrences AFTER it that are still booked to the series client, with no
+--     outcome recorded, are DELETED. Not freed: they were never open
+--     availability, they existed only because of this arrangement, and leaving
+--     a year of empty Tuesdays on the coach's calendar would be a worse lie
+--     than removing them. No charge is raised for any of them.
+--
+--   · Any other future occurrence carrying this series id — one the client
+--     cancelled singly and somebody took off the waitlist, one the coach has
+--     already marked delivered, one that was a pre-existing open slot the
+--     materialiser claimed — is LEFT EXACTLY AS IT IS and merely detached from
+--     the series. Ending an arrangement must not reach into a session that now
+--     belongs to somebody else.
+--
+-- WHAT ABOUT THE NEXT ONE, THE ONE INSIDE THE NOTICE WINDOW? It stays booked,
+-- on purpose, and the apps say so in as many words (RECURRING_END_RULE in
+-- src/lib/recurring.ts). "We will stop after next Tuesday" is what ending a
+-- standing appointment means to the two people in it. If the client also cannot
+-- make that last one, they cancel that one session, through the ordinary
+-- button, and their coach's ordinary notice policy applies to it — one session,
+-- one decision, one fee at most. The alternative is this function quietly
+-- pricing a cancellation the person never made.
+--
+-- Either party may end it. A standing appointment is an agreement, and an
+-- agreement one side cannot leave is not one.
+create or replace function public.end_session_series(p_series uuid, p_effective date default null)
+returns jsonb
+language plpgsql
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+declare
+  v_uid     uuid := auth.uid();
+  v_s       record;
+  v_cut     date;
+  v_removed int := 0;
+  v_kept    int := 0;
+begin
+  if v_uid is null then
+    raise exception 'Not signed in.' using errcode = '42501';
+  end if;
+
+  select ss.* into v_s from session_series ss where ss.id = p_series for update;
+  if not found then
+    raise exception 'That standing appointment no longer exists.' using errcode = '42501';
+  end if;
+  if v_s.trainer_id <> v_uid and v_s.client_id <> v_uid then
+    raise exception 'That standing appointment is not yours.' using errcode = '42501';
+  end if;
+
+  v_cut := coalesce(p_effective, (now() at time zone v_s.tz)::date);
+
+  -- Removed: still ours, still booked, never delivered. Nothing else.
+  delete from sessions s
+   where s.series_id = p_series
+     and s.occurrence_on > v_cut
+     and s.status = 'booked'
+     and s.client_id = v_s.client_id
+     and s.outcome is null;
+  get diagnostics v_removed = row_count;
+
+  -- Everything else in the future keeps its place on the calendar and simply
+  -- stops belonging to an arrangement that has ended.
+  update sessions s
+     set series_id = null, occurrence_on = null
+   where s.series_id = p_series
+     and s.occurrence_on > v_cut;
+  get diagnostics v_kept = row_count;
+
+  update session_series
+     set status = 'ended', ends_on = v_cut, ended_at = now(), ended_by = v_uid
+   where id = p_series;
+
+  return jsonb_build_object(
+    'ended', true,
+    'effective_on', v_cut,
+    'removed', v_removed,
+    'left_standing', v_kept,
+    -- Stated rather than implied. Every screen that reports this reads it from
+    -- here, so no app can invent a fee this function did not raise.
+    'charged', false);
+end $fn$;
+
+revoke all on function public.end_session_series(uuid, date) from public, anon;
+grant execute on function public.end_session_series(uuid, date) to authenticated;
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 7 · Reading them
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- Both apps, one function. The RLS policy above already scopes `session_series`
+-- to the two parties, so this adds only the counts — how many occurrences are
+-- on the books, and when the next one is — which a client cannot compute
+-- themselves because `sessions_client_read` shows them their own sessions but
+-- not a count they could trust to be complete under the PostgREST row cap.
+create or replace function public.my_session_series()
+returns table (
+  id           uuid,
+  trainer_id   uuid,
+  client_id    uuid,
+  client_name  text,
+  dow          smallint,
+  hour         smallint,
+  minute       smallint,
+  duration_min int,
+  tz           text,
+  starts_on    date,
+  ends_on      date,
+  status       text,
+  upcoming     int,
+  next_at      timestamptz
+)
+language sql
+stable
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+  select ss.id, ss.trainer_id, ss.client_id,
+         -- The coach sees who it is with. The client is looking at their own
+         -- arrangement and does not need to be told their own name.
+         case when ss.trainer_id = auth.uid() then p.full_name else null end as client_name,
+         ss.dow, ss.hour, ss.minute, ss.duration_min, ss.tz,
+         ss.starts_on, ss.ends_on, ss.status,
+         (select count(*)::int from sessions s
+           where s.series_id = ss.id and s.starts_at > now() and s.status = 'booked') as upcoming,
+         (select min(s.starts_at) from sessions s
+           where s.series_id = ss.id and s.starts_at > now() and s.status = 'booked') as next_at
+    from session_series ss
+    left join profiles p on p.id = ss.client_id
+   where ss.trainer_id = auth.uid() or ss.client_id = auth.uid()
+   order by ss.status, ss.dow, ss.hour, ss.minute
+   limit 500;
+$fn$;
+
+revoke all on function public.my_session_series() from public, anon;
+grant execute on function public.my_session_series() to authenticated;
+
+-- ▶ a-member-can-see-that-they-turned-up.sql
+
+-- ── The attendance a member generates about themselves and cannot read ─────
+--
+-- The client app had no record that anybody had ever turned up. The coach app
+-- takes the register (app/(trainer)/class-checkin.tsx), the owner console marks
+-- it and the Studio reads the door log, and the member — the person the rows
+-- are ABOUT — had no screen at all. app/(client)/attendance.tsx is that screen.
+-- This part is the audit that had to come first, because RLS narrows a GRANT
+-- and the GRANT on all three tables is the blanket `authenticated` one.
+--
+-- Modelled on 125-a-member-can-read-their-own-membership.sql, which asked the
+-- same question about memberships a few hours ago and found the answer was
+-- already yes. It is already yes here too — and, unlike part 125, the reason
+-- the screen still could not be built honestly turned out to be a hole rather
+-- than a gap.
+--
+-- ── What the audit found (run against the live project, not read off) ───────
+--
+-- Both self-reads exist and both work:
+--
+--   class_bookings_self  for all    using (user_id  = (select auth.uid()))   -- part 02
+--   gym_visits_own_r     for select using (member_id = (select auth.uid()))  -- part 32
+--
+-- Proved with two real client profiles in two different tenants, each holding a
+-- scratch booking and scratch visits, queried under `set local role
+-- authenticated` with the other member's uid in request.jwt.claims:
+--
+--   member A: own bookings 2, own visits 3.
+--   member B: own bookings 1, own visits 1; A's booking by primary key 0,
+--             A's visit by primary key 0.
+--   anon:     the read never reaches a policy — it dies at `permission denied
+--             for function my_tenant`, the SECURITY DEFINER helper anon has no
+--             EXECUTE on. It fails closed.
+--
+-- So nothing below re-grants a member their own attendance. They had it.
+--
+-- ── 1. What they could not read: the class they attended ────────────────────
+--
+-- A booking row names a class_id and an attended_at and nothing else. Every
+-- human-readable fact about the class — its TITLE, when it STARTED, who taught
+-- it, which branch it was at — lives in `gym_classes`, whose only member-facing
+-- policy is
+--
+--     gym_classes_read  for select using (tenant_id = my_tenant())
+--
+-- my_tenant() reads profiles.tenant_id, which is where the member is NOW. A
+-- member who changes gyms keeps every booking and every visit they ever made —
+-- both are keyed on the person, not the tenant, and part 125 argued at length
+-- for keeping them that way — but loses the ability to read the classes those
+-- rows point at. Proved live: member A holding one booking at their own gym and
+-- one at another read TWO bookings and TWO class-linked visits, and exactly ONE
+-- class row.
+--
+-- That is not a blank field, it is a wrong answer. `class_bookings.class_id` is
+-- `not null references gym_classes(id) on delete cascade`, so a booking CANNOT
+-- outlive its class: a booking whose class reads as nothing is never a deleted
+-- class, it is always one being withheld. A screen showing the row unlabelled
+-- says "some class, we can't say which" about a session the member attended and
+-- the gym has a register for. A screen dropping the row says they did not come.
+--
+-- ── 2. The hole that had to be closed before the fix could be safe ──────────
+--
+-- The obvious policy — a member may read a class they hold a booking for — is
+-- an ENUMERATION of every gym's timetable, and the reason is `class_bookings_self`
+-- being `for all` rather than `for select`. Its WITH CHECK is `user_id =
+-- auth.uid()` and says nothing about the class. Proved live, as a real member
+-- under `set local role authenticated`:
+--
+--     insert into class_bookings (class_id, user_id, status, attended_at)
+--     values (<a class in a gym they have never been to>, <themselves>, 'booked', now());
+--     -- 1 row
+--
+-- Two separate harms, and only the second is about this part:
+--
+--   · A member can write the gym's attendance register. `attended_at` is what
+--     class_attendance_summary counts, what the Studio's retention page reads
+--     and what the owner's members page shows. Anyone could mark themselves
+--     present at a class they did not attend, or absent from one they did, or
+--     delete the record outright — and the gym has no way to see it happened.
+--   · With that insert available, any policy keyed on "a class I have a booking
+--     for" is a policy keyed on "a class whose id I can name", which is the
+--     platform-wide timetable read 30-classes-tenant-scope.sql closed.
+--
+-- The member does not need the pen. Every legitimate write to their own booking
+-- already goes through a SECURITY DEFINER function that bypasses RLS entirely:
+-- `book_class` takes the seat (and refuses a class outside my_tenant(), which
+-- is the check the raw insert skips), `cancel_class` releases it and promotes
+-- the waitlist. Nothing in the client app, the coach app or the Studio inserts,
+-- updates or deletes a class_bookings row as the member. So the policy is
+-- narrowed to SELECT, which is what it was always doing.
+--
+-- Proved live under the narrowed policy: `book_class` still returns 'booked'
+-- and the seat is visible to the member; `cancel_class` still releases it; and
+-- the member's own UPDATE and DELETE now move ZERO rows. Zero rows, not an
+-- error — PostgREST does not raise on an RLS-filtered write, which is why that
+-- proof counts rows rather than trusting an exception to arrive.
+drop policy if exists class_bookings_self on class_bookings;
+create policy class_bookings_self_r on class_bookings
+  for select using (user_id = (select auth.uid()));
+
+-- ── 3. The class read, and why it cannot be written inline ─────────────────
+--
+-- A policy on `gym_classes` may not subquery `class_bookings`. class_bookings
+-- carries `class_bookings_owner_r`, which itself subqueries gym_classes, so the
+-- two tables' policies re-enter each other. Not a theory — the naive policy was
+-- created live and the read failed with
+--
+--     42P17: infinite recursion detected in policy for relation "gym_classes"
+--
+-- which is 28-fix-profiles-recursion.sql wearing different tables. The way out
+-- is the one part 32 already names: a SECURITY DEFINER helper does not re-enter
+-- the table it is protecting, because RLS does not apply inside it.
+--
+-- Set-returning rather than a `has_attended(class)` boolean on purpose. A
+-- scalar helper is called once per candidate row of gym_classes — a table that
+-- holds every gym on the platform. This one is STABLE and correlated with
+-- nothing outside itself, so the planner evaluates it ONCE per statement as an
+-- InitPlan and the policy becomes a hash lookup.
+--
+-- It is the caller's history and only ever the caller's: both arms are pinned
+-- to auth.uid() inside the function, which is the whole of its authority. Under
+-- anon auth.uid() is null and both arms match nothing — and anon cannot reach
+-- it anyway, having no EXECUTE.
+create or replace function public.my_class_history()
+returns setof uuid
+language sql
+stable
+security definer
+set search_path to 'public', 'pg_temp'
+as $function$
+  select cb.class_id from class_bookings cb
+   where cb.user_id = auth.uid()
+  union
+  select v.class_id from gym_visits v
+   where v.member_id = auth.uid() and v.class_id is not null
+$function$;
+
+revoke execute on function public.my_class_history() from public, anon;
+grant  execute on function public.my_class_history() to authenticated;
+
+-- Additive, and narrow on the only axis that exists here: the exact set of rows
+-- it admits is the classes this person has a booking for or a recorded visit
+-- to. Not "classes at my gym" — that is gym_classes_read and it already covers
+-- the timetable. Not "classes I could name".
+--
+-- The booking arm is only safe because of the narrowing above. With the member
+-- unable to create a booking row, every one that exists came from `book_class`,
+-- which refuses a class whose tenant is not the caller's — so a booking is now
+-- proof that the class WAS the member's gym's when they took the seat, which is
+-- exactly the claim this policy needs and could not previously make.
+--
+-- The visit arm needs no such argument: `gym_visits` has no member INSERT policy
+-- at all (part 32 gives writes to `my_role() in ('trainer','owner')`), so a
+-- visit row is the gym's own record of a door opening and cannot be forged by
+-- the person it names.
+drop policy if exists gym_classes_mine_r on gym_classes;
+create policy gym_classes_mine_r on gym_classes
+  for select using (id in (select public.my_class_history()));
+
+-- The two lookups my_class_history performs. idx_class_bookings_user_id (part
+-- 25) already covers the booking arm; idx_gym_visits_member (part 32) leads on
+-- member_id but carries entered_at, so this pairs the member with the column
+-- actually being selected and keeps the visit arm off the heap.
+create index if not exists idx_gym_visits_member_class
+  on public.gym_visits (member_id, class_id)
+  where class_id is not null;
+
+comment on policy gym_classes_mine_r on public.gym_classes is
+  'A member may read a class they hold a booking for or have a recorded visit to, whichever gym it belongs to. gym_classes_read is scoped to my_tenant(), which is where the member is now, so a member who changes gyms kept their bookings and visits and lost every class those rows point at.';
+
+comment on function public.my_class_history() is
+  'The class ids the caller has attended or booked. SECURITY DEFINER because a policy on gym_classes cannot subquery class_bookings without recursing through class_bookings_owner_r. Reads nobody''s history but auth.uid()''s.';
+
+-- ── Deliberately NOT done here ─────────────────────────────────────────────
+--
+-- 1. `gym_visits_own_r` and `class_bookings_self_r` are NOT tenant-scoped, for
+--    the reason part 125 sets out for memberships and payments: `= auth.uid()`
+--    is already the tightest predicate available, no row it admits belongs to
+--    anyone else, and `and tenant_id = my_tenant()` would delete the attendance
+--    history of the one member it distinguishes — the one who changed gyms.
+--    Their old gym's record of them turning up is still a record of THEM. Which
+--    gym a visit belongs to is a question for the screen, which reads tenant_id
+--    off the row and says so.
+--
+-- 2. `gym_visits.note` stays readable by the member, because it already is.
+--    Same warning as part 125 made about memberships.note: it is free text the
+--    desk writes, in a row the member can read. app/(client)/attendance.tsx
+--    therefore does not select it.
+--
+-- 3. The owner console still cannot book a walk-in onto a class.
+--    `class_bookings_owner_w` is UPDATE only, there is no owner INSERT policy,
+--    and `bookOnto` in src/lib/gymSchedule.ts inserts directly — so it is
+--    refused today and was refused before this part. Narrowing the member's
+--    policy does not touch it and does not cause it. Left alone rather than
+--    fixed blind: the desk-booking path is the owner console's, not the client
+--    app's, and an INSERT policy written without that screen in front of it is
+--    a guess.

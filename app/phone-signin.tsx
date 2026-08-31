@@ -89,7 +89,7 @@ export default function PhoneSignIn() {
                 We’ll text you a six-digit code. No password to remember, and nothing to reset.
               </Text>
 
-              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 6 }}>MOBILE NUMBER</Text>
+              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 6 }}>Mobile number</Text>
               <View style={{ flexDirection: 'row', gap: sp.sm }}>
                 <Pressable onPress={() => { setSearch(''); setPickerOpen(true); }}
                   accessibilityRole="button" accessibilityLabel={`Country: ${countryFor(iso).name}, +${countryFor(iso).dial}`}
@@ -118,7 +118,7 @@ export default function PhoneSignIn() {
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: 7 }}>We’ll text {e164}</Text>
               ) : null}
 
-              <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.xl, marginBottom: 6 }}>YOUR NAME</Text>
+              <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.xl, marginBottom: 6 }}>Your name</Text>
               <TextInput value={name} onChangeText={setName} placeholder="Only needed the first time"
                 placeholderTextColor={t.ink3} autoCapitalize="words" autoComplete="name"
                 accessibilityLabel="Your name" style={field} />

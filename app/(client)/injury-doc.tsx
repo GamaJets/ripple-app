@@ -275,10 +275,10 @@ export default function InjuryDoc() {
           Photograph a physio report, a scan result or a doctor's note. We suggest what to disclose; you decide what goes in.
         </Text>
 
-        <Notice tone={t.s3} kicker="Guidance only" title="Not Medical Advice"
+        <Notice tone={t.s3} kicker="Guidance only" title="Not medical advice"
           note="Nothing here reads, checks or corrects a diagnosis. For pain, a new injury, or a diagnosis, see a doctor or physio before training." />
 
-        <Notice tone={t.brand} kicker="Private" title="Your Coach Never Sees the File"
+        <Notice tone={t.brand} kicker="Private" title="Your coach never sees the file"
           note="The document stays in your account and only you can open it. What your coach sees is the injury you confirm below — the area, how bad it is and your note — the same as if you had typed it in yourself." />
 
         {busy ? (

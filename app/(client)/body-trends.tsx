@@ -56,7 +56,7 @@ import { useSettings } from '../../src/ui/settings';
 import { weightDeltaIn, weightIn } from '../../src/lib/units';
 import {
   bodyReadings, measuredNote, stalenessNote, mixedSourceNote, readingsLabel,
-  shortDayLabel, dayLabel, todayISO, type BodyReading,
+  dayLabel, todayISO, type BodyReading,
 } from '../../src/lib/bodyFigures';
 import { Rule, Section, SectionHead, Ghost, Spark } from '../../src/ui/kit';
 import { sp, layout, type as ty, numeric, value } from '../../src/theme/scale';
@@ -224,11 +224,16 @@ export default function BodyTrends() {
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>{measuredNote(now, today)}</Text>
                   {stale ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{stale}</Text> : null}
                   <View style={{ height: sp.md }} />
+                  {/* The two end dates that used to sit in the row below are
+                      now the chart's own axis, drawn from the same array it
+                      plots — so they cannot drift from the points the way a
+                      row assembled beside a chart can. What is left underneath
+                      is the part the axis does not say: where the series
+                      starts and how far it ranges. */}
                   <Spark data={vals} labels={readings.map((r) => r.at)} unit={` ${unit}`} />
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: sp.sm }}>
-                    <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{shortDayLabel(readings[0].at)} · {first} {unit}</Text>
+                    <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>first {first} {unit}</Text>
                     <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>range {min}–{max} {unit}</Text>
-                    <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{shortDayLabel(readings[readings.length - 1].at)}</Text>
                   </View>
                 </Section>
               </View>

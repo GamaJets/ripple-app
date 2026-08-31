@@ -291,6 +291,15 @@ export default function Settings() {
           <SectionHead title="Signed in as" />
           <Line t={t} first label="Name" value={auth.loading ? 'Checking\u2026' : fig(auth.user?.name)} />
           <Line t={t} label="Email" value={auth.loading ? 'Checking\u2026' : fig(auth.user?.email)} />
+          {/* The middle ground this section did not have. It offered sign-out
+              and, further down, account deletion \u2014 so the only thing a member
+              could do about a password they had reason to distrust was leave
+              the app and use the "forgotten password" flow for a password they
+              had not forgotten, and there was nothing at all they could do
+              about an email address they no longer had access to. Which is the
+              address every route back into the account goes to. */}
+          <ListRow icon="settings" title="Password & Email" note="Change your password or the address you sign in with"
+            onPress={() => router.push('/(client)/account')} />
           <View style={{ flexDirection: 'row', marginTop: sp.md }}>
             <Ghost label="Sign Out" onPress={signOut} />
           </View>

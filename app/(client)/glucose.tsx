@@ -95,7 +95,7 @@ export default function Glucose() {
           </View>
         </View>
 
-        <Notice tone={t.s3} kicker="Not medical advice" title="Readings, Not Recommendations"
+        <Notice tone={t.s3} kicker="Not medical advice" title="Readings, not recommendations"
           note={`Repple shows what your monitor recorded. It does not tell you what to eat, and the range shown (${TYPICAL_LOW_MMOL}–${TYPICAL_HIGH_MMOL} mmol/L) is the one commonly quoted for adults, not a target set for you. Your targets come from your clinician.`} />
 
         {/* ── The window's headline figures ─────────────────────────────── */}

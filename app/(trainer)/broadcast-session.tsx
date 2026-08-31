@@ -1,27 +1,36 @@
-// Trainer · Broadcast a session. Pick a recorded session clip, write one caption,
-// choose platforms, and publish to all at once. Connected platforms auto-post;
-// unconnected ones prompt to connect (and offer native share right now).
+// Trainer · Share a session clip. Pick a video, write a caption, hand both to
+// the phone's share sheet. That is the screen.
 //
-// Re-skinned onto the instrument-panel kit (`src/ui/kit`) and the scale
-// (`src/theme/scale`). No hero — a compose screen has no live number to lead
-// with. Five bordered boxes became one card (the clip drop, the only thing you
-// act on) plus hairline-separated sections. Same picker, same publish call.
+// ── What this screen used to be, and what is left of it ─────────────────────
 //
-// Three claims the code could not back were removed:
-//   · "Published · Posted to YouTube, Instagram…" — `publishToSocials` has never
-//     uploaded anything (the platform hand-off is still a TODO in
-//     `src/lib/social.ts`), so the success alert announced posts that did not
-//     happen. It now says what actually occurred and offers the share sheet,
-//     which is the one thing that really works.
-//   · The trailing "Connect each account once (Settings → Integrations)" —
-//     there is no Integrations screen anywhere in the app.
-//   · "Connect them in Settings to publish automatically", in the publish alert
-//     itself, which sent the coach to that same screen that does not exist. It
-//     says plainly that auto-posting is not wired up yet. And since every
-//     platform comes back pending, the "posted" branch beside it was
-//     unreachable — one alert now, not a branch that never ran.
-// The right-hand "Connect" label went too: tapping a row toggles selection, it
-// never opened a connect flow. The row now states the platform's status.
+// It was "Broadcast a Session": a clip, a caption, four tickable platforms —
+// YouTube, Instagram, Facebook, TikTok — and a "Publish to all" button. None of
+// it published anything. `publishToSocials` in src/lib/social.ts was one line
+// long and pushed every platform onto a "pending" list; the green "Set up" dot
+// beside each network tested whether an `EXPO_PUBLIC_*_CLIENT_ID` string
+// existed in the build, which says nothing about an account being linked
+// because there was no OAuth flow, no token and no account record anywhere. The
+// footnote told the coach to "connect each account once (Settings →
+// Integrations)", and there is no Integrations screen in this app.
+//
+// A previous pass rewrote the alerts to say so — which was right, and stopped
+// short. It left four checkboxes on the screen, each labelled "Not available",
+// above a button that opened the share sheet regardless of which ones were
+// ticked. This codebase has already ruled on that shape twice, for Studio's
+// "Connect Accounting" and for Apple Music: a control whose only function is to
+// explain that it does not work is worse than no control, because the coach
+// still has to read it, still has to decide, and still ends up somewhere the
+// screen did not promise. So the picker is gone rather than reworded, along
+// with `sel`, `toggle` and the publish call, and the screen now does the one
+// thing it can actually do — well, and in one tap.
+//
+// What direct publishing would cost is written down in the header of
+// src/lib/social.ts. It is not on this screen because a coach cannot act on it.
+//
+// The share sheet is not a consolation prize. It lists every app the phone
+// actually has, reaches networks that do not exist yet, keeps working when any
+// of them changes its SDK, and gives Repple no posting access — the coach picks
+// the destination and confirms the post. Two taps, and the clip is theirs.
 import { useState } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -30,16 +39,15 @@ import * as ImagePicker from 'expo-image-picker';
 import { ensureMediaPermission } from '../../src/ui/permissions';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Card, Ghost } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Card, Ghost, ListRow } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
-import { SOCIAL_PLATFORMS, socialConnected, publishToSocials, shareSessionNatively, type SocialPlatform } from '../../src/lib/social';
+import { shareSessionNatively } from '../../src/lib/social';
 
-export default function BroadcastSession() {
+export default function ShareSessionClip() {
   const t = useTheme();
   const router = useRouter();
   const [uri, setUri] = useState<string | null>(null);
   const [caption, setCaption] = useState('');
-  const [sel, setSel] = useState<SocialPlatform[]>(['youtube', 'instagram', 'facebook']);
   const [busy, setBusy] = useState(false);
 
   const pick = async (fromCamera: boolean) => {
@@ -50,31 +58,15 @@ export default function BroadcastSession() {
     if (!res.canceled && res.assets && res.assets[0]) setUri(res.assets[0].uri);
   };
 
-  const toggle = (p: SocialPlatform) => setSel((s) => (s.includes(p) ? s.filter((x) => x !== p) : [...s, p]));
-
-  const publish = async () => {
+  // One path, no branches, no alert on the way out. The old version put a
+  // dialog between the coach and the share sheet to explain what was about to
+  // happen; there is nothing to explain now, and a confirmation step in front
+  // of a confirmation step is just a tap.
+  const share = async () => {
     if (!uri) { Alert.alert('Add a clip', 'Record or choose the session video first.'); return; }
-    if (!sel.length) { Alert.alert('Pick a platform', 'Choose at least one place to post.'); return; }
     setBusy(true);
-    const r = await publishToSocials({ uri, caption: caption.trim(), platforms: sel });
+    await shareSessionNatively(caption.trim() || 'My training session', uri);
     setBusy(false);
-    // A third claim the code could not back, and the one that sent the coach
-    // looking for a screen: `publishToSocials` returns every platform as pending
-    // (src/lib/social.ts), so this branch is the only one that ever runs and it
-    // said "Connect them in Settings to publish automatically" — pointing at the
-    // Integrations screen the header above already notes does not exist. A coach
-    // hunting Settings for a connect flow finds nothing and concludes the app is
-    // broken, when the truth is simply that auto-posting has not been built yet.
-    // Say that, and offer the share sheet, which does work. The old `else` was
-    // unreachable for the same reason and is gone.
-    const names = r.pending.map((p) => SOCIAL_PLATFORMS.find((x) => x.key === p)?.name || p).join(', ');
-    const many = r.pending.length > 1;
-    Alert.alert(
-      'Nothing posted yet',
-      `Repple cannot post to ${names} for you — auto-posting is not wired up yet, so there is nothing to connect and nothing has been uploaded. ` +
-        `Open your phone's share sheet and post the clip to ${many ? 'them' : 'it'} yourself?`,
-      [{ text: 'Not now' }, { text: 'Share now', onPress: () => shareSessionNatively(caption.trim() || 'My training session', uri) }],
-    );
   };
 
   const G = layout.gutter;
@@ -86,11 +78,13 @@ export default function BroadcastSession() {
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon="back" onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Your channels</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Broadcast a Session</Text>
+            <Text style={{ ...ty.micro, color: t.ink3 }}>Marketing</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Share a Session</Text>
           </View>
         </View>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>Post one clip to all your channels at once.</Text>
+        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
+          Your clip and your caption, straight into whichever app you post from.
+        </Text>
 
         {/* ── the clip: the one thing on this screen you act on ──────────── */}
         <Section>
@@ -113,49 +107,33 @@ export default function BroadcastSession() {
           <TextInput value={caption} onChangeText={setCaption} placeholder="Today's session — 20 min full-body burner 🔥 #Warehouse"
             placeholderTextColor={t.ink3} multiline
             style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md, minHeight: 88, textAlignVertical: 'top' }} />
-        </Section>
-
-        <Rule />
-
-        {/* ── platforms ──────────────────────────────────────────────────── */}
-        <Section>
-          <SectionHead title="Post To" note={sel.length ? `${sel.length} selected` : 'None selected'} />
-          {SOCIAL_PLATFORMS.map((p, i) => {
-            const on = sel.includes(p.key); const connected = socialConnected(p.key);
-            return (
-              <Pressable key={p.key} onPress={() => toggle(p.key)} accessibilityRole="checkbox" accessibilityState={{ checked: on }} accessibilityLabel={p.name}
-                style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-                <View style={{ width: 22, height: 22, borderRadius: 7, borderWidth: hairline, borderColor: on ? t.brand : t.ink3, backgroundColor: on ? t.brand : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
-                  {on ? <Icon name="check" size={13} color={t.brandInk} /> : null}
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{p.name}</Text>
-                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{p.hint}</Text>
-                </View>
-                {/* socialConnected() only tests whether a build-time client id exists.
-                    It is not an OAuth session and no account is linked, so this used to
-                    read "Set up" in green while nothing could post. */}
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.ink3 }} />
-                  <Text style={{ ...ty.caption, color: t.ink2 }}>{connected ? 'Not linked yet' : 'Not available'}</Text>
-                </View>
-              </Pressable>
-            );
-          })}
-        </Section>
-
-        <Rule />
-
-        {/* ── publish ────────────────────────────────────────────────────── */}
-        <Section>
-          <Pressable onPress={publish} disabled={busy} accessibilityRole="button" accessibilityLabel="Publish to all"
-            style={{ backgroundColor: t.brand, borderRadius: radius.sm, paddingVertical: 13, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: sp.sm, opacity: busy ? 0.7 : 1 }}>
-            {busy ? <ActivityIndicator color={t.brandInk} /> : <Icon name="share" size={16} color={t.brandInk} />}
-            <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>{busy ? 'Publishing…' : 'Publish to all'}</Text>
-          </Pressable>
+          {/* Said once, plainly, and not as an apology: the coach is choosing
+              where this goes, which is the part of the arrangement that makes
+              it work at all. */}
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-            No platform upload is wired yet, so publishing opens your phone's share sheet and you post the clip yourself.
+            The caption travels with the clip. You pick where it goes on the next screen — Repple never posts on your behalf.
           </Text>
+        </Section>
+
+        <Rule />
+
+        {/* ── share ──────────────────────────────────────────────────────── */}
+        <Section>
+          <Pressable onPress={share} disabled={busy} accessibilityRole="button" accessibilityLabel="Share this clip"
+            style={{ backgroundColor: t.brand, borderRadius: radius.sm, paddingVertical: 13, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: sp.sm, opacity: busy ? 0.7 : 1, borderWidth: hairline, borderColor: t.brand }}>
+            {busy ? <ActivityIndicator color={t.brandInk} /> : <Icon name="share" size={16} color={t.brandInk} />}
+            <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>{busy ? 'Opening…' : 'Share this clip'}</Text>
+          </Pressable>
+        </Section>
+
+        <Rule />
+
+        {/* ── the other half of the marketing story ──────────────────────── */}
+        <Section>
+          <SectionHead title="No clip today?" />
+          <ListRow icon="sparkle" title="Make a share card"
+            note="Your week's real numbers as a graphic you can post"
+            onPress={() => router.push('/(trainer)/share-kit')} />
         </Section>
 
       </ScrollView>

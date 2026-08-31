@@ -53,18 +53,18 @@ export default function Guide() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingTop: sp.xl, paddingBottom: 48 }}>
-        <Text style={{ ...ty.micro, color: t.ink3 }}>USER GUIDE</Text>
+        <Text style={{ ...ty.micro, color: t.ink3 }}>User guide</Text>
         <Text style={{ ...ty.title, color: t.ink, marginTop: 2 }}>{VARIANT_LABEL[VARIANT]}</Text>
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>{GUIDE_INTRO[VARIANT]}</Text>
 
         <Rule />
 
-        <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>THE TABS</Text>
+        <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>The tabs</Text>
         {tabs.map((s) => <Block key={s.title} s={s} />)}
 
         {topics.length ? (
           <>
-            <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>ACROSS THE APP</Text>
+            <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>Across the app</Text>
             {topics.map((s) => <Block key={s.title} s={s} />)}
           </>
         ) : null}

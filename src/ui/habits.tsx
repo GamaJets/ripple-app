@@ -88,6 +88,7 @@ import { buildChecklist, scheduledFocus, type ChecklistGap, type ChecklistSource
 import { worstStatus, type LoadStatus } from './loadStatus';
 import { capLimit, capped } from '../lib/rowCap';
 import { WATER_CAP, clampGlasses, mergeCount, type CountAt } from '../lib/wellnessSync';
+import { classifyWrite, serverRows, type WriteOutcome } from '../lib/offlineQueue';
 import { useAuthRevision } from './authRevision';
 import { useClientData } from './clientData';
 import { useCoachNutrition } from './coachNutrition';
@@ -130,6 +131,11 @@ interface HabitsValue {
   waterStatus: LoadStatus;
   addWater: () => void;
   removeWater: () => void;
+  /** How many of today's ticks (and un-ticks) the server has not accepted.
+   *  Under 'error' this is the difference between what the client did and what
+   *  their coach's adherence figures are counting, and it is not zero just
+   *  because the screen looks green. */
+  unsent: number;
 }
 
 /** Where today's count is cached on this device.
@@ -139,6 +145,40 @@ interface HabitsValue {
  *  account is the one older builds used, and it is still read as a fallback
  *  below — see `readLocalWater`. */
 const waterKey = (uid: string | null, day: string) => (uid ? `repple.water:${uid}:${day}` : `repple.water:${day}`);
+
+/** Today's ticks on this device, and the writes the server has not taken yet.
+ *
+ *  Keyed by account and by day, like the water count and for the same reason:
+ *  a shared gym phone must not show one client another's morning, and a tick
+ *  belongs to the day it was made on and to no other.
+ *
+ *  This did not exist. Ticks lived in a useState and a write that never
+ *  reached the server left nothing behind, so a client who worked through
+ *  their checklist in a basement gym came back to a blank card — and the
+ *  coach's adherence figures, which count `habit_logs` rows over four weeks,
+ *  read the same morning as a day the client did nothing. */
+const ticksKey = (uid: string, day: string) => `repple.habits:${uid}:${day}`;
+
+/** What that cache holds: the ticks as they stand, and the toggles that have
+ *  not been accepted. The two are separate because they answer different
+ *  questions — `done` is what the client sees, `pending` is what the server
+ *  still owes — and a single list could not represent an UN-tick that has not
+ *  landed, which is a row that must be deleted rather than one to write. */
+interface CachedTicks { done: string[]; pending: Record<string, boolean> }
+
+const readLocalTicks = async (uid: string, day: string): Promise<CachedTicks> => {
+  try {
+    const raw = await AsyncStorage.getItem(ticksKey(uid, day));
+    if (!raw) return { done: [], pending: {} };
+    const v = JSON.parse(raw);
+    const done = Array.isArray(v?.done) ? v.done.map(String) : [];
+    const pending: Record<string, boolean> = {};
+    if (v?.pending && typeof v.pending === 'object') {
+      for (const [k, on] of Object.entries(v.pending)) pending[String(k)] = !!on;
+    }
+    return { done, pending };
+  } catch { return { done: [], pending: {} }; }
+};
 
 /** Today's cached count, from whichever key holds it.
  *
@@ -208,6 +248,17 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
   // fires twice, and an updater is no place for one regardless.
   const uidRef = useRef<string | null>(null);
   const waterRef = useRef(0);
+  // Today's ticks and the toggles the server has not accepted, as they stand
+  // right now, for the async paths. A tap resolves its write a second or two
+  // after the render that produced it; a functional updater is no place for a
+  // network call or a cache write, because React double-invokes updaters in
+  // development and both would fire twice. That is the shape of the two bugs
+  // documented further down this file.
+  const doneRef = useRef<Set<string>>(new Set());
+  const pendingRef = useRef<Map<string, boolean>>(new Map());
+  // The same count, in state, because `unsent` is rendered and a ref changing
+  // re-renders nothing. Only ever written beside `pendingRef`.
+  const [pendingCount, setPendingCount] = useState(0);
   const [ticksStatus, setTicksStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
   // Separate from the ticks on purpose: a coach's items failing to load and
   // today's ticks failing to load are two different holes, and folding them
@@ -257,6 +308,35 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
   const cacheWater = (n: number, at: string) => {
     AsyncStorage.setItem(waterKey(uidRef.current, today()), JSON.stringify({ count: n, at }))
       .catch(() => { /* the count is correct this session either way */ });
+  };
+
+  /** Write today's ticks and the outstanding toggles to this device.
+   *
+   *  Before the network, never conditional on it. A checklist worked through
+   *  in a basement gym has to survive the app being killed before signal comes
+   *  back — which is the whole of what was missing here. */
+  const cacheTicks = () => {
+    const owner = uidRef.current;
+    if (!owner) return;
+    const payload: CachedTicks = { done: [...doneRef.current], pending: Object.fromEntries(pendingRef.current) };
+    AsyncStorage.setItem(ticksKey(owner, today()), JSON.stringify(payload))
+      .catch(() => { /* the ticks are correct this session either way */ });
+  };
+
+  /** Set the ticks, the ref, and the cache together. Three copies of one fact
+   *  that must not be allowed to disagree. */
+  const applyDone = (next: Set<string>) => {
+    doneRef.current = next;
+    setDoneIds(next);
+    cacheTicks();
+  };
+
+  /** Record, or clear, a toggle the server has not taken. */
+  const markPending = (id: string, done: boolean | null) => {
+    if (done === null) pendingRef.current.delete(id);
+    else pendingRef.current.set(id, done);
+    setPendingCount(pendingRef.current.size);
+    cacheTicks();
   };
 
   /** Send today's count up. Resolves true only when the server holds this
@@ -309,6 +389,21 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
         // same order availability.ts settled on, for the same reason: a client
         // in a basement gym still sees their morning.
         const day = today();
+
+        // ── today's ticks, off this device ─────────────────────────────────
+        //
+        // Before the network, like the water count beside it. This is what a
+        // client who worked through their checklist in a basement gym sees,
+        // and `pending` is what the server still owes them.
+        const localTicks = await readLocalTicks(id, day);
+        if (cancelled) return;
+        pendingRef.current = new Map(Object.entries(localTicks.pending));
+        setPendingCount(pendingRef.current.size);
+        if (localTicks.done.length || pendingRef.current.size) {
+          doneRef.current = new Set(localTicks.done);
+          setDoneIds(doneRef.current);
+        }
+
         const localWater = await readLocalWater(id, day);
         if (cancelled) return;
         if (localWater && localWater.count !== waterRef.current) { waterRef.current = localWater.count; setWater(localWater.count); }
@@ -345,14 +440,38 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
           .eq('user_id', id).eq('done_on', today())
           .order('habit', { ascending: true }).limit(capLimit());
         if (cancelled) return;
-        if (error) { setTicksStatus('error'); }
+        // null when the read failed, [] when the client genuinely has not
+        // ticked anything today. The cached ticks stay on screen either way;
+        // only the second is allowed to take them off it.
+        const tickRows = serverRows<any>(error, data);
+        if (tickRows === null) { setTicksStatus('error'); }
         else {
-          const page = capped(data);
-          // Replaces rather than merges. A tick that is not in the server's
-          // answer is not ticked, and carrying a stale optimistic one forward
-          // is how a refused write stayed green until the next launch.
-          setDoneIds(new Set(page.rows.map((r: any) => String(r.habit))));
+          const page = capped(tickRows);
+          // Replaces rather than merges — and then re-applies the toggles the
+          // server has not been TOLD about. Those are two different things and
+          // the distinction is the whole of this change.
+          //
+          // The old comment here was right about the bug it named: "a tick that
+          // is not in the server's answer is not ticked, and carrying a stale
+          // optimistic one forward is how a refused write stayed green until
+          // the next launch". A REFUSED write. It is dropped from `pending` by
+          // `settle` the moment the server declines it, so nothing carries it
+          // forward. What survives is a toggle nobody answered, which the
+          // server's silence about is not evidence of anything — and wiping it
+          // here is precisely how a morning's work in a basement gym was
+          // deleted by the first launch that got signal.
+          const server = new Set(page.rows.map((r: any) => String(r.habit)));
+          for (const [habit, on] of pendingRef.current) { if (on) server.add(habit); else server.delete(habit); }
+          applyDone(server);
           setTicksStatus(page.truncated ? 'partial' : 'ready');
+
+          // And now they go up. A failure is neither fatal nor silent: the
+          // toggle stays queued, stays counted in `unsent`, and is tried again
+          // on the next launch.
+          for (const [habit, on] of [...pendingRef.current]) {
+            if (cancelled) return;
+            settle(habit, on, await persist(id, habit, on));
+          }
         }
 
         // Inactive rows are filtered here rather than in RLS — the client is
@@ -444,14 +563,55 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
     c.scansStatus === 'loading' || c.profileStatus === 'loading' ? 'loading' : 'ready',
   );
 
-  const persist = async (id: string, done: boolean): Promise<boolean> => {
-    if (!USE_SUPABASE || !uid) return false;
+  /**
+   * Send one toggle, and say which of the three things happened to it.
+   *
+   * The row count is read, not just `error`. Neither of these writes fails
+   * when RLS narrows it to nothing: the upsert succeeds having written no row,
+   * and a delete that matched nothing succeeds having removed none — so "no
+   * error" was never evidence that the server had heard.
+   *
+   * The delete is the exception, and it is deliberate: removing a tick that is
+   * not there IS the un-tick. Zero rows back means the row is already gone,
+   * which is the state the client asked for, so it counts as stored rather
+   * than as a refusal.
+   */
+  const persist = async (owner: string, id: string, done: boolean): Promise<WriteOutcome> => {
     try {
-      const { error } = done
-        ? await supabase.from('habit_logs').upsert({ user_id: uid, habit: id, done_on: today() }, { onConflict: 'user_id,habit,done_on' })
-        : await supabase.from('habit_logs').delete().eq('user_id', uid).eq('habit', id).eq('done_on', today());
-      return !error;
-    } catch { return false; }
+      if (done) {
+        const { data, error } = await supabase.from('habit_logs')
+          .upsert({ user_id: owner, habit: id, done_on: today() }, { onConflict: 'user_id,habit,done_on' })
+          .select('habit');
+        return classifyWrite(error as any, data ? data.length : 0);
+      }
+      const { data, error } = await supabase.from('habit_logs')
+        .delete().eq('user_id', owner).eq('habit', id).eq('done_on', today())
+        .select('habit');
+      const out = classifyWrite(error as any, data ? data.length : 0);
+      return out === 'refused' && !error ? 'stored' : out;
+    } catch { return 'unsent'; }
+  };
+
+  /**
+   * Apply one toggle's outcome to what is on screen and to what is still owed.
+   *
+   * 'stored'  the server has it; nothing is owed.
+   * 'unsent'  nobody answered. The tick stands — the client did the thing —
+   *           and the toggle stays queued for the next launch.
+   * 'refused' the server read it and said no. The tick is REVERTED, because a
+   *           green tick that no policy will ever record is the thing this
+   *           file's header already complains about: right on screen, absent
+   *           in the row the coach's adherence figures count.
+   */
+  const settle = (id: string, done: boolean, out: WriteOutcome) => {
+    if (out === 'unsent') { markPending(id, done); return; }
+    if (out === 'refused') {
+      const n = new Set(doneRef.current);
+      if (done) n.delete(id); else n.add(id);
+      doneRef.current = n;
+      setDoneIds(n);
+    }
+    markPending(id, null);
   };
 
   const toggleHabit = async (id: string): Promise<boolean> => {
@@ -460,12 +620,26 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
     // resolving — and writing a habit_logs row for a line that is no longer
     // there records a day nobody had.
     if (!items.some((i) => i.id === id)) return false;
-    const nd = !doneIds.has(id);
+    const nd = !doneRef.current.has(id);
     // The write used to run INSIDE the setHabits updater, which meant it could
     // fire twice under React's double-invoked updaters and had nowhere to put a
     // result. It is its own step now.
-    setDoneIds((p) => { const n = new Set(p); if (nd) n.add(id); else n.delete(id); return n; });
-    return persist(id, nd);
+    //
+    // Cached before the network is attempted, and the toggle is queued in the
+    // same breath — so a tick made with no signal is on the phone whatever
+    // happens next, including the app being killed on the walk home.
+    const n = new Set(doneRef.current);
+    if (nd) n.add(id); else n.delete(id);
+    applyDone(n);
+    // Nothing is owed when there is no server to owe it to. A build with no
+    // backend IS the store, and a signed-out session has no account to cache
+    // or to write under — queueing there would show a client a toggle
+    // "waiting to send" that nothing will ever pick up.
+    if (!USE_SUPABASE || !uidRef.current) return false;
+    markPending(id, nd);
+    const out = await persist(uidRef.current, id, nd);
+    settle(id, nd, out);
+    return out === 'stored';
   };
 
   // Hitting the goal ticks the water habit off. The tick used to be issued from
@@ -473,9 +647,14 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
   // documents: React double-invokes updaters in development, so the write could
   // fire twice, and an updater is no place for a network call.
   const markWaterDone = () => {
-    if (doneIds.has('water') || !items.some((i) => i.id === 'water')) return;
-    setDoneIds((p) => { const n = new Set(p); n.add('water'); return n; });
-    void persist('water', true);
+    if (doneRef.current.has('water') || !items.some((i) => i.id === 'water')) return;
+    const n = new Set(doneRef.current);
+    n.add('water');
+    applyDone(n);
+    const owner = uidRef.current;
+    if (!USE_SUPABASE || !owner) return;
+    markPending('water', true);
+    void persist(owner, 'water', true).then((out) => settle('water', true, out));
   };
   // A sanity ceiling on the counter, not a goal. It was a bare 20, which was
   // above the old constant 8 and below the 30 the column now permits — so a
@@ -533,7 +712,7 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
   // count past the number of rows on screen.
   const doneCount = habits.filter((h) => h.done).length;
 
-  return <Ctx.Provider value={{ habits, toggleHabit, status, gaps, doneCount, water, waterGoal, waterStatus, addWater, removeWater }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ habits, toggleHabit, status, gaps, doneCount, water, waterGoal, waterStatus, addWater, removeWater, unsent: pendingCount }}>{children}</Ctx.Provider>;
 }
 
 export function useHabits(): HabitsValue {

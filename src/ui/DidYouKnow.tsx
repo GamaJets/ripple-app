@@ -79,7 +79,7 @@ export function DidYouKnow() {
       </View>
       <View style={{ flex: 1 }}>
         <Text style={{ ...ty.micro, color: t.ink3, letterSpacing: 1 }}>
-          DID YOU KNOW · {tip.tab.toUpperCase()}
+          Did you know · {tip.tab.toUpperCase()}
         </Text>
         <Text style={{ ...ty.body, color: t.ink2, marginTop: 5 }}>{tip.text}</Text>
       </View>

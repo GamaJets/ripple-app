@@ -31,7 +31,7 @@ import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Cta, Ghost } from '../../src/ui/kit';
 import { sp, layout, type as ty, numeric } from '../../src/theme/scale';
 import { useClasses } from '../../src/ui/classes';
-import { useSessions, cancelBookedSession, ptCancelLines } from '../../src/ui/sessions';
+import { useSessions, cancelBookedSession, ptCancelLines, useCancellationPolicy, useSlotWaitlist, cancelWarningFor, waitlistLine } from '../../src/ui/sessions';
 import { useBrand } from '../../src/ui/brand';
 import { useClientData } from '../../src/ui/clientData';
 import type { TrainingSession } from '../../src/lib/types';
@@ -85,7 +85,17 @@ export default function Bookings() {
   const t = useTheme();
   const router = useRouter();
   const { classes, myStatus, status: classStatus, cancel: cancelClass } = useClasses();
-  const { sessions, status: sessionStatus, releaseSession } = useSessions();
+  const { sessions, status: sessionStatus, releaseSession, cancelMyBooking } = useSessions();
+  // The coach's own policy, so the warning on this screen and the warning on
+  // the Book screen are the same sentence about the same money. They came apart
+  // once already — see the long note above `Item` — and a hardcoded 24 hours in
+  // one of them was how a coach's 48-hour policy would have gone unmentioned
+  // here and mentioned there.
+  const { policy: cancelPolicy } = useCancellationPolicy();
+  // What this member is waiting for. `session_waitlist_client_r` shows them
+  // their own row and nobody else's, so a position can only come from the
+  // server: read from the app the queue is a set of one and everybody is first.
+  const { mine: myQueue, status: waitStatus, leave: leaveWait, reload: reloadWait } = useSlotWaitlist();
   // Either read failing makes this list a fragment, and a fragment must not be
   // announced as "you have nothing booked" — the member then turns up to
   // nothing, or fails to turn up to something.
@@ -153,8 +163,11 @@ export default function Bookings() {
       // sentences about the member's money come back from `ptCancelLines`, for
       // the same reason.
       if (it.pt) {
-        const out = await cancelBookedSession(it.pt, releaseSession, asked);
+        const out = await cancelBookedSession(it.pt, cancelMyBooking, asked, cancelPolicy);
         if (!out.freed) { failed(); return; }
+        // The slot may have gone straight to somebody's queue, and this member's
+        // own queues may have moved with it.
+        reloadWait();
         Alert.alert('Cancelled', ptCancelLines(out, timeLabel(it.startsAt)).join('\n\n'), [{ text: 'OK' }]);
         return;
       }
@@ -162,24 +175,58 @@ export default function Bookings() {
       if (ok) return;
       failed();
     };
-    // The 24-hour warning is part of the cancellation, not part of the calendar
+    // The notice warning is part of the cancellation, not part of the calendar
     // screen. Asked without it, a member cancelling from this list agreed to
     // something they were not told the price of — and the price is a session off
-    // a pack they paid for. Same rule, same wording, and only for PT: a class is
-    // the gym's own no-show policy and this app does not know it.
-    const late = !!it.pt && Date.parse(it.startsAt) - asked < 24 * 3600 * 1000;
-    if (late) {
+    // a pack they paid for, plus whatever their coach charges. Same rule, same
+    // wording, from the same helper, and only for PT: a class is the gym's own
+    // no-show policy and this app does not know it.
+    const warn = it.pt ? cancelWarningFor(it.startsAt, cancelPolicy, asked) : null;
+    if (warn?.late) {
       Alert.alert(
-        'Within 24 hours',
-        `This is inside 24 hours, so the session is charged from your package, and your coach's late-cancellation fee may apply — Repple does not charge it, so check with them what it is. The slot is offered to your coach's other clients. Continue?`,
+        'Cancelling late',
+        `${warn.line}\n\n${it.title} · ${dayLabel(it.startsAt)} ${timeLabel(it.startsAt)}. Continue?`,
         [{ text: 'Keep it', style: 'cancel' }, { text: 'Cancel anyway', style: 'destructive', onPress: () => { void doCancel(); } }],
       );
+      return;
+    }
+    if (warn) {
+      Alert.alert('Cancel this booking?', `${it.title} · ${dayLabel(it.startsAt)} ${timeLabel(it.startsAt)}\n\n${warn.line}`, [
+        { text: 'Keep it', style: 'cancel' },
+        { text: 'Cancel', style: 'destructive', onPress: () => { void doCancel(); } },
+      ]);
       return;
     }
     Alert.alert('Cancel this booking?', `${it.title} · ${dayLabel(it.startsAt)} ${timeLabel(it.startsAt)}`, [
       { text: 'Keep it', style: 'cancel' },
       { text: 'Cancel', style: 'destructive', onPress: () => { void doCancel(); } },
     ]);
+  };
+
+  const confirmLeave = (q: { sessionId: string; startsAt: string }) => {
+    Alert.alert(
+      'Leave this waitlist?',
+      `You’ll lose your place in line for ${dayLabel(q.startsAt)} ${timeLabel(q.startsAt)}. If it frees up after that, it goes to whoever is in the queue instead of you.`,
+      [
+        { text: 'Stay in line', style: 'cancel' },
+        {
+          text: 'Leave',
+          style: 'destructive',
+          onPress: async () => {
+            const res = await leaveWait(q.sessionId);
+            // A delete that matched nothing is not an error in PostgREST, so
+            // the RPC counts its rows and this screen believes the count. Told
+            // otherwise, a member walks away still in a queue that can book
+            // them into a session they no longer want.
+            if (!res.ok) {
+              Alert.alert('Still on the waitlist', `${res.error || 'That did not save.'} You are still in line for ${timeLabel(q.startsAt)}, so it could still be booked for you.`, [{ text: 'OK' }]);
+              return;
+            }
+            Alert.alert('Left the waitlist', `You’re no longer in line for ${dayLabel(q.startsAt)} ${timeLabel(q.startsAt)}.`, [{ text: 'OK' }]);
+          },
+        },
+      ],
+    );
   };
 
   const addToCalendar = async () => {
@@ -259,6 +306,47 @@ export default function Bookings() {
             </Text>
           ) : null}
         </Section>
+
+        {/* ── the queues this member is in ────────────────────────────────
+            A PT waitlist is not a booking and is never listed as one: it lives
+            under its own heading, below Upcoming, and every line of it says
+            where in the queue they actually are. The one promise made here is
+            the one the database keeps — the slot goes to whoever is first,
+            inside the transaction that frees it, so nobody has to be quick and
+            nobody can be beaten to it by a faster phone. */}
+        {waitStatus === 'error' || myQueue.length > 0 ? (
+          <>
+            <Rule />
+            <Section>
+              <SectionHead title="Waiting For" note={waitStatus === 'error' ? 'Not read' : myQueue.length > 0 ? `${myQueue.length} slot${myQueue.length === 1 ? '' : 's'}` : undefined} />
+              {waitStatus === 'error' ? (
+                <Text style={{ ...ty.label, color: t.ink3 }}>
+                  We couldn’t read your waitlists. This is not a statement that you are on none — any place you hold still stands, and a slot that frees can still be booked for you.
+                </Text>
+              ) : (
+                myQueue.map((q, i) => (
+                  <View key={q.sessionId}>
+                    {i > 0 ? <Rule /> : null}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ ...ty.micro, color: t.ink3 }}>Personal training</Text>
+                        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, marginTop: 3 }}>{dayLabel(q.startsAt)} · {timeLabel(q.startsAt)}</Text>
+                        <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                          {/* A slot that is no longer taken and did not come to
+                              this member is worth saying plainly: the queue
+                              moved past them, or the coach opened the hour up
+                              rather than it being cancelled into the list. */}
+                          {q.stillTaken ? waitlistLine(q.position, q.waiting) : 'This slot is open again and did not come to you — book it from the Book screen if you still want it.'}
+                        </Text>
+                      </View>
+                      <Ghost label="Leave" onPress={() => confirmLeave(q)} />
+                    </View>
+                  </View>
+                ))
+              )}
+            </Section>
+          </>
+        ) : null}
       </ScrollView>
     </SafeAreaView>
   );

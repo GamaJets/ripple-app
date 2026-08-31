@@ -37,8 +37,22 @@ import { SessionMusicBar } from '../../src/ui/SessionMusicBar';
 import { Rule, Section, SectionHead, Cta, Ghost, Notice } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 
+// ── Apple Music is not a connectable service, and no longer pretends to be ──
+//
+// It had a Connect row whose only behaviour was an alert saying linking
+// "arrives with MusicKit" and that nothing was linked. That is the same shape
+// as Studio's "Connect Accounting" — a control that exists to explain that it
+// does not work — and it is worse than no control, because it is
+// indistinguishable from one that is merely misconfigured. Somebody taps it,
+// reads a sentence about a library they have never heard of, and goes looking
+// for a setting.
+//
+// What Apple Music genuinely does here still works and is untouched: tapping a
+// track opens it. That needs no account, no link and no MusicKit, so it is
+// described where it happens rather than sold as a connection.
+//
+// When MusicKit is actually built, this list is where it comes back.
 const SERVICES: { id: Service; name: string; note: string }[] = [
- { id: 'apple', name: 'Apple Music', note: 'Linking arrives with MusicKit' },
  { id: 'spotify', name: 'Spotify', note: 'Playback control needs Spotify Premium' },
 ];
 const MODES: { id: GenParams['mode']; label: string }[] = [
@@ -109,9 +123,11 @@ export default function Music() {
  })(); }, [loadMine]);
 
  const toggleService = async (id: Service) => {
-   // Apple Music has no linking code behind it — say so rather than showing a
-   // "Connected" badge for a connection that was never made.
-   if (id !== 'spotify') { Alert.alert('Apple Music', 'Apple Music linking uses MusicKit, which arrives with the Apple Music connect. Nothing was linked. Tap any track to open it, or connect Spotify to save a playlist.'); return; }
+   // Only Spotify is offered now, so this is the whole of the list. Kept as a
+   // guard rather than removed: `Service` still has two members because the
+   // track-opening code uses them, and a silent no-op would be worse than a
+   // guard that can no longer be reached from the UI.
+   if (id !== 'spotify') return;
    if (conn.spotify) {
      await spotifyDisconnect();
      setConn((p) => ({ ...p, spotify: false })); setSpotifyName(undefined);
@@ -128,7 +144,10 @@ export default function Music() {
    finally { setSpotifyBusy(false); }
  };
 
- const anyConnected = conn.apple || conn.spotify;
+ // Apple Music was counted here, and `conn.apple` can never become true — it
+ // had no linking code to set it. Spotify is the only thing that can be
+ // connected, so it is the only thing that can make this true.
+ const anyConnected = conn.spotify;
  const openInSpotify = (q: string) => { Linking.openURL('https://open.spotify.com/search/' + encodeURIComponent(q)).catch(() => Alert.alert('Open Spotify', 'Install the Spotify app, then search "' + q + '".')); };
 
  /** Play a whole playlist on the account's active device, or fall back to
@@ -189,8 +208,8 @@ export default function Music() {
      finally { setSpotifyBusy(false); }
      return;
    }
-   if (conn.apple) { Alert.alert('Apple Music', 'Apple Music saving uses MusicKit, which arrives with the Apple Music connect. For now, tap a track to open it.'); return; }
-   Alert.alert('Connect a service', 'Connect Spotify above to save this playlist to your account.');
+   // `conn.apple` was tested here and is unreachable — nothing ever set it.
+   Alert.alert('Connect Spotify', 'Saving a playlist to an account needs Spotify. Every track here opens in Apple Music on a tap, which needs nothing.');
  };
 
  const G = layout.gutter;

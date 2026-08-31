@@ -11,6 +11,7 @@
 // whenever no churn had been observed. It rendered as "Trainer LTV $X · ~24 mo
 // lifespan" — a measured-looking unit economic derived from a magic number.
 // With no churn signal there is no lifespan and no LTV; the screen says so.
+import { useMemo } from 'react';
 import { View, Text, ScrollView } from 'react-native';
 import { num } from '../../src/lib/format';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -70,6 +71,22 @@ export default function OwnerRevenue() {
   let growth = canForecast ? Math.pow(roll.sessions30 / first, 1 / (n - 1)) - 1 : 0;
   growth = Math.max(-0.5, Math.min(0.5, growth));
   const forecast = Array.from({ length: 6 }, (_, i) => Math.round(roll.sessions30 * Math.pow(1 + growth, i + 1)));
+  // The months the forecast lands in, so the chart can say WHICH six. It read
+  // "Now" at one end and "6 mo →" at the other, which is a duration and not a
+  // date — an owner could not tell whether the far end was February or March.
+  //
+  // Built with the Date constructor's own month rollover and read back through
+  // local getters, the same way monthlyHistory.monthKey does it: `new Date(y,
+  // m + k, 1)` normalises December + 1 into January of the next year, and
+  // nothing here is ever parsed from a string, so a coach in Auckland gets
+  // their own months and not UTC's.
+  const forecastLabels = useMemo(() => {
+    const now = new Date();
+    return Array.from({ length: 7 }, (_, k) => {
+      const d = new Date(now.getFullYear(), now.getMonth() + k, 1);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    });
+  }, []);
 
   // Sessions delivered per trainer. The old split was by Repple plan, which is
   // what a trainer pays us — never a figure in the gym's own revenue.
@@ -163,14 +180,11 @@ export default function OwnerRevenue() {
           <SectionHead title="Sessions Trend"
             note={delta !== 0 ? `${delta > 0 ? '+' : '−'}${num(Math.abs(delta))} session${Math.abs(delta) === 1 ? '' : 's'} vs last mo` : 'Tracking started'} />
           {months >= 2 ? (
-            <>
-              <Spark data={series.filter((v): v is number => v != null)} />
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: sp.sm }}>
-                {labels.map((l, i) => (
-                  <Text key={i} style={{ ...ty.micro, letterSpacing: 0.4, color: t.ink3 }}>{series[i] != null ? l : ''}</Text>
-                ))}
-              </View>
-            </>
+            /* With the holes, and with the months. See the same note on the
+               owner dashboard: filtering the nulls out drew the line over four
+               points and the labels over six, so each point was reported under
+               a month it did not belong to. */
+            <Spark data={series} labels={labels} />
           ) : (
             <Text style={{ ...ty.label, color: t.ink3 }}>Not enough history yet — a snapshot is recorded each month, and the trend appears from the second one.</Text>
           )}
@@ -183,7 +197,7 @@ export default function OwnerRevenue() {
         <Section>
           <SectionHead title="6-month forecast" note={canForecast ? `${growth >= 0 ? '+' : ''}${Math.round(growth * 100)}%/mo` : undefined} />
           {canForecast ? (<>
-            <Spark data={[roll.sessions30, ...forecast]} h={58} />
+            <Spark data={[roll.sessions30, ...forecast]} labels={forecastLabels} h={58} />
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: sp.sm }}>
               <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>Now {num(roll.sessions30)}</Text>
               <Text style={{ ...ty.caption, ...numeric, color: t.ink }}>6 mo → {num(forecast[5])}</Text>

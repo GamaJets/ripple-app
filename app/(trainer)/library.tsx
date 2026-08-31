@@ -275,7 +275,7 @@ export default function TrainerLibrary() {
           ) : null}
         </View>
 
-        <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.md }}>MUSCLE GROUP</Text>
+        <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.md }}>Muscle group</Text>
         <Chips options={groups} value={group} onChange={setGroup} />
 
         <Section>

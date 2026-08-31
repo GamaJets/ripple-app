@@ -347,7 +347,7 @@ export default function Recovery() {
        averaged into it: a number somebody remembered in the morning and a
        number a ring measured are not the same kind of fact, and blending
        them would make both unfalsifiable. */}
-   <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>FROM YOUR DEVICES</Text>
+   <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>From your devices</Text>
    {connectedKey === '' ? (
     <Text style={{ ...ty.label, color: t.ink3 }}>
      No device connected. Connect a watch or a ring in Watch &amp; devices and your nights appear here, each one labelled with which device recorded it.
@@ -417,7 +417,7 @@ export default function Recovery() {
    </>)}
 
    <View style={{ height: sp.xl }} />
-   <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>LOGGED BY YOU</Text>
+   <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Logged by you</Text>
    <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'center' }}>
     <TextInput value={hrs} onChangeText={setHrs} keyboardType="numeric" accessibilityLabel="Hours slept"
      style={{ ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 10, width: 78, textAlign: 'center' }} />

@@ -20,7 +20,29 @@
 //     is: an estimate the trainer computes from a number they typed.
 //   · the file header claimed "a demo roster otherwise". There is no demo
 //     roster; `classRoster` returns [] when the backend has no bookings.
-import { useEffect, useMemo, useState } from 'react';
+//
+// ── The rate is now remembered, and nothing else about it has changed ──────
+//
+// It was `useState('')` and nothing else — not persisted anywhere at all, not
+// even to this device — so a coach checking in four classes a day retyped their
+// own rate four times, and the pay estimate restarted from an empty box on
+// every visit. It now follows the account (`coach_prefs.class_rate`, part 129),
+// self-only: no owner and no other coach can read it.
+//
+// What deliberately did NOT come back with it is the currency. The stored
+// number is bare, the column says so, and the sentence under the field is the
+// same one it had: the trainer's own arithmetic, on a number they typed, about
+// a payment Repple does not make and is not told the unit of. Persisting the
+// figure removes the retyping. It does not turn the estimate into a payout, and
+// nothing on this screen may start printing a currency beside it.
+//
+// The box is also no longer written back blindly. An empty box means "unset my
+// rate" and is saved as NULL; a half-typed one ("12." on the way to "12.50")
+// means nothing yet and is not saved at all, because `parseFloat` would have
+// called it 12 and quietly replaced a real rate mid-keystroke. And an empty box
+// after a FAILED read says why it is empty, rather than looking like a coach
+// who has never set one. src/lib/coachPrefs.ts holds those rules, under test.
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -30,6 +52,9 @@ import { Rule, Section, SectionHead, Hero, Ghost, fig, Flag } from '../../src/ui
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { tapLight } from '../../src/ui/haptics';
 import { classRoster, setAttendance, UNLINKED_CLASS, type RosterMember } from '../../src/lib/classAttendance';
+import { parseRate, rateText, payEstimate, rateFieldNote } from '../../src/lib/coachPrefs';
+import { fetchCoachPrefs, saveCoachPrefs } from '../../src/lib/coachPrefsStore';
+import type { LoadStatus } from '../../src/ui/loadStatus';
 
 export default function ClassCheckin() {
   const t = useTheme();
@@ -53,7 +78,72 @@ export default function ClassCheckin() {
   const [readFailed, setReadFailed] = useState(false);
   const [saveFailed, setSaveFailed] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [rate, setRate] = useState(''); // per-attendee pay, in the trainer's own currency
+  // Per-attendee pay, as the coach typed it. UNITLESS — see the header. The
+  // string is what is on screen; `coach_prefs.class_rate` is what is stored.
+  const [rate, setRate] = useState('');
+  const [rateStatus, setRateStatus] = useState<LoadStatus>('loading');
+  // True once the account's stored rate has actually come back. It gates one
+  // thing only — see `persistRate`.
+  const rateRead = useRef(false);
+  // The coach has typed in the box. A read landing afterwards must not yank
+  // what they are typing out from under them.
+  const touched = useRef(false);
+  const savePending = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // The rate the coach has already set, read once. `fetchCoachPrefs` reports
+  // its own failure rather than returning a bare null, so an empty box after a
+  // refused read can say so instead of looking like a coach who never set one.
+  useEffect(() => {
+    let on = true;
+    fetchCoachPrefs().then(
+      ({ prefs, status }) => {
+        if (!on) return;
+        setRateStatus(status);
+        if (status === 'ready') {
+          rateRead.current = true;
+          if (!touched.current) setRate(rateText(prefs.classRate));
+        }
+      },
+      () => { if (on) setRateStatus('error'); },
+    );
+    return () => { on = false; };
+  }, []);
+
+  // Saved as the coach stops typing rather than on every keystroke, and the
+  // timer is cleared on unmount so a half-typed rate cannot land after the
+  // screen is gone.
+  useEffect(() => () => { if (savePending.current) clearTimeout(savePending.current); }, []);
+
+  /**
+   * Persist what is in the box.
+   *
+   * Three cases, and they are three different requests:
+   *
+   *  · a number — save it. This is saved even when the read failed, because it
+   *    is a thing the coach deliberately typed and refusing it would leave them
+   *    retyping their rate exactly as before.
+   *  · half-typed or mistyped ("12." on the way to "12.50", "12abc") — NOT a
+   *    request. Not sent. `parseFloat` would have called both of those 12 and
+   *    replaced a real rate mid-keystroke, and the coach would have found out
+   *    at payroll.
+   *  · empty — "unset my rate", and sent as NULL, but ONLY once the stored rate
+   *    has actually been read. An empty box under a failed read is empty for a
+   *    reason that has nothing to do with the coach, and writing NULL from it
+   *    would delete the very rate the read could not show them.
+   */
+  const persistRate = (text: string) => {
+    const parsed = parseRate(text);
+    if (parsed.kind === 'invalid') return;
+    if (parsed.kind === 'empty' && !rateRead.current) return;
+    void saveCoachPrefs({ classRate: parsed.kind === 'empty' ? null : parsed.value });
+  };
+
+  const onRateChange = (text: string) => {
+    touched.current = true;
+    setRate(text);
+    if (savePending.current) clearTimeout(savePending.current);
+    savePending.current = setTimeout(() => persistRate(text), 700);
+  };
 
   useEffect(() => {
     let on = true;
@@ -75,7 +165,14 @@ export default function ClassCheckin() {
   const counted = !unlinked && !readFailed && roster !== null;
   const present = useMemo(() => (roster ?? []).filter((m) => m.attended).length, [roster]);
   const booked = useMemo(() => (roster ?? []).filter((m) => m.status === 'booked').length, [roster]);
-  const pay = Math.round((parseFloat(rate) || 0) * present);
+  // Null unless BOTH halves are known: a rate that parses, and a check-in count
+  // from a roster that was actually read. `counted` is what makes the second
+  // true — see the note on the estimate below.
+  const parsedRate = parseRate(rate);
+  const pay = payEstimate(parsedRate.kind === 'value' ? parsedRate.value : null, counted ? present : null);
+  // Only shown while the stored rate is in flight or could not be read. Under
+  // 'ready' an empty box speaks for itself.
+  const rateNote = rate.trim() ? null : rateFieldNote(rateStatus);
 
   // The tick used to move before anything was written, and setAttendance
   // swallowed every failure — so a refused check-in looked exactly like a saved
@@ -123,14 +220,31 @@ export default function ClassCheckin() {
         <Section>
           <SectionHead title="Pay Estimate" />
           <Text style={{ ...ty.caption, color: t.ink3, marginBottom: 6 }}>Rate per attendee</Text>
-          <TextInput value={rate} onChangeText={setRate} keyboardType="numeric" placeholder="Your rate" placeholderTextColor={t.ink3}
+          <TextInput value={rate} onChangeText={onRateChange} onEndEditing={() => persistRate(rate)} onBlur={() => persistRate(rate)}
+            keyboardType="numeric" placeholder="Your rate" placeholderTextColor={t.ink3}
             style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 }} />
+          {/* An empty box means two entirely different things and they must not
+              read the same: a coach who has not set a rate, and a read that was
+              refused. Silence under 'ready' is the first; a sentence under
+              'error' is the second. */}
+          {rateNote ? (
+            <Text style={{ ...ty.caption, color: rateStatus === 'error' ? t.crit : t.ink3, marginTop: 6 }}>{rateNote}</Text>
+          ) : null}
           {/* The arithmetic needs a real check-in count. With the roster unread
               `present` is 0, and this line rendered "25 × 0 checked in = 0" —
               a payout figure for a class the screen never managed to look at,
-              in the one place on the trainer's phone that talks about money. */}
-          {rate.trim() && counted ? (
+              in the one place on the trainer's phone that talks about money.
+              `pay` is null in that case rather than 0, so there is nothing to
+              print by accident. */}
+          {pay != null ? (
             <Text style={{ ...ty.label, ...numeric, color: t.ink2, marginTop: sp.md }}>{rate.trim()} × {present} checked in = {pay}</Text>
+          ) : rate.trim() && parsedRate.kind === 'invalid' ? (
+            // Said rather than left blank: the box looks filled in, and without
+            // this the missing total reads as a broken screen rather than as a
+            // number the app cannot make sense of. Nothing is saved either.
+            <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>
+              That is not a rate this can multiply yet — digits and at most one decimal point. Nothing has been saved.
+            </Text>
           ) : rate.trim() ? (
             <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>
               {unlinked
@@ -139,8 +253,13 @@ export default function ClassCheckin() {
                 : 'The roster could not be read, so there is no check-in count to multiply — this is not zero attendees.'}
             </Text>
           ) : null}
+          {/* This sentence used to say "Repple is not told your rate", which
+              stopped being true the moment the rate was persisted. It is
+              rewritten rather than dropped: what made it worth saying is
+              untouched — the number has no currency attached, nothing is paid
+              from it, and nobody else can read it. */}
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-            Your own arithmetic — Repple is not told your rate and does not process this payment. Your gym owner pays from the attendance below.
+            Your own arithmetic. Your rate is kept on your account so you don't retype it — nobody else can see it, no currency is attached to it, and Repple does not process this payment. Your gym owner pays from the attendance below.
           </Text>
         </Section>
 

@@ -216,14 +216,14 @@ export default function OwnerOverview() {
             note={delta !== 0 ? `${delta > 0 ? '+' : '−'}${num(Math.abs(delta))} session${Math.abs(delta) === 1 ? '' : 's'} vs last mo` : 'Tracking started'}
             onPress={() => router.push('/(owner)/revenue')} />
           {months >= 2 ? (
-            <>
-              <Spark data={series.filter((v): v is number => v != null)} />
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: sp.sm }}>
-                {labels.map((l, i) => (
-                  <Text key={i} style={{ ...ty.micro, letterSpacing: 0.4, color: t.ink3 }}>{series[i] != null ? l : ''}</Text>
-                ))}
-              </View>
-            </>
+            /* The series goes in WITH its holes, and the months go in with it.
+               This was `series.filter((v) => v != null)` over a hand-rolled
+               label row, which drew four points across the width while
+               printing six evenly spaced months underneath — so every point
+               sat above the wrong one. <Spark> now places each point and its
+               own label from the same index, and breaks the line across a
+               month nobody recorded instead of closing over it. */
+            <Spark data={series} labels={labels} />
           ) : (
             <Text style={{ ...ty.label, color: t.ink3 }}>Not enough history yet — a snapshot is recorded each month, and the trend appears from the second one.</Text>
           )}

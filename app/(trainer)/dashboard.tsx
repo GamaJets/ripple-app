@@ -1119,7 +1119,7 @@ export default function TrainerClients() {
 
               {sel.metrics && Object.values(sel.metrics).some((v) => v != null) ? (
                 <View style={{ marginBottom: sp.xl }}>
-                  <SheetHead t={t} title="Body composition · latest scan" />
+                  <SheetHead t={t} title="Body Composition · latest scan" />
                   {METRIC_GROUPS.map((g) => {
                     const items = METRIC_DEFS.filter((d) => d.group === g && sel.metrics && sel.metrics[d.key] != null);
                     if (!items.length) return null;
@@ -1221,7 +1221,7 @@ export default function TrainerClients() {
 
               {sel.injuries && sel.injuries.length ? (
                 <View style={{ marginBottom: sp.xl }}>
-                  <SheetHead t={t} title="Injuries & limitations · disclosed at onboarding" />
+                  <SheetHead t={t} title="Injuries & Limitations · disclosed at onboarding" />
                   {sel.injuries.map((inj, i) => (
                     <View key={i} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.sm, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                       <Icon name="heart" size={14} color={t.s3} />
@@ -1391,7 +1391,7 @@ export default function TrainerClients() {
               </View>
 
               <View style={{ marginBottom: sp.xl }}>
-                <SheetHead t={t} title="Private Notes (only You)" />
+                <SheetHead t={t} title="Private Notes (only you)" />
                 {/* Three renders, and the middle one is the whole point.
                     'error' with an empty list means the notes could NOT be
                     read — it is not a coach who has written nothing. Say so,

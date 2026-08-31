@@ -22,7 +22,20 @@ export function makeCloudProvider(meta: ProviderMeta): WearableProvider {
     meta,
     isAvailable() {
       if (isHealthConnect) return Platform.OS === 'android';
-      return true; // cloud APIs are reachable from any build (once configured)
+      // "once configured" was doing a lot of work in the old comment, and
+      // nothing in the code. This returned true for EVERY cloud vendor —
+      // including Fitbit and Garmin, whose client ids are empty strings in
+      // app.json — so both were offered as connectable, `unavailableReason()`
+      // was computed and then never consulted (the caller's guard is
+      // `!isAvailable() && reason`, which cannot fire when this is true), and
+      // the person was walked into an OAuth handshake that had no client id to
+      // start it with. The reason text explaining exactly that was sitting one
+      // function away the whole time.
+      //
+      // Garmin is `special: 'partnership'` — self-serve OAuth is not available
+      // at any client id — so it is unavailable on a different ground, and
+      // `unavailableReason()` already says which.
+      return isConfigured(meta.id);
     },
     unavailableReason() {
       if (isHealthConnect && Platform.OS !== 'android') return 'Health Connect is Android-only — connect it from an Android device.';

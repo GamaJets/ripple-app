@@ -8,6 +8,7 @@ import { appLink } from './deepLink';
 import { supabase } from './supabase';
 import { reportError } from './reportError';
 import { capLimit, capped } from './rowCap';
+import { packBalance, readDraw, drew, drawReason, type PackPurchase } from './packDraw';
 import type { LoadStatus } from '../ui/loadStatus';
 
 export interface ConnectStatus { stripe_account_id: string | null; charges_enabled: boolean; details_submitted: boolean }
@@ -37,7 +38,14 @@ export interface TrainerPackage { id: string; trainer_id: string; name: string; 
  *  say. Note what is NOT here: there is no currency column on this table at
  *  all, which is why an amount from it is only printable alongside the package
  *  it was sold from. */
-export interface Purchase { id: string; client_id: string | null; trainer_id: string | null; package_id: string | null; amount_cents: number | null; sessions_total: number | null; sessions_used: number; status: string; created_at: string }
+export interface Purchase { id: string; client_id: string | null; trainer_id: string | null; package_id: string | null; amount_cents: number | null; sessions_total: number | null; sessions_used: number; status: string; created_at: string;
+  /** The unit this sale's money actually moved in, written at checkout from
+   *  the Stripe session (part 132). Null on rows written before that column
+   *  existed whose package has since been deleted — genuinely unrecoverable,
+   *  and reported as an amount missing from a total rather than summed into
+   *  one. Not to be confused with the package's currency, which is a lookup
+   *  that can change underneath a sale that already happened. */
+  currency?: string | null }
 
 const openUrl = async (url?: string | null) => { if (url) { try { await Linking.openURL(url); } catch { /* ignore */ } } };
 
@@ -159,13 +167,39 @@ export async function fetchTrainerPackages(trainerId: string): Promise<TrainerPa
  * dollars.
  */
 export async function packageCurrencies(ids: string[]): Promise<Map<string, string>> {
+  const labelled = await packageLabels(ids);
+  const out = new Map<string, string>();
+  labelled.forEach((v, k) => { if (v.currency) out.set(k, v.currency); });
+  return out;
+}
+
+/**
+ * The name AND the currency of a set of packages, in one read.
+ *
+ * Both live on the same row and both are missing in the same circumstances, so
+ * fetching them separately was two round trips that could disagree. What a
+ * client can see of that row is decided by `pkg_read`, which is `active or
+ * trainer_id = auth.uid()` — so a client reads only packages still ON SALE. A
+ * coach who withdraws a package makes it unreadable to the very people who
+ * bought it, and a package actually deleted is unreadable to everybody.
+ *
+ * An id absent from the map is a package we could not read. That is not a
+ * package with no name and no currency: the screen DESCRIBES such a pack by its
+ * size (`packLabel` in packDraw.ts) rather than naming it, and prints a dash
+ * where the amount would go rather than a figure in a currency we chose.
+ */
+export async function packageLabels(ids: string[]): Promise<Map<string, { name: string | null; currency: string | null }>> {
   const unique = [...new Set(ids.filter(Boolean))];
   if (!unique.length) return new Map();
   try {
-    const { data, error } = await supabase.from('trainer_packages').select('id, currency').in('id', unique);
-    if (error) { reportError('connect.packageCurrencies', error); return new Map(); }
-    return new Map(((data as { id: string; currency: string | null }[]) ?? []).filter((p) => p.currency).map((p) => [p.id, p.currency as string]));
-  } catch (e) { reportError('connect.packageCurrencies', e); return new Map(); }
+    const { data, error } = await supabase.from('trainer_packages').select('id, name, currency').in('id', unique).limit(capLimit());
+    if (error) { reportError('connect.packageLabels', error); return new Map(); }
+    const out = new Map<string, { name: string | null; currency: string | null }>();
+    ((data as { id: string; name: string | null; currency: string | null }[]) ?? []).forEach((p) => {
+      if (p?.id) out.set(p.id, { name: (p.name || '').trim() || null, currency: (p.currency || '').trim() || null });
+    });
+    return out;
+  } catch (e) { reportError('connect.packageLabels', e); return new Map(); }
 }
 
 /** Client buys a package → Stripe Checkout (funds to the trainer, minus fee). */
@@ -220,13 +254,15 @@ export async function sessionsRemaining(trainerId?: string): Promise<number | nu
   try {
     const { data: auth } = await supabase.auth.getUser();
     const uid = auth?.user?.id; if (!uid) return null;
-    let q = supabase.from('client_purchases').select('sessions_total, sessions_used').eq('client_id', uid).eq('status', 'paid').not('sessions_total', 'is', null);
+    let q = supabase.from('client_purchases').select('id, package_id, sessions_total, sessions_used, status, created_at').eq('client_id', uid).eq('status', 'paid').not('sessions_total', 'is', null).limit(capLimit());
     if (trainerId) q = q.eq('trainer_id', trainerId);
     const { data, error } = await q;
     if (error) { reportError('connect.sessionsRemaining', error); return null; }
     if (!data) return null;
-    return (data as { sessions_total: number | null; sessions_used: number }[])
-      .reduce((a, r) => a + Math.max(0, (r.sessions_total || 0) - r.sessions_used), 0);
+    // One place does this arithmetic, and it is tested: `packBalance` returns
+    // null for an unread history and a real 0 for an empty one, which is the
+    // distinction this function exists to preserve. See src/lib/packDraw.ts.
+    return packBalance(data as PackPurchase[]).left;
   } catch (e) { reportError('connect.sessionsRemaining', e); return null; }
 }
 
@@ -306,32 +342,80 @@ export async function fetchClientPurchases(): Promise<{ rows: CoachPurchase[]; s
       ...r,
       client_name: (r.client_id && names.get(r.client_id)) || null,
       package_name: (r.package_id && pkgs.get(r.package_id)?.name) || null,
-      currency: (r.package_id && pkgs.get(r.package_id)?.currency) || null,
+      // The SALE's own currency first, the package's only as a fallback.
+      //
+      // `client_purchases.currency` (part 132) is written at checkout from the
+      // Stripe session's own currency — the unit the money actually moved in.
+      // The package is a lookup that can change or be deleted underneath it,
+      // and reading the package first is how a sale loses its unit the moment
+      // somebody tidies their price list. Existing rows were backfilled from
+      // their package where one survived, so the two agree wherever both exist.
+      currency: (r.currency || '').trim() || (r.package_id && pkgs.get(r.package_id)?.currency) || null,
     }));
     return { rows, status: page.truncated ? 'partial' : 'ready' };
   } catch (e) { reportError('connect.fetchClientPurchases', e); return { rows: [], status: 'error' }; }
 }
 
-/** Draw down one credit from the client's oldest active pack for a trainer.
- *  Best-effort: no-ops (ok:false) when there is no pack — booking still proceeds. */
+/**
+ * Draw down one credit from the client's oldest active pack for a trainer.
+ *
+ * ── Why this is one RPC and not the read-then-write it used to be ──────────
+ *
+ * It used to select the packs, pick one in JavaScript, and UPDATE the row it
+ * had picked. Three things were wrong with that, and all three were confirmed
+ * against the live database before this was changed (see
+ * supabase/parts/123-a-credit-is-spent-once.sql):
+ *
+ *   · **The write could not report doing nothing.** PostgREST resolves an
+ *     UPDATE that matched zero rows with `error: null` and an empty body. This
+ *     function checked `error` — the only thing it had — and returned `ok:
+ *     true` with a `remaining` it had worked out ITSELF, from the row it read
+ *     a moment earlier. A balance the app printed and the database never
+ *     agreed to. (An adversarial review said this meant packs never
+ *     decremented at all; that half was wrong — `cp_self` is FOR ALL and the
+ *     write does match its own row, proven live. The bug was that nothing
+ *     could tell the difference.)
+ *
+ *   · **It was a lost update.** Two bookings in flight both read
+ *     `sessions_used = 3`, both wrote 4, and two sessions came off one credit.
+ *
+ *   · **Nothing bounded the column.** `sessions_used = 500` on a ten-pack was
+ *     accepted, live, as the client. Part 123 adds the CHECK constraint.
+ *
+ * `redeem_pack_session` does the pick and the write in one statement, holds the
+ * chosen row with `for update`, and RAISES when its own `row_count` is not 1.
+ * So the three answers below are the database's, not this file's:
+ *
+ *   ok: true            a credit came off. `remaining` is what the DATABASE
+ *                       now holds — never a number computed here.
+ *   ok: false + error   nothing came off, and `error` says why. It is a
+ *                       lower-case clause: app/(client)/calendar.tsx renders
+ *                       it inside parentheses mid-sentence.
+ *   ok: false, no error the client has no pack with this coach at all. Nothing
+ *                       was supposed to happen and nothing is explained.
+ *
+ * A thrown/refused call is `ok: false` with a reason — never silently the same
+ * as "you have none left", which is what a paying client would otherwise be
+ * told when the server simply could not be reached.
+ */
 export async function redeemSession(trainerId: string): Promise<{ ok: boolean; remaining?: number; error?: string }> {
   try {
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id; if (!uid) return { ok: false, error: 'Not signed in.' };
-    const { data, error: readErr } = await supabase.from('client_purchases').select('*').eq('client_id', uid).eq('trainer_id', trainerId).eq('status', 'paid').not('sessions_total', 'is', null).order('created_at', { ascending: true });
-    // A refused read was becoming "No sessions left in a pack" — telling
-    // somebody who has paid for ten that they have none. Different sentence.
-    if (readErr) {
-      reportError('connect.redeemSession.read', readErr);
-      return { ok: false, error: 'Your session packs could not be read, so none was drawn down. This is not the same as having none left.' };
+    const { data, error } = await supabase.rpc('redeem_pack_session', { p_trainer: trainerId });
+    if (error) {
+      reportError('connect.redeemSession', error);
+      return { ok: false, error: 'the server did not confirm it — this is not the same as having none left' };
     }
-    const packs = (data as Purchase[]) ?? [];
-    const pack = packs.find((p) => (p.sessions_total || 0) - p.sessions_used > 0);
-    if (!pack) return { ok: false, error: 'No sessions left in a pack.' };
-    const { error } = await supabase.from('client_purchases').update({ sessions_used: pack.sessions_used + 1 }).eq('id', pack.id);
-    if (error) return { ok: false, error: error.message };
-    return { ok: true, remaining: (pack.sessions_total || 0) - pack.sessions_used - 1 };
-  } catch (e) { return { ok: false, error: (e as Error).message }; }
+    // Zero rows back is not a redemption. `readDraw` is the row count this
+    // function never had: [] and [row, row] and a word from a newer schema are
+    // all 'unknown', and 'unknown' never reads as success.
+    const d = readDraw(data);
+    if (drew(d)) return d.remaining == null ? { ok: true } : { ok: true, remaining: d.remaining };
+    const why = drawReason(d);
+    return why ? { ok: false, error: why } : { ok: false };
+  } catch (e) {
+    reportError('connect.redeemSession', e);
+    return { ok: false, error: 'the server did not confirm it — this is not the same as having none left' };
+  }
 }
 
 /** The trainer OTHER clients, to push a freed slot to. Server-side lookup so no
@@ -344,18 +428,37 @@ export async function reofferSlot(sessionId: string): Promise<string[]> {
   } catch { return []; }
 }
 
-/** Refund one credit (e.g. the client cancelled a booked session). Best-effort. */
-export async function refundSession(trainerId: string): Promise<{ ok: boolean }> {
+/**
+ * Refund one credit — the client cancelled outside the window and it goes back
+ * onto their pack. The exact inverse of `redeemSession`, through the same kind
+ * of RPC and for the same reasons: the old version read, picked, and wrote,
+ * and its final `return { ok: !error }` treated a write that matched nothing as
+ * a credit successfully returned. A credit believed returned and not returned
+ * is one the client has paid for twice.
+ *
+ * WHETHER a refund is owed is not decided here. `cancelBookedSession` in
+ * src/ui/sessions.tsx applies the 24-hour rule and only calls this when a
+ * credit is due; `refund_pack_session` decides which pack it lands on (the
+ * newest with usage, the inverse of drawing from the oldest with room).
+ *
+ * `ok` is true only when the database says a credit moved. `reason` is why it
+ * did not, when there is something worth saying — 'nothing had been drawn off
+ * it', or the one that matters, 'we could not confirm the change'. Callers that
+ * only read `.ok` (src/ui/sessions.tsx does) keep exactly their old behaviour.
+ */
+export async function refundSession(trainerId: string): Promise<{ ok: boolean; remaining?: number; reason?: string }> {
   try {
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id; if (!uid) return { ok: false };
-    const { data, error: readErr } = await supabase.from('client_purchases').select('*').eq('client_id', uid).eq('trainer_id', trainerId).eq('status', 'paid').not('sessions_total', 'is', null).order('created_at', { ascending: false });
-    // A credit not returned because the read failed is a credit taken. Report
-    // it rather than resolving false, which reads as "nothing to refund".
-    if (readErr) { reportError('connect.refundSession.read', readErr); return { ok: false }; }
-    const pack = ((data as Purchase[]) ?? []).find((p) => p.sessions_used > 0);
-    if (!pack) return { ok: false };
-    const { error } = await supabase.from('client_purchases').update({ sessions_used: pack.sessions_used - 1 }).eq('id', pack.id);
-    return { ok: !error };
-  } catch { return { ok: false }; }
+    const { data, error } = await supabase.rpc('refund_pack_session', { p_trainer: trainerId });
+    if (error) {
+      reportError('connect.refundSession', error);
+      return { ok: false, reason: 'the server did not confirm it' };
+    }
+    const d = readDraw(data);
+    if (drew(d)) return d.remaining == null ? { ok: true } : { ok: true, remaining: d.remaining };
+    const why = drawReason(d);
+    return why ? { ok: false, reason: why } : { ok: false };
+  } catch (e) {
+    reportError('connect.refundSession', e);
+    return { ok: false, reason: 'the server did not confirm it' };
+  }
 }

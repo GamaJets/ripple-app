@@ -23,6 +23,8 @@ import type { Theme } from '../../src/theme/tokens';
 import { Rule, Section, SectionHead, Card, ListRow, QuickRow, Cta, Notice, Ghost } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, value } from '../../src/theme/scale';
 import { useMyTrainerProfile } from '../../src/ui/coachProfile';
+import { useMyCancellationPolicy } from '../../src/ui/sessions';
+import { feeAmountLine, noticeLabel } from '../../src/lib/booking';
 import { RepdbAttribution } from '../../src/ui/Attribution';
 
 function Field({ t, label, value: val, onChangeText, placeholder, multiline, keyboardType }: { t: Theme; label: string; value: string; onChangeText: (v: string) => void; placeholder?: string; multiline?: boolean; keyboardType?: 'default' | 'numeric' }) {
@@ -78,6 +80,12 @@ export default function CoachProfile() {
     ]);
   };
   const p = useMyTrainerProfile();
+  // The late-cancellation policy is NOT part of `useMyTrainerProfile`. That
+  // provider is the coach's public identity — what clients see — and this is a
+  // rule about money that binds them. It also has a constraint behind it
+  // (`trainers_late_cancel_fee_stated`) that a debounced write of five other
+  // fields would trip on the coach's behalf, taking their bio down with it.
+  const lc = useMyCancellationPolicy();
   const [newOffer, setNewOffer] = useState('');
   const [newSpec, setNewSpec] = useState('');
   const initials = p.name.replace('Coach ', '').split(' ').map((x) => x[0]).join('').slice(0, 2);
@@ -242,6 +250,109 @@ export default function CoachProfile() {
               ? 'Leave this empty and nothing quotes a rate for you — your figures show a dash rather than a zero.'
               : 'Shown to clients as a number, in whatever currency you charge in. Repple does not print a symbol it has not been told.'}
           </Text>
+        </Section>
+
+        <Rule />
+
+        {/* ── late cancellations ─────────────────────────────────────────
+            The policy a coach can actually state, in place of the bare number
+            this app used to quote as one. `trainers.session_fee` is what a
+            SESSION costs; it was being printed to clients as the late-cancel
+            fee as well, which is a different figure, and for a coach who had
+            not set a rate it was printed as zero.
+
+            Three separate facts, because a client is owed all three before
+            they cancel: whether there is a policy at all, how much notice it
+            wants, and what it costs. Off by default — a coach who has said
+            nothing has not agreed to charge anybody.
+
+            What Repple does with it is RECORD it. There is no payment here, no
+            card, no balance: when a client cancels inside the window a row is
+            written that says who owes what for which session, and the coach
+            settles it themselves. Every sentence on both apps says so. */}
+        <Section>
+          <SectionHead title="Late Cancellations" />
+          {lc.status === 'error' ? (
+            <Notice tone={t.warn} kicker="Policy" title="We couldn’t read your cancellation policy"
+              note="Nothing typed here would be stored, so the controls are withheld rather than accepting an edit that goes nowhere. Your existing policy is unchanged — clients are still held to whatever it already says." />
+          ) : (
+          <>
+          <Pressable
+            onPress={() => lc.setApplies(!lc.applies)}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: lc.applies }}
+            style={{
+              flexDirection: 'row', alignItems: 'center', gap: sp.md,
+              backgroundColor: t.surface, borderRadius: radius.md, padding: sp.lg, ...elevation.e1,
+              ...(lc.applies ? { borderWidth: hairline, borderColor: t.brand } : null),
+            }}
+          >
+            <View style={{ width: 34, height: 34, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+              <Icon name="calendar" size={17} color={lc.applies ? t.brand : t.ink3} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>Charge for late cancellations</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                {lc.applies
+                  ? `Cancelling inside ${noticeLabel(lc.noticeHours)} records a fee against the client. Repple does not take it — you settle it with them.`
+                  : 'Off — clients can cancel at any time and nothing is recorded against them.'}
+              </Text>
+            </View>
+            <View style={{ width: 46, height: 27, borderRadius: radius.pill, backgroundColor: lc.applies ? t.brand : t.surface3, borderWidth: hairline, borderColor: lc.applies ? t.brand : t.ring, justifyContent: 'center', paddingHorizontal: 3 }}>
+              <View style={{ width: 21, height: 21, borderRadius: radius.pill, backgroundColor: lc.applies ? t.brandInk : t.ink3, alignSelf: lc.applies ? 'flex-end' : 'flex-start' }} />
+            </View>
+          </Pressable>
+
+          {/* Presets rather than a free number field: the notice period is a
+              policy, not a measurement, and the database holds it between 1
+              hour and a week. A coach who types 0 has not written a policy that
+              never applies, they have written one that always does. */}
+          <View style={{ marginTop: sp.lg }}>
+            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Notice Required</Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
+              {[6, 12, 24, 48, 72].map((h) => (
+                <Pressable key={h} onPress={() => lc.setNoticeHours(h)}
+                  accessibilityRole="button" accessibilityState={{ selected: lc.noticeHours === h }}
+                  style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: lc.noticeHours === h ? t.brand : t.surface2 }}>
+                  <Text style={{ ...ty.label, fontWeight: lc.noticeHours === h ? '500' : '400', color: lc.noticeHours === h ? t.brandInk : t.ink2 }}>{noticeLabel(h)}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+
+          <View style={{ marginTop: sp.lg }}>
+            <Field t={t} label="Late-Cancellation Fee"
+              value={lc.fee == null ? '' : String(lc.fee)}
+              onChangeText={(v) => {
+                const digits = v.replace(/[^0-9.]/g, '');
+                const n = parseFloat(digits);
+                lc.setFee(digits === '' || !Number.isFinite(n) ? null : n);
+              }}
+              placeholder="25" keyboardType="numeric" />
+            <Text style={{ ...ty.caption, color: t.ink3 }}>
+              {/* The currency is the GYM's (tenants.currency), never a symbol
+                  this app picked. A coach with no gym sees the bare figure and
+                  is told why, exactly as the session rate above does it. */}
+              {lc.fee == null
+                ? 'No amount set. A policy with no amount cannot be switched on — a fee of nothing is a policy that does not apply.'
+                : lc.currency
+                  ? `Clients see ${feeAmountLine(lc.fee, lc.currency)} before they confirm a late cancellation, and again on the record afterwards.`
+                  : `Clients see this figure as a number. Your gym hasn’t told us what it charges in, so Repple prints no symbol rather than guessing one.`}
+            </Text>
+          </View>
+
+          {/* The database refuses `applies` with no amount behind it, so the
+              coach is told before the write rather than after it fails —
+              silently, in a debounce, with the switch still showing on. */}
+          {lc.blocker ? (
+            <Text style={{ ...ty.caption, color: t.warn, marginTop: sp.md }}>{lc.blocker}</Text>
+          ) : (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+              Repple records the fee and never collects it. Your client sees what they owe and who to pay — you.
+            </Text>
+          )}
+          </>
+          )}
         </Section>
 
         <Rule />

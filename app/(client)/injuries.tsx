@@ -88,7 +88,7 @@ export default function Injuries() {
         </View>
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, marginBottom: sp.lg }}>Your coach and your plan train around these — flagging and swapping risky moves.</Text>
 
-        <Notice tone={t.s3} kicker="Guidance only" title="Not Medical Advice"
+        <Notice tone={t.s3} kicker="Guidance only" title="Not medical advice"
           note="For pain, a new injury, or a diagnosis, see a doctor or physio before training." />
 
         <View style={{ marginTop: sp.md }}>

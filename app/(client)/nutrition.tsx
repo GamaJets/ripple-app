@@ -14,6 +14,7 @@
 // number up.
 import { useState, useEffect, useMemo } from 'react';
 import { num } from '../../src/lib/format';
+import { planDayIndex, planDayOverride, planStale } from '../../src/lib/mealPlan';
 import { View, Text, Pressable, ScrollView, Modal, TextInput, Alert, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
@@ -237,14 +238,28 @@ export default function Nutrition() {
   });
   const observedPace = observedRateKg(energyPlan);
 
-  const input = { id: c.id, weightKg: w, bodyFatPct: bf, activity: c.activity, goal: c.goal, diet, mealsPerDay: c.mealsPerDay, mealOverride: { ...(coachAdjust?.mealOverride ?? {}), ...override }, coachAdjust: cyclingAdjust, avoid: c.avoid, energyPlan };
+  // The week the coach composed (part 133 / src/lib/mealPlan.ts). It supersedes
+  // the single-day `mealOverride`, and is used only while it still describes
+  // THIS client: a plan written before they disclosed an allergen, changed diet
+  // or changed meals-per-day resolves its indices through a DIFFERENT catalogue
+  // — filtering a pool renumbers every index after the removal — so a stale
+  // plan is dropped rather than served under a coach's name. Serving one would
+  // put a shellfish meal in front of somebody who has just told us they cannot
+  // eat it, with their coach's name on it.
+  const coachPlan = coachAdjust?.plan ?? null;
+  const coachPlanCurrent = !!coachPlan && !planStale(coachPlan, diet, c.avoid, c.mealsPerDay).stale;
+  const coachDay = planDayIndex(new Date().toISOString());
+  const coachOverride = coachPlanCurrent && coachDay != null
+    ? planDayOverride(coachPlan!, coachDay)
+    : (coachAdjust?.mealOverride ?? {});
+  const input = { id: c.id, weightKg: w, bodyFatPct: bf, activity: c.activity, goal: c.goal, diet, mealsPerDay: c.mealsPerDay, mealOverride: { ...coachOverride, ...override }, coachAdjust: cyclingAdjust, avoid: c.avoid, energyPlan };
   const { plan, target, tot } = buildPlan(input);
   // Snacks are ideas, not plan slots: they do not move the targets or the
   // macro split above, because a snack nobody has eaten yet is not a
   // commitment. Logging one is what counts it, like any other food.
   const snacks = useMemo(() => snackIdeas(input, 3), [input]);
   const planHasSnacks = plan.some((m) => m.slot === 'Snack');
-  const coachPick = (pos: number) => !!(coachAdjust?.mealOverride && coachAdjust.mealOverride[pos] != null && override[pos] == null);
+  const coachPick = (pos: number) => coachOverride[pos] != null && override[pos] == null;
   const swap = (pos: number, slot: PlannedMeal['slot'], idx: number) => setOverride({ ...override, [pos]: swapIndex(diet, slot, idx) });
   const groc = groceryData(input);
   const grocCount = DEPTS.reduce((a, d) => a + (groc.byDept[d]?.length ?? 0), 0);
@@ -269,7 +284,14 @@ export default function Nutrition() {
     const { html, text } = mealPlanDoc(c.name, target.kcal, rows, labels, appName, t.brand);
     await shareDoc(html, text, 'Meal plan');
   };
-  const weekPlans = view === 'week' ? WEEKD.map((_, d) => { const ov: Record<number, number> = {}; plan.forEach((m) => { ov[m.pos] = m.idx + d; }); return buildPlan({ ...input, mealOverride: ov }); }) : [];
+  // `idx + d` was a synthetic week — the same meal shifted along the catalogue
+  // one place per day, which is a pattern rather than a plan. Where the coach
+  // has written a real week, show theirs.
+  const weekPlans = view === 'week' ? WEEKD.map((_, d) => {
+    if (coachPlanCurrent) return buildPlan({ ...input, mealOverride: planDayOverride(coachPlan!, d) });
+    const ov: Record<number, number> = {}; plan.forEach((m) => { ov[m.pos] = m.idx + d; });
+    return buildPlan({ ...input, mealOverride: ov });
+  }) : [];
 
   const G = layout.gutter;
   const eaten = fl.consumed;

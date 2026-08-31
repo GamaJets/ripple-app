@@ -19,9 +19,8 @@ import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { Rule, Section, SectionHead, Hero, ListRow, Cta, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, radius, elevation, type as ty, numeric } from '../../src/theme/scale';
-import { useMyTrainerProfile } from '../../src/ui/coachProfile';
-import { cancelSession } from '../../src/lib/booking';
-import { useSessions } from '../../src/ui/sessions';
+import { insideNoticeWindow, feeAmountLine, noticeLabel } from '../../src/lib/booking';
+import { useSessions, useSessionWaitlistCounts, useLateCancelCharges, useMyCancellationPolicy, promoteWaitlist } from '../../src/ui/sessions';
 import { useAvailability, upcomingDates } from '../../src/ui/availability';
 import { useRoster } from '../../src/ui/roster';
 import type { TrainingSession } from '../../src/lib/types';
@@ -29,7 +28,7 @@ import { buildIcs, shareIcs } from '../../src/lib/exportShare';
 import { sendPushChecked } from '../../src/ui/pushNotifications';
 import { markOutcome } from '../../src/lib/gymSessions';
 import { supabase } from '../../src/lib/supabase';
-import { useTenant, gymMoney } from '../../src/ui/tenant';
+import { useTenant } from '../../src/ui/tenant';
 import { reportError } from '../../src/lib/reportError';
 
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -87,8 +86,22 @@ export default function TrainerSchedule() {
   useFocusEffect(useCallback(() => { refresh(); }, [refresh]));
 
   const { roster, status: rosterStatus } = useRoster();
+  // Who is waiting on which of these hours. A booked slot with somebody behind
+  // it is not the same object as one with nobody behind it: cancelling the
+  // first hands it straight over, and the coach should be able to see that
+  // before they do it rather than after.
+  const bookedIds = sessions.filter((x) => x.status === 'booked').map((x) => x.id).sort();
+  const { counts: waitCounts, status: waitStatus, reload: reloadWaits } = useSessionWaitlistCounts(bookedIds);
+  // The fees this coach's clients have actually been charged — rows in
+  // `charges`, which nothing in this product wrote until part 126. The coach is
+  // the one who collects them, so they are the one who has to be able to see
+  // them, and to let one off.
+  const { charges: lateFees, status: feeStatus, waive: waiveFee, unwaive: unwaiveFee, reload: reloadFees } = useLateCancelCharges();
+  const lcPolicy = useMyCancellationPolicy();
+  // The fee was recorded by the CLIENT's cancellation, on their phone, and the
+  // waitlist moved with it. Neither shows up here without asking again.
+  useFocusEffect(useCallback(() => { reloadFees(); }, [reloadFees]));
   const { tenant } = useTenant();
-  const { sessionFee } = useMyTrainerProfile();
   const nameOf = (id: string | null) => roster.find((c) => c.id === id)?.name ?? 'Open slot';
   const [viewYear, setViewYear] = useState(now.getFullYear());
   const [viewMonth, setViewMonth] = useState(now.getMonth());
@@ -321,12 +334,6 @@ export default function TrainerSchedule() {
 
   async function doCancel(s: TrainingSession) {
     const others = roster.filter((c) => c.id !== s.clientId).map((c) => c.name);
-    // `cancelSession` prices the late-cancel from a plain number, so a rate that
-    // is not known is passed as 0 and the resulting `feeAmount` is not printed —
-    // the sentence below drops out entirely. Quoting "$0" here would be the same
-    // fabrication the client app was making: a figure about money, on the screen
-    // where somebody decides whether a cancellation costs anything.
-    const res = cancelSession(s, sessionFee ?? 0, roster.map((c) => c.id));
     // Free the slot first, and only say so if the server actually freed it.
     // This was fired and forgotten, and the roster was then pushed "first to
     // book it gets it" about a session that was still booked — so the quickest
@@ -340,39 +347,87 @@ export default function TrainerSchedule() {
       );
       return;
     }
+
+    // The queue, before anybody is broadcast at. A client's own cancellation
+    // hands the slot over inside the transaction that frees it; a coach frees
+    // theirs with a direct update, so for this path the promotion is an
+    // explicit second call — and it has to come BEFORE the re-offer, or the
+    // roster is invited to race for an hour that already has an owner.
+    const promoted = await promoteWaitlist(s.id);
+    await reloadWaits();
+
     const toldClient = s.clientId
       ? await sendPushChecked([s.clientId], 'Session cancelled', `Your ${timeLabel(s.startsAt)} session on ${DOW[new Date(s.startsAt).getDay()]} was cancelled.`, { route: '/(client)/calendar' })
       : { ok: true };
-    const _openTo = roster.filter((c) => c.id !== s.clientId).map((c) => c.id);
-    const offered = _openTo.length
-      ? (await sendPushChecked(_openTo, 'A slot just opened', `${timeLabel(s.startsAt)} on ${DOW[new Date(s.startsAt).getDay()]} is available — first to book it gets it.`, { route: '/(client)/calendar' })).ok
-      : null;
+
+    // Exactly one of these. Where somebody was waiting, one person is told the
+    // slot is theirs; where nobody was, the old broadcast stands.
+    let promotedTold: boolean | null = null;
+    let offered: boolean | null = null;
+    if (promoted) {
+      promotedTold = (await sendPushChecked([promoted], 'The slot you were waiting for is yours', `${timeLabel(s.startsAt)} on ${DOW[new Date(s.startsAt).getDay()]} freed up and you were next on the list — it is booked for you.`, { route: '/(client)/calendar' })).ok;
+    } else {
+      const openTo = roster.filter((c) => c.id !== s.clientId).map((c) => c.id);
+      offered = openTo.length
+        ? (await sendPushChecked(openTo, 'A slot just opened', `${timeLabel(s.startsAt)} on ${DOW[new Date(s.startsAt).getDay()]} is available — first to book it gets it.`, { route: '/(client)/calendar' })).ok
+        : null;
+    }
+
     Alert.alert(
       'Session cancelled',
       `${timeLabel(s.startsAt)} with ${nameOf(s.clientId)} was cancelled.\n\n` +
       (toldClient.ok
         ? `${nameOf(s.clientId)} was sent a notification. `
         : `We couldn’t notify ${nameOf(s.clientId)} — tell them yourself, especially if this session is soon. `) +
-      `The slot is open again on your calendar. ` +
-      (offered === null
-        ? 'You have no other clients to offer it to.'
-        : offered
-        ? `Your ${others.length} other client${others.length === 1 ? '' : 's'} ${others.length === 1 ? 'was' : 'were'} told it is free (${others.slice(0, 3).join(', ')}${others.length > 3 ? '…' : ''}) — first to book takes it.`
-        : `We couldn’t tell your other clients about it, so it is open but nobody has been asked.`) +
-      // Repple does not charge anything. This used to say the fee "applies",
-      // which described a charge that no code anywhere makes. It also printed
-      // the rate with no dollar sign in front of it, and printed it whatever it
-      // was — including the 0 that stood in for "not loaded".
-      (res.charged
-        ? (sessionFee == null
-          ? '\n\nInside 24h — your late-cancel policy would apply. Repple does not charge it; settle it with the client yourself.'
-          // The gym's currency, not a dollar sign. This sentence names a sum a
-          // coach will actually ask a client for.
-          : `\n\nInside 24h — your ${gymMoney(sessionFee, tenant?.currency) ?? `${sessionFee}`} late-cancel policy would apply. Repple does not charge it; settle it with the client yourself.`)
+      (promoted
+        ? `The hour went straight to the next client on its waitlist${promotedTold === false ? ', though we couldn’t notify them — tell them yourself.' : ' and they have been told. Nobody had to race for it.'}`
+        : `The slot is open again on your calendar. ` +
+          (offered === null
+            ? 'You have no other clients to offer it to.'
+            : offered
+            ? `Your ${others.length} other client${others.length === 1 ? '' : 's'} ${others.length === 1 ? 'was' : 'were'} told it is free (${others.slice(0, 3).join(', ')}${others.length > 3 ? '…' : ''}) — first to book takes it.`
+            : `We couldn’t tell your other clients about it, so it is open but nobody has been asked.`)) +
+      // Nothing is charged, and this sentence used to say the opposite.
+      //
+      // It read "Inside 24h — your late-cancel policy would apply", off
+      // `cancelSession`, which prices a CLIENT's cancellation from
+      // `trainers.session_fee`. Three separate things were wrong with it: the
+      // session fee is not the late-cancel fee, `?? 0` printed a zero for a
+      // coach who had not set a rate, and — worst of the three — the person
+      // cancelling here is the COACH. A client does not owe a fee because
+      // their coach called off the session. No policy applies to this path at
+      // all, so nothing about money is printed on it.
+      (insideNoticeWindow(s.startsAt, lcPolicy.noticeHours)
+        ? `\n\nThis was inside your ${noticeLabel(lcPolicy.noticeHours)} notice period, but you cancelled it — so nothing is charged to ${nameOf(s.clientId)}.`
         : ''),
       [{ text: 'Done' }]
     );
   }
+  function confirmWaive(c: { id: string; clientId: string; amount: number | null; currency: string | null; waivedAt: string | null }) {
+    const sum = c.amount == null ? 'this fee' : feeAmountLine(c.amount, c.currency);
+    const who = nameOf(c.clientId);
+    if (c.waivedAt) {
+      Alert.alert('Reinstate this fee?', `${sum} against ${who} would go back to outstanding.`, [
+        { text: 'Leave waived', style: 'cancel' },
+        { text: 'Reinstate', onPress: async () => {
+          const ok = await unwaiveFee(c.id);
+          if (!ok) Alert.alert('Not reinstated', 'That did not save, so the fee is still waived. Try again.', [{ text: 'OK' }]);
+        } },
+      ]);
+      return;
+    }
+    Alert.alert('Waive this fee?', `${sum} against ${who} would be marked as forgiven. The record stays — it shows as waived rather than disappearing — and neither of you owes anything on it.`, [
+      { text: 'Keep it', style: 'cancel' },
+      { text: 'Waive', onPress: async () => {
+        // A zero-row update is a success in PostgREST. `waiveFee` counts the
+        // rows it changed, so a coach is never told they forgave a fee that
+        // is still standing against their client.
+        const ok = await waiveFee(c.id);
+        if (!ok) Alert.alert('Not waived', `That did not save, so ${sum} is still outstanding against ${who}. Try again.`, [{ text: 'OK' }]);
+      } },
+    ]);
+  }
+
   function confirmCancel(s: TrainingSession) {
     Alert.alert('Cancel this session?', `${timeLabel(s.startsAt)} with ${nameOf(s.clientId)} on ${DOW[selDate.getDay()]} ${selD}/${selM + 1}.`, [
       { text: 'Keep', style: 'cancel' },
@@ -650,6 +705,24 @@ export default function TrainerSchedule() {
                   <View style={{ flex: 1 }}>
                     <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: t.ink }}>{timeLabel(s.startsAt)} · {s.durationMin} min</Text>
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{s.status === 'booked' ? nameOf(s.clientId) : s.status === 'blocked' ? 'Unavailable · nobody can book this' : (s.released ? 'Open · re-offered' : 'Open slot')}</Text>
+                    {/* Who is behind this hour. It changes what cancelling
+                        means — the slot is handed straight over rather than
+                        thrown open — so it is said on the row, next to the
+                        button that does it. A count off a truncated read is a
+                        wrong count, so 'partial' shows a dash like every other
+                        figure in this app. */}
+                    {s.status === 'booked' && (waitStatus === 'error' || waitStatus === 'partial' || (waitCounts.get(s.id) ?? 0) > 0) ? (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
+                        <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: t.warn }} />
+                        <Text style={{ ...ty.caption, color: t.ink3 }}>
+                          {waitStatus === 'error'
+                            ? 'Waitlist not read'
+                            : waitStatus === 'partial'
+                              ? `${fig(null)} waiting — only part of the list loaded`
+                              : `${waitCounts.get(s.id)} waiting — cancelling hands it to whoever is first`}
+                        </Text>
+                      </View>
+                    ) : null}
                     {s.approvedAt ? (
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
                         <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: t.good }} />
@@ -684,6 +757,57 @@ export default function TrainerSchedule() {
             </View>
           ))}
         </Section>
+
+        <Rule />
+
+        {/* ── late-cancellation fees ─────────────────────────────────────
+            The record. `charges` has been in this schema since the first
+            migration and nothing has ever written to it: a late cancellation
+            was detected, the client was warned, an outcome was filed, and no
+            money was ever recorded anywhere. This is the other end of that.
+
+            Repple does not take the payment and this section never suggests
+            otherwise. What it gives a coach is the one thing they could not
+            get before — a list of who owes them what, for which session — so
+            they can ask. Letting one off is a first-class action here for the
+            same reason: forgiving a fee is part of the policy, and a coach
+            who cannot do it in the app will simply stop trusting the list. */}
+        {feeStatus === 'error' || lateFees.length > 0 ? (
+          <Section>
+            <SectionHead title="Late-Cancellation Fees"
+              note={feeStatus === 'error' ? 'Not read' : feeStatus === 'partial' ? 'Part of the list' : undefined} />
+            {feeStatus === 'error' ? (
+              <Text style={{ ...ty.label, color: t.warn }}>
+                We couldn’t read your late-cancellation fees. This is not a statement that there are none — any fee already recorded still stands.
+              </Text>
+            ) : (<>
+              <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
+                Recorded when a client cancelled inside your notice period. Repple does not collect these — you settle them with the client.
+              </Text>
+              {lateFees.map((c, i) => (
+                <View key={c.id}>
+                  {i > 0 ? <Rule /> : null}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
+                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: c.waivedAt ? t.surface3 : t.warn }} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: c.waivedAt ? t.ink3 : t.ink }}>
+                        {/* Null amount renders as a dash, never a zero: the
+                            row exists, its figure did not come back, and "0"
+                            would be a statement that nothing is owed. */}
+                        {c.amount == null ? fig(null) : feeAmountLine(c.amount, c.currency)}
+                      </Text>
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                        {nameOf(c.clientId)} · {new Date(c.createdAt).toLocaleDateString()}
+                        {c.waivedAt ? ' · waived' : ''}
+                      </Text>
+                    </View>
+                    <Ghost label={c.waivedAt ? 'Reinstate' : 'Waive'} onPress={() => confirmWaive(c)} />
+                  </View>
+                </View>
+              ))}
+            </>)}
+          </Section>
+        ) : null}
 
       </ScrollView>
 

@@ -1,0 +1,51 @@
+-- ── A join code is not directory information ───────────────────────────────
+--
+-- `trainers_public_directory_r` is `SELECT USING (listed = true)` for every
+-- authenticated account, and `trainers_assigned_client_r` gives a client their
+-- own coach's row. Both are right as ROW rules — a directory has to be
+-- readable, and a client should see their coach.
+--
+-- But RLS chooses rows, never columns, and `trainers` carries `join_code`. So
+-- every signed-in account in the product could read the join code of every
+-- listed coach, by selecting the directory.
+--
+-- A join code is not a secret the way a password is: `join_by_code` only
+-- creates a PENDING request the coach must accept. But it is meant to be handed
+-- out deliberately, and this product MEASURES it — parts 81 and 98 give a coach
+-- named codes in parallel, per-code spend, per-code revenue and cost per
+-- client, with last-touch attribution. A code anybody can lift off the
+-- directory is a code whose numbers mean nothing, and rotating it does not help
+-- when the new one is equally readable.
+--
+-- ── The first attempt at this did nothing, and that is worth recording ──────
+--
+--     revoke select (join_code) on public.trainers from authenticated;
+--
+-- In PostgreSQL a TABLE-level SELECT grant supersedes a column-level revoke:
+-- you cannot subtract a column from a table-wide grant. It reported success and
+-- changed nothing. Proven by trying to read the column as a real client either
+-- side of it — "STILL READABLE" first, refused after the version below.
+revoke select on public.trainers from authenticated, anon;
+
+grant select (id, tenant_id, bio, tagline, offers, specialties, session_fee, listed)
+  on public.trainers to authenticated;
+
+-- `anon` gets nothing: it held a stock grant nobody wrote, and no
+-- unauthenticated path reads this table — the directory is behind sign-in.
+--
+-- Every live reader is covered by the columns granted above:
+--   app/(client)/trainers.tsx    id, bio, tagline, specialties, session_fee
+--   src/ui/coachProfile.tsx      bio, tagline, offers, specialties, session_fee, listed
+--   src/lib/gymTrainers.ts       id
+--   studio-web /revenue, /staff  id
+-- and every join-code path is a SECURITY DEFINER RPC (`my_join_code`,
+-- `my_join_codes`, `my_join_code_stats`, `create_join_code`,
+-- `rotate_join_code`, `revoke_join_code`, `my_code_returns`, `join_by_code`),
+-- which executes as the definer and keeps the privilege.
+--
+-- INSERT and UPDATE are untouched, so `trainers_self_rw` still lets a coach
+-- write their own row.
+--
+-- Verified live: the directory query returns its row, a client reading
+-- `join_code` is refused 42501, `my_coach_profile()` still answers, and the
+-- coach's own `my_join_code()` still returns their code.

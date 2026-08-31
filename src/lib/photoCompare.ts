@@ -99,6 +99,56 @@ export const COMPARE_DISCLAIMER =
   'These are two photographs and the InBody figures recorded on the days they were taken. Nothing here is measured from the pictures themselves.';
 
 /**
+ * The selection a route param names, reduced to photos that actually exist.
+ *
+ * ── Why this is a function and not two `find` calls in the screen ─────────
+ *
+ * The compare panel became app/(client)/compare.tsx so it could be linked to
+ * and returned to, and the two photos are named in the URL. That means the
+ * selection now arrives from OUTSIDE the app's own state: a deep link, a
+ * restored session, a param left over from a photo that has since been
+ * deleted. src/lib/backTo.ts made the same move for its `from` param and its
+ * header sets out the rule this follows — a value that came in from a link is
+ * looked up rather than trusted, and an unknown one resolves to nothing rather
+ * than to something nobody chose.
+ *
+ * Concretely, the four things it refuses:
+ *
+ *   · an id that names no photo in the loaded list. Left in the selection it
+ *     would sit there as a permanently half-made comparison the person cannot
+ *     complete or clear, because the thing they would have to tap does not
+ *     exist. It is dropped, and the screen falls back to asking them to pick.
+ *   · the same id twice. `comparePair` already refuses it, but a selection that
+ *     LOOKS full and produces nothing is a screen with no explanation on it.
+ *   · more than two. A link carrying five ids selects the first two rather than
+ *     failing, because two is what the screen is for.
+ *   · Expo Router hands a repeated query param back as `string[]` and a single
+ *     one as `string`. Both shapes arrive here and neither is special-cased at
+ *     the call site.
+ *
+ * It deliberately does NOT order the pair. Which of the two is "before" is a
+ * question about their dates, `comparePair` answers it, and answering it twice
+ * in two places is how two screens come to disagree about which photo is the
+ * earlier one.
+ */
+export function selectionFromParams(
+  raw: string | string[] | null | undefined,
+  known: { id: string }[] | null | undefined,
+): string[] {
+  if (!raw || !known) return [];
+  const wanted = Array.isArray(raw) ? raw : [raw];
+  const out: string[] = [];
+  for (const id of wanted) {
+    if (typeof id !== 'string' || !id) continue;
+    if (out.includes(id)) continue;
+    if (!known.some((p) => p.id === id)) continue;
+    out.push(id);
+    if (out.length === 2) break;
+  }
+  return out;
+}
+
+/**
  * Are these two values the same calendar day, as the person living that day
  * would count it? See the header for why `slice(0, 10)` is not this function.
  */
@@ -256,6 +306,56 @@ export function compareBasis(rows: CompareRow[]): string {
   return beforeMeasured
     ? 'Only the earlier day has an InBody scan, so there is nothing to measure the change against.'
     : 'Only the later day has an InBody scan, so there is nothing to measure the change against.';
+}
+
+/**
+ * The comparison as a few lines of text, for the share sheet.
+ *
+ * ── Why the FIGURES can be shared and the pictures cannot ─────────────────
+ *
+ * The comparison became a screen so it could be linked to and returned to, and
+ * the third thing asked of it was that it could be shared. What goes out is
+ * this: two dates, the readings recorded on them, and the change. It is the
+ * same table the screen is showing, in the same units, built from the same
+ * rows, so the two cannot disagree.
+ *
+ * What does NOT go out is either photograph, and that is not an oversight to be
+ * fixed later. Progress photos live in a private bucket behind URLs that expire
+ * in an hour (src/lib/progressPhotos.ts). A shared message outlives them: put a
+ * signed URL in one and it leaks the object path to everybody it is forwarded
+ * to and is dead before any of them taps it; attach the image itself and a
+ * photograph of somebody's body is in a group chat off a single tap in a share
+ * sheet. Sending a photo is already its own deliberate, per-photo, revocable
+ * act — see src/lib/photoShare.ts — and it stays that way.
+ *
+ * The last line says so, because a person who sends this to their coach needs
+ * to know whether the pictures went with it, and "I assumed" is the wrong way
+ * to find out.
+ *
+ * The two date labels are ARGUMENTS rather than formatted here: the screen has
+ * already put them under the photographs, and a document that dates the same
+ * photo differently from the screen that made it is worse than one with no
+ * dates at all.
+ */
+export function compareSummary(
+  beforeLabel: string,
+  afterLabel: string,
+  days: number | null,
+  rows: CompareRow[],
+): string {
+  const head = `Progress comparison — ${beforeLabel} → ${afterLabel} (${spanLabel(days)})`;
+  const lines = rows.map(
+    (r) => `${r.label}: ${readingText(r.before, r.unit)} → ${readingText(r.after, r.unit)} (${deltaText(r.delta, r.unit)})`,
+  );
+  return [
+    head,
+    '',
+    ...lines,
+    '',
+    compareBasis(rows),
+    COMPARE_DISCLAIMER,
+    'The photographs themselves are not attached — they stay private to this account.',
+  ].join('\n');
 }
 
 /**

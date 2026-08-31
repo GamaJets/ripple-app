@@ -33,6 +33,8 @@ import { useClientData } from '../../src/ui/clientData';
 import { useSettings } from '../../src/ui/settings';
 import { weightIn, weightLabel, weightToKg, kgToLb, plain, convertedNote } from '../../src/lib/units';
 import { useCheckIns } from '../../src/ui/checkins';
+import { isPending } from '../../src/lib/wellnessSync';
+import { unsentNote } from '../../src/lib/offlineQueue';
 
 // The range a human weighs, in the kilograms this app stores. Kept in metric
 // because the record is metric; the two bounds are converted for whichever unit
@@ -111,16 +113,30 @@ export default function CheckIn() {
     const kg = weightToKg(weight, wu);
     if (kg == null) return;
     cd.setWeightKg(kg);
-    // `addCheckIn` resolves false when the insert never reached the server, and
-    // the result was thrown away — so "your coach can see this week's check-in"
-    // was printed whether or not anybody could. That sentence is the entire
-    // reason a person fills this in, and a client who believes their coach has
-    // their numbers does not send them again.
-    const sent = await ci.addCheckIn({ weightKg: kg, energy, sleep, mood, adherence, note: note.trim() });
-    if (!sent) {
+    // `sendCheckIn` says which of three things happened, and they need three
+    // different sentences. The result used to be thrown away entirely, so "your
+    // coach can see this week's check-in" was printed whether or not anybody
+    // could — the entire reason a person fills this in, and a client who
+    // believes their coach has their numbers does not send them again.
+    //
+    // The middle case is new. This form used to be lost outright when the gym
+    // had no reception, and the alert said so honestly: "energy, sleep, mood,
+    // adherence and your note is not saved anywhere". The provider keeps it
+    // now, so what has to be said is narrower and harder — the work is safe,
+    // the coach still has not seen it, and nothing here may blur those two.
+    const out = await ci.sendCheckIn({ weightKg: kg, energy, sleep, mood, adherence, note: note.trim() });
+    if (out === 'unsent') {
       Alert.alert(
-        'Not sent',
-        'Your check-in did not save, so your coach has not seen it. Your weight is on this phone and will go up with your profile, but the rest of this week — energy, sleep, mood, adherence and your note — is not saved anywhere. Check your connection and send it again.',
+        'Saved on this phone',
+        'No connection, so your coach has not seen this yet — nothing is lost. The whole check-in, including your note, is saved here and goes up on its own the next time the app has signal.',
+        [{ text: 'Done', onPress: () => router.back() }],
+      );
+      return;
+    }
+    if (out === 'refused') {
+      Alert.alert(
+        'Not saved',
+        'Your check-in was rejected, so it is not stored and your coach has not seen it. Sending it again as it is will be rejected again — check for an update, or tell your coach directly.',
         [{ text: 'OK' }],
       );
       return;
@@ -170,11 +186,36 @@ export default function CheckIn() {
 
         <Cta label="Send Check-in" onPress={submit} wide />
 
+        {/* Waiting to go up. Said here rather than only in the alert that
+            followed the tap, because the alert is gone by the next time this
+            screen is opened and the client's question then is "did that
+            send?". `unsentNote` is the one wording for it — see the note on it
+            in src/lib/offlineQueue.ts about not letting "saved" read as
+            "delivered". */}
+        {unsentNote(ci.unsent, 'check-in', 'check-ins') ? (
+          <View>
+            <Rule />
+            <Section>
+              <SectionHead title="Waiting to Send" />
+              <Text style={{ ...ty.label, color: t.ink3 }}>{unsentNote(ci.unsent, 'check-in', 'check-ins')}</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>Your coach cannot see it until then.</Text>
+            </Section>
+          </View>
+        ) : null}
+
         {ci.latest ? (
           <View>
             <Rule />
             <Section>
-              <SectionHead title="Last Check-in" note={new Date(ci.latest.at).toLocaleDateString()} />
+              {/* Which copy this is. A pending check-in is real and is the
+                  client's own, but their coach has not read it — and under
+                  'error' even a stored-looking one came off this phone and
+                  could not be checked, which is what src/ui/loadStatus.ts
+                  means by an unconfirmed non-empty answer. */}
+              <SectionHead
+                title="Last Check-in"
+                note={isPending(ci.latest.id) ? 'not sent yet' : ci.status === 'error' ? 'not checked' : new Date(ci.latest.at).toLocaleDateString()}
+              />
               {/* The stored kilograms read back in the client's unit. The two
                   ratings beside it are scores out of five and are not a
                   measurement of anything physical, so they are printed as they

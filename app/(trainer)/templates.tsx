@@ -22,6 +22,23 @@
 // starters are always present, so a failed read of the coach's own templates
 // produced a page that looked perfectly healthy and was missing everything
 // they had ever built.
+//
+// ── The injury gate was not applied here at all ────────────────────────────
+//
+// The builder withholds Assign for ONE client until their disclosures have
+// been read — src/lib/injuryGate.ts, which refuses when the disclosures could
+// not be READ and not merely when they are empty. This sheet, which assigns to
+// twelve people at once, asked nothing. So the single fastest way to put a
+// programme in front of somebody's shoulder without ever seeing it was to tick
+// their name here instead of opening them in the builder, and the coach would
+// have been told "Assigned".
+//
+// The gate is now consulted PER TICKED CLIENT, through the same fan-out plan
+// the group screen uses (src/lib/groupProgram.ts). The clear ones are assigned;
+// the ones whose disclosures have not been read are named on their own row,
+// excluded from the write, and the button says "Assign to 7 of 8". Nobody is
+// silently skipped — a bulk assign that quietly dropped somebody would be worse
+// than one that refused, because the coach would believe they had sent it.
 import { useState } from 'react';
 import { View, Text, Pressable, ScrollView, Modal, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -31,10 +48,14 @@ import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Cta, Ghost, Notice, PartialRead } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
+import { useInjuryAcks } from '../../src/ui/injuryAcks';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
 import { useProgramTemplates, type ProgramTemplate } from '../../src/ui/programTemplates';
 import { notifySuccess } from '../../src/ui/haptics';
 import { guardOverwrite } from '../../src/lib/overwriteGuard';
+import { planFanOut, listNames, fanOutSubject, type FanOutMember } from '../../src/lib/groupProgram';
+import type { LoadStatus } from '../../src/ui/loadStatus';
+import type { Injury } from '../../src/lib/injuries';
 
 export default function Templates() {
   const t = useTheme();
@@ -52,26 +73,78 @@ export default function Templates() {
   const { templates, removeTemplate, status: tplStatus } = useProgramTemplates();
   const { roster, status: rosterStatus } = useRoster();
   const { assignProgram, getProgram, status: programStatus } = useAssignedPrograms();
+  const acks = useInjuryAcks();
   const [assignTpl, setAssignTpl] = useState<ProgramTemplate | null>(null);
   const [picked, setPicked] = useState<Record<string, boolean>>({});
   const [delFailed, setDelFailed] = useState<string | null>(null);
 
   // One assign here is many overwrites, so it is held until the programmes it
   // would replace have actually been read. See src/lib/overwriteGuard.ts.
+  // Kept alongside the plan below because it is what licenses the "replaces the
+  // program they are on" marker on each row, which is a claim about a read.
   const assignGuard = guardOverwrite(programStatus, 'the programmes these clients are currently on');
 
   const openAssign = (tpl: ProgramTemplate) => { setPicked({}); setAssignTpl(tpl); };
   const pickedIds = Object.keys(picked).filter((k) => picked[k]);
+
+  // ── One ticked client, as both guards need to see them ───────────────────
+  //
+  // `disclosures` is how the read of THIS person's own injury list went, and is
+  // a different question from how the acknowledgement read went. A client the
+  // roster never produced has an empty injury list for exactly the same reason
+  // a healthy client does, so only the status separates them — and a gate that
+  // opened on that silence is how somebody gets overhead press programmed
+  // around a shoulder nobody read.
+  const asMember = (clientId: string): FanOutMember => {
+    const c = roster.find((r) => r.id === clientId);
+    const disclosures: LoadStatus =
+      rosterStatus === 'error' ? 'error'
+      : c ? 'ready'
+      : rosterStatus === 'loading' ? 'loading'
+      : 'error';
+    return {
+      clientId,
+      name: c?.name.split(' ')[0] ?? 'This client',
+      disclosures,
+      ackStatus: acks.status,
+      injuries: (c?.injuries ?? []).map((i, n): Injury => ({
+        id: `${clientId}-${n}`, area: i.area, severity: i.severity as Injury['severity'],
+        status: 'active', note: i.note, at: '',
+      })),
+      acknowledged: acks.acknowledged(clientId),
+    };
+  };
+  const pickedMembers = pickedIds.map(asMember);
+  // 'ready' for the list itself: unlike a group's membership, this list is the
+  // ticks the coach just made with their own thumb. There is no read of it that
+  // could have come back short — the roster it was ticked FROM carries its own
+  // banner above.
+  const plan = planFanOut('ready', programStatus, pickedMembers, !!assignTpl, fanOutSubject(pickedIds.length));
+
   const doAssign = async () => {
-    if (!assignTpl || pickedIds.length === 0 || !assignGuard.allowed) return;
-    const results = await Promise.all(pickedIds.map((id) => assignProgram(id, assignTpl.program)));
+    if (!assignTpl || !plan.allowed) return;
+    const tpl = assignTpl;
+    const sending = plan.send;
+    const results = await Promise.all(sending.map((id) => assignProgram(id, tpl.program)));
     const okCount = results.filter(Boolean).length;
-    notifySuccess();
-    const tpl = assignTpl; const n = pickedIds.length;
+    if (okCount) notifySuccess();
     setAssignTpl(null);
-    Alert.alert(okCount === n ? 'Assigned' : 'Partly assigned', okCount === n
-      ? `“${tpl.name}” assigned to ${n} client${n > 1 ? 's' : ''}. They'll see it on their Train tab.`
-      : `${okCount} of ${n} saved. The rest are on this device only — clients you added by hand have no Train tab until they join.`);
+    const parts: string[] = [];
+    parts.push(okCount
+      ? `“${tpl.name}” assigned to ${okCount} client${okCount === 1 ? '' : 's'}. They'll see it on their Train tab.`
+      : 'Nobody was assigned.');
+    if (okCount < sending.length) {
+      parts.push(`${sending.length - okCount} did not reach the server, so they are on this device only — clients you added by hand have no Train tab until they join.`);
+    }
+    // Named, never silently dropped. A coach who believes twelve people got a
+    // programme when eleven did is worse off than one who was refused.
+    if (plan.blocked.length) {
+      parts.push(`${listNames(plan.blocked.map((b) => b.name))} ${plan.blocked.length === 1 ? 'was' : 'were'} NOT assigned — they have disclosed injuries this screen cannot confirm you have read. Open them in the builder and read what they disclosed.`);
+    }
+    Alert.alert(
+      !okCount ? 'Not assigned' : (okCount === pickedIds.length ? 'Assigned' : 'Partly assigned'),
+      parts.join('\n\n'),
+    );
   };
 
   const dayCount = (tpl: ProgramTemplate) => tpl.program.days.length;
@@ -96,6 +169,12 @@ export default function Templates() {
 
         <Section>
           <Cta label="Build a New Program" wide onPress={() => router.push('/(trainer)/builder')} />
+          {/* A tick-list is remembered by nobody. A group is the same fan-out
+              with the list kept, so tomorrow the coach can still answer "who is
+              on the bootcamp programme". */}
+          <View style={{ marginTop: sp.sm }}>
+            <Ghost label="Program Groups" onPress={() => router.push('/(trainer)/group')} />
+          </View>
         </Section>
 
         <Rule />
@@ -177,6 +256,16 @@ export default function Templates() {
                   note={assignGuard.reason ?? undefined} />
               ) : null}
 
+              {/* The injury half. Held per ticked client, and said out loud —
+                  a bulk assign that quietly dropped somebody would leave the
+                  coach believing they had sent it. */}
+              {assignGuard.allowed && !plan.allowed && plan.reason && pickedIds.length ? (
+                <Notice tone={t.warn} kicker="Injuries" title={plan.label ?? 'Held'} note={plan.reason} />
+              ) : null}
+              {plan.allowed && plan.heldNote ? (
+                <Notice tone={t.warn} kicker="Not everybody" title="Some of these are held" note={plan.heldNote} />
+              ) : null}
+
               {/* An unread roster is not an empty one, and a short one is not
                   the whole book — "Select all" over it selects part of it. */}
               {rosterStatus === 'error' ? (
@@ -196,6 +285,7 @@ export default function Templates() {
                 // marking somebody "no program yet" on that basis is how a
                 // coach comes to overwrite one without realising.
                 const replaces = assignGuard.allowed && !!getProgram(c.id);
+                const held = plan.blocked.find((b) => b.clientId === c.id);
                 return (
                   <Pressable key={c.id} onPress={() => setPicked((p) => ({ ...p, [c.id]: !p[c.id] }))}
                     accessibilityRole="button" accessibilityLabel={c.name}
@@ -211,6 +301,12 @@ export default function Templates() {
                       <Text style={{ ...ty.caption, color: replaces ? t.warn : t.ink3, marginTop: 2 }}>
                         {c.goal}{replaces ? ' · replaces the program they are on' : ''}
                       </Text>
+                      {/* Their own sentence, on their own row. A count of how
+                          many are held tells the coach nothing about whose
+                          shoulder it is. */}
+                      {held ? (
+                        <Text style={{ ...ty.caption, color: t.warn, marginTop: 4 }}>{held.reason}</Text>
+                      ) : null}
                     </View>
                   </Pressable>
                 );
@@ -222,8 +318,8 @@ export default function Templates() {
                       many training programmes as there are ticks, with no undo
                       and nothing told to the clients — so it waits until the
                       screen knows what it would be replacing. */}
-                  <Cta label={assignGuard.label ?? `Assign to ${pickedIds.length || 0} client${pickedIds.length === 1 ? '' : 's'}`} wide
-                    disabled={pickedIds.length === 0 || !assignGuard.allowed} onPress={doAssign} />
+                  <Cta label={plan.label ?? `Assign to ${pickedIds.length || 0} client${pickedIds.length === 1 ? '' : 's'}`} wide
+                    disabled={pickedIds.length === 0 || !plan.allowed} onPress={doAssign} />
                 </View>
               </View>
             </ScrollView>

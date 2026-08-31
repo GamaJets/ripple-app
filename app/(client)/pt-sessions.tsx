@@ -16,15 +16,16 @@
 // (`src/theme/scale`): no hero, cards spent only on the sessions you can act
 // on, and a coloured dot beside ink text where "Approved ✓" used to be painted
 // in the reserved `good` colour.
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect, useCallback } from 'react';
 import { View, Text, ScrollView, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Card, Cta, Ghost, ListRow } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Card, Cta, Ghost, ListRow, Hero, Flag, fig } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
 import { useSessions } from '../../src/ui/sessions';
 import { useClientData } from '../../src/ui/clientData';
+import { sessionsRemaining } from '../../src/lib/connect';
 
 const fmt = (iso: string) => { const d = new Date(iso); return d.toLocaleDateString() + ' · ' + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); };
 
@@ -35,6 +36,29 @@ export default function PtSessions() {
   const c = useClientData();
   const [note, setNote] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
+
+  // ── the balance, on the screen where somebody is thinking about sessions ──
+  //
+  // This screen has always sent people to /packages to find out what is left,
+  // which is the wrong place to make them look: it is the screen where they
+  // approve the sessions that were delivered, so it is the screen where "and
+  // how many have I got left" is the next thought.
+  //
+  // Three states, not two. `left` is `number | null`, and `sessionsRemaining`
+  // returns null for a count it could not read — never a fabricated zero. That
+  // distinction is the whole reason this is not `useState(0)`:
+  //
+  //   'loading'  first read still in flight — no figure yet.
+  //   number     the database's count. 0 is real and is stated plainly.
+  //   null       we could not read it. A dash, and a sentence saying so, so a
+  //              client holding ten credits is never shown a zero.
+  const [left, setLeft] = useState<number | null>(null);
+  const [leftRead, setLeftRead] = useState(false);
+  const loadLeft = useCallback(async () => {
+    const n = await sessionsRemaining();
+    setLeft(n); setLeftRead(true);
+  }, []);
+  useEffect(() => { loadLeft(); }, [loadLeft]);
 
   const mine = useMemo(() => sessions
     .filter((s) => s.clientId === c.id && s.status === 'booked' && Date.parse(s.startsAt) <= Date.now())
@@ -48,6 +72,10 @@ export default function PtSessions() {
     setBusy(null);
     if (!r.ok) { Alert.alert('Not approved', r.error || 'Could not save that. Try again in a moment.'); return; }
     setNote((p) => ({ ...p, [id]: '' }));
+    // Approving spends nothing — the credit came off when the session was
+    // booked. The balance is re-read anyway rather than left stale, because
+    // the number beside this button is the one the client is checking.
+    loadLeft();
     Alert.alert('Approved', 'Your trainer can see this. Package credits are drawn when a session is booked, not here.');
   };
 
@@ -66,6 +94,31 @@ export default function PtSessions() {
           </View>
           <Ghost icon="back" onPress={() => router.back()} />
         </View>
+
+        {/* ── what is left on the pack ────────────────────────────────────
+            A figure only when one was actually read. `fig` prints a dash for
+            null, so a refused count renders as a dash beside a sentence saying
+            we could not read it — never as "0 sessions remaining" to somebody
+            who has paid for ten. */}
+        {leftRead ? (
+          <>
+            <Hero label="Sessions Remaining" figure={fig(left)}
+              note={left == null ? 'We could not read your balance'
+                : left === 0 ? 'Nothing left on a pack'
+                : 'Across your active session packs'} />
+            {left == null ? (
+              <Flag tone={t.crit}>
+                We couldn&apos;t read how many sessions you have left. This is not a statement that you
+                have none — anything you have paid for is still yours.
+              </Flag>
+            ) : left === 0 ? (
+              <Flag tone={t.warn}>
+                Your next session is not covered by a pack. Buy another from your coach, or arrange it
+                with them directly.
+              </Flag>
+            ) : null}
+          </>
+        ) : null}
 
         <Rule />
 

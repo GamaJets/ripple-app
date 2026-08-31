@@ -195,7 +195,7 @@ export default function ScanMachine() {
                 <Text style={{ ...ty.label, color: t.ink3 }}>Preparing camera…</Text>
               </Section>
             ) : !permission.granted ? (
-              <Notice kicker="Camera" title="Camera Access"
+              <Notice kicker="Camera" title="Camera access"
                 note="Repple reads the code on a machine, then names the exercise and muscle group for you.">
                 <View style={{ marginTop: sp.lg }}>
                   <Cta label="Allow Camera" wide onPress={requestPermission} />

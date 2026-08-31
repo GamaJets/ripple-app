@@ -16,6 +16,45 @@ export function fmtTime(iso: string): string {
   return `${h}${m ? ':' + String(m).padStart(2, '0') : ''}${ap}`;
 }
 
+/* ── Chart axis dates ─────────────────────────────────────────────────────────
+ * The four forms a chart writes a date in, and the only four. They take year,
+ * month index and day as NUMBERS rather than a string, because every one of
+ * this codebase's date bugs has been a string being parsed: `new Date('2026-08')`
+ * is UTC midnight and reads back as July west of Greenwich. Taking the parts
+ * means there is nothing left to parse — src/lib/chartAxis.ts does the reading,
+ * strictly and locally, and these only render.
+ *
+ * They live here beside fmtDay rather than in the chart file because the fifth
+ * hand-rolled date formatter was exactly what this change was asked to remove:
+ * src/ui/kit.tsx carried its own hardcoded month-name array, src/ui/Chart.tsx
+ * printed "14/8" from raw getters, and the two disagreed on screen.
+ *
+ * 'en-GB' matches fmtDay and num() above — day before month, which is what the
+ * rest of the app already says to every reader. When this app finally takes the
+ * reader's own locale it takes it in one place, and this is the place.
+ */
+
+/** Axis, day precision: "14 Aug". No year — see chartAxis.axisLabel. */
+export function fmtAxisDay(y: number, m: number, day: number): string {
+  return new Date(y, m, day).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+}
+
+/** Axis, month precision: "Aug 26". The year is two digits because a six-month
+ *  window that crosses New Year is otherwise two identically labelled Augusts. */
+export function fmtAxisMonth(y: number, m: number): string {
+  return new Date(y, m, 1).toLocaleDateString('en-GB', { month: 'short', year: '2-digit' });
+}
+
+/** Touch readout, day precision: "14 Aug 2026". The exact date that was asked for. */
+export function fmtPointDay(y: number, m: number, day: number): string {
+  return new Date(y, m, day).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+/** Touch readout, month precision: "Aug 2026". */
+export function fmtPointMonth(y: number, m: number): string {
+  return new Date(y, m, 1).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' });
+}
+
 /** Signed one-decimal delta between the first and last value of a series. */
 export function seriesDelta(values: number[]): number {
   if (values.length < 2) return 0;

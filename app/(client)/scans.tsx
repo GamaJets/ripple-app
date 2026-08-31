@@ -71,7 +71,20 @@ import { metricTrends, compositionInsights, METRIC_GROUPS, type ScanMetrics } fr
 import { focusToGroups, recommendedExercises } from '../../src/lib/focus';
 import { listProgressPhotos, uploadProgressPhoto, deleteProgressPhoto, comparePair, photosNote, missingFileCount, type ProgressPhoto } from '../../src/lib/progressPhotos';
 import { fetchMyCoach, fetchMyShares, sharePhoto, unsharePhoto, shareStateOf, shareLabel, sharedNote, sendBlocker, revokeCaveat, type ShareGrant, type CoachRef } from '../../src/lib/photoShare';
-import { compareRows, compareBasis, readingText, deltaText, spanLabel, COMPARE_DISCLAIMER } from '../../src/lib/photoCompare';
+import { spanLabel } from '../../src/lib/photoCompare';
+// ── the handover document ─────────────────────────────────────────────────
+// The third thing a client can do with their own record, alongside the report
+// and the spreadsheet: hand it to a physiotherapist, a doctor or a new coach.
+// Four separate reads feed it and any of them can fail on its own, so the
+// builder takes each one's LoadStatus and prints the failure on the document
+// rather than an empty table. src/lib/clientReport.ts sets out the three rules
+// it keeps — no interpretation, no false claim of completeness, and no
+// photograph or photo URL anywhere in a file that will be forwarded and kept.
+import { clientReportDoc, reportShareBlurb, type ReportInjury } from '../../src/lib/clientReport';
+import { useMeasurements, METRICS as MEASURE_METRICS } from '../../src/ui/measurements';
+import { useWorkoutLog } from '../../src/ui/workoutLog';
+import { sessionsOf, trainingBoard } from '../../src/lib/clientTraining';
+import { areaLabel } from '../../src/lib/injuries';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const ITEM_H = 42, VISIBLE = 5;
@@ -133,7 +146,12 @@ export default function Scans() {
   const t = useTheme();
   const router = useRouter();
   const cd = useClientData();
-  const wu = useSettings().weightUnit;
+  // Both units, because this screen now builds a document that carries tape
+  // measurements as well as body weights. NULL on `clients.weight_unit` /
+  // `length_unit` means nobody has chosen — the settings provider resolves that
+  // to the metric default and is the only place that decision is made, so
+  // nothing here second-guesses it.
+  const { weightUnit: wu, lengthUnit: lu } = useSettings();
   const { appName } = useBrand();
   // ── sharing and exporting this record ──────────────────────────────────
   //
@@ -170,6 +188,104 @@ export default function Scans() {
   const sendPdf = async () => { const rows = exportRows(); const { html, text } = progressDoc(cd.name, rows, appName, t.brand, wu); await shareDoc(html, text, 'My progress'); };
   const sendCsv = async () => { await shareTextFile(progressCsv(exportRows()), 'my-progress.csv', 'text/csv', 'My progress'); };
   const sendSummary = async () => { await shareText(progressSummary(cd.name, exportRows(), appName, wu), 'My progress'); };
+
+  // ── the handover document ────────────────────────────────────────────────
+  //
+  // "PDF report — not in this version of the app. It arrives with the next
+  // release." That sentence shipped twice and the release never came, because
+  // expo-print and expo-sharing were not dependencies of this app at all (see
+  // the post-mortem at the top of src/lib/exportShare.ts). They are now, they
+  // are in ios/Podfile.lock, and `check:native` counts them among the 29
+  // modules in the binary — so `pdfExportAvailable()` finally answers true and
+  // the branch below that apologises for its absence is a fallback rather than
+  // the only path.
+  //
+  // The document itself is a different thing from the progress report beside
+  // it. That one is the scans; this one is the whole record a professional
+  // would ask for — body composition over time, tape measurements, logged
+  // training and any injuries the client has disclosed — in the units they read
+  // in, with every section's read status printed on the page.
+  //
+  // FOUR reads feed it and each can fail alone, so each is passed with its own
+  // status. A section that could not be read says so where its table would
+  // have been. That matters most for the injuries: an empty injury table handed
+  // to a physiotherapist reads as "nothing disclosed", which is the most
+  // dangerous false statement this app is capable of making, and it is exactly
+  // what a swallowed RLS refusal would have produced.
+  const measures = useMeasurements();
+  const wlog = useWorkoutLog();
+
+  const buildReport = () => {
+    const board = trainingBoard(sessionsOf(wlog.log), wlog.status);
+    const injuries: ReportInjury[] = cd.injuries.map((i) => ({
+      // Labelled here rather than in the builder so the document names an area
+      // exactly as the client's own Injuries screen names it.
+      label: areaLabel(i.area),
+      severity: i.severity,
+      status: i.status,
+      note: i.note ?? null,
+      at: i.at,
+    }));
+    return clientReportDoc({
+      name: cd.name,
+      brand: appName,
+      generatedOn: todayISO(),
+      weightUnit: wu,
+      lengthUnit: lu,
+      composition: {
+        status: cd.scansStatus,
+        items: cd.scans.map((sc) => ({
+          takenAt: sc.takenAt,
+          weightKg: Number.isFinite(sc.weightKg) ? sc.weightKg : null,
+          bodyFatPct: Number.isFinite(sc.bodyFatPct) ? sc.bodyFatPct : null,
+          muscleKg: sc.skeletalMuscleKg,
+          source: sc.source,
+        })),
+      },
+      measurements: {
+        status: measures.status,
+        // `values` is the entry itself minus its id and date. The columns come
+        // from the measurements screen's own METRICS, so a part added there
+        // appears here without this file being touched.
+        items: measures.entries.map((e) => ({ at: e.at, values: e as unknown as Record<string, number | null | undefined> })),
+      },
+      measureColumns: MEASURE_METRICS.map((m) => ({ key: String(m.key), label: m.label })),
+      training: {
+        status: wlog.status,
+        items: {
+          state: board.state,
+          dayCount: board.dayCount,
+          entryCount: board.entryCount,
+          sets: board.sets,
+          volumeKg: board.volumeKg,
+          newestDay: board.newestDay,
+          days: board.days,
+          // Sessions whose timestamp would not parse belong to no day. Their
+          // sets and load ARE in the totals above and they cannot be in the
+          // table, so the count is passed and the document says so — otherwise
+          // the table and the totals disagree with no explanation.
+          undatedCount: board.undated.length,
+        },
+      },
+      // The injuries ride on the PROFILE read, which is what carries them.
+      injuries: { status: cd.profileStatus, items: injuries },
+    });
+  };
+
+  const shareForProfessional = () => {
+    const doc = buildReport();
+    Alert.alert(
+      'Summary for a health professional',
+      reportShareBlurb(doc) + '\n\n'
+      + (pdfExportAvailable()
+        ? 'It goes as a PDF through your phone\u2019s share sheet, so it can reach a physio, a doctor, a new coach — anyone you choose.'
+        : 'This build cannot produce a PDF, so it goes as plain text instead. Nothing is left out of it: every figure and every caveat is in the text.'),
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Send', onPress: () => { void shareDoc(doc.html, doc.text, 'Health & training summary'); } },
+      ],
+    );
+  };
 
   const shareProgress = () => {
     const rows = exportRows();
@@ -220,7 +336,7 @@ export default function Scans() {
       // feature having been taken away. Said once, and only while it is true.
       + (pdf
         ? 'PDF report — a one-page document with every scan and the change since your first.\n'
-        : 'PDF report — not in this version of the app. It arrives with the next release; the two below work now.\n')
+        : 'PDF report — the copy of the app on this phone can\u2019t make one. Update to the latest version and it will; the two below work either way.\n')
       + csvLine + '\n'
       + 'Short summary — a few lines of text for a message, a story or a post.\n\n'
       + `Whichever you pick opens your phone's share sheet, so it can go to your coach, Instagram, WhatsApp, anywhere. ${appName} posts nothing on its own.`,
@@ -877,92 +993,36 @@ export default function Scans() {
             </Text>
           ) : (
             <View>
+              {/* ── the way into the comparison ────────────────────────────
+                  The side-by-side panel used to be rendered right here, inside
+                  this screen, which meant it could not be linked to, returned
+                  to or shared: it was a region of a scroll view rather than a
+                  place. It is app/(client)/compare.tsx now, and the pair
+                  travels in the URL as two photo ids — never as a signed URL,
+                  which expires in an hour and would sit in a navigation
+                  history long after it stopped working.
+
+                  Selecting still happens here, on the strip below, because
+                  this is where the photos are and where the long-press actions
+                  live. What changed is where the answer is shown. */}
               {(() => {
                 const sel = comparePair(photos, cmp);
                 if (!sel) return (
-                  <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>Tap two photos to compare before → after. Press and hold one to send it to your coach, or delete it.</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
+                    Tap two photos to compare before → after. Press and hold one to send it to your coach, or delete it.
+                  </Text>
                 );
-                const pair: [string, ProgressPhoto][] = [['Before', sel.before], ['After', sel.after]];
                 return (
                   <View style={{ marginBottom: sp.lg }}>
-                    <View style={{ flexDirection: 'row', gap: sp.md }}>
-                      {pair.map(([label, ph]) => (
-                        <View key={label} style={{ flex: 1 }}>
-                          {ph.url ? (
-                            <Image source={{ uri: ph.url }} style={{ width: '100%', height: 220, borderRadius: radius.md, backgroundColor: t.surface2 }} />
-                          ) : (
-                            <View style={{ width: '100%', height: 220, borderRadius: radius.md, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center', paddingHorizontal: sp.md }}>
-                              <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center' }}>Picture unavailable</Text>
-                            </View>
-                          )}
-                          <Text style={{ ...ty.label, fontWeight: '500', color: t.ink, marginTop: 6 }}>{label}</Text>
-                          <Text style={{ ...ty.caption, color: t.ink3 }}>{new Date(ph.takenAt).toLocaleDateString()}</Text>
-                          {/* The badge is repeated here and not left to the
-                              strip below. These are photographs of somebody's
-                              body shown four times the size, and this is where
-                              a person actually looks: "can my coach see this
-                              one?" must not be a question you have to scroll
-                              down and re-find the thumbnail to answer. Same
-                              three states as the strip, same em-dash when the
-                              grants have not been read. */}
-                          <Text style={{ ...ty.caption, fontWeight: '500', color: shareStateOf(ph.id, shares) === 'sent' ? t.brand : t.ink3 }}>{shareLabel(shareStateOf(ph.id, shares))}</Text>
-                        </View>
-                      ))}
+                    <Text style={{ ...ty.label, color: t.ink2 }}>
+                      {new Date(sel.before.takenAt).toLocaleDateString()} → {new Date(sel.after.takenAt).toLocaleDateString()} · {spanLabel(sel.days)}
+                    </Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                      Open them side by side, with the scan figures recorded on each of those two days.
+                    </Text>
+                    <View style={{ alignSelf: 'flex-start', marginTop: sp.md }}>
+                      <Cta label="Compare These Two" onPress={() => router.push({ pathname: '/(client)/compare', params: { before: sel.before.id, after: sel.after.id } } as any)} />
                     </View>
-                    <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.sm }}>{spanLabel(sel.days)}</Text>
-
-                    {/* ── the readings from those two days ─────────────────
-                        TF-23 asks to see two photos "with their dates and the
-                        readings from those days". The readings are the InBody
-                        scan recorded on each photo's own calendar day and
-                        nothing else — src/lib/photoCompare.ts explains at
-                        length why it is not the photo row's own weight_kg
-                        column (always null: savePhoto uploads with no opts)
-                        and why "same day" is not a string slice.
-
-                        The Change column is the difference between two SCANS
-                        that both exist. It is not, and cannot be, anything
-                        read off the pictures: a row whose either side was not
-                        measured shows a dash there, and COMPARE_DISCLAIMER
-                        says so in words underneath. */}
-                    {cd.scansStatus === 'error' ? (
-                      // Not a table of dashes. A dash means "there was no scan
-                      // that day", and saying that when the app merely failed
-                      // to read the list would be inventing the tidier answer.
-                      <Flag tone={t.warn} style={{ marginTop: sp.md }}>
-                        Your scans could not be read just now, so no figures are shown beside these photos. The photos and their dates above are unaffected.
-                      </Flag>
-                    ) : cd.scansStatus === 'loading' ? (
-                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>Reading the scans from those days…</Text>
-                    ) : (() => {
-                      const rows = compareRows(sel.before.takenAt, sel.after.takenAt, scans, wu);
-                      return (
-                        <View style={{ marginTop: sp.lg }}>
-                          <View style={{ flexDirection: 'row', alignItems: 'flex-end', paddingBottom: sp.sm, borderBottomWidth: hairline, borderBottomColor: t.ring }}>
-                            <Text style={{ ...ty.micro, color: t.ink3, flex: 1.3 }}>Reading</Text>
-                            <Text style={{ ...ty.micro, color: t.ink3, flex: 1, textAlign: 'right' }}>Before</Text>
-                            <Text style={{ ...ty.micro, color: t.ink3, flex: 1, textAlign: 'right' }}>After</Text>
-                            <Text style={{ ...ty.micro, color: t.ink3, flex: 1, textAlign: 'right' }}>Change</Text>
-                          </View>
-                          {rows.map((r) => (
-                            <View key={r.key} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: sp.sm, borderBottomWidth: hairline, borderBottomColor: t.ring }}>
-                              <Text style={{ ...ty.label, color: t.ink2, flex: 1.3 }}>{r.label}</Text>
-                              {/* An unmeasured cell is t.ink3 as well as an
-                                  em-dash: it must not sit in the same weight
-                                  as a figure somebody actually recorded. */}
-                              <Text style={{ ...ty.label, ...numeric, fontWeight: '500', color: r.before === null ? t.ink3 : t.ink, flex: 1, textAlign: 'right' }}>{readingText(r.before, r.unit)}</Text>
-                              <Text style={{ ...ty.label, ...numeric, fontWeight: '500', color: r.after === null ? t.ink3 : t.ink, flex: 1, textAlign: 'right' }}>{readingText(r.after, r.unit)}</Text>
-                              <Text style={{ ...ty.label, ...numeric, color: r.delta === null ? t.ink3 : t.ink2, flex: 1, textAlign: 'right' }}>{deltaText(r.delta, r.unit)}</Text>
-                            </View>
-                          ))}
-                          {/* Which days were scanned, named. A blank column
-                              with no sentence beside it reads as a failure of
-                              the app rather than as a day off the machine. */}
-                          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{compareBasis(rows)}</Text>
-                          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>{COMPARE_DISCLAIMER}</Text>
-                        </View>
-                      );
-                    })()}
                   </View>
                 );
               })()}
@@ -1074,6 +1134,38 @@ export default function Scans() {
 
         <Rule />
 
+        <Rule />
+
+        {/* ── handing your own record to somebody who treats bodies ──────────
+            A client sitting in front of a physiotherapist had nothing to show
+            them. The GDPR export exists and is 400 kB of JSON; the progress
+            report exists and is the scans alone. This is the whole record in
+            one document — composition, tape measurements, training and any
+            injury they have disclosed — and the point of it is that they own
+            it and hand it over themselves.
+
+            Its own section rather than a fourth row in the Share dialog: that
+            dialog is an Alert, Android keeps only three of its buttons, and the
+            one that would silently disappear is Cancel. A thing this
+            consequential also should not be the option below "Short summary".
+        */}
+        <Section>
+          <SectionHead title="Share With a Professional" />
+          <Text style={{ ...ty.label, color: t.ink2 }}>
+            A summary a physio, a doctor or a new coach can read: your body composition over time, your tape
+            measurements, the training you have logged, and any injuries you have recorded.
+          </Text>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+            It carries no assessment and no advice of any kind — only what has been recorded, and when. Your
+            progress photos are not in it, and neither is any injury document you have uploaded. If part of your
+            record cannot be read when you make it, the document says so on its own front page rather than
+            looking complete.
+          </Text>
+          <View style={{ alignSelf: 'flex-start', marginTop: sp.lg }}>
+            <Cta label="Make the Summary" onPress={shareForProfessional} />
+          </View>
+        </Section>
+
         {/* ── the rest: navigational, deliberately quiet ──────────────────── */}
         <Section>
           <SectionHead title="Go Deeper" />
@@ -1091,6 +1183,7 @@ export default function Scans() {
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
             {([
               ['chart', 'Report', '/(client)/report'],
+              ['camera', 'Compare', '/(client)/compare'],
               ['trending', 'Composition', '/(client)/body-trends'],
               ['ruler', 'Measurements', '/(client)/measurements'],
               ['trophy', 'Records', '/(client)/records'],

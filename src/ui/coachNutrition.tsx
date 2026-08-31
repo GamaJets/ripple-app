@@ -13,6 +13,19 @@
 // the SECOND (carbs, fat, meal override) only ran inside the first's success
 // handler, and neither read `error`. A coach could adjust a client's macros,
 // watch the screen confirm it, and have nothing reach the client at all.
+//
+// ── The plan ────────────────────────────────────────────────────────────────
+//
+// `plan` (part 133) is the week of meals the coach composed, on the same row as
+// the deltas it is composed against. It supersedes `mealOverride`, which said
+// the same thing for a single day with no weekday attached to it, and which is
+// still read here so that a plan written by an older build is not lost — see
+// the note on setPlan.
+//
+// It is PARSED on the way in rather than handed on as raw jsonb, so that no
+// screen has to remember to validate it and no two screens can validate it
+// differently. `parsePlan` returning null means the column held nothing this
+// build understands; `status` is still what says whether it was read at all.
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import type { CoachAdjust } from '../lib/nutrition';
 import { supabase } from '../lib/supabase';
@@ -20,8 +33,19 @@ import { USE_SUPABASE } from '../lib/config';
 import type { LoadStatus } from './loadStatus';
 import { capLimit, capped } from '../lib/rowCap';
 import { useAuthRevision } from './authRevision';
+import { parsePlan, type CoachMealPlan } from '../lib/mealPlan';
+import { reportError } from '../lib/reportError';
 
-export interface NutritionAdjust extends CoachAdjust { note?: string; mealOverride?: Record<number, number> }
+export interface NutritionAdjust extends CoachAdjust {
+  note?: string;
+  /** SUPERSEDED by `plan`. One day's meals, position → catalogue index, with no
+   *  weekday attached. Kept because a coach may have written one before part
+   *  133, and a client following it should not lose it. */
+  mealOverride?: Record<number, number>;
+  /** The week the coach composed, already parsed. Undefined means the row was
+   *  never read; null means it was read and holds no plan this build knows. */
+  plan?: CoachMealPlan | null;
+}
 
 interface CoachNutritionValue {
   get: (clientId: string) => NutritionAdjust | null;
@@ -34,6 +58,10 @@ interface CoachNutritionValue {
   setAdjust: (clientId: string, patch: Partial<NutritionAdjust>) => Promise<boolean>;
   /** Resolves true only when the adjustment was actually removed server-side. */
   clear: (clientId: string) => Promise<boolean>;
+  /** Send a composed week to the client. Resolves true only when the server
+   *  confirmed a row — a PostgREST write that matched nothing resolves with no
+   *  error at all, so the returned row is the only proof it landed. */
+  setPlan: (clientId: string, plan: CoachMealPlan) => Promise<boolean>;
 }
 
 const Ctx = createContext<CoachNutritionValue | null>(null);
@@ -76,7 +104,7 @@ export function CoachNutritionProvider({ children }: { children: ReactNode }) {
         if (error) { setStatus('error'); return; }
         const page = capped(data);
         const m: Record<string, NutritionAdjust> = {};
-        for (const r of page.rows as any[]) m[r.client_id] = { kcalDelta: r.kcal_delta ?? 0, proteinDelta: r.protein_delta ?? 0, carbDelta: r.carb_delta ?? 0, fatDelta: r.fat_delta ?? 0, note: r.note ?? undefined, mealOverride: r.meal_override ?? undefined };
+        for (const r of page.rows as any[]) m[r.client_id] = { kcalDelta: r.kcal_delta ?? 0, proteinDelta: r.protein_delta ?? 0, carbDelta: r.carb_delta ?? 0, fatDelta: r.fat_delta ?? 0, note: r.note ?? undefined, mealOverride: r.meal_override ?? undefined, plan: parsePlan(r.plan) };
         if (Object.keys(m).length) setMap((prev) => ({ ...prev, ...m }));
         setStatus(page.truncated ? 'partial' : 'ready');
       } catch { if (!cancelled) setStatus('error'); /* stay in-memory, but say so */ }
@@ -109,7 +137,40 @@ export function CoachNutritionProvider({ children }: { children: ReactNode }) {
     } catch { return false; }
   };
 
-  return <Ctx.Provider value={{ get, status, setAdjust, clear }}>{children}</Ctx.Provider>;
+  /**
+   * Send the week.
+   *
+   * `meal_override` is cleared in the SAME statement, and that is deliberate
+   * rather than tidy-minded. It says the same thing as the plan for a single
+   * day with no weekday on it, and leaving both would give the client's Meals
+   * tab two coach-authored answers for the same slot with nothing to arbitrate
+   * between them. Nothing is lost by clearing it: the coach screen seeds the
+   * week it is about to send FROM the client's current plan, overrides
+   * included, so any meal the coach had pinned is already inside `plan` by the
+   * time this runs.
+   *
+   * The row is asked for back. `.upsert().eq()`-shaped writes in PostgREST
+   * resolve with `error: null` and no rows when a policy matched nothing, so a
+   * coach whose relationship had ended would otherwise watch this succeed and
+   * send nothing.
+   */
+  const setPlan = async (clientId: string, plan: CoachMealPlan): Promise<boolean> => {
+    setMap((m) => ({ ...m, [clientId]: { kcalDelta: 0, proteinDelta: 0, carbDelta: 0, fatDelta: 0, ...(m[clientId] ?? {}), plan, mealOverride: undefined } }));
+    if (!USE_SUPABASE || !uid) return false;
+    try {
+      const { data, error } = await supabase.from('coach_nutrition')
+        .upsert({ client_id: clientId, coach_id: uid, plan, meal_override: null }, { onConflict: 'client_id' })
+        .select('client_id');
+      if (error) { reportError('coachNutrition.setPlan', error, { clientId }); return false; }
+      if (!data || data.length === 0) {
+        reportError('coachNutrition.setPlan', new Error('plan upsert returned no row'), { clientId });
+        return false;
+      }
+      return true;
+    } catch (e) { reportError('coachNutrition.setPlan', e, { clientId }); return false; }
+  };
+
+  return <Ctx.Provider value={{ get, status, setAdjust, clear, setPlan }}>{children}</Ctx.Provider>;
 }
 
 export function useCoachNutrition(): CoachNutritionValue {

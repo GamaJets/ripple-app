@@ -28,6 +28,7 @@
     "rootDir": "src"
   },
   "files": [
+    "src/lib/mealPlan.test.ts",
     "src/lib/types.ts",
     "src/lib/nutrition.ts",
     "src/lib/meals.ts",
@@ -68,6 +69,7 @@
     "src/lib/wearableLink.test.ts",
     "src/lib/backTo.test.ts",
     "src/lib/injuryGate.test.ts",
+    "src/lib/intake.test.ts",
     "src/lib/videoCoverage.test.ts",
     "src/lib/rosterMerge.test.ts",
     "src/lib/ownTraining.test.ts",
@@ -83,6 +85,22 @@
     "src/lib/wellnessSync.test.ts",
     "src/lib/coachMoney.test.ts",
     "src/lib/trainerSessions.test.ts",
-    "src/lib/gymSettings.test.ts"
+    "src/lib/gymSettings.test.ts",
+    "src/lib/packDraw.test.ts",
+    "src/lib/notifyInbox.test.ts",
+    "src/lib/memberRecord.test.ts",
+    "src/lib/accountSecurity.test.ts",
+    "src/lib/messageAttachments.test.ts",
+    "src/lib/booking.test.ts",
+    "src/lib/monthlyHistory.test.ts",
+    "src/lib/coachPrefs.test.ts",
+    "src/lib/clientReport.test.ts",
+    "src/lib/groupProgram.test.ts",
+    "src/lib/offlineQueue.test.ts",
+    "src/lib/challenges.test.ts",
+    "src/lib/referralCredit.test.ts",
+    "src/lib/shareAsset.test.ts",
+    "src/lib/chartAxis.test.ts",
+    "src/lib/attendance.test.ts"
   ]
 }

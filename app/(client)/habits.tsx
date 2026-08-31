@@ -28,6 +28,7 @@ import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Hero, Cta, Ghost, Notice, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { useHabits } from '../../src/ui/habits';
+import { unsentNote } from '../../src/lib/offlineQueue';
 import { donePercent } from '../../src/lib/checklist';
 import { useClientData } from '../../src/ui/clientData';
 
@@ -135,6 +136,17 @@ export default function Habits() {
           <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>
             Built from your plan, your targets and anything your coach adds.
           </Text>
+
+          {/* Ticks the server has not taken. The client did the thing and the
+              tick is safe on this phone — what has not happened is the row in
+              `habit_logs`, which is what src/lib/adherence.ts counts to tell
+              their coach how often they keep a habit. Saying "saved" without
+              saying "not sent" would let somebody read a green screen as a
+              figure their coach can see. */}
+          {unsentNote(h.unsent, 'tick') ? (
+            <Notice tone={t.warn} kicker="Checklist" title="Not sent yet"
+              note={`${unsentNote(h.unsent, 'tick')} Until then your coach's records for today are short of them.`} />
+          ) : null}
 
           {/* A refused read leaves rows off the list. Naming that is the whole
               point of `status` — an unticked (or absent) habit under 'error'
