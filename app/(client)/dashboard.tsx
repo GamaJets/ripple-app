@@ -20,6 +20,8 @@ import { buildProgram } from '../../src/lib/programs';
 import { useClientData } from '../../src/ui/clientData';
 import { useSettings } from '../../src/ui/settings';
 import { weightIn, weightDeltaIn, kgToLb, type WeightUnit } from '../../src/lib/units';
+import { deltaLabel, deltaMoved, movementIsProgress } from '../../src/lib/deltaLabel';
+import { shortDayLabel } from '../../src/lib/bodyFigures';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
 import { useCoachFeedback } from '../../src/ui/feedback';
@@ -217,12 +219,21 @@ export default function Home() {
   // sign is taken from the converted figure, so that a change too small to show
   // at this grain — 0.2 kg is under half a pound — is reported as no change
   // rather than printed as "−0 lb", the fabricated zero this screen already
-  // refuses to show elsewhere. `good` deliberately keeps reading the metric
-  // value: whether a change is in the right direction does not depend on units.
+  // refuses to show elsewhere. That judgement, and the sign that follows from
+  // it, now live in deltaLabel: `good` reads the converted figure too, because
+  // a change that rounds away in the reader's own unit is not a direction of
+  // travel the app should be marking either way.
   // wDelta comes off the weight series and is always finite, so the null
   // branch of weightDeltaIn cannot be reached here.
   const wDeltaShown = weightDeltaIn(wDelta, wu) ?? 0;
   const muDShown = weightDeltaIn(muD, wu);
+  // The day each of those changes is measured FROM. Two different baselines
+  // used to sit side by side in the Body row with neither of them named —
+  // weight ran from the first check-in on record and body fat from the previous
+  // scan — and at caption size they read as one interval. "+2 kg" against what,
+  // and since when, is not a question to leave with the person it is about.
+  const wSince = ws.length > 1 ? shortDayLabel(c.weightSeries[0].t) : null;
+  const scanSince = scPrev ? shortDayLabel(scPrev.takenAt) : null;
 
   const now = Date.now();
   const nextSession = sessions
@@ -407,12 +418,19 @@ export default function Home() {
           <KpiRow
             onPress={() => router.push('/(client)/scans')}
             items={[
-              { label: 'Weight', value: fig(weightIn(c.weightKg, wu)), unit: wu, route: '/(client)/scans', good: wDelta <= 0, delta: wDeltaShown !== 0 ? `${wDeltaShown < 0 ? '−' : '+'}${Math.abs(wDeltaShown)} ${wu}` : undefined },
+              // `good` was `wDelta <= 0` on every one of these: the app decided
+              // that down is better whoever is reading it. A member whose goal
+              // is Build Muscle was shown the accent dot — the app's "well
+              // done" — for losing the weight they are training to put on, and
+              // an unchanged reading got it too. `movementIsProgress` asks
+              // their own goal, and returns undefined where the goal does not
+              // settle it, which draws a neutral mark rather than a verdict.
+              { label: 'Weight', value: fig(weightIn(c.weightKg, wu)), unit: wu, route: '/(client)/scans', good: movementIsProgress(wDeltaShown, c.goal, 'weight'), delta: deltaMoved(wDeltaShown) ? deltaLabel(wDeltaShown, { since: wSince, unit: wu }) : undefined },
               // Body fat is a proportion of the body, not an amount of it, and
               // stays a percentage under every unit preference. Nothing on this
               // line converts.
-              { label: 'Body Fat', value: fig(c.bodyFatPct), unit: '%', route: '/(client)/scans', good: bfD <= 0, delta: bfD !== 0 ? `${bfD < 0 ? '−' : '+'}${Math.abs(bfD)}` : undefined },
-              { label: 'Muscle', value: fig(weightIn(c.muscleKg, wu)), unit: wu, route: '/(client)/scans', good: muD != null ? muD >= 0 : undefined, delta: muDShown ? `${muDShown < 0 ? '−' : '+'}${Math.abs(muDShown)}` : undefined },
+              { label: 'Body Fat', value: fig(c.bodyFatPct), unit: '%', route: '/(client)/scans', good: movementIsProgress(bfD, c.goal, 'bodyFat'), delta: deltaMoved(bfD) ? deltaLabel(bfD, { since: scanSince, unit: '%' }) : undefined },
+              { label: 'Muscle', value: fig(weightIn(c.muscleKg, wu)), unit: wu, route: '/(client)/scans', good: movementIsProgress(muDShown, c.goal, 'muscle'), delta: deltaMoved(muDShown) ? deltaLabel(muDShown, { since: scanSince, unit: wu }) : undefined },
             ]}
           />
         </Section>
@@ -422,7 +440,9 @@ export default function Home() {
           <Rule />
           <Section>
             <SectionHead title={`Weight · ${ws.length} check-ins`}
-              note={`${wDeltaShown > 0 ? '+' : wDeltaShown < 0 ? '−' : ''}${Math.abs(wDeltaShown)} ${wu}`}
+              // Named from the day the series starts. A bare "1.2 kg" over a
+              // heading counting check-ins is a figure with no interval on it.
+              note={deltaLabel(wDeltaShown, { since: wSince, unit: wu })}
               onPress={() => router.push('/(client)/scans')} />
             <Spark data={wsShown} labels={c.weightSeries.map((x) => x.t)} unit={` ${wu}`} />
           </Section>

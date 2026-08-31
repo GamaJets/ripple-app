@@ -82,6 +82,15 @@ function projectionLine(goal: GoalTarget, series: Point[], wu: WeightUnit): stri
   // a kilogram a week the honest figure is 1.10 lb/wk, and "1 lb/wk" would make
   // every pace between 0.7 and 1.5 look identical.
   const rate = (v: number) => (measured != null && weightKind(measured) && wu === 'lb' ? kgToLb(v) : v);
+  // A pace is only quoted where it survives being printed. `weeklyRate === 0`
+  // is caught upstream as 'flat', but a rate of 0.004 kg/wk is not zero and
+  // formatted "+0.00 kg/wk" — a plus sign on a pace of nothing, offered as the
+  // basis of a finish date. Where the rate rounds away the sentence drops the
+  // parenthetical rather than quoting a figure it has just contradicted.
+  const pace = (v: number) => {
+    const r = rate(v);
+    return deltaMoved(r, 2) ? ` (${deltaSign(r, 2)}${Math.abs(r).toFixed(2)} ${unit}/wk)` : '';
+  };
   switch (p.kind) {
     case 'reached':
       return 'You’ve reached this one — mark it done, or set a new target.';
@@ -90,10 +99,10 @@ function projectionLine(goal: GoalTarget, series: Point[], wu: WeightUnit): stri
     case 'flat':
       return 'Your readings haven’t moved since you set this, so there’s no pace to project from.';
     case 'wrongway':
-      return `Your recent trend (${p.weeklyRate > 0 ? '+' : ''}${rate(p.weeklyRate).toFixed(2)} ${unit}/wk) is heading away from this target. Keep going, or adjust the goal.`;
+      return `Your recent trend${pace(p.weeklyRate)} is heading away from this target. Keep going, or adjust the goal.`;
     case 'eta': {
       const eta = new Date(p.etaMs);
-      return `At your current pace (${p.weeklyRate > 0 ? '+' : ''}${rate(p.weeklyRate).toFixed(2)} ${unit}/wk) you’ll get there around ${eta.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}.`;
+      return `At your current pace${pace(p.weeklyRate)} you’ll get there around ${eta.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}.`;
     }
   }
 }

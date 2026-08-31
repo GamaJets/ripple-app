@@ -54,7 +54,8 @@
 // two converted ends, which is the bug that helper exists to prevent: −1.0 cm
 // would otherwise print as −0.3 in one month and −0.4 in the next off the back
 // of nothing the client did.
-import { lengthDeltaIn, plain, type LengthUnit } from './units';
+import { lengthDeltaIn, type LengthUnit } from './units';
+import { deltaLabel } from './deltaLabel';
 import { dateParts } from './localDate';
 import { dayHeading, whenLabel, daysBetweenIso } from './coachWeek';
 

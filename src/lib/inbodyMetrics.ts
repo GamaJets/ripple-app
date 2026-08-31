@@ -1,6 +1,8 @@
 // InBody composition metrics — the richer field set we extract from a scan and
 // trend over time. Kept backend-agnostic so the vision layer, storage and UI
 // all share one definition. Every field is optional (a report may omit some).
+import { deltaLabel } from './deltaLabel';
+
 export interface ScanMetrics {
   visceralFat?: number;   // level (unitless)
   inbodyScore?: number;   // total points
@@ -63,9 +65,22 @@ export interface CompositionRead { improving: string[]; watch: string[]; balance
 export function compositionInsights(scans: ScanLike[]): CompositionRead {
   const trends = metricTrends(scans);
   const improving: string[] = [], watch: string[] = [];
+  // Through deltaLabel rather than interpolating the number. `${tr.delta}` on a
+  // negative prints a HYPHEN, and the rest of the app prints U+2212 MINUS, so
+  // the same drop read differently depending on which screen showed it — and
+  // deltaLabel is also what guarantees a movement of nothing never arrives here
+  // wearing a sign. No baseline is named because this line has none of its own:
+  // it is a fragment for a summary that dates itself.
+  const line = (tr: MetricTrend) =>
+    `${tr.def.label} ${deltaLabel(tr.delta, {
+      since: null,
+      decimals: tr.def.decimals ?? 0,
+      noChange: 'unchanged',
+      noBaseline: 'no earlier reading',
+    })}`.trim();
   for (const tr of trends) {
-    if (tr.good === true) improving.push(`${tr.def.label} ${tr.delta! > 0 ? '+' : ''}${tr.delta}`.trim());
-    else if (tr.good === false) watch.push(`${tr.def.label} ${tr.delta! > 0 ? '+' : ''}${tr.delta}`.trim());
+    if (tr.good === true) improving.push(line(tr));
+    else if (tr.good === false) watch.push(line(tr));
   }
   const balance: string[] = [];
   const asc = [...scans].sort((a, b) => Date.parse(a.takenAt) - Date.parse(b.takenAt));

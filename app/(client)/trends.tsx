@@ -18,6 +18,8 @@ import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { isWhole } from '../../src/ui/loadStatus';
 import { useSettings } from '../../src/ui/settings';
 import { volumeIn, est1RMIn, weightDeltaIn, convertedNote } from '../../src/lib/units';
+import { deltaLabel, deltaMoved, deltaSign } from '../../src/lib/deltaLabel';
+import { shortDayLabel } from '../../src/lib/bodyFigures';
 import { est1RM } from '../../src/lib/streaks';
 import type { WorkoutEntry } from '../../src/lib/mockData';
 import { Rule, Section, SectionHead, Hero, KpiRow, Ghost, Spark, fig } from '../../src/ui/kit';
@@ -197,8 +199,16 @@ export default function Trends() {
                       // progress, and a genuine 2.5 kg gain could read as 5 lb
                       // one session and 6 lb the next.
                       label: 'Est. 1RM', value: fig(est1RMIn(last, wu)), unit: wu,
-                      good: delta >= 0,
-                      delta: series.length >= 2 && deltaShown != null ? `${deltaShown >= 0 ? '+' : '−'}${Math.abs(deltaShown)} ${wu}` : undefined,
+                      // `deltaShown >= 0` put a plus on an unchanged 1RM, and
+                      // `delta >= 0` gave that same nothing the accent dot the
+                      // row uses to mean "you moved the right way". Both now
+                      // ask the figure that is printed, which has its own arm
+                      // for nothing. The day the session series starts is named
+                      // rather than left to be inferred from the chart below.
+                      good: deltaMoved(deltaShown) ? deltaSign(deltaShown) === '+' : undefined,
+                      delta: series.length >= 2 && deltaMoved(deltaShown)
+                        ? deltaLabel(deltaShown, { since: shortDayLabel(series[0].t), unit: wu })
+                        : undefined,
                     },
                     { label: 'Best', value: fig(est1RMIn(maxE, wu)), unit: wu },
                     { label: 'Sessions', value: fig(series.length) },

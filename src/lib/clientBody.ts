@@ -60,7 +60,14 @@
 // than guessed from its name.
 import { GOAL_METRIC, type MeasuredKind } from './goalTargets';
 import { goalUnit, goalValue, goalDelta, type ScanRow } from './clientGoals';
+// `plain` is still used by `manualFigures` below. It was dropped from this
+// import alongside the move to `deltaLabel`, which left two call sites naming a
+// symbol that was no longer in scope and took `npm test` down with it — the
+// suite is `tsc && node …`, so a non-zero tsc means no test runs at all.
+// Re-added rather than reverted: the deltaLabel change is somebody else's work
+// in flight and is untouched.
 import { plain, type WeightUnit } from './units';
+import { deltaLabel } from './deltaLabel';
 import { dateParts } from './localDate';
 import { dayHeading, whenLabel, daysBetweenIso } from './coachWeek';
 

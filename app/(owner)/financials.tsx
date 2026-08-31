@@ -28,6 +28,7 @@ import { fetchPlans, fetchMemberships, fetchPayments, summarise } from '../../sr
 import { useTenant, gymMoney } from '../../src/ui/tenant';
 import { supabase } from '../../src/lib/supabase';
 import { reportError } from '../../src/lib/reportError';
+import { deltaLabel } from '../../src/lib/deltaLabel';
 
 const KEY = 'repple.owner.financials';
 // One formatter for the whole owner app, rather than 'AED ' typed here and '$'
@@ -181,7 +182,9 @@ export default function Financials() {
     ['MRR', money(fin.mrr)],
     ['Members', fin.members.toLocaleString()],
     ['Churn', r.churnPct.toFixed(1) + '%'],
-    ['Net growth', (r.growthPct >= 0 ? '+' : '') + r.growthPct.toFixed(1) + '%'],
+    // A gym that neither grew nor shrank reads "No change", not "+0.0%". The
+    // `>= 0` arm put a plus on a month in which nothing happened.
+    ['Net growth', deltaLabel(r.growthPct, { since: null, unit: '%' })],
     ['PT + classes', money(fin.ptRevenue + fin.classRevenue)],
   ] : [];
 

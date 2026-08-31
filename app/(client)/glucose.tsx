@@ -23,6 +23,7 @@ import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Notice, Cta, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty } from '../../src/theme/scale';
 import { useGlucose } from '../../src/ui/glucoseData';
+import { deltaLabel } from '../../src/lib/deltaLabel';
 import {
   band, formatGlucose, parseTyped, TYPICAL_LOW_MMOL, TYPICAL_HIGH_MMOL,
   type GlucoseUnit, type GlucoseBand,
@@ -205,7 +206,12 @@ export default function Glucose() {
                     {/* Null unless BOTH ends are real readings. A peak with no
                         baseline is a number, not a rise. */}
                     <Text style={{ ...ty.body, color: t.ink }}>
-                      {p.rise == null ? '—' : `${p.rise > 0 ? '+' : ''}${unit === 'mg/dL' ? Math.round(p.rise * 18.0182) : p.rise}`}
+                      {/* Signed from the figure that is actually printed. In
+                          mg/dL the rise is rounded to whole units, so a real
+                          0.02 mmol/L rise became "+0" — a sign attached to
+                          nothing, on the number a member reads a meal by. */}
+                      {deltaLabel(unit === 'mg/dL' && p.rise != null ? Math.round(p.rise * 18.0182) : p.rise,
+                        { since: null, decimals: unit === 'mg/dL' ? 0 : 1, noChange: 'No change', noBaseline: '—' })}
                     </Text>
                   </View>
                 </View>

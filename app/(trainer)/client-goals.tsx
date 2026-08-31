@@ -114,10 +114,10 @@ function projectionLine(goal: GoalTarget, series: Point[], wu: WeightUnit, who: 
     case 'flat':
       return 'Their readings have not moved since they set this, so there is no pace to project from.';
     case 'wrongway':
-      return `Their trend since setting this (${p.weeklyRate > 0 ? '+' : ''}${rate(p.weeklyRate).toFixed(2)} ${unit}/wk) is heading away from the target.`;
+      return `Their trend since setting this${pace(p.weeklyRate)} is heading away from the target.`;
     case 'eta': {
       const eta = new Date(p.etaMs);
-      return `At their current pace (${p.weeklyRate > 0 ? '+' : ''}${rate(p.weeklyRate).toFixed(2)} ${unit}/wk) they get there around ${eta.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}.`;
+      return `At their current pace${pace(p.weeklyRate)} they get there around ${eta.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}.`;
     }
   }
 }

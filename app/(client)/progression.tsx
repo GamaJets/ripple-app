@@ -18,6 +18,7 @@ import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useSettings } from '../../src/ui/settings';
 import { liftIn, liftLabel, liftDeltaIn, convertedNote } from '../../src/lib/units';
 import { suggestProgression, type ProgressAction } from '../../src/lib/progression';
+import { deltaLabel } from '../../src/lib/deltaLabel';
 import { Rule, Section, SectionHead, KpiRow, Notice, Cta, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 
@@ -127,7 +128,11 @@ export default function Progression() {
                     {
                       label: 'Target Load', value: fig(liftIn(tip.nextWeight, wu)), unit: wu,
                       good: bump >= 0,
-                      delta: bump !== 0 && bumpShown != null ? `${bumpShown > 0 ? '+' : '−'}${Math.abs(bumpShown)} ${wu}` : 'same weight',
+                      // Gated on the CONVERTED bump, not the raw one. A 1 kg
+                      // step is 2 lb, but a 0.2 kg one is no whole pounds at
+                      // all, and `bump !== 0` let that through as "+0 lb" —
+                      // a load increase the member cannot put on the bar.
+                      delta: deltaLabel(bumpShown, { since: null, unit: wu, noChange: 'same weight', noBaseline: 'same weight' }),
                     },
                     { label: 'Target Reps', value: fig(tip.nextReps) },
                   ]} />

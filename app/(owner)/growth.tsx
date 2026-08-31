@@ -22,6 +22,7 @@ import { DistBar } from '../../src/ui/charts';
 import { usePromos } from '../../src/ui/promos';
 import { usePlatformTrainers } from '../../src/ui/trainers';
 import { gymRollup, cohorts, clientAnalytics, type TrainerLike } from '../../src/lib/ownerAnalytics';
+import { deltaLabel } from '../../src/lib/deltaLabel';
 
 const DISCOUNTS = [10, 20, 30, 50];
 
@@ -114,7 +115,10 @@ export default function OwnerGrowth() {
         {/* ── the hero ───────────────────────────────────────────────────── */}
         <Hero
           label={`New trainers · ${now.toLocaleString(undefined, { month: 'short' })} ${now.getFullYear()}`}
-          figure={trainersUnknown ? '—' : '+' + newThisMonth}
+          // A month with nobody joining reads "0", not "+0". The plus was
+          // unconditional, so the emptiest month on the roster was the one the
+          // hero dressed up as an addition.
+          figure={trainersUnknown ? '—' : deltaLabel(newThisMonth, { since: null, decimals: 0, noChange: '0' })}
           note={loading
             ? 'Reading your roster…'
             : trainersUnread

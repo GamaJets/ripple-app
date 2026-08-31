@@ -28,6 +28,7 @@ import { useTheme } from '../../src/ui/components';
 import { useClientData } from '../../src/ui/clientData';
 import { useSettings } from '../../src/ui/settings';
 import { weightDeltaIn } from '../../src/lib/units';
+ import { deltaLabel, deltaSign, deltaMoved } from '../../src/lib/deltaLabel';
 import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, Notice, fig } from '../../src/ui/kit';
 import { isWhole } from '../../src/ui/loadStatus';
 import { sp, layout, type as ty } from '../../src/theme/scale';
@@ -60,10 +61,30 @@ export default function Social() {
  // Two scans are the minimum that can describe a change. One (or none) is not
  // progress, and printing a zero here would read as one.
  const measured = scansWhole && cd.scans.length >= 2;
+ // The same two figures as MOVEMENTS rather than as drops. `wtDrop` and
+ // `bfDrop` are first-minus-latest, so they are positive when the reading came
+ // DOWN, and every sentence on this screen read `>= 0` as "down". Zero sat in
+ // that arm: a member whose two scans said the same thing was offered "Weight
+ // Down · 0 kg" — and unlike every other screen in the app, what this one says
+ // gets posted, and stays posted.
+ const wtMove = -wtDropShown;
+ const bfMove = -bfDrop;
+ // The direction as a word, asked of the same rounding that decides the sign,
+ // so the word and the figure can never disagree. Only ever called where
+ // `deltaMoved` has already said there is a direction to name.
+ const wayWord = (v: number) => (deltaSign(v) === '−' ? 'down' : 'up');
 
  const share = async () => {
- const msg = measured
- ? `My Repple progress — ${wtDropShown >= 0 ? 'down' : 'up'} ${Math.abs(wtDropShown)} ${wu} and ${bfDrop >= 0 ? 'down' : 'up'} ${Math.abs(bfDrop)}% body fat so far. Every rep ripples out.`
+ // Only the figures that actually moved go into the post. Two identical scans
+ // used to become "down 0 kg and down 0% body fat so far", which is a claim
+ // about a change the scans did not record, made in public on the member's
+ // behalf.
+ const bits = [
+ deltaMoved(wtMove) ? `${wayWord(wtMove)} ${Math.abs(wtMove)} ${wu}` : null,
+ deltaMoved(bfMove) ? `${wayWord(bfMove)} ${Math.abs(bfMove)}% body fat` : null,
+ ].filter(Boolean);
+ const msg = measured && bits.length
+ ? `My Repple progress — ${bits.join(' and ')} so far. Every rep ripples out.`
  : 'I train with Repple. Every rep ripples out.';
  try { await Share.share({ message: msg }); } catch {}
  };
@@ -84,10 +105,10 @@ export default function Social() {
 
  {measured ? (
  <Hero
- label={wtDropShown >= 0 ? 'Weight Down' : 'Weight Up'}
- figure={Math.abs(wtDropShown).toString()}
+ label={!deltaMoved(wtMove) ? 'Weight Unchanged' : wayWord(wtMove) === 'down' ? 'Weight Down' : 'Weight Up'}
+ figure={Math.abs(wtMove).toString()}
  unit={wu}
- note={`Body fat ${bfDrop >= 0 ? 'down' : 'up'} ${Math.abs(bfDrop)}% across ${cd.scans.length} scans`}
+ note={`Body fat ${deltaMoved(bfMove) ? `${wayWord(bfMove)} ${Math.abs(bfMove)}%` : 'unchanged'} across ${cd.scans.length} scans`}
  />
  ) : (
  !scansWhole && cd.scansStatus !== 'loading' ? (
@@ -117,8 +138,11 @@ export default function Social() {
  <Section>
  <SectionHead title="Since Your First Scan" />
  <KpiRow items={[
- { label: 'Weight', value: `${wtDropShown >= 0 ? '−' : '+'}${Math.abs(wtDropShown)}`, unit: wu },
- { label: 'Body Fat', value: `${bfDrop >= 0 ? '−' : '+'}${Math.abs(bfDrop)}`, unit: '%' },
+ // The heading above names the baseline, so these two carry the figure alone —
+ // and where it rounds to nothing they carry the word instead of a sign, with
+ // the unit dropped so it cannot read "No change kg".
+ { label: 'Weight', value: deltaMoved(wtMove) ? deltaLabel(wtMove, { since: null }) : 'No change', unit: deltaMoved(wtMove) ? wu : undefined },
+ { label: 'Body Fat', value: deltaMoved(bfMove) ? deltaLabel(bfMove, { since: null }) : 'No change', unit: deltaMoved(bfMove) ? '%' : undefined },
  { label: 'Scans', value: fig(cd.scans.length) },
  ]} />
  </Section>

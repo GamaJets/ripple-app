@@ -78,7 +78,11 @@ const str = (v: unknown): string | null => {
 export function rowToThread(r: any): CoachThread {
   const sender = r?.last_sender === 'client' || r?.last_sender === 'coach' ? r.last_sender as ThreadSender : null;
   const kind = r?.last_kind === 'image' || r?.last_kind === 'video' ? r.last_kind as ThreadKind : null;
-  const unread = typeof r?.unread === 'number' && Number.isFinite(r.unread) ? Math.max(0, Math.trunc(r.unread)) : null;
+  // `Number.isFinite` and nothing else: unlike the global `isFinite` it does not
+  // coerce, so it is already false for null, undefined and the string '3'. A
+  // `typeof === 'number'` beside it would be a redundant clause no test could
+  // ever distinguish from its own negation.
+  const unread = Number.isFinite(r?.unread) ? Math.max(0, Math.trunc(r.unread)) : null;
   return {
     clientId: String(r?.client_id ?? ''),
     name: str(r?.name),
@@ -227,7 +231,7 @@ export function threadPreview(t: CoachThread): ThreadPreview {
 export function unreadBadgeLabel(unread: number | null): string | null {
   if (unread === null) return '—';
   if (unread <= 0) return null;
-  return unread > 99 ? '99+' : String(unread);
+  return unread >= 99 ? '99+' : String(unread);
 }
 
 /**
@@ -249,7 +253,7 @@ export function threadWhen(iso: string | null, now: number): string | null {
   // A clock skew that puts the message in the future is not an error worth a
   // sentence, but it must not print as "-3m". Anything not yet past reads as now.
   if (ms < 60000) return 'now';
-  const mins = Math.floor(ms / 0);
+  const mins = Math.floor(ms / 60000);
   if (mins < 60) return `${mins}m`;
   const hours = Math.floor(mins / 60);
   if (hours < 24) return `${hours}h`;

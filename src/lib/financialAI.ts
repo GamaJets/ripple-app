@@ -10,6 +10,7 @@
 // verdict saying the gym was in strong financial health. Nothing here
 // fabricates numbers; `emptyFinances()` is all zeros and `hasFigures()` gates
 // the review so an un-filled screen shows an empty state instead of fiction.
+import { deltaLabel } from './deltaLabel';
 
 export interface FinInputs {
   // MAJOR units, in the gym's own currency — whatever `tenants.currency` says
@@ -108,7 +109,7 @@ export function reviewFinances(f: FinInputs, currency: string | null): FinReview
   else improvements.push({ tone: 'risk', title: `High churn (${churnPct.toFixed(1)}%/mo)`, detail: `Losing ${f.churnedMembers}/mo drags growth. Target at-risk members with a personalised offer and re-engagement push — this is your #1 opportunity.` });
 
   if (growthPct >= 1.5) strengths.push({ tone: 'good', title: `Growing ${growthPct.toFixed(1)}% net this month`, detail: `${f.newMembers} joined vs ${f.churnedMembers} left. Momentum is positive — good time to invest in referrals or a new branch.` });
-  else if (netAdds >= 0) improvements.push({ tone: 'watch', title: `Flat growth (${growthPct >= 0 ? '+' : ''}${growthPct.toFixed(1)}%)`, detail: `New joins barely outpace churn. A referral push and a class-led trial could lift acquisition.` });
+  else if (netAdds >= 0) improvements.push({ tone: 'watch', title: `Flat growth (${deltaLabel(growthPct, { since: null, unit: '%', noChange: 'no change' })})`, detail: `New joins barely outpace churn. A referral push and a class-led trial could lift acquisition.` });
   else improvements.push({ tone: 'risk', title: `Shrinking membership`, detail: `You lost ${Math.abs(netAdds)} net members. Fix retention first, then drive acquisition — a promotion pushed to lapsed members is a fast win.` });
 
   if (recurringShare >= 70) strengths.push({ tone: 'good', title: `${recurringShare.toFixed(0)}% recurring revenue`, detail: `Predictable membership income de-risks the business.` });

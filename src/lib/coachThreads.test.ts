@@ -59,6 +59,19 @@ const thread = (over: Partial<CoachThread> = {}): CoachThread => ({
   eq(r.unread, 3, 'a real count comes through');
 }
 
+// Both halves of the narrowing, stated positively as well as negatively. A
+// narrowing written as `=== 'image' && === 'video'` is never true and would
+// null every attachment in the app, which the negative assertions below cannot
+// see because they only ever check for null.
+eq(rowToThread({ client_id: 'c1', last_kind: 'image' }).lastKind, 'image', 'an image comes through as an image');
+eq(rowToThread({ client_id: 'c1', last_kind: 'video' }).lastKind, 'video', 'a video comes through as a video');
+eq(rowToThread({ client_id: 'c1', last_sender: 'coach' }).lastSender, 'coach', 'the coach side comes through');
+// Values that are not numbers must not be coerced into one. The global
+// `isFinite('3')` is true; `Number.isFinite('3')` is not, and a count that
+// arrived as a string is a count we did not read.
+eq(rowToThread({ client_id: 'c1', unread: '3' }).unread, null, 'a count that arrived as a string is not a count');
+eq(rowToThread({ client_id: 'c1', unread: 2.7 }).unread, 2, 'a fractional count is truncated, not rounded up into a message nobody sent');
+
 // THE ONE THAT MATTERS. A null count is not zero.
 {
   const r = rowToThread({ client_id: 'c1', unread: null });
@@ -116,23 +129,50 @@ ok(!hasConversation(thread({ lastAt: 'not a date' })), 'an unparseable timestamp
   // cannot silently reshuffle the list.
   ok(sortThreads(rows)[0].clientId !== 'old', 'the unread count does not reorder anybody');
   // Total order on ties, so two messages in the same millisecond do not swap
-  // places between renders.
-  const tied = [
-    thread({ clientId: 'b', lastAt: '2026-08-31T20:13:44Z', lastBody: 'x' }),
-    thread({ clientId: 'a', lastAt: '2026-08-31T20:13:44Z', lastBody: 'y' }),
-  ];
-  eq(sortThreads(tied).map((t) => t.clientId).join(','), 'a,b', 'a tie breaks on the client id, stably');
+  // places between renders. FOUR of them, reversed: a two-element list can be
+  // put in order by a comparator that is wrong in every other case, because
+  // there is only one comparison to get right.
+  const tied = ['d', 'c', 'b', 'a'].map((id) =>
+    thread({ clientId: id, lastAt: '2026-08-31T20:13:44Z', lastBody: 'x' }));
+  eq(sortThreads(tied).map((t) => t.clientId).join(','), 'a,b,c,d', 'a tie breaks on the client id, stably');
+  // Same list, already in order. A comparator that never returns 0 for equal
+  // ids passes the reversed case and fails this one.
+  const already = ['a', 'b', 'c', 'd'].map((id) =>
+    thread({ clientId: id, lastAt: '2026-08-31T20:13:44Z', lastBody: 'x' }));
+  eq(sortThreads(already).map((t) => t.clientId).join(','), 'a,b,c,d', 'and an ordered list is left alone');
   // Not mutated in place: the hook holds this array and React compares it.
   eq(rows[0].clientId, 'old', 'sortThreads does not reorder its input');
 }
 {
   const rows = [
-    thread({ clientId: 'c3', name: null }),
+    thread({ clientId: 'c5', name: null }),
     thread({ clientId: 'c2', name: 'zoe' }),
+    thread({ clientId: 'c4', name: null }),
     thread({ clientId: 'c1', name: 'Alice' }),
+    thread({ clientId: 'c3', name: 'Mo' }),
   ];
-  eq(sortUnstarted(rows).map((t) => t.clientId).join(','), 'c1,c2,c3',
+  // TWO unnamed rows, not one: with a single unnamed row at the end, a
+  // comparator that reports "equal" instead of "after" for the named/unnamed
+  // pair still happens to produce the right list.
+  eq(sortUnstarted(rows).map((t) => t.clientId).join(','), 'c1,c3,c2,c4,c5',
     'unstarted threads go by name, case-insensitively, with the unnameable last');
+  // Two people with the same name, which happens. They must not swap places
+  // between renders, so the id is the second key and not a coin toss.
+  const sameName = [
+    thread({ clientId: 'z', name: 'Sam Rivera' }),
+    thread({ clientId: 'a', name: 'sam rivera' }),
+    thread({ clientId: 'm', name: 'Sam Rivera' }),
+  ];
+  eq(sortUnstarted(sameName).map((t) => t.clientId).join(','), 'a,m,z',
+    'two clients with the same name are ordered by id, stably');
+  // The two minimal pairs, each already in the WRONG order so that a comparator
+  // reporting "equal" instead of "after" leaves them where they are. A longer
+  // list can hide both: insertion sort only needs "is a before b" to be right,
+  // so a comparator that never says "after" still sorts most inputs correctly.
+  eq(sortUnstarted([thread({ clientId: 'x', name: null }), thread({ clientId: 'y', name: 'Ann' })])
+    .map((t) => t.clientId).join(','), 'y,x', 'a client with no readable name sorts AFTER one with a name');
+  eq(sortUnstarted([thread({ clientId: 'x', name: 'zoe' }), thread({ clientId: 'y', name: 'Ann' })])
+    .map((t) => t.clientId).join(','), 'y,x', 'and a later name sorts after an earlier one');
 }
 
 /* ── 4 · the split ─────────────────────────────────────────────────────── */
@@ -181,6 +221,15 @@ eq(threadPreview(thread()).text, 'No messages yet', 'a client with no thread say
   eq(threadWhen('2026-08-31T19:45:00Z', now), '15m', 'minutes');
   eq(threadWhen('2026-08-31T17:00:00Z', now), '3h', 'hours');
   eq(threadWhen('2026-08-29T20:00:00Z', now), '2d', 'days');
+  // Each boundary EXACTLY, because every one of these thresholds is one
+  // character away from being wrong and none of the cases above would notice.
+  // "60m" and "24h" and "7d" are all things this has printed in other screens.
+  eq(threadWhen('2026-08-31T19:59:00Z', now), '1m', 'exactly a minute is a minute, not still "now"');
+  eq(threadWhen('2026-08-31T19:00:00Z', now), '1h', 'exactly an hour is 1h, never 60m');
+  eq(threadWhen('2026-08-30T20:00:00Z', now), '1d', 'exactly a day is 1d, never 24h');
+  eq(threadWhen('2026-08-30T20:00:01Z', now), '23h', 'a second under a day is still hours');
+  ok(/\//.test(threadWhen('2026-08-24T20:00:00Z', now) ?? ''), 'exactly a week is a date, never 7d');
+  eq(threadWhen('2026-08-24T20:00:01Z', now), '6d', 'a second under a week is still days');
   // Past a week it is a date rather than arithmetic — and the date is the
   // READER's, so this is stated against the local calendar rather than against
   // a literal. `npm run test:zones` runs the suite in Los Angeles, Auckland and
