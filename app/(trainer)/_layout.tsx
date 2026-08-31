@@ -71,6 +71,7 @@ export default function TrainerLayout() {
       <Tabs.Screen name="feedback" options={{ href: null, title: 'Send Feedback' }} />
       <Tabs.Screen name="billing" options={{ href: null, title: 'Billing & Subscription' }} />
       <Tabs.Screen name="payments" options={{ href: null, title: 'Payments' }} />
+      <Tabs.Screen name="ad-spend" options={{ href: null, title: 'Ad Spend' }} />
       <Tabs.Screen name="classes" options={{ href: null, title: 'Classes' }} />
       <Tabs.Screen name="class-checkin" options={{ href: null, title: 'Class Check-in' }} />
       <Tabs.Screen name="broadcast" options={{ href: null, title: 'Broadcast' }} />

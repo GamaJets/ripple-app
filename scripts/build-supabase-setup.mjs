@@ -23,7 +23,25 @@ const header = `-- ════════════════════�
 -- ═══════════════════════════════════════════════════════════════════════════
 `;
 
-const files = readdirSync(PARTS).filter((f) => f.endsWith('.sql')).sort();
+// Sorted by the NUMBER in the prefix, not by the string.
+//
+// A plain .sort() is lexicographic, and the first three-digit part broke the
+// one rule this file states: '100-ad-accounts.sql' sorts between '09-' and
+// '10-', because '0' < '1' at the second character. Part 100 references tables
+// created in parts 81 and 98, so the bundle it produced failed on the first
+// statement — and it failed in the Supabase SQL editor, on a paste, with no
+// build step anywhere that could have caught it.
+//
+// The prefix is the dependency order. This makes the sort agree with that
+// sentence for parts 100 and up, and is identical to the old behaviour for
+// every part below it. A file with no numeric prefix keeps its place by name.
+const partNumber = (f) => {
+  const m = /^(\d+)-/.exec(f);
+  return m ? Number(m[1]) : Number.POSITIVE_INFINITY;
+};
+const files = readdirSync(PARTS)
+  .filter((f) => f.endsWith('.sql'))
+  .sort((a, b) => partNumber(a) - partNumber(b) || a.localeCompare(b));
 if (!files.length) { console.error(`no parts found in ${PARTS}`); process.exit(1); }
 
 const body = files

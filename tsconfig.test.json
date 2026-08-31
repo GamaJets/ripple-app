@@ -71,6 +71,7 @@
     "src/lib/ownTraining.test.ts",
     "src/lib/joinCodes.test.ts",
     "src/lib/codeReturn.test.ts",
+    "src/lib/adMatch.test.ts",
     "src/lib/foodSearch.test.ts",
     "src/lib/waiver.test.ts",
     "src/lib/injuryExtract.test.ts"
