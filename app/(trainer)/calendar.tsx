@@ -93,6 +93,11 @@ export default function TrainerSchedule() {
   }, [bookFor]);
   const { slots: availSlots, addSlot: addAvail, removeSlot: removeAvail } = useAvailability();
   const [availOpen, setAvailOpen] = useState(false);
+  const [blockOpen, setBlockOpen] = useState(false);
+  const [blkFrom, setBlkFrom] = useState(9);
+  const [blkTo, setBlkTo] = useState(17);
+  const [blkAllDay, setBlkAllDay] = useState(false);
+  const [blkBusy, setBlkBusy] = useState(false);
   const [avDow, setAvDow] = useState(1);
   const [avHour, setAvHour] = useState(9);
   // `addSession(...).ok` means only that the slot did not overlap one already on
@@ -145,6 +150,51 @@ export default function TrainerSchedule() {
   const selDaySessions = (byDay.get(selKey) ?? []).sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt));
   const [selY, selM, selD] = selKey.split('-').map(Number);
   const selDate = new Date(selY, selM, selD);
+
+  // Time the coach is NOT available. The database withdraws the open slots
+  // inside the period as it writes the block, because an offer left standing
+  // that the server will then refuse is the app advertising something it will
+  // not honour. A session already booked in there is never quietly removed —
+  // somebody arranged to be there, so this refuses and the coach cancels it
+  // themselves, which tells the client.
+  const doBlock = async () => {
+    const start = new Date(selY, selM, selD);
+    start.setHours(blkAllDay ? 0 : blkFrom, 0, 0, 0);
+    const mins = blkAllDay ? 24 * 60 : (blkTo - blkFrom) * 60;
+    if (mins <= 0) {
+      Alert.alert('Pick an end after the start', 'The finish time needs to be later than the start time.');
+      return;
+    }
+    setBlkBusy(true);
+    let row: any = null;
+    let failed = false;
+    try {
+      const { data, error } = await supabase.rpc('block_time', { p_starts_at: start.toISOString(), p_duration_min: mins });
+      if (error) failed = true;
+      else row = Array.isArray(data) ? data[0] : data;
+    } catch { failed = true; }
+    setBlkBusy(false);
+    const span = blkAllDay ? 'That whole day' : `${timeLabel(start.toISOString())} to ${blkTo % 12 || 12}${blkTo >= 12 ? 'pm' : 'am'}`;
+    if (failed || !row?.ok) {
+      Alert.alert(
+        'Not blocked',
+        row?.reason === 'booked'
+          ? `You have a session booked in that time, so nothing was changed. Cancel it first — that tells the client — and then block the time.`
+          : `That did not save, so the time is not blocked and clients can still book it. Try again.`,
+        [{ text: 'OK' }],
+      );
+      return;
+    }
+    setBlockOpen(false);
+    await refresh();
+    const withdrawn = Number(row.withdrawn) || 0;
+    Alert.alert(
+      'Time blocked',
+      `${span} on ${DOW[selDate.getDay()]} ${selD} ${MON[selM].slice(0, 3)} is blocked, and no client can book across it.` +
+        (withdrawn ? `\n\n${withdrawn} open slot${withdrawn === 1 ? '' : 's'} inside it ${withdrawn === 1 ? 'was' : 'were'} withdrawn.` : ''),
+      [{ text: 'Done' }],
+    );
+  };
 
   function shiftMonth(delta: number) {
     let m = viewMonth + delta, y = viewYear;
@@ -418,6 +468,9 @@ export default function TrainerSchedule() {
               ? `${availSlots.length} weekly slot${availSlots.length === 1 ? '' : 's'} · generate the next 4 weeks`
               : 'Set the times you offer every week'}
             onPress={() => setAvailOpen(true)} />
+          <ListRow icon="clock" title="Block Out Time"
+            note={`Mark ${DOW[selDate.getDay()]} ${selD} ${MON[selM].slice(0, 3)} as unavailable so nobody can book it`}
+            onPress={() => setBlockOpen(true)} />
           <ListRow icon="people" title="Group Classes" note="Schedule & fill classes across branches"
             onPress={() => router.push('/(trainer)/classes')} />
           {booked.length > 0 ? (
@@ -440,10 +493,10 @@ export default function TrainerSchedule() {
               {i > 0 ? <Rule /> : null}
               <View style={{ paddingVertical: sp.md }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
-                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: s.status === 'booked' ? t.brand : t.surface3 }} />
+                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: s.status === 'booked' ? t.brand : s.status === 'blocked' ? t.warn : t.surface3 }} />
                   <View style={{ flex: 1 }}>
                     <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: t.ink }}>{timeLabel(s.startsAt)} · {s.durationMin} min</Text>
-                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{s.status === 'booked' ? nameOf(s.clientId) : (s.released ? 'Open · re-offered' : 'Open slot')}</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{s.status === 'booked' ? nameOf(s.clientId) : s.status === 'blocked' ? 'Unavailable · nobody can book this' : (s.released ? 'Open · re-offered' : 'Open slot')}</Text>
                     {s.approvedAt ? (
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
                         <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: t.good }} />
@@ -467,7 +520,9 @@ export default function TrainerSchedule() {
                         their app rather than staying on the coach's screen. */}
                     <View style={{ flex: 1 }}><Cta label="Check In" wide onPress={() => checkIn(s)} /></View>
                     <View style={{ flex: 1 }}><Ghost label="Cancel" onPress={() => confirmCancel(s)} /></View>
-                  </>) : (<>
+                  </>) : s.status === 'blocked' ? (
+                    <View style={{ flex: 1 }}><Ghost label="Free This Time Up" onPress={() => removeOpen(s)} /></View>
+                  ) : (<>
                     <View style={{ flex: 1 }}><Ghost label="Re-offer" onPress={() => reoffer(s)} /></View>
                     <View style={{ flex: 1 }}><Ghost label="Remove" onPress={() => removeOpen(s)} /></View>
                   </>)}
@@ -516,6 +571,44 @@ export default function TrainerSchedule() {
           <Cta label="Generate Open Slots · Next 4 Weeks" wide onPress={generateSlots} />
           <View style={{ height: sp.sm }} />
           <Ghost label="Done" onPress={() => setAvailOpen(false)} />
+        </View>
+      </Modal>
+
+      {/* ── block-out sheet ───────────────────────────────────────────────── */}
+      <Modal visible={blockOpen} animationType="slide" transparent onRequestClose={() => setBlockOpen(false)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setBlockOpen(false)} />
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, maxHeight: '82%', ...elevation.e2 }}>
+          <Text style={{ ...ty.head, color: t.ink }}>Block out time</Text>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.md }}>
+            {DOW[selDate.getDay()]} {selD} {MON[selM].slice(0, 3)} — nobody can book across this, and any open slots inside it are withdrawn.
+          </Text>
+          <ScrollView showsVerticalScrollIndicator={false}>
+            <View style={{ flexDirection: 'row', gap: sp.sm, paddingBottom: sp.md }}>
+              <Chip t={t} label="All day" on={blkAllDay} onPress={() => setBlkAllDay(true)} />
+              <Chip t={t} label="Part of the day" on={!blkAllDay} onPress={() => setBlkAllDay(false)} />
+            </View>
+            {!blkAllDay ? (<>
+              <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.sm, marginBottom: sp.sm }}>From</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.md }}>
+                {HOURS.map((h) => (
+                  <Chip key={'bf' + h} t={t} label={`${h % 12 || 12}${h >= 12 ? 'pm' : 'am'}`} on={blkFrom === h}
+                    onPress={() => { setBlkFrom(h); if (blkTo <= h) setBlkTo(Math.min(24, h + 1)); }} />
+                ))}
+              </ScrollView>
+              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Until</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.md }}>
+                {HOURS.filter((h) => h > blkFrom).concat([24]).map((h) => (
+                  <Chip key={'bt' + h} t={t} label={h === 24 ? 'midnight' : `${h % 12 || 12}${h >= 12 ? 'pm' : 'am'}`} on={blkTo === h} onPress={() => setBlkTo(h)} />
+                ))}
+              </ScrollView>
+            </>) : null}
+          </ScrollView>
+          <View style={{ height: sp.md }} />
+          <Cta wide disabled={blkBusy}
+            label={blkBusy ? 'Blocking…' : blkAllDay ? 'Block the Whole Day' : `Block ${blkFrom % 12 || 12}${blkFrom >= 12 ? 'pm' : 'am'} — ${blkTo === 24 ? 'midnight' : `${blkTo % 12 || 12}${blkTo >= 12 ? 'pm' : 'am'}`}`}
+            onPress={doBlock} />
+          <View style={{ height: sp.sm }} />
+          <Ghost label="Cancel" onPress={() => setBlockOpen(false)} />
         </View>
       </Modal>
 
