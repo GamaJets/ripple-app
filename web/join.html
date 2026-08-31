@@ -104,6 +104,25 @@ addEventListener('DOMContentLoaded', function () {
       <p class="mono" id="code" style="font-size:30px;letter-spacing:.14em;margin:6px 0 10px"></p>
       <button class="btn" type="button" id="copy">Copy code</button>
       <p class="compare-note" id="copied" hidden>Copied.</p>
+      <!-- The handoff. With Repple installed this opens it on the join route
+           with the code already carried, so nobody has to memorise six
+           characters across an App Store visit — which is where most of the
+           credit for a coach's post used to fall on the floor. Hidden until a
+           code is present: an "Open Repple" button that opens Repple with
+           nothing in it is worse than no button.
+
+           Custom scheme rather than a universal link, because the app declares
+           `scheme: "repple"` and no associatedDomains / intentFilters. A
+           universal link would let THIS address open the app directly and is
+           the better answer, but it needs the site to serve
+           /.well-known/apple-app-site-association and assetlinks.json, and a
+           new native build. Until then this button is the whole of it.
+
+           Nothing happens if the app is not installed — the browser simply
+           ignores an unknown scheme — which is why the store buttons below
+           stay exactly where they are. -->
+      <p style="margin:14px 0 0"><a class="btn" id="openapp" href="#" hidden>Open in Repple</a></p>
+      <p class="compare-note" id="openhint" hidden>Already have Repple? That opens it with your coach&rsquo;s code filled in.</p>
     </div>
 
     <div class="callout">
@@ -168,6 +187,13 @@ addEventListener('DOMContentLoaded', function () {
     document.getElementById('codebox').hidden = false;
     document.getElementById('who').textContent =
       'Someone has invited you to train with them. Get the app, then enter the code below when it asks.';
+    // Built with encodeURIComponent even though the pattern above already
+    // restricts this to letters and digits: the guarantee lives at the point of
+    // use, not three lines away in a test somebody could later loosen.
+    var open = document.getElementById('openapp');
+    open.setAttribute('href', 'repple://join?c=' + encodeURIComponent(up));
+    open.hidden = false;
+    document.getElementById('openhint').hidden = false;
     var btn = document.getElementById('copy');
     btn.addEventListener('click', function () {
       try {

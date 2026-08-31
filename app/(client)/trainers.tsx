@@ -26,6 +26,7 @@ import { useClientData } from '../../src/ui/clientData';
 import { useInvites } from '../../src/ui/invites';
 import { joinByCode } from '../../src/ui/joinCode';
 import { isPlausibleCode, normaliseCode, CODE_LENGTH } from '../../src/lib/joinCode';
+import { peekJoinCode, clearJoinCode } from '../../src/ui/pendingJoinCode';
 import { notifySuccess } from '../../src/ui/haptics';
 import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
@@ -70,6 +71,27 @@ export default function FindTrainer() {
   // only arrives if the coach spelled the address exactly as the client did.
   // A code the coach hands over depends on neither.
   const [code, setCode] = useState('');
+  // Filled from the link they arrived on, if there was one. A coach's bio link
+  // carries their code through the install and lands here already typed, which
+  // is the difference between an audience and a client: the alternative was
+  // asking somebody to memorise six characters across an App Store visit, and
+  // whoever forgets them joins attributed to nothing at all.
+  //
+  // Not consumed on arrival. Somebody who taps a link, gets distracted and comes
+  // back tomorrow should still find it waiting — it is spent when the request is
+  // actually sent, not when it is shown. And it never overwrites something they
+  // have started typing themselves.
+  const [fromLink, setFromLink] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const pending = await peekJoinCode();
+      if (cancelled || !pending) return;
+      setCode((cur) => (cur ? cur : pending));
+      setFromLink(true);
+    })();
+    return () => { cancelled = true; };
+  }, []);
   const [codeBusy, setCodeBusy] = useState(false);
   // ── The way out ────────────────────────────────────────────────────────────
   //
@@ -99,7 +121,11 @@ export default function FindTrainer() {
     const r = await joinByCode(code, cd.coachingMode === 'solo' ? 'online' : cd.coachingMode);
     setCodeBusy(false);
     if (!r.ok) { Alert.alert('That code didn’t work', r.reason); return; }
+    // Spent, so it does not come back next time. Only now — not when it was
+    // shown — because a code that was merely displayed has not done its job.
     setCode('');
+    setFromLink(false);
+    void clearJoinCode();
     // `already` is a real outcome, not a failure: they had asked before, or are
     // already coached by this person. Saying "request sent" again would have
     // them waiting on a second answer that is never coming.
@@ -402,8 +428,9 @@ export default function FindTrainer() {
         <Section>
           <SectionHead title="Have a code from your coach?" />
           <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
-            Ask them for their coaching code — it’s six characters, in their app under Clients › Add a client.
-            This works even if they aren’t listed in the directory below.
+            {fromLink
+              ? 'Your coach’s code came in with the link you tapped, so it is already filled in below. Send it when you are ready — they see the request and add you once they accept.'
+              : 'Ask them for their coaching code — it’s six characters, in their app under Clients › Add a client. This works even if they aren’t listed in the directory below.'}
           </Text>
           <View style={{ flexDirection: 'row', gap: sp.sm }}>
             <TextInput
