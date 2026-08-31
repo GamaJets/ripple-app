@@ -121,3 +121,95 @@ export function capped<T>(rows: T[] | null | undefined, cap: number = ROW_CAP): 
   const r = rows ?? [];
   return r.length > cap ? { rows: r.slice(0, cap), truncated: true } : { rows: r, truncated: false };
 }
+
+/* ── reading past the ceiling, where a prefix is not good enough ───────────── */
+
+/**
+ * A hard stop on `readAll` below.
+ *
+ * Pagination removes the 1000-row cliff; it does not remove the need for a
+ * limit. A predicate that accidentally matches the whole table — a tenant
+ * filter that was dropped in an edit, a date bound that parsed to NaN — would
+ * otherwise walk the table a page at a time into a browser tab until it died,
+ * and the failure would look like a slow network rather than a wrong query.
+ * Fifty thousand is far past any honest answer these reads have and near enough
+ * to be reached before the tab is in trouble.
+ */
+export const PAGE_CEILING = 50_000;
+
+/**
+ * Every row of a set, read a page at a time, or an error saying it was too big
+ * to read honestly.
+ *
+ * ── When to reach for this instead of `assertWhole` ────────────────────────
+ *
+ * `assertWhole` is the right answer for a tenant-wide read with no natural
+ * bound: refusing to report a figure over an unknown fraction of the gym's
+ * whole history is honest, and the alternative is dragging that history into a
+ * browser to compute one number. This is the right answer for the other shape —
+ * a read the caller has already bounded, by a date window or by a list of ids
+ * it is holding — where the set is finite by construction, the screen genuinely
+ * needs all of it, and refusing would take a working screen away for no gain.
+ *
+ * The class timetable is the case that forced it. A month of classes is a
+ * bounded set, but the BOOKINGS for those classes are counted per class, and a
+ * truncated bookings read does not make a figure smaller: every class whose
+ * rows fell off the end reports `booked: 0`, which is a false statement about a
+ * named class on a named evening, and the owner cancels it. Neither refusing
+ * the whole timetable nor reporting the zero is acceptable, so the read is
+ * simply finished.
+ *
+ * ── The contract the caller has to keep ────────────────────────────────────
+ *
+ * `page` must apply a TOTAL order — one that cannot tie. `.order('starts_at')
+ * .order('id')` is total; `.order('starts_at')` alone is not, and two classes at
+ * 6am are two rows Postgres may return in either order.
+ *
+ * Probed against the live database rather than assumed, and the honest finding
+ * is that a tied order does not reliably misbehave: 1001 classes at an
+ * identical `starts_at`, paged 400 at a time, came back complete and without
+ * duplicates. That is not a guarantee of anything. Postgres promises no order
+ * between tied rows, each page here is a SEPARATE HTTP request that may be
+ * planned differently, and a row inserted between two pages shifts every offset
+ * after it. The failure would be silent, intermittent and unreproducible, which
+ * is the worst kind to leave to luck for the sake of one clause.
+ *
+ * `from`/`to` are inclusive, matching PostgREST's `.range()`.
+ *
+ * `what` is a plain-English noun phrase, for the same reason `assertWhole`'s is:
+ * this message can reach a gym owner's screen.
+ */
+export async function readAll<T>(
+  page: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>,
+  what: string,
+  opts: { pageSize?: number; ceiling?: number } = {},
+): Promise<T[]> {
+  const size = Math.max(1, Math.floor(opts.pageSize ?? ROW_CAP));
+  const ceiling = Math.max(size, Math.floor(opts.ceiling ?? PAGE_CEILING));
+  const out: T[] = [];
+  for (let from = 0; ; from += size) {
+    const { data, error } = await page(from, from + size - 1);
+    // supabase-js RESOLVES on a database error, so a page that failed arrives
+    // as `data: null` and would end the loop early — handing back the pages
+    // that did come as though they were the whole set. That is the exact silent
+    // truncation this file exists to prevent, reintroduced by the fix for it.
+    if (error) throw error;
+    const rows = data ?? [];
+    for (const r of rows) out.push(r);
+    // The ceiling is tested BEFORE the end-of-set test, not after it. A set of
+    // ceiling + 1 rows arrives as a full page followed by a SHORT one, so a
+    // guard that ran after the short-page return would wave through the one
+    // read it exists to stop and only ever fire on sets that overshot by a
+    // whole page.
+    //
+    // Strictly greater, so a set that is exactly the ceiling comes back whole.
+    // The ceiling says how many rows may be accepted; refusing a complete set
+    // for being exactly that size would be a false refusal, and the caller
+    // would have no way to tell it from a real runaway.
+    if (out.length > ceiling) throw new TruncatedRead(what, ceiling);
+    // A SHORT page is the end of the set, and the only end-of-set signal there
+    // is. A full last page is followed by one empty page, which costs a round
+    // trip and is the price of not guessing.
+    if (rows.length < size) return out;
+  }
+}

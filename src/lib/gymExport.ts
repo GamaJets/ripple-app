@@ -816,7 +816,21 @@ function readmeText(manifest: ExportManifest, missing: MissingPart[]): string {
     }
     out.push('');
   } else {
-    out.push('This bundle is complete: every part of the record was read successfully.');
+    // What "complete" is allowed to mean, said in the words that make it
+    // checkable. It used to say only that every read succeeded, which was true
+    // and was not the claim a reader takes from the word: a read that came back
+    // at PostgREST's silent 1000-row ceiling SUCCEEDS, and every part of this
+    // bundle was capable of arriving as a prefix of itself under this sentence.
+    // Every read behind it now either returns the whole set or fails and is
+    // named above, so the claim is one somebody verified rather than one nobody
+    // had reason to doubt. See src/lib/rowCap.ts.
+    out.push('This bundle is complete: every part of the record was read, and read whole.');
+    out.push('');
+    out.push('No read here can come back short without saying so. The database returns at most a');
+    out.push('fixed number of rows per request and does not mention when it has stopped, so every');
+    out.push('read either asks for one row more than it will accept — and fails loudly if it gets');
+    out.push('it — or pages until the set is finished. A part that could not be read whole is a');
+    out.push('part listed as not exported, never a shorter file.');
     out.push('');
   }
 

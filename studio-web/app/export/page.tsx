@@ -41,6 +41,7 @@ import { fetchSessions } from '@lib/gymSessions';
 import { fetchPassTypes, fetchPasses } from '@lib/gymPasses';
 import { fetchVisits } from '@lib/gymVisits';
 import { fetchInvites } from '@lib/memberInvites';
+import { readAll } from '@lib/rowCap';
 import { sliceLoading, sliceReady, sliceFailed } from '@lib/memberView';
 import {
   buildGymExport, exportBlocker, partSlice,
@@ -227,10 +228,31 @@ export default function ExportPage() {
 
       {bundle?.caveats.map((c) => <Banner key={c}>{c}</Banner>)}
 
+      {/*
+        * The sentence, and what stands behind it.
+        *
+        * "This bundle is complete" was being printed over reads that could
+        * silently come back short: PostgREST returns at most 1000 rows and says
+        * nothing about having stopped, so a read that truncated SUCCEEDED, its
+        * part showed as read, and the banner asserted completeness about a
+        * prefix. The claim was not wrong by accident — nothing anywhere had
+        * checked it.
+        *
+        * Every read behind this banner now either asks for one row more than it
+        * will accept and fails loudly on getting it (src/lib/rowCap.ts), or
+        * pages until the set is finished. So a part that cannot be read whole
+        * is a FAILED part: it is named, it gets a stub, and `complete` is
+        * false. The second sentence says which of the two guarantees the reader
+        * is being given, because "complete" on its own is exactly the word that
+        * was doing the unearned work before.
+        */}
       {bundle?.complete ? (
         <Banner>
-          Every part of the record was read. This bundle is complete as of{' '}
-          <span className="mono">{bundle.manifest.exportedAt}</span>.
+          Every part of the record was read, and read whole. This bundle is complete as of{' '}
+          <span className="mono">{bundle.manifest.exportedAt}</span>. No read here can come back
+          short without saying so — each one either fails rather than return a partial set, or
+          pages until it has all of it, so a part that could not be read in full is listed as
+          missing rather than quietly shortened.
         </Banner>
       ) : null}
 
@@ -473,8 +495,19 @@ function reason(e: unknown): string {
  * The `.error` check on each chunk is not decoration. supabase-js resolves on a
  * database error, so an unchecked failure here arrives as `data === null`,
  * falls through `?? []`, and produces an attendance.csv that is missing a slab
- * of the gym's history with nothing to say so. It throws instead, and the
- * caller turns that into a named, missing part.
+ * of the gym's history with nothing to say so. `readAll` throws instead, and
+ * the caller turns that into a named, missing part.
+ *
+ * PAGINATED, not capped, and this is the read that made the difference between
+ * a bundle that is complete and a bundle that says so. The chunk bounds the URL
+ * (see ID_CHUNK); it does nothing about PostgREST's silent 1000-row ceiling,
+ * and 150 classes at a dozen bookings each is already past it. Every chunk that
+ * truncated would have dropped a slab of attendance out of the archive under a
+ * banner reading "This bundle is complete". A capped read that refused would at
+ * least have been honest, but it would also have taken class attendance away
+ * from every gym big enough to have interesting attendance — on the one screen
+ * whose entire purpose is that leaving with the record must be possible. So the
+ * read is simply finished.
  */
 async function bookingsFor(classes: GymClass[]): Promise<MemberBooking[]> {
   if (!classes.length) return [];
@@ -483,12 +516,21 @@ async function bookingsFor(classes: GymClass[]): Promise<MemberBooking[]> {
   const out: MemberBooking[] = [];
 
   for (let i = 0; i < ids.length; i += ID_CHUNK) {
-    const { data, error } = await supabase
-      .from('class_bookings')
-      .select('id, class_id, user_id, status, attended_at')
-      .in('class_id', ids.slice(i, i + ID_CHUNK));
-    if (error) throw error;
-    for (const r of (data ?? []) as any[]) {
+    const slice = ids.slice(i, i + ID_CHUNK);
+    const rows = await readAll<any>(
+      (from, to) => supabase
+        .from('class_bookings')
+        .select('id, class_id, user_id, status, attended_at')
+        .in('class_id', slice)
+        // A total order. Postgres promises nothing about the order of rows
+        // that tie, and each page is a separate request, so paging over a
+        // non-unique order can lose rows — which is the bug this read is being
+        // fixed for, arriving again by a different route.
+        .order('id', { ascending: true })
+        .range(from, to),
+      'the class bookings for this gym',
+    );
+    for (const r of rows) {
       const c = byId.get(r.class_id);
       out.push({
         bookingId: r.id,

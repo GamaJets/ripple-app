@@ -118,7 +118,11 @@ export default function OwnerRevenue() {
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ paddingTop: sp.md }}>
           <Ghost icon="back" onPress={() => router.back()} />
-          <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg }}>Platform revenue, forecast &amp; unit economics</Text>
+          {/* Not "Platform revenue". Every figure below is this gym's own —
+              sessions its coaches delivered, at its own session fee — and
+              "the platform" is what a trainer pays Repple, which the header of
+              src/ui/trainers.tsx rules is not a gym owner's business at all. */}
+          <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg }}>Your gym's revenue, forecast &amp; unit economics</Text>
           <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Revenue</Text>
         </View>
 
@@ -270,7 +274,7 @@ export default function OwnerRevenue() {
             <Text style={{ ...ty.label, color: t.ink3 }}>
               {loading ? 'Reading your roster…'
                 : trainersUnread ? 'Your trainers could not be read, so none of them could be scored — nobody has been cleared here.'
-                : roll.trainers === 0 ? 'No trainers on the platform yet.'
+                : roll.trainers === 0 ? 'No trainers at your gym yet.'
                 : 'No trainers flagged watch or high risk.'}
             </Text>
           </>)}

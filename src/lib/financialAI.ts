@@ -54,16 +54,53 @@ export interface FinReview {
  * rather than picking a currency for it.
  */
 const moneyIn = (n: number, currency: string) => `${currency} ${Math.round(n).toLocaleString()}`;
-const pct = (n: number) => (n >= 0 ? '' : '') + n.toFixed(1) + '%';
+// A `pct` helper stood here with no caller and a ternary whose two arms were
+// both the empty string — a sign-prefix somebody removed without removing the
+// branch. Left in place it is a formatter the next person reaches for believing
+// it signs a percentage. src/lib/deltaLabel.ts is the one that actually does.
 
 /** All-zero starting point. The owner fills these in (or accounting supplies them). */
 export function emptyFinances(): FinInputs {
   return { revenue: 0, expenses: 0, mrr: 0, members: 0, newMembers: 0, churnedMembers: 0, ptRevenue: 0, classRevenue: 0 };
 }
 
-/** True once there is enough entered for a review to mean anything. */
+/**
+ * True once there is enough entered for a review to mean anything.
+ *
+ * REVENUE, specifically, and not "any of the three". This used to be
+ * `revenue > 0 || expenses > 0 || members > 0`, and every figure this module
+ * derives is a share of revenue: margin, the 40 points of the score that margin
+ * carries, and the recurring and ancillary flags. With revenue at zero
+ * `marginPct` was pinned to 0 by its own divide-guard, which is not a measured
+ * margin — it is the absence of one — and the review then stated it as a fact.
+ *
+ * An owner who entered only their member counts was handed a hero reading
+ * "Health Score 60/100 · Grade C · 0% net margin", a risk flag headed "Thin
+ * margin at 0%" saying "Only 0 of 0 is profit", and the advice to raise their
+ * membership prices — all of it about money they had never typed, in the same
+ * confident type used when it is true. Forty of the hundred points were scored
+ * against a number nobody supplied.
+ *
+ * So revenue is the gate. It is also exactly what the empty state has always
+ * asked for ("Enter this month's revenue, expenses and membership numbers"), so
+ * nothing about the screen's promise changes — only whether the review can be
+ * produced without the figure it is a ratio of.
+ */
 export function hasFigures(f: FinInputs): boolean {
-  return f.revenue > 0 || f.expenses > 0 || f.members > 0;
+  return f.revenue > 0;
+}
+
+/**
+ * Whether the owner has typed ANYTHING, which is a different question.
+ *
+ * Without it the screen cannot tell a fresh install from somebody who filled in
+ * their member counts and left revenue blank — both fail `hasFigures` and both
+ * would get "Nothing is shown until it comes from you", which reads to the
+ * second person as their figures having been lost.
+ */
+export function anyEntered(f: FinInputs): boolean {
+  return f.revenue > 0 || f.expenses > 0 || f.mrr > 0 || f.members > 0
+    || f.newMembers > 0 || f.churnedMembers > 0 || f.ptRevenue > 0 || f.classRevenue > 0;
 }
 
 /**
@@ -119,11 +156,43 @@ export function reviewFinances(f: FinInputs, currency: string | null): FinReview
   // or above 'A' — so this branch always won and the two honest summaries below
   // were dead code. A gym on grade E read "in strong financial health (E) …
   // low churn and positive growth" with its own bad numbers spliced in.
+  //
+  // Two more faults lived in the two branches that were then unreachable, and
+  // both are the shape scripts/check-prose.mjs was written for — a sentence
+  // assembled from parts, one of which can come out empty:
+  //
+  //  · The "needs attention" line interpolated `marginPct < 8 ? 'Margin is thin
+  //    and' : ''` and then a space and a lower-case clause. At any gym scoring
+  //    under 55 whose margin was 8% or better — a thin-retention, thin-growth
+  //    gym, which is most of them — that read "Needs attention (E).  churn is
+  //    high — tackle the risk items below first". A double space and a sentence
+  //    starting in lower case is not a wording preference; it is what a broken
+  //    screen looks like, on the one line of this screen an owner reads first.
+  //    The four cases are spelled out instead, so no branch can leave a hole.
+  //
+  //  · The "solid but improvable" line asserted "The business is profitable"
+  //    unconditionally. Margin scores nothing below zero but retention and
+  //    growth alone reach 60, so a gym LOSING money every month cleared 55 and
+  //    was told it was profitable — with the loss printed after the word as
+  //    though it were the profit. Profitability is now read off netProfit,
+  //    which is the figure that decides it.
+  const attention = marginPct < 8
+    ? churnPct > 6
+      ? 'Margin is thin and churn is high'
+      : 'Margin is thin and growth is stalling'
+    : churnPct > 6
+      ? 'Churn is high'
+      : 'Growth is stalling';
+  const standing = netProfit > 0
+    ? `The business is profitable${m(netProfit) ? ` at ${m(netProfit)}/mo` : ''}`
+    : netProfit < 0
+      ? `The business is losing money${m(-netProfit) ? ` at ${m(-netProfit)}/mo` : ''}`
+      : 'The business is breaking even';
   const summary = score >= 85
     ? `Your gym is in strong financial health (${grade}). ${m(netProfit) ? `${m(netProfit)}/mo profit on a ` : 'A '}${marginPct.toFixed(0)}% margin, low churn and positive growth. Keep protecting retention and reinvest into what's working.`
     : score >= 55
-    ? `Solid but improvable (${grade}). The business is profitable${m(netProfit) ? ` at ${m(netProfit)}/mo` : ''}, but ${churnPct > 4 ? 'churn' : 'margin'} is the lever to pull next. Focus there and the score climbs quickly.`
-    : `Needs attention (${grade}). ${marginPct < 8 ? 'Margin is thin and' : ''} ${churnPct > 6 ? 'churn is high' : 'growth is stalling'} — tackle the risk items below first; each one directly lifts profitability.`;
+    ? `Solid but improvable (${grade}). ${standing}, but ${churnPct > 4 ? 'churn' : 'margin'} is the lever to pull next. Focus there and the score climbs quickly.`
+    : `Needs attention (${grade}). ${attention} — tackle the risk items below first; each one directly lifts profitability.`;
 
   return { score, grade, netProfit, marginPct, churnPct, growthPct, summary, strengths, improvements };
 }

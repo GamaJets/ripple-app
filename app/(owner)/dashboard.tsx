@@ -39,7 +39,12 @@ export default function OwnerOverview() {
   // trainers yet" on the console's biggest figure while the query was still in
   // flight — an owner opening the app first thing was told their gym delivered
   // nothing last month, in the same confident type used when it is true.
-  const { trainers, loading, status: trainersStatus, sessions30, payroll30 } = usePlatformTrainers();
+  // `refresh` is taken because the failed-read card below used to end "pull
+  // down to try again" over a ScrollView with no RefreshControl on it — the
+  // gesture did nothing, and the dashboard was the one owner screen with no
+  // retry of any kind. Revenue and Trainers both offer the provider's own
+  // `refresh` behind a button; this is that, here.
+  const { trainers, loading, status: trainersStatus, sessions30, payroll30, refresh } = usePlatformTrainers();
   // `loading` covered the in-flight case. It does not cover the read having
   // FAILED — that also leaves `trainers` empty, and every roll-up below then
   // computes a confident 0 over it. Same wrong sentence, arrived at a second
@@ -185,9 +190,14 @@ export default function OwnerOverview() {
           <Card style={{ marginTop: sp.sm }}>
             <Text style={{ ...ty.label, color: t.ink2 }}>
               {trainersUnread
-                ? 'Your trainers could not be read, so this is not "no trainers" — pull down to try again.'
+                ? 'Your trainers could not be read, so this is not "no trainers".'
                 : 'No trainers yet — clients, delivered sessions and trainer health fill in as they join your gym.'}
             </Text>
+            {trainersUnread ? (
+              <View style={{ marginTop: sp.md, alignSelf: 'flex-start' }}>
+                <Ghost label="Try Again" onPress={refresh} />
+              </View>
+            ) : null}
           </Card>
         ) : null}
 
@@ -280,10 +290,23 @@ export default function OwnerOverview() {
 
         <Rule />
 
-        {/* ── revenue by plan ────────────────────────────────────────────── */}
+        {/* ── client load per trainer ────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Client Load" note="Revenue" onPress={() => router.push('/(owner)/revenue')} />
-          {byTrainer.map((p) => (
+          {/* The note read "Revenue", which named neither what the section
+              shows — a client count per coach — nor the state it is in. It is
+              the label on the tap target through to Revenue, so it says so. */}
+          <SectionHead title="Client Load" note="Open Revenue" onPress={() => router.push('/(owner)/revenue')} />
+          {/* Every other section on this screen says what an empty one means;
+              this was the one that drew its heading over blank space. With no
+              trainers — which is two of the three owner gyms in the live
+              database — an owner saw a title, a rule, and nothing between. */}
+          {loading ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>Reading your roster…</Text>
+          ) : trainersUnread ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>Your trainers could not be read, so their client load is not known.</Text>
+          ) : byTrainer.length === 0 ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>No trainers to show a client load for yet.</Text>
+          ) : byTrainer.map((p) => (
             <View key={p.id} style={{ marginBottom: sp.lg }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                 <Text style={{ ...ty.caption, color: t.ink2 }}>{p.name}</Text>

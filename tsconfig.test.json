@@ -121,6 +121,8 @@
     "src/lib/clipOwner.test.ts",
     "src/lib/gymMoney.test.ts",
     "src/lib/coachThreads.test.ts",
-    "src/lib/deltaLabel.test.ts"
+    "src/lib/deltaLabel.test.ts",
+    "src/lib/readAll.test.ts",
+    "src/lib/financialAI.test.ts"
   ]
 }

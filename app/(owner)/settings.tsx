@@ -394,7 +394,18 @@ export default function OwnerSettings() {
             style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
             <View style={{ flex: 1 }}>
               <Text style={{ ...ty.body, color: t.ink }}>Push Notifications</Text>
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>Class bookings, member messages and requests to join</Text>
+              {/* Read "Class bookings, member messages and requests to join",
+                  which is app/(trainer)/settings.tsx's line with the nouns
+                  swapped — and none of the three reaches an owner. Class
+                  bookings notify the coach and the member; there is no owner
+                  messaging screen in this app at all; requests to join go to
+                  the coach being asked. app/(owner)/notifications.tsx states
+                  the position plainly in its own header: nothing in the product
+                  currently addresses a notification TO a gym owner except what
+                  a coach in their gym sends them. A switch has to say what
+                  turning it off costs, and this one named three things it does
+                  not control. */}
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>Anything a coach at your gym sends you. Offers you push go to your members, not here.</Text>
             </View>
             <View style={{ width: 46, height: 27, borderRadius: radius.pill, backgroundColor: st.notifPush ? t.brand : t.surface3, borderWidth: hairline, borderColor: st.notifPush ? t.brand : t.ring, justifyContent: 'center', paddingHorizontal: 3 }}>
               <View style={{ width: 21, height: 21, borderRadius: radius.pill, backgroundColor: st.notifPush ? t.brandInk : t.ink3, alignSelf: st.notifPush ? 'flex-end' : 'flex-start' }} />

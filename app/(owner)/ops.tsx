@@ -298,7 +298,10 @@ export default function OwnerOps() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
 
         <View style={{ paddingTop: sp.md }}>
-          <Text style={{ ...ty.micro, color: t.ink3 }}>Platform</Text>
+          {/* "Platform" named Repple, not this gym — the same drift Overview
+              settled when it dropped "Repple HQ · Platform". Everything on this
+              screen belongs to the owner's own gym. */}
+          <Text style={{ ...ty.micro, color: t.ink3 }}>Your gym</Text>
           <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Operations</Text>
           <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>Your session fee · notices to members · support · gym activity</Text>
         </View>
@@ -575,10 +578,20 @@ export default function OwnerOps() {
                   </View>
                 );
               })}
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-                Written by the database as things happen, so nothing here was typed by anyone and nothing
-                can be missed by a screen forgetting to record it. The most recent hundred.
-              </Text>
+              {/* This sat outside every branch, so under a failed read it
+                  followed "The feed could not be read" with "nothing here was
+                  typed by anyone… The most recent hundred" — a description of
+                  a list that is not on the screen, which is the shape that made
+                  the coach app print a Retired paperwork list under "you
+                  haven't added any paperwork yet". The provenance is worth
+                  saying wherever there is a feed to describe; the row cap is
+                  only true of rows that arrived. */}
+              {evStatus === 'error' ? null : (
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                  Written by the database as things happen, so nothing here was typed by anyone and nothing
+                  can be missed by a screen forgetting to record it.{events.length ? ' The most recent hundred.' : ''}
+                </Text>
+              )}
             </Section>
           </View>
         )}

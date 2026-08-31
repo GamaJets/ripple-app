@@ -300,9 +300,19 @@ export default function OwnerMembers() {
           ) : !loaded ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Loading…</Text>
           ) : list.length === 0 ? (
+            /* "…or import your history from a CSV" pointed at nothing twice
+               over. There is no CSV import anywhere in the phone app, and the
+               importer that does exist — the web console's — says in its own
+               header that MEMBERS DO NOT IMPORT: `memberships.member_id` is
+               `not null references profiles(id)`, so a membership needs a real
+               account behind it and creating one is an invite flow. So the one
+               empty state every new gym sees offered a route out of it that
+               cannot be walked, in either app. Plans and payments do import,
+               which is a true thing to say and a different thing. */
             <Text style={{ ...ty.label, color: t.ink3 }}>
               Nobody on the register yet. Open a membership for someone who already has a Repple
-              account, or import your history from a CSV.
+              account — a membership has to point at a real account, so somebody who has never
+              used the app is invited rather than imported.
             </Text>
           ) : shown.length === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>No membership matches “{q.trim()}”.</Text>

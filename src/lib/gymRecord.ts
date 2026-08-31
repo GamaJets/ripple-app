@@ -52,15 +52,26 @@ export interface GymPayment {
 
 /* ── plans ─────────────────────────────────────────────────────────────────── */
 
+/**
+ * The gym's price book.
+ *
+ * Capped through src/lib/rowCap.ts. A thousand plans is not a real price book,
+ * so this will not truncate in practice — but the order is active-first then
+ * cheapest-first, so if it ever did the rows lost would be the DEAREST live
+ * plans, and /import maps a CSV's plan names against this list. A plan missing
+ * from it is not reported as missing; the importer has nothing to match and
+ * files the member without one. Refusing is the cheap half of that trade.
+ */
 export async function fetchPlans(sb: Queryable, tenantId: string): Promise<MembershipPlan[]> {
   const { data, error } = await sb
     .from('membership_plans')
     .select('id, name, price_cents, currency, interval, active')
     .eq('tenant_id', tenantId)
     .order('active', { ascending: false })
-    .order('price_cents', { ascending: true });
+    .order('price_cents', { ascending: true })
+    .limit(capLimit());
   if (error) throw error;
-  return (data ?? []).map((r: any) => ({
+  return assertWhole(data, "this gym's price book").map((r: any) => ({
     id: r.id, name: r.name, priceCents: r.price_cents,
     currency: r.currency, interval: r.interval, active: r.active,
   }));

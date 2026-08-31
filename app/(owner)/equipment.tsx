@@ -204,9 +204,15 @@ export default function OwnerEquipment() {
             { label: 'Out of Service', value: !loaded || list.length === 0 ? '—' : String(sum!.downUnits) },
           ]} />
           {failed ? (
+            // Said "pull the screen again" over a ScrollView with no
+            // RefreshControl on it, and there was no retry anywhere else on the
+            // screen either — so the only instruction offered to an owner whose
+            // maintenance board had failed to load was a gesture that does
+            // nothing. The button under "All kit" below is the retry; this says
+            // so instead.
             <Flag tone={t.crit} style={{ marginTop: sp.md }}>
-              These are blank because the read failed, not because the register is empty. Check
-              your connection and pull the screen again before assuming nothing is due.
+              These are blank because the read failed, not because the register is empty. Read it
+              again from the button below before assuming nothing is due.
             </Flag>
           ) : loaded && list.length === 0 ? (
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
@@ -268,10 +274,18 @@ export default function OwnerEquipment() {
         <Section>
           <SectionHead title={loaded && list.length ? `All kit · ${list.length}` : 'All kit'} />
           {failed ? (
-            <Flag tone={t.crit}>
-              The register could not be read. This is not a list of your kit — it is nothing at
-              all. Check your connection and try again.
-            </Flag>
+            <View>
+              <Flag tone={t.crit}>
+                The register could not be read. This is not a list of your kit — it is nothing at
+                all. Check your connection and read it again.
+              </Flag>
+              {/* The control the two failure messages point at. Without it both
+                  of them told an owner to try again and gave them nothing to
+                  press — the same shape deletions.tsx already closed. */}
+              <View style={{ marginTop: sp.md, alignSelf: 'flex-start' }}>
+                <Ghost label="Try Again" onPress={() => { void load(); }} />
+              </View>
+            </View>
           ) : !loaded ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Loading…</Text>
           ) : list.length === 0 ? (

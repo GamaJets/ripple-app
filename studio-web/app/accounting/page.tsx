@@ -37,6 +37,7 @@ import {
   type MonthWindow,
 } from '@lib/monthEnd';
 import { isoDate } from '@lib/format';
+import { assertWhole, capLimit } from '@lib/rowCap';
 
 /** How far back the picker offers. Thirteen so last year's same month is there. */
 const MONTHS_OFFERED = 13;
@@ -1107,6 +1108,16 @@ function Reconcile({ books, w, inMonthPayments }: {
  * error, so without it a refused read arrives as `data: null`, falls through
  * `?? []`, and this page reports a gym that billed nothing, is owed nothing and
  * reconciles perfectly.
+ *
+ * Capped through src/lib/rowCap.ts, and it refuses rather than reporting a
+ * prefix. PostgREST stops at 1000 rows and says nothing; a gym billing monthly
+ * to two hundred members crosses that in five months, and the paragraph above
+ * is the reason it cannot be allowed to happen quietly. The order is
+ * `issued_on desc`, so the rows that would fall away are the OLDEST — which are
+ * precisely the long-unpaid ones the ageing table exists to surface, and the
+ * ones a reconciliation needs to match this month's payments against. A
+ * truncated read would not merely make "owed" smaller: it would make the month
+ * appear to reconcile, which is the sentence somebody files accounts on.
  */
 async function fetchInvoices(tenantId: string, upToDay: string): Promise<Invoice[]> {
   const { data, error } = await supabase
@@ -1114,10 +1125,11 @@ async function fetchInvoices(tenantId: string, upToDay: string): Promise<Invoice
     .select('id, member_id, membership_id, amount_cents, currency, issued_on, due_on, status, note')
     .eq('tenant_id', tenantId)
     .lte('issued_on', upToDay)
-    .order('issued_on', { ascending: false });
+    .order('issued_on', { ascending: false })
+    .limit(capLimit());
   if (error) throw error;
 
-  const rows = data ?? [];
+  const rows = assertWhole(data, 'the invoices up to the end of this month');
   if (!rows.length) return [];
 
   const names = await namesFor(rows.map((r: any) => r.member_id));
@@ -1141,7 +1153,17 @@ async function fetchInvoices(tenantId: string, upToDay: string): Promise<Invoice
   }));
 }
 
-/** Payroll settled inside the month, by the date it was settled. */
+/**
+ * Payroll settled inside the month, by the date it was settled.
+ *
+ * Capped, and refusing. This read is already bounded to one month, so a
+ * thousand settlement rows would mean a gym paying its coaches more than thirty
+ * times a day — it will not truncate. It is capped anyway because the cost if
+ * it ever did is a payroll total that is short by an unknown amount, printed
+ * beside the month's takings as the wage bill. The check costs one character in
+ * the query and removes the only way that figure could be wrong without saying
+ * so.
+ */
 async function fetchSettled(tenantId: string, fromIso: string, toIso: string): Promise<Settled[]> {
   const { data, error } = await supabase
     .from('payroll_settlements')
@@ -1149,10 +1171,11 @@ async function fetchSettled(tenantId: string, fromIso: string, toIso: string): P
     .eq('tenant_id', tenantId)
     .gte('settled_at', fromIso)
     .lt('settled_at', toIso)
-    .order('settled_at', { ascending: false });
+    .order('settled_at', { ascending: false })
+    .limit(capLimit());
   if (error) throw error;
 
-  const rows = data ?? [];
+  const rows = assertWhole(data, 'the payroll settled in this month');
   if (!rows.length) return [];
 
   const names = await namesFor(rows.map((r: any) => r.trainer_id));
@@ -1172,14 +1195,29 @@ async function fetchSettled(tenantId: string, fromIso: string, toIso: string): P
   }));
 }
 
-/** Names from `profiles`, where they live. Throws rather than returning an empty
- *  map: an unnamed row on a page somebody files from is not cosmetic. */
+/**
+ * Names from `profiles`, where they live. Throws rather than returning an empty
+ * map: an unnamed row on a page somebody files from is not cosmetic.
+ *
+ * Capped for the same reason it is chunked nowhere: `unique` is bounded by the
+ * invoice and settlement reads above, both of which now refuse past 1000 rows,
+ * so this cannot legitimately ask for more than that. Which means a read that
+ * comes back at the ceiling is a symptom of something else having gone wrong,
+ * and the honest response to that is to stop rather than to name half the
+ * people and leave the rest as dashes.
+ *
+ * Fewer names than ids is NOT truncation and is not treated as it — verified
+ * against the live database: `profiles_owner_tenant_r` is `is_owner_of(
+ * tenant_id)`, so an owner reading three ids gets back only the ones inside
+ * their own gym. A missing name is a person this console may not name.
+ */
 async function namesFor(ids: Array<string | null | undefined>): Promise<Map<string, string>> {
   const unique = [...new Set(ids.filter((x): x is string => !!x))];
   if (!unique.length) return new Map();
-  const { data, error } = await supabase.from('profiles').select('id, full_name').in('id', unique);
+  const { data, error } = await supabase
+    .from('profiles').select('id, full_name').in('id', unique).limit(capLimit());
   if (error) throw error;
-  return new Map((data ?? [])
+  return new Map(assertWhole(data, 'the names on those rows')
     .map((p: any) => [p.id, (p.full_name || '').trim()] as [string, string])
     .filter(([, n]) => !!n));
 }

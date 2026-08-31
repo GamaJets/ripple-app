@@ -226,8 +226,28 @@ export default function OwnerBrand() {
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
             Puts the gym back to having chosen no colour, and the app back to its own. Not the same as picking teal.
           </Text>
+          {/* ── A paragraph selling four things that do not exist ───────────
+              It read: "On Studio plans each trainer gets this panel for their
+              own client app — their logo, colours, and domain. You keep the
+              platform fee."
+
+              None of it is true of this product. There are no per-trainer
+              plans — `tenants.plan` is one value for the whole gym and every
+              gym in the live database is on 'starter'; a trainer does not get a
+              branding panel of their own anywhere in the three apps; there is
+              no logo upload on this screen (the `tenants.logo` column has no
+              writer); there is no domain column at all; and there is no
+              platform fee any owner keeps a share of. It is a survivor of the
+              subscription console this app used to be, and the header of
+              src/ui/trainers.tsx already rules that what a trainer pays Repple
+              is not a gym owner's business.
+
+              Left standing it is worse than a missing feature: it is a
+              commercial promise in the owner's own settings, phrased as a
+              statement of fact, that support would have to walk back. What this
+              screen actually does is the two controls above it. */}
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
-            On Studio plans each trainer gets this panel for their own client app — their logo, colours, and domain. You keep the platform fee.
+            The name and the colour are the whole of the branding today. They apply to this gym everywhere it appears — on every device any owner signs in on, and in the apps your members and coaches use.
           </Text>
         </Section>
       </ScrollView>

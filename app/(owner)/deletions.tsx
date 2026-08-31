@@ -224,7 +224,11 @@ export default function OwnerDeletions() {
           figure={fig(loaded ? queue.length : null)}
           tone={failed || overdue ? t.crit : undefined}
           note={failed
-            ? 'The queue could not be read. This is NOT an all-clear — pull to retry.'
+            // Said "pull to retry" over a ScrollView with no RefreshControl, so
+            // the one instruction on the most consequential line of this screen
+            // did nothing. The retry that does exist is the button in the queue
+            // below; this points at it rather than at a dead gesture.
+            ? 'The queue could not be read. This is NOT an all-clear — try again below.'
             : !loaded
             ? 'Reading the queue…'
             : queue.length === 0

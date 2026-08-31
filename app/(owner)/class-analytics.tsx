@@ -249,8 +249,16 @@ export default function OwnerClassAnalytics() {
                 <Text style={{ ...ty.body, fontWeight: '600', ...numeric, color: t.ink }}>{rate$ > 0 ? fig(gymMoney(v.attended * rate$, cur)) : '—'}</Text>
               </View>
             ))}
+            {/* Read "Export feeds accounting/payroll once Stripe & accounting
+                are connected." There is no export control on this screen, and
+                no accounting integration anywhere in the product — the same
+                promise app/(owner)/financials.tsx removed a ListRow for, with
+                the reasoning that a control explaining what it would do if it
+                were built is worse than no control. This says what the figures
+                ARE, which is what somebody about to pay against them needs. */}
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-              Export feeds accounting/payroll once Stripe & accounting are connected.
+              Check-ins × your per-attendee rate, and nothing else. Nothing here is estimated and
+              nothing is paid from this screen.
             </Text>
           </Section>
 

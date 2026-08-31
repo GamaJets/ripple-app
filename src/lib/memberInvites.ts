@@ -19,6 +19,8 @@
 // accept_member_invite in 37-member-invites.sql. Three answers that disagree is
 // a support ticket, so there is one implementation and the SQL mirrors it.
 
+import { assertWhole, capLimit } from './rowCap';
+
 type Queryable = { from: (table: string) => any; rpc?: (fn: string, args?: any) => any };
 
 /** What the table stores: the three states a person actually decided. */
@@ -257,7 +259,18 @@ export interface NewMemberInvite {
   validDays?: number | null;
 }
 
-/** The gym's invites, newest first. */
+/**
+ * The gym's invites, newest first.
+ *
+ * Capped through src/lib/rowCap.ts. This is the one read here that a gym can
+ * realistically push past a thousand: an owner moving two hundred members off a
+ * spreadsheet does it in one afternoon, and does it again next year. The order
+ * is `created_at desc`, so truncation drops the OLDEST invites — which are
+ * exactly the ones that have been either accepted or left to expire. Both
+ * figures `inviteStats` reports would then be computed over the recent invites
+ * alone: the acceptance rate would read as whatever this month happened to do,
+ * under a heading that says it is the gym's. It refuses instead.
+ */
 export async function fetchInvites(
   sb: Queryable, tenantId: string,
 ): Promise<MemberInvite[]> {
@@ -265,10 +278,11 @@ export async function fetchInvites(
     .from('member_invites')
     .select('id, tenant_id, email, full_name, plan_id, invited_by, token, status, created_at, expires_at, accepted_at, accepted_by')
     .eq('tenant_id', tenantId)
-    .order('created_at', { ascending: false });
+    .order('created_at', { ascending: false })
+    .limit(capLimit());
   if (error) throw error;
 
-  const rows = data ?? [];
+  const rows = assertWhole(data, "this gym's invites");
   if (!rows.length) return [];
 
   // One query for every plan name rather than one per invite — the same reason

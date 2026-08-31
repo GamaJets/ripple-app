@@ -95,6 +95,22 @@ export default function OwnerRota() {
   const [shifts, setShifts] = useState<Shift[] | null>(null);
   const [demand, setDemand] = useState<DemandBlock[] | null>(null);
   const [trainers, setTrainers] = useState<GymTrainer[] | null>(null);
+  /**
+   * The week's shifts and bookings could not be READ.
+   *
+   * This screen used to answer a failed read with `setShifts([]); setDemand([])`
+   * under a comment calling that the honest fallback, and it is the one place in
+   * the owner app that still did. It is not honest: an empty shift list makes
+   * `coverage()` return the blocker "No shifts on the rota for this week", the
+   * hero prints "Uncovered Hours 0", and "The Week" invites the owner to add a
+   * shift. So a gym with a full rota and a refused query was told its rota was
+   * empty, shown a zero where its uncovered hours should be, and asked to fix a
+   * problem it does not have — which is the sentence app/(owner)/trainers.tsx
+   * names as the worst thing an empty-state can do.
+   */
+  const [failed, setFailed] = useState(false);
+  /** Same distinction for the roster the Add-a-Shift sheet picks from. */
+  const [trainersFailed, setTrainersFailed] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const [addOpen, setAddOpen] = useState(false);
@@ -112,6 +128,9 @@ export default function OwnerRota() {
     if (!win) return;
     setShifts(null);
     setDemand(null);
+    // Cleared with them, so a retry reads as "Loading…" rather than leaving the
+    // previous attempt's failure standing over a read that is in flight.
+    setFailed(false);
     try {
       const [s, d] = await Promise.all([
         fetchShifts(supabase, tenant.id, win.fromISO, win.toISO),
@@ -119,12 +138,14 @@ export default function OwnerRota() {
       ]);
       setShifts(s);
       setDemand(d);
+      setFailed(false);
     } catch (e) {
       reportError('rota.fetch', e);
-      // Loaded-and-empty is the honest fallback here: the screen then says the
-      // rota is empty rather than spinning forever on a failed read.
-      setShifts([]);
-      setDemand([]);
+      // Null, and `failed` says which of the two nulls this is. See the note on
+      // that flag for what the old `setShifts([])` told an owner.
+      setShifts(null);
+      setDemand(null);
+      setFailed(true);
     }
   }, [tenant?.id, week]);
 
@@ -136,10 +157,12 @@ export default function OwnerRota() {
     (async () => {
       try {
         const list = await fetchGymTrainers(supabase, tenant.id);
-        if (!cancelled) setTrainers(list);
+        if (!cancelled) { setTrainers(list); setTrainersFailed(false); }
       } catch (e) {
         reportError('rota.trainers', e);
-        if (!cancelled) setTrainers([]);
+        // Not `[]`: that rendered as "No trainers on this gym yet, so there is
+        // nobody to roster" to a gym whose roster read was simply refused.
+        if (!cancelled) { setTrainers(null); setTrainersFailed(true); }
       }
     })();
     return () => { cancelled = true; };
@@ -206,6 +229,7 @@ export default function OwnerRota() {
   const lab = { ...ty.caption, color: t.ink2, marginBottom: 6 } as const;
 
   const heroNote = (): string => {
+    if (failed) return 'This week could not be read, so cover is not known — that is a failed read, not a covered week.';
     if (!loaded) return 'Reading the rota…';
     if (cov?.blocker) return cov.blocker;
     const u = cov?.uncovered?.length ?? 0;
@@ -260,7 +284,9 @@ export default function OwnerRota() {
             { label: 'Idle Hours', value: fig(loaded ? (cov?.idle?.length ?? null) : null) },
           ]} />
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-            {!loaded
+            {failed
+              ? 'This week’s shifts and bookings could not be read, so none of these could be worked out.'
+              : !loaded
               ? 'Reading this week’s shifts, classes and one-to-ones.'
               : cov?.blocker
                 ? 'An empty rota is not an uncovered gym. These stay blank until shifts are entered, rather than reporting a confident zero.'
@@ -273,7 +299,14 @@ export default function OwnerRota() {
         {/* ── the whole point: where the two disagree ────────────────────── */}
         <Section>
           <SectionHead title="Where the Rota Misses" />
-          {!loaded ? (
+          {failed ? (
+            // Ahead of every other branch: an unread week misses nothing that
+            // anybody has established, and a clean list here reads as a clean
+            // week. The retry is under "The Week" below.
+            <Text style={{ ...ty.label, color: t.ink3 }}>
+              This week could not be read, so no gap has been found and none has been ruled out.
+            </Text>
+          ) : !loaded ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Loading…</Text>
           ) : cov?.blocker ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>{cov.blocker}</Text>
@@ -331,7 +364,17 @@ export default function OwnerRota() {
               ? `${sum!.shifts} shift${sum!.shifts === 1 ? '' : 's'}${sum!.cancelled ? ` · ${sum!.cancelled} pulled` : ''}`
               : undefined}
           />
-          {!loaded ? (
+          {failed ? (
+            <View>
+              <Text style={{ ...ty.label, color: t.ink3 }}>
+                This week’s rota could not be read. Nobody has been taken off it — this screen
+                simply does not know who is on, which is not the same as nobody being on.
+              </Text>
+              <View style={{ marginTop: sp.md, alignSelf: 'flex-start' }}>
+                <Ghost label="Try Again" onPress={() => { void load(); }} />
+              </View>
+            </View>
+          ) : !loaded ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Loading…</Text>
           ) : shifts!.length === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>
@@ -406,7 +449,12 @@ export default function OwnerRota() {
             </Text>
 
             <Text style={lab}>Trainer</Text>
-            {trainers === null ? (
+            {trainersFailed ? (
+              <Text style={{ ...ty.label, color: t.ink3 }}>
+                Your trainers could not be read, so nobody can be offered here — this is a failed
+                read, not a gym with no staff.
+              </Text>
+            ) : trainers === null ? (
               <Text style={{ ...ty.label, color: t.ink3 }}>Loading trainers…</Text>
             ) : trainers.length === 0 ? (
               <Text style={{ ...ty.label, color: t.ink3 }}>

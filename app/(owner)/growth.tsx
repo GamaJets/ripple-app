@@ -134,10 +134,20 @@ export default function OwnerGrowth() {
         <Section>
           <SectionHead title="Retention" />
           <KpiRow items={[
+            // "0 of 0" under a dash is a fraction of nobody. `idlePct` is
+            // already null with an empty roster, so the caption says the same
+            // thing the figure does rather than inventing a denominator.
             { label: 'Idle', value: trainersUnknown ? '—' : fig(idlePct), unit: trainersUnknown || idlePct == null ? undefined : '%',
-              delta: loading ? 'not read yet' : trainersUnread ? unreadNote : `${idle} of ${roll.trainers}` },
+              delta: loading ? 'not read yet' : trainersUnread ? unreadNote : idlePct == null ? 'no trainers yet' : `${idle} of ${roll.trainers}` },
+            // `avgSessionsPerTrainer` is NULL with no trainers — an average over
+            // an empty set — and this was the one interpolation on the screen
+            // that did not branch on it, so a gym with nobody on the roster read
+            // "null avg / trainer" under its session count. Two of the three
+            // owner gyms in the live database are in exactly that state. The
+            // sibling row below and both rows on Overview have always had this
+            // guard; this one had been missed.
             { label: 'Sessions · 30d', value: trainersUnknown ? '—' : fig(num(roll.sessions30)),
-              delta: loading ? 'not read yet' : trainersUnread ? unreadNote : `${roll.avgSessionsPerTrainer} avg / trainer` },
+              delta: loading ? 'not read yet' : trainersUnread ? unreadNote : roll.avgSessionsPerTrainer == null ? 'no trainers yet' : `${roll.avgSessionsPerTrainer} avg / trainer` },
             { label: 'Clients', value: trainersUnknown ? '—' : fig(num(ca.total)),
               delta: loading ? 'not read yet' : trainersUnread ? unreadNote : ca.avgPerTrainer == null ? 'no trainers yet' : `${ca.avgPerTrainer} avg / trainer` },
           ]} />
@@ -147,7 +157,12 @@ export default function OwnerGrowth() {
 
         {/* ── platform client analytics ──────────────────────────────────── */}
         <Section>
-          <SectionHead title="Platform Clients" note="Across every trainer" />
+          {/* "Platform Clients" was a survivor of the subscription console this
+              app used to be, where "the platform" meant Repple. To a gym owner
+              it names somebody else's product: these are the members of THEIR
+              gym, counted through the coaches who carry them. Overview settled
+              this when it stopped saying "Repple HQ · Platform". */}
+          <SectionHead title="Your Members" note="Across every trainer" />
           <KpiRow items={[
             { label: 'Active Clients', value: trainersUnknown ? '—' : fig(num(ca.total)) },
             { label: 'Engaged', value: trainersUnknown ? '—' : fig(ca.engagementPct), unit: trainersUnknown || ca.engagementPct == null ? undefined : '%' },
@@ -207,7 +222,7 @@ export default function OwnerGrowth() {
           ) : trainersUnread ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Your trainers could not be read — an empty funnel here would say nobody signed up, which is not something this screen found out.</Text>
           ) : roll.trainers === 0 ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>No trainers on the platform yet — the funnel fills in as they sign up.</Text>
+            <Text style={{ ...ty.label, color: t.ink3 }}>No trainers at your gym yet — the funnel fills in as they join.</Text>
           ) : funnel.map(([label, count, pct]) => (
             <Bar key={label} label={label} right={`${num(count)} · ${pct}%`} pct={pct} />
           ))}

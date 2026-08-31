@@ -515,6 +515,16 @@ export default function Analytics() {
 
   const buckets: BucketRow[] = useMemo(() => {
     const rosterKnown = memberships.state === null;
+    // Which of the two ways the roster can be absent, in the words the band's
+    // dash needs. Every other read on this page already draws this distinction
+    // and this one did not: `rosterKnown` is false while the memberships are
+    // still IN FLIGHT as well as when they were refused, and both said "the
+    // roster could not be read". A page that reports a fault for the first
+    // second of every visit teaches its owner to ignore the sentence — which is
+    // the sentence that matters on the one occasion it is true.
+    const rosterMissing =
+      memberships.state === 'loading' ? 'reading the memberships…'
+        : 'the roster could not be read';
     return BUCKETS.map((b) => {
       // The "did not come" bucket is the only one that needs the roster: every
       // other bucket is counted straight off the log. Without the roster the
@@ -522,9 +532,12 @@ export default function Analytics() {
       // most flattering possible lie on this page.
       if (!visitsCounted) return { key: b.key, label: b.label, members: null, share: null, note: doorNote };
       if (b.key === '0' && !rosterKnown) {
-        return { key: b.key, label: b.label, members: null, share: null, note: 'the roster could not be read, so the members who stayed away cannot be counted' };
+        return { key: b.key, label: b.label, members: null, share: null,
+          note: memberships.state === 'loading'
+            ? 'reading the memberships, so the members who stayed away cannot be counted yet'
+            : 'the roster could not be read, so the members who stayed away cannot be counted' };
       }
-      if (!rosterKnown) return { key: b.key, label: b.label, members: null, share: null, note: 'the roster could not be read' };
+      if (!rosterKnown) return { key: b.key, label: b.label, members: null, share: null, note: rosterMissing };
 
       const members = roster.filter((s) => b.hit(visitsByMember.get(s.memberId) ?? 0)).length;
       const share = rateOf(members, roster.length);
@@ -667,7 +680,7 @@ export default function Analytics() {
       <Frequency
         buckets={buckets}
         rosterSize={roster.length}
-        rosterKnown={memberships.state === null}
+        rosterState={memberships.state}
         anonVisits={anonVisits}
         seenNotOnRoster={seenNotOnRoster}
         visitsCounted={visitsCounted}
@@ -871,10 +884,14 @@ function retention(
 
 /* ── how often people come ─────────────────────────────────────────────────── */
 
-function Frequency({ buckets, rosterSize, rosterKnown, anonVisits, seenNotOnRoster, visitsCounted }: {
+function Frequency({ buckets, rosterSize, rosterState, anonVisits, seenNotOnRoster, visitsCounted }: {
   buckets: BucketRow[];
   rosterSize: number;
-  rosterKnown: boolean;
+  /** Which of the three, not merely whether it is known: the footer used to say
+   *  "has not been read … yet" for a roster that was refused, which is a
+   *  transient-sounding sentence about a permanent failure, and the reader is
+   *  left waiting for something that is not coming. */
+  rosterState: Unread;
   anonVisits: number;
   seenNotOnRoster: number | null;
   visitsCounted: boolean;
@@ -909,9 +926,11 @@ function Frequency({ buckets, rosterSize, rosterKnown, anonVisits, seenNotOnRost
         empty="—"
       />
       <p style={{ margin: 0, padding: '12px 14px', borderTop: '1px solid var(--ring)', color: 'var(--ink3)', fontSize: 12.5 }}>
-        {rosterKnown
+        {rosterState === null
           ? <>Counted over the {rosterSize} membership{rosterSize === 1 ? '' : 's'} marked active.</>
-          : <>The roster has not been read, so there is no denominator here yet — and none of these bands is a zero.</>}
+          : rosterState === 'loading'
+            ? <>The roster is still being read, so there is no denominator here yet — and none of these bands is a zero.</>
+            : <>The roster could not be read, so there is no denominator here at all — and none of these bands is a zero. This is a failed read, not a quiet gym.</>}
         {' '}A band is a count of people, not of visits.
         {visitsCounted && anonVisits > 0 ? (
           <> {anonVisits} entr{anonVisits === 1 ? 'y' : 'ies'} in the window {anonVisits === 1 ? 'is' : 'are'} attached

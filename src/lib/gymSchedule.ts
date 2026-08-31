@@ -8,6 +8,7 @@
 // Framework-agnostic, like gymTrainers and gymRecord: the Supabase client comes
 // in as an argument so neither front end owns this.
 
+import { readAll } from './rowCap';
 import { assertWrote } from './wroteRows';
 
 type Queryable = { from: (table: string) => any; rpc?: (fn: string, args?: any) => any };
@@ -59,39 +60,97 @@ export interface RosterEntry {
 
 /* ── timetable ─────────────────────────────────────────────────────────────── */
 
+/**
+ * How many class ids go into one `.in(...)` filter.
+ *
+ * PostgREST takes the filter in the query string, so a thousand uuids is a URL
+ * of roughly forty kilobytes and the gateway in front of it rejects the request
+ * outright. That failure is at least loud — it throws — but it takes the whole
+ * timetable with it, and the number is not worth discovering in production.
+ * 150 matches studio-web/app/export/page.tsx, which met this first.
+ */
+const ID_CHUNK = 150;
+
+/**
+ * The timetable in a window, and what was booked against it.
+ *
+ * ── Why both reads are paginated rather than capped ────────────────────────
+ *
+ * PostgREST stops at 1000 rows and says nothing (src/lib/rowCap.ts). The house
+ * answer to that is usually `assertWhole`: refuse to report a figure computed
+ * from part of a set. It is the wrong answer for these two, for two different
+ * reasons.
+ *
+ * The BOOKINGS read is the sharper one. Bookings are counted PER CLASS, so
+ * truncation does not make a figure smaller — every class whose rows fell off
+ * the end reports `booked: 0` and `attended: 0`. That is the same false-figure
+ * shape the `.error` check below already guards against, arriving by a
+ * different door: a false statement about a named class on a named evening,
+ * which an owner reads as a class nobody wants and cancels. And it is not rare
+ * — 150 classes at a dozen bookings each is past the cap inside three weeks.
+ *
+ * The CLASSES read is ordered ascending, so truncation would drop the LATEST
+ * classes: the timetable would simply stop partway through the month, and the
+ * screen showing it has no way to know. Refusing instead would be defensible,
+ * but every caller has already bounded this read to a window it chose, so the
+ * set is finite by construction and there is nothing to protect by refusing.
+ * /export is the one caller that asks for all of time, and it is the one that
+ * most needs the answer: a gym that cannot take its timetable with it does not
+ * have its record.
+ *
+ * Both orders are TOTAL — `id` breaks the tie. Postgres promises no order
+ * between rows that tie, each page is a separate request that may be planned
+ * differently, and a row written between two pages shifts every offset after
+ * it. Two classes at 6am is not a hypothetical; a page boundary landing between
+ * them silently is.
+ */
 export async function fetchClasses(
   sb: Queryable, tenantId: string, fromISO: string, toISO: string,
 ): Promise<GymClass[]> {
-  const { data, error } = await sb
-    .from('gym_classes')
-    .select('id, title, room, instructor, trainer_id, starts_at, duration_min, capacity')
-    .eq('tenant_id', tenantId)
-    .gte('starts_at', fromISO)
-    .lte('starts_at', toISO)
-    .order('starts_at', { ascending: true });
-  if (error) throw error;
-
-  const rows = data ?? [];
+  const rows = await readAll<any>(
+    (from, to) => sb
+      .from('gym_classes')
+      .select('id, title, room, instructor, trainer_id, starts_at, duration_min, capacity')
+      .eq('tenant_id', tenantId)
+      .gte('starts_at', fromISO)
+      .lte('starts_at', toISO)
+      .order('starts_at', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, to),
+    'the classes in this window',
+  );
   if (!rows.length) return [];
 
   // One query for every booking in the window rather than one per class.
   //
-  // The `.error` check is not decoration. supabase-js RESOLVES on a database
-  // error, so without it a failed read arrives as `bookings === null`, falls
-  // through `?? []` below, and every class in the window reports 0 booked and
+  // The `.error` check inside readAll is not decoration. supabase-js RESOLVES
+  // on a database error, so without it a failed read arrives as `data === null`,
+  // falls through `?? []`, and every class in the window reports 0 booked and
   // 0 attended. That is a FALSE FIGURE, not a blank: a gym opens the timetable,
   // sees an empty week, and concludes nobody is coming. The classes query above
   // has always thrown; this one silently did not.
   const ids = rows.map((r: any) => r.id);
-  const { data: bookings, error: bookingsError } = await sb
-    .from('class_bookings')
-    .select('class_id, status, attended_at')
-    .in('class_id', ids);
-  if (bookingsError) throw bookingsError;
+  const bookings: any[] = [];
+  for (let i = 0; i < ids.length; i += ID_CHUNK) {
+    const slice = ids.slice(i, i + ID_CHUNK);
+    const page = await readAll<any>(
+      (from, to) => sb
+        .from('class_bookings')
+        .select('class_id, status, attended_at, id')
+        .in('class_id', slice)
+        .order('id', { ascending: true })
+        .range(from, to),
+      'the bookings for the classes in this window',
+    );
+    // Appended one at a time rather than spread. `push(...page)` passes every
+    // row as an argument, and a chunk of tens of thousands overflows the call
+    // stack — a crash that would only ever happen at the busiest gym.
+    for (const b of page) bookings.push(b);
+  }
 
   const booked = new Map<string, number>();
   const attended = new Map<string, number>();
-  (bookings ?? []).forEach((b: any) => {
+  bookings.forEach((b: any) => {
     if (b.status === 'cancelled') return;
     booked.set(b.class_id, (booked.get(b.class_id) ?? 0) + 1);
     if (b.attended_at) attended.set(b.class_id, (attended.get(b.class_id) ?? 0) + 1);

@@ -22,7 +22,7 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Cta, Ghost, Notice, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
-import { emptyFinances, hasFigures, reviewFinances, type FinInputs, type FinFlag } from '../../src/lib/financialAI';
+import { emptyFinances, hasFigures, anyEntered, reviewFinances, type FinInputs, type FinFlag } from '../../src/lib/financialAI';
 import { reconcile, reconcileNote, unreadable } from '../../src/lib/finReconcile';
 import { fetchPlans, fetchMemberships, fetchPayments, summarise } from '../../src/lib/gymRecord';
 import { useTenant, gymMoney } from '../../src/ui/tenant';
@@ -289,13 +289,19 @@ export default function Financials() {
         ) : !ready ? (
           /* ── honest empty state: no hero of zeros ─────────────────────── */
           <Section>
-            <SectionHead title="No Figures Yet" />
+            {/* Two different people arrive here and they must not read the same
+                sentence. One has typed nothing. The other typed their member
+                counts, left revenue blank, and would otherwise be told "nothing
+                is shown until it comes from you" about figures they had just
+                entered — which reads as the screen having lost them. */}
+            <SectionHead title={anyEntered(fin) ? 'Revenue Is Missing' : 'No Figures Yet'} />
             <Text style={{ ...ty.body, color: t.ink2 }}>
-              Enter this month's revenue, expenses and membership numbers. Nothing is shown
-              until it comes from you.
+              {anyEntered(fin)
+                ? 'Your figures are saved. The review still needs your total revenue for the month — margin, the health score and every recommendation below are a share of it, and without it there is nothing honest to work them out from.'
+                : "Enter this month's revenue, expenses and membership numbers. Nothing is shown until it comes from you."}
             </Text>
             <View style={{ height: sp.lg }} />
-            <Cta label="Enter My Figures" wide onPress={openEditor} />
+            <Cta label={anyEntered(fin) ? 'Add My Revenue' : 'Enter My Figures'} wide onPress={openEditor} />
           </Section>
         ) : r ? (
           <>
@@ -354,9 +360,18 @@ export default function Financials() {
 
             <Rule />
 
+            {/* A heading with nothing under it is a section that failed to
+                load, and that is how an A-grade gym read this one: every flag
+                had gone to "What's Working" and this drew its title over blank
+                space. A gym with nothing to fix is told so. */}
             <Section>
               <SectionHead title="Where to Improve" />
-              {flagList(r.improvements)}
+              {r.improvements.length > 0 ? flagList(r.improvements) : (
+                <Text style={{ ...ty.body, color: t.ink2 }}>
+                  Nothing is flagged on these figures — margin, retention, growth and your
+                  recurring mix all read well this month.
+                </Text>
+              )}
             </Section>
 
             <Rule />

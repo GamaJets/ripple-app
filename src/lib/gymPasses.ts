@@ -12,6 +12,8 @@
 // counting it as zero, because a gym reading "pass revenue: 0" when it took
 // cash all week will make a worse decision than one reading a dash.
 
+import { assertWhole, capLimit } from './rowCap';
+
 type Queryable = { from: (table: string) => any };
 
 export type PassKind = 'drop_in' | 'guest' | 'pack';
@@ -177,15 +179,28 @@ export function passStatus(p: GymPass, today: string): 'live' | 'expired' | 'use
 
 /* ── pass types ────────────────────────────────────────────────────────────── */
 
+/**
+ * The gym's pass price book.
+ *
+ * Capped through src/lib/rowCap.ts. A price book with a thousand entries in it
+ * is not a real gym, so this read will not truncate in practice — and "in
+ * practice" is what every silent defect in this repo was made of. The cost if
+ * it ever did is not cosmetic: the order is active-first then cheapest-first,
+ * so the rows that fell off the end would be the DEAREST live types, /door
+ * would offer the desk a price list missing exactly the passes worth most, and
+ * a walk-in would be sold the wrong thing. It refuses rather than sell from
+ * half a price list.
+ */
 export async function fetchPassTypes(sb: Queryable, tenantId: string): Promise<PassType[]> {
   const { data, error } = await sb
     .from('gym_pass_types')
     .select('id, name, kind, price_cents, currency, uses, valid_days, active')
     .eq('tenant_id', tenantId)
     .order('active', { ascending: false })
-    .order('price_cents', { ascending: true });
+    .order('price_cents', { ascending: true })
+    .limit(capLimit());
   if (error) throw error;
-  return (data ?? []).map(rowToPassType);
+  return assertWhole(data, "this gym's pass price book").map(rowToPassType);
 }
 
 function rowToPassType(r: any): PassType {
@@ -239,6 +254,29 @@ export async function createPassType(
 
 /* ── issued passes ─────────────────────────────────────────────────────────── */
 
+/**
+ * Every pass the gym has ever issued, newest first.
+ *
+ * Capped through src/lib/rowCap.ts, and this one refuses rather than reporting
+ * a prefix, for the same reason `fetchVisits` does: truncation here makes a
+ * false statement about a NAMED PERSON, not merely a smaller figure.
+ *
+ * The order is `issued_on desc`, so a truncated read keeps the newest thousand
+ * passes and silently drops the older ones. A gym selling twenty drop-ins a
+ * week crosses a thousand inside a year, and then:
+ *
+ *   · /door, the screen the desk actually works from, cannot find a pass that
+ *     is still live and turns away somebody who paid for it;
+ *   · /members shows a named member's pass history and would say they have
+ *     never held one;
+ *   · /passes divides passes converted into memberships by passes issued — and
+ *     dropping the OLDEST passes drops the ones that had the most time to
+ *     convert, so the rate would come out flattering, in the direction that
+ *     stops a gym chasing the people it should.
+ *
+ * There is no honest prefix of this set, so the read refuses and the screens
+ * say the passes could not be read.
+ */
 export async function fetchPasses(sb: Queryable, tenantId: string): Promise<GymPass[]> {
   const { data, error } = await sb
     .from('gym_passes')
@@ -248,9 +286,10 @@ export async function fetchPasses(sb: Queryable, tenantId: string): Promise<GymP
         'gym_pass_types(name, kind), profiles!gym_passes_holder_id_fkey(full_name)',
     )
     .eq('tenant_id', tenantId)
-    .order('issued_on', { ascending: false });
+    .order('issued_on', { ascending: false })
+    .limit(capLimit());
   if (error) throw error;
-  return (data ?? []).map(rowToPass);
+  return assertWhole(data, "this gym's passes").map(rowToPass);
 }
 
 function rowToPass(r: any): GymPass {

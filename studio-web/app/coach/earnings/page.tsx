@@ -42,6 +42,7 @@ import {
 } from '@lib/gymSessions';
 import { money } from '@lib/gymRecord';
 import { isoDate } from '@lib/format';
+import { assertWhole, capLimit } from '@lib/rowCap';
 
 /** How many months back a coach can look. */
 const PERIODS = 12;
@@ -105,6 +106,13 @@ function periodsBack(n: number): Period[] {
 
 /* ── reads, scoped to one coach ────────────────────────────────────────────── */
 
+/** The names, and whether the read that was meant to supply them happened. */
+interface ClientNames {
+  names: Map<string, string>;
+  /** Null when the read came back. A sentence when it did not. */
+  unread: string | null;
+}
+
 /**
  * Client names for a set of session rows.
  *
@@ -113,20 +121,50 @@ function periodsBack(n: number): Period[] {
  * profiles in — the shape gymSessions uses.
  *
  * A failure here is deliberately not fatal. A name is a label on a row whose
- * subject is money; losing it renders a dash, which is honest, where throwing
- * would black out a figure that is perfectly readable without it.
+ * subject is money; losing it must not black out a figure that is perfectly
+ * readable without it.
+ *
+ * But it is not silent either, and it used to be. The error was swallowed and
+ * an empty map returned, and an empty map is indistinguishable from a
+ * successful read — so a refused profiles query rendered every row's client as
+ * the same em dash that a session with NO CLIENT ON IT shows. Two different
+ * facts, one glyph, and on this screen they are not close: "this hour was not
+ * against anybody" is a thing the coach knows about their own week, and "we
+ * could not read who this was" is a reason to reload. So the failure travels
+ * with the names and the table says which it is.
+ *
+ * A name MISSING from a read that succeeded is a third thing again, and it is
+ * normal rather than a fault. Verified against the live database: a coach
+ * reaches `profiles` through `profiles_trainer_read` and
+ * `profiles_trainer_r_clients`, both of which are scoped to their own clients,
+ * so a session against somebody who is no longer on their roster comes back
+ * without a name and is entitled to. Asking for three ids and getting two is
+ * not truncation and is not treated as it.
  */
-async function clientNames(ids: string[]): Promise<Map<string, string>> {
+async function clientNames(ids: string[]): Promise<ClientNames> {
   const unique = [...new Set(ids.filter(Boolean))];
-  if (!unique.length) return new Map();
-  const { data, error } = await supabase.from('profiles').select('id, full_name').in('id', unique);
-  if (error) return new Map();
+  if (!unique.length) return { names: new Map(), unread: null };
+  // Capped, though it cannot truncate in practice: `unique` is bounded by one
+  // coach's sessions in one month. If it ever did come back at the ceiling,
+  // half the rows would be named and half would show the "not named" dash,
+  // which is the one outcome this whole function is being rewritten to avoid.
+  const { data, error } = await supabase
+    .from('profiles').select('id, full_name').in('id', unique).limit(capLimit());
+  if (error) {
+    return { names: new Map(), unread: error.message || 'the names could not be read' };
+  }
+  let rows: Array<{ id: string; full_name: string | null }>;
+  try {
+    rows = assertWhole(data, 'the names of your clients');
+  } catch (e: any) {
+    return { names: new Map(), unread: e?.message ?? 'the names could not be read whole' };
+  }
   const m = new Map<string, string>();
-  for (const p of (data ?? []) as Array<{ id: string; full_name: string | null }>) {
+  for (const p of rows) {
     const name = (p.full_name ?? '').trim();
     if (p.id && name) m.set(p.id, name);
   }
-  return m;
+  return { names: m, unread: null };
 }
 
 /**
@@ -138,9 +176,17 @@ async function clientNames(ids: string[]): Promise<Map<string, string>> {
  * this screen from "your month" to "the gym's month" without the heading
  * changing. trainer_id is in the query.
  */
+/** A month's sessions, and whether the names on them could be read. The two
+ *  travel together because a screen that has one without the other cannot tell
+ *  an unnamed row from an unreadable one. */
+interface MyMonth {
+  sessions: PtSession[];
+  namesUnread: string | null;
+}
+
 async function fetchMySessions(
   tenantId: string, trainerId: string, fromIso: string, toIso: string,
-): Promise<PtSession[]> {
+): Promise<MyMonth> {
   const { data, error } = await supabase
     .from('sessions')
     .select('id, trainer_id, client_id, starts_at, duration_min, status, outcome, outcome_at, rate_cents, settlement_id')
@@ -159,9 +205,9 @@ async function fetchMySessions(
   // stops a colleague's session reaching the screen rather than merely making
   // the total wrong.
   const mine = rows.filter((r) => r.trainer_id === trainerId);
-  const names = await clientNames(mine.map((r) => r.client_id).filter(Boolean));
+  const { names, unread } = await clientNames(mine.map((r) => r.client_id).filter(Boolean));
 
-  return mine.map((r) => ({
+  return { namesUnread: unread, sessions: mine.map((r) => ({
     id: r.id,
     trainerId: r.trainer_id,
     trainerName: null,
@@ -174,10 +220,23 @@ async function fetchMySessions(
     outcomeAt: r.outcome_at ?? null,
     rateCents: r.rate_cents ?? null,
     settlementId: r.settlement_id ?? null,
-  }));
+  })) };
 }
 
-/** What this coach has actually been paid. Their own rows and nobody else's. */
+/**
+ * What this coach has actually been paid. Their own rows and nobody else's.
+ *
+ * The `.limit(100)` is a deliberate prefix, not an accident of the cap, and
+ * src/lib/rowCap.ts's rule — a limit the caller asked for is not a set that was
+ * cut off behind its back — applies. It is safe because of what these rows are
+ * USED for and nothing else: `paidHere` keeps only the settlements whose ids
+ * are stamped on sessions in the selected month, and the month is one of the
+ * last few. A settlement covering a session that recent cannot be older than
+ * the hundredth most recent run against this one coach, which for monthly
+ * payroll is eight years. Nothing here totals the list, and nothing says "these
+ * are all your payments"; widening the period picker past a hundred payment
+ * runs is what would make this wrong.
+ */
 async function fetchMySettlements(tenantId: string, trainerId: string): Promise<Settlement[]> {
   const { data, error } = await supabase
     .from('payroll_settlements')
@@ -233,6 +292,11 @@ export default function CoachEarnings() {
   const [runs, setRuns] = useState<Settlement[] | null>(null);
   const [sessionsErr, setSessionsErr] = useState<string | null>(null);
   const [runsErr, setRunsErr] = useState<string | null>(null);
+  // Carried apart from `sessionsErr` because it is a different failure with a
+  // different cost: the sessions are readable and every figure on this screen
+  // is right, and the only thing missing is who each hour was with. Folding it
+  // into the banner would tell a coach their month could not be read.
+  const [namesErr, setNamesErr] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   /**
@@ -246,7 +310,7 @@ export default function CoachEarnings() {
   const load = useCallback(async (
     tenantId: string, trainerId: string, p: Period, stale: () => boolean = () => false,
   ) => {
-    setSessions(null); setRuns(null);
+    setSessions(null); setRuns(null); setNamesErr(null);
 
     // allSettled, not all: one failing read must not take the other with it.
     // Under Promise.all a refused payroll_settlements query would also empty the
@@ -263,7 +327,8 @@ export default function CoachEarnings() {
     // A read that failed is null, never []. [] is the gym saying there were
     // none; null is nobody knowing. Here those two answers differ by a month's
     // wages.
-    setSessions(sRes.status === 'fulfilled' ? sRes.value : null);
+    setSessions(sRes.status === 'fulfilled' ? sRes.value.sessions : null);
+    setNamesErr(sRes.status === 'fulfilled' ? sRes.value.namesUnread : null);
     setRuns(rRes.status === 'fulfilled' ? rRes.value : null);
 
     const s = failure(sRes, 'your sessions for this month');
@@ -297,7 +362,7 @@ export default function CoachEarnings() {
   // under September's heading until something else happened to trigger a load.
   useEffect(() => {
     if (me === undefined) return;
-    if (!me?.tenantId) { setSessions([]); setRuns([]); return; }
+    if (!me?.tenantId) { setSessions([]); setRuns([]); setNamesErr(null); return; }
     let dropped = false;
     load(me.tenantId, me.id, period, () => dropped);
     return () => { dropped = true; };
@@ -581,9 +646,19 @@ export default function CoachEarnings() {
         </Banner>
       ) : null}
 
-      <Blocking sessions={awaiting} unread={sessionsUnread} ccy={ccy} />
+      {namesErr ? (
+        <Banner>
+          <strong style={{ color: 'var(--ink)' }}>Your clients&rsquo; names could not be read.</strong>{' '}
+          Every figure on this page is unaffected — the names are a label on the rows, not part of
+          the arithmetic — but the sessions below say &ldquo;name not read&rdquo; rather than who
+          they were with. That is deliberately not the same dash as a session booked against
+          nobody. {namesErr}
+        </Banner>
+      ) : null}
 
-      <LineItems sessions={marked} unread={sessionsUnread} policy={policy} ccy={ccy} />
+      <Blocking sessions={awaiting} unread={sessionsUnread} namesUnread={namesErr} ccy={ccy} />
+
+      <LineItems sessions={marked} unread={sessionsUnread} namesUnread={namesErr} policy={policy} ccy={ccy} />
 
       <Paid runs={paidHere} unread={runsUnread} sessionsUnread={sessionsUnread} period={period} />
 
@@ -598,18 +673,59 @@ export default function CoachEarnings() {
   );
 }
 
+/**
+ * The Client column, and the three different facts it has to be able to tell
+ * apart.
+ *
+ * All three used to render the same em dash, which made the most alarming of
+ * them invisible:
+ *
+ *   · the session has no client on it at all. Ordinary — a coach's own
+ *     training, or a slot blocked out — and the coach already knows it;
+ *   · the session has a client, the names read came back, and this one is not
+ *     in it. Also ordinary, and the reason is in the database rather than in
+ *     the code: a coach reads `profiles` through policies scoped to their own
+ *     roster, so somebody who has since left it is a client they may no longer
+ *     name. The row is right, the figure is right, the name is genuinely not
+ *     available;
+ *   · the names read FAILED. Nothing here is known, and the coach can fix it by
+ *     reloading. Shown as the same dash as the two above, it was a fault
+ *     reported as an ordinary fact about the week.
+ *
+ * The figures are untouched in every case: a name is a label, and a screen a
+ * coach checks a payslip against must not black out because a label is missing.
+ */
+function clientColumn(namesUnread: string | null): Column<PtSession> {
+  return {
+    key: 'client',
+    header: 'Client',
+    // Sorted on the same three cases, so the rows whose name could not be read
+    // group together instead of scattering through the alphabet as blanks.
+    value: (s) => s.clientName ?? (s.clientId == null ? '' : namesUnread ? '\uffff\uffff' : '\uffff'),
+    render: (s) => {
+      if (s.clientName) return s.clientName;
+      if (s.clientId == null) return <span className="dash" title="This session was not booked against a client.">—</span>;
+      if (namesUnread) {
+        return (
+          <span className="dash" title={namesUnread}>— name not read</span>
+        );
+      }
+      return <span className="dash" title="This session is against a client this console cannot name — usually somebody no longer on your roster.">— not named</span>;
+    },
+  };
+}
+
 /* ── what is holding the rest up ───────────────────────────────────────────── */
 
-function Blocking({ sessions, unread, ccy }: {
-  sessions: PtSession[] | null; unread: Unread; ccy: TenantCurrency;
+function Blocking({ sessions, unread, namesUnread, ccy }: {
+  sessions: PtSession[] | null; unread: Unread; namesUnread: string | null; ccy: TenantCurrency;
 }) {
   const cols: Column<PtSession>[] = [
     { key: 'when', header: 'When', value: (s) => s.startsAt,
       render: (s) => new Date(s.startsAt).toLocaleString([], {
         day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
       }) },
-    { key: 'client', header: 'Client', value: (s) => s.clientName ?? '',
-      render: (s) => s.clientName ?? <span className="dash">—</span> },
+    clientColumn(namesUnread),
     { key: 'mins', header: 'Mins', value: (s) => s.durationMin, numeric: true },
     // Not "0.00" and not the gym's standard fee presented as earned: until
     // somebody says what happened, this session has no price, only a rate it
@@ -660,14 +776,14 @@ const OUTCOME_LABEL: Record<string, string> = {
  * August short" is to trust the number, which is the position this screen
  * exists to get a coach out of.
  */
-function LineItems({ sessions, unread, policy, ccy }: {
-  sessions: PtSession[] | null; unread: Unread; policy: PayPolicy; ccy: TenantCurrency;
+function LineItems({ sessions, unread, namesUnread, policy, ccy }: {
+  sessions: PtSession[] | null; unread: Unread; namesUnread: string | null;
+  policy: PayPolicy; ccy: TenantCurrency;
 }) {
   const cols: Column<PtSession>[] = [
     { key: 'when', header: 'When', value: (s) => s.startsAt,
       render: (s) => new Date(s.startsAt).toLocaleDateString([], { day: 'numeric', month: 'short' }) },
-    { key: 'client', header: 'Client', value: (s) => s.clientName ?? '',
-      render: (s) => s.clientName ?? <span className="dash">—</span> },
+    clientColumn(namesUnread),
     { key: 'outcome', header: 'Recorded', value: (s) => s.outcome ?? '',
       render: (s) => (
         <span style={{ color: isDelivered(s) ? 'var(--good)' : 'var(--ink2)' }}>

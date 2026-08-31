@@ -27,6 +27,7 @@ import {
   type PtSession, type PayPolicy, type PayrollLine,
 } from '@lib/gymSessions';
 import { fetchPasses } from '@lib/gymPasses';
+import { assertWhole, capLimit } from '@lib/rowCap';
 import { NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
 import { sliceLoading, sliceReady, sliceFailed, type Slice } from '@lib/memberView';
 import {
@@ -678,6 +679,14 @@ async function slice<T>(run: () => Promise<T[]>): Promise<Slice<T>> {
  * error, so without it a failed read arrives as `data: null`, falls through
  * `?? []`, and this screen reports a gym that billed nothing and is owed
  * nothing — while continuing to call the month reconciled.
+ *
+ * Capped through src/lib/rowCap.ts, and refusing rather than reporting a
+ * prefix. Same read and same reasoning as /accounting: PostgREST stops at 1000
+ * rows silently, monthly billing to a couple of hundred members passes that
+ * inside half a year, and the order is `issued_on desc` so what falls away is
+ * the OLDEST — the long-unpaid invoices. This is the screen that says a month
+ * is closed. A month cannot be closed against a set of invoices whose size
+ * nobody knows.
  */
 async function fetchInvoices(tenantId: string, upToDay: string): Promise<GymInvoice[]> {
   const { data, error } = await supabase
@@ -685,10 +694,11 @@ async function fetchInvoices(tenantId: string, upToDay: string): Promise<GymInvo
     .select('id, member_id, amount_cents, currency, issued_on, due_on, status, note')
     .eq('tenant_id', tenantId)
     .lte('issued_on', upToDay)
-    .order('issued_on', { ascending: false });
+    .order('issued_on', { ascending: false })
+    .limit(capLimit());
   if (error) throw error;
 
-  const rows = data ?? [];
+  const rows = assertWhole(data, 'the invoices up to the end of this month');
   if (!rows.length) return [];
 
   const names = await namesFor(rows.map((r: any) => r.member_id));
@@ -708,15 +718,27 @@ async function fetchInvoices(tenantId: string, upToDay: string): Promise<GymInvo
   }));
 }
 
-/** Names from `profiles`, where they live. Throws on a failed read rather than
- *  returning an empty map — an unnamed invoice list on a chase-the-money screen
- *  is not a cosmetic problem. */
+/**
+ * Names from `profiles`, where they live. Throws on a failed read rather than
+ * returning an empty map — an unnamed invoice list on a chase-the-money screen
+ * is not a cosmetic problem.
+ *
+ * Capped: `unique` is bounded by the invoice read above, which now refuses past
+ * 1000 rows, so this can never legitimately ask for more. A read that comes
+ * back at the ceiling means something else is wrong, and half a list of names
+ * is not the answer to that.
+ *
+ * Fewer names than ids is not truncation. Verified against the live database:
+ * `profiles_owner_tenant_r` is `is_owner_of(tenant_id)`, so ids outside this
+ * owner's gym simply do not come back, and the row keeps its honest null.
+ */
 async function namesFor(ids: (string | null | undefined)[]): Promise<Map<string, string>> {
   const unique = [...new Set(ids.filter((x): x is string => !!x))];
   if (!unique.length) return new Map();
-  const { data, error } = await supabase.from('profiles').select('id, full_name').in('id', unique);
+  const { data, error } = await supabase
+    .from('profiles').select('id, full_name').in('id', unique).limit(capLimit());
   if (error) throw error;
-  return new Map((data ?? [])
+  return new Map(assertWhole(data, 'the names on those invoices')
     .map((p: any) => [p.id, (p.full_name || '').trim()] as [string, string])
     .filter(([, n]) => !!n));
 }
