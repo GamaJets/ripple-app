@@ -35,17 +35,44 @@ const INVOICE_ACTIONABLE = new Set([
 Deno.serve(async (req) => {
   if (req.method !== 'POST') return json({ error: 'POST only' }, 405);
   const key = Deno.env.get('STRIPE_SECRET_KEY');
+  // TWO secrets, because Stripe's event destinations are scoped and one endpoint
+  // cannot receive both scopes. Everything about a subscription or a checkout
+  // happens on the PLATFORM account — with destination charges the charge lives
+  // there, not on the coach's account — while `account.updated`, which is how we
+  // learn a coach has finished onboarding and can take money, only ever comes
+  // from a CONNECTED account. Stripe requires a separate destination for each,
+  // and issues each its own signing secret.
+  //
+  // So both are tried. A signature is a cheap HMAC and there are at most two, so
+  // trying the second costs nothing measurable and saves running a second copy
+  // of this whole function under a different name.
+  //
+  // The connect one is OPTIONAL: with it unset this behaves exactly as it did
+  // before, which is what keeps a half-finished dashboard setup working rather
+  // than failing in a way that reads like a bug in here.
   const whSecret = Deno.env.get('STRIPE_WEBHOOK_SECRET');
+  const whSecretConnect = Deno.env.get('STRIPE_WEBHOOK_SECRET_CONNECT');
   if (!key || !whSecret) return json({ error: 'Set STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET.' }, 400);
   const stripe = new Stripe(key, { apiVersion: '2024-06-20' });
 
   const sig = req.headers.get('stripe-signature') || '';
   const raw = await req.text();
-  let event: Stripe.Event;
-  try {
-    event = await stripe.webhooks.constructEventAsync(raw, sig, whSecret, undefined, Stripe.createSubtleCryptoProvider());
-  } catch (e) {
-    return json({ error: 'signature verification failed: ' + (e as Error).message }, 400);
+  let event: Stripe.Event | null = null;
+  let firstError = '';
+  for (const secret of [whSecret, whSecretConnect]) {
+    if (!secret) continue;
+    try {
+      event = await stripe.webhooks.constructEventAsync(raw, sig, secret, undefined, Stripe.createSubtleCryptoProvider());
+      break;
+    } catch (e) {
+      // Kept from the FIRST attempt: it is the platform secret, the one almost
+      // every event arrives under, and so the one whose message is worth
+      // reading when nothing verifies.
+      if (!firstError) firstError = (e as Error).message;
+    }
+  }
+  if (!event) {
+    return json({ error: 'signature verification failed: ' + firstError }, 400);
   }
 
   const service = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);

@@ -9,7 +9,7 @@
 // additional door, not a replacement: an existing member has an email account
 // and no phone on it yet, and somebody abroad without their SIM needs a way in
 // that does not depend on a text arriving.
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView, Modal, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useRouter } from 'expo-router';
@@ -18,15 +18,16 @@ import { useAuth } from '../src/ui/auth';
 import { useBrand } from '../src/ui/brand';
 import { Cta, Ghost, Card } from '../src/ui/kit';
 import { Icon } from '../src/ui/Icon';
-import { sp, layout, radius, hairline, type as ty, value } from '../src/theme/scale';
+// The code half of this screen now lives in src/ui/OtpCodeEntry — six boxes, a
+// countdown and a resend that reports both outcomes — because email
+// confirmation needs the identical gesture and two copies would drift.
+import { OtpCodeEntry } from '../src/ui/OtpCodeEntry';
+import { sp, layout, radius, hairline, type as ty } from '../src/theme/scale';
 import {
   COUNTRIES, DEFAULT_COUNTRY, countryFor, flagFor,
-  toE164, isPlausiblePhone, maskedForDisplay, digitsOnly,
-  OTP_LENGTH, isCompleteOtp,
+  toE164, isPlausiblePhone, maskedForDisplay,
+  OTP_LENGTH,
 } from '../src/lib/phone';
-
-/** Seconds before a new code may be requested. Matches Supabase's own default. */
-const RESEND_AFTER = 60;
 
 export default function PhoneSignIn() {
   const t = useTheme();
@@ -42,20 +43,8 @@ export default function PhoneSignIn() {
 
   const [stage, setStage] = useState<'number' | 'code'>('number');
   const [sentTo, setSentTo] = useState<string | null>(null);
-  const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [left, setLeft] = useState(0);
-  const codeRef = useRef<TextInput>(null);
-
-  // The resend countdown. A dead "Resend" that silently does nothing until the
-  // server's own window passes teaches people to tap it repeatedly and then
-  // hit the rate limit, which is a worse failure than waiting.
-  useEffect(() => {
-    if (left <= 0) return;
-    const id = setInterval(() => setLeft((n) => (n <= 1 ? 0 : n - 1)), 1000);
-    return () => clearInterval(id);
-  }, [left]);
 
   const e164 = toE164(national, iso);
   const canSend = !busy && isPlausiblePhone(national, iso);
@@ -68,20 +57,6 @@ export default function PhoneSignIn() {
     if (!r.ok) { setError(r.reason); return; }
     setSentTo(e164);
     setStage('code');
-    setCode('');
-    setLeft(RESEND_AFTER);
-    setTimeout(() => codeRef.current?.focus(), 250);
-  };
-
-  const verify = async (submitted: string) => {
-    if (!sentTo || busy) return;
-    setBusy(true); setError(null);
-    const r = await auth.verifyPhoneCode(sentTo, digitsOnly(submitted), name);
-    setBusy(false);
-    if (!r.ok) { setError(r.reason); setCode(''); return; }
-    // The root layout routes on `authed`; replacing avoids leaving a signed-in
-    // person able to swipe back to a sign-in screen.
-    router.replace('/');
   };
 
   const list = COUNTRIES.filter((c) => {
@@ -164,75 +139,25 @@ export default function PhoneSignIn() {
               </Pressable>
             </>
           ) : (
-            <>
-              <Text style={{ ...ty.title, color: t.ink }}>Enter Your Code</Text>
-              <Text style={{ ...ty.label, color: t.ink3, marginTop: 6, marginBottom: sp.xxl }}>
-                Sent to {sentTo ? maskedForDisplay(sentTo) : 'your phone'}.
-              </Text>
-
-              {/* One real input behind six painted boxes: iOS fills a texted
-                  code into a single field via autoComplete, and six separate
-                  inputs break that — the thing that makes this flow quick. */}
-              <Pressable onPress={() => codeRef.current?.focus()} accessibilityRole="button"
-                accessibilityLabel="Enter the six-digit code">
-                <View style={{ flexDirection: 'row', gap: sp.sm }}>
-                  {Array.from({ length: OTP_LENGTH }).map((_, i) => {
-                    const ch = digitsOnly(code)[i];
-                    const active = digitsOnly(code).length === i;
-                    return (
-                      <View key={i} style={{
-                        flex: 1, aspectRatio: 0.82, borderRadius: radius.sm,
-                        alignItems: 'center', justifyContent: 'center',
-                        backgroundColor: t.surface2,
-                        borderWidth: active ? 2 : hairline,
-                        borderColor: active ? t.brand : t.ring,
-                      }}>
-                        <Text style={{ ...value(26), color: t.ink }}>{ch ?? ''}</Text>
-                      </View>
-                    );
-                  })}
-                </View>
-              </Pressable>
-              <TextInput
-                ref={codeRef}
-                value={code}
-                onChangeText={(v) => {
-                  const d = digitsOnly(v).slice(0, OTP_LENGTH);
-                  setCode(d); setError(null);
-                  // Submit as soon as it is complete. Making somebody tap a
-                  // button after typing the last digit is a step with no
-                  // decision in it.
-                  if (isCompleteOtp(d)) void verify(d);
-                }}
-                keyboardType="number-pad"
-                textContentType="oneTimeCode"
-                autoComplete="sms-otp"
-                maxLength={OTP_LENGTH}
-                autoFocus
-                style={{ position: 'absolute', opacity: 0, height: 1, width: 1 }}
-              />
-
-              {error ? (
-                <Card tone={t.warn} style={{ marginTop: sp.xl }}>
-                  <Text style={{ ...ty.label, color: t.ink2 }}>{error}</Text>
-                </Card>
-              ) : null}
-
-              <View style={{ alignItems: 'center', marginTop: sp.xxl }}>
-                {left > 0 ? (
-                  <Text style={{ ...ty.label, color: t.ink3 }}>
-                    Resend a new code in {String(Math.floor(left / 60)).padStart(2, '0')}:{String(left % 60).padStart(2, '0')}
-                  </Text>
-                ) : (
-                  <Ghost label={busy ? 'Sending…' : 'Send a New Code'} onPress={send} />
-                )}
-              </View>
-
-              <Pressable onPress={() => { setStage('number'); setCode(''); setError(null); }} hitSlop={8}
-                style={{ paddingVertical: sp.xl, alignItems: 'center' }}>
-                <Text style={{ ...ty.label, color: t.ink2 }}>Wrong number? Change it</Text>
-              </Pressable>
-            </>
+            <OtpCodeEntry
+              title="Enter Your Code"
+              sentTo={sentTo ? maskedForDisplay(sentTo) : 'your phone'}
+              length={OTP_LENGTH}
+              channel="sms"
+              // `sentTo` and not `e164`: the number we actually texted, which is
+              // not always the one still sitting in the field above.
+              onVerify={(submitted) => (sentTo
+                ? auth.verifyPhoneCode(sentTo, submitted, name)
+                : Promise.resolve({ ok: false as const, reason: 'No number to check that code against. Enter your number again.' }))}
+              // The root layout routes on `authed`; replacing avoids leaving a
+              // signed-in person able to swipe back to a sign-in screen.
+              onVerified={() => router.replace('/')}
+              onResend={() => (sentTo
+                ? auth.sendPhoneCode(sentTo)
+                : Promise.resolve({ ok: false as const, reason: 'No number to send to. Enter your number again.' }))}
+              changeLabel="Wrong number? Change it"
+              onChange={() => { setStage('number'); setError(null); }}
+            />
           )}
         </ScrollView>
       </KeyboardAvoidingView>

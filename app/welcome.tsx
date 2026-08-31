@@ -19,6 +19,8 @@ import { useBrand } from '../src/ui/brand';
 import { USE_SUPABASE } from '../src/lib/config';
 import { VARIANT, VARIANT_LABEL, VARIANT_TILE } from '../src/lib/variant';
 import { recordReferral, stashPendingReferral, flushPendingReferral } from '../src/lib/referrals';
+import { OtpCodeEntry } from '../src/ui/OtpCodeEntry';
+import { isUnconfirmedEmailError, EMAIL_OTP_LENGTH } from '../src/ui/emailOtp';
 import { Card, Cta } from '../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../src/theme/scale';
 
@@ -56,6 +58,17 @@ export default function Welcome() {
   const [busy, setBusy] = useState(false);
   const [refCode, setRefCode] = useState('');
   const [notice, setNotice] = useState<string | null>(null);
+  /**
+   * The address a confirmation code has just been sent to, or null.
+   *
+   * Set ONLY when we know an email actually went out — signUp reporting
+   * `needsConfirmation`, or a resend that came back ok. Never inferred: with
+   * confirmation switched off (which is where the project is today, see
+   * docs/LAUNCH-CHECKLIST.md item 1) signUp hands back a live session and
+   * nothing is sent, so this stays null and the person goes straight in. A code
+   * screen shown on a guess is a screen no email will ever satisfy.
+   */
+  const [pendingEmail, setPendingEmail] = useState<string | null>(null);
 
   // A session refused at launch because it belongs to another brand has nobody
   // to tell: it is turned away before this screen mounts, and all the reader
@@ -82,9 +95,12 @@ export default function Welcome() {
       if (mode === 'up') {
         const res = await auth.signUp(name, email.trim(), pw, role);
         if (res.needsConfirmation) {
+          // Stashed rather than recorded, because there is no session yet to
+          // attribute it to. Kept even though the code screen flushes it on
+          // success: somebody who closes the app on the code screen and signs
+          // in a day later must still be attributed to whoever referred them.
           await stashPendingReferral(refCode);
-          setNotice('Account created. Check your email to confirm, then sign in.');
-          setMode('in');
+          setPendingEmail(email.trim());
         } else {
           await recordReferral(refCode);
           router.replace('/onboarding');
@@ -95,8 +111,29 @@ export default function Welcome() {
         router.replace('/');
       }
     } catch (e: any) {
-      setNotice(e?.message || 'Something went wrong. Please try again.');
+      // An unconfirmed account is the one sign-in failure with a way forward
+      // that is not "try the password again": it exists, the password was
+      // right, and what is missing is a code we can send. Before this, the
+      // person read "Email not confirmed" on a screen offering them nothing to
+      // do about it — and the email they were being sent back to is the one
+      // that a mail scanner had already spent.
+      if (isUnconfirmedEmailError(e)) {
+        const r = await auth.resendEmailCode(email.trim());
+        // Only a send we watched succeed opens the code screen. A refused one
+        // says so and leaves them here, where their password still is.
+        if (r.ok) setPendingEmail(email.trim());
+        else setNotice(`That address has not been confirmed yet. ${r.reason}`);
+      } else {
+        setNotice(e?.message || 'Something went wrong. Please try again.');
+      }
     } finally { setBusy(false); }
+  };
+
+  /** Confirmed, signed in, and brand new — the same door signUp uses when
+   *  confirmation is off. The referral stashed a moment ago is spent here. */
+  const onConfirmed = async () => {
+    await flushPendingReferral();
+    router.replace('/onboarding');
   };
   const provider = async (p: 'apple' | 'google') => {
     setNotice(null);
@@ -125,9 +162,43 @@ export default function Welcome() {
             <Text style={{ ...ty.title, color: t.ink }}>{appName}</Text>
           </View>
           <Text style={{ ...ty.body, color: t.ink3, marginTop: sp.sm, marginBottom: sp.xl }}>
-            {mode === 'up' ? 'Create your account to get started.' : 'Welcome back — sign in to continue.'}
+            {pendingEmail ? 'One step left — the six digits we just emailed you.'
+              : mode === 'up' ? 'Create your account to get started.' : 'Welcome back — sign in to continue.'}
           </Text>
 
+          {pendingEmail ? (
+            /* The confirmation code, in the same six boxes the phone door uses.
+               A code and not a link on purpose: a link in a confirmation email
+               is fetched, and spent, by the recipient's own mail scanner before
+               they ever see the message — the failure that had email
+               confirmation switched off in the first place. Six digits give a
+               scanner nothing to press. See src/ui/emailOtp.ts. */
+            <OtpCodeEntry
+              title="Confirm Your Email"
+              sentTo={pendingEmail}
+              length={EMAIL_OTP_LENGTH}
+              channel="email"
+              onVerify={(submitted) => auth.confirmEmailCode(pendingEmail, submitted)}
+              onVerified={onConfirmed}
+              onResend={() => auth.resendEmailCode(pendingEmail)}
+              // Says where to look, and names the one case where no code is
+              // coming at all: an address that already has a confirmed account
+              // gets nothing sent to it, and signUp cannot tell us that without
+              // telling anybody who asks which addresses are registered.
+              note="No link to click, so nothing can use it before you do. If it has not arrived, check your junk folder — and if you already have an account at this address, go back and sign in instead."
+              changeLabel="Wrong address? Go back"
+              onChange={() => {
+                // Back to the form with the address still in the field. The
+                // account that was just created keeps that address — it is not
+                // being deleted here and saying otherwise would be a lie — so
+                // the way out of a typo is to create the account again at the
+                // right one, which is exactly what this returns them to.
+                setPendingEmail(null);
+                setNotice(`Nothing has been sent anywhere else. If ${pendingEmail} is wrong, correct it and create the account again.`);
+              }}
+            />
+          ) : (
+          <>
           {/* Sign in / Sign up toggle */}
           <View style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: radius.sm, padding: 3, marginBottom: sp.xl }}>
             {([['up', 'Create Account'], ['in', 'Sign In']] as const).map(([m, label]) => (
@@ -222,6 +293,8 @@ export default function Welcome() {
           </Pressable>
 
           <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.xl }}>{USE_SUPABASE ? 'Your account is securely stored. By continuing you agree to the Terms & Privacy Policy.' : 'Not connected to Repple — any email/password works and stays on this device. Real accounts activate when the backend is connected.'}</Text>
+          </>
+          )}
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>

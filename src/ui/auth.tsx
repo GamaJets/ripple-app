@@ -19,7 +19,8 @@ import {
 } from '../lib/supabase';
 import { resetPasswordUrl } from '../lib/deepLink';
 import { reportError } from '../lib/reportError';
-import { phoneAuthError } from '../lib/phone';
+import { phoneAuthError, digitsOnly } from '../lib/phone';
+import { emailCodeError, emailResendError, type OtpOutcome } from './emailOtp';
 import { checkTenantBrand, stampTenantBrand, signUpWithBrand, brandSignUpMetadata } from '../lib/tenantBrand';
 
 export type Role = 'owner' | 'trainer' | 'client';
@@ -62,6 +63,19 @@ interface AuthValue {
   sendPhoneCode: (e164: string) => Promise<{ ok: true } | { ok: false; reason: string }>;
   /** Exchange a code for a session. Only `ok: true` means they are signed in. */
   verifyPhoneCode: (e164: string, code: string, name?: string) => Promise<{ ok: true } | { ok: false; reason: string }>;
+  /**
+   * Signup, step two: turn the six digits from the confirmation email into a
+   * session. Only `ok: true` means the address is confirmed and they are in.
+   *
+   * Only reachable when `signUp` said `needsConfirmation` — with confirmation
+   * switched off there is no code, no email and nothing to confirm.
+   */
+  confirmEmailCode: (email: string, code: string) => Promise<OtpOutcome>;
+  /**
+   * Send the confirmation code again. `ok: false` means NOTHING was sent — a
+   * throttled resend is the common case and must never read as a sent one.
+   */
+  resendEmailCode: (email: string) => Promise<OtpOutcome>;
   signOut: () => void;
   /**
    * Why the last session was refused, when nobody was there to be told.
@@ -172,6 +186,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // cannot be attached afterwards.
     await signUpWithBrand(email, password, name.trim(), role);
     // If email confirmation is OFF, a session exists now; otherwise it does not.
+    //
+    // This branch is the whole answer to "what happens while confirmation is
+    // still off" — which is where the project is today. A session means there
+    // is nothing to confirm and no email coming, so the caller must take them
+    // straight in. Showing a code screen here would be asking somebody to type
+    // six digits out of a message nobody sent.
     const { data } = await supabase.auth.getSession();
     if (data.session) {
       // Belt and braces for an account whose metadata did not survive the trip
@@ -256,6 +276,79 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  /**
+   * Email signup, step two — the reason this exists at all.
+   *
+   * Supabase's "Confirm signup" template decides what the person receives: with
+   * `{{ .Token }}` in it they get six digits, with `{{ .ConfirmationURL }}` they
+   * get a link that a mail scanner spends before they see it. See the header of
+   * src/ui/emailOtp.ts and item 1 of docs/LAUNCH-CHECKLIST.md. This function is
+   * the code half; nothing here works until that template says `{{ .Token }}`.
+   *
+   * `type: 'signup'` and not 'email': 'email' is the passwordless magic-link
+   * OTP and would refuse a token minted by a signup confirmation.
+   */
+  const confirmEmailCode = async (email: string, code: string): Promise<OtpOutcome> => {
+    if (!USE_SUPABASE) return { ok: false, reason: 'Not connected to Repple, so the code could not be checked.' };
+    const address = email.trim();
+    try {
+      const { data, error } = await supabase.auth.verifyOtp({ email: address, token: digitsOnly(code), type: 'signup' });
+      if (error) return { ok: false, reason: emailCodeError(error) };
+      if (!data?.session) {
+        // The same trap verifyPhoneCode found: verifyOtp resolving is not the
+        // same as being signed in. Saying "confirmed" here would send somebody
+        // into the app with no session behind it, and every screen they opened
+        // would come back empty for a reason none of them could explain.
+        reportError('auth.confirmEmailCode', new Error('verifyOtp returned no session'));
+        return { ok: false, reason: 'The code was accepted but the sign-in did not complete. Try once more.' };
+      }
+      // Belt and braces, exactly as the immediate-session branch of signUp does
+      // it: signUpWithBrand already carried `brand` into the metadata that
+      // created the auth row, so this only ever fills a blank.
+      await stampTenantBrand();
+      const { refused } = await refreshFromSession();
+      // Returned rather than thrown, matching this function's own contract —
+      // the welcome screen prints `reason` in the card it already has.
+      if (refused) return { ok: false, reason: refused };
+      return { ok: true };
+    } catch (e: any) {
+      reportError('auth.confirmEmailCode', e);
+      return { ok: false, reason: emailCodeError(e) };
+    }
+  };
+
+  /**
+   * Another copy of the same confirmation.
+   *
+   * `resend` and not a second `signUp`: signing up again with the same address
+   * would either be rejected or quietly create nothing, and neither tells the
+   * caller whether an email went out. This one does.
+   *
+   * No brand metadata here on purpose, and for the mirror image of the reason
+   * the phone path puts it on the SEND: by the time anybody resends, the
+   * auth.users row already exists and handle_new_user() has already read the
+   * metadata that created it. Anything attached now is too late to matter, and
+   * `resend` has no argument for it anyway.
+   */
+  const resendEmailCode = async (email: string): Promise<OtpOutcome> => {
+    if (!USE_SUPABASE) return { ok: false, reason: 'Not connected to Repple, so no code was sent.' };
+    const address = email.trim();
+    try {
+      const { error } = await supabase.auth.resend({ type: 'signup', email: address });
+      if (error) {
+        // A throttle is the person tapping a button we offered them, not a
+        // fault — reporting it would fill app_errors with one expected fact.
+        const throttled = error.code === 'over_email_send_rate_limit' || error.status === 429;
+        if (!throttled) reportError('auth.resendEmailCode', error);
+        return { ok: false, reason: emailResendError(error) };
+      }
+      return { ok: true };
+    } catch (e: any) {
+      reportError('auth.resendEmailCode', e);
+      return { ok: false, reason: emailResendError(e) };
+    }
+  };
+
   const signInWithProvider = async (provider: 'apple' | 'google') => {
     if (!USE_SUPABASE) {
       setUser({ id: 'local', name: provider === 'apple' ? 'Apple User' : 'Google User', email: `local@${provider}.invalid`, role: 'client' });
@@ -308,7 +401,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <Ctx.Provider value={{ authed: !!user, user, loading, brandNotice, signIn, signUp, signInWithProvider, sendPhoneCode, verifyPhoneCode, signOut, sendPasswordReset, beginPasswordRecoveryWithTokenHash, beginPasswordRecoveryWithCode, beginPasswordRecoveryWithTokens, completePasswordReset }}>
+    <Ctx.Provider value={{ authed: !!user, user, loading, brandNotice, signIn, signUp, signInWithProvider, sendPhoneCode, verifyPhoneCode, confirmEmailCode, resendEmailCode, signOut, sendPasswordReset, beginPasswordRecoveryWithTokenHash, beginPasswordRecoveryWithCode, beginPasswordRecoveryWithTokens, completePasswordReset }}>
       {children}
     </Ctx.Provider>
   );
