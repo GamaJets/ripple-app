@@ -143,7 +143,7 @@ export function RosterProvider({ children }: { children: ReactNode }) {
           if (mcErr) partialFailure = true;
           const mcPage = capped(mc);
           if (mcPage.truncated) partialRead = true;
-          manual = mcPage.rows.map((r: any) => ({ id: r.id, name: r.name, goal: r.goal || 'General', weightDelta: null, adherence: null, lastActive: 'added by you', next: '—', unread: 0, mode: readCoachedMode(r.mode), joinedAt: r.created_at ?? null }));
+          manual = mcPage.rows.map((r: any) => ({ id: r.id, name: r.name, goal: r.goal || 'General', weightDelta: null, adherence: null, lastActive: 'added by you', next: '—', unread: null, mode: readCoachedMode(r.mode), joinedAt: r.created_at ?? null }));
         } catch { partialFailure = true; }
         // Ordered as well as capped. This read had no `.order()` at all, which
         // was harmless while it returned everything and stops being harmless the
@@ -273,7 +273,7 @@ export function RosterProvider({ children }: { children: ReactNode }) {
         //     not produce a smaller number, it produces a wrong one — often the
         //     wrong sign. Null, and the screen already renders that as no change
         //     recorded rather than as zero.
-        const real: RosterClient[] = linked.map((c: any) => { const sc = st[c.id]; return { id: c.id, name: names[c.id] || 'Client', goal: goalMap[c.goal] || 'General', weightDelta: scansTruncated ? null : sc.wDelta, adherence: sc.adh != null ? sc.adh : null, lastActive: sc.last ? ago(sc.last) : (statsTruncated ? '—' : 'no activity yet'), next: '—', unread: 0, mode: readCoachedMode(c.mode), metrics: sc.mx ?? undefined, diet: c.diet ?? undefined, mealsPerDay: c.meals_per_day ?? undefined, avoid: Array.isArray(c.avoid) ? c.avoid : undefined, joinedAt: joined[c.id] ?? null, injuries: activeInjuries(Array.isArray(c.injuries) ? c.injuries : []).map((i: Injury) => ({ area: i.area, severity: i.severity, note: i.note, isNew: isRecent(i.at) })) }; });
+        const real: RosterClient[] = linked.map((c: any) => { const sc = st[c.id]; return { id: c.id, name: names[c.id] || 'Client', goal: goalMap[c.goal] || 'General', weightDelta: scansTruncated ? null : sc.wDelta, adherence: sc.adh != null ? sc.adh : null, lastActive: sc.last ? ago(sc.last) : (statsTruncated ? '—' : 'no activity yet'), next: '—', unread: null, mode: readCoachedMode(c.mode), metrics: sc.mx ?? undefined, diet: c.diet ?? undefined, mealsPerDay: c.meals_per_day ?? undefined, avoid: Array.isArray(c.avoid) ? c.avoid : undefined, joinedAt: joined[c.id] ?? null, injuries: activeInjuries(Array.isArray(c.injuries) ? c.injuries : []).map((i: Injury) => ({ area: i.area, severity: i.severity, note: i.note, isNew: isRecent(i.at) })) }; });
         // ── One row per person, not one row per table ──────────────────────
         //
         // These two lists used to be concatenated, on the assumption that a
@@ -295,7 +295,21 @@ export function RosterProvider({ children }: { children: ReactNode }) {
         // typed goal onto it as `coachGoal` rather than dropping it — the two
         // goals disagreeing is a conversation for the coach to have, not a
         // conflict for this loader to settle.
-        if (!cancelled) { setRoster(mergeRoster(real, manual)); setStatus(partialFailure ? 'error' : partialRead ? 'partial' : 'ready'); }
+        // Unread counts, one read for the whole roster rather than one per
+        // client. A failure leaves them null — the count is unknown, and the
+        // row says so with a dash instead of asserting that nobody is waiting.
+        let unread: Record<string, number> | null = null;
+        try {
+          const { data: uc, error: ucErr } = await supabase.rpc('coach_unread_counts');
+          if (!ucErr && Array.isArray(uc)) {
+            unread = {};
+            for (const row of uc as any[]) unread[String(row.client_id)] = Number(row.unread) || 0;
+          }
+        } catch { /* stays null, and null prints as a dash */ }
+        const withUnread = unread
+          ? mergeRoster(real, manual).map((c) => ({ ...c, unread: unread![c.id] ?? c.unread }))
+          : mergeRoster(real, manual);
+        if (!cancelled) { setRoster(withUnread); setStatus(partialFailure ? 'error' : partialRead ? 'partial' : 'ready'); }
       } catch { if (!cancelled) setStatus('error'); }
     })();
     return () => { cancelled = true; };
@@ -309,7 +323,7 @@ export function RosterProvider({ children }: { children: ReactNode }) {
     const n = name.trim();
     if (!n) return false;
     const localId = `c${SEQ++}`;
-    setRoster((p) => [...p, { id: localId, name: n, goal, weightDelta: null, adherence: null, lastActive: 'just added', next: '—', unread: 0, mode, joinedAt: new Date().toISOString() }]);
+    setRoster((p) => [...p, { id: localId, name: n, goal, weightDelta: null, adherence: null, lastActive: 'just added', next: '—', unread: null, mode, joinedAt: new Date().toISOString() }]);
     // Durable: persist to coach_clients so the roster survives restarts/devices.
     //
     // `uid` is null until the read effect above has resolved a session. A coach

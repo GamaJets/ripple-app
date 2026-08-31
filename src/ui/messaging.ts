@@ -101,6 +101,13 @@ export function useThread(clientId: string | null, role: ChatRole) {
         }
       } catch { if (!cancelled) setStatus('error'); }
       if (!cancelled) setReady(true);
+      // Opening the thread is what marks it read, for whichever side opened it.
+      // The side is inferred server-side from who is calling, so this cannot
+      // clear the other person's unread count. Failing costs an unread badge
+      // that stays up, which is the harmless direction — it never hides a
+      // message, it only keeps claiming one is waiting.
+      // no-error-ok: an unmarked thread keeps showing as unread, which overstates rather than hides
+      try { await supabase.rpc('mark_thread_read', { p_client: cid }); } catch { /* the badge stays up */ }
       try {
         channel = supabase
           .channel('msg:' + cid)

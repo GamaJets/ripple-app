@@ -36,7 +36,11 @@ export interface RosterClient {
   /** null = this client has never submitted a check-in. It used to default to
    *  100, so a client nobody knew anything about scored a perfect adherence
    *  and could never be flagged at risk. */
-  adherence: number | null; lastActive: string; next: string; unread: number;
+  adherence: number | null; lastActive: string; next: string;
+  /** Messages from them this coach has not opened. `null` means the count could
+   *  not be read — it was hardcoded 0, which told a coach nobody was waiting on
+   *  them on the one screen that exists to say who is. */
+  unread: number | null;
   mode: CoachedMode;
   /** When this client joined the coach's book, ISO. Null when unknown.
    *

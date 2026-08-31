@@ -10528,3 +10528,157 @@ begin
 end $fn$;
 
 grant execute on function public.cancel_session(uuid) to authenticated;
+
+-- ▶ message-read-state.sql
+
+-- Unread counts were the number 0, written into the roster by hand, on a screen
+-- whose whole discipline is never to state a figure it has not read. A coach
+-- looking at "Unread 0" beside a client who had messaged them was being told
+-- something false in the most ordinary way possible.
+--
+-- `messages` is one thread per client with a `sender` role, so read state is
+-- per thread per SIDE — one row each for the client and the coach — rather than
+-- per message. That keeps opening a thread to a single write.
+create table if not exists public.message_reads (
+  client_id uuid not null references auth.users(id) on delete cascade,
+  reader text not null check (reader in ('client', 'coach')),
+  last_read_at timestamptz not null default now(),
+  primary key (client_id, reader)
+);
+
+alter table public.message_reads enable row level security;
+
+drop policy if exists message_reads_client on public.message_reads;
+create policy message_reads_client on public.message_reads
+  for all using (reader = 'client' and client_id = (select auth.uid()))
+  with check (reader = 'client' and client_id = (select auth.uid()));
+
+drop policy if exists message_reads_coach on public.message_reads;
+create policy message_reads_coach on public.message_reads
+  for all using (reader = 'coach' and is_my_client(client_id))
+  with check (reader = 'coach' and is_my_client(client_id));
+
+grant select, insert, update on public.message_reads to authenticated;
+
+-- One row per client on the caller's roster, so the coach's list is one read
+-- rather than one per client. A client with no read row has read nothing, which
+-- is why the fallback is the epoch and not now().
+create or replace function public.coach_unread_counts()
+returns table (client_id uuid, unread int)
+language sql stable security definer set search_path to 'public'
+as $fn$
+  select c.id,
+         (select count(*)::int from messages m
+           where m.client_id = c.id
+             and m.sender = 'client'
+             and m.created_at > coalesce(
+                   (select r.last_read_at from message_reads r
+                     where r.client_id = c.id and r.reader = 'coach'),
+                   'epoch'::timestamptz))
+    from clients c
+   where c.trainer_id = auth.uid();
+$fn$;
+
+create or replace function public.client_unread_count()
+returns int
+language sql stable security definer set search_path to 'public'
+as $fn$
+  select count(*)::int from messages m
+   where m.client_id = auth.uid()
+     and m.sender = 'coach'
+     and m.created_at > coalesce(
+           (select r.last_read_at from message_reads r
+             where r.client_id = auth.uid() and r.reader = 'client'),
+           'epoch'::timestamptz);
+$fn$;
+
+-- The side is inferred rather than passed, so a caller cannot mark the other
+-- person's side of the thread read.
+create or replace function public.mark_thread_read(p_client uuid)
+returns boolean
+language plpgsql security definer set search_path to 'public'
+as $fn$
+declare v_role text;
+begin
+  if auth.uid() is null or p_client is null then return false; end if;
+  if p_client = auth.uid() then
+    v_role := 'client';
+  elsif exists (select 1 from clients c where c.id = p_client and c.trainer_id = auth.uid()) then
+    v_role := 'coach';
+  else
+    return false;
+  end if;
+  insert into message_reads (client_id, reader, last_read_at)
+       values (p_client, v_role, now())
+  on conflict (client_id, reader) do update set last_read_at = now();
+  return true;
+end $fn$;
+
+grant execute on function public.coach_unread_counts() to authenticated;
+grant execute on function public.client_unread_count() to authenticated;
+grant execute on function public.mark_thread_read(uuid) to authenticated;
+
+-- ▶ coach-blocked-time.sql
+
+-- A coach marking time they are NOT available. `sessions.status` has allowed
+-- 'blocked' since the first schema and nothing has ever written it; this makes
+-- it mean something.
+--
+-- A blocked row is invisible to clients by construction: the client read policy
+-- exposes `status = 'available'` plus their own bookings, and a block is neither.
+
+-- The double-booking guarantee now covers blocked time too, so the database —
+-- not the app — is what stops a client booking across a coach's holiday.
+alter table public.sessions drop constraint if exists sessions_no_double_booking;
+alter table public.sessions add constraint sessions_no_double_booking
+  exclude using gist (
+    trainer_id with =,
+    session_span(starts_at, duration_min) with &&
+  ) where (status in ('booked', 'blocked'));
+
+-- Blocking a period has to do two things at once, or it does neither honestly:
+-- put the block down, and withdraw the open slots inside it. Leaving those
+-- offers up would show clients a bookable time the server then refuses — the
+-- app advertising something it will not honour.
+--
+-- A BOOKED session in the way is never silently removed. Somebody has arranged
+-- to be there, so this refuses and says so, and the coach cancels it themselves
+-- — which notifies the client, as cancelling should.
+create or replace function public.block_time(p_starts_at timestamptz, p_duration_min int)
+returns table (ok boolean, withdrawn int, reason text)
+language plpgsql security definer set search_path to 'public'
+as $fn$
+declare
+  v_uid uuid := auth.uid();
+  v_withdrawn int := 0;
+  v_clash int := 0;
+begin
+  if v_uid is null then
+    return query select false, 0, 'not-signed-in'::text; return;
+  end if;
+  if p_duration_min is null or p_duration_min <= 0 then
+    return query select false, 0, 'bad-duration'::text; return;
+  end if;
+
+  select count(*) into v_clash
+    from sessions s
+   where s.trainer_id = v_uid
+     and s.status = 'booked'
+     and session_span(s.starts_at, s.duration_min) && session_span(p_starts_at, p_duration_min);
+  if v_clash > 0 then
+    return query select false, 0, 'booked'::text; return;
+  end if;
+
+  delete from sessions s
+   where s.trainer_id = v_uid
+     and s.status = 'available'
+     and session_span(s.starts_at, s.duration_min) && session_span(p_starts_at, p_duration_min);
+  get diagnostics v_withdrawn = row_count;
+
+  insert into sessions (trainer_id, client_id, starts_at, duration_min, status, released)
+  values (v_uid, null, p_starts_at, p_duration_min, 'blocked', false);
+
+  return query select true, v_withdrawn, null::text;
+end $fn$;
+
+grant execute on function public.block_time(timestamptz, int) to authenticated;

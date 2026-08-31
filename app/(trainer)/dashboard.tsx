@@ -432,7 +432,12 @@ export default function TrainerClients() {
   // arrived looking like arithmetic somebody had done rather than a rate nobody
   // had ever set — see src/lib/trainerProfileAccess.ts.
   const revenue = sessionFee == null ? null : active * sessionFee * 4;
-  const unread = roster.reduce((a, c) => a + c.unread, 0);
+  // One unknown count makes the TOTAL unknown. Summing the nulls as zero would
+  // quietly report fewer waiting messages than there are, on the tile a coach
+  // reads to decide whether anybody needs them.
+  const unread = roster.some((c) => c.unread == null)
+    ? null
+    : roster.reduce((a, c) => a + (c.unread ?? 0), 0);
   // The legacy signal, kept only for the render where the drift read has not
   // landed. It cannot see the client this whole feature is about: with
   // `adherence: null` and `lastActive: 'no activity yet'` both of its clauses
@@ -513,7 +518,7 @@ export default function TrainerClients() {
     // a client with no record at all.
     if (d && (d.status === 'at_risk' || d.status === 'idle')) return d.reason;
     if (!d && atRiskClient(c)) return (c.adherence != null && c.adherence < 80) ? 'Adherence ' + c.adherence + '% — below target' : 'Inactive ' + c.lastActive + ' — check in';
-    if (c.unread > 0) return c.unread + ' unread message' + (c.unread > 1 ? 's' : '');
+    if (c.unread != null && c.unread > 0) return c.unread + ' unread message' + (c.unread > 1 ? 's' : '');
     return null;
   };
   const needsAttention = roster.filter((c) => attnReason(c)).sort((a, b) => {
@@ -867,11 +872,11 @@ export default function TrainerClients() {
                 </View>
               </View>
 
-              {(c.unread > 0 || showDrift || (!d && atRiskClient(c)) || (c.injuries && c.injuries.length)) ? (
+              {((c.unread != null && c.unread > 0) || showDrift || (!d && atRiskClient(c)) || (c.injuries && c.injuries.length)) ? (
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.md, marginTop: sp.sm, marginLeft: 38 + sp.md }}>
                   {showDrift ? <Flag t={t} tone={driftTone(t, d!)} text={DRIFT_LABEL[d!.status]} /> : null}
                   {!d && atRiskClient(c) ? <Flag t={t} tone={t.warn} text="Needs a check-in" /> : null}
-                  {c.unread > 0 ? <Flag t={t} tone={t.brand} text={`${c.unread} unread`} /> : null}
+                  {c.unread != null && c.unread > 0 ? <Flag t={t} tone={t.brand} text={`${c.unread} unread`} /> : null}
                   {c.injuries && c.injuries.length ? <Flag t={t} tone={t.s3} text={c.injuries.some((x) => x.isNew) ? 'New injury' : 'Injury'} /> : null}
                 </View>
               ) : null}

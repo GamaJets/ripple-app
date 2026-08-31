@@ -607,7 +607,7 @@ export default function ClientScreen() {
             onPress={go('/(trainer)/log-session')} />
 
           <ListRow icon="chat" title={`Message ${who}`}
-            note={client && client.unread > 0
+            note={client && client.unread != null && client.unread > 0
               ? `${client.unread} unread from them in your thread.`
               : 'Open your thread with them.'}
             onPress={go('/(trainer)/chat')} />
