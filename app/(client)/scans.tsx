@@ -69,6 +69,7 @@ import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../
 import { Icon } from '../../src/ui/Icon';
 import { analyzeInBody, analyzePhysique, visionAvailable, lastVisionError, type PhysiqueVision } from '../../src/lib/vision';
 import { metricTrends, compositionInsights, METRIC_GROUPS, type ScanMetrics } from '../../src/lib/inbodyMetrics';
+import { deltaLabel } from '../../src/lib/deltaLabel';
 import { focusToGroups, recommendedExercises } from '../../src/lib/focus';
 import { listProgressPhotos, uploadProgressPhoto, deleteProgressPhoto, comparePair, photosNote, missingFileCount, type ProgressPhoto } from '../../src/lib/progressPhotos';
 import { fetchMyCoach, fetchMyShares, sharePhoto, unsharePhoto, shareStateOf, shareLabel, sharedNote, sendBlocker, revokeCaveat, type ShareGrant, type CoachRef } from '../../src/lib/photoShare';
@@ -1138,7 +1139,17 @@ export default function Scans() {
                         {it.delta != null && it.delta !== 0 ? (
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, minWidth: 52, justifyContent: 'flex-end' }}>
                             <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: it.good == null ? t.ink3 : it.good ? t.brand : t.warn }} />
-                            <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{it.delta > 0 ? '+' : ''}{it.delta}</Text>
+                            {/* Through `deltaLabel` rather than interpolating
+                                the number. A positive got a '+' written here
+                                and a negative got whatever JS renders, which is
+                                an ASCII hyphen — so this column showed "-1"
+                                while the summary line six rows above it, which
+                                already goes through the helper, showed "−1"
+                                with the real minus. Two different characters
+                                for the same idea, in one screenful. */}
+                            <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>
+                              {deltaLabel(it.delta, { since: null, decimals: it.def.decimals ?? 0 })}
+                            </Text>
                           </View>
                         ) : (
                           <Text style={{ ...ty.caption, color: t.ink3, minWidth: 52, textAlign: 'right' }}>—</Text>

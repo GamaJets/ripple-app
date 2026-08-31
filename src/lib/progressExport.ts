@@ -19,6 +19,7 @@ import { localDate } from './localDate';
 // from a provider because everything in this module is pure and has to stay
 // that way: it is the half of the export the node suite can actually assert on.
 import { weightIn, weightDeltaIn, type WeightUnit } from './units';
+import { deltaSign } from './deltaLabel';
 
 export interface ProgressRow {
   /**
@@ -133,7 +134,14 @@ export function progressChangeLines(
     // A 0.2 kg loss is −0.44 lb, which is no whole pounds at all: "(−0 lb)"
     // would be a direction attached to nothing, and "(+0 lb)" is not a thing
     // anybody writes. A converted zero gets no sign and says what it is.
-    const sign = change > 0 ? '+' : change < 0 ? '−' : '';
+    //
+    // Through deltaSign so that this is the app's one rule about zero rather
+    // than a local copy of it. The precision asked for is deliberately finer
+    // than any metric here carries: `Math.abs(change)` is interpolated at full
+    // precision, so the question is simply whether the printed figure is a
+    // movement, and a coarser rounding here would sign a figure the reader can
+    // see is not zero.
+    const sign = deltaSign(change, 6);
     return [`${spec.label} ${from}${spec.suffix} → ${to}${spec.suffix} (${sign}${Math.abs(change)}${spec.suffix})`];
   });
 }
