@@ -23,7 +23,22 @@ export function Icon({ name, size = 22, color = '#fff', filled = false, strokeWi
   name: IconName; size?: number; color?: ColorValue; filled?: boolean; strokeWidth?: number;
 }) {
   const common = { stroke: color, strokeWidth, fill: 'none', strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
-  const S = (children: React.ReactNode) => <Svg width={size} height={size} viewBox="0 0 24 24">{children}</Svg>;
+  // An icon in this app is never the meaning on its own — it sits inside a
+  // button, a row or a chip that carries the label. Left visible to the
+  // accessibility tree it is one more unnamed stop between the reader and the
+  // thing they wanted; on Android react-native-svg's shapes can surface as
+  // separate nodes, so a single Icon becomes four. It has no text to lose.
+  //
+  // The one thing this must NOT do is hide an icon that is the only content of
+  // a control — but a control like that is already broken, because an <Svg>
+  // announces nothing either way. The fix there is a label on the control, which
+  // is what Ghost's ICON_NAMES table does.
+  const S = (children: React.ReactNode) => (
+    <Svg
+      width={size} height={size} viewBox="0 0 24 24"
+      accessibilityElementsHidden importantForAccessibility="no-hide-descendants"
+    >{children}</Svg>
+  );
   switch (name) {
     case 'home':
       return S(<Path d="M12 3 3 10.5V21h6v-6h6v6h6V10.5z" fill={filled ? color : 'none'} stroke={filled ? 'none' : color} strokeWidth={strokeWidth} strokeLinejoin="round" />);

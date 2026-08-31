@@ -25,7 +25,7 @@ import { useWearables } from '../../src/ui/wearables';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { importSources, withHr, useImportedIds, isLogged, fetchRecent } from '../../src/ui/watchImport';
 import { tapLight } from '../../src/ui/haptics';
-import { Rule, Section, SectionHead, Hero, ListRow, Cta, Ghost, Notice, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, ListRow, Cta, Ghost, Flag, Notice, fig } from '../../src/ui/kit';
 import { requestHealthAuth, writeAuthStatus, type WriteAuth } from '../../src/lib/wearables/appleHealth';
 import {
   planWrite, readLedger, writeSessions, summariseResult, writeUnavailableReason,
@@ -446,9 +446,15 @@ export default function Devices() {
           // 'error' is louder than 'unsupported' because one of them means we
           // do not know what happened last night and the other means we never
           // asked. Both are stated; neither renders as a zero.
-          <Text style={{ ...ty.caption, color: r.status === 'error' ? t.warn : t.ink3, marginTop: 2 }}>
-           {r.reason || (r.status === 'error' ? 'Could not be read just now, so last night is unknown rather than empty.' : 'Cannot report sleep to Repple yet.')}
-          </Text>
+          r.status === 'error' ? (
+           <Flag tone={t.warn} style={{ marginTop: 2 }}>
+            {r.reason || 'Could not be read just now, so last night is unknown rather than empty.'}
+           </Flag>
+          ) : (
+           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+            {r.reason || 'Cannot report sleep to Repple yet.'}
+           </Text>
+          )
          ) : lastNight.length === 0 ? (
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>Readable — nothing recorded for last night.</Text>
          ) : (
@@ -659,7 +665,9 @@ export default function Devices() {
           other state gets its full sentence, because the complaint was one word
           standing in for four different situations. */}
       {link.state !== 'live' && link.state !== 'never' ? (
-       <Text style={{ ...ty.caption, color: link.tone === 'warn' ? t.warn : t.ink3, marginTop: sp.sm }}>{link.detail}</Text>
+       link.tone === 'warn'
+        ? <Flag tone={t.warn} style={{ marginTop: sp.sm }}>{link.detail}</Flag>
+        : <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{link.detail}</Text>
       ) : null}
 
       {/* And the metric-level answer, kept visibly separate from the account
@@ -667,7 +675,9 @@ export default function Devices() {
           Recovery as "needs reconnecting", which is how the two screens came to
           disagree about the same device in the same session. */}
       {sleepLink.state === 'metric-blocked' ? (
-       <Text style={{ ...ty.caption, color: sleepLink.tone === 'warn' ? t.warn : t.ink3, marginTop: sp.sm }}>{sleepLink.detail}</Text>
+       sleepLink.tone === 'warn'
+        ? <Flag tone={t.warn} style={{ marginTop: sp.sm }}>{sleepLink.detail}</Flag>
+        : <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{sleepLink.detail}</Text>
       ) : null}
 
       {on ? (
@@ -695,8 +705,15 @@ export default function Devices() {
      </View>
     );
    })}
+   {/* This footnote named four cloud vendors and said all four "connect
+       through their own APIs — sign in once and the day syncs on its own."
+       Two of them cannot be signed into at all: Fitbit has no client id in any
+       build profile and Garmin needs a partnership Repple does not have, so
+       both render as Unavailable three rows above the sentence claiming they
+       work. It now names only the two that do, and says what the other two
+       need — which is the same thing their rows say, rather than the opposite. */}
    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
-    Apple Health reads your paired Apple Watch through HealthKit. WHOOP, Oura, Garmin and Fitbit connect through their own APIs — sign in once and the day syncs on its own.
+    Apple Health reads your paired Apple Watch through HealthKit. WHOOP and Oura connect through their own APIs — sign in once and the day syncs on its own. Fitbit and Garmin are not connectable in this version; on an iPhone, both write into Apple Health, so connecting that picks their days up.
    </Text>
   </Section>
  </ScrollView>

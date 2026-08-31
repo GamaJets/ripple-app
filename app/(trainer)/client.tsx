@@ -807,9 +807,13 @@ export default function ClientScreen() {
               <Flag tone={t.ink3}>{unasked}</Flag>
             ) : (
               <>
-                <Text style={{ ...ty.body, color: ci.status === 'error' ? t.warn : t.ink2 }}>
-                  {ci.status === 'loading' ? `Reading ${who}'s intake.` : intakeLine(ci.state, ci.progress, who)}
-                </Text>
+                {ci.status === 'error' ? (
+                  <Flag tone={t.warn}>{intakeLine(ci.state, ci.progress, who)}</Flag>
+                ) : (
+                  <Text style={{ ...ty.body, color: t.ink2 }}>
+                    {ci.status === 'loading' ? `Reading ${who}'s intake.` : intakeLine(ci.state, ci.progress, who)}
+                  </Text>
+                )}
                 {intakeNudge ? (
                   <View style={{ marginTop: sp.md }}>
                     <Flag tone={t.warn}>{intakeNudge}</Flag>

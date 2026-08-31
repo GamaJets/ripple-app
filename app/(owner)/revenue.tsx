@@ -129,11 +129,16 @@ export default function OwnerRevenue() {
             ? 'Reading your roster…'
             : trainersUnread
             ? unreadNote
+            // gymMoney is null when the fee is unset OR the gym has not set a
+            // currency, and both have to be branched on before the value is
+            // interpolated — `${null}` puts the word "null" in the sentence.
             : delta !== 0
-            ? `${delta > 0 ? '+' : '−'}${num(Math.abs(delta))} vs last month${revenue30 != null ? ` · ${gymMoney(revenue30, cur)} at your fee` : ''}`
-            : revenue30 != null
+            ? `${delta > 0 ? '+' : '−'}${num(Math.abs(delta))} vs last month${gymMoney(revenue30, cur) != null ? ` · ${gymMoney(revenue30, cur)} at your fee` : ''}`
+            : gymMoney(revenue30, cur) != null
               ? `${gymMoney(revenue30, cur)} at your session fee`
-              : 'Set a session fee in Ops to value these'}
+              : revenue30 != null
+                ? "Set your gym's currency in Ops to value these"
+                : 'Set a session fee in Ops to value these'}
         />
 
         {/* Said once, at the top, rather than left for an owner to infer from a

@@ -65,17 +65,28 @@ export async function fetchPlans(sb: Queryable, tenantId: string): Promise<Membe
   }));
 }
 
+/**
+ * `currency` is REQUIRED, and it is required because it used to be optional.
+ *
+ * This wrote `plan.currency ?? 'AED'`. `membership_plans.currency` is `not null
+ * default 'AED'`, so an omitted currency did not fail loudly — it landed as a
+ * dirham price in a gym that has never seen a dirham, and every screen that
+ * reads the price book afterwards reads that stamp as the gym's own answer.
+ * A price is not a display; it is the record. There is no honest fallback for
+ * the currency of money somebody is going to be charged, so the caller has to
+ * have one, and a caller that does not must refuse to write rather than guess.
+ */
 export async function createPlan(
   sb: Queryable,
   tenantId: string,
-  plan: { name: string; priceCents: number; interval: PlanInterval; currency?: string },
+  plan: { name: string; priceCents: number; interval: PlanInterval; currency: string },
 ): Promise<void> {
   const { error } = await sb.from('membership_plans').insert({
     tenant_id: tenantId,
     name: plan.name,
     price_cents: plan.priceCents,
     interval: plan.interval,
-    currency: plan.currency ?? 'AED',
+    currency: plan.currency,
   });
   if (error) throw error;
 }
@@ -176,6 +187,23 @@ export async function fetchPayments(
   }));
 }
 
+/**
+ * `currency` is REQUIRED, for the same reason as `createPlan` and with a worse
+ * history.
+ *
+ * This wrote `p.currency ?? 'AED'`, and `gym_payments.currency` is `not null
+ * default 'AED'`, so the omission was invisible at every layer. The Members
+ * screen's payment form had its LABEL corrected to the gym's own currency
+ * while this write was left alone: a GBP gym's owner read "Amount (GBP)",
+ * typed 50, and 50 dirhams went into the ledger — permanently, and read back
+ * as fact by the accounting and month-end screens that reconcile against a
+ * bank statement. A half-corrected currency is worse than an uncorrected one,
+ * because the label is what makes the owner confident.
+ *
+ * A caller that does not know the gym's currency must not record the payment.
+ * There is nothing to fall back on: the amount was handed over in some real
+ * money and no default can find out which.
+ */
 export async function recordPayment(
   sb: Queryable,
   tenantId: string,
@@ -186,7 +214,7 @@ export async function recordPayment(
     takenAt?: string;
     note?: string | null;
     recordedBy?: string | null;
-    currency?: string;
+    currency: string;
   },
 ): Promise<void> {
   const { error } = await sb.from('gym_payments').insert({
@@ -197,7 +225,7 @@ export async function recordPayment(
     taken_at: p.takenAt ?? new Date().toISOString(),
     note: p.note ?? null,
     recorded_by: p.recordedBy ?? null,
-    currency: p.currency ?? 'AED',
+    currency: p.currency,
   });
   if (error) throw error;
 }
@@ -248,34 +276,60 @@ export function summarise(
   };
 }
 
-/** Minor units to a readable amount. Returns null for null so a caller cannot
- *  accidentally render "0.00" for something unknown. */
 /**
- * A minor-unit amount, rendered with its currency.
+ * A minor-unit amount, rendered with the currency it is an amount of.
  *
- * ── THE DEFAULT IS A HAZARD, AND IT IS DELIBERATE THAT IT SURVIVES ─────────
+ * ── THE 'AED' DEFAULT IS GONE, AND THIS IS WHY ─────────────────────────────
  *
- * `currency = 'AED'` means a caller who forgets the second argument prints a
- * currency the gym may not use, with no error and nothing to notice. That is
- * not hypothetical: 33 call sites across ten console pages called this bare,
- * and TWO OF THEM WROTE THE RESULT TO DISK — `recordSettlement` stamps
+ * This used to read `currency = 'AED'`. A caller who forgot the second
+ * argument printed a currency the gym may not use, with no error, nothing to
+ * notice, and — worst of all — a result that LOOKS considered. Nobody reads
+ * "AED 6,300.00" as a missing setting.
+ *
+ * It was not hypothetical. 33 call sites across ten console pages called this
+ * bare, and TWO OF THEM WROTE THE RESULT TO DISK — `recordSettlement` stamped
  * `run.currency ?? 'AED'`, so every settlement a non-UAE gym ever made was
  * stored as dirhams and read back as fact by the accounting and month-end
- * screens. Those call sites are fixed; this default is why they were wrong.
+ * screens. A payment form's LABEL was corrected to the gym's currency while
+ * the WRITE beside it was not, so a GBP gym stored dirhams permanently. The
+ * default was the root cause of both, and a comment explaining a hazard is not
+ * a fix for it.
  *
- * It is not removed here because `tenants.currency` is nullable ON PURPOSE —
- * a gym that has never chosen one must render a dash and be asked, not be
- * assumed into a currency — and making the parameter required is a change to
- * every caller in three apps and a console plus the assertion in
- * coverage.test.ts that pins the current behaviour. That is a calm-morning
- * change with a green test run behind it, not a 1am one.
+ * ── WHAT REPLACES IT ──────────────────────────────────────────────────────
  *
- * Until then: pass the currency. `gymMoney` in src/ui/tenant.tsx and
- * `amount()` in studio-web/lib/currency.ts both take one and are the preferred
- * doors.
+ * Nothing. There is no fallback currency here and there must never be one.
+ * `tenants.currency` is nullable ON PURPOSE: NULL means the gym has not told
+ * us, and the standing rule is render a dash and ask, never assume. So an
+ * absent, empty or null currency returns **null**, exactly as an absent amount
+ * does — one silence, one dash, and the caller says in its note which of the
+ * two silences it is. A figure whose currency is unknown is withheld; it is
+ * not printed bare (a bare "6,300.00" is read in whatever money the reader is
+ * thinking in) and it is not printed in a guess.
+ *
+ * ── WHY THE PARAMETER IS STILL OPTIONAL IN THE TYPE ───────────────────────
+ *
+ * `currency?:` rather than `currency:` buys exactly one thing: it does not
+ * break `src/lib/exportShare.ts:385`, the last bare call in the tree, which
+ * belongs to another change in flight tonight. That call now renders a dash
+ * instead of a fabricated dirham figure, so it is already correct — it is
+ * merely less explicit than it should be.
+ *
+ * The arity rule is enforced anyway, statically, by `scripts/check-currency.mjs`
+ * in preflight: a `money(...)` call with one argument fails the build unless it
+ * carries a `currency-ok:` marker or is named in that script's KNOWN map (where
+ * exportShare.ts sits, with its reason). When that file is free, changing
+ * `currency?:` to `currency:` here and deleting its KNOWN entry is a two-token
+ * edit that will compile on the first try.
+ *
+ * `gymMoney` in src/ui/tenant.tsx and `amount()` in studio-web/lib/currency.ts
+ * both take a currency and are the preferred doors.
  */
-export function money(cents: number | null | undefined, currency = 'AED'): string | null {
+export function money(cents: number | null | undefined, currency?: string | null): string | null {
   if (cents == null) return null;
+  // Not `currency ?? ''`: an empty-string currency is the same fact as a null
+  // one — nobody has said — and printing " 6,300.00" with a leading space is
+  // the bare figure this function exists to refuse.
+  if (!currency) return null;
   return `${currency} ${(cents / 100).toLocaleString(undefined, {
     minimumFractionDigits: 2, maximumFractionDigits: 2,
   })}`;

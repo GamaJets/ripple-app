@@ -39,7 +39,7 @@ import { unsentNote } from '../../src/lib/offlineQueue';
 import { readFoodEdit, foodChanged } from '../../src/lib/entryEdit';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
 import { useWearables } from '../../src/ui/wearables';
-import { Rule, Section, SectionHead, Hero, Ghost, ListRow, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, Ghost, ListRow, Flag, fig } from '../../src/ui/kit';
 import { sp, layout, radius, elevation, type as ty, numeric } from '../../src/theme/scale';
 
 type Food = { n: string; k: number; p: number; c: number; f: number };
@@ -469,7 +469,7 @@ export default function FoodLog() {
      or another device reads, and only one of those two things is obvious
      from looking at the list. */}
  {unsentNote(fl.unsent, 'meal') ? (
- <Text style={{ ...ty.label, color: t.warn, marginBottom: sp.sm }}>{unsentNote(fl.unsent, 'meal')}</Text>
+ <Flag tone={t.warn} style={{ marginBottom: sp.sm }}>{unsentNote(fl.unsent, 'meal')}</Flag>
  ) : null}
  {fl.entries.length === 0 ? (
  // An empty list under 'error' means we could not ask, never that nobody
@@ -511,7 +511,7 @@ export default function FoodLog() {
  <Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>Cancel</Text>
  </Pressable>
  </View>
- {photoUri ? <Image source={{ uri: photoUri }} style={{ width: '100%', height: 150, borderRadius: radius.md, backgroundColor: t.surface2, marginBottom: sp.md }} resizeMode="cover" /> : null}
+ {photoUri ? <Image source={{ uri: photoUri }} accessible accessibilityLabel="The meal you photographed" style={{ width: '100%', height: 150, borderRadius: radius.md, backgroundColor: t.surface2, marginBottom: sp.md }} resizeMode="cover" /> : null}
  {reading ? (
  <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.sm }}>
  <ActivityIndicator color={t.brand} />
@@ -584,7 +584,15 @@ export default function FoodLog() {
      open, and the confirm is the same one either way. */}
  <Pressable onPress={() => { const fe = editing; setEditing(null); if (fe) confirmRemove(fe); }} accessibilityRole="button"
  style={{ paddingVertical: sp.md, alignItems: 'center', marginTop: sp.xs }}>
- <Text style={{ ...ty.label, fontWeight: '500', color: t.crit }}>Remove this meal</Text>
+ {/* The kit's ListRow idiom: crit in the icon, which only has to clear the
+     3:1 of a mark, and the label in ink. crit as text is 3.03–4.05:1 on all
+     ten palettes, so this was the least readable button in the sheet — and it
+     is the one that destroys a record. The word "Remove" carries the meaning
+     without the colour. */}
+ <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+ <Icon name="minus" size={14} color={t.crit} />
+ <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>Remove this meal</Text>
+ </View>
  </Pressable>
  </View>
    </KeyboardAvoidingView>

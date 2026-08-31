@@ -43,7 +43,9 @@ export interface GymPass {
   usesSpent: number;
   /** Null means no price was recorded — not that it was free. */
   paidCents: number | null;
-  currency: string;
+  /** ISO 4217 as the row states it. Null means the row does not say — which is
+   *  a dash beside the amount, never a currency chosen on its behalf. */
+  currency: string | null;
   note: string | null;
 }
 
@@ -203,11 +205,21 @@ export interface NewPassType {
   name: string;
   kind: PassKind;
   priceCents: number;
-  currency?: string;
+  currency: string;
   uses?: number;
   validDays?: number | null;
 }
 
+/**
+ * `currency` is REQUIRED on `NewPassType`, and was not.
+ *
+ * This wrote `t.currency ?? 'AED'` into `gym_pass_types.currency`, a column
+ * declared `not null default 'AED'` — so an omitted currency did not fail, it
+ * priced a gym's day passes in dirhams and every screen that read the pass
+ * afterwards read that as the gym's own answer. Same shape, same silence and
+ * same consequence as `createPlan` and `recordPayment` in src/lib/gymRecord.ts;
+ * see the notes there. A price somebody is charged has no honest default.
+ */
 export async function createPassType(
   sb: Queryable,
   tenantId: string,
@@ -218,7 +230,7 @@ export async function createPassType(
     name: t.name,
     kind: t.kind,
     price_cents: t.priceCents,
-    currency: t.currency ?? 'AED',
+    currency: t.currency,
     uses: t.uses ?? 1,
     valid_days: t.validDays ?? null,
   });
@@ -259,7 +271,12 @@ function rowToPass(r: any): GymPass {
     usesTotal: r.uses_total,
     usesSpent: r.uses_spent ?? 0,
     paidCents: r.paid_cents ?? null,
-    currency: r.currency ?? 'AED',
+    // Not `?? 'AED'`. The column is `not null default 'AED'` so in practice
+    // this is always set — but "in practice" is what the whole currency bug was
+    // made of, and the branch that fires when it is not must not invent one.
+    // Null flows to money(), which withholds the figure and lets the screen
+    // draw a dash.
+    currency: r.currency ?? null,
     note: r.note ?? null,
   };
 }

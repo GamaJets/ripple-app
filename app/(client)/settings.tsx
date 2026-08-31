@@ -55,9 +55,27 @@ import { exportMyDataDetailed, requestAccountDeletion, withdrawAccountDeletion, 
 import { shareTextFile } from '../../src/lib/exportShare';
 import { reportError } from '../../src/lib/reportError';
 
-function Toggle({ t, on, onPress }: { t: Theme; on: boolean; onPress: () => void }) {
+/**
+ * The pill switch used down the right-hand side of this screen.
+ *
+ * It is a real switch and announced as one. Before this it was an unnamed
+ * button whose entire state — on or off — was which side a white dot sat on and
+ * what colour the track was: nothing a screen reader can read, and nothing a
+ * person who cannot separate the accent from surface3 can see either. The row's
+ * own label is beside it rather than inside it, so `label` is passed in.
+ *
+ * 48 × 28 is also under the 44pt minimum on both axes; the slop brings the
+ * boundary out to 44 without moving the drawing.
+ */
+function Toggle({ t, on, onPress, label }: { t: Theme; on: boolean; onPress: () => void; label?: string }) {
   return (
-    <Pressable onPress={onPress} style={{ width: 48, height: 28, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface3, justifyContent: 'center', padding: 3 }}>
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="switch"
+      accessibilityState={{ checked: on }}
+      accessibilityLabel={label}
+      hitSlop={{ top: 8, bottom: 8, left: 0, right: 0 }}
+      style={{ width: 48, height: 28, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface3, justifyContent: 'center', padding: 3 }}>
       <View style={{ width: 22, height: 22, borderRadius: radius.pill, backgroundColor: '#fff', alignSelf: on ? 'flex-end' : 'flex-start' }} />
     </Pressable>
   );
@@ -312,7 +330,7 @@ export default function Settings() {
           <Row t={t} first
             label={lock.available ? `Require ${lock.label}` : 'Require Face ID'}
             sub={lockSettingNote(lock.available, lock.enabled, lock.label)}
-            right={<Toggle t={t} on={lock.enabled} onPress={() => { void toggleLock(); }} />} />
+            right={<Toggle t={t} on={lock.enabled} label={lock.available ? `Require ${lock.label}` : 'Require Face ID'} onPress={() => { void toggleLock(); }} />} />
         </Section>
 
         <Rule />
@@ -320,7 +338,7 @@ export default function Settings() {
         <Section>
           <SectionHead title="Notifications" />
           <Row t={t} first label="Push Notifications" sub="Session reminders, class reminders, coach messages"
-            right={<Toggle t={t} on={st.notifPush} onPress={() => { void togglePush(); }} />} />
+            right={<Toggle t={t} on={st.notifPush} label="Push Notifications" onPress={() => { void togglePush(); }} />} />
         </Section>
 
         <Rule />

@@ -225,7 +225,8 @@ export default function Compare() {
                     {([['Before', pair.before], ['After', pair.after]] as [string, ProgressPhoto][]).map(([label, ph]) => (
                       <View key={label} style={{ flex: 1 }}>
                         {ph.url ? (
-                          <Image source={{ uri: ph.url }} style={{ width: '100%', height: 260, borderRadius: radius.md, backgroundColor: t.surface2 }} />
+                          <Image source={{ uri: ph.url }} accessible accessibilityLabel={`${label} photo, ${dayOf(ph)}`}
+                            style={{ width: '100%', height: 260, borderRadius: radius.md, backgroundColor: t.surface2 }} />
                         ) : (
                           // The row is here and the file is not. A gap, not a
                           // blank frame that reads as a photo still loading.

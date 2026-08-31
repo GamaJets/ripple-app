@@ -82,11 +82,50 @@
 // charged NEXT if nobody cancels — a forward-looking figure, which is why it is
 // not added to a backward-looking one.
 //
-// Stopping a subscription is still the client's to do. The `cancel`/`resume`
-// actions in the connect-checkout edge function scope the lookup to
-// `client_id = auth.uid()`, so a coach calling them gets "subscription not
-// found" — and a Cancel button that always fails is worse than none. It is said
-// on screen instead of offered.
+// ── Stopping a subscription, which a coach can now actually do ────────────
+//
+// This screen used to say, out loud, that stopping a subscription was the
+// client's to do — because the `cancel`/`resume` actions in connect-checkout
+// scoped their lookup to `client_id = auth.uid()`, so a coach calling them got
+// "subscription not found" every time. Saying that was right; a Cancel button
+// that always fails on somebody's recurring charge is worse than none.
+//
+// The edge function was the thing that was wrong, and it is fixed. It now reads
+// the subscription and asks who the caller is TO IT — client or coach, per
+// src/lib/subscriptionScope.ts, which is a pure module with a test because it
+// is the only thing standing between one coach and another coach's
+// subscriptions. So the buttons are here: stop at period end, and put back one
+// that was stopped.
+//
+// Three things this screen still does not do, each on purpose:
+//
+//   · Cancel immediately. The client paid for the period they are in and keeps
+//     it. There is no immediate cancel in the edge function for either party.
+//   · Refund. Stripe refunds are a separate API with consequences nothing here
+//     models — partial amounts, reversing the platform's application fee,
+//     pulling money out of a connected account that may already have paid out
+//     to a bank. A refund button that half works is worse on somebody's money
+//     than no refund button. The Stripe dashboard is where one is issued, and
+//     the note under the list says so rather than implying a control exists.
+//   · Open the client's billing portal. That is their saved card, their billing
+//     address and every receipt they have been sent. It stays theirs; a coach
+//     calling it is refused with a 403 that says why.
+//
+// ── A status nobody wrote a sentence for ──────────────────────────────────
+//
+// `client_subscriptions.status` is Stripe's word, written verbatim by the
+// webhook, and this screen filtered it with `isLive` — true for three words,
+// false for everything else. So a subscription in a state Repple has no
+// sentence for did not render as unknown, it rendered as NOTHING: a coach whose
+// client's subscription Stripe had PAUSED read "Nobody is subscribed yet" off a
+// screen that had the row in memory, and concluded a paying client had left.
+//
+// `subState` splits three ways instead — live, ended, and unsettled — with
+// unsettled as the DEFAULT rather than a list, so a status word Stripe adds
+// after this was written shows up quoted rather than disappearing. Unsettled
+// rows are listed separately and are in neither the subscriber count nor the
+// priced-to-recur figure, because neither may include a charge that is not
+// happening.
 //
 // Two things are new. A package can now bill EVERY month or year rather than
 // once (part 97), which is the biggest difference between two rows on this
@@ -115,7 +154,8 @@ import { Rule, Section, SectionHead, Cta, Ghost, Notice, Flag, PartialRead, fig 
 import { sp, layout, radius, hairline, type as ty, value } from '../../src/theme/scale';
 import { worstStatus, type LoadStatus } from '../../src/ui/loadStatus';
 import { startTrainerOnboarding, fetchMyConnect, fetchMyPackages, createPackage, deactivatePackage, fetchClientPurchases, type ConnectStatus, type TrainerPackage, type CoachPurchase } from '../../src/lib/connect';
-import { fetchMySubscribers, fetchMySubscriptionPayments, myTenantCurrency, pkgMoney, pkgPriceLine, statusLabel, isLive, type BillingInterval, type Subscriber, type SubscriptionPayment } from '../../src/lib/subscriptions';
+import { fetchMySubscribers, fetchMySubscriptionPayments, myTenantCurrency, pkgMoney, pkgPriceLine, statusLabel, cancelSubscription, resumeSubscription, type BillingInterval, type Subscriber, type SubscriptionPayment } from '../../src/lib/subscriptions';
+import { subState, unsettledNote, canSwitchCancel } from '../../src/lib/subscriptionScope';
 import { sumTaken, combineTaken, sumRecurring, since, monthStart, packLeft, packRunOut, minorMoney, type Pot, type TakenRow } from '../../src/lib/coachMoney';
 
 const INTERVALS: { key: BillingInterval | null; label: string }[] = [
@@ -159,6 +199,11 @@ export default function TrainerPayments() {
   // not the same fact about somebody's income.
   const [subs, setSubs] = useState<Subscriber[]>([]);
   const [subsStatus, setSubsStatus] = useState<LoadStatus>('loading');
+  // Which ONE subscription is mid-change, by its Stripe id. Not a screen-wide
+  // `busy`: a coach with twelve subscribers pressing Stop on the third of them
+  // must not watch every other row grey out, because the row that greys out is
+  // the one they will believe they acted on.
+  const [subBusy, setSubBusy] = useState<string | null>(null);
   // What clients have actually bought. Same three-way distinction, and it
   // carries more weight here than anywhere else on the screen: an empty list
   // under 'error' is "we could not look", and rendering it as "nothing has been
@@ -223,6 +268,57 @@ export default function TrainerPayments() {
       [{ text: 'Cancel', style: 'cancel' }, { text: 'Put On Sale', onPress: go }]);
   };
 
+  /**
+   * Stop a client's subscription at the end of the period they have paid for,
+   * or put one back that was stopped.
+   *
+   * Both go to the same `connect-checkout` action the client's own Memberships
+   * screen calls. Until tonight that action scoped its lookup to
+   * `client_id = auth.uid()` and answered a coach with "subscription not
+   * found", which is why this screen had no button and said so. It now reads
+   * the row and asks who the caller is to it (src/lib/subscriptionScope.ts), so
+   * a coach can act on their OWN client's subscription and on nobody else's.
+   *
+   * Nothing here cancels immediately and nothing here refunds. The client has
+   * paid for the period they are in and keeps it; a refund is a different
+   * Stripe API this app does not implement, and the note under the list says
+   * where one is issued instead of pretending there is a button for it.
+   *
+   * The confirmation names the person and the date. "Stop this subscription?"
+   * on its own is the dialog somebody taps through — this is a coach ending a
+   * paying client's arrangement, and the two facts they need before they do it
+   * are who it is and when it actually ends.
+   */
+  const switchCancel = (s: Subscriber, to: 'cancel' | 'resume') => {
+    const who = s.client_name || 'this client';
+    const ends = s.current_period_end ? new Date(s.current_period_end).toLocaleDateString() : null;
+    const price = pkgPriceLine(s.amount_cents, s.currency, s.billing_interval);
+    const go = async () => {
+      setSubBusy(s.stripe_subscription_id);
+      const r = to === 'cancel'
+        ? await cancelSubscription(s.stripe_subscription_id)
+        : await resumeSubscription(s.stripe_subscription_id);
+      setSubBusy(null);
+      // `ok: false` is Stripe saying it did NOT change, so the row must not be
+      // redrawn as though it had. The screen is reloaded either way — on
+      // failure because whatever Stripe does think is truer than what is on
+      // screen, on success because the edge function has already mirrored
+      // Stripe's answer into the row this list reads.
+      if (!r.ok) Alert.alert(to === 'cancel' ? 'Not stopped' : 'Not restarted',
+        (r.error || 'The change did not go through.') + (to === 'cancel' ? '\n\nThis subscription is still charging.' : '\n\nThis subscription is still set to end.'));
+      load();
+    };
+    if (to === 'resume') {
+      Alert.alert('Let this keep running?',
+        `${who}${price ? ` — ${price}` : ''}\n\nIt was set to end${ends ? ` on ${ends}` : ''}. Restarting it means they are charged again on that date, as normal.`,
+        [{ text: 'Leave It', style: 'cancel' }, { text: 'Keep Running', onPress: go }]);
+      return;
+    }
+    Alert.alert('Stop this subscription?',
+      `${who}${price ? ` — ${price}` : ''}\n\nThey keep what they have already paid for${ends ? ` until ${ends}` : ''}, and are not charged again after that. Nothing is refunded, and you can put it back any time before it ends.`,
+      [{ text: 'Leave It', style: 'cancel' }, { text: 'Stop At Period End', style: 'destructive', onPress: go }]);
+  };
+
   const remove = (id: string) => Alert.alert('Remove package?', 'Clients will no longer see it.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Remove', style: 'destructive', onPress: async () => {
     // deactivatePackage used to return void and swallow the error, so this
     // refreshed and said nothing — a package the trainer believes is withdrawn
@@ -261,7 +357,19 @@ export default function TrainerPayments() {
     </View>
   );
 
-  const liveSubs = subs.filter((s) => isLive(s.status));
+  // Three buckets, not two. `subs.filter(isLive)` answered true for three
+  // status words and false for every other one — so a subscription in a state
+  // this app has no sentence for (`paused`, `incomplete`, or whatever Stripe
+  // adds next) did not render as unknown, it rendered as NOTHING, and a coach
+  // with one paused subscriber read "Nobody is subscribed yet" off a screen
+  // that was holding the row. `subState` files those as 'unsettled' and they
+  // are listed below, separately, with Stripe's own word quoted back.
+  //
+  // They are NOT in `liveSubs`, so nothing about the count or the priced-to-
+  // recur figure changes: neither of those may include a subscription that is
+  // not charging.
+  const liveSubs = subs.filter((s) => subState(s.status) === 'live');
+  const unsettledSubs = subs.filter((s) => subState(s.status) === 'unsettled');
 
   // ── the money figures ─────────────────────────────────────────────────────
   // Only a WHOLE read may be summed. 'partial' is refused alongside 'error' on
@@ -525,7 +633,10 @@ export default function TrainerPayments() {
                           is null only for a row that is not a pack, which
                           cannot reach this list — so the dash is a guard, not
                           an expected state. */}
-                      <Text style={{ ...ty.caption, color: out ? t.warn : t.ink3, flex: 1 }}>
+                      {/* The dot above is the mark and always was; the ink no
+                          longer doubles it. warn as caption text is 3.87–4.08:1
+                          on the three light palettes, under AA. */}
+                      <Text style={{ ...ty.caption, color: out ? t.ink2 : t.ink3, flex: 1 }}>
                         {out ? `Used up — all ${fig(b.sessions_total)} sessions` : `${fig(left)} of ${fig(b.sessions_total)} left`}
                         {b.package_name ? ' · ' + b.package_name : ''}
                         {' · '}{new Date(b.created_at).toLocaleDateString()}
@@ -581,31 +692,93 @@ export default function TrainerPayments() {
                 </Flag>
               ) : subsStatus === 'partial' ? (
                 <PartialRead what="subscribers" shown={subs.length} onPress={load} />
-              ) : liveSubs.length === 0 ? (
+              ) : liveSubs.length === 0 && unsettledSubs.length === 0 ? (
+                // Both buckets, or this sentence is false. "Nobody is
+                // subscribed yet" printed above a paused subscriber is exactly
+                // the bug the third bucket exists to fix, and it would have
+                // survived intact if this condition still asked only about the
+                // live ones.
                 <Text style={{ ...ty.label, color: t.ink3 }}>
                   Nobody is subscribed yet. Add a monthly or yearly package below and it appears on your
                   clients&apos; Memberships screen.
                 </Text>
               ) : null}
-              {(subsStatus === 'error' ? [] : liveSubs).map((s, i) => (
-                <View key={s.id} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.md }}>
-                    {/* A name we could not read is a dash, never 'Client' —
-                        the money beside it is real either way. */}
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, flex: 1 }}>{fig(s.client_name)}</Text>
-                    <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>{fig(pkgPriceLine(s.amount_cents, s.currency, s.billing_interval))}</Text>
+              {(subsStatus === 'error' ? [] : liveSubs).map((s, i) => {
+                // Two different things a row can be, and the dot has always
+                // told them apart: a failed card is critical, a subscription
+                // already set to end is a warning, anything else is running.
+                // The word beside it now says which of those it is in full,
+                // because "Active · ends 4 March" was the only place a coach
+                // could learn a client had cancelled, and it read as a renewal
+                // date at a glance.
+                const stopping = s.cancel_at_period_end;
+                const changing = subBusy === s.stripe_subscription_id;
+                return (
+                  <View key={s.id} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.md }}>
+                      {/* A name we could not read is a dash, never 'Client' —
+                          the money beside it is real either way. */}
+                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, flex: 1 }}>{fig(s.client_name)}</Text>
+                      <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>{fig(pkgPriceLine(s.amount_cents, s.currency, s.billing_interval))}</Text>
+                    </View>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 4 }}>
+                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: s.status === 'past_due' ? t.crit : stopping ? t.warn : t.brand }} />
+                      {/* Same again: the status dot beside this line is the mark. */}
+                      <Text style={{ ...ty.caption, color: stopping ? t.ink2 : t.ink3, flex: 1 }}>
+                        {stopping ? 'Stopping' : statusLabel(s.status)}
+                        {stopping && s.status !== 'active' ? ` · ${statusLabel(s.status)}` : ''}
+                        {s.current_period_end
+                          ? ` · ${stopping ? 'ends' : 'renews'} ${new Date(s.current_period_end).toLocaleDateString()}`
+                          : ''}
+                      </Text>
+                    </View>
+                    {/* The control this screen went without. Offered only on a
+                        subscription Stripe will actually accept the switch on
+                        — `canSwitchCancel` — so there is still no button here
+                        whose only outcome is an error message. */}
+                    {canSwitchCancel(s.status) ? (
+                      <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm }}>
+                        {changing ? (
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, paddingVertical: 11 }}>
+                            <ActivityIndicator color={t.ink3} />
+                            <Text style={{ ...ty.caption, color: t.ink3 }}>Telling Stripe…</Text>
+                          </View>
+                        ) : (
+                          <Ghost
+                            label={stopping ? 'Keep Running' : 'Stop At Period End'}
+                            a11yLabel={(stopping ? 'Keep running the subscription for ' : 'Stop the subscription for ') + (s.client_name || 'this client') + ' at the end of the period'}
+                            onPress={() => switchCancel(s, stopping ? 'resume' : 'cancel')}
+                          />
+                        )}
+                      </View>
+                    ) : null}
                   </View>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 4 }}>
-                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: s.status === 'past_due' ? t.crit : s.cancel_at_period_end ? t.warn : t.brand }} />
-                    <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }}>
-                      {statusLabel(s.status)}
-                      {s.current_period_end
-                        ? ` · ${s.cancel_at_period_end ? 'ends' : 'renews'} ${new Date(s.current_period_end).toLocaleDateString()}`
-                        : ''}
-                    </Text>
-                  </View>
+                );
+              })}
+
+              {/* ── neither charging nor finished ──────────────────────────
+                  A status Repple has no sentence for used to be filtered out
+                  of this list by `isLive` and shown nowhere at all — so a
+                  coach whose client's subscription Stripe had PAUSED read
+                  "Nobody is subscribed yet" off a screen that was holding the
+                  row. These are listed with Stripe's own word quoted back, and
+                  kept out of the count and out of the priced-to-recur figure
+                  above, because neither of those may include a subscription
+                  that is not charging. */}
+              {subsStatus !== 'error' && unsettledSubs.length ? (
+                <View style={{ marginTop: sp.md, paddingTop: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
+                  <Text style={{ ...ty.caption, color: t.ink3 }}>Neither charging nor finished</Text>
+                  {unsettledSubs.map((s) => (
+                    <View key={s.id} style={{ marginTop: sp.md }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.md }}>
+                        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink2, flex: 1 }}>{fig(s.client_name)}</Text>
+                        <Text style={{ ...ty.label, color: t.ink3 }}>{statusLabel(s.status)}</Text>
+                      </View>
+                      <Flag tone={t.warn} style={{ marginTop: 4 }}>{unsettledNote(s.status)}</Flag>
+                    </View>
+                  ))}
                 </View>
-              ))}
+              ) : null}
 
               {/* What is running today, at what it is priced at — printed only
                   on a whole read, and never called income. Kept apart by
@@ -631,17 +804,21 @@ export default function TrainerPayments() {
                 </View>
               ) : null}
 
-              {/* Why there is no Cancel button beside these rows. The cancel and
-                  resume actions in the connect-checkout function look the
-                  subscription up by `client_id = auth.uid()`, so a coach
-                  pressing one would get "subscription not found" every time,
-                  and a control that always fails on somebody's recurring charge
-                  is worse than no control. Said rather than offered. */}
+              {/* What the buttons above do and do not do.
+                  Refunds are deliberately absent. They are a different Stripe
+                  API with consequences nothing in this repo models — partial
+                  amounts, reversing the platform's application fee, pulling
+                  money back out of a connected account that may already have
+                  paid it into a bank — and a refund button that half works is
+                  worse on somebody's money than no refund button. So it is not
+                  offered, and where one IS issued is said instead. */}
               {liveSubs.length ? (
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
-                  Stopping a subscription is the client&apos;s to do, from their Memberships screen —
-                  it cancels at the end of the period they have already paid for. You can also cancel
-                  or refund from your Stripe dashboard.
+                  Stopping a subscription ends it at the close of the period the client has already
+                  paid for — they keep what they bought, and are not charged again. You can put it
+                  back any time before it ends, and the client can do both from their Memberships
+                  screen too. Nothing here refunds: a refund is issued from your Stripe dashboard,
+                  where the amount and the fees can be seen.
                 </Text>
               ) : null}
             </Section>

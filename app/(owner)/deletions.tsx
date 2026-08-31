@@ -304,8 +304,12 @@ export default function OwnerDeletions() {
                     hitSlop={8}
                     accessibilityRole="button"
                     accessibilityLabel={`Permanently delete the account of ${p.name ?? 'this member'}`}
-                    style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 7 }}>
-                    <Text style={{ ...ty.label, fontWeight: '600', color: working ? t.ink3 : t.crit }}>
+                    style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 7, borderWidth: hairline, borderColor: working ? t.ring : t.crit }}>
+                    {/* The border is the mark now. crit as label text measures
+                        3.03–4.05:1 on every palette, and this is the control
+                        that erases a member permanently — the word "Delete"
+                        and the accessibility label carry it without colour. */}
+                    <Text style={{ ...ty.label, fontWeight: '600', color: working ? t.ink3 : t.ink }}>
                       {working ? 'Deleting…' : 'Delete'}
                     </Text>
                   </Pressable>

@@ -240,9 +240,15 @@ export default function Overview() {
         }}
       >
         {/* `amount`, not `money`. Both of these are sums with no currency of
-            their own, and `money()` prints "AED" over whatever it is not told —
-            a considered-looking figure in a currency this gym may never have
-            charged in. A dash naming the unset setting is the honest tile. */}
+            their own, so they inherit the gym's, and `amount()` is the door
+            that takes one.
+
+            `money()` used to print "AED" over whatever it was not told — a
+            considered-looking figure in a currency this gym may never have
+            charged in — which is why this note existed. That default is gone:
+            money() now withholds a figure it cannot denominate, so both doors
+            are safe and this one is simply the clearer of the two. A dash
+            naming the unset setting is still the honest tile. */}
         <Kpi label="Taken · 30d" text={hub ? amount(hub.revenueCents, ccy) : null}
              note={hub && hub.revenueCents == null ? 'no payments recorded'
                : hub && !ccy ? NO_CURRENCY_NOTE : undefined} />

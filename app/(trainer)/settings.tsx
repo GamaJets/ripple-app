@@ -56,7 +56,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
-import { Rule, Section, SectionHead, ListRow, Ghost, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, ListRow, Ghost, Flag, fig } from '../../src/ui/kit';
 import { useSettings } from '../../src/ui/settings';
 import { convertedNote } from '../../src/lib/units';
 import { sp, layout, hairline, type as ty, radius } from '../../src/theme/scale';
@@ -390,7 +390,13 @@ export default function TrainerSettings() {
               note="Ask for your account and your data to be erased permanently"
               onPress={deleteAccount} />
           )}
-          <Text style={{ ...ty.caption, color: pendingFailed ? t.crit : t.ink3, marginTop: sp.md }}>{requestLine}</Text>
+          {/* crit as ink measures 3.03–4.05:1 on all ten palettes, so the one
+              line saying the deletion request could not be read was the least
+              legible thing in the section. The dot carries crit at the 3:1 a
+              mark needs; the sentence stays ink. */}
+          {pendingFailed
+            ? <Flag tone={t.crit} style={{ marginTop: sp.md }}>{requestLine}</Flag>
+            : <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{requestLine}</Text>}
         </Section>
 
         <Rule />

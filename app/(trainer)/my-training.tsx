@@ -46,7 +46,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, KpiRow, Cta, Ghost, Notice, PartialRead, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, KpiRow, Cta, Ghost, Notice, PartialRead, Field, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { useExerciseCatalogue, type CatalogueRow } from '../../src/ui/exerciseDetail';
 import { useCatalogueThumbs } from '../../src/ui/useCatalogueThumbs';
@@ -422,13 +422,19 @@ export default function MyTraining() {
                 ))}
               </View>
             ) : null}
+            {/* Three numbers in a row with nothing over them once they have been
+                typed — and the third is the only one carrying a unit, which is
+                the coach's own kg/lb setting rather than a constant. */}
             <View style={{ flexDirection: 'row', gap: sp.sm }}>
-              <TextInput value={setCount} onChangeText={setSetCount} keyboardType="numeric" placeholder="Sets"
-                placeholderTextColor={t.ink3} accessibilityLabel="Number of sets" style={[inp, { flex: 1 }]} />
-              <TextInput value={reps} onChangeText={setReps} keyboardType="numeric" placeholder="Reps"
-                placeholderTextColor={t.ink3} accessibilityLabel="Reps per set" style={[inp, { flex: 1 }]} />
-              <TextInput value={load} onChangeText={setLoad} keyboardType="numeric" placeholder={wu}
-                placeholderTextColor={t.ink3} accessibilityLabel={`Weight in ${wu}`} style={[inp, { flex: 1 }]} />
+              <Field label="Sets" a11y="Number of sets">
+                <TextInput value={setCount} onChangeText={setSetCount} keyboardType="numeric" style={inp} />
+              </Field>
+              <Field label="Reps" a11y="Reps per set">
+                <TextInput value={reps} onChangeText={setReps} keyboardType="numeric" style={inp} />
+              </Field>
+              <Field label={wu.toUpperCase()} a11y={wu === 'kg' ? 'Load in kilograms' : 'Load in pounds'}>
+                <TextInput value={load} onChangeText={setLoad} keyboardType="numeric" style={inp} />
+              </Field>
             </View>
             {problem ? (
               <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'flex-start', marginTop: sp.md }}>

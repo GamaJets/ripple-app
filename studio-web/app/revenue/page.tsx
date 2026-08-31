@@ -85,7 +85,7 @@ interface Taking {
   memberId: string | null;
   membershipId: string | null;
   amountCents: number | null;
-  currency: string;
+  currency: string | null;
   method: string;
   takenAt: string;
 }
@@ -278,14 +278,22 @@ export default function Revenue() {
       >
         <Kpi
           label="Recurring / month"
-          text={recurring ? money(recurring.mrrCents, recurring.currency ?? 'AED') : null}
-          note={recurring?.mrrCents == null ? forecastNote : `forecast, ${recurring.pricedMembers} membership${recurring.pricedMembers === 1 ? '' : 's'}`}
+          // `recurring.currency ?? 'AED'` sat here. That null is not an
+          // absence to paper over — it is `oneCurrency()` reporting that the
+          // contributing plans DISAGREE, so the tile was printing a sum across
+          // two currencies and labelling the result dirhams. money() withholds
+          // it now and the note says which of the reasons it is.
+          text={recurring ? money(recurring.mrrCents, recurring.currency) : null}
+          note={recurring?.mrrCents == null ? forecastNote
+            : !recurring.currency ? 'these plans are priced in more than one currency, so there is no one total'
+            : `forecast, ${recurring.pricedMembers} membership${recurring.pricedMembers === 1 ? '' : 's'}`}
         />
         <Kpi
           label={`Taken (${DAYS} days)`}
-          text={cash ? money(cash.totalCents, cash.currency ?? 'AED') : null}
+          text={cash ? money(cash.totalCents, cash.currency) : null}
           note={cash?.totalCents == null
             ? (takingsErr ? 'the payments could not be read' : takingsUnread ? 'still reading' : cash?.reason)
+            : !cash.currency ? 'these payments are in more than one currency, so there is no one total'
             : `${cash.count} payment${cash.count === 1 ? '' : 's'}`}
         />
         <Kpi
@@ -337,7 +345,7 @@ interface PlanLine {
   name: string;
   interval: PlanInterval;
   active: boolean;
-  currency: string;
+  currency: string | null;
   priceCents: number | null;
   /** Active memberships sitting on this plan right now. */
   members: number;
@@ -405,7 +413,7 @@ function buildRecurring(plans: MembershipPlan[], memberships: Membership[]): Rec
       name: p.name,
       interval: p.interval,
       active: p.active,
-      currency: p.currency ?? 'AED',
+      currency: p.currency ?? null,
       priceCents,
       members,
       monthlyCents,
@@ -460,7 +468,11 @@ function buildRecurring(plans: MembershipPlan[], memberships: Membership[]): Rec
 }
 
 function Recurring({ r, state }: { r: RecurringView | null; state: Unread }) {
-  const ccy = r?.currency ?? r?.lines[0]?.currency ?? 'AED';
+  // No `?? 'AED'` at the end of this chain. The view's own currency where the
+  // plans agree on one, otherwise the first line's — and null when neither
+  // exists, which draws dashes down the column instead of pricing a British
+  // gym's plans in dirhams.
+  const ccy = r?.currency ?? r?.lines[0]?.currency ?? null;
 
   const cols: Column<PlanLine>[] = [
     { key: 'name', header: 'Plan', value: (l) => l.name,
@@ -640,7 +652,7 @@ function buildCash(rows: Taking[]): CashView {
 }
 
 function Cash({ c, state }: { c: CashView | null; state: Unread }) {
-  const ccy = c?.currency ?? 'AED';
+  const ccy = c?.currency ?? null;
 
   const cols: Column<Bucket>[] = [
     { key: 'label', header: 'How it arrived', value: (b) => b.label },
@@ -954,7 +966,10 @@ async function fetchTakings(tenantId: string, sinceIso: string): Promise<Taking[
     memberId: r.member_id ?? null,
     membershipId: r.membership_id ?? null,
     amountCents: Number.isFinite(r.amount_cents) ? r.amount_cents : null,
-    currency: r.currency ?? 'AED',
+    // Not `?? 'AED'`. The column is `not null default 'AED'`, so this branch
+    // does not fire in practice — and every currency bug in this repo was built
+    // out of "in practice". Null reaches money(), which withholds the figure.
+    currency: r.currency ?? null,
     method: r.method ?? 'other',
     takenAt: r.taken_at,
   }));
@@ -1015,14 +1030,17 @@ async function fetchPromos(tenantId: string): Promise<Promo[]> {
 
 /** The one currency these rows share, or null when they share none — because a
  *  sum across two currencies is not a sum, it is a bigger number. */
-function oneCurrency(rows: { currency: string }[]): string | null {
+function oneCurrency(rows: { currency: string | null }[]): string | null {
+  // A row with no currency of its own is not a row that agrees with the others
+  // — it is a row that cannot be added to them — so it collapses the answer to
+  // null exactly as a genuine disagreement does.
   const set = new Set(rows.map((r) => r.currency));
   return set.size === 1 ? [...set][0] : null;
 }
 
 /** Integer minor units only, and null wherever a total would be a claim rather
  *  than a fact: nothing readable to add, or more than one currency in the pile. */
-function totalOf(rows: { amountCents: number | null; currency: string }[]): number | null {
+function totalOf(rows: { amountCents: number | null; currency: string | null }[]): number | null {
   const known = rows.filter((r) => r.amountCents != null);
   if (!known.length) return null;
   if (oneCurrency(known) == null) return null;

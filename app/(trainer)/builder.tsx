@@ -715,9 +715,9 @@ export default function Builder() {
                           const f = injuryFlag(e.name, e.group || '', clientInjuries);
                           if (!f) return null;
                           return (
-                            <Text style={{ ...ty.caption, color: t.warn, marginTop: 3 }}>
+                            <Flag tone={t.warn} style={{ marginTop: 3 }}>
                               Loads their {areaLabel(f.injury.area).toLowerCase()} · {f.injury.severity}
-                            </Text>
+                            </Flag>
                           );
                         })()}
                       </View>
@@ -785,9 +785,9 @@ export default function Builder() {
                   <Cta wide label={ackBusy ? 'Confirming…' : 'I Have Read These'} onPress={confirmInjuries} />
                 </View>
                 {ackFailed ? (
-                  <Text style={{ ...ty.caption, color: t.crit, marginTop: sp.sm }}>
+                  <Flag tone={t.crit} style={{ marginTop: sp.sm }}>
                     That did not save, so nothing has been recorded. Check your connection and try again.
-                  </Text>
+                  </Flag>
                 ) : null}
               </Notice>
             </View>

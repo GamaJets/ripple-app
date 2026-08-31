@@ -13,7 +13,7 @@ import { View, Text, ScrollView, Pressable, Modal, ActivityIndicator } from 'rea
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from './components';
 import { Icon } from './Icon';
-import { Cta } from './kit';
+import { Cta, Flag } from './kit';
 import { sp, layout, radius, type as ty } from '../theme/scale';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
@@ -183,7 +183,7 @@ function WaiverScreen({ state, accept, reload, insets }: {
         </View>
 
         {err ? (
-          <Text style={{ ...ty.caption, color: t.warn, marginTop: sp.md }}>{err}</Text>
+          <Flag tone={t.warn} style={{ marginTop: sp.md }}>{err}</Flag>
         ) : null}
 
         <View style={{ marginTop: sp.lg }}>

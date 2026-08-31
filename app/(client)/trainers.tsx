@@ -7,14 +7,43 @@
 // client the coach would "confirm shortly". Everything here now comes from
 // Supabase: `trainers.listed = true` (opt-in, set by the trainer themselves)
 // and a real row in `coach_requests` that the trainer sees on their dashboard.
-// Ratings and review counts are gone — there is no review system to feed them.
+//
+// ── The two things this directory could not tell anybody ──────────────────
+//
+// The invented star ratings came off this screen when the invented coaches did,
+// and the header said for months that "there is no review system to feed them."
+// There is now — supabase/parts/139 — along with the other half of the question
+// a directory listing has to answer: what is this person qualified to do, and
+// are they insured.
+//
+// Both are shown under rules that live in src/lib, not here:
+//
+//   · A rating is a COUNT below three reviews and only becomes an average above
+//     it. `ratingDisplay` has no branch that can average two, so a single
+//     five-star cannot be rendered as "5.0" next to a coach with forty ratings.
+//   · A failed read prints NOTHING. "No reviews yet" and "no insurance stated"
+//     are claims about a named person's reputation and professional standing,
+//     and both are wrong in the state where the query merely did not answer.
+//     `ratingLine` returns null for that and `insuranceClaim(null)` is
+//     'unknown'.
+//   · Every credential is the coach's own statement and is labelled as one.
+//     Repple has not seen a certificate. `credentialBadge` cannot produce a
+//     checked-looking label for a self-declared row, and the coach cannot write
+//     the verification columns — they hold no grant on them.
+//
+// The reviews and the summary come back through SECURITY DEFINER functions
+// rather than a table read, because `coach_reviews` carries `client_id` and RLS
+// selects rows, not columns: any policy wide enough to show a review to a
+// stranger browsing this screen would also hand over the reviewer's account id.
+// Part 131 is the worked example of that mistake on this very table's neighbour
+// — `join_code` was readable by every signed-in account for the same reason.
 //
 // Re-skinned onto the instrument-panel kit (`src/ui/kit`) and the scale
 // (`src/theme/scale`): no hero (a directory has no single live number), a
 // hairline-separated directory instead of a stack of bordered cards, and a
 // <Notice> for the one thing that needs a decision — an invitation. Every
 // query, conditional and route above is untouched.
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, Pressable, ScrollView, Modal, Alert, ActivityIndicator, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -37,6 +66,16 @@ import { COACHED_MODES, COACHED_MODE_SHORT, COACHING_MODE_NOTE, type CoachedMode
 // is your coach.
 import { fetchMyCoach, type CoachRef } from '../../src/lib/photoShare';
 import { endCoaching, leaveCoachPrompt, leaveOutcome, coachLabel } from '../../src/lib/endCoaching';
+import type { LoadStatus } from '../../src/ui/loadStatus';
+import { fetchCredentials, fetchRatingSummaries, fetchReviews, todayKey } from '../../src/ui/reviews';
+import {
+  credentialBadge, credentialLine, credentialState, expiryLine, sortCredentials,
+  credentialsSummaryLine, insuranceClaim, insuranceLine, CLAIM_NOTE, type Credential,
+} from '../../src/lib/coachCredentials';
+import {
+  ratingDisplay, ratingLine, reviewListState, reviewerLabel, gymLine,
+  MAX_RATING, type RatingSummary, type Review,
+} from '../../src/lib/reviews';
 
 interface Coach {
   id: string;
@@ -66,6 +105,21 @@ export default function FindTrainer() {
   // and an unreadable list of requests are different things: the first means
   // "ask this coach", the second means "we don't know whether you already did".
   const [pendingUnknown, setPendingUnknown] = useState(false);
+  // The trust surface of a listing. Both are read for the whole page at once
+  // and both carry their own status: a directory that loads and a set of
+  // ratings that does not is a real, common state, and the coaches must still
+  // be shown — with no rating beside them rather than a fabricated "no reviews
+  // yet", which is a sentence about somebody's reputation.
+  const today = useMemo(() => todayKey(), []);
+  const [ratings, setRatings] = useState<Record<string, RatingSummary>>({});
+  const [ratingStatus, setRatingStatus] = useState<LoadStatus>('loading');
+  const [creds, setCreds] = useState<Record<string, Credential[]> | null>(null);
+  const [credStatus, setCredStatus] = useState<LoadStatus>('loading');
+  // The reviews of the one coach whose profile is open, fetched when it opens
+  // rather than for the whole directory — a page of twenty coaches is twenty
+  // review lists nobody asked to read.
+  const [selReviews, setSelReviews] = useState<Review[]>([]);
+  const [selReviewStatus, setSelReviewStatus] = useState<LoadStatus>('loading');
   // The direct path. The directory below is opt-in — a coach who has not
   // published a profile cannot be found in it at all — and the email invite
   // only arrives if the coach spelled the address exactly as the client did.
@@ -336,6 +390,24 @@ export default function FindTrainer() {
         }
 
         if (!cancelled) { setCoaches(list); setStatus('ready'); }
+
+        // ── the trust surface, in two calls for the whole page ───────────
+        //
+        // Their own branch, not the outer catch: the directory above is real
+        // and useful without either of these, and losing them must cost the
+        // rating line and the credentials line, not the list of coaches.
+        // Each sets its own status so the screen can tell "this coach has no
+        // reviews" apart from "we could not ask".
+        const listed = list.map((c) => c.id);
+        const [sum, cr] = await Promise.all([
+          fetchRatingSummaries(listed),
+          fetchCredentials(listed),
+        ]);
+        if (cancelled) return;
+        setRatings(sum.rows);
+        setRatingStatus(sum.status);
+        setCreds(cr.rows);
+        setCredStatus(cr.status);
       } catch (e) {
         reportError('findTrainer.load', e);
         if (!cancelled) setStatus('error');
@@ -375,6 +447,30 @@ export default function FindTrainer() {
       Alert.alert('Could not send request', 'Check your connection and try again.');
     }
   }, []);
+
+  // Reviews for the open profile. Reset to 'loading' the moment the sheet
+  // changes coach, so the previous coach's reviews can never sit under a new
+  // name for the length of a round trip.
+  const selId = sel?.id ?? null;
+  useEffect(() => {
+    let cancelled = false;
+    setSelReviews([]);
+    setSelReviewStatus('loading');
+    if (!selId) return;
+    (async () => {
+      const r = await fetchReviews(selId);
+      if (cancelled) return;
+      setSelReviews(r.rows);
+      setSelReviewStatus(r.status);
+    })();
+    return () => { cancelled = true; };
+  }, [selId]);
+
+  /** The rating beside a directory row, or null when nothing may be said. */
+  const rateLine = (id: string) => ratingLine(ratingDisplay(ratings[id] ?? null, ratingStatus));
+  /** What this coach has stated. `null` under a failed read, never `[]`. */
+  const credsFor = (id: string): Credential[] | null =>
+    credStatus === 'ready' && creds ? (creds[id] ?? []) : null;
 
   const G = layout.gutter;
   // `n.split(' ').map((x) => x[0]).join('')` is the obvious version and it is
@@ -541,6 +637,16 @@ export default function FindTrainer() {
                 <View style={{ flex: 1 }}>
                   <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{c.name}</Text>
                   {c.tagline ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }} numberOfLines={1}>{c.tagline}</Text> : null}
+                  {/* The two lines a person actually decides on. Each is null
+                      when the read behind it did not complete — a rating that
+                      could not be fetched leaves a gap, never "No reviews yet",
+                      and a credentials read that failed leaves a gap, never
+                      the impression that this coach has listed nothing. */}
+                  {rateLine(c.id) || credentialsSummaryLine(credsFor(c.id), today) ? (
+                    <Text style={{ ...ty.caption, color: t.ink2, marginTop: 3 }}>
+                      {[rateLine(c.id), credentialsSummaryLine(credsFor(c.id), today)].filter(Boolean).join(' · ')}
+                    </Text>
+                  ) : null}
                   {c.specialties.length > 0 || sent[c.id] ? (
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: 7, flexWrap: 'wrap' }}>
                       {sent[c.id] ? (
@@ -595,6 +701,49 @@ export default function FindTrainer() {
 
               {sel.bio ? <Text style={{ ...ty.body, color: t.ink2, marginBottom: sp.lg }}>{sel.bio}</Text> : null}
 
+              {/* ── what they say they are qualified to do ─────────────────
+                  Above the specialties and the request buttons, because it is
+                  the thing a serious client is here to check. Every row says
+                  whose claim it is; nothing on this screen may imply Repple
+                  looked at a certificate, because Repple has not. */}
+              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Qualifications & insurance</Text>
+              {credStatus === 'loading' ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.xl }}>Loading.</Text>
+              ) : credsFor(sel.id) === null ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.xl }}>
+                  We couldn’t load this. It is not a statement that {sel.name} has listed nothing.
+                </Text>
+              ) : credsFor(sel.id)!.length === 0 ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.xl }}>
+                  {sel.name} hasn’t listed any. Ask them before you book — it is a normal thing to ask.
+                </Text>
+              ) : (
+                <View style={{ marginBottom: sp.xl }}>
+                  {sortCredentials(credsFor(sel.id)!, today).map((c) => (
+                    <View key={c.id} style={{ marginBottom: sp.md }}>
+                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{c.title}</Text>
+                      {credentialLine(c) ? (
+                        <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{credentialLine(c)}</Text>
+                      ) : null}
+                      {/* expiryLine() already says "expired" in words; warn as
+                          caption ink is 3.87–4.08:1 on the three light palettes,
+                          under AA, so the tone goes into a dot beside it. This
+                          is what a member reads before choosing a coach. */}
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                        {credentialState(c, today) === 'expired' ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn, flexShrink: 0 }} /> : null}
+                        <Text style={{ ...ty.caption, color: credentialState(c, today) === 'expired' ? t.ink2 : t.ink3, flex: 1 }}>
+                          {expiryLine(c, today)} · {credentialBadge(c).label}
+                        </Text>
+                      </View>
+                    </View>
+                  ))}
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                    {insuranceLine(insuranceClaim(credsFor(sel.id), today))}
+                  </Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{CLAIM_NOTE}</Text>
+                </View>
+              )}
+
               {sel.specialties.length > 0 ? (<>
                 <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Specialties</Text>
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginBottom: sp.xl }}>
@@ -605,6 +754,68 @@ export default function FindTrainer() {
                   ))}
                 </View>
               </>) : null}
+
+              {/* ── what their clients said ───────────────────────────────
+                  Only people this coach has actually trained can write one —
+                  `can_review_coach()` answers on an active or ended
+                  relationship and never on a pending join-code request, so a
+                  stranger holding a code cannot leave one. The reviewer is a
+                  first name and nothing else: `client_id` never leaves the
+                  database. */}
+              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>
+                Reviews{ratingLine(ratingDisplay(ratings[sel.id] ?? null, ratingStatus)) ? ` · ${rateLine(sel.id)}` : ''}
+              </Text>
+              {(() => {
+                const state = reviewListState(selReviewStatus, selReviews);
+                if (state === 'loading') {
+                  return <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.xl }}>Loading.</Text>;
+                }
+                if (state === 'unreadable') {
+                  /* Not "no reviews yet". That sentence, printed about a coach
+                     whose reviews simply did not load, is a claim about their
+                     reputation that nothing here has any basis for. */
+                  return (
+                    <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.xl }}>
+                      We couldn’t load the reviews. This is our end — it does not mean there are none.
+                    </Text>
+                  );
+                }
+                if (state === 'none') {
+                  return (
+                    <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.xl }}>
+                      Nobody has reviewed {sel.name} yet. Only their current and former clients can, so a
+                      new coach starts here.
+                    </Text>
+                  );
+                }
+                return (
+                  <View style={{ marginBottom: sp.xl }}>
+                    {selReviews.map((r) => (
+                      <View key={r.id} style={{ marginBottom: sp.lg }}>
+                        <Text style={{ ...ty.caption, color: t.ink2 }}>
+                          {r.rating} / {MAX_RATING} · {reviewerLabel(r)}{r.edited ? ' · edited' : ''}
+                        </Text>
+                        {/* A review earned at another gym is shown, and said to
+                            be from another gym. Hiding it would report a coach
+                            with a record as having none; showing it unlabelled
+                            would pass one gym's work off as this one's. */}
+                        {gymLine(r) ? (
+                          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 1 }}>{gymLine(r)}</Text>
+                        ) : null}
+                        {r.body ? (
+                          <Text style={{ ...ty.body, color: t.ink2, marginTop: 4 }}>{r.body}</Text>
+                        ) : null}
+                        {r.coachReply ? (
+                          <View style={{ marginTop: sp.sm, paddingLeft: sp.md, borderLeftWidth: 2, borderLeftColor: t.ring }}>
+                            <Text style={{ ...ty.micro, color: t.ink3 }}>{sel.name.toUpperCase()} REPLIED</Text>
+                            <Text style={{ ...ty.body, color: t.ink2, marginTop: 2 }}>{r.coachReply}</Text>
+                          </View>
+                        ) : null}
+                      </View>
+                    ))}
+                  </View>
+                );
+              })()}
 
               {sent[sel.id] ? (
                 <View style={{ backgroundColor: t.surface2, borderRadius: radius.sm, padding: sp.lg, marginBottom: sp.md }}>

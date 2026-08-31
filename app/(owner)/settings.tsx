@@ -37,7 +37,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
-import { Rule, Section, SectionHead, ListRow, Ghost, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, ListRow, Ghost, Flag, fig } from '../../src/ui/kit';
 import { RepdbAttribution } from '../../src/ui/Attribution';
 import { sp, layout, hairline, type as ty, radius } from '../../src/theme/scale';
 import { BuildInfo } from '../../src/ui/BuildInfo';
@@ -352,7 +352,10 @@ export default function OwnerSettings() {
               note="Ask for your account and your data to be erased permanently"
               onPress={deleteAccount} />
           )}
-          <Text style={{ ...ty.caption, color: facts && !facts.selfRead ? t.crit : t.ink3, marginTop: sp.md }}>{requestLine}</Text>
+          {/* crit as ink is 3.03–4.05:1 on every palette. The dot carries it. */}
+          {facts && !facts.selfRead
+            ? <Flag tone={t.crit} style={{ marginTop: sp.md }}>{requestLine}</Flag>
+            : <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{requestLine}</Text>}
         </Section>
 
         <Rule />
@@ -361,7 +364,9 @@ export default function OwnerSettings() {
             this queue is actionable by an owner and by nobody else. */}
         <Section>
           <SectionHead title="Before You Delete Yourself" />
-          <Text style={{ ...ty.label, color: facts && facts.waiting == null ? t.crit : t.ink2 }}>{queueLine()}</Text>
+          {facts && facts.waiting == null
+            ? <Flag tone={t.crit}>{queueLine()}</Flag>
+            : <Text style={{ ...ty.label, color: t.ink2 }}>{queueLine()}</Text>}
           <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{ownersLine()}</Text>
           <ListRow icon="clock" title="Deletion Requests" note="The queue, and the 30-day clock running on it"
             onPress={() => router.push('/(owner)/deletions')} />

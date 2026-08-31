@@ -214,15 +214,25 @@ export default function LogSession() {
                   </Pressable>
                 </View>
 
+                {/* Column headers rather than placeholders. Every set after the
+                    first is seeded from the one above it, so from set two on
+                    the two words that said which column was reps and which was
+                    load were never on screen — and the load column's unit is
+                    the coach's own kg/lb setting, not a constant. */}
+                <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm, alignItems: 'center' }}>
+                  <View style={{ width: 46 }} />
+                  <Text style={{ ...ty.micro, color: t.ink3, flex: 1 }}>Reps</Text>
+                  <Text style={{ ...ty.micro, color: t.ink3, flex: 1 }}>{wu.toUpperCase()}</Text>
+                </View>
                 {r.sets.map((s, i) => (
                   <View key={i} style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm, alignItems: 'center' }}>
                     <Text style={{ ...ty.caption, color: t.ink3, width: 46 }}>Set {i + 1}</Text>
                     <TextInput value={s.reps} onChangeText={(v) => patchSet(r.key, i, { reps: v })}
-                      keyboardType="numeric" placeholder="Reps" placeholderTextColor={t.ink3}
+                      keyboardType="numeric"
                       accessibilityLabel={`${r.name} set ${i + 1} reps`} style={[inp, { flex: 1 }]} />
                     <TextInput value={s.kg} onChangeText={(v) => patchSet(r.key, i, { kg: v })}
-                      keyboardType="numeric" placeholder={wu} placeholderTextColor={t.ink3}
-                      accessibilityLabel={`${r.name} set ${i + 1} weight`} style={[inp, { flex: 1 }]} />
+                      keyboardType="numeric"
+                      accessibilityLabel={`${r.name} set ${i + 1} weight in ${wu === 'kg' ? 'kilograms' : 'pounds'}`} style={[inp, { flex: 1 }]} />
                   </View>
                 ))}
                 <Pressable onPress={() => addSet(r.key)} hitSlop={8} accessibilityRole="button"
@@ -245,9 +255,16 @@ export default function LogSession() {
                 different sentences. "Add a set" to somebody who added four and
                 typed one load wrong sends them looking for the wrong thing. */}
             {!ready ? (
-              <Text style={{ ...ty.caption, color: loadProblem() ? t.warn : t.ink3, textAlign: 'center', marginTop: sp.sm }}>
-                {loadProblem() ?? 'Add at least one set with a rep count.'}
-              </Text>
+              // Centred under the held button, so the tone goes into a dot in
+              // the same row rather than into the ink — warn as caption text is
+              // 3.87–4.08:1 on the light palettes, and this is the sentence
+              // that explains why the button will not move.
+              <View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 6, marginTop: sp.sm }}>
+                {loadProblem() ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn }} /> : null}
+                <Text style={{ ...ty.caption, color: loadProblem() ? t.ink2 : t.ink3, textAlign: 'center' }}>
+                  {loadProblem() ?? 'Add at least one set with a rep count.'}
+                </Text>
+              </View>
             ) : null}
           </View>
         </ScrollView>

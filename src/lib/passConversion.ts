@@ -246,7 +246,18 @@ export interface PassMoney {
   followingMrrCents: number | null;
   /** How many of those memberships are active right now. */
   followingActive: number;
-  currency: string;
+  /**
+   * The currency the priced passes were sold in, or null when NONE of them
+   * states one.
+   *
+   * It used to be `currencies[0] ?? 'AED'`, so a gym whose passes carry no
+   * currency was told its pass revenue in dirhams — a figure with a currency
+   * bolted onto it at the last moment, indistinguishable on screen from one the
+   * gym actually sold in. Null instead: the amount is known and the money it is
+   * in is not, and `money()` withholds the figure rather than denominating it
+   * for us.
+   */
+  currency: string | null;
   /** True when the passes were sold in more than one currency, in which case
    *  `passCents` adds unlike things and the screen must say so. */
   mixedCurrency: boolean;
@@ -594,7 +605,7 @@ export function moneyOf(
     passesTotal: total,
     followingMrrCents,
     followingActive,
-    currency: currencies[0] ?? 'AED',
+    currency: currencies[0] ?? null,
     mixedCurrency: currencies.length > 1,
   };
 }

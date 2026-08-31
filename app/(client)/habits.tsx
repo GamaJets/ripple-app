@@ -25,7 +25,7 @@ import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Hero, Cta, Ghost, Notice, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, Cta, Ghost, Flag, Notice, Field, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { useHabits } from '../../src/ui/habits';
 import { unsentNote } from '../../src/lib/offlineQueue';
@@ -215,15 +215,20 @@ export default function Habits() {
             Set any of these and it joins your list. Leave one blank and nothing is assumed.
           </Text>
 
-          <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.sm }}>
-            Steps a day{c.stepGoal != null ? ` · now ${c.stepGoal}` : ' · not set'}
-          </Text>
-          <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'center' }}>
+          {/* The unit for each of these three is what the whole box means, and
+              two of them have a wrong reading that looks entirely plausible:
+              7 hours of sleep and 7 minutes of it are both "7", and 8 glasses
+              and 8 ml are both "8" — the Alerts below already have to explain
+              that. So the unit is in the label, not in a placeholder that a
+              typed digit erases. */}
+          <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'flex-end' }}>
+            <Field label="Steps a day" hint={c.stepGoal != null ? `now ${c.stepGoal}` : 'not set'}>
             <TextInput
               value={stepDraft} onChangeText={setStepDraft} keyboardType="number-pad"
               placeholder={c.stepGoal != null ? String(c.stepGoal) : 'e.g. 8000'} placeholderTextColor={t.ink3}
               accessibilityLabel="Daily step goal"
-              style={{ flex: 1, ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md }} />
+              style={{ ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md }} />
+            </Field>
             <Cta label="Save" onPress={() => {
               const n = Math.round(parseFloat(stepDraft));
               if (!Number.isFinite(n) || n < STEP_MIN || n > STEP_MAX) {
@@ -240,15 +245,14 @@ export default function Habits() {
             ) : null}
           </View>
 
-          <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>
-            Sleep a night{c.sleepGoalHours != null ? ` · now ${c.sleepGoalHours}h` : ' · not set'}
-          </Text>
-          <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'center' }}>
+          <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'flex-end', marginTop: sp.lg }}>
+            <Field label="Sleep a night" hint={c.sleepGoalHours != null ? `hours · now ${c.sleepGoalHours}h` : 'hours · not set'}>
             <TextInput
               value={sleepDraft} onChangeText={setSleepDraft} keyboardType="decimal-pad"
               placeholder={c.sleepGoalHours != null ? String(c.sleepGoalHours) : 'e.g. 7.5'} placeholderTextColor={t.ink3}
               accessibilityLabel="Nightly sleep goal in hours"
-              style={{ flex: 1, ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md }} />
+              style={{ ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md }} />
+            </Field>
             <Cta label="Save" onPress={() => {
               // One decimal, matching numeric(3,1) on the column. Postgres would
               // round it anyway; doing it here means the number the client sees
@@ -268,15 +272,14 @@ export default function Habits() {
             ) : null}
           </View>
 
-          <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>
-            Water a day{c.waterGoalGlasses != null ? ` · now ${c.waterGoalGlasses} glasses` : ' · not set'}
-          </Text>
-          <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'center' }}>
+          <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'flex-end', marginTop: sp.lg }}>
+            <Field label="Water a day" hint={c.waterGoalGlasses != null ? `glasses · now ${c.waterGoalGlasses}` : 'glasses · not set'}>
             <TextInput
               value={waterDraft} onChangeText={setWaterDraft} keyboardType="number-pad"
               placeholder={c.waterGoalGlasses != null ? String(c.waterGoalGlasses) : 'e.g. 8'} placeholderTextColor={t.ink3}
               accessibilityLabel="Daily water goal in glasses"
-              style={{ flex: 1, ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md }} />
+              style={{ ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md }} />
+            </Field>
             <Cta label="Save" onPress={() => {
               const n = Math.round(parseFloat(waterDraft));
               if (!Number.isFinite(n) || n < WATER_MIN || n > WATER_MAX) {
@@ -294,9 +297,9 @@ export default function Habits() {
           </View>
 
           {c.saveFailed ? (
-            <Text style={{ ...ty.micro, color: t.warn, marginTop: sp.md }}>
+            <Flag tone={t.warn} style={{ marginTop: sp.md }}>
               Your last profile change could not be saved, so this may not have stored either.
-            </Text>
+            </Flag>
           ) : null}
         </Section>
       </ScrollView>

@@ -16,13 +16,14 @@
 // Nothing about the fallback changes. `status` simply says which copy you are
 // looking at: 'ready' means the server confirmed these slots, 'error' means
 // these came off this device and could not be checked.
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import type { LoadStatus } from './loadStatus';
 import { capLimit, capped } from '../lib/rowCap';
 import { useAuthRevision } from './authRevision';
+import { shapeSeries, type RecurringSeries, type RawSeries } from '../lib/recurring';
 
 export interface AvailSlot { id: string; dow: number; hour: number; minute: number; dur: number }
 
@@ -212,4 +213,176 @@ export function upcomingDates(dow: number, hour: number, minute = 0, weeks = 4, 
     }
   }
   return out;
+}
+
+/* ── Standing appointments ──────────────────────────────────────────────────
+ *
+ * The weekly template above is AVAILABILITY: "I am free on Tuesdays at seven",
+ * turned into concrete open slots by a Generate button somebody has to press
+ * again every month. It is the right shape for what it describes and it cannot
+ * describe a standing appointment — "Ana trains with me at seven every Tuesday"
+ * — which is the single most common fact about a personal trainer's week.
+ *
+ * `session_series` (supabase/parts/135) is that. A daily job materialises it
+ * eight weeks ahead, so nobody re-taps anything, and each occurrence is an
+ * ordinary booked session: the same waitlist, the same notice window, the same
+ * fee, the same exclusion constraint.
+ *
+ * These live here rather than in src/ui/sessions.tsx because a series is an
+ * arrangement about the WEEK, which is what this file is about, and because
+ * sessions.tsx already owns the concrete calendar the arrangement produces.
+ */
+
+/** What `create_session_series` did. `skipped` is not a failure — see the note
+ *  on clashes in part 135 — and `clashedOn` is what makes it actionable. */
+export interface SeriesCreated {
+  seriesId: string;
+  created: number;
+  skipped: number;
+  clashedOn: string[];
+}
+
+/** What `end_session_series` did. `charged` is read from the server rather than
+ *  assumed, and the server states it as false: ending a standing appointment
+ *  never prices a cancellation. */
+export interface SeriesEnded {
+  removed: number;
+  leftStanding: number;
+  effectiveOn: string | null;
+  charged: boolean;
+}
+
+/**
+ * The zone the local hour on a series is an hour IN.
+ *
+ * Null rather than a guess when the runtime cannot say. A series stored against
+ * the wrong zone is an appointment at seven in the morning somewhere nobody
+ * involved lives, and defaulting to UTC would produce exactly that silently —
+ * so the caller refuses to create one instead, and says why.
+ */
+export function deviceTimeZone(): string | null {
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return typeof tz === 'string' && tz.includes('/') ? tz : null;
+  } catch { return null; }
+}
+
+const toNum = (v: unknown): number => {
+  const n = typeof v === 'number' ? v : Number(v);
+  return Number.isFinite(n) ? n : 0;
+};
+
+/**
+ * Every standing appointment the signed-in person is a party to.
+ *
+ * One hook for both apps: `my_session_series()` returns the coach's and the
+ * client's from the same definer function, scoped by auth.uid(), so the coach
+ * screen and the client screen cannot come to disagree about what was agreed.
+ *
+ * `status` is the ordinary discipline. An empty list under 'error' means the
+ * arrangements could not be READ, not that there are none — and "you have no
+ * standing appointments" said to somebody who trains every Tuesday is exactly
+ * the class of sentence this codebase keeps having to take back.
+ */
+export function useRecurringSeries() {
+  const authRev = useAuthRevision();
+  const [series, setSeries] = useState<RecurringSeries[]>([]);
+  const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
+
+  const reload = useCallback(async () => {
+    // A series only exists on the server. There is no local fallback to show,
+    // and 'ready' over an empty list is honest here: with the backend off there
+    // is nothing that could have one.
+    if (!USE_SUPABASE) { setSeries([]); setStatus('ready'); return; }
+    try {
+      const { data: sess } = await supabase.auth.getSession();
+      if (!sess?.session) { setSeries([]); setStatus('ready'); return; }
+      const { data, error } = await supabase.rpc('my_session_series');
+      if (error) { setStatus('error'); return; }
+      setSeries(shapeSeries((data ?? []) as RawSeries[]));
+      setStatus('ready');
+    } catch { setStatus('error'); }
+  }, []);
+
+  useEffect(() => { reload(); }, [authRev, reload]);
+
+  /**
+   * Agree a standing appointment. The coach's call — `create_session_series`
+   * refuses anybody who is not the client's coach with 42501.
+   *
+   * Resolves an error string rather than throwing, because every refusal here
+   * has a sentence a coach can act on: they are not your client, that is not a
+   * zone this server knows, this device cannot tell us what zone it is in.
+   */
+  const create = useCallback(async (o: {
+    clientId: string; dow: number; hour: number; minute: number; durationMin: number;
+    startsOn?: string | null; endsOn?: string | null;
+  }): Promise<{ ok: true; report: SeriesCreated } | { ok: false; error: string }> => {
+    if (!USE_SUPABASE) {
+      return { ok: false, error: 'This build is running without the server, and a standing appointment lives on it.' };
+    }
+    const tz = deviceTimeZone();
+    if (!tz) {
+      return { ok: false, error: 'This device can’t say what time zone it is in, and a weekly appointment has to be stored against one. Set the zone in your phone’s settings and try again.' };
+    }
+    try {
+      const { data, error } = await supabase.rpc('create_session_series', {
+        p_client: o.clientId, p_dow: o.dow, p_hour: o.hour, p_minute: o.minute,
+        p_duration: o.durationMin, p_tz: tz,
+        p_starts_on: o.startsOn ?? null, p_ends_on: o.endsOn ?? null,
+      });
+      if (error || !data) return { ok: false, error: error?.message ?? 'That standing appointment was not created.' };
+      const d = data as any;
+      await reload();
+      return {
+        ok: true,
+        report: {
+          seriesId: String(d.series_id),
+          created: toNum(d.created),
+          skipped: toNum(d.skipped),
+          clashedOn: Array.isArray(d.clashed_on) ? d.clashed_on.map(String) : [],
+        },
+      };
+    } catch (e: any) {
+      return { ok: false, error: e?.message ?? 'That standing appointment was not created.' };
+    }
+  }, [reload]);
+
+  /**
+   * End it. Either party may — an agreement one side cannot leave is not one.
+   *
+   * THIS IS NOT A CANCELLATION AND IT NEVER RAISES A FEE. See the long note on
+   * `end_session_series` in part 135 and `cancelOptions` in src/lib/recurring.ts:
+   * the implementation that loops the occurrences and cancels each of them bills
+   * somebody a late fee for a year of sessions, and `charged` comes back from
+   * the server stated as false so no screen has to take this comment's word for
+   * it.
+   */
+  const end = useCallback(async (seriesId: string, effectiveOn?: string | null):
+  Promise<{ ok: true; report: SeriesEnded } | { ok: false; error: string }> => {
+    if (!USE_SUPABASE) {
+      return { ok: false, error: 'This build is running without the server, and a standing appointment lives on it.' };
+    }
+    try {
+      const { data, error } = await supabase.rpc('end_session_series', {
+        p_series: seriesId, p_effective: effectiveOn ?? null,
+      });
+      if (error || !data) return { ok: false, error: error?.message ?? 'That standing appointment is still running.' };
+      const d = data as any;
+      await reload();
+      return {
+        ok: true,
+        report: {
+          removed: toNum(d.removed),
+          leftStanding: toNum(d.left_standing),
+          effectiveOn: d.effective_on ? String(d.effective_on) : null,
+          charged: !!d.charged,
+        },
+      };
+    } catch (e: any) {
+      return { ok: false, error: e?.message ?? 'That standing appointment is still running.' };
+    }
+  }, [reload]);
+
+  return { series, status, reload, create, end };
 }

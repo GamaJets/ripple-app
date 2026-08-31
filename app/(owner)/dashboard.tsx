@@ -188,6 +188,10 @@ export default function OwnerOverview() {
             ? `${delta > 0 ? '+' : '−'}${num(Math.abs(delta))} vs last month`
             : roll.payroll30 == null
               ? 'Set a session fee in Ops to value these'
+              // Null here also covers "the gym has not set a currency", and an
+              // unguarded ${} would say "Worth null at your session fee".
+              : gymMoney(roll.payroll30, cur) == null
+              ? "Set your gym's currency in Ops to value these"
               : `Worth ${gymMoney(roll.payroll30, cur)} at your session fee`}
           onPress={() => router.push('/(owner)/revenue')}
         />

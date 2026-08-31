@@ -31,7 +31,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
-import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, Field, fig } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty, numeric, value } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
 import {
@@ -96,9 +96,15 @@ function PlateCalc({ t }: { t: Theme }) {
  <View>
  <Section>
  <SectionHead title="Load the Bar" />
- <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'center' }}>
- <TextInput value={target} onChangeText={setTarget} keyboardType="numeric" style={inp} placeholder="total kg" placeholderTextColor={t.ink3} accessibilityLabel="Target total in kilograms" />
- <Text style={{ ...ty.label, color: t.ink3 }}>bar</Text>
+ {/* "total kg" was a placeholder, so the one number on this screen you type
+     rather than read lost its unit as soon as it had a value — and the two
+     bar buttons beside it are both labelled in kg, which makes a bare figure
+     next to them read like a third one. */}
+ <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'flex-end' }}>
+ <Field label="Target total" hint="kg">
+ <TextInput value={target} onChangeText={setTarget} keyboardType="numeric" style={inp} />
+ </Field>
+ <Text style={{ ...ty.label, color: t.ink3, paddingBottom: 13 }}>bar</Text>
  {[20, 15].map((b) => {
  const on = bar === b;
  return (

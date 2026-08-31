@@ -18,10 +18,47 @@ export function makeCloudProvider(meta: ProviderMeta): WearableProvider {
   const isHealthConnect = meta.kind === 'health-connect';
   const vendor = vendorFor(meta.id);
 
+  /**
+   * The one Health Connect sentence, so the row, the alert and the sleep list
+   * cannot drift into three wordings of the same fact — which is precisely how
+   * Watch & devices and Recovery came to contradict each other about WHOOP.
+   *
+   * Both now end by naming what the person can actually use, because the real
+   * question behind tapping this row is "how do I get my phone's health data
+   * into Repple", and on Android that answer is not "nowhere": WHOOP and Oura
+   * are browser OAuth and work identically there.
+   */
+  const healthConnectReason = (): string =>
+    Platform.OS === 'android'
+      ? 'Repple can’t read Health Connect yet. It needs a piece of the Android app itself, so it can’t arrive in an update — it has to come with a new version from the Play Store. WHOOP and Oura connect here on Android today and cover the same ground.'
+      : 'Health Connect is Android’s health store, so there is nothing on this phone for it to read. Apple Health above is the equivalent here.';
+
   return {
     meta,
     isAvailable() {
-      if (isHealthConnect) return Platform.OS === 'android';
+      // False on EVERY platform, Android included. It used to return true on
+      // Android, and that one `true` was the whole Android health story:
+      //
+      //   available → not `blocked` on Watch & devices → a primary "Connect"
+      //   button → `onConnect` skips the reason alert because the provider says
+      //   it is available → `connect()` throws "Health Connect connects on
+      //   Android via the native module — added in the Android build" → the
+      //   state goes to 'error', which `describeLink` reads as 'never' → the
+      //   button returns to "Connect".
+      //
+      // So an Android client was offered a control that could only ever produce
+      // an error dialogue, and was then offered it again, with the app's own
+      // sentence inviting them to try. That is the reconnect loop this file
+      // family exists to prevent, wearing a different vendor's name: the app
+      // asking somebody to fix something only we can fix.
+      //
+      // There IS no native module. `react-native-health-connect` is a native
+      // Android dependency — a new Gradle dependency, a minSdk bump and a fresh
+      // set of manifest permission declarations — so it cannot arrive in an
+      // over-the-air update at all. Until a build carries it, "can this
+      // provider run in the current binary right now?" (the contract in
+      // types.ts) has exactly one honest answer, and it is no.
+      if (isHealthConnect) return false;
       // "once configured" was doing a lot of work in the old comment, and
       // nothing in the code. This returned true for EVERY cloud vendor —
       // including Fitbit and Garmin, whose client ids are empty strings in
@@ -38,16 +75,27 @@ export function makeCloudProvider(meta: ProviderMeta): WearableProvider {
       return isConfigured(meta.id);
     },
     unavailableReason() {
-      if (isHealthConnect && Platform.OS !== 'android') return 'Health Connect is Android-only — connect it from an Android device.';
-      if (vendor?.special === 'partnership') return vendor.note;
-      if (vendor && !isConfigured(meta.id)) return `Not set up yet. ${vendor.note}`;
+      // Two different facts, and the old single sentence — "Health Connect is
+      // Android-only — connect it from an Android device" — was the wrong one on
+      // both platforms. On an iPhone it sent somebody to look for an Android
+      // phone to do something that would not have worked there either. On
+      // Android it never rendered at all, because the provider claimed to be
+      // available and the caller's guard is `!isAvailable() && reason`.
+      if (isHealthConnect) return healthConnectReason();
+      // `clientNote`, not `note`. The owner's registration instructions — env
+      // var names, our Supabase secret names — were being printed on a client
+      // screen; see the field's own comment in oauthConfig.ts.
+      if (vendor?.special === 'partnership') return vendor.clientNote;
+      if (vendor && !isConfigured(meta.id)) return vendor.clientNote;
       return null;
     },
     async connect() {
-      if (isHealthConnect) {
-        if (Platform.OS !== 'android') throw new Error('Health Connect is Android-only.');
-        throw new Error('Health Connect connects on Android via the native module — added in the Android build.');
-      }
+      // Unreachable from Watch & devices now that `isAvailable()` is false —
+      // that screen shows the reason and never calls this. Kept as the backstop
+      // for any caller that skips the check, and saying the SAME sentence,
+      // because the previous one here ("added in the Android build") promised a
+      // build that does not exist and named a module that was never added.
+      if (isHealthConnect) throw new Error(healthConnectReason());
       await connectVendor(meta.id);
     },
     async disconnect() {
@@ -96,7 +144,7 @@ export function makeCloudProvider(meta: ProviderMeta): WearableProvider {
         return { provider: meta.id, status: 'unsupported', readings: [], reason: why };
       };
       if (isHealthConnect) {
-        return absent('Health Connect sleep arrives with the Android native module.');
+        return absent(healthConnectReason());
       }
       if (vendor?.special === 'partnership') {
         return absent(`${meta.name} needs an approved partnership before Repple can read anything from it.`);

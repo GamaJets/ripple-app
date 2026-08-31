@@ -285,6 +285,20 @@ export async function subscribeToPackage(packageId: string): Promise<{ ok: boole
  * — never immediately. They bought this month; cancelling should not take the
  * rest of it off them.
  *
+ * EITHER PARTY may call this: the client from their Memberships screen, and the
+ * coach from Payments. Both go to the same `connect-checkout` action, which
+ * reads the subscription and asks who the caller is to it — see
+ * src/lib/subscriptionScope.ts. It used to scope its lookup to
+ * `client_id = auth.uid()`, so a coach calling it got "subscription not found"
+ * every time and the coach's screen said out loud that it had no button.
+ *
+ * A refund is NOT here and is not a thing this app does. Stripe refunds are a
+ * separate API with consequences this codebase models none of — partial
+ * amounts, reversing the platform's application fee, pulling money back out of
+ * a connected account that may already have paid out to a bank. A half-working
+ * refund button is worse than no refund button, so refunds are the Stripe
+ * dashboard's, and both screens say so.
+ *
  * The result is Stripe's answer, not ours. `ok: false` means it is still
  * running, which is exactly the case where a screen must not say "cancelled".
  */
@@ -293,7 +307,8 @@ export async function cancelSubscription(subscriptionId: string): Promise<{ ok: 
 }
 
 /** Undo a pending cancellation, while it is still pending. Without this the
- *  only way back is to subscribe again — at whatever the coach charges today. */
+ *  only way back is to subscribe again — at whatever the coach charges today.
+ *  Callable by either party, for the same reason as `cancelSubscription`. */
 export async function resumeSubscription(subscriptionId: string): Promise<{ ok: boolean; endsAt?: string | null; error?: string }> {
   return setCancelAtPeriodEnd(subscriptionId, 'resume');
 }
@@ -309,7 +324,13 @@ async function setCancelAtPeriodEnd(subscriptionId: string, action: 'cancel' | '
 
 /** Stripe's hosted billing portal for the client's own coaching subscription —
  *  card, invoices, receipts. Not stripe-portal, which is the coach's Repple
- *  plan and looks the caller up as a trainer. */
+ *  plan and looks the caller up as a trainer.
+ *
+ *  The CLIENT's, and only theirs. `cancel`/`resume` were widened to the coach;
+ *  this deliberately was not. The portal opens somebody's saved card, billing
+ *  address and every receipt they have ever been sent, and a coach who needs an
+ *  invoice can ask for one. A coach calling this is refused with a 403 that says
+ *  so, rather than with a pretence that the subscription is missing. */
 export async function openSubscriptionPortal(subscriptionId: string): Promise<{ ok: boolean; error?: string }> {
   try {
     const { data, error } = await supabase.functions.invoke('connect-checkout', {

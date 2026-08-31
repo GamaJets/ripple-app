@@ -89,7 +89,7 @@ interface Invoice {
   memberName: string | null;
   membershipId: string | null;
   amountCents: number | null;
-  currency: string;
+  currency: string | null;
   issuedOn: string;
   /** Null means no due date was set — which is not the same as due today, and
    *  is why such an invoice cannot be aged. */
@@ -106,7 +106,7 @@ interface Settled {
   periodFrom: string | null;
   periodTo: string | null;
   amountCents: number | null;
-  currency: string;
+  currency: string | null;
   /** Null when the run did not record how many sessions it paid for. Not 0 —
    *  a settlement for no sessions and a settlement that forgot to say are
    *  different rows, and only one of them is worth asking about. */
@@ -153,7 +153,7 @@ type Sum =
   | { known: false; why: string };
 
 function sumOf(
-  rows: Array<{ amountCents: number | null; currency: string }>,
+  rows: Array<{ amountCents: number | null; currency: string | null }>,
   whenEmpty: string,
 ): Sum {
   if (!rows.length) return { known: false, why: whenEmpty };
@@ -166,7 +166,19 @@ function sumOf(
     };
   }
 
-  const currencies = [...new Set(rows.map((r) => r.currency))].sort();
+  // A row that states no currency is not a row that agrees with the others —
+  // it is a row that cannot be added to them. It refuses the total in its own
+  // words rather than being quietly folded into whatever the neighbours say,
+  // which is what a `?? 'AED'` up in the mapper used to do for it.
+  if (rows.some((r) => !r.currency)) {
+    const n = rows.filter((r) => !r.currency).length;
+    return {
+      known: false,
+      why: `${n} of ${rows.length} rows do not say what currency they are in, so this set cannot be totalled`,
+    };
+  }
+
+  const currencies = [...new Set(rows.map((r) => r.currency as string))].sort();
   if (currencies.length > 1) {
     return { known: false, why: `${currencies.join(' and ')} in one set — not summed` };
   }
@@ -451,7 +463,7 @@ function netOf(cashIn: Sum, cashOut: Sum, books: Books): Sum {
 interface MethodLine {
   key: string;
   method: string;
-  currency: string;
+  currency: string | null;
   count: number;
   cents: number;
 }
@@ -641,7 +653,7 @@ function NetCash({ net, w }: { net: Sum; w: MonthWindow }) {
 interface StatusLine {
   key: string;
   label: string;
-  currency: string;
+  currency: string | null;
   count: number;
   cents: number | null;
   /** Rows in this group that carry no amount — why `cents` may be null. */
@@ -1117,7 +1129,11 @@ async function fetchInvoices(tenantId: string, upToDay: string): Promise<Invoice
     // Not `?? 0`. An invoice with no amount is money of unknown size, and every
     // total on this page refuses rather than absorbs it.
     amountCents: r.amount_cents ?? null,
-    currency: r.currency ?? 'AED',
+    // Not `?? 'AED'`. The column is `not null default 'AED'`, so this branch
+    // does not fire in practice — and "in practice" is what every currency bug
+    // in this repo was made of. Null reaches money(), which withholds the
+    // figure, and sumOf() below refuses to total a set containing one.
+    currency: r.currency ?? null,
     issuedOn: r.issued_on,
     dueOn: r.due_on ?? null,
     status: r.status ?? null,
@@ -1147,7 +1163,9 @@ async function fetchSettled(tenantId: string, fromIso: string, toIso: string): P
     periodFrom: r.period_from ?? null,
     periodTo: r.period_to ?? null,
     amountCents: r.amount_cents ?? null,
-    currency: r.currency ?? 'AED',
+    // Same as the invoice mapper above. A settlement is what a coach was
+    // actually paid; if the row does not say in what, nothing here may decide.
+    currency: r.currency ?? null,
     sessionsCount: r.sessions_count ?? null,
     method: r.method ?? null,
     settledAt: r.settled_at,

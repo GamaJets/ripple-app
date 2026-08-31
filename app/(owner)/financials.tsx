@@ -25,7 +25,7 @@ import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale'
 import { emptyFinances, hasFigures, reviewFinances, type FinInputs, type FinFlag } from '../../src/lib/financialAI';
 import { reconcile, reconcileNote } from '../../src/lib/finReconcile';
 import { fetchPlans, fetchMemberships, fetchPayments, summarise } from '../../src/lib/gymRecord';
-import { useTenant, gymMoney, GYM_CURRENCY } from '../../src/ui/tenant';
+import { useTenant, gymMoney } from '../../src/ui/tenant';
 import { supabase } from '../../src/lib/supabase';
 import { reportError } from '../../src/lib/reportError';
 
@@ -35,10 +35,11 @@ const KEY = 'repple.owner.financials';
 // between them showed one business in two currencies. Every figure on this
 // screen is one the owner typed into the form below, so it is never null; the
 // dash is there because gymMoney refuses to render an unknown as 0.00.
-// Takes the gym's currency rather than the module default: part 99 added
-// `tenants.currency` so a white-labelled gym is not shown somebody else's
-// money. GYM_CURRENCY remains the fallback for a tenant that never set one.
-const moneyIn = (n: number, cur?: string | null) => gymMoney(n, cur) ?? '—';
+// Takes the gym's currency, and there is no fallback behind it: part 99 added
+// `tenants.currency` nullable on purpose, so a gym that never set one gets the
+// dash rather than somebody else's money. GYM_CURRENCY is no longer a render
+// fallback anywhere — see the note on it in src/ui/tenant.tsx.
+const moneyIn = (n: number, cur: string | null) => gymMoney(n, cur) ?? '—';
 
 // `hint` is optional now. A money field's hint IS the gym's currency, and the
 // gym is not known at module scope — it was printing GYM_CURRENCY, the module
@@ -59,7 +60,12 @@ export default function Financials() {
   const t = useTheme();
   const router = useRouter();
   const { tenant } = useTenant();
-  const cur = tenant?.currency || GYM_CURRENCY;
+  // `?? null`, not `|| GYM_CURRENCY`. Every figure on this screen is one the
+  // owner typed, so the amounts are known — but the money they are in is the
+  // gym's own answer or nothing, and a form whose fields are headed "(AED)" at
+  // a gym billing in pounds invites the owner to type pounds into a dirham
+  // field. The header below names the missing setting instead.
+  const cur = tenant?.currency ?? null;
   const money = (n: number) => moneyIn(n, cur);
   const [fin, setFin] = useState<FinInputs>(emptyFinances);
   const [hydrated, setHydrated] = useState(false);
@@ -138,7 +144,11 @@ export default function Financials() {
   }, [draft]);
 
   const ready = hasFigures(fin);
-  const r = useMemo(() => (ready ? reviewFinances(fin) : null), [fin, ready]);
+  // The review quotes amounts inside its sentences, so it needs the currency
+  // rather than a formatter: with null it writes the same analysis in
+  // percentages and leaves the figures out, which is the only honest version
+  // when nobody has said what money this gym counts in.
+  const r = useMemo(() => (ready ? reviewFinances(fin, cur) : null), [fin, ready, cur]);
   const toneColor = (tone: FinFlag['tone']) => (tone === 'good' ? t.good : tone === 'watch' ? t.warn : t.crit);
 
   const kpis: [string, string][] = r ? [
@@ -210,7 +220,7 @@ export default function Financials() {
             {FIELDS.map((f) => (
               <View key={f.key} style={{ marginBottom: sp.md }}>
                 <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>
-                  {f.label} <Text style={{ ...ty.caption, color: t.ink3 }}>({f.hint ?? cur})</Text>
+                  {f.label} <Text style={{ ...ty.caption, color: t.ink3 }}>({f.hint ?? cur ?? 'currency not set'})</Text>
                 </Text>
                 <TextInput
                   value={draft[f.key] ?? ''}
@@ -230,7 +240,11 @@ export default function Financials() {
                   if (!note) return null;
                   return (
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: 6 }}>
-                      <Text style={{ ...ty.caption, color: chk.state === 'differs' ? t.s3 : t.ink3, flex: 1 }}>
+                      {/* s3 as caption ink does not clear 4.5:1 — it is a series
+                          colour, drawn for chart lines at the 3:1 a mark needs.
+                          reconcileNote() already says the two figures differ. */}
+                      {chk.state === 'differs' ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.s3, flexShrink: 0 }} /> : null}
+                      <Text style={{ ...ty.caption, color: chk.state === 'differs' ? t.ink2 : t.ink3, flex: 1 }}>
                         {note}
                       </Text>
                       {val != null ? (
@@ -264,7 +278,9 @@ export default function Financials() {
               label="Health Score"
               figure={fig(r.score)}
               unit="/100"
-              note={`Grade ${r.grade} · ${money(r.netProfit)} net profit on a ${r.marginPct.toFixed(0)}% margin`}
+              note={cur
+                ? `Grade ${r.grade} · ${money(r.netProfit)} net profit on a ${r.marginPct.toFixed(0)}% margin`
+                : `Grade ${r.grade} · a ${r.marginPct.toFixed(0)}% net margin. The amounts are not written here because this gym has not set its currency.`}
               arc={r.score / 100}
               arcLabel="health score"
             />

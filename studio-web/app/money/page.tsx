@@ -156,9 +156,13 @@ export default function Money() {
         }}
       >
         {/* `amount`, not `money`: these are sums with no currency of their own,
-            and `money()` writes "AED" over anything it is not told. The tiles go
-            to a dash naming the missing setting instead of a figure in a money
-            nobody chose. */}
+            so they inherit the gym's. The tiles go to a dash naming the missing
+            setting instead of a figure in a money nobody chose.
+
+            `money()` used to write "AED" over anything it was not told, which
+            is what this note was warning about. It has no default any more — it
+            withholds an amount it cannot denominate — so the choice between the
+            two doors is now about clarity rather than safety. */}
         <Kpi label="Taken (30 days)" text={amount(sum?.takenCents, ccy)}
              note={sum?.takenCents == null ? (unread ?? 'nothing recorded yet')
                : !ccy ? NO_CURRENCY_NOTE
@@ -171,17 +175,18 @@ export default function Money() {
         <Kpi label="Plans on sale" text={plans ? String(plans.filter((p) => p.active).length) : null} note={plans ? undefined : (plansErr ? 'the price book could not be read' : undefined)} />
       </div>
 
-      <Plans plans={plans} readErr={plansErr} tenantId={tenantId} onChange={refresh} />
+      <Plans plans={plans} readErr={plansErr} tenantId={tenantId} ccy={ccy} onChange={refresh} />
       <Members members={members} readErr={membersErr} plans={plans} tenantId={tenantId} onChange={refresh} />
-      <Payments payments={payments} readErr={paymentsErr} members={members} tenantId={tenantId} me={me} onChange={refresh} />
+      <Payments payments={payments} readErr={paymentsErr} members={members} tenantId={tenantId} me={me} ccy={ccy} onChange={refresh} />
     </Shell>
   );
 }
 
 /* ── plans ─────────────────────────────────────────────────────────────────── */
 
-function Plans({ plans, readErr, tenantId, onChange }: {
-  plans: MembershipPlan[] | null; readErr: string | null; tenantId: string; onChange: () => void;
+function Plans({ plans, readErr, tenantId, ccy, onChange }: {
+  plans: MembershipPlan[] | null; readErr: string | null; tenantId: string;
+  ccy: TenantCurrency; onChange: () => void;
 }) {
   const [name, setName] = useState('');
   const [price, setPrice] = useState('');
@@ -193,10 +198,20 @@ function Plans({ plans, readErr, tenantId, onChange }: {
     e.preventDefault();
     const major = parseFloat(price);
     if (!name.trim() || !isFinite(major)) return;
+    // A price with no currency is not a price. `createPlan` used to stamp 'AED'
+    // over whatever it was not told and `membership_plans.currency` is `not null
+    // default 'AED'`, so a gym that never set one had its whole price book
+    // written in dirhams and read back as its own answer. The write is refused
+    // instead: nothing here can find out what money this gym charges in, and a
+    // plan is what a member is actually billed.
+    if (!ccy) {
+      setWriteErr(`That plan was not saved: ${NO_CURRENCY_NOTE}, so there is no currency to price it in. An owner sets it on the gym settings screen, and this form works the moment they have.`);
+      return;
+    }
     setBusy(true); setWriteErr(null);
     try {
       await createPlan(supabase, tenantId, {
-        name: name.trim(), priceCents: Math.round(major * 100), interval,
+        name: name.trim(), priceCents: Math.round(major * 100), interval, currency: ccy,
       });
       setName(''); setPrice(''); onChange();
     } catch (e: any) {
@@ -238,14 +253,18 @@ function Plans({ plans, readErr, tenantId, onChange }: {
     <Section title="Price book" sub="Retiring a plan keeps it on the memberships already sold on it.">
       <form onSubmit={add} style={formRow}>
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Plan name" style={{ ...field, flex: 2 }} />
-        <input value={price} onChange={(e) => setPrice(e.target.value)} placeholder="Price" inputMode="decimal" style={{ ...field, flex: 1 }} />
+        {/* The placeholder names the currency the number will be STORED in.
+            A bare "Price" is the gap that let a GBP gym type 50 into a field
+            whose write said dirhams. */}
+        <input value={price} onChange={(e) => setPrice(e.target.value)} placeholder={ccy ? `Price (${ccy})` : 'Price'} inputMode="decimal" style={{ ...field, flex: 1 }} />
         <select value={interval} onChange={(e) => setInterval(e.target.value as PlanInterval)} style={{ ...field, flex: 1 }}>
           <option value="month">per month</option>
           <option value="year">per year</option>
           <option value="once">one-off</option>
         </select>
-        <button type="submit" disabled={busy} style={primaryBtn}>Add plan</button>
+        <button type="submit" disabled={busy || !ccy} style={primaryBtn}>Add plan</button>
       </form>
+      {ccy ? null : <Banner>Plans cannot be priced until this gym sets its currency &mdash; {NO_CURRENCY_NOTE}. Guessing one would write it into every price sold on it.</Banner>}
       {writeErr ? <Banner tone="crit">{writeErr}</Banner> : null}
       {plans === null ? (
         readErr ? (
@@ -362,9 +381,9 @@ function Members({ members, readErr, plans, tenantId, onChange }: {
 
 /* ── payments ──────────────────────────────────────────────────────────────── */
 
-function Payments({ payments, readErr, members, tenantId, me, onChange }: {
+function Payments({ payments, readErr, members, tenantId, me, ccy, onChange }: {
   payments: GymPayment[] | null; readErr: string | null; members: Membership[] | null;
-  tenantId: string; me: Me; onChange: () => void;
+  tenantId: string; me: Me; ccy: TenantCurrency; onChange: () => void;
 }) {
   const [amount, setAmount] = useState('');
   const [memberId, setMemberId] = useState('');
@@ -376,6 +395,15 @@ function Payments({ payments, readErr, members, tenantId, me, onChange }: {
     e.preventDefault();
     const major = parseFloat(amount);
     if (!isFinite(major)) return;
+    // The money was handed over in something. `gym_payments.currency` is `not
+    // null default 'AED'`, so a write that does not say which stamps dirhams on
+    // a figure an owner will later reconcile against a bank statement — and
+    // nothing on the row, or on any screen reading it, marks it as a guess.
+    // Refusing costs one setting; guessing costs the ledger.
+    if (!ccy) {
+      setWriteErr(`That payment was NOT recorded: ${NO_CURRENCY_NOTE}, so there is no currency to record it in and a guessed one would be stored permanently. Set the gym's currency and enter it again \u2014 the money is still not in the record.`);
+      return;
+    }
     setBusy(true); setWriteErr(null);
     try {
       await recordPayment(supabase, tenantId, {
@@ -383,6 +411,7 @@ function Payments({ payments, readErr, members, tenantId, me, onChange }: {
         amountCents: Math.round(major * 100),
         method,
         recordedBy: me.id,
+        currency: ccy,
       });
       setAmount(''); onChange();
     } catch (e: any) {
@@ -413,7 +442,11 @@ function Payments({ payments, readErr, members, tenantId, me, onChange }: {
   return (
     <Section title="Payments taken" sub="Last 30 days. A payment appears here because somebody recorded it — never because it was inferred.">
       <form onSubmit={add} style={formRow}>
-        <input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="Amount" inputMode="decimal" style={{ ...field, flex: 1 }} />
+        {/* Names the currency this figure is STORED in, not the one the reader
+            assumes. The Members screen's twin of this form had its label
+            corrected and its write left alone, which is how a GBP gym came to
+            hold dirhams. */}
+        <input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder={ccy ? `Amount (${ccy})` : 'Amount'} inputMode="decimal" style={{ ...field, flex: 1 }} />
         <select value={memberId} onChange={(e) => setMemberId(e.target.value)} style={{ ...field, flex: 2 }}>
           {/* When the member list did not read, this dropdown holds nobody —
               which looks like a gym with no members rather than a list that
@@ -429,8 +462,9 @@ function Payments({ payments, readErr, members, tenantId, me, onChange }: {
           <option value="direct_debit">direct debit</option>
           <option value="other">other</option>
         </select>
-        <button type="submit" disabled={busy} style={primaryBtn}>Record</button>
+        <button type="submit" disabled={busy || !ccy} style={primaryBtn}>Record</button>
       </form>
+      {ccy ? null : <Banner>Payments cannot be recorded until this gym sets its currency &mdash; {NO_CURRENCY_NOTE}. A recorded amount is permanent, and it is only a number until it says what money it is.</Banner>}
       {writeErr ? <Banner tone="crit">{writeErr}</Banner> : null}
       {payments === null ? (
         readErr ? (

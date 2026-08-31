@@ -17,11 +17,15 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
-import { Rule, Section, SectionHead, Hero, ListRow, Cta, Ghost, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, ListRow, Cta, Ghost, Flag, fig } from '../../src/ui/kit';
 import { sp, layout, radius, elevation, type as ty, numeric } from '../../src/theme/scale';
-import { insideNoticeWindow, feeAmountLine, noticeLabel } from '../../src/lib/booking';
+import { insideNoticeWindow, feeAmountLine, noticeLabel, type CancellationPolicy } from '../../src/lib/booking';
 import { useSessions, useSessionWaitlistCounts, useLateCancelCharges, useMyCancellationPolicy, promoteWaitlist } from '../../src/ui/sessions';
-import { useAvailability, upcomingDates } from '../../src/ui/availability';
+import { useAvailability, upcomingDates, useRecurringSeries, deviceTimeZone } from '../../src/ui/availability';
+import {
+  DOW_NAMES, SERIES_HORIZON_DAYS, SERIES_MINUTES, RECURRING_CLASH_NOTE, RECURRING_CREDIT_NOTE,
+  cancelOptions, clashLine, createdLine, seriesLabel, type RecurringSeries,
+} from '../../src/lib/recurring';
 import { useRoster } from '../../src/ui/roster';
 import type { TrainingSession } from '../../src/lib/types';
 import { buildIcs, shareIcs } from '../../src/lib/exportShare';
@@ -54,6 +58,116 @@ function Chip({ t, label, on, onPress }: { t: Theme; label: string; on: boolean;
       <Text style={{ ...ty.label, fontWeight: on ? '500' : '400', color: on ? t.brandInk : t.ink2 }}>{label}</Text>
     </Pressable>
   );
+}
+
+// Every hour of the day.
+//
+// This was a hand-written list that ran 6am–1pm and then jumped to 4pm, so a
+// coach could not book anybody at 2pm or 3pm at all — and nothing said why.
+// Any hand-picked window is somebody's assumption about when training
+// happens: a 5am lifter, a shift worker training at 11pm, a gym that opens
+// at four. The calendar has no business deciding that, so it offers all
+// twenty-four and lets the coach pick.
+const HOURS = Array.from({ length: 24 }, (_, h) => h);
+// Quarter past, half past, quarter to. The time was whole hours only, and
+// sessions are not: an 8:30 start had to be booked as 8 or 9 and the record
+// was wrong either way. A second row rather than 64 chips in one scroller —
+// hour then minute is two short reads; one list of every quarter hour is a
+// drag through a haystack.
+//
+// Taken from src/lib/recurring rather than written out again. It is the grid
+// `trainer_availability.minute` uses and the grid `session_series_minute_chk`
+// ENFORCES: a standing appointment at 07:03 is refused by the database, so a
+// picker that could offer one would be a control whose value the server throws
+// away. One list, stated once, and the three sheets below cannot drift from it.
+const MINUTES = SERIES_MINUTES;
+/** An hour of the day as a person says it, including the 24 that means the
+ *  end of it. Written once because three places were saying it and only two
+ *  of them knew about midnight. */
+const hourLabel = (h: number) => (h === 24 ? 'midnight' : `${h % 12 || 12}${h >= 12 ? 'pm' : 'am'}`);
+/** A weekly slot's start, written once so the list row, the heading above the
+ *  picker and the Add button cannot drift apart. Minutes are always shown,
+ *  including :00 — "Wed 9am" and "Wed 9:15am" side by side reads as two
+ *  different kinds of thing. */
+const avTime = (h: number, m: number) => `${h % 12 || 12}:${String(m).padStart(2, '0')}${h >= 12 ? 'pm' : 'am'}`;
+const DURS = [30, 45, 60, 90];
+
+/**
+ * Hour, then quarter — the only way this app asks anybody for a time of day.
+ *
+ * It was written out three times in this file, once per sheet, and the copies
+ * had already come apart before: the weekly-availability sheet was still on a
+ * hand-picked 6am–8pm list of whole hours long after the Add Session sheet
+ * offered all twenty-four, so a coach could book a client at 6:45 but could not
+ * OFFER 6:45 every week. A fourth copy for standing appointments is how that
+ * happens again, so there is one control and the three sheets pass their own
+ * state into it.
+ */
+function TimeGrid({ t, hour, minute, onHour, onMinute }: {
+  t: Theme; hour: number; minute: number; onHour: (h: number) => void; onMinute: (m: number) => void;
+}) {
+  return (
+    <>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.md }}>
+        {HOURS.map((h) => (
+          <Chip key={h} t={t} label={`${h % 12 || 12}${h >= 12 ? 'pm' : 'am'}`} on={hour === h} onPress={() => onHour(h)} />
+        ))}
+      </ScrollView>
+      <View style={{ flexDirection: 'row', gap: sp.sm }}>
+        {MINUTES.map((m) => (
+          <View key={m} style={{ flex: 1 }}>
+            {/* The spoken label is the WHOLE time, not ":15". A row of four
+                pills each announcing a bare minute tells a screen-reader user
+                nothing about what they are choosing. */}
+            <Pressable onPress={() => onMinute(m)} accessibilityRole="button"
+              accessibilityState={{ selected: m === minute }}
+              accessibilityLabel={avTime(hour, m)}
+              style={{ paddingVertical: sp.sm, borderRadius: radius.pill, alignItems: 'center', backgroundColor: m === minute ? t.brand : t.surface2 }}>
+              <Text style={{ ...ty.label, ...numeric, fontWeight: m === minute ? '500' : '400', color: m === minute ? t.brandInk : t.ink2 }}>
+                :{String(m).padStart(2, '0')}
+              </Text>
+            </Pressable>
+          </View>
+        ))}
+      </View>
+    </>
+  );
+}
+
+/**
+ * The LOCAL date, in the SERIES' own zone, that an occurrence falls on —
+ * `sessions.occurrence_on` exactly as supabase/parts/135 writes it.
+ *
+ * This exists because of the one line in `end_session_series` that decides
+ * whether this feature keeps its promise. That function leaves every
+ * occurrence ON OR BEFORE the date it is given and removes the ones after it,
+ * and its default is TODAY — so calling it with the default removes the NEXT
+ * occurrence along with all the rest. The sheet that calls it has just told
+ * the coach, in as many words, that the next session stays booked: "we'll stop
+ * after next Tuesday" is what ending a standing appointment means to the two
+ * people in it. Passing this date is what makes that sentence true.
+ *
+ * Computed in the series' zone rather than the reader's because that is the
+ * zone `occurrence_on` was written in, and a date one day out either deletes
+ * the session the sheet promised to keep or leaves one extra standing.
+ */
+function occurrenceDateOf(nextAt: string, tz: string): string | null {
+  const at = new Date(nextAt);
+  if (!Number.isFinite(at.getTime())) return null;
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
+    }).formatToParts(at);
+    const part = (kind: string) => parts.find((p) => p.type === kind)?.value;
+    const y = part('year'); const m = part('month'); const d = part('day');
+    if (y && m && d) return `${y}-${m}-${d}`;
+  } catch { /* the runtime does not know that zone; the reader's own clock is below */ }
+  // The zone was not one this device's Intl knows. The reader's own date is the
+  // fallback rather than giving up: a standing appointment is created from the
+  // coach's phone and stored against the zone that phone was standing in, so
+  // for the coach reading it these are the same date.
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`;
 }
 
 let SEQ = 5000;
@@ -428,8 +542,17 @@ export default function TrainerSchedule() {
     ]);
   }
 
+  // The date comes off the SESSION rather than off `selKey`. Every caller used
+  // to be a row inside the selected day, where the two are the same string —
+  // and then the standing-appointment sheet started cancelling the next
+  // occurrence of a series, which is whatever day of the week that series falls
+  // on and almost never the day the coach has selected. Read from the selected
+  // day it asked "cancel 7am with Ana on Tue 1/9?" about a session next Tuesday
+  // the 8th, and a coach who checks the date before confirming would have been
+  // checking the wrong one.
   function confirmCancel(s: TrainingSession) {
-    Alert.alert('Cancel this session?', `${timeLabel(s.startsAt)} with ${nameOf(s.clientId)} on ${DOW[selDate.getDay()]} ${selD}/${selM + 1}.`, [
+    const d = new Date(s.startsAt);
+    Alert.alert('Cancel this session?', `${timeLabel(s.startsAt)} with ${nameOf(s.clientId)} on ${DOW[d.getDay()]} ${d.getDate()}/${d.getMonth() + 1}.`, [
       { text: 'Keep', style: 'cancel' },
       { text: 'Cancel session', style: 'destructive', onPress: () => doCancel(s) },
     ]);
@@ -496,32 +619,6 @@ export default function TrainerSchedule() {
       { text: `Notify ${ids.length}`, onPress: () => { void doReoffer(s, ids); } },
     ]);
   }
-
-  // Every hour of the day.
-  //
-  // This was a hand-written list that ran 6am–1pm and then jumped to 4pm, so a
-  // coach could not book anybody at 2pm or 3pm at all — and nothing said why.
-  // Any hand-picked window is somebody's assumption about when training
-  // happens: a 5am lifter, a shift worker training at 11pm, a gym that opens
-  // at four. The calendar has no business deciding that, so it offers all
-  // twenty-four and lets the coach pick.
-  const HOURS = Array.from({ length: 24 }, (_, h) => h);
-  // Quarter past, half past, quarter to. The time was whole hours only, and
-  // sessions are not: an 8:30 start had to be booked as 8 or 9 and the record
-  // was wrong either way. A second row rather than 64 chips in one scroller —
-  // hour then minute is two short reads; one list of every quarter hour is a
-  // drag through a haystack.
-  const MINUTES = [0, 15, 30, 45];
-  /** An hour of the day as a person says it, including the 24 that means the
-   *  end of it. Written once because three places were saying it and only two
-   *  of them knew about midnight. */
-  const hourLabel = (h: number) => (h === 24 ? 'midnight' : `${h % 12 || 12}${h >= 12 ? 'pm' : 'am'}`);
-  /** A weekly slot's start, written once so the list row, the heading above the
-   *  picker and the Add button cannot drift apart. Minutes are always shown,
-   *  including :00 — "Wed 9am" and "Wed 9:15am" side by side reads as two
-   *  different kinds of thing. */
-  const avTime = (h: number, m: number) => `${h % 12 || 12}:${String(m).padStart(2, '0')}${h >= 12 ? 'pm' : 'am'}`;
-  const DURS = [30, 45, 60, 90];
 
   const G = layout.gutter;
   const totalSlots = booked.length + open.length;
@@ -687,15 +784,23 @@ export default function TrainerSchedule() {
             // "No sessions this day" is a claim about the coach's diary, and it
             // may only be made when the diary was actually read. Under 'error'
             // this is the sentence that sends a coach home.
-            <Text style={{ ...ty.label, color: !known ? t.warn : t.ink3 }}>
-              {!known
-                ? 'Your calendar could not be read, so nothing can be shown for this day. This is a connection problem, not an empty day — do not book over it until it loads.'
-                : sessionsStatus === 'loading'
+            // The unread case is a Flag, not warn-coloured ink: warn as label
+            // text is 3.87–4.08:1 on the three light palettes, so the one
+            // sentence telling a coach not to book over the day was the one
+            // they could not read on a bright screen.
+            !known ? (
+              <Flag tone={t.warn}>
+                Your calendar could not be read, so nothing can be shown for this day. This is a connection problem, not an empty day — do not book over it until it loads.
+              </Flag>
+            ) : (
+              <Text style={{ ...ty.label, color: t.ink3 }}>
+                {sessionsStatus === 'loading'
                   ? 'Reading your calendar…'
                   : sessionsStatus === 'partial'
                     ? 'Nothing came back for this day, but only part of your calendar loaded — so this day may not be empty. Pull down to refresh.'
                     : 'No sessions this day. Tap Add to book one.'}
-            </Text>
+              </Text>
+            )
           ) : selDaySessions.map((s, i) => (
             <View key={s.id}>
               {i > 0 ? <Rule /> : null}
@@ -777,9 +882,9 @@ export default function TrainerSchedule() {
             <SectionHead title="Late-Cancellation Fees"
               note={feeStatus === 'error' ? 'Not read' : feeStatus === 'partial' ? 'Part of the list' : undefined} />
             {feeStatus === 'error' ? (
-              <Text style={{ ...ty.label, color: t.warn }}>
+              <Flag tone={t.warn}>
                 We couldn’t read your late-cancellation fees. This is not a statement that there are none — any fee already recorded still stands.
-              </Text>
+              </Flag>
             ) : (<>
               <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
                 Recorded when a client cancelled inside your notice period. Repple does not collect these — you settle them with the client.
@@ -837,30 +942,14 @@ export default function TrainerSchedule() {
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.md }}>
               {DOW.map((d, i) => <Chip key={d} t={t} label={d} on={avDow === i} onPress={() => setAvDow(i)} />)}
             </ScrollView>
-            {/* The same two rows the Add Session sheet uses, deliberately: hour
-                then quarter. This sheet was still on a hand-written 6am–8pm
-                list of whole hours — the assumption about when training happens
-                that HOURS above exists to refuse, and no way at all to offer
-                6:45 every Tuesday. */}
+            {/* The same control the Add Session and Standing Appointment
+                sheets use, deliberately: hour then quarter. This sheet was
+                still on a hand-written 6am–8pm list of whole hours — the
+                assumption about when training happens that HOURS exists to
+                refuse, and no way at all to offer 6:45 every Tuesday. */}
             <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.md }}>Time · {avTime(avHour, avMinute)}</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.md }}>
-              {HOURS.map((h) => (
-                <Chip key={h} t={t} label={`${h % 12 || 12}${h >= 12 ? 'pm' : 'am'}`} on={avHour === h} onPress={() => setAvHour(h)} />
-              ))}
-            </ScrollView>
-            <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.md }}>
-              {MINUTES.map((m) => (
-                <View key={m} style={{ flex: 1 }}>
-                  <Pressable onPress={() => setAvMinute(m)} accessibilityRole="button"
-                    accessibilityState={{ selected: m === avMinute }}
-                    accessibilityLabel={avTime(avHour, m)}
-                    style={{ paddingVertical: sp.sm, borderRadius: radius.pill, alignItems: 'center', backgroundColor: m === avMinute ? t.brand : t.surface2 }}>
-                    <Text style={{ ...ty.label, ...numeric, fontWeight: m === avMinute ? '500' : '400', color: m === avMinute ? t.brandInk : t.ink2 }}>
-                      :{String(m).padStart(2, '0')}
-                    </Text>
-                  </Pressable>
-                </View>
-              ))}
+            <View style={{ marginBottom: sp.md }}>
+              <TimeGrid t={t} hour={avHour} minute={avMinute} onHour={setAvHour} onMinute={setAvMinute} />
             </View>
             {/* The result was discarded, and it is the half that matters: this
                 sheet is the template the month is generated from, so a weekly
@@ -923,28 +1012,9 @@ export default function TrainerSchedule() {
             <Text style={{ ...ty.head, color: t.ink }}>Add Session</Text>
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>{DOW[selDate.getDay()]}, {MON[selM]} {selD}</Text>
 
-            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.md }}>
-              Time · {(addHour % 12) || 12}:{String(addMinute).padStart(2, '0')}{addHour >= 12 ? 'pm' : 'am'}
-            </Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.md }}>
-              {HOURS.map((h) => {
-                const sel = h === addHour; const ap = h >= 12 ? 'pm' : 'am'; const hh = h % 12 || 12;
-                return <Chip key={h} t={t} label={`${hh}${ap}`} on={sel} onPress={() => setAddHour(h)} />;
-              })}
-            </ScrollView>
-            <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.lg }}>
-              {MINUTES.map((m) => (
-                <View key={m} style={{ flex: 1 }}>
-                  <Pressable onPress={() => setAddMinute(m)} accessibilityRole="button"
-                    accessibilityState={{ selected: m === addMinute }}
-                    accessibilityLabel={`${(addHour % 12) || 12}:${String(m).padStart(2, '0')}${addHour >= 12 ? 'pm' : 'am'}`}
-                    style={{ paddingVertical: sp.sm, borderRadius: radius.pill, alignItems: 'center', backgroundColor: m === addMinute ? t.brand : t.surface2 }}>
-                    <Text style={{ ...ty.label, ...numeric, fontWeight: m === addMinute ? '500' : '400', color: m === addMinute ? t.brandInk : t.ink2 }}>
-                      :{String(m).padStart(2, '0')}
-                    </Text>
-                  </Pressable>
-                </View>
-              ))}
+            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.md }}>Time · {avTime(addHour, addMinute)}</Text>
+            <View style={{ marginBottom: sp.lg }}>
+              <TimeGrid t={t} hour={addHour} minute={addMinute} onHour={setAddHour} onMinute={setAddMinute} />
             </View>
 
             <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.md }}>Duration</Text>
@@ -975,13 +1045,17 @@ export default function TrainerSchedule() {
                 is still loading, the read failed, or there genuinely is
                 nobody. */}
             {roster.length === 0 ? (
-              <Text style={{ ...ty.caption, color: rosterStatus === 'error' ? t.warn : t.ink3, marginBottom: sp.xl }}>
-                {rosterStatus === 'loading'
-                  ? 'Reading your clients…'
-                  : rosterStatus === 'error'
-                    ? 'Your clients could not be read, so none can be listed here. This is a connection problem, not an empty book — you can still add an open slot.'
+              rosterStatus === 'error' ? (
+                <Flag tone={t.warn} style={{ marginBottom: sp.xl }}>
+                  Your clients could not be read, so none can be listed here. This is a connection problem, not an empty book — you can still add an open slot.
+                </Flag>
+              ) : (
+                <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.xl }}>
+                  {rosterStatus === 'loading'
+                    ? 'Reading your clients…'
                     : 'No clients on your roster yet, so there is nobody to book. Add one from the Clients tab, or leave this as an open slot for somebody to take.'}
-              </Text>
+                </Text>
+              )
             ) : rosterStatus === 'partial' ? (
               <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.xl }}>
                 Part of your roster did not load, so somebody may be missing from this list.

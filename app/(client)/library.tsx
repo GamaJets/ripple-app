@@ -48,7 +48,7 @@ import { ExerciseVideo } from '../../src/ui/ExerciseVideo';
 import { useExerciseVideos, type VideoItem } from '../../src/ui/exerciseVideos';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { tapLight, notifySuccess } from '../../src/ui/haptics';
-import { Rule, Section, SectionHead, ListRow, Notice, Cta, Ghost, PartialRead } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, ListRow, Notice, Cta, Ghost, PartialRead, Field } from '../../src/ui/kit';
 import { useExerciseCatalogue } from '../../src/ui/exerciseDetail';
 import { catalogueValue as cap, num } from '../../src/lib/format';
 import { Image as ExpoImage } from 'expo-image';
@@ -420,12 +420,19 @@ export default function Library() {
         ))}
        </View>
       ) : null}
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
-       <TextInput value={reps} onChangeText={setReps} keyboardType="numeric" placeholder="Reps" placeholderTextColor={t.ink3}
-        accessibilityLabel="Reps" style={{ flex: 1, ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 10 }} />
-       <Text style={{ ...ty.caption, color: t.ink3 }}>×</Text>
-       <TextInput value={kg} onChangeText={setKg} keyboardType="numeric" placeholder="kg" placeholderTextColor={t.ink3}
-        accessibilityLabel="Weight in kilos, blank for bodyweight" style={{ flex: 1, ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 10 }} />
+      {/* The unit lived in the placeholder, so it was gone the moment either
+          box had a number in it — and a bare pair of numerals either side of a
+          × is exactly how somebody types pounds into a kilogram field. */}
+      <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: sp.sm }}>
+       <Field label="Reps">
+        <TextInput value={reps} onChangeText={setReps} keyboardType="numeric"
+         style={{ ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 10 }} />
+       </Field>
+       <Text style={{ ...ty.caption, color: t.ink3, paddingBottom: 12 }}>×</Text>
+       <Field label="KG" a11y="Load in kilograms, blank for a bodyweight set">
+        <TextInput value={kg} onChangeText={setKg} keyboardType="numeric"
+         style={{ ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 10 }} />
+       </Field>
        <Pressable onPress={addSet} accessibilityRole="button" accessibilityLabel="Add another set"
         style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 }}>
         <Icon name="plus" size={16} color={t.ink2} />

@@ -234,13 +234,19 @@ export default function Goal() {
                         <Text style={{ ...ty.body, color: x.achievedAtISO ? t.ink3 : t.ink, fontWeight: '600' }}>
                           {goalLabel(x)}{measured && x.targetValue != null ? ` · ${fig(goalValue(x.targetValue, x.kind as MeasuredKind, wu))} ${unit}` : ''}
                         </Text>
-                        <Text style={{ ...ty.micro, color: overdue ? t.warn ?? t.ink3 : t.ink3, marginTop: 2 }}>
-                          {x.achievedAtISO
-                            ? `Done ${shortDate(x.achievedAtISO)}`
-                            : x.targetDateISO
-                              ? (overdue ? `Target date passed (${shortDate(x.targetDateISO)})` : `By ${shortDate(x.targetDateISO)}`)
-                              : 'No target date'}
-                        </Text>
+                        {/* The words say "Target date passed"; the dot carries the
+                            tone. warn as micro ink is 3.87–4.08:1 on the three
+                            light palettes, under AA at 11pt. */}
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 2 }}>
+                          {overdue ? <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: t.warn, flexShrink: 0 }} /> : null}
+                          <Text style={{ ...ty.micro, color: overdue ? t.ink2 : t.ink3, flex: 1 }}>
+                            {x.achievedAtISO
+                              ? `Done ${shortDate(x.achievedAtISO)}`
+                              : x.targetDateISO
+                                ? (overdue ? `Target date passed (${shortDate(x.targetDateISO)})` : `By ${shortDate(x.targetDateISO)}`)
+                                : 'No target date'}
+                          </Text>
+                        </View>
                         {/* What the readings can and cannot say about this goal. */}
                         {measured ? (
                           <Text style={{ ...ty.micro, color: t.ink3, marginTop: 3 }}>

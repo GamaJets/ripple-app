@@ -195,7 +195,12 @@ async function fetchMySettlements(tenantId: string, trainerId: string): Promise<
       periodFrom: r.period_from,
       periodTo: r.period_to,
       amountCents: r.amount_cents ?? 0,
-      currency: r.currency ?? 'AED',
+      // Not `?? 'AED'`. This is what a coach was actually handed; the column is
+      // `not null default 'AED'` so the branch does not fire in practice, and
+      // "in practice" is what every currency bug in this repo was made of. Null
+      // reaches money(), which withholds the figure rather than denominating
+      // somebody's pay for them.
+      currency: r.currency ?? null,
       sessionsCount: r.sessions_count ?? 0,
       method: r.method ?? 'transfer',
       note: r.note ?? null,
@@ -676,7 +681,8 @@ function Paid({ runs, unread, sessionsUnread, period }: {
     { key: 'amount', header: 'Amount', value: (r) => r.amountCents, numeric: true,
       // Snapshotted when the money went out, never recomputed — a later change
       // to a rate must not rewrite what a coach was actually handed.
-      render: (r) => money(r.amountCents, r.currency) },
+      render: (r) => money(r.amountCents, r.currency)
+        ?? <span className="dash">{r.amountCents == null ? 'not recorded' : NO_CURRENCY_NOTE}</span> },
   ];
   return (
     <Section

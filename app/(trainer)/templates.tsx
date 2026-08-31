@@ -45,7 +45,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Cta, Ghost, Notice, PartialRead } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Cta, Ghost, Flag, Notice, PartialRead } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { useInjuryAcks } from '../../src/ui/injuryAcks';
@@ -298,14 +298,23 @@ export default function Templates() {
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{c.name}</Text>
-                      <Text style={{ ...ty.caption, color: replaces ? t.warn : t.ink3, marginTop: 2 }}>
-                        {c.goal}{replaces ? ' · replaces the program they are on' : ''}
-                      </Text>
+                      {/* The warning is a DOT, not the ink. warn as caption text
+                          measures 3.87–4.08:1 on the three light palettes —
+                          under AA — so "replaces the program they are on" was
+                          hardest to read on the coach who most needed it. The
+                          words carry the meaning; the dot carries the tone at
+                          the 3:1 a mark has to clear. */}
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                        {replaces ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn, flexShrink: 0 }} /> : null}
+                        <Text style={{ ...ty.caption, color: replaces ? t.ink2 : t.ink3, flex: 1 }}>
+                          {c.goal}{replaces ? ' · replaces the program they are on' : ''}
+                        </Text>
+                      </View>
                       {/* Their own sentence, on their own row. A count of how
                           many are held tells the coach nothing about whose
                           shoulder it is. */}
                       {held ? (
-                        <Text style={{ ...ty.caption, color: t.warn, marginTop: 4 }}>{held.reason}</Text>
+                        <Flag tone={t.warn} style={{ marginTop: 4 }}>{held.reason}</Flag>
                       ) : null}
                     </View>
                   </Pressable>

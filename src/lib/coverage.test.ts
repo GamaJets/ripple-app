@@ -234,9 +234,22 @@ ok(s2.mrrCents === null, 'no active priced membership means unknown MRR, not 0')
 const s3 = summarise([], [mem('a', null)], plans);
 ok(s3.mrrCents === null, 'membership with no plan cannot contribute a price');
 
-ok(money(null) === null, 'money(null) must stay null so a caller cannot render 0.00 for unknown');
+ok(money(null, 'AED') === null, 'money(null) must stay null so a caller cannot render 0.00 for unknown');
 ok(money(123456, 'AED') === 'AED 1,234.56', `money formats minor units (got ${money(123456,'AED')})`);
-ok(money(0) === 'AED 0.00', 'a real zero still formats as zero');
+ok(money(0, 'AED') === 'AED 0.00', 'a real zero still formats as zero');
+ok(money(123456, 'GBP') === 'GBP 1,234.56', 'and it formats whatever currency it is handed, not the one it was born with');
+
+// The assertion this replaced was `money(0) === 'AED 0.00'` — it pinned the
+// 'AED' default in place, so the default could not be removed without a red
+// test run, which is most of why it survived for months. An unknown currency is
+// now the same silence as an unknown amount: null, so the screen draws a dash
+// and says the gym has not set one. It is emphatically NOT a bare number —
+// "1,234.56" beside a Pay button is read in whatever money the reader happens
+// to be thinking in, which is the wrong-amount bug wearing a disguise.
+ok(money(123456) === null, 'no currency means no figure — never a guessed one, never a bare one');
+ok(money(123456, null) === null, 'an explicitly unknown currency is the same refusal');
+ok(money(123456, '') === null, 'and so is an empty one, which is how an unset tenants.currency arrives after a trim');
+ok(money(null) === null, 'neither amount nor currency is still just one dash');
 
 
 // ── timetable and attendance ────────────────────────────────────────────────
@@ -1202,8 +1215,21 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
   ok(p.ready[0].interval === 'month', 'month read');
   ok(p.ready[1].interval === 'year', 'year read');
   ok(p.ready[2].interval === 'once', 'one-off read');
-  ok(p.ready[0].currency === 'AED', 'currency defaults');
+  // This used to assert `currency === 'AED'` — "currency defaults" — and the
+  // assertion was doing real harm: it pinned a parser into stamping dirhams on
+  // every sheet that has no currency column, which is most of them, and a price
+  // book imported from a British gym's old system landed in the wrong money for
+  // the whole file in one press. A sheet that does not say is a sheet that does
+  // not say. The import screen fills it from the gym, whose currency it knows,
+  // and refuses the import when the gym has not set one either.
+  ok(p.ready[0].currency === null, 'a sheet with no currency column states no currency — it does not default to one');
   ok(p.ready[0].active === true, 'plans default to on sale');
+
+  // A sheet that DOES say is believed, and it outranks the gym's own currency
+  // at the import screen: it is what that plan was actually priced in.
+  const withCcy = previewPlans('name,price,interval,currency\nOff-peak,180,month,GBP\n');
+  ok(withCcy.ready.length === 1 && withCcy.ready[0].currency === 'GBP',
+    'a currency column is read and kept, rather than being overwritten by a default');
 
   // The refusal that matters most. membership_plans.interval accepts only
   // month/year/once, so a quarterly plan has nowhere truthful to go: mapping
@@ -4207,9 +4233,13 @@ function by2(v: ReturnType<typeof buildStaff>, id: string) {
   ok(payroll30For([], 75) === 0, 'no trainers is a measured zero — there is nobody to pay');
 
   // money() takes MINOR units. This is the conversion the console got wrong.
-  ok(money(6300) === 'AED 63.00', 'money() divides by 100 — 6300 minor units is 63.00');
-  ok(money(Math.round((payroll30For([t(84)], 75) ?? 0) * 100)) === 'AED 6,300.00',
+  // The currency is passed explicitly here because money() no longer has one to
+  // fall back on — the gym whose payroll this is is the only thing that knows.
+  ok(money(6300, 'AED') === 'AED 63.00', 'money() divides by 100 — 6300 minor units is 63.00');
+  ok(money(Math.round((payroll30For([t(84)], 75) ?? 0) * 100), 'AED') === 'AED 6,300.00',
     'so a payroll30For result must be scaled to minor units before formatting');
+  ok(money(Math.round((payroll30For([t(84)], 75) ?? 0) * 100), 'GBP') === 'GBP 6,300.00',
+    'and a London gym owed 6,300 pounds is not shown a dirham figure for them');
 }
 
 // ── a read at the row limit is not the whole set ───────────────────────────

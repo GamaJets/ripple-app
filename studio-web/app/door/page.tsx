@@ -405,7 +405,11 @@ function Passes({ passes, types, members, summary, passesUnread, typesUnread, te
       render: (p) => p.expiresOn ?? <span className="dash">no expiry</span> },
     { key: 'paid', header: 'Paid', value: (p) => p.paidCents ?? -1, numeric: true,
       // Null is a pass nobody priced, which is not a free pass.
-      render: (p) => p.paidCents == null ? <span className="dash">not recorded</span> : money(p.paidCents, p.currency) },
+      // money() is null when the ROW states no currency, which is a second
+      // silence and gets its own words — an amount with no currency is not an
+      // amount, and printing the bare number invites the reader to supply one.
+      render: (p) => p.paidCents == null ? <span className="dash">not recorded</span>
+        : money(p.paidCents, p.currency) ?? <span className="dash">no currency on this pass</span> },
     { key: 'status', header: 'Status', value: (p) => passStatus(p, today) },
     { key: 'take', header: '', value: () => 0, align: 'right',
       render: (p) => passStatus(p, today) === 'live'
@@ -444,7 +448,7 @@ function Passes({ passes, types, members, summary, passesUnread, typesUnread, te
             <option value="">Pass type…</option>
             {(types ?? []).filter((t) => t.active).map((t) => (
               <option key={t.id} value={t.id}>
-                {t.name} — {money(t.priceCents, t.currency)}{t.uses > 1 ? ` (${t.uses} visits)` : ''}
+                {t.name}{money(t.priceCents, t.currency) ? ` — ${money(t.priceCents, t.currency)}` : ''}{t.uses > 1 ? ` (${t.uses} visits)` : ''}
               </option>
             ))}
           </select>

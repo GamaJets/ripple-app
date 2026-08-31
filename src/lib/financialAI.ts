@@ -12,8 +12,12 @@
 // the review so an un-filled screen shows an empty state instead of fiction.
 
 export interface FinInputs {
-  revenue: number;      // total monthly revenue (AED)
-  expenses: number;     // total monthly expenses (AED)
+  // MAJOR units, in the gym's own currency — whatever `tenants.currency` says
+  // it is. These comments used to read "(AED)" and the formatter below used to
+  // agree with them, which is how a white-label product came to tell a London
+  // gym how many dirhams of profit it keeps.
+  revenue: number;      // total monthly revenue
+  expenses: number;     // total monthly expenses
   mrr: number;          // recurring membership revenue
   members: number;      // active members
   newMembers: number;   // joined this month
@@ -31,7 +35,24 @@ export interface FinReview {
   improvements: FinFlag[];
 }
 
-const money = (n: number) => 'AED ' + Math.round(n).toLocaleString();
+/**
+ * A whole-currency figure for the review sentences, in the gym's own money.
+ *
+ * This was `'AED ' + Math.round(n).toLocaleString()` — a currency hardcoded
+ * into a module that a white-labelled product runs for every gym on it. It was
+ * not a label somewhere quiet either: it is spliced into the prose of every
+ * strength, every improvement and the summary paragraph, so a Manchester
+ * owner opening Financial health read "You keep AED 12,000 of every month's
+ * AED 60,000 — strong operating discipline" about pounds. A wrong symbol in
+ * front of a number is not cosmetic, it is a different amount, and this one
+ * arrives inside a sentence that sounds like advice.
+ *
+ * `currency` is threaded in from the caller rather than defaulted, because
+ * `tenants.currency` is nullable on purpose and a gym that has not set one has
+ * no figure to be told — see `reviewFinances`, which withholds the sentence
+ * rather than picking a currency for it.
+ */
+const moneyIn = (n: number, currency: string) => `${currency} ${Math.round(n).toLocaleString()}`;
 const pct = (n: number) => (n >= 0 ? '' : '') + n.toFixed(1) + '%';
 
 /** All-zero starting point. The owner fills these in (or accounting supplies them). */
@@ -44,7 +65,23 @@ export function hasFigures(f: FinInputs): boolean {
   return f.revenue > 0 || f.expenses > 0 || f.members > 0;
 }
 
-export function reviewFinances(f: FinInputs): FinReview {
+/**
+ * `currency` is REQUIRED and may be null, and the two are different answers.
+ *
+ * A string is the gym's own ISO code and every figure below is written in it.
+ * Null means `tenants.currency` is unset — the gym has not told us — and every
+ * sentence that would have contained a money figure is replaced by one that
+ * does not. The alternatives were both worse: a bare "12,000" is read in
+ * whatever money the owner is thinking in, and a guessed "AED 12,000" is read
+ * as a fact somebody established. The scores, grades and percentages are
+ * currency-free and are unaffected either way, so the review still works —
+ * it just stops quoting amounts it cannot denominate.
+ */
+export function reviewFinances(f: FinInputs, currency: string | null): FinReview {
+  // One local so the sentences below read as sentences. `m()` returns null when
+  // the currency is unknown and each call site picks its wording from that,
+  // rather than every branch repeating the ternary.
+  const m = (n: number): string | null => (currency ? moneyIn(n, currency) : null);
   const netProfit = f.revenue - f.expenses;
   const marginPct = f.revenue > 0 ? (netProfit / f.revenue) * 100 : 0;
   const churnPct = f.members > 0 ? (f.churnedMembers / f.members) * 100 : 0;
@@ -62,9 +99,9 @@ export function reviewFinances(f: FinInputs): FinReview {
   const strengths: FinFlag[] = [];
   const improvements: FinFlag[] = [];
 
-  if (marginPct >= 20) strengths.push({ tone: 'good', title: `Healthy ${marginPct.toFixed(0)}% net margin`, detail: `You keep ${money(netProfit)} of every month's ${money(f.revenue)} — strong operating discipline.` });
-  else if (marginPct >= 8) improvements.push({ tone: 'watch', title: `Margin is moderate at ${marginPct.toFixed(0)}%`, detail: `Net profit is ${money(netProfit)}/mo. Review your largest cost lines (staff, rent, platform) — a few points of margin compounds fast.` });
-  else improvements.push({ tone: 'risk', title: `Thin margin at ${marginPct.toFixed(0)}%`, detail: `Only ${money(netProfit)} of ${money(f.revenue)} is profit. Prioritise cost review or a modest membership price increase before adding overhead.` });
+  if (marginPct >= 20) strengths.push({ tone: 'good', title: `Healthy ${marginPct.toFixed(0)}% net margin`, detail: m(netProfit) ? `You keep ${m(netProfit)} of every month's ${m(f.revenue)} — strong operating discipline.` : `You keep ${marginPct.toFixed(0)}% of every month's revenue — strong operating discipline. The amounts are not written here because this gym has not set its currency.` });
+  else if (marginPct >= 8) improvements.push({ tone: 'watch', title: `Margin is moderate at ${marginPct.toFixed(0)}%`, detail: m(netProfit) ? `Net profit is ${m(netProfit)}/mo. Review your largest cost lines (staff, rent, platform) — a few points of margin compounds fast.` : `Net profit is ${marginPct.toFixed(0)}% of revenue. Review your largest cost lines (staff, rent, platform) — a few points of margin compounds fast.` });
+  else improvements.push({ tone: 'risk', title: `Thin margin at ${marginPct.toFixed(0)}%`, detail: m(netProfit) ? `Only ${m(netProfit)} of ${m(f.revenue)} is profit. Prioritise cost review or a modest membership price increase before adding overhead.` : `Only ${marginPct.toFixed(0)}% of revenue is profit. Prioritise cost review or a modest membership price increase before adding overhead.` });
 
   if (churnPct <= 3) strengths.push({ tone: 'good', title: `Low churn (${churnPct.toFixed(1)}%/mo)`, detail: `Members are staying — retention is your cheapest growth lever and it's working.` });
   else if (churnPct <= 6) improvements.push({ tone: 'watch', title: `Churn to watch (${churnPct.toFixed(1)}%/mo)`, detail: `You lose ${f.churnedMembers} members/mo. A win-back offer and a check-in on low-attendance members could recover several of them.` });
@@ -75,16 +112,16 @@ export function reviewFinances(f: FinInputs): FinReview {
   else improvements.push({ tone: 'risk', title: `Shrinking membership`, detail: `You lost ${Math.abs(netAdds)} net members. Fix retention first, then drive acquisition — a promotion pushed to lapsed members is a fast win.` });
 
   if (recurringShare >= 70) strengths.push({ tone: 'good', title: `${recurringShare.toFixed(0)}% recurring revenue`, detail: `Predictable membership income de-risks the business.` });
-  if (f.ptRevenue + f.classRevenue < f.revenue * 0.15) improvements.push({ tone: 'watch', title: `Ancillary revenue is light`, detail: `PT + classes are only ${money(f.ptRevenue + f.classRevenue)}/mo. Promote packs and premium classes to members already in the door — high margin, low cost.` });
+  if (f.ptRevenue + f.classRevenue < f.revenue * 0.15) improvements.push({ tone: 'watch', title: `Ancillary revenue is light`, detail: m(f.ptRevenue + f.classRevenue) ? `PT + classes are only ${m(f.ptRevenue + f.classRevenue)}/mo. Promote packs and premium classes to members already in the door — high margin, low cost.` : `PT + classes are under a sixth of revenue. Promote packs and premium classes to members already in the door — high margin, low cost.` });
 
   // `grade >= 'A'` was a string comparison, and every grade from A to E sorts at
   // or above 'A' — so this branch always won and the two honest summaries below
   // were dead code. A gym on grade E read "in strong financial health (E) …
   // low churn and positive growth" with its own bad numbers spliced in.
   const summary = score >= 85
-    ? `Your gym is in strong financial health (${grade}). ${money(netProfit)}/mo profit on a ${marginPct.toFixed(0)}% margin, low churn and positive growth. Keep protecting retention and reinvest into what's working.`
+    ? `Your gym is in strong financial health (${grade}). ${m(netProfit) ? `${m(netProfit)}/mo profit on a ` : 'A '}${marginPct.toFixed(0)}% margin, low churn and positive growth. Keep protecting retention and reinvest into what's working.`
     : score >= 55
-    ? `Solid but improvable (${grade}). The business is profitable at ${money(netProfit)}/mo, but ${churnPct > 4 ? 'churn' : 'margin'} is the lever to pull next. Focus there and the score climbs quickly.`
+    ? `Solid but improvable (${grade}). The business is profitable${m(netProfit) ? ` at ${m(netProfit)}/mo` : ''}, but ${churnPct > 4 ? 'churn' : 'margin'} is the lever to pull next. Focus there and the score climbs quickly.`
     : `Needs attention (${grade}). ${marginPct < 8 ? 'Margin is thin and' : ''} ${churnPct > 6 ? 'churn is high' : 'growth is stalling'} — tackle the risk items below first; each one directly lifts profitability.`;
 
   return { score, grade, netProfit, marginPct, churnPct, growthPct, summary, strengths, improvements };

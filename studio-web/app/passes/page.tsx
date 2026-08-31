@@ -599,6 +599,10 @@ function Money({ c, rec }: { c: PassConversion; rec: PassConversionRecord }) {
               note={
                 m.passCents == null
                   ? 'no pass carries a recorded price — which is not the same as free'
+                  // The total is known and the money it is in is not, so the
+                  // tile shows a dash rather than a figure the reader
+                  // denominates for themselves.
+                  : !m.currency ? NO_CURRENCY_NOTE
                   : `from ${m.passesPriced} of ${m.passesTotal} passes${m.mixedCurrency ? ', across more than one currency' : ''}`
               }
             />
@@ -608,6 +612,7 @@ function Money({ c, rec }: { c: PassConversion; rec: PassConversionRecord }) {
               note={
                 rec.plans.state === 'failed' ? 'price book not read'
                   : rec.memberships.state === 'failed' ? 'roster not read'
+                  : m.followingMrrCents != null && !m.currency ? NO_CURRENCY_NOTE
                   : m.followingMrrCents == null ? 'none of them is on a priced plan'
                   : `${m.followingActive} active membership${m.followingActive === 1 ? '' : 's'}`
               }

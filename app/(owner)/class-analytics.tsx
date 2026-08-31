@@ -20,7 +20,7 @@ import type { Theme } from '../../src/theme/tokens';
 import { Rule, Section, SectionHead, Hero, KpiRow, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { classSummary, summariseClassRows, type ClassSummaryRow } from '../../src/lib/classAttendance';
-import { useTenant, gymMoney, GYM_CURRENCY } from '../../src/ui/tenant';
+import { useTenant, gymMoney } from '../../src/ui/tenant';
 import { reportError } from '../../src/lib/reportError';
 
 type Range = 'week' | 'month' | 'season';
@@ -55,7 +55,11 @@ export default function OwnerClassAnalytics() {
   // prints a pay rate a trainer is owed, which is the last figure that should
   // be denominated in a guess.
   const { tenant } = useTenant();
-  const cur = tenant?.currency || GYM_CURRENCY;
+  // `?? null`, not `|| GYM_CURRENCY`: the per-check-in rate below is typed by
+  // the owner in their own money, and printing the payroll it produces in
+  // dirhams at a gym that never chose them is a wrong figure on a screen whose
+  // whole job is what people are paid.
+  const cur = tenant?.currency ?? null;
   const t = useTheme();
   const router = useRouter();
   const [range, setRange] = useState<Range>('week');
@@ -174,8 +178,13 @@ export default function OwnerClassAnalytics() {
           <Hero
             label="Trainer Payroll"
             figure={rate$ > 0 ? fig(gymMoney(totals.payroll, cur)) : '—'}
-            note={rate$ > 0
+            note={rate$ > 0 && gymMoney(rate$, cur) != null
               ? `${totals.attended} check-ins × ${gymMoney(rate$, cur)} · ${totals.classes} classes · ${totals.showPct ?? '—'}% turned up`
+              : rate$ > 0
+              // The rate is entered and the currency is not, so the counts are
+              // stated and the money is not — an unguarded ${} would read
+              // "× null" to an owner.
+              ? `${totals.attended} check-ins · ${totals.classes} classes · ${totals.showPct ?? '—'}% turned up · set your gym's currency to value them`
               : `${totals.attended} check-ins · ${totals.classes} classes · ${totals.showPct ?? '—'}% turned up · enter your per-check-in rate below`}
           />
 

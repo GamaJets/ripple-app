@@ -364,6 +364,52 @@ export function mergeSleepNights(reads: SleepRead[], nights: string[]): MergedNi
   return (nights || []).map((n) => mergeSleepNight(n, byNight.get(n) || [], failed));
 }
 
+/**
+ * The same nights, told that the read they came from did not happen.
+ *
+ * ── The gap this closes ─────────────────────────────────────────────────────
+ *
+ * `mergeSleepNights` learns about failure from the `SleepRead` rows it is
+ * handed: a provider that threw arrives as status 'error', lands in `failed`,
+ * and its nights come back 'unknown'. That is exactly right for the failure it
+ * was designed for — ONE device not answering — and it is silent about the
+ * other one.
+ *
+ * When the walk itself breaks rather than a provider inside it, there are no
+ * rows at all. `src/ui/deviceSleep.tsx` catches that, sets `status: 'error'`
+ * and — correctly, it has nothing else to offer — sets `reads: []`. Then
+ * `mergeSleepNights([], recentNights(7))` sees no readings AND no failures, and
+ * every night in the week comes back 'no-record': the confident, specific claim
+ * that nobody's watch recorded anything, produced by a read that never
+ * completed. On the Recovery screen that renders as seven rows of "nothing
+ * recorded" with no warning anywhere, because the warning is driven off the
+ * error rows and there are none.
+ *
+ * That is the house rule's own counter-example — an empty metric under a failed
+ * read rendering as a confident empty — surviving in this file family because
+ * the failure arrives as an ABSENCE of failures rather than as one.
+ *
+ * ── What it will and will not touch ─────────────────────────────────────────
+ *
+ * A night some device actually measured keeps its figure, its source and its
+ * 'measured' outcome. A real reading that reached us is not made less true by a
+ * later step falling over, and blanking it would be the same fabrication in the
+ * opposite direction. It only gains `failed`, so a screen can say the night may
+ * be incomplete. Everything else — 'no-record' and any night already 'unknown' —
+ * becomes 'unknown', which is the honest answer: we did not ask.
+ *
+ * `asked` is the providers the walk was going to read, so the sentence can name
+ * them. An empty list is still a failure and still produces 'unknown'; the
+ * nights are unknown because of the failure, not because of who was in it.
+ */
+export function markNightsUnread(nights: MergedNight[], asked: readonly ProviderId[] = []): MergedNight[] {
+  const failed = [...new Set(asked)];
+  return (nights || []).map((n) => {
+    if (n.outcome === 'measured') return { ...n, failed: [...new Set([...n.failed, ...failed])] };
+    return { ...n, outcome: 'unknown' as NightOutcome, failed: [...new Set([...n.failed, ...failed])] };
+  });
+}
+
 /** "7h 12m", or a dash when there is nothing a device actually reported. */
 export function formatSleepHours(minutes: number | null | undefined): string {
   if (typeof minutes !== 'number' || !isFinite(minutes) || minutes <= 0) return '—';

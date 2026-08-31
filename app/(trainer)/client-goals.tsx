@@ -357,13 +357,19 @@ export default function ClientGoals() {
           {goalLabel(g)}
           {kind && g.targetValue != null ? ` · ${fig(goalValue(g.targetValue, kind, wu))} ${unit}` : ''}
         </Text>
-        <Text style={{ ...ty.micro, color: overdue ? t.warn : t.ink3, marginTop: sp.xs }}>
-          {g.achievedAtISO
-            ? `Marked done ${shortDate(g.achievedAtISO)}`
-            : g.targetDateISO
-              ? (overdue ? `Target date passed (${shortDate(g.targetDateISO)})` : `By ${shortDate(g.targetDateISO)}`)
-              : 'No target date'}
-        </Text>
+        {/* "Target date passed" is already the whole message in words. warn as
+            micro ink is 3.87–4.08:1 on the three light palettes — under AA at
+            the smallest size in the app — so the tone is a dot instead. */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: sp.xs }}>
+          {overdue ? <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: t.warn, flexShrink: 0 }} /> : null}
+          <Text style={{ ...ty.micro, color: overdue ? t.ink2 : t.ink3, flex: 1 }}>
+            {g.achievedAtISO
+              ? `Marked done ${shortDate(g.achievedAtISO)}`
+              : g.targetDateISO
+                ? (overdue ? `Target date passed (${shortDate(g.targetDateISO)})` : `By ${shortDate(g.targetDateISO)}`)
+                : 'No target date'}
+          </Text>
+        </View>
         {/* A goal with no number by construction gets the client's own words
             and no percentage. "Squat without my knee complaining" is 40% of
             nothing, and only they can say when it is done. */}
@@ -399,9 +405,10 @@ export default function ClientGoals() {
           </Text>
         </View>
         <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.xs }}>{siteChangeLine(h, lu)}</Text>
-        <Text style={{ ...ty.micro, color: stale ? t.warn : t.ink3, marginTop: sp.xs }}>
-          {siteAgeLine(h, todayISO)}
-        </Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: sp.xs }}>
+          {stale ? <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: t.warn, flexShrink: 0 }} /> : null}
+          <Text style={{ ...ty.micro, color: stale ? t.ink2 : t.ink3, flex: 1 }}>{siteAgeLine(h, todayISO)}</Text>
+        </View>
       </View>
     );
   };

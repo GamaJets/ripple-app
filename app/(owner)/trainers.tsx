@@ -14,7 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { num } from '../../src/lib/format';
-import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, Notice, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, Flag, Notice, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../../src/theme/scale';
 import { usePlatformTrainers, type GymTrainer } from '../../src/ui/trainers';
 import { useTrainerInvites } from '../../src/ui/trainerInvites';
@@ -107,6 +107,11 @@ export default function OwnerTrainers() {
             : trainers.length === 0 ? 'Invite a trainer and their delivered sessions start counting here.'
             : payroll30 == null
               ? `Across ${trainers.length} trainer${trainers.length === 1 ? '' : 's'} · set a session fee to see what that is worth`
+              // gymMoney returns null when the gym has not set a currency, and
+              // an unguarded ${} would put the word "null" in front of an
+              // owner. The count is still true, so it is still said.
+              : gymMoney(payroll30, cur) == null
+              ? `Across ${trainers.length} trainer${trainers.length === 1 ? '' : 's'} · set your gym's currency to see what that is worth`
               : `Across ${trainers.length} trainer${trainers.length === 1 ? '' : 's'} · ${gymMoney(payroll30, cur)} at your session fee`
           }
           onPress={() => router.push('/(owner)/revenue')}
@@ -214,7 +219,7 @@ export default function OwnerTrainers() {
               placeholder="their@email.com" placeholderTextColor={t.ink3}
               autoCapitalize="none" autoCorrect={false} keyboardType="email-address" style={input} />
             {invErr ? (
-              <Text style={{ ...ty.caption, color: t.warn, marginTop: sp.sm }}>{invErr}</Text>
+              <Flag tone={t.warn} style={{ marginTop: sp.sm }}>{invErr}</Flag>
             ) : null}
             <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.lg }}>
               <View style={{ flex: 1 }}><Ghost label="Cancel" onPress={() => { setInvErr(null); setInvOpen(false); }} /></View>
@@ -245,10 +250,16 @@ export default function OwnerTrainers() {
                     kicker="Awaiting outcomes"
                     title={`${current.unmarked30} session${current.unmarked30 === 1 ? '' : 's'} need marking before this can be valued.`}
                   />
-                ) : tenant?.sessionFee != null ? (
+                ) : tenant?.sessionFee != null && cur ? (
                   <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: sp.lg }}>
                     {gymMoney(current.delivered30 * tenant.sessionFee, cur)} at your {gymMoney(tenant.sessionFee, cur)}/session fee
                   </Text>
+                ) : tenant?.sessionFee != null ? (
+                  // A fee with no currency is a number. Saying "6,300 at your
+                  // 75/session fee" invites the reader to supply their own
+                  // money for it, which is the wrong-amount bug without even a
+                  // wrong symbol to notice.
+                  <Notice kicker="No currency" title="Set your gym's currency in Ops to value these sessions." />
                 ) : (
                   <Notice kicker="No session fee" title="Set a session fee in Ops to value delivered sessions." />
                 )}

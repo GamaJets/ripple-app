@@ -370,10 +370,10 @@ export default function ClientTraining() {
           </Text>
         ) : null}
         {!alone ? (
-          <Text style={{ ...ty.caption, color: t.warn, marginTop: 2 }}>
+          <Flag tone={t.warn} style={{ marginTop: 2 }}>
             Logged in {d.sessions.length} separate entries, listed below. The totals above add all of
             them up — if {who} saved the same work twice, this day reads high and the entries show it.
-          </Text>
+          </Flag>
         ) : null}
 
         <View style={{ marginTop: sp.sm }}>

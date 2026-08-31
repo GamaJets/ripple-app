@@ -28,25 +28,41 @@ import type { LoadStatus } from './loadStatus';
 import { useAuthRevision } from './authRevision';
 
 /**
- * The currency to fall back on when the gym has not named its own.
+ * What the EXISTING rows in the gym operating record were recorded as — and
+ * emphatically NOT a currency to render a figure in.
  *
- * This constant used to say there was no `tenants.currency` column. There is
- * one — part 99 added it, nullable on purpose, and `myTenantCurrency()` in
- * src/lib/subscriptions.ts already reads it. So the sentence this file was
- * built on ("the currency cannot be read per gym") stopped being true and the
- * comment did not, which is how a white-label product came to have its
- * currency hardcoded in the one module named after the tenant.
+ * ── it stopped being a fallback ───────────────────────────────────────────
  *
- * What is still true is why 'AED' is the fallback rather than a guess: every
- * money column in the gym operating record declares `currency text not null
+ * This used to be the fallback `gymMoney` reached for when the gym had not
+ * named its own currency, and `money()` in src/lib/gymRecord.ts had the same
+ * value baked in as a parameter default. Between them, every owner screen
+ * printed dirhams at a gym that had never chosen them — with no error, nothing
+ * to notice, and a result that reads as considered rather than as a missing
+ * setting. Two call sites wrote it to disk. `tenants.currency` is nullable ON
+ * PURPOSE and its own comment in setup.sql says the rule: NULL means the gym
+ * has not set one — render a dash and ask, never assume.
+ *
+ * So `gymMoney` no longer touches this, `money()` has no default at all, and
+ * an unknown currency is a withheld figure everywhere.
+ *
+ * ── what it is still FOR ──────────────────────────────────────────────────
+ *
+ * Every money column in the operating record declares `currency text not null
  * default 'AED'` — membership_plans, gym_payments, pass_types, guest_passes,
- * payroll settlements — and `money()` in src/lib/gymRecord.ts defaults to the
- * same. It is what this database has been recording all along, and part 99
- * backfilled the existing tenants to it for exactly that reason.
+ * payroll settlements — and part 99 backfilled the existing tenants to it. So
+ * rows written before a gym set its currency genuinely ARE denominated in this,
+ * and Ops says so in as many words when it offers the setting: an owner
+ * switching to GBP needs to know the history is in dirhams and this changes
+ * only what is written from here on.
  *
- * Read it as "what the operating record is denominated in when nobody has said
- * otherwise", never as "the currency". `Tenant.currency` below is the gym's own
- * answer and outranks this wherever it is known.
+ * That is its one legitimate use: naming what the record already holds, in
+ * prose, to an owner deciding something. Never as the currency of a figure.
+ *
+ * currency-ok: this constant IS the historical denomination of the operating
+ * record — every money column declares `default 'AED'` and part 99 backfilled
+ * to it — and Ops quotes it to an owner as a fact about their existing rows.
+ * It is a named piece of history, not a fallback: nothing renders a figure
+ * through it any more, and `money()` no longer has a default at all.
  */
 export const GYM_CURRENCY = 'AED';
 
@@ -60,17 +76,25 @@ export const GYM_CURRENCY = 'AED';
  * once showed AED 63.00 where the gym owed AED 6,300 (see the note on
  * `payroll30For` in src/lib/gymTrainers.ts).
  *
- * Null in, null out, exactly as `money()` does it: a caller must not be handed
- * "AED 0.00" for an amount nobody has established. Pair it with `fig()` to draw
- * the dash.
+ * ── TWO reasons this returns null, and they are the same dash ─────────────
  *
- * `currency` is optional and defaults to GYM_CURRENCY, so every existing call
- * site means precisely what it meant. Pass `tenant.currency` where the tenant
- * is in hand — a London gym's takings printed in dirhams is a wrong number in
- * front of a paying customer, and it looks like a considered one.
+ * No AMOUNT: nobody has established the figure. This was always true — a
+ * caller must not be handed "AED 0.00" for something unknown.
+ *
+ * No CURRENCY: the gym has not set one. This is new, and it is the point of
+ * the change. `currency || GYM_CURRENCY` used to sit on this line, so six owner
+ * screens quietly printed dirhams at gyms that had never chosen them. A wrong
+ * currency in front of a number is a different amount, and unlike a dash it
+ * does not prompt anybody to go and fix the setting. Pass `tenant.currency`
+ * and pass it honestly — `?? null`, never `|| GYM_CURRENCY`.
+ *
+ * Callers pair this with `fig()` to draw the dash. A caller INTERPOLATING the
+ * result into a sentence must branch on null first: `${gymMoney(...)}` renders
+ * the four characters "null" into owner-facing copy, which is the one outcome
+ * worse than a wrong currency.
  */
-export const gymMoney = (whole: number | null | undefined, currency?: string | null): string | null =>
-  whole == null || !Number.isFinite(whole) ? null : money(Math.round(whole * 100), currency || GYM_CURRENCY);
+export const gymMoney = (whole: number | null | undefined, currency: string | null | undefined): string | null =>
+  whole == null || !Number.isFinite(whole) ? null : money(Math.round(whole * 100), currency);
 
 export interface Tenant {
   id: string;
@@ -89,8 +113,10 @@ export interface Tenant {
   sessionFee: number | null;
   /**
    * ISO 4217, from `tenants.currency` (part 99). Null means the gym has not
-   * told us — render a dash or fall back to GYM_CURRENCY explicitly, never
-   * assume one.
+   * told us: render a dash and say so. Do NOT fall back to GYM_CURRENCY —
+   * that advice was in this comment and six screens took it, which is how a
+   * white-label product printed dirhams at gyms that had never chosen them.
+   * A figure whose currency is unknown is withheld, not guessed.
    */
   currency: string | null;
 }

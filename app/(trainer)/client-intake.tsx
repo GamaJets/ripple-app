@@ -113,11 +113,15 @@ export default function ClientIntakeScreen() {
           </Section>
         ) : (
           <>
-            <Text style={{ ...ty.label, color: ci.status === 'error' ? t.warn : t.ink3, marginTop: sp.sm }}>
-              {ci.state === 'unknown' && ci.status === 'loading'
-                ? `Reading ${who}'s intake.`
-                : intakeLine(ci.state, ci.progress, who)}
-            </Text>
+            {ci.status === 'error' ? (
+              <Flag tone={t.warn} style={{ marginTop: sp.sm }}>{intakeLine(ci.state, ci.progress, who)}</Flag>
+            ) : (
+              <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
+                {ci.state === 'unknown' && ci.status === 'loading'
+                  ? `Reading ${who}'s intake.`
+                  : intakeLine(ci.state, ci.progress, who)}
+              </Text>
+            )}
             {intake && intake.updatedAt ? (
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>
                 Last changed by {who} on {fmtDay(intake.updatedAt)}. Only they can change it — you

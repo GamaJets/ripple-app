@@ -9,7 +9,7 @@
 // a night of no sleep.
 import {
   nightKey, recentNights, foldSleepIntervals, nightsFromIntervals,
-  mergeSleepNight, mergeSleepNights, formatSleepHours,
+  mergeSleepNight, mergeSleepNights, markNightsUnread, formatSleepHours,
   AGREEMENT_TOLERANCE_MIN,
   type SleepReading, type SleepRead,
 } from './sleepMerge';
@@ -176,6 +176,51 @@ const windowBroken = mergeSleepNights(
   ['2026-08-03'],
 );
 ok(windowBroken[0].outcome === 'unknown', 'an errored provider turns an empty night into an unknown one');
+
+// ── the walk itself failing, which arrives as no failures at all ────────────
+//
+// The failure `mergeSleepNights` was built for is one provider throwing: it
+// arrives as an 'error' row and the nights come back unknown, as asserted just
+// above. The other failure has no rows to arrive in. When the read never
+// completes, deviceSleep.tsx sets `reads: []`, and an empty `reads` produces an
+// empty `failed` — so the merge below sees no readings and no failures and
+// declares the whole week 'no-record'. Confident emptiness out of a read that
+// never happened, which is the exact bug this file family was written against.
+const walkFailed = mergeSleepNights([], ['2026-08-03', '2026-08-02']);
+ok(walkFailed.every((n) => n.outcome === 'no-record'),
+  'a merge given nothing cannot know a read failed — which is why the caller has to say so');
+
+const unread = markNightsUnread(walkFailed, ['whoop', 'oura']);
+ok(unread.length === 2, `every night survives the marking, got ${unread.length}`);
+ok(unread.every((n) => n.outcome === 'unknown'),
+  `a night from a failed walk is unknown, not empty, got ${unread.map((n) => n.outcome).join()}`);
+ok(unread.every((n) => n.minutesAsleep === null), 'and still never a zero');
+ok(unread[0].failed.join() === 'whoop,oura', 'the devices that were going to be asked are named');
+
+// The invariant that keeps this from becoming the opposite fabrication: a real
+// figure that DID reach us is not erased by a later step falling over. Marking
+// only ever adds doubt about the nights nobody answered for; it never discards
+// a measurement.
+const measured = mergeSleepNights(
+  [{ provider: 'apple', status: 'ready', readings: [{ ...watch, night: '2026-08-03' }] }],
+  ['2026-08-03', '2026-08-02'],
+);
+const markedMixed = markNightsUnread(measured, ['apple']);
+ok(markedMixed[0].outcome === 'measured' && markedMixed[0].minutesAsleep === 392,
+  `a night a device actually measured keeps its figure, got ${markedMixed[0].outcome}/${markedMixed[0].minutesAsleep}`);
+ok(markedMixed[0].source?.sourceName === 'Apple Watch', 'and keeps its attribution, so the screen can still name it');
+ok(markedMixed[0].failed.join() === 'apple', 'while still recording that the night may be incomplete');
+ok(markedMixed[1].outcome === 'unknown', 'and the night nobody answered for is the one that turns unknown');
+
+// Marking with nobody named is still a failure. The nights are unknown because
+// the read did not happen, not because of who was in it — an empty `asked` must
+// not quietly hand back a confident 'no-record'.
+ok(markNightsUnread(walkFailed)[0].outcome === 'unknown',
+  'a failed walk with no providers named is still a failed walk');
+// Idempotent, because a screen re-rendering must not accumulate duplicates in
+// the list of devices it names to the client.
+ok(markNightsUnread(unread, ['whoop', 'oura'])[0].failed.join() === 'whoop,oura',
+  'marking twice names each device once');
 
 // ── formatting ──────────────────────────────────────────────────────────────
 ok(formatSleepHours(432) === '7h 12m', `432 minutes is 7h 12m, got ${formatSleepHours(432)}`);

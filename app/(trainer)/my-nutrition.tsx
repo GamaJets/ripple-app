@@ -60,7 +60,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Hero, Cta, Ghost, Notice, PartialRead, KpiRow, Flag, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, Cta, Ghost, Notice, PartialRead, KpiRow, Flag, Field, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
@@ -458,15 +458,24 @@ export default function MyNutrition() {
 
               <TextInput value={name} onChangeText={(v) => { setName(v); setVia('manual'); }} placeholder="Meal name"
                 placeholderTextColor={t.ink3} accessibilityLabel="Meal name" style={[inp, { marginBottom: sp.sm }]} />
+              {/* Tapping a recent meal above fills all four of these, and so
+                  does the food search — so the ordinary path puts numbers in
+                  the boxes and takes every placeholder with it. Four bare
+                  numerals in a row, three of them grams and one kilocalories,
+                  and "P" "C" "F" were single letters even while they showed. */}
               <View style={{ flexDirection: 'row', gap: sp.sm }}>
-                <TextInput value={kcalIn} onChangeText={setKcalIn} keyboardType="numeric" placeholder="kcal"
-                  placeholderTextColor={t.ink3} accessibilityLabel="Calories" style={[numInp, { flex: 1.2 }]} />
-                <TextInput value={protein} onChangeText={setProtein} keyboardType="numeric" placeholder="P"
-                  placeholderTextColor={t.ink3} accessibilityLabel="Protein in grams" style={[numInp, { flex: 1 }]} />
-                <TextInput value={carbs} onChangeText={setCarbs} keyboardType="numeric" placeholder="C"
-                  placeholderTextColor={t.ink3} accessibilityLabel="Carbohydrate in grams" style={[numInp, { flex: 1 }]} />
-                <TextInput value={fat} onChangeText={setFat} keyboardType="numeric" placeholder="F"
-                  placeholderTextColor={t.ink3} accessibilityLabel="Fat in grams" style={[numInp, { flex: 1 }]} />
+                <Field label="Calories" hint="kcal" style={{ flex: 1.2 }}>
+                  <TextInput value={kcalIn} onChangeText={setKcalIn} keyboardType="numeric" style={numInp} />
+                </Field>
+                <Field label="Protein" hint="g" a11y="Protein in grams">
+                  <TextInput value={protein} onChangeText={setProtein} keyboardType="numeric" style={numInp} />
+                </Field>
+                <Field label="Carbs" hint="g" a11y="Carbohydrate in grams">
+                  <TextInput value={carbs} onChangeText={setCarbs} keyboardType="numeric" style={numInp} />
+                </Field>
+                <Field label="Fat" hint="g" a11y="Fat in grams">
+                  <TextInput value={fat} onChangeText={setFat} keyboardType="numeric" style={numInp} />
+                </Field>
               </View>
               {problem ? <Flag style={{ marginTop: sp.md }}>{problem}</Flag> : null}
               <View style={{ marginTop: sp.md }}>

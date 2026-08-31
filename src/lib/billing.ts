@@ -104,10 +104,26 @@ export const money = (cents: number | null, cur: string | null = null): string =
   const v = cents / 100;
   const amount = v.toLocaleString(undefined, { minimumFractionDigits: v % 1 ? 2 : 0, maximumFractionDigits: 2 });
   const c = (cur || '').toLowerCase();
-  if (c === 'gbp') return '£' + amount;
-  if (c === 'eur') return '€' + amount;
-  if (c === 'usd') return '$' + amount;
+  const sym = SYMBOLS[c];
+  if (sym) return sym + amount;
   // Including no currency at all: Stripe always sends one, so its absence means
   // the read did not land, and guessing is what this whole change removes.
   return c ? `${c.toUpperCase()} ${amount}` : `${amount} (currency not read)`;
 };
+
+/**
+ * The three currencies Repple can draw a symbol for, keyed by the ISO code
+ * Stripe sent.
+ *
+ * currency-ok: a TRANSLATION of a currency somebody stated, not a guess at one.
+ * The code arrives on the invoice row and this table only chooses how to draw
+ * it; anything absent falls through to its ISO code above rather than to a
+ * symbol invented for it — which is the bug this replaced, where everything
+ * that was not GBP or EUR rendered as dollars, dirhams included. The rule
+ * check-currency.mjs enforces is that a figure must not state a currency NOBODY
+ * CHOSE. Here somebody did, and it was the payment processor.
+ *
+ * It is a table rather than three `if`s so the literals live under this one
+ * explanation instead of needing the marker repeated beside each of them.
+ */
+const SYMBOLS: Record<string, string> = { gbp: '£', eur: '€', usd: '$' };

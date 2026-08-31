@@ -28,7 +28,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Cta, Ghost, Notice, PartialRead } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Cta, Ghost, Notice, PartialRead, Field } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, value } from '../../src/theme/scale';
 import { useClasses } from '../../src/ui/classes';
 import { CLASS_KINDS, branchesFrom, type GymClass } from '../../src/lib/classesMock';
@@ -161,9 +161,16 @@ export default function TrainerClasses() {
             </ScrollView>
           ) : null}
 
+          {/* Two names side by side, and which is which — and which of the two
+              may be left empty — lived in placeholders that the first keystroke
+              erased. */}
           <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
-            <TextInput value={instructor} onChangeText={setInstructor} placeholder="Instructor" placeholderTextColor={t.ink3} style={[inp, { flex: 1 }]} />
-            <TextInput value={room} onChangeText={setRoom} placeholder="Room (optional)" placeholderTextColor={t.ink3} style={[inp, { flex: 1 }]} />
+            <Field label="Instructor">
+              <TextInput value={instructor} onChangeText={setInstructor} style={inp} />
+            </Field>
+            <Field label="Room" hint="optional">
+              <TextInput value={room} onChangeText={setRoom} style={inp} />
+            </Field>
           </View>
 
           <Text style={[lbl, { marginTop: sp.md }]}>Day</Text>

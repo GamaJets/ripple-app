@@ -27,6 +27,7 @@ import {
   type PtSession, type PayPolicy, type PayrollLine,
 } from '@lib/gymSessions';
 import { fetchPasses } from '@lib/gymPasses';
+import { type TenantCurrency } from '@/lib/currency';
 import { sliceLoading, sliceReady, sliceFailed, type Slice } from '@lib/memberView';
 import {
   monthWindow, recentMonths, monthKeyOf, buildClose, isOverdue, closeHeadline,
@@ -47,6 +48,10 @@ const MONTHS_OFFERED = 13;
 export default function Close() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
   const [gymName, setGymName] = useState<string | null>(null);
+  // `tenants.currency`. A month-end close is the document an owner reconciles
+  // against a bank statement, so the one thing it must not do is name a
+  // currency nobody chose — see currencyOf() at the foot of this file.
+  const [gymCcy, setGymCcy] = useState<TenantCurrency>(null);
   const [sessionFee, setSessionFee] = useState<number | null>(null);
   const [feeRead, setFeeRead] = useState<'ok' | 'failed'>('ok');
 
@@ -107,12 +112,13 @@ export default function Close() {
         return;
       }
       const { data: t, error: tErr } = await supabase
-        .from('tenants').select('name, session_fee').eq('id', who.tenantId).single();
+        .from('tenants').select('name, session_fee, currency').eq('id', who.tenantId).single();
       if (!live) return;
       // Checked, not assumed. A null session fee from a failed read would price
       // every unrated session at nothing and quietly shrink payroll; the two
       // are told apart so the screen can say "the fee could not be read".
       setGymName(tErr ? null : t?.name ?? null);
+      setGymCcy(tErr ? null : (((t?.currency ?? '') as string).trim().toUpperCase() || null));
       setSessionFee(tErr ? null : t?.session_fee ?? null);
       setFeeRead(tErr ? 'failed' : 'ok');
       if (w) await load(who.tenantId, w);
@@ -128,7 +134,7 @@ export default function Close() {
   // The gym's currency as the record itself states it. Declared before the
   // close, not after: the formatter below closes over it, and a `const` read
   // before its own initialiser is a ReferenceError, not a fallback.
-  const currency = useMemo(() => currencyOf(rec), [rec]);
+  const currency = useMemo(() => currencyOf(rec, gymCcy), [rec, gymCcy]);
 
   const close: MonthClose | null = useMemo(() => {
     if (!w) return null;
@@ -215,7 +221,7 @@ export default function Close() {
 function CloseView({ c, rec, currency, feeRead, sessionFee }: {
   c: MonthClose;
   rec: CloseRecord;
-  currency: string;
+  currency: TenantCurrency;
   feeRead: 'ok' | 'failed';
   sessionFee: number | null;
 }) {
@@ -328,7 +334,7 @@ function Verdict({ c }: { c: MonthClose }) {
 
 /* ── what came in, and what it was for ─────────────────────────────────────── */
 
-function Income({ c, rec, currency }: { c: MonthClose; rec: CloseRecord; currency: string }) {
+function Income({ c, rec, currency }: { c: MonthClose; rec: CloseRecord; currency: TenantCurrency }) {
   const cols: Column<Line>[] = [
     { key: 'label', header: 'How it arrived', value: (l) => l.label },
     { key: 'count', header: 'Payments', value: (l) => l.count, numeric: true },
@@ -392,7 +398,7 @@ function Income({ c, rec, currency }: { c: MonthClose; rec: CloseRecord; currenc
 
 /* ── what is still owed ────────────────────────────────────────────────────── */
 
-function Owed({ c, rec, currency }: { c: MonthClose; rec: CloseRecord; currency: string }) {
+function Owed({ c, rec, currency }: { c: MonthClose; rec: CloseRecord; currency: TenantCurrency }) {
   const today = new Date().toISOString().slice(0, 10);
   const open = (rec.invoices.state === 'ready' ? rec.invoices.rows : [])
     .filter((i) => i.status === 'open' || i.status === 'overdue')
@@ -497,7 +503,7 @@ const RECON_LABEL: Record<string, string> = {
 /* ── what is unmarked, and therefore blocking payroll ──────────────────────── */
 
 function Payroll({ c, rec, currency, sessionFee }: {
-  c: MonthClose; rec: CloseRecord; currency: string; sessionFee: number | null;
+  c: MonthClose; rec: CloseRecord; currency: TenantCurrency; sessionFee: number | null;
 }) {
   const unmarked = useMemo(
     () => (rec.sessions.state === 'ready' ? rec.sessions.rows : [])
@@ -581,7 +587,7 @@ function Payroll({ c, rec, currency, sessionFee }: {
 
 /* ── passes ────────────────────────────────────────────────────────────────── */
 
-function Passes({ c, rec, currency }: { c: MonthClose; rec: CloseRecord; currency: string }) {
+function Passes({ c, rec, currency }: { c: MonthClose; rec: CloseRecord; currency: TenantCurrency }) {
   return (
     <Section
       title="Passes sold"
@@ -651,7 +657,10 @@ async function fetchInvoices(tenantId: string, upToDay: string): Promise<GymInvo
     memberId: r.member_id,
     memberName: names.get(r.member_id) ?? null,
     amountCents: r.amount_cents ?? 0,
-    currency: r.currency ?? 'AED',
+    // Not `?? 'AED'`. The column is `not null default 'AED'` so this branch does
+    // not fire in practice — and "in practice" is exactly what the currency bug
+    // was made of. Null flows to money(), which withholds the figure.
+    currency: r.currency ?? null,
     issuedOn: r.issued_on,
     dueOn: r.due_on ?? null,
     status: r.status ?? 'open',
@@ -687,12 +696,28 @@ function sumOrNull(a: number | null, b: number | null): number | null {
   return (a ?? 0) + (b ?? 0);
 }
 
-/** The currency the record itself states, or AED when it states none. Only ever
- *  used for rendering; no total is asserted across currencies anywhere. */
-function currencyOf(rec: CloseRecord): string {
+/**
+ * The currency this close is denominated in — or null, which is a dash on every
+ * figure and is the right answer more often than it looks.
+ *
+ * The last line of this used to be `return 'AED'`. So a month with no priced
+ * payment and no invoice in it — a quiet month, a new gym, a month whose reads
+ * failed — produced a close reporting itself in dirhams, and a close is the
+ * document an owner reconciles against a bank statement and sends to an
+ * accountant. Nothing about the number was marked as assumed.
+ *
+ * Order matters and it is deliberate: a row that STATES its currency wins,
+ * because that is what was actually recorded against that money. The gym's own
+ * `tenants.currency` is the fallback for a month with no rows to ask. And when
+ * the gym has not set one either, there is genuinely no answer and the screen
+ * says so rather than picking.
+ *
+ * Only ever used for rendering; no total is asserted across currencies anywhere.
+ */
+function currencyOf(rec: CloseRecord, gym: TenantCurrency): TenantCurrency {
   if (rec.payments.state === 'ready' && rec.payments.rows.length) return rec.payments.rows[0].currency;
   if (rec.invoices.state === 'ready' && rec.invoices.rows.length) return rec.invoices.rows[0].currency;
-  return 'AED';
+  return gym;
 }
 
 /** The note under a KPI whose figure is missing — which of the three states it

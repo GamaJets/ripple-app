@@ -682,15 +682,20 @@ export default function MyProgress() {
               <View key={f.key} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: sp.sm }}>
                 <Text style={{ ...ty.body, fontWeight: '500', color: t.ink2 }}>
                   {f.label}
-                  {/* Said on the row rather than in a footnote. The two required
+                  {/* The unit belongs on the row, not in the placeholder. Two of
+                      these three are in the coach's weight unit and the middle
+                      one is a percentage — and once a figure is typed, or the
+                      form is reopened to correct one, a placeholder is drawn
+                      nowhere at all. A body fat of 18 and a muscle mass of 18
+                      have nothing to tell them apart but the word.
+                      Said on the row rather than in a footnote: the two required
                       figures are the two the calorie target needs; muscle is
                       what a basic scale does not report, and a form that looks
                       like it wants three numbers gets a guess for the third. */}
-                  {f.key === 'sm' ? <Text style={{ ...ty.caption, color: t.ink3 }}>  optional</Text> : null}
+                  <Text style={{ ...ty.caption, color: t.ink3 }}>  {f.unit}{f.key === 'sm' ? ' · optional' : ''}</Text>
                 </Text>
                 <TextInput value={f.value} onChangeText={f.set} keyboardType="numeric"
-                  accessibilityLabel={f.a11y} placeholder={f.unit} placeholderTextColor={t.ink3}
-                  style={tapeInp} />
+                  accessibilityLabel={f.a11y} style={tapeInp} />
               </View>
             ))}
             {weightNote ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{weightNote}</Text> : null}

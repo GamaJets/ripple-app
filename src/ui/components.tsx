@@ -188,7 +188,10 @@ export function PasswordRules({ value }: { value: string }) {
             paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999,
             backgroundColor: r.met ? (t.good || t.brand) + '22' : t.surface2,
           }}>
-            <Text style={{ fontSize: 11, color: r.met ? (t.good || t.brand) : t.ink3 }}>
+            {/* The glyph itself is the channel — a tick or a bullet — and the
+                pill behind it still carries the good tint. The 11pt character
+                takes ink, because good as text does not clear 4.5:1. */}
+            <Text style={{ fontSize: 11, color: r.met ? t.ink2 : t.ink3 }}>
               {r.met ? '✓' : '•'}
             </Text>
             <Text style={{ fontSize: 12, color: r.met ? t.ink2 : t.ink3 }}>{r.label}</Text>

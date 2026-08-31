@@ -436,7 +436,17 @@ export interface PlanRow {
   priceCents: number;
   /** Matches membership_plans.interval — `once` is a day pass or joining fee. */
   interval: 'month' | 'year' | 'once';
-  currency: string;
+  /**
+   * The ISO code the SHEET states, or null when the sheet has no currency
+   * column — in which case the plan inherits the gym's, decided at the import
+   * screen where the gym is known.
+   *
+   * It used to default to 'AED' here. `membership_plans.currency` is `not null
+   * default 'AED'`, so a price book exported from a British gym's old system
+   * and imported without a currency column landed as dirhams, in one press, for
+   * the whole file, with nothing at any layer marking it as assumed.
+   */
+  currency: string | null;
   active: boolean;
 }
 
@@ -534,9 +544,11 @@ export function previewPlans(text: string): ImportPreview<PlanRow> {
       else errors.push(`billing period "${at(r, 'interval').trim()}" is not month, year or one-off`);
     }
 
-    // Currency defaults at the database, so an absent column is fine. A
-    // present one that is not a 3-letter code is not.
-    let currency = 'AED';
+    // An absent currency column is not an error — most sheets do not have one
+    // — but it is not 'AED' either. Null means "the sheet does not say", and
+    // the import screen fills it from the gym before anything is written. A
+    // present column that is not a 3-letter code IS an error.
+    let currency: string | null = null;
     const rawCurrency = at(r, 'currency').trim().toUpperCase();
     if (rawCurrency) {
       if (/^[A-Z]{3}$/.test(rawCurrency)) currency = rawCurrency;

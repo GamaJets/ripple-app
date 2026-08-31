@@ -252,9 +252,12 @@ export default function ClientBody() {
             ) : null}
           </View>
           <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.xs }}>{readingLine(s, wu)}</Text>
-          <Text style={{ ...ty.micro, color: stale ? t.warn : t.ink3, marginTop: sp.xs }}>
-            {seriesAgeLine(s, todayISO)}
-          </Text>
+          {/* seriesAgeLine already says how old the reading is. warn as micro
+              ink is 3.87–4.08:1 on the light palettes, so it goes in the dot. */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: sp.xs }}>
+            {stale ? <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: t.warn, flexShrink: 0 }} /> : null}
+            <Text style={{ ...ty.micro, color: stale ? t.ink2 : t.ink3, flex: 1 }}>{seriesAgeLine(s, todayISO)}</Text>
+          </View>
           {/* A line needs two points. One reading is drawn as the reading it is
               — a figure and a date — rather than as a trend through a single
               point, which is the thing this screen was asked to stop doing. */}

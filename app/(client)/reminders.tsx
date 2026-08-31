@@ -74,8 +74,13 @@ export default function Reminders() {
     );
   };
 
+  // Which of the three is chosen is drawn as a fill and a half-step of weight.
+  // accessibilityState carries the same fact to VoiceOver, which otherwise
+  // hears "2 hours, 3 hours, 4 hours" and no indication of which one is set.
   const seg = (val: number, cur: number, set: (n: number) => void, label: string) => (
-    <Pressable onPress={() => set(val)} style={{ flex: 1, paddingVertical: sp.md, borderRadius: radius.sm, alignItems: 'center', backgroundColor: cur === val ? t.brand : t.surface2 }}>
+    <Pressable onPress={() => set(val)}
+      accessibilityRole="radio" accessibilityState={{ selected: cur === val }}
+      style={{ flex: 1, paddingVertical: sp.md, borderRadius: radius.sm, alignItems: 'center', backgroundColor: cur === val ? t.brand : t.surface2 }}>
       <Text style={{ ...ty.label, fontWeight: cur === val ? '600' : '500', color: cur === val ? t.brandInk : t.ink2 }}>{label}</Text>
     </Pressable>
   );
@@ -107,7 +112,15 @@ export default function Reminders() {
               <Icon name="water" size={17} color={t.brand} />
               <Text style={{ ...ty.head, color: t.ink }}>Hydration nudges</Text>
             </View>
-            <Pressable onPress={() => setHydration((v) => !v)} style={{ width: 48, height: 28, borderRadius: radius.pill, backgroundColor: hydration ? t.brand : t.surface3, justifyContent: 'center', paddingHorizontal: 3 }}>
+            {/* A switch, announced as one. It was an unnamed button whose state
+                was a dot's position and a track colour — nothing a screen
+                reader gets, and 48 × 28 is under the 44pt minimum besides. */}
+            <Pressable onPress={() => setHydration((v) => !v)}
+              accessibilityRole="switch"
+              accessibilityLabel="Hydration nudges"
+              accessibilityState={{ checked: hydration }}
+              hitSlop={{ top: 8, bottom: 8, left: 0, right: 0 }}
+              style={{ width: 48, height: 28, borderRadius: radius.pill, backgroundColor: hydration ? t.brand : t.surface3, justifyContent: 'center', paddingHorizontal: 3 }}>
               <View style={{ width: 22, height: 22, borderRadius: radius.pill, backgroundColor: '#fff', alignSelf: hydration ? 'flex-end' : 'flex-start' }} />
             </Pressable>
           </View>

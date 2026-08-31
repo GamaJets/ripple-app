@@ -30,7 +30,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Cta, Ghost } from '../../src/ui/kit';
+import { Cta, Ghost, Field } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
 import { useSettings } from '../../src/ui/settings';
@@ -200,24 +200,30 @@ export default function Onboarding() {
             Filled in from your most recent measurement{lastScanLabel ? ` — ${lastScanLabel}` : ''}. Change anything that has moved on.
           </Text>
         ) : null}
-        <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 6 }}>Weight</Text>
-        <TextInput value={weight} onChangeText={setWeight} keyboardType="decimal-pad" placeholder={wu} placeholderTextColor={t.ink3}
-          accessibilityLabel={wu === 'kg' ? 'Weight in kilograms' : 'Weight in pounds'} style={[inp, { marginBottom: sp.lg }]} />
-        <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 6 }}>Height</Text>
+        {/* The units were placeholders, and `prefilled` above is the case that
+            makes that fatal: the boxes arrive holding the last scan's figures,
+            so the one screen that decides every calorie target the client ever
+            sees showed three bare numerals with no unit on any of them. */}
+        <Field label="Weight" hint={wu} style={{ marginBottom: sp.lg }} a11y={wu === 'kg' ? 'Weight in kilograms' : 'Weight in pounds'}>
+          <TextInput value={weight} onChangeText={setWeight} keyboardType="decimal-pad" style={inp} />
+        </Field>
         {/* Two boxes in imperial, one in metric, as in the profile sheet. A
             single box asking for a height "in inches" is a box nobody who
             thinks in feet knows how to fill in — they would type 5.10 and mean
             five foot ten. */}
-        <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.lg }}>
-          <TextInput value={height} onChangeText={setHeight} keyboardType="number-pad" placeholder={lu === 'cm' ? 'cm' : 'ft'} placeholderTextColor={t.ink3}
-            accessibilityLabel={lu === 'cm' ? 'Height in centimetres' : 'Height, feet'} style={[inp, { flex: 1 }]} />
+        <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.lg, alignItems: 'flex-end' }}>
+          <Field label="Height" hint={lu === 'cm' ? 'cm' : 'ft'} a11y={lu === 'cm' ? 'Height in centimetres' : 'Height, feet'}>
+            <TextInput value={height} onChangeText={setHeight} keyboardType="number-pad" style={inp} />
+          </Field>
           {lu === 'in' ? (
-            <TextInput value={heightInVal} onChangeText={setHeightInVal} keyboardType="number-pad" placeholder="in" placeholderTextColor={t.ink3}
-              accessibilityLabel="Height, inches" style={[inp, { flex: 1 }]} />
+            <Field label="Inches" a11y="Height, inches">
+              <TextInput value={heightInVal} onChangeText={setHeightInVal} keyboardType="number-pad" style={inp} />
+            </Field>
           ) : null}
         </View>
-        <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 6 }}>Body fat % (optional)</Text>
-        <TextInput value={bf} onChangeText={setBf} keyboardType="decimal-pad" placeholder="%" placeholderTextColor={t.ink3} accessibilityLabel="Body fat percentage" style={inp} />
+        <Field label="Body fat" hint="% · optional" a11y="Body fat percentage">
+          <TextInput value={bf} onChangeText={setBf} keyboardType="decimal-pad" style={inp} />
+        </Field>
       </View>
     ),
     // 2 — diet + allergens

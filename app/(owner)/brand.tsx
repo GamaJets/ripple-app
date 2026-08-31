@@ -32,7 +32,7 @@ import { useEffect, useRef, useState } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme, useThemeControls } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Ghost, Cta } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Ghost, Cta, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/theme/scale';
 import { DEFAULT_PALETTE } from '../../src/theme/tokens';
 import { useBrand } from '../../src/ui/brand';
@@ -147,19 +147,23 @@ export default function OwnerBrand() {
           ) : status === 'error' ? (
             // An empty field under a failed read is not an unnamed gym, and
             // saving over it would write a name derived from a failure.
-            <Text style={{ ...ty.label, color: t.warn }}>
+            <Flag tone={t.warn}>
               Your gym could not be read, so its name is not known — this is not a gym without one.
               Nothing here can be changed until it can be read.
-            </Text>
+            </Flag>
           ) : !tenant ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>This account is not attached to a gym, so there is no name to set.</Text>
           ) : (<>
             <TextInput value={nameField} onChangeText={(v) => { setDraft(v); if (msg) setMsg(null); }}
               placeholder="What the gym is called" placeholderTextColor={t.ink3}
               accessibilityLabel="Gym name" style={inp} />
-            <Text style={{ ...ty.caption, color: msg ? (msg.bad ? t.warn : t.ink3) : t.ink3, marginTop: sp.sm }}>
-              {msg ? msg.text : 'Saved to the gym, so every owner and every device you sign in on sees the same name.'}
-            </Text>
+            {msg && msg.bad ? (
+              <Flag tone={t.warn} style={{ marginTop: sp.sm }}>{msg.text}</Flag>
+            ) : (
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                {msg ? msg.text : 'Saved to the gym, so every owner and every device you sign in on sees the same name.'}
+              </Text>
+            )}
             <View style={{ marginTop: sp.lg }}>
               <Cta wide label={busy ? 'Saving…' : 'Save Gym Name'} disabled={busy} onPress={() => { void saveName(); }} />
             </View>

@@ -43,6 +43,7 @@
 // instance — it scored a trainer on bookings nobody had marked. Three places,
 // one mistake: absence of evidence read as evidence of health.
 import { STATUS_LABEL, STATUS_RANK, statusFromRisk, type StatusLevel } from './status';
+import { capLimit, capped } from './rowCap';
 
 type Queryable = { from: (table: string) => any };
 
@@ -183,6 +184,56 @@ function activeDaysIn(evs: { at: number }[], fromMs: number, toMs: number): numb
   const days = new Set<string>();
   for (const e of evs) if (e.at >= fromMs && e.at < toMs) days.add(dayKey(e.at));
   return days.size;
+}
+
+/* ── showing the working ────────────────────────────────────────────────────
+ *
+ * Three exports that add no rule and change no verdict. They exist so a screen
+ * can print the DATES a verdict was reached on rather than only the number it
+ * came out as — "nothing since 12 August, and here are the six days in July"
+ * instead of "-72%". A coach asked to act on a figure has to be able to check
+ * it, and the only honest way to let them is to hand back the same day
+ * boundaries and the same window edges this module measured with. Re-deriving
+ * them in the caller would be a second implementation of `dayKey`, free to
+ * drift from this one and wrong on exactly the evenings that matter.
+ */
+
+/** The LOCAL calendar day an instant belongs to, as `YYYY-MM-DD`. The boundary
+ *  every count above is taken on. */
+export function localDayKey(atMs: number): string {
+  return dayKey(atMs);
+}
+
+/** The distinct local days with activity in `[fromMs, toMs)`, oldest first, each
+ *  with the sources that produced it. Unparseable timestamps are dropped, the
+ *  same ones `assessDrift` drops — this is the working, not a second reading. */
+export function activeDayLog(
+  events: ActivityEvent[],
+  fromMs: number,
+  toMs: number,
+): { day: string; kinds: ActivityKind[] }[] {
+  const byDay = new Map<string, Set<ActivityKind>>();
+  for (const e of parsed(events)) {
+    if (e.at < fromMs || e.at >= toMs) continue;
+    const k = dayKey(e.at);
+    const set = byDay.get(k) ?? new Set<ActivityKind>();
+    set.add(e.kind);
+    byDay.set(k, set);
+  }
+  return [...byDay.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([day, kinds]) => ({ day, kinds: [...kinds].sort() as ActivityKind[] }));
+}
+
+/** The two edges `assessDrift` measures against, as epoch ms: the near window
+ *  starts at `recentStart`, and the baseline is what lies between `historyStart`
+ *  and it. Note this is BEFORE the clamp to when the client joined — `Drift`
+ *  reports the clamped baseline span in `baselineSpanDays`. */
+export function driftBounds(
+  now: number = Date.now(),
+  windows: DriftWindows = DEFAULT_WINDOWS,
+): { recentStart: number; historyStart: number } {
+  return { recentStart: now - windows.recentDays * DAY, historyStart: now - windows.historyDays * DAY };
 }
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
@@ -447,48 +498,106 @@ export async function fetchClientActivity(
   clientIds: string[],
   opts: ActivityQuery = {},
 ): Promise<Record<string, ActivityEvent[]>> {
+  return (await readClientActivity(sb, clientIds, opts)).byClient;
+}
+
+/**
+ * The same read, with the two things the map alone cannot say.
+ *
+ * `fetchClientActivity` hands back `Record<id, ActivityEvent[]>`, and an empty
+ * array in that map means one of three quite different things: the client was
+ * asked about and is silent, the client could not be asked about at all, or the
+ * answer was cut off at PostgREST's row ceiling and their events happen to be
+ * on the other side of it. Ordering a list by drift can live with that — the
+ * worst case is a name too high up. ACTING on it cannot: every one of the three
+ * renders as "nothing recorded", and a coach messaging somebody who trained
+ * yesterday to ask where they have been looks, to the one client who was
+ * paying attention, like the coach who was not.
+ *
+ * So this returns the same map plus:
+ *
+ *   notAsked   ids that are not uuids and so were never put to the database.
+ *              A client added by hand on the coach's phone has no Repple
+ *              account: nothing to read, and no thread to write in either.
+ *   truncated  true when any of the four reads came back at its ceiling. The
+ *              rows are real and the LIST is worth showing (see rowCap.ts) —
+ *              but a client's silence cannot be inferred from a set that was
+ *              cut off, because the missing rows are exactly the ones that
+ *              would disprove it.
+ *
+ * The `.limit(capLimit())` calls do not change what any existing caller
+ * receives: `capped()` trims the probe row, so the page is the same 1000 rows
+ * PostgREST was already returning silently. What changes is that the ceiling is
+ * now detectable at all.
+ */
+export interface ClientActivityRead {
+  /** One entry per id passed in, `[]` where there was nothing. */
+  byClient: Record<string, ActivityEvent[]>;
+  /** Ids the database could not be asked about. Their entry is `[]` and that
+   *  empty array is NOT an answer about them. */
+  notAsked: string[];
+  /** True when at least one of the four reads hit its row ceiling. */
+  truncated: boolean;
+}
+
+export async function readClientActivity(
+  sb: Queryable,
+  clientIds: string[],
+  opts: ActivityQuery = {},
+): Promise<ClientActivityRead> {
   const out: Record<string, ActivityEvent[]> = {};
   for (const id of clientIds) out[id] = [];
-  if (!clientIds.length) return out;
+  if (!clientIds.length) return { byClient: out, notAsked: [], truncated: false };
 
   // Everyone keeps their entry in `out`; only the ones the database can answer
   // for are asked about. Somebody with no Repple account has no server-side
   // activity by definition, and an empty list is the truthful answer for them —
   // it flows into the same "nothing recorded" state the roster already shows,
-  // rather than taking the whole read down with it.
+  // rather than taking the whole read down with it. `notAsked` is how a caller
+  // that must not act on that emptiness finds out which ones they are.
   const askable = clientIds.filter(isQueryableId);
-  if (!askable.length) return out;
+  const notAsked = clientIds.filter((id) => !isQueryableId(id));
+  if (!askable.length) return { byClient: out, notAsked, truncated: false };
 
   const now = opts.now ?? Date.now();
   const days = opts.days ?? DEFAULT_WINDOWS.historyDays;
   const sinceIso = new Date(now - days * DAY).toISOString();
+  let truncated = false;
 
   const push = (id: string | null, at: string | null, kind: ActivityKind) => {
     if (!id || !at || !out[id]) return;
     out[id].push({ at, kind });
   };
 
-  const ci = await sb.from('check_ins').select('user_id, at').in('user_id', askable).gte('at', sinceIso);
+  const ci = await sb.from('check_ins').select('user_id, at').in('user_id', askable).gte('at', sinceIso).limit(capLimit());
   if (ci.error) throw ci.error;
-  for (const r of ci.data ?? []) push(r.user_id, r.at, 'check_in');
+  const ciPage = capped<any>(ci.data);
+  truncated = truncated || ciPage.truncated;
+  for (const r of ciPage.rows) push(r.user_id, r.at, 'check_in');
 
-  const wo = await sb.from('workouts').select('user_id, performed_at').in('user_id', askable).gte('performed_at', sinceIso);
+  const wo = await sb.from('workouts').select('user_id, performed_at').in('user_id', askable).gte('performed_at', sinceIso).limit(capLimit());
   if (wo.error) throw wo.error;
-  for (const r of wo.data ?? []) push(r.user_id, r.performed_at, 'workout');
+  const woPage = capped<any>(wo.data);
+  truncated = truncated || woPage.truncated;
+  for (const r of woPage.rows) push(r.user_id, r.performed_at, 'workout');
 
   // Only sessions somebody confirmed took place. A booked slot whose clock has
   // passed is not evidence the client turned up — that inference is the bug
   // 33-session-outcomes.sql was written to end, and it would read here as a
   // client still attending when they had stopped.
-  const se = await sb.from('sessions').select('client_id, starts_at, outcome').in('client_id', askable).gte('starts_at', sinceIso).eq('outcome', 'completed');
+  const se = await sb.from('sessions').select('client_id, starts_at, outcome').in('client_id', askable).gte('starts_at', sinceIso).eq('outcome', 'completed').limit(capLimit());
   if (se.error) throw se.error;
-  for (const r of se.data ?? []) push(r.client_id, r.starts_at, 'session');
+  const sePage = capped<any>(se.data);
+  truncated = truncated || sePage.truncated;
+  for (const r of sePage.rows) push(r.client_id, r.starts_at, 'session');
 
   if (opts.tenantId) {
-    const vi = await sb.from('gym_visits').select('member_id, entered_at').eq('tenant_id', opts.tenantId).in('member_id', askable).gte('entered_at', sinceIso);
+    const vi = await sb.from('gym_visits').select('member_id, entered_at').eq('tenant_id', opts.tenantId).in('member_id', askable).gte('entered_at', sinceIso).limit(capLimit());
     if (vi.error) throw vi.error;
-    for (const r of vi.data ?? []) push(r.member_id, r.entered_at, 'visit');
+    const viPage = capped<any>(vi.data);
+    truncated = truncated || viPage.truncated;
+    for (const r of viPage.rows) push(r.member_id, r.entered_at, 'visit');
   }
 
-  return out;
+  return { byClient: out, notAsked, truncated };
 }

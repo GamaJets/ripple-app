@@ -102,8 +102,14 @@
     "src/lib/shareAsset.test.ts",
     "src/lib/chartAxis.test.ts",
     "src/lib/attendance.test.ts",
+    "src/lib/a11y.test.ts",
     "src/lib/recurring.test.ts",
     "src/lib/coachDocs.test.ts",
-    "src/lib/subscriptionScope.test.ts"
+    "src/lib/subscriptionScope.test.ts",
+    "src/lib/nudge.test.ts",
+    "src/lib/coachInvoice.test.ts",
+    "src/lib/coachClientReport.test.ts",
+    "src/lib/coachCredentials.test.ts",
+    "src/lib/reviews.test.ts"
   ]
 }

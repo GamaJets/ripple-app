@@ -29,7 +29,7 @@ import { useDeviceSleep } from '../../src/ui/deviceSleep';
 import { connectedProviders } from '../../src/lib/wearables/sleep';
 import { reportError } from '../../src/lib/reportError';
 import { PROVIDERS } from '../../src/lib/wearables/registry';
-import { Rule, Section, SectionHead, Hero, Cta, Ghost, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, Cta, Ghost, Flag, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 import { localDate } from '../../src/lib/localDate';
 import { Icon } from '../../src/ui/Icon';
@@ -41,7 +41,13 @@ import { RECOVERY_ACTIVITIES, isRecoveryActivity } from '../../src/lib/recoveryA
 // src/lib/wearableLink.ts for the four reports that came of it.
 import { linkFor, useLinkRevision } from '../../src/lib/wearableLinkLedger';
 import { requestHealthAuth } from '../../src/lib/wearables/appleHealth';
-import { mergeSleepNights, recentNights, formatSleepHours, type MergedNight, type SleepRead } from '../../src/lib/sleepMerge';
+// `mergeSleepNights` and `recentNights` are deliberately NOT imported here any
+// more: they were left behind when the merge moved into DeviceSleepProvider and
+// were unused, and having them in scope on this screen is the standing
+// invitation to re-derive the nights locally — which is how Home and Recovery
+// came to disagree about the same week in the first place.
+import { formatSleepHours, markNightsUnread, type MergedNight, type SleepRead } from '../../src/lib/sleepMerge';
+import type { ProviderId } from '../../src/lib/wearables/types';
 import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
 
 const MOBILITY = [
@@ -194,11 +200,29 @@ export default function Recovery() {
  // the read and the stale "needs reconnecting" outlived the reconnect that
  // fixed it. Re-merging here would put this screen and Home back on separate
  // arithmetic over the same nights, which is the whole reason it moved.
- const deviceNights = deviceSleep.nights;
+ //
+ // The one thing still decided here is what to do when the WALK failed rather
+ // than a device in it. `deviceSleep` reports that as status 'error' with an
+ // empty `reads`, and an empty `reads` carries no failures — so the merge below
+ // it saw no readings and no failures and called every night in the week
+ // 'no-record'. This screen then rendered seven rows of "nothing recorded", the
+ // hero said "No device recorded this night", and the warning block that exists
+ // to prevent exactly that stayed empty, because it is driven off the error
+ // rows and there were none. A read that never completed, printed as a fact
+ // about how the client slept.
+ //
+ // `markNightsUnread` turns those nights back into 'unknown', which every
+ // sentence on this screen already handles — `attribution()` has said "we
+ // couldn't read your devices for this night, so it is unknown — that is not
+ // the same as no sleep" all along, and nothing could reach it.
+ const deviceProviderIds = connectedProviders(wear.states).map((p: { meta: { id: string } }) => p.meta.id as ProviderId);
+ const deviceNights = deviceSleep.status === 'error'
+   ? markNightsUnread(deviceSleep.nights, deviceProviderIds)
+   : deviceSleep.nights;
 
  // Still needed here, for the sentence below that names having no device at
  // all — a different thing from having devices that recorded nothing.
- const connectedKey = connectedProviders(wear.states).map((p: { meta: { id: string } }) => p.meta.id).join(',');
+ const connectedKey = deviceProviderIds.join(',');
  const lastNight = deviceNights[0] ?? null;
  const unreadable = sleepReads.reads.filter((r) => r.status === 'error');
  const cannotReport = sleepReads.reads.filter((r) => r.status === 'unsupported');
@@ -384,12 +408,23 @@ export default function Recovery() {
      </View>
     ))}
 
+    {/* The walk itself failing, said once and plainly. `unreadable` below
+        cannot cover this: it is built from the per-provider error rows, and
+        when the read never completed there are no rows of any kind — which
+        is exactly why every night above used to claim "nothing recorded"
+        with nothing on the screen to doubt it. */}
+    {sleepReads.status === 'error' ? (
+     <Flag tone={t.warn} style={{ marginTop: sp.md }}>
+      Repple couldn’t reach your devices just now, so the nights above are unknown rather than empty — this is our end, not your watch. Pull down to try again.
+     </Flag>
+    ) : null}
+
     {/* A device that could not be reached is stated, because the dashes
         above are otherwise read as nights of no sleep. */}
     {unreadable.map((r) => (
-     <Text key={r.provider} style={{ ...ty.caption, color: t.warn, marginTop: sp.md }}>
+     <Flag key={r.provider} tone={t.warn} style={{ marginTop: sp.md }}>
       {r.reason || `${r.provider} could not be read, so any dash above may not mean you did not sleep.`}
-     </Text>
+     </Flag>
     ))}
     {cannotReport.map((r) => (
      <Text key={r.provider} style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>

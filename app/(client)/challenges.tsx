@@ -37,7 +37,7 @@ import { useRouter } from 'expo-router';
 import { num } from '../../src/lib/format';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Meter, Cta, Ghost } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Meter, Cta, Ghost, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, elevation, type as ty, numeric, value } from '../../src/theme/scale';
 import { useChallenges, type BoardResult, type ChallengeRow } from '../../src/ui/challenges';
 import {
@@ -187,7 +187,7 @@ export default function Challenges() {
           })}
 
           {notice ? (
-            <Text style={{ ...ty.caption, color: t.warn, marginTop: sp.md }}>{notice}</Text>
+            <Flag tone={t.warn} style={{ marginTop: sp.md }}>{notice}</Flag>
           ) : null}
         </Section>
 
@@ -265,7 +265,7 @@ export default function Challenges() {
                 )}
               </View>
               {notice ? (
-                <Text style={{ ...ty.caption, color: t.warn, marginTop: sp.md }}>{notice}</Text>
+                <Flag tone={t.warn} style={{ marginTop: sp.md }}>{notice}</Flag>
               ) : null}
               <Pressable onPress={() => setOpen(null)} style={{ paddingVertical: sp.md, alignItems: 'center', marginTop: sp.sm }}>
                 <Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>Close</Text>

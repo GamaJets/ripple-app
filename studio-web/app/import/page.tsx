@@ -40,6 +40,7 @@ import {
   recordPayment, fetchMemberships, fetchPlans, money,
   type Membership, type MembershipPlan,
 } from '@lib/gymRecord';
+import { NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
 
 type Kind = 'payments' | 'members' | 'plans';
 
@@ -54,6 +55,17 @@ export default function ImportPage() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
   const [gymName, setGymName] = useState<string | null>(null);
   const [tenantId, setTenantId] = useState<string | null>(null);
+  // `tenants.currency`, and the reason this read exists at all.
+  //
+  // A payments CSV has no currency column — `PaymentRow` in src/lib/csvImport.ts
+  // carries an amount, a date and a method and nothing else — so every imported
+  // payment inherits the gym's. `recordPayment` used to stamp 'AED' over
+  // whatever it was not told, which meant a whole historical ledger imported
+  // from a GBP gym's old system landed as dirhams in one press, silently, and
+  // was thereafter indistinguishable from a figure somebody had checked.
+  // Null here means the gym has not set one, and the import is refused rather
+  // than guessed.
+  const [ccy, setCcy] = useState<TenantCurrency>(null);
 
   const [kind, setKind] = useState<Kind>('payments');
   const [text, setText] = useState('');
@@ -108,8 +120,9 @@ export default function ImportPage() {
         // supabase-js resolves on a database error rather than rejecting, so
         // the error has to be read off the result, not caught.
         const { data, error } = await supabase
-          .from('tenants').select('name').eq('id', who.tenantId).single();
+          .from('tenants').select('name, currency').eq('id', who.tenantId).single();
         setGymName(error ? null : ((data as any)?.name ?? null));
+        setCcy(error ? null : ((((data as any)?.currency ?? '') as string).trim().toUpperCase() || null));
         await loadGym(who.tenantId);
       }
     })();
@@ -209,6 +222,10 @@ export default function ImportPage() {
 
   const runImport = async () => {
     if (!preview || !tenantId || kind !== 'payments' || !paymentRows.length) return;
+    // Belt as well as the disabled button: this writes money, permanently, in
+    // bulk, and a currency nobody chose is not a detail that can be corrected
+    // afterwards from the rows themselves.
+    if (!ccy) return;
     setBusy(true); setDone(null); setFailed([]);
     let ok = 0; const bad: { line: number; why: string }[] = [];
     for (const { line, payment } of paymentRows) {
@@ -219,6 +236,7 @@ export default function ImportPage() {
           method: payment.method,
           takenAt: new Date(payment.takenOn + 'T12:00:00Z').toISOString(),
           note: payment.note,
+          currency: ccy,
         });
         ok++;
       } catch (e: any) {
@@ -247,6 +265,11 @@ export default function ImportPage() {
    */
   const runPlanImport = async () => {
     if (!preview || !tenantId || kind !== 'plans' || !planRows.length) return;
+    // A row's own currency wins; a row without one inherits the gym's; a gym
+    // without one cannot import a price book at all. Nothing here picks a
+    // currency, and the button is disabled for the third case so this is a
+    // belt rather than the explanation.
+    if (!ccy && planRows.some(({ plan }) => !plan.currency)) return;
     setBusy(true); setDone(null); setFailed([]);
     let ok = 0; const bad: { line: number; why: string }[] = [];
     for (const { line, plan } of planRows) {
@@ -255,7 +278,10 @@ export default function ImportPage() {
           tenant_id: tenantId,
           name: plan.name,
           price_cents: plan.priceCents,
-          currency: plan.currency,
+          // The sheet's currency where it states one, the gym's where it does
+          // not. `plan.currency` used to arrive as a hardcoded 'AED' from the
+          // parser for every sheet without a currency column.
+          currency: plan.currency ?? ccy,
           interval: plan.interval,
           active: plan.active,
         });
@@ -471,10 +497,17 @@ export default function ImportPage() {
           {kind === 'payments' && paymentRows.length > 0 ? (
             <Section title="Import" sub={`${paymentRows.length} payments will be recorded. This writes to your gym.`}>
               <div style={{ ...formRow, borderBottom: 'none' }}>
-                <button onClick={runImport} disabled={busy || !tenantId} style={primaryBtn}>
-                  {busy ? 'Importing…' : `Record ${paymentRows.length} payments`}
+                <button onClick={runImport} disabled={busy || !tenantId || !ccy} style={primaryBtn}>
+                  {busy ? 'Importing…' : ccy ? `Record ${paymentRows.length} payments in ${ccy}` : `Record ${paymentRows.length} payments`}
                 </button>
                 {!tenantId ? <span style={{ fontSize: 13, color: '#ef8080' }}>{NO_TENANT}</span> : null}
+                {tenantId && !ccy ? (
+                  <span style={{ fontSize: 13, color: '#ef8080' }}>
+                    These payments cannot be recorded: {NO_CURRENCY_NOTE}, and this file does not
+                    carry one. Every row would be stored in a currency nobody chose, permanently.
+                    An owner sets it on the gym settings screen.
+                  </span>
+                ) : null}
                 <Result done={done} />
               </div>
               <Failures failed={failed} />
@@ -500,8 +533,15 @@ export default function ImportPage() {
                   }}>
                     <span style={{ fontFamily: 'var(--mono)', color: 'var(--ink3)', minWidth: 44 }}>line {line}</span>
                     <span style={{ color: 'var(--ink)', flex: 1 }}>{plan.name}</span>
+                    {/* The preview shows the price in the currency it WILL BE
+                        WRITTEN in — the sheet's where the sheet says, the gym's
+                        where it does not — so that pressing the button is a
+                        decision about the row that actually lands. A preview
+                        that showed one currency and wrote another is the exact
+                        shape of the payment-form bug this change exists to
+                        close. */}
                     <span style={{ fontFamily: 'var(--mono)', color: 'var(--ink2)' }}>
-                      {money(plan.priceCents, plan.currency) ?? '—'}
+                      {money(plan.priceCents, plan.currency ?? ccy) ?? '—'}
                     </span>
                     <span style={{ color: 'var(--ink3)', minWidth: 68 }}>
                       {plan.interval === 'once' ? 'one-off' : `per ${plan.interval}`}
@@ -519,12 +559,19 @@ export default function ImportPage() {
                 ) : null}
               </div>
               <div style={{ ...formRow, borderBottom: 'none', borderTop: '1px solid var(--ring)' }}>
-                <button onClick={runPlanImport} disabled={busy || !tenantId} style={primaryBtn}>
+                <button onClick={runPlanImport} disabled={busy || !tenantId || (!ccy && planRows.some(({ plan }) => !plan.currency))} style={primaryBtn}>
                   {busy
                     ? 'Importing…'
                     : `Add ${planRows.length} plan${planRows.length === 1 ? '' : 's'}`}
                 </button>
                 {!tenantId ? <span style={{ fontSize: 13, color: '#ef8080' }}>{NO_TENANT}</span> : null}
+                {tenantId && !ccy && planRows.some(({ plan }) => !plan.currency) ? (
+                  <span style={{ fontSize: 13, color: '#ef8080' }}>
+                    Some of these rows have no currency of their own and {NO_CURRENCY_NOTE}, so there
+                    is nothing to price them in. Add a `currency` column to the sheet, or set the
+                    gym's currency on the settings screen.
+                  </span>
+                ) : null}
                 <Result done={done} />
               </div>
               <Failures failed={failed} />

@@ -22,7 +22,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { ensureMediaPermission } from '../../src/ui/permissions';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
-import { Rule, Section, SectionHead, KpiRow, ListRow, Ghost, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, KpiRow, ListRow, Ghost, Field, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../../src/theme/scale';
 import { ageFromDob } from '../../src/lib/age';
 import { macrosFor, applyCoachAdjust } from '../../src/lib/nutrition';
@@ -119,6 +119,13 @@ function DobPicker({ iso, onClose, onSave, t }: { iso: string; onClose: () => vo
   );
 }
 
+// "CM", "IN", "KG", "LB" are two letters each, and a screen reader spells them
+// or mispronounces them ("in" is a preposition). `SEG_SPOKEN` gives the switch
+// the sentence a sighted reader gets from the field label beside it.
+const SEG_SPOKEN: Record<string, string> = {
+  cm: 'centimetres', in: 'inches', kg: 'kilograms', lb: 'pounds',
+};
+
 function Seg({ options, value: val, onChange, t }: { options: string[]; value: string; onChange: (v: string) => void; t: Theme }) {
   return (
     <View style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: radius.sm, padding: 3 }}>
@@ -128,6 +135,7 @@ function Seg({ options, value: val, onChange, t }: { options: string[]; value: s
           // screen reader gets nothing of: every option read as a plain button
           // and nothing said which one was on.
           accessibilityRole="radio" accessibilityState={{ selected: val === o }}
+          accessibilityLabel={val === o ? `Shown in ${SEG_SPOKEN[o] ?? o}` : `Show in ${SEG_SPOKEN[o] ?? o} instead`}
           hitSlop={{ top: 8, bottom: 8, left: 0, right: 0 }}
           style={{ paddingHorizontal: sp.md, paddingVertical: 7, borderRadius: radius.sm, backgroundColor: val === o ? t.brand : 'transparent' }}>
           <Text style={{ ...ty.label, fontWeight: '600', color: val === o ? t.brandInk : t.ink3 }}>{o.toUpperCase()}</Text>
@@ -522,31 +530,39 @@ export default function Profile() {
               <Text style={{ ...ty.caption, color: t.ink3 }}>{age != null ? `${age} yrs  ▾` : '▾'}</Text>
             </Pressable>
 
-            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Height</Text>
-            <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: lengthNote ? sp.sm : sp.lg }}>
+            {/* This sheet always opens holding the figures already on file, so
+                the unit — which lived only in the placeholder — was invisible
+                every single time it was opened. A height of 5 is feet and a
+                height of 175 is centimetres, but 70 is both, and a weight with
+                no unit over it is how pounds get saved as kilograms. */}
+            <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: lengthNote ? sp.sm : sp.lg, alignItems: 'flex-end' }}>
               {/* Two boxes in imperial, one in metric. A single box asking for
                   a height "in inches" is a box nobody who thinks in feet knows
                   how to fill in — they would type 5.10 and mean 5' 10". */}
-              <TextInput value={heightVal} onChangeText={setHeightVal} keyboardType="numeric"
-                accessibilityLabel={lu === 'cm' ? 'Height in centimetres' : 'Height, feet'}
-                placeholder={lu === 'cm' ? 'cm' : 'ft'} placeholderTextColor={t.ink3}
-                style={{ flex: 1, ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md }} />
+              <Field label="Height" hint={lu === 'cm' ? 'cm' : 'ft'} a11y={lu === 'cm' ? 'Height in centimetres' : 'Height, feet'}>
+                <TextInput value={heightVal} onChangeText={setHeightVal} keyboardType="numeric"
+                  style={{ ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md }} />
+              </Field>
               {lu === 'in' ? (
-                <TextInput value={heightInVal} onChangeText={setHeightInVal} keyboardType="numeric"
-                  accessibilityLabel="Height, inches" placeholder="in" placeholderTextColor={t.ink3}
-                  style={{ flex: 1, ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md }} />
+                <Field label="Inches" a11y="Height, inches">
+                  <TextInput value={heightInVal} onChangeText={setHeightInVal} keyboardType="numeric"
+                    style={{ ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md }} />
+                </Field>
               ) : null}
-              <Seg options={['cm', 'in']} value={lu} onChange={switchLengthUnit} t={t} />
+              <View style={{ paddingBottom: 4 }}>
+                <Seg options={['cm', 'in']} value={lu} onChange={switchLengthUnit} t={t} />
+              </View>
             </View>
             {lengthNote ? <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>{lengthNote}</Text> : null}
 
-            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Current weight</Text>
-            <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: weightNote ? sp.sm : sp.lg }}>
-              <TextInput value={weightVal} onChangeText={setWeightVal} keyboardType="numeric"
-                accessibilityLabel={wu === 'kg' ? 'Current weight in kilograms' : 'Current weight in pounds'}
-                placeholder={wu} placeholderTextColor={t.ink3}
-                style={{ flex: 1, ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md }} />
-              <Seg options={['kg', 'lb']} value={wu} onChange={switchWeightUnit} t={t} />
+            <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: weightNote ? sp.sm : sp.lg, alignItems: 'flex-end' }}>
+              <Field label="Current weight" hint={wu} a11y={wu === 'kg' ? 'Current weight in kilograms' : 'Current weight in pounds'}>
+                <TextInput value={weightVal} onChangeText={setWeightVal} keyboardType="numeric"
+                  style={{ ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md }} />
+              </Field>
+              <View style={{ paddingBottom: 4 }}>
+                <Seg options={['kg', 'lb']} value={wu} onChange={switchWeightUnit} t={t} />
+              </View>
             </View>
             {weightNote ? <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>{weightNote}</Text> : null}
 

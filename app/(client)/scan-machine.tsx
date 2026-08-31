@@ -32,8 +32,12 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import { analyzeMachine, visionAvailable } from '../../src/lib/vision';
 import { MACHINES, identifyMachine, looksLikeSerial, type MachineDef } from '../../src/lib/machines';
 import { recallMachine, rememberMachine } from '../../src/lib/machineMemory';
-import { Rule, Section, SectionHead, Cta, Ghost, Notice } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Cta, Ghost, Notice, Field } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
+
+// "km", "m" and "mi" are three glyphs a screen reader says as themselves — and
+// "mi" spoken aloud is not a word. The distance toggle says the whole thing.
+const UNIT_SPOKEN: Record<string, string> = { km: 'kilometres', m: 'metres', mi: 'miles' };
 
 // Pull a human label out of whatever the QR encodes (JSON, query param, URL slug).
 function parseMachine(raw: string): string {
@@ -277,17 +281,31 @@ export default function ScanMachine() {
             {cardio ? (
               <Section>
                 <SectionHead title="Your Effort" note={kcalNow != null ? `${num(kcalNow)} kcal` : undefined} />
+                {/* Labels, not placeholders. A machine that was scanned once is
+                    recalled with its numbers already in the boxes, and every
+                    word below then vanished — four bare numerals, one of which
+                    is watts and looks exactly like a heart rate. */}
                 <View style={{ flexDirection: 'row', gap: sp.sm }}>
-                  <TextInput value={mins} onChangeText={setMins} keyboardType="numeric" placeholder="minutes" placeholderTextColor={t.ink3} style={inp} />
-                  <TextInput value={dist} onChangeText={setDist} keyboardType="numeric" placeholder={'distance (' + unit + ')'} placeholderTextColor={t.ink3} style={inp} />
+                  <Field label="Time" hint="min">
+                    <TextInput value={mins} onChangeText={setMins} keyboardType="numeric" style={inp} />
+                  </Field>
+                  <Field label="Distance" hint={unit}>
+                    <TextInput value={dist} onChangeText={setDist} keyboardType="numeric" style={inp} />
+                  </Field>
                 </View>
-                <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm }}>
-                  <TextInput value={watts} onChangeText={setWatts} keyboardType="numeric" placeholder="avg watts" placeholderTextColor={t.ink3} style={inp} />
-                  <TextInput value={kcalIn} onChangeText={setKcalIn} keyboardType="numeric" placeholder="calories" placeholderTextColor={t.ink3} style={inp} />
+                <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
+                  <Field label="Avg watts" hint="optional">
+                    <TextInput value={watts} onChangeText={setWatts} keyboardType="numeric" style={inp} />
+                  </Field>
+                  <Field label="Calories" hint="kcal · optional">
+                    <TextInput value={kcalIn} onChangeText={setKcalIn} keyboardType="numeric" style={inp} />
+                  </Field>
                 </View>
                 <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
                   {['km', 'm', 'mi'].map((u) => (
-                    <Pressable key={u} onPress={() => setUnit(u)}
+                    <Pressable key={u} onPress={() => setUnit(u)} accessibilityRole="button"
+                      accessibilityState={{ selected: unit === u }}
+                      accessibilityLabel={unit === u ? `Distance is in ${UNIT_SPOKEN[u]}` : `Measure the distance in ${UNIT_SPOKEN[u]} instead`}
                       style={{ backgroundColor: unit === u ? t.brand : t.surface2, borderRadius: radius.pill, paddingVertical: 7, paddingHorizontal: sp.lg }}>
                       <Text style={{ ...ty.caption, fontWeight: unit === u ? '600' : '500', color: unit === u ? t.brandInk : t.ink2 }}>{u}</Text>
                     </Pressable>
@@ -300,9 +318,13 @@ export default function ScanMachine() {
             ) : (
               <Section>
                 <SectionHead title="Add Your Sets" note={sets.length ? `${sets.length} logged` : undefined} />
-                <View style={{ flexDirection: 'row', gap: sp.sm }}>
-                  <TextInput value={reps} onChangeText={setReps} keyboardType="numeric" placeholder="reps" placeholderTextColor={t.ink3} style={inp} />
-                  <TextInput value={kg} onChangeText={setKg} keyboardType="numeric" placeholder="kg" placeholderTextColor={t.ink3} style={inp} />
+                <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'flex-end' }}>
+                  <Field label="Reps">
+                    <TextInput value={reps} onChangeText={setReps} keyboardType="numeric" style={inp} />
+                  </Field>
+                  <Field label="KG" a11y="Load in kilograms">
+                    <TextInput value={kg} onChangeText={setKg} keyboardType="numeric" style={inp} />
+                  </Field>
                   <Ghost label="Add Set" onPress={addSet} />
                 </View>
                 {sets.length > 0 ? (

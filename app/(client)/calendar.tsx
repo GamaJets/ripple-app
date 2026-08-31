@@ -67,7 +67,7 @@ import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Hero, KpiRow, Card, ListRow, Cta, Ghost, Notice, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, KpiRow, Card, ListRow, Cta, Ghost, Flag, Notice, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../../src/theme/scale';
 import { useSessions, cancelBookedSession, ptCancelLines, useCancellationPolicy, useSlotWaitlist, useLateCancelCharges, cancelWarningFor, waitlistLine } from '../../src/ui/sessions';
 import { feeAmountLine } from '../../src/lib/booking';
@@ -602,9 +602,9 @@ export default function Calendar() {
             ...(packLeft != null && packLeft > 0 ? [{ label: 'Pack Credits', value: fig(packLeft) }] : []),
           ]} />
           {!sessionsKnown ? (
-            <Text style={{ ...ty.caption, color: t.warn, marginTop: sp.md }}>
+            <Flag tone={t.warn} style={{ marginTop: sp.md }}>
               Your sessions could not be read, so no open slot or booking of yours is shown here or on the grid below. This is a connection problem, not an empty calendar.
-            </Text>
+            </Flag>
           ) : null}
           {/* The policy is what the Cancel button on this screen will hold the
               member to, so a policy that could not be read is worth saying
@@ -612,9 +612,9 @@ export default function Calendar() {
               into "no fee": that is the sentence this whole feature exists to
               stop being printed by accident. */}
           {policyStatus === 'error' ? (
-            <Text style={{ ...ty.caption, color: t.warn, marginTop: sp.md }}>
+            <Flag tone={t.warn} style={{ marginTop: sp.md }}>
               We couldn’t read your coach’s cancellation policy, so we can’t tell you whether cancelling would cost you anything. Cancelling still works — check with your coach what their notice period and fee are.
-            </Text>
+            </Flag>
           ) : null}
           {mine.length > 0 ? (
             <View style={{ alignSelf: 'flex-start', marginTop: sp.lg }}>
@@ -870,9 +870,9 @@ export default function Calendar() {
               transaction that frees it, and nobody has to be quick. */}
           {waitStatus === 'error' ? (
             <View style={{ paddingVertical: sp.md }}>
-              <Text style={{ ...ty.caption, color: t.warn }}>
+              <Flag tone={t.warn}>
                 We couldn’t read your coach’s taken hours or your place in any waitlist, so neither is shown on this day. This is a connection problem — nothing has been lost, and any waitlist you are on still stands.
-              </Text>
+              </Flag>
             </View>
           ) : selDayTaken.length > 0 ? (
             <View style={{ marginTop: selDaySessions.length > 0 ? sp.lg : 0 }}>

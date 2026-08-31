@@ -43,7 +43,7 @@ import { View, Text, Pressable, ScrollView, TextInput, Alert } from 'react-nativ
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Cta, ListRow } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Cta, ListRow, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { useOwnerOps } from '../../src/ui/ownerOps';
 import { fetchAllFeedback, type FeedbackRow } from '../../src/ui/appFeedback';
@@ -58,6 +58,11 @@ import { parseSessionFee, sessionFeeFieldValue } from '../../src/lib/gymSettings
  * and a scroller of 180 options is a worse answer than eight and a note. It is
  * not a closed set in the database — `tenants.currency` is free text — so
  * adding one here is the whole of adding one.
+ *
+ * currency-ok: this is the list an owner CHOOSES from. Naming currencies is the
+ * entire job of a currency picker, and it is the one place in the product where
+ * an ISO code beside nothing is correct — nothing here is a figure, and nothing
+ * here is applied to a gym until somebody taps it.
  */
 const CURRENCIES = ['AED', 'GBP', 'USD', 'EUR', 'SAR', 'AUD', 'CAD', 'ZAR'] as const;
 import { capLimit } from '../../src/lib/rowCap';
@@ -144,6 +149,11 @@ export default function OwnerOps() {
       bad: false,
       text: next == null
         ? 'Session fee cleared. Delivered sessions are shown as a count until you set one again.'
+        // The fee saved either way; the confirmation just cannot name an amount
+        // in a currency this gym has not chosen, and gymMoney returns null
+        // rather than picking one.
+        : gymMoney(next, cur) == null
+        ? `Saved. Set your gym's currency below and every delivered session will be valued at ${next}.`
         : `Saved. Every delivered session is now valued at ${gymMoney(next, cur)}.`,
     });
   };
@@ -338,7 +348,9 @@ export default function OwnerOps() {
                   </View>
                 </>)}
                 {feeMsg ? (
-                  <Text style={{ ...ty.caption, color: feeMsg.bad ? t.warn : t.ink3, marginTop: sp.sm }}>{feeMsg.text}</Text>
+                  feeMsg.bad
+                    ? <Flag tone={t.warn} style={{ marginTop: sp.sm }}>{feeMsg.text}</Flag>
+                    : <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{feeMsg.text}</Text>
                 ) : (
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
                     {tenant.sessionFee == null

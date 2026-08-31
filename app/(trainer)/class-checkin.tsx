@@ -228,7 +228,9 @@ export default function ClassCheckin() {
               refused. Silence under 'ready' is the first; a sentence under
               'error' is the second. */}
           {rateNote ? (
-            <Text style={{ ...ty.caption, color: rateStatus === 'error' ? t.crit : t.ink3, marginTop: 6 }}>{rateNote}</Text>
+            rateStatus === 'error'
+              ? <Flag tone={t.crit} style={{ marginTop: 6 }}>{rateNote}</Flag>
+              : <Text style={{ ...ty.caption, color: t.ink3, marginTop: 6 }}>{rateNote}</Text>
           ) : null}
           {/* The arithmetic needs a real check-in count. With the roster unread
               `present` is 0, and this line rendered "25 × 0 checked in = 0" —

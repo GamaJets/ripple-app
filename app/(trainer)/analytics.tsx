@@ -30,7 +30,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Card, Cta, Ghost, Spark, fig, Notice, PartialRead } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Card, Cta, Ghost, Spark, fig, Flag, Notice, PartialRead } from '../../src/ui/kit';
 import { isWhole, worstStatus } from '../../src/ui/loadStatus';
 import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 import { useMyTrainerProfile } from '../../src/ui/coachProfile';
@@ -270,8 +270,13 @@ export default function TrainerAnalytics() {
               telling that coach they have no targets is both false and an
               invitation to type them in again over the top of the stored ones.
               goalsEmptyLine picks the sentence, and is tested. */}
+          {/* crit as ink measures 3.03–4.05:1 on all ten palettes, so the
+              failed-read sentence was the least readable line on the screen.
+              Flag puts crit in the dot and the sentence in ink2. */}
           {goalsLine ? (
-            <Text style={{ ...ty.label, color: goalsStatus === 'error' ? t.crit : t.ink3 }}>{goalsLine}</Text>
+            goalsStatus === 'error'
+              ? <Flag tone={t.crit}>{goalsLine}</Flag>
+              : <Text style={{ ...ty.label, color: t.ink3 }}>{goalsLine}</Text>
           ) : null}
           {/* A revenue target set with no session rate has a goal but no
               progress, and drawing that bar at 0% would tell a coach who has
@@ -422,9 +427,9 @@ export default function TrainerAnalytics() {
             // trading, and under a failed read it is one the app cannot make.
             // The months live on the account now (part 129) — a phone that
             // cannot reach them has not established that there are none.
-            <Text style={{ ...ty.label, color: t.crit }}>
+            <Flag tone={t.crit}>
               Your recorded months could not be read, so this is not "no history yet" — there may be months on your account this phone has not got. Nothing has been lost; open this screen again once you have signal.
-            </Text>
+            </Flag>
           ) : (
             <Text style={{ ...ty.label, color: t.ink3 }}>Not enough history yet — a snapshot is recorded each month, and the trend appears from the second one.</Text>
           )}
@@ -433,9 +438,9 @@ export default function TrainerAnalytics() {
               rather than in place of it: withholding a trend the coach has
               genuinely recorded would be its own kind of wrong. */}
           {revHist.months >= 2 && revHist.status === 'error' ? (
-            <Text style={{ ...ty.caption, color: t.crit, marginTop: sp.sm }}>
+            <Flag tone={t.crit} style={{ marginTop: sp.sm }}>
               Drawn from what this phone recorded — your account's months could not be read just now, so there may be more than this.
-            </Text>
+            </Flag>
           ) : null}
         </Section>
 

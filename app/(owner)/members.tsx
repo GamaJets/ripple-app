@@ -24,7 +24,7 @@ import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import type { Theme } from '../../src/theme/tokens';
-import { useTenant, GYM_CURRENCY } from '../../src/ui/tenant';
+import { useTenant } from '../../src/ui/tenant';
 import { supabase } from '../../src/lib/supabase';
 import { reportError } from '../../src/lib/reportError';
 import {
@@ -53,11 +53,21 @@ export default function OwnerMembers() {
   const t = useTheme();
   const router = useRouter();
   const { tenant } = useTenant();
-  // The gym's own currency, not the module default. Part 99 added
-  // `tenants.currency` precisely so a white-labelled gym is not billed in
-  // somebody else's money; GYM_CURRENCY stays as the fallback for a tenant
-  // that has never set one.
-  const cur = tenant?.currency || GYM_CURRENCY;
+  // The gym's own currency, and NOTHING when it has not set one.
+  //
+  // This was `tenant?.currency || GYM_CURRENCY`, and the fallback was the last
+  // path in the owner app that wrote a guessed currency to disk: the payment
+  // form below sends `cur` straight into `recordPayment`, so a gym that had
+  // never chosen one had its takings stored as dirhams — permanently, and read
+  // back as its own answer by the accounting and month-end screens that
+  // reconcile against a bank statement. A fallback is defensible for something
+  // being DISPLAYED and never for something being RECORDED, and this one value
+  // was doing both.
+  //
+  // Part 99 made `tenants.currency` nullable on purpose: NULL means the gym has
+  // not told us. So null here, a dash on the figures, and the payment form
+  // refuses rather than guesses. Ops has the control that sets it.
+  const cur = tenant?.currency ?? null;
 
   const [plans, setPlans] = useState<MembershipPlan[]>([]);
   const [rows, setRows] = useState<Membership[] | null>(null);
@@ -174,18 +184,24 @@ export default function OwnerMembers() {
 
   const commitPayment = async () => {
     if (!payFor || !tenant?.id) return;
+    // No currency, no write. The form above renders an explanation instead of
+    // an amount field when this is null, so in normal running this is
+    // unreachable — it is here because `recordPayment` now REQUIRES a currency
+    // and the one thing that must never happen is this call site inventing one
+    // to satisfy the type.
+    if (!cur) return;
     const major = parseFloat(amount.replace(/,/g, ''));
     if (!Number.isFinite(major) || major <= 0) return;
     setBusy(true);
     try {
-      // The currency goes with the amount. The label above this form reads the
-      // gym's own currency, and `recordPayment` defaults to 'AED' when it is
-      // not told one — so a GBP gym's owner read "Amount (GBP)", typed 50, and
-      // the row was stored as dirhams, permanently, with nothing to notice.
-      //
-      // That gap opened when the LABEL was corrected earlier tonight and the
-      // WRITE was not: before it, both said AED and were at least consistent.
-      // A half-corrected currency is worse than an uncorrected one.
+      // The currency goes with the amount, and it is the gym's own or nothing.
+      // The label above this form was corrected to the gym's currency earlier
+      // while this write still said 'AED' by default — so a GBP gym's owner
+      // read "Amount (GBP)", typed 50, and the row was stored as dirhams,
+      // permanently, with nothing on any screen to notice. Before that
+      // correction both said AED and were at least consistent: a
+      // half-corrected currency is worse than an uncorrected one, because the
+      // label is what makes the owner confident.
       await recordPayment(supabase, tenant.id, {
         memberId: payFor.memberId,
         amountCents: Math.round(major * 100),
@@ -224,6 +240,11 @@ export default function OwnerMembers() {
           figure={money(sum.mrrCents, cur) ?? "—"}
           note={failed
             ? 'The register could not be read, so recurring revenue is not known. This is a failed read, not a gym with no members.'
+            : sum.mrrCents != null && !cur
+            // The figure is known and the money it is in is not. Printing it
+            // bare would be read in whatever currency the owner is thinking in,
+            // which is the same wrong number with fewer clues.
+            ? 'This gym has not set its currency, so a recurring total cannot be written down. An owner sets it in Ops.'
             : sum.mrrCents == null
             ? loaded && list.length === 0
               ? 'No memberships on the register yet.'
@@ -448,11 +469,26 @@ export default function OwnerMembers() {
 
             {/* The currency comes from the one place the owner app keeps it,
                 so this label cannot drift from what money() prints two lines up
-                the screen. */}
-            <Text style={lab}>Amount ({cur})</Text>
-            <TextInput value={amount} onChangeText={setAmount} autoFocus keyboardType="numeric"
-              placeholder="0.00" placeholderTextColor={t.ink3} returnKeyType="done"
-              onSubmitEditing={() => { void commitPayment(); }} style={inp} accessibilityLabel={`Amount in ${cur}`} />
+                the screen — or from what the write beside it stores. The label
+                and the write coming apart is the whole bug: this label was
+                corrected to the gym's currency earlier and `recordPayment` was
+                not, so a GBP gym's owner read "Amount (GBP)", typed 50, and 50
+                dirhams went into the ledger. They now read the same `cur`, and
+                when there is no `cur` there is no form. */}
+            {cur ? (
+              <>
+                <Text style={lab}>Amount ({cur})</Text>
+                <TextInput value={amount} onChangeText={setAmount} autoFocus keyboardType="numeric"
+                  placeholder="0.00" placeholderTextColor={t.ink3} returnKeyType="done"
+                  onSubmitEditing={() => { void commitPayment(); }} style={inp} accessibilityLabel={`Amount in ${cur}`} />
+              </>
+            ) : (
+              <Text style={{ ...ty.body, color: t.ink2 }}>
+                This gym has not set its currency, so a payment cannot be recorded yet — an amount
+                with no currency is a number, and it would be stored as one permanently. An owner
+                sets the currency in Ops, and this form works from that moment on.
+              </Text>
+            )}
 
             <Text style={{ ...lab, marginTop: sp.md }}>Method</Text>
             <View style={{ flexDirection: 'row', gap: sp.sm, flexWrap: 'wrap' }}>
@@ -468,8 +504,8 @@ export default function OwnerMembers() {
             </View>
 
             <View style={{ marginTop: sp.lg }}>
-              <Pressable disabled={!amount.trim() || busy} onPress={commitPayment}
-                style={{ backgroundColor: amount.trim() && !busy ? t.brand : t.surface2, borderRadius: radius.sm, paddingVertical: 13, alignItems: 'center', marginBottom: sp.sm }}>
+              <Pressable disabled={!amount.trim() || busy || !cur} onPress={commitPayment}
+                style={{ backgroundColor: amount.trim() && !busy && cur ? t.brand : t.surface2, borderRadius: radius.sm, paddingVertical: 13, alignItems: 'center', marginBottom: sp.sm }}>
                 <Text style={{ ...ty.label, fontWeight: '600', color: amount.trim() && !busy ? t.brandInk : t.ink3 }}>
                   {busy ? 'Recording…' : 'Record payment'}
                 </Text>

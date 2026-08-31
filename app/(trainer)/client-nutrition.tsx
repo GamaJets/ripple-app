@@ -414,7 +414,11 @@ export default function ClientNutrition() {
                         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.xs }}>
                           {profile.avoid.map((a) => (
                             <View key={a} style={{ paddingHorizontal: sp.md, paddingVertical: sp.xs, borderRadius: radius.pill, backgroundColor: t.surface2, borderWidth: hairline, borderColor: t.warn }}>
-                              <Text style={{ ...ty.micro, color: t.warn }}>{ALLERGEN_LABEL.get(a) ?? a}</Text>
+                              {/* The chip's warn border is the mark and clears 3:1;
+                                  warn as micro ink did not clear 4.5:1 on the three
+                                  light palettes, which made the allergen name the
+                                  hardest word in the chip to read. */}
+                              <Text style={{ ...ty.micro, color: t.ink }}>{ALLERGEN_LABEL.get(a) ?? a}</Text>
                             </View>
                           ))}
                         </View>

@@ -20,7 +20,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { ensureMediaPermission } from '../../src/ui/permissions';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
-import { Rule, Section, SectionHead, Card, ListRow, QuickRow, Cta, Notice, Ghost } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Card, ListRow, QuickRow, Cta, Flag, Notice, Ghost } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, value } from '../../src/theme/scale';
 import { useMyTrainerProfile } from '../../src/ui/coachProfile';
 import { useMyCancellationPolicy } from '../../src/ui/sessions';
@@ -321,7 +321,12 @@ export default function CoachProfile() {
           </View>
 
           <View style={{ marginTop: sp.lg }}>
-            <Field t={t} label="Late-Cancellation Fee"
+            {/* The currency goes in the LABEL, where it stays, rather than only
+                in the prose underneath — this box arrives holding the fee the
+                coach set last time, and an amount being edited is the moment
+                the unit matters most. `lc.currency` is the gym's own ISO code
+                and may be null; nothing is invented in its place. */}
+            <Field t={t} label={`Late-Cancellation Fee${lc.currency ? ` · ${lc.currency}` : ''}`}
               value={lc.fee == null ? '' : String(lc.fee)}
               onChangeText={(v) => {
                 const digits = v.replace(/[^0-9.]/g, '');
@@ -345,7 +350,7 @@ export default function CoachProfile() {
               coach is told before the write rather than after it fails —
               silently, in a debounce, with the switch still showing on. */}
           {lc.blocker ? (
-            <Text style={{ ...ty.caption, color: t.warn, marginTop: sp.md }}>{lc.blocker}</Text>
+            <Flag tone={t.warn} style={{ marginTop: sp.md }}>{lc.blocker}</Flag>
           ) : (
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
               Repple records the fee and never collects it. Your client sees what they owe and who to pay — you.
