@@ -18,14 +18,21 @@
 // `repple://` deliberately. Those features are client-app only, so that scheme
 // is the correct one for them.
 import * as Linking from 'expo-linking';
+import { BRAND } from './brands';
 
 /** An absolute URL that reopens THIS app at `path`. */
 export function appLink(path: string): string {
   return Linking.createURL(path);
 }
 
-/** The public site. The reset flow lands here rather than in an app scheme. */
-export const WEB_ORIGIN = 'https://repplefitness.com';
+/** The public site. The reset flow lands here rather than in an app scheme.
+ *
+ *  Comes from the brand registry now rather than being a literal. It was
+ *  sending every brand's password-reset email to Repple's website — which for
+ *  a white-labelled chain means their locked-out member lands on their
+ *  supplier's site to get back in. For Repple itself this resolves to exactly
+ *  the string it always was. */
+export const WEB_ORIGIN = BRAND.webOrigin;
 
 /**
  * Where a password-reset email should send somebody.

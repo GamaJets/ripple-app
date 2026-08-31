@@ -77,6 +77,21 @@ export type Brand = {
    */
   joinOrigin: string;
   /**
+   * The brand's public site, used for the links a person opens OUT OF AN EMAIL
+   * — password reset today.
+   *
+   * Separate from `joinOrigin` and not derivable from it: Repple's join links
+   * carry the www host and its reset links do not, and a redirect between the
+   * two is exactly the kind of thing that quietly breaks a reset. Both are
+   * stated rather than one inferred from the other.
+   *
+   * This mattered before white-label was a plan: a reset email is the one link
+   * a person opens when they are already locked out, and sending a chain's
+   * member to their supplier's website to do it is both confusing and a leak of
+   * who runs the software.
+   */
+  webOrigin: string;
+  /**
    * Hosts whose `/join` this brand's CLIENT app claims as universal links.
    *
    * Both the apex and the www host, in that order, because the two are separate
@@ -129,6 +144,9 @@ export const BRANDS: Record<string, Brand> = {
       owner:   { name: 'Repple Studio', bundle: 'com.washateria.repple.studio', scheme: 'repplestudio', icon: './assets/icon-studio.png', tile: '#b45309' },
     },
     joinOrigin: 'https://www.repplefitness.com',
+    // Deliberately apex, no www — this is the exact literal deepLink.ts has
+    // always used, kept character for character so no reset URL moves.
+    webOrigin: 'https://repplefitness.com',
     linkHosts: ['repplefitness.com', 'www.repplefitness.com'],
     androidGoogleServices: null,
   },
@@ -154,6 +172,7 @@ export const BRANDS: Record<string, Brand> = {
       owner:   { name: 'Example Fitness Studio', bundle: 'com.example.fitness.studio', scheme: 'examplefitnessstudio', icon: './assets/brands/example/icon-studio.png', tile: '#9a6700' },
     },
     joinOrigin: 'https://www.example.com',
+    webOrigin: 'https://example.com',
     linkHosts: ['example.com', 'www.example.com'],
     androidGoogleServices: './google-services.example.json',
   },
