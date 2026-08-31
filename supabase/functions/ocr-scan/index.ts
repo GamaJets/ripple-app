@@ -46,15 +46,26 @@ Deno.serve(async (req) => {
   let body: any = {};
   try { body = await req.json(); } catch { return json({ ok: false, error: 'bad json' }, 400); }
   const b64 = String(body.imageBase64 || '');
-  if (!b64) return json({ ok: false, error: 'No image was received.' });
-  if (b64.length > MAX_B64) return json({ ok: false, error: 'That photo is too large — try again a little further back.' });
+  // A physio report usually arrives as a PDF rather than a photograph, so the
+  // caller may say what it sent. Absent, it is a JPEG — which is every existing
+  // caller (the InBody sheet), so their behaviour is unchanged.
+  const mime = String(body.mime || 'image/jpeg').toLowerCase();
+  const isPdf = mime === 'application/pdf';
+  if (!b64) return json({ ok: false, error: isPdf ? 'No document was received.' : 'No image was received.' });
+  if (b64.length > MAX_B64) {
+    return json({ ok: false, error: isPdf
+      ? 'That document is too large to read. Try a shorter one, or photograph the page you need.'
+      : 'That photo is too large — try again a little further back.' });
+  }
 
   try {
     const form = new URLSearchParams();
     form.set('apikey', key);
     form.set('OCREngine', '2');
     form.set('scale', 'true');
-    form.set('base64Image', b64.startsWith('data:') ? b64 : `data:image/jpeg;base64,${b64}`);
+    form.set('base64Image', b64.startsWith('data:') ? b64 : `data:${mime};base64,${b64}`);
+    // OCR.space needs telling, and gets the extension rather than the mime.
+    if (isPdf) form.set('filetype', 'PDF');
 
     const res = await fetch('https://api.ocr.space/parse/image', {
       method: 'POST',
@@ -68,8 +79,18 @@ Deno.serve(async (req) => {
       const detail = Array.isArray(out?.ErrorMessage) ? out.ErrorMessage.join(' ') : String(out?.ErrorMessage || '');
       return json({ ok: false, error: detail || 'The scanning service could not read that image.' });
     }
-    const text: string = out?.ParsedResults?.[0]?.ParsedText || '';
-    if (!text.trim()) return json({ ok: false, error: 'No text could be read from that photo.' });
+    // Every page, not the first one. A PDF comes back as one ParsedResult PER
+    // PAGE, so reading [0] would have quietly dropped everything after page one
+    // — and on a physio report the diagnosis is rarely on the cover.
+    const pages: string[] = Array.isArray(out?.ParsedResults)
+      ? out.ParsedResults.map((r: any) => String(r?.ParsedText || '')).filter((t: string) => t.trim())
+      : [];
+    const text = pages.join('\n');
+    if (!text.trim()) {
+      return json({ ok: false, error: isPdf
+        ? 'No text could be read from that document. If it is a scan or a photo inside a PDF, photographing the page directly often reads better.'
+        : 'No text could be read from that photo.' });
+    }
     return json({ ok: true, text });
   } catch (_e) {
     return json({ ok: false, error: 'Could not reach the scanning service.' });

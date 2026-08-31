@@ -32,6 +32,7 @@ import { View, Text, Pressable, ScrollView, TextInput, ActivityIndicator, Alert,
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Notice, Card, Cta, Ghost, Flag } from '../../src/ui/kit';
@@ -98,6 +99,37 @@ export default function InjuryDoc() {
     ...ty.label, fontWeight: (on ? '600' : '500') as '600' | '500', color: on ? t.brandInk : t.ink2,
   });
 
+  // Shared by all three ways in, so a PDF chosen from Files and a photo taken
+  // of the same page land in exactly the same state machine.
+  const readFrom = async (file: { uri: string; name?: string | null; mimeType?: string | null }) => {
+    setBusy('preparing');
+    setResult(null);
+    setDrafts({});
+    setBusy('reading');
+    const r = await readInjuryDocument(file);
+    setBusy(null);
+    setResult(r);
+    const seeded: Record<string, Draft> = {};
+    for (const cand of r.extraction?.candidates ?? []) {
+      seeded[cand.key] = { area: cand.area, severity: cand.severity, note: candidateNote(cand), verdict: 'open' };
+    }
+    setDrafts(seeded);
+    if (r.stored === 'ready') refreshDocs();
+  };
+
+  // A report is usually emailed as a PDF rather than photographed, so Files is
+  // a first-class way in rather than a fallback. The reader takes both.
+  const pickFile = async () => {
+    const res = await DocumentPicker.getDocumentAsync({
+      type: ['application/pdf', 'image/jpeg', 'image/png'],
+      copyToCacheDirectory: true,
+      multiple: false,
+    });
+    if (res.canceled || !res.assets?.[0]) return;
+    const a = res.assets[0];
+    await readFrom({ uri: a.uri, name: a.name, mimeType: a.mimeType });
+  };
+
   const pick = async (fromCamera: boolean) => {
     if (!(await ensureMediaPermission(fromCamera ? 'camera' : 'library', 'read an injury off a document'))) return;
     const res = fromCamera
@@ -105,23 +137,7 @@ export default function InjuryDoc() {
       : await ImagePicker.launchImageLibraryAsync({ quality: 0.9 });
     if (res.canceled || !res.assets?.[0]) return;
 
-    setBusy('preparing');
-    setResult(null);
-    setDrafts({});
-    // One await covers the upload and the read; the label moves on so the
-    // client is not looking at "preparing" while a network call runs.
-    setBusy('reading');
-    const r = await readInjuryDocument({ uri: res.assets[0].uri, name: res.assets[0].fileName });
-    setBusy(null);
-    setResult(r);
-    // Seed one draft per proposal, pre-filled with what the document appears to
-    // say. Everything in here is editable and nothing in here is written.
-    const seeded: Record<string, Draft> = {};
-    for (const cand of r.extraction?.candidates ?? []) {
-      seeded[cand.key] = { area: cand.area, severity: cand.severity, note: candidateNote(cand), verdict: 'open' };
-    }
-    setDrafts(seeded);
-    if (r.stored === 'ready') refreshDocs();
+    await readFrom({ uri: res.assets[0].uri, name: res.assets[0].fileName, mimeType: res.assets[0].mimeType });
   };
 
   const setDraft = (key: string, patch: Partial<Draft>) =>
@@ -275,9 +291,16 @@ export default function InjuryDoc() {
             </View>
           </Card>
         ) : (
-          <View style={{ marginTop: sp.md, flexDirection: 'row', gap: sp.sm }}>
-            <View style={{ flex: 1 }}><Cta label="Take a Photo" onPress={() => pick(true)} wide /></View>
-            <View style={{ flex: 1 }}><Ghost label="Choose an Image" onPress={() => pick(false)} /></View>
+          <View style={{ marginTop: sp.md, gap: sp.sm }}>
+            <Cta label="Take a Photo" onPress={() => pick(true)} wide />
+            {/* Files sits beside the camera rather than under it, because a
+                report is more often something a clinic emailed than something
+                on the page in front of you. The reader takes a PDF whole and
+                reads every page of it, not just the first. */}
+            <View style={{ flexDirection: 'row', gap: sp.sm }}>
+              <View style={{ flex: 1 }}><Ghost label="Choose a File" onPress={pickFile} /></View>
+              <View style={{ flex: 1 }}><Ghost label="Choose an Image" onPress={() => pick(false)} /></View>
+            </View>
           </View>
         )}
 
@@ -318,6 +341,7 @@ export default function InjuryDoc() {
                   // that is true — it only knows it could not find one here.
                   <View style={{ marginTop: sp.lg, flexDirection: 'row', gap: sp.sm }}>
                     <Cta label="Add It Myself" onPress={() => router.replace('/(client)/injuries')} />
+                    <Ghost label="Try a File Instead" onPress={pickFile} />
                     <Ghost label="Try Another Photo" onPress={() => pick(true)} />
                   </View>
                 )}

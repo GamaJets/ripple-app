@@ -54,6 +54,13 @@ export interface RosterClient {
    *  selected it and then dropped it on the floor. */
   joinedAt?: string | null;
   injuries?: { area: string; severity: string; note?: string; isNew?: boolean }[];
+  /** Disclosures they have marked recovered. Kept SEPARATE from `injuries`
+   *  rather than folded in: the acknowledgement gate and the roster's "Injury"
+   *  flag are both about what is live, and a healed knee re-closing a gate or
+   *  lighting a warning would be the app being stopped by good news. This is
+   *  history — the coach can see what somebody has had, without it counting as
+   *  something they have. */
+  pastInjuries?: { area: string; severity: string; note?: string }[];
   metrics?: import('./inbodyMetrics').ScanMetrics;
   diet?: string;
   mealsPerDay?: number;

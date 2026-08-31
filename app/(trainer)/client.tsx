@@ -602,12 +602,34 @@ export default function ClientScreen() {
                   </View>
                 ))}
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-                  Their own words, and only what they still have — anything they have marked recovered
-                  drops off. Their programme cannot be assigned until you have read these, and their
-                  app already flags or swaps movements that load them.
+                  Their own words. Their programme cannot be assigned until you have read these, and
+                  their app already flags or swaps movements that load them. Only {who} can add,
+                  change or remove one — you cannot, deliberately, because a gate the coach can edit
+                  their way out of is not a gate.
                 </Text>
               </>
             )}
+
+            {/* Kept even though it is not live. A coach reading "hamstring,
+                severe, recovered" plans the next twelve weeks differently from
+                one who has never heard of it, and it does not follow that
+                somebody who healed a thing is somebody it never happened to.
+                Not counted anywhere: it lights no flag and closes no gate. */}
+            {client?.pastInjuries?.length ? (
+              <View style={{ marginTop: sp.lg }}>
+                <Text style={{ ...ty.micro, color: t.ink3 }}>Recovered</Text>
+                {client.pastInjuries.map((inj, i) => (
+                  <View key={`past-${inj.area}-${i}`} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.sm }}>
+                    <Text style={{ ...ty.label, color: t.ink2 }}>{areaLabel(inj.area)}</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, textTransform: 'capitalize' }}>{inj.severity}</Text>
+                  </View>
+                ))}
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                  {who} has marked {client.pastInjuries.length === 1 ? 'this' : 'these'} recovered. Kept
+                  because what somebody has had is worth knowing when you plan what they do next.
+                </Text>
+              </View>
+            ) : null}
           </Section>
         ) : null}
 

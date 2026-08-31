@@ -55,6 +55,8 @@ import { ExerciseThumb } from '../../src/ui/ExerciseDemo';
 import { buildProgram, type Program } from '../../src/lib/programs';
 import { guardOverwrite } from '../../src/lib/overwriteGuard';
 import { guardInjuries } from '../../src/lib/injuryGate';
+import { supabase } from '../../src/lib/supabase';
+import { reportError } from '../../src/lib/reportError';
 import { useInjuryAcks } from '../../src/ui/injuryAcks';
 import { areaLabel, injuryFlag, type Injury } from '../../src/lib/injuries';
 import { goalToEnum, goalsDisagree } from '../../src/lib/rosterMerge';
@@ -361,11 +363,68 @@ export default function Builder() {
         : `“${nm}” did not reach the server, so it is in your library on this phone only and will be gone when you reopen the app. Save it again once you have signal.`,
     );
   };
+  // Recorded BEFORE the programme is assigned, and the assignment is abandoned
+  // if it cannot be. The point of the acknowledgement is that it exists; a
+  // programme that went out while the record of the coach's decision did not is
+  // the one outcome that makes this worse than having no record at all — it
+  // would look, afterwards, exactly like a coach who never knew.
+  const recordInjuryChoice = async (): Promise<boolean> => {
+    if (!clientId || !loadsInjury.length) return true;
+    const movements = loadsInjury.map((e) => {
+      const f = injuryFlag(e.name, e.group || '', clientInjuries)!;
+      return { exercise: e.name, area: f.injury.area, severity: f.injury.severity };
+    });
+    try {
+      const { data: auth } = await supabase.auth.getUser();
+      const uid = auth?.user?.id;
+      if (!uid) return false;
+      const { error } = await supabase.from('program_injury_acknowledgements')
+        .insert({ trainer_id: uid, client_id: clientId, movements });
+      if (error) { reportError('builder.injuryChoice', error, { clientId }); return false; }
+      return true;
+    } catch (e) { reportError('builder.injuryChoice', e, { clientId }); return false; }
+  };
+
   const assign = async () => {
     // Belt as well as braces: the control is withheld above, and the handler
     // refuses too. An overwrite of somebody's training must not be one stray
     // render away from happening.
     if (!canAssign || !planGuard.allowed || !injuryGate.allowed) return;
+
+    // Knowing about a disclosure is not the same as deciding to load it anyway.
+    // The gate above covers the first; this covers the second, and asks at the
+    // moment the coach commits rather than while they are still arranging days.
+    if (loadsInjury.length) {
+      const lines = loadsInjury.slice(0, 6).map((e) => {
+        const f = injuryFlag(e.name, e.group || '', clientInjuries)!;
+        return `· ${e.name} — ${areaLabel(f.injury.area).toLowerCase()}, ${f.injury.severity}`;
+      });
+      const more = loadsInjury.length - lines.length;
+      const go = await new Promise<boolean>((resolve) => {
+        Alert.alert(
+          'These load what they disclosed',
+          `${lines.join('\n')}${more > 0 ? `\n· and ${num(more)} more` : ''}\n\n` +
+            'You can absolutely programme these on purpose. Confirming records that you chose to, with the date — ' +
+            `${client?.name.split(' ')[0] ?? 'your client'} can see that record too.`,
+          [
+            { text: 'Change the Programme', style: 'cancel', onPress: () => resolve(false) },
+            { text: 'I Know — Assign', style: 'destructive', onPress: () => resolve(true) },
+          ],
+          { cancelable: true, onDismiss: () => resolve(false) },
+        );
+      });
+      if (!go) return;
+      const recorded = await recordInjuryChoice();
+      if (!recorded) {
+        Alert.alert(
+          'Not assigned',
+          'Your acknowledgement could not be saved, so the programme was not assigned either — sending it without the record would leave no sign you knew. Nothing has changed. Try again.',
+          [{ text: 'OK' }],
+        );
+        return;
+      }
+    }
+
     const program: Program = {
       title: title.trim() || 'Custom program',
       focus: ['Coach-assigned', 'Personalised for you'],

@@ -43,6 +43,7 @@
 // of throwing, so a try/catch alone only catches the network dying. Every call
 // below reads `.error`.
 import * as ImageManipulator from 'expo-image-manipulator';
+import * as FileSystem from 'expo-file-system';
 import { supabase } from '../lib/supabase';
 import { reportError } from '../lib/reportError';
 import { extractFromDocument, type Extraction } from '../lib/injuryExtract';
@@ -76,8 +77,12 @@ export function docSlug(name?: string | null): string {
   return s || 'document';
 }
 
-export function injuryDocObjectPath(uid: string, atMs: number, token: string, slug: string): string {
-  return `${uid}/${atMs}-${token}-${slug}.jpg`;
+export function injuryDocObjectPath(uid: string, atMs: number, token: string, slug: string, ext = 'jpg'): string {
+  // The extension is part of what the client gets back when they open their own
+  // report later: a PDF stored under .jpg is a file their phone refuses to
+  // render. Defaulted so every existing caller keeps the behaviour it had.
+  const safe = /^[a-z0-9]{1,5}$/.test(ext) ? ext : 'jpg';
+  return `${uid}/${atMs}-${token}-${slug}.${safe}`;
 }
 
 /** The same test the storage policies apply, asked here so a mismatch fails
@@ -134,7 +139,7 @@ async function requireUid(): Promise<string | null> {
  * under an image/jpeg content type that would then be a lie.
  */
 export async function readInjuryDocument(
-  input: { uri: string; name?: string | null },
+  input: { uri: string; name?: string | null; mimeType?: string | null },
 ): Promise<InjuryDocRead> {
   const fail = (error: string): InjuryDocRead =>
     ({ stored: 'error', path: null, read: 'error', extraction: null, error });
@@ -142,23 +147,42 @@ export async function readInjuryDocument(
   const uid = await requireUid();
   if (!uid) return fail('Sign in to add a document.');
 
+  // A report is far more often a PDF somebody was emailed than a photograph of
+  // one, so both come through here. They are prepared differently and cannot
+  // share a path: ImageManipulator decodes images, and handing it a PDF fails.
+  const pdf = String(input.mimeType || '').toLowerCase() === 'application/pdf'
+    || /\.pdf$/i.test(input.name || '');
+  const contentType = pdf ? 'application/pdf' : 'image/jpeg';
+
   let uri = input.uri;
   let b64 = '';
-  try {
-    const out = await ImageManipulator.manipulateAsync(
-      input.uri,
-      [{ resize: { width: READ_WIDTH } }],
-      { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true },
-    );
-    uri = out.uri;
-    b64 = out.base64 ?? '';
-  } catch (e) {
-    reportError('injuryDocs.prepare', e);
-    return fail('That image could not be prepared for reading. Try another photo.');
+  if (pdf) {
+    // Sent whole. There is no downscaling a PDF, so an over-large one is
+    // refused by the reader with a sentence saying to photograph the page
+    // instead — which is a better outcome than quietly reading half of it.
+    try {
+      b64 = await FileSystem.readAsStringAsync(input.uri, { encoding: 'base64' });
+    } catch (e) {
+      reportError('injuryDocs.prepare-pdf', e);
+      return fail('That document could not be opened. Try another file, or photograph the page.');
+    }
+  } else {
+    try {
+      const out = await ImageManipulator.manipulateAsync(
+        input.uri,
+        [{ resize: { width: READ_WIDTH } }],
+        { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true },
+      );
+      uri = out.uri;
+      b64 = out.base64 ?? '';
+    } catch (e) {
+      reportError('injuryDocs.prepare', e);
+      return fail('That image could not be prepared for reading. Try another photo.');
+    }
   }
 
   // ── store ──────────────────────────────────────────────────────────────
-  const path = injuryDocObjectPath(uid, Date.now(), newToken(), docSlug(input.name));
+  const path = injuryDocObjectPath(uid, Date.now(), newToken(), docSlug(input.name), pdf ? 'pdf' : 'jpg');
   let bytes: ArrayBuffer;
   try {
     const res = await fetch(uri);
@@ -172,7 +196,7 @@ export async function readInjuryDocument(
 
   const { error: upErr } = await supabase.storage
     .from(INJURY_DOC_BUCKET)
-    .upload(path, bytes, { contentType: 'image/jpeg', upsert: false });
+    .upload(path, bytes, { contentType, upsert: false });
   if (upErr) {
     reportError('injuryDocs.upload', upErr, { path });
     return fail('That document could not be saved, so nothing was read from it.');
@@ -183,10 +207,13 @@ export async function readInjuryDocument(
   const storedOnly = (error: string): InjuryDocRead =>
     ({ stored: 'ready', path, read: 'error', extraction: null, error });
 
-  if (!b64) return storedOnly('Your document is saved, but there was no image data to read from it.');
+  if (!b64) return storedOnly('Your document is saved, but there was nothing in it to read.');
 
   try {
-    const { data, error } = await supabase.functions.invoke('ocr-scan', { body: { imageBase64: b64 } });
+    // The reader defaults to JPEG when nothing is said, which is every other
+    // caller, so saying it here is what makes a PDF read as a PDF rather than
+    // as a corrupt image.
+    const { data, error } = await supabase.functions.invoke('ocr-scan', { body: { imageBase64: b64, mime: contentType } });
     if (error) {
       reportError('injuryDocs.ocr', error, { path });
       return storedOnly('Your document is saved. We could not reach the reader, so nothing has been read from it yet.');
