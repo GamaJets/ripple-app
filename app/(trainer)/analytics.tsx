@@ -283,9 +283,17 @@ export default function TrainerAnalytics() {
               progress, and drawing that bar at 0% would tell a coach who has
               delivered a full month of sessions that they are nowhere. The bar
               is withheld and the reason is given instead. */}
+          {/* The target is the SUBJECT of this sentence, so it cannot be a
+              dash: with no gym currency `priced()` returns null and the line
+              read "Monthly revenue target — — progress needs a session rate in
+              your profile", which is a sentence that has lost the figure it is
+              about. A target nobody can price is a missing currency before it
+              is anything else, so that is what the line says instead. */}
           {goals.revenue > 0 && revenue == null ? (
             <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>
-              Monthly revenue target {fig(priced(goals.revenue))} — progress needs {sessionsMo == null ? (sessionsStatus === 'loading' ? 'a session count that is still being read' : 'a session count that did not come back whole') : 'a session rate in your profile'}.
+              {priced(goals.revenue) == null
+                ? 'Your gym has not set a currency, so your monthly revenue target cannot be shown as an amount. An owner sets it in the gym settings.'
+                : `Monthly revenue target ${priced(goals.revenue)} — progress needs ${sessionsMo == null ? (sessionsStatus === 'loading' ? 'a session count that is still being read' : 'a session count that did not come back whole') : 'a session rate in your profile'}.`}
             </Text>
           ) : null}
           {/* Same withholding for the client target. A bar drawn at 0% tells a

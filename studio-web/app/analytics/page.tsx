@@ -859,7 +859,13 @@ function retention(
   const p = pointsPerMember(c.total);
   return {
     rate: null,
-    note: `${c.total} member${c.total === 1 ? '' : 's'} — one is worth ${p == null ? '—' : p.toFixed(1)} points`,
+    // An empty cohort has no "one member's worth" to state, and the dash that
+    // stood there made a sentence — "0 members — one is worth — points" — that
+    // named a figure it did not have and described a member who is not there.
+    // Nothing is withheld by saying so plainly instead.
+    note: p == null
+      ? 'nobody joined in this month'
+      : `${c.total} member${c.total === 1 ? '' : 's'} — one is worth ${p.toFixed(1)} points`,
   };
 }
 

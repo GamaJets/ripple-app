@@ -1126,7 +1126,12 @@ export default function TrainerSchedule() {
                           {waitStatus === 'error'
                             ? 'Waitlist not read'
                             : waitStatus === 'partial'
-                              ? `${fig(null)} waiting — only part of the list loaded`
+                              // Not `${fig(null)} waiting`: a dash standing where the
+                              // count goes rendered "— waiting — only part of the list
+                              // loaded", which reads as a line that lost its first word
+                              // rather than as a number nobody has. The count is left out
+                              // of the sentence instead of drawn as a dash inside it.
+                              ? 'Only part of the waitlist loaded, so the number waiting is not known'
                               : `${waitCounts.get(s.id)} waiting — cancelling hands it to whoever is first`}
                         </Text>
                       </View>

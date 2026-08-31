@@ -27,7 +27,7 @@ import {
   type PtSession, type PayPolicy, type PayrollLine,
 } from '@lib/gymSessions';
 import { fetchPasses } from '@lib/gymPasses';
-import { type TenantCurrency } from '@/lib/currency';
+import { NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
 import { sliceLoading, sliceReady, sliceFailed, type Slice } from '@lib/memberView';
 import {
   monthWindow, recentMonths, monthKeyOf, buildClose, isOverdue, closeHeadline,
@@ -335,6 +335,9 @@ function Verdict({ c }: { c: MonthClose }) {
 /* ── what came in, and what it was for ─────────────────────────────────────── */
 
 function Income({ c, rec, currency }: { c: MonthClose; rec: CloseRecord; currency: TenantCurrency }) {
+  // Null for either of `money()`'s two silences — no amount, or no currency —
+  // and the sentence below has to hold together under both.
+  const unattributed = c.income ? money(c.income.unattributedCents, currency) : null;
   const cols: Column<Line>[] = [
     { key: 'label', header: 'How it arrived', value: (l) => l.label },
     { key: 'count', header: 'Payments', value: (l) => l.count, numeric: true },
@@ -385,10 +388,17 @@ function Income({ c, rec, currency }: { c: MonthClose; rec: CloseRecord; currenc
         ) : null}
         {c.income && c.income.unattributed > 0 ? (
           <p style={{ margin: 0, padding: '0 14px 14px', color: 'var(--ink3)', fontSize: 12.5 }}>
+            {/* The amount is a clause, not the subject: `money()` returns null
+                at a gym that has not set its currency, and React renders null as
+                nothing — which left " . Counted in the total" with a space and a
+                full stop where the figure should be. The count is what this
+                paragraph is for and it is always known, so the money joins it
+                only when it can be written. */}
             {c.income.unattributed} payment{c.income.unattributed === 1 ? '' : 's'} carr
-            {c.income.unattributed === 1 ? 'ies' : 'y'} nobody&rsquo;s name —{' '}
-            {money(c.income.unattributedCents, currency)}. Counted in the total, and
+            {c.income.unattributed === 1 ? 'ies' : 'y'} nobody&rsquo;s name
+            {unattributed ? <> &mdash; {unattributed}</> : null}. Counted in the total, and
             named here because it cannot be chased, refunded or explained later.
+            {unattributed ? null : <> What they come to cannot be stated because {NO_CURRENCY_NOTE}.</>}
           </p>
         ) : null}
       </div>
@@ -400,6 +410,10 @@ function Income({ c, rec, currency }: { c: MonthClose; rec: CloseRecord; currenc
 
 function Owed({ c, rec, currency }: { c: MonthClose; rec: CloseRecord; currency: TenantCurrency }) {
   const today = new Date().toISOString().slice(0, 10);
+  // Both null at a gym that has not set a currency, and the paragraph below
+  // states the invoice counts rather than a dash when they are.
+  const outstanding = c.arrears ? money(c.arrears.outstandingCents, currency) : null;
+  const dropped = c.arrears ? money(c.arrears.droppedCents, currency) : null;
   const open = (rec.invoices.state === 'ready' ? rec.invoices.rows : [])
     .filter((i) => i.status === 'open' || i.status === 'overdue')
     .filter((i) => i.issuedOn <= c.window.lastDay);
@@ -429,14 +443,22 @@ function Owed({ c, rec, currency }: { c: MonthClose; rec: CloseRecord; currency:
         <>
           {c.arrears ? (
             <p style={{ margin: 0, padding: '12px 14px', color: 'var(--ink2)', fontSize: 13, borderBottom: '1px solid var(--ring)' }}>
+              {/* The counts lead and the money follows, because `money()` is
+                  null at a gym with no currency set and "— across 3 invoices"
+                  is a sentence whose subject has gone missing. The invoice
+                  counts are known either way, and they are the fact an owner
+                  is reconciling against. */}
               {c.arrears.outstanding === 0
                 ? 'Nothing outstanding. Every invoice issued up to the end of this month is settled, void or written off.'
                 : <>
-                    {money(c.arrears.outstandingCents, currency) ?? '—'} across{' '}
-                    {c.arrears.outstanding} invoice{c.arrears.outstanding === 1 ? '' : 's'}, of which{' '}
+                    {c.arrears.outstanding} invoice{c.arrears.outstanding === 1 ? '' : 's'} still unpaid
+                    {outstanding ? <>, {outstanding} in all</> : null}, of which{' '}
                     {c.arrears.overdue} {c.arrears.overdue === 1 ? 'is' : 'are'} past a due date the gym set.
+                    {outstanding ? null : ` What they come to cannot be stated because ${NO_CURRENCY_NOTE}.`}
                     {c.arrears.dropped
-                      ? ` A further ${money(c.arrears.droppedCents, currency) ?? '—'} is void or written off and is counted in neither what was taken nor what is owed.`
+                      ? dropped
+                        ? ` A further ${dropped} is void or written off and is counted in neither what was taken nor what is owed.`
+                        : ` A further ${c.arrears.dropped} invoice${c.arrears.dropped === 1 ? ' is' : 's are'} void or written off and counted in neither what was taken nor what is owed.`
                       : null}
                   </>}
             </p>
@@ -512,6 +534,10 @@ function Payroll({ c, rec, currency, sessionFee }: {
     [rec.sessions, c],
   );
 
+  // Null when the gym has not set a currency — see the paragraph below, which
+  // states the session count instead of a dash where the total would go.
+  const payrollTotal = c.payroll ? money(c.payroll.total.cents, currency) : null;
+
   const cols: Column<PayrollLine>[] = [
     { key: 'trainer', header: 'Trainer', value: (l) => l.trainerName },
     { key: 'delivered', header: 'Delivered', value: (l) => l.delivered, numeric: true },
@@ -551,9 +577,13 @@ function Payroll({ c, rec, currency, sessionFee }: {
               margin: 0, padding: '12px 14px', borderBottom: '1px solid var(--ring)',
               color: c.payroll.blocker ? 'var(--ink2)' : 'var(--ink3)', fontSize: 13,
             }}>
+              {/* The payable count leads. `money()` is null at a gym with no
+                  currency set, and "…is marked and priced. — across 12 payable
+                  sessions." reads as a sentence that lost its total rather than
+                  as a total nobody can write. */}
               {c.payroll.blocker
                 ? <><strong>Not safe to settle.</strong> {c.payroll.blocker}</>
-                : <>Every session in {c.window.label} is marked and priced. {money(c.payroll.total.cents, currency) ?? '—'} across {c.payroll.total.payable} payable session{c.payroll.total.payable === 1 ? '' : 's'}.</>}
+                : <>Every session in {c.window.label} is marked and priced. {c.payroll.total.payable} payable session{c.payroll.total.payable === 1 ? '' : 's'}{payrollTotal ? <>, {payrollTotal} in all</> : null}.{payrollTotal ? null : ` What they come to cannot be stated because ${NO_CURRENCY_NOTE}.`}</>}
               {sessionFee == null ? ' No standard session fee is set, so a session with no snapshotted rate stays unpriced rather than free.' : null}
             </p>
           ) : null}
@@ -588,6 +618,9 @@ function Payroll({ c, rec, currency, sessionFee }: {
 /* ── passes ────────────────────────────────────────────────────────────────── */
 
 function Passes({ c, rec, currency }: { c: MonthClose; rec: CloseRecord; currency: TenantCurrency }) {
+  // Null for either silence — no priced pass, or no gym currency — and the
+  // sentence below has a branch for each.
+  const passesTotal = c.passes ? money(c.passes.cents, currency) : null;
   return (
     <Section
       title="Passes sold"
@@ -599,9 +632,16 @@ function Passes({ c, rec, currency }: { c: MonthClose; rec: CloseRecord; currenc
             ? `No pass was issued in ${c.window.label}.`
             : <>
                 {c.passes.sold} pass{c.passes.sold === 1 ? '' : 'es'} issued,{' '}
+                {/* Three states, not two: no price recorded on any pass, prices
+                    recorded but no currency to write them in, and both. The
+                    middle one used to render `money()`'s null as nothing at all,
+                    leaving " recorded across 4 of them." — a sentence starting
+                    with a space where its subject belonged. */}
                 {c.passes.cents == null
                   ? <>and not one carried a recorded price — so the amount is unknown, not nothing.</>
-                  : <>{money(c.passes.cents, currency)} recorded across {c.passes.priced} of them.</>}
+                  : passesTotal
+                    ? <>{passesTotal} recorded across {c.passes.priced} of them.</>
+                    : <>{c.passes.priced} of them carr{c.passes.priced === 1 ? 'ies' : 'y'} a recorded price, but what they come to cannot be stated because {NO_CURRENCY_NOTE}.</>}
                 {' '}Nothing links a pass row to a payment row, so this is not added to
                 what came in: summing them would double-count every pass paid for at
                 the desk, and ignoring it would drop the rest. Both records are shown

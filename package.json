@@ -37,7 +37,8 @@
     "test:zones": "TZ=America/Los_Angeles npm run test && TZ=Pacific/Auckland npm run test && TZ=Asia/Dubai npm run test",
     "check:reachable": "node scripts/check-reachable.mjs",
     "check:deltas": "node scripts/check-deltas.mjs",
-    "check:caps": "node scripts/check-caps.mjs"
+    "check:caps": "node scripts/check-caps.mjs",
+    "check:prose": "node scripts/check-prose.mjs"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",

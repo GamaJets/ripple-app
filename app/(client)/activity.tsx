@@ -83,11 +83,22 @@ export default function Activity() {
 
   const events: Event[] = [];
 
+  // One set, as "8×60kg". `|| null` and the branch on null, because neither is
+  // optional: a set tuple that came back without its load rendered the word
+  // "null" against the reps — a bare interpolation never reaches fig() — and a
+  // set stored at 0 is a bodyweight set, which units.ts says a screen shows as
+  // a dash rather than as "0 kg". The unit goes with the figure and stays off
+  // the dash, so nothing reads "—kg".
+  const setText = (s: number[]): string => {
+    const v = weightIn(s[1] || null, wu);
+    return `${s[0]}×${v == null ? fig(null) : `${v}${wu}`}`;
+  };
+
   // Workouts + PR flags
   for (const e of log) {
     const pr = prsKnown && isNewPR(log, e);
     if (e.sets) {
-      events.push({ at: e.t, icon: pr ? 'trophy' : 'dumbbell', title: pr ? `New PR — ${e.exercise}` : `Logged ${e.exercise}`, sub: e.sets.map((s) => `${s[0]}×${weightIn(s[1], wu)}${wu}`).join(' · '), route: pr ? '/(client)/records' : '/(client)/trends', hr: { title: e.exercise, startISO: e.t, durationMin: Math.max(20, e.sets.length * 4) } });
+      events.push({ at: e.t, icon: pr ? 'trophy' : 'dumbbell', title: pr ? `New PR — ${e.exercise}` : `Logged ${e.exercise}`, sub: e.sets.map(setText).join(' · '), route: pr ? '/(client)/records' : '/(client)/trends', hr: { title: e.exercise, startISO: e.t, durationMin: Math.max(20, e.sets.length * 4) } });
     } else if (e.cardio) {
       events.push({ at: e.t, icon: 'heart', title: `Logged ${e.exercise}`, sub: [`${e.cardio.mins} min`, e.cardio.dist > 0 ? `${e.cardio.dist} ${e.cardio.unit}` : null, e.cardio.watts && e.cardio.watts > 0 ? `${e.cardio.watts} W` : null, e.cardio.hrAvg ? `♥ ${e.cardio.hrAvg} avg / ${e.cardio.hrHigh ?? e.cardio.hrAvg} hi` : null].filter(Boolean).join(' · '), route: '/(client)/trends', hr: { title: e.exercise, startISO: e.t, durationMin: e.cardio.mins || 30 } });
     }

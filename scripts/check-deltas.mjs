@@ -84,14 +84,17 @@ const HAND_ROLLED = /[<>]=?\s*0\b[^\n]{0,90}\?[^\n]{0,60}['"`][+−▲▼]/;
  * describing the tree — the same contract as KNOWN in check-currency.mjs.
  */
 const KNOWN = new Map([
-  ['app/(client)/scans.tsx', { count: 5, why:
-    'The screen the defect was found on, and the one it was fixed on. Its five sites are the ' +
-    'reference wording for the rest of the app: the hero at ~836 has an explicit `=== 0` arm ' +
-    'reading "No change since <day>", the trend note at ~907 and the movement chip at ~784 ' +
-    'each carry their own empty-sign arm, and the two `> 0 ? \'+\' : \'\'` forms print an ' +
-    'unsigned "0" for a measured no-change rather than a signed one. Correct as written, and ' +
-    'left as the worked example — but still hand-rolled, so it is listed rather than exempted ' +
-    'silently.' }],
+  ['app/(client)/scans.tsx', { count: 4, why:
+    'The screen the defect was found on, and the one it was fixed on. Its four remaining sites ' +
+    'are the reference wording for the rest of the app: the hero has an explicit `=== 0` arm ' +
+    'reading "No change since <day>", the trend note and the movement chip each carry their own ' +
+    'empty-sign arm, and the alert helper prints an unsigned "0" for a measured no-change ' +
+    'rather than a signed one. Correct as written, and left as the worked example — but still ' +
+    'hand-rolled, so listed rather than exempted silently. ' +
+    'Was 5: the metric column now goes through `deltaLabel` instead of interpolating the number, ' +
+    'because a negative rendered there with an ASCII hyphen while the summary line six rows ' +
+    'above it — already using the helper — rendered a real minus. Two characters for one idea, ' +
+    'in a single screenful.' }],
   ['app/(trainer)/dashboard.tsx', { count: 1, why:
     'Not a delta. `v > 0 ? \'+\' + v : String(v)` labels the fixed offsets on the coach\'s ' +
     'nutrition-adjustment picker — a chooser of values, where "+100" and "0" and "-100" are the ' +

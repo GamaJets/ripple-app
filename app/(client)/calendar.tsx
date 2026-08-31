@@ -164,7 +164,12 @@ const KIND_ICON: Record<WorkoutKind, IconName> = {
 // gave. Same rule as app/(client)/activity.tsx, which this is built to agree
 // with word for word.
 function logDetail(e: WorkoutEntry, wu: WeightUnit): string {
-  if (e.sets && e.sets.length) return e.sets.map((x) => `${x[0]}×${liftLabel(x[1], wu)}`).join(' · ');
+  // `|| null` and then fig(): a set tuple that came back without its load put
+  // the four-letter word "null" between the reps and the separator — bare
+  // interpolation does not reach fig(), which is the whole reason fig() exists.
+  // A set stored at 0 is a bodyweight set, and units.ts is explicit that a
+  // screen shows that as a dash rather than as "0 kg".
+  if (e.sets && e.sets.length) return e.sets.map((x) => `${x[0]}×${fig(liftLabel(x[1] || null, wu))}`).join(' · ');
   if (e.cardio) {
     const c = e.cardio;
     return [
@@ -1000,9 +1005,13 @@ export default function Calendar() {
           <SectionHead title="Planned Ahead" note={planStatus === 'error' ? 'Not read' : undefined} />
           {planStatus === 'error' ? (
             // No count, no list, no reassurance. Under a failed read the honest
-            // statement is that we do not know, and a dash is how this app says
-            // that everywhere else.
-            <Text style={{ ...ty.label, color: t.ink3 }}>{fig(null)} — we couldn’t read your planned days. Try again from the day panel above.</Text>
+            // statement is that we do not know. That used to be said with a
+            // leading `fig(null)`, which put a dash in front of a sentence that
+            // already contained one — "— — we couldn't read your planned days"
+            // reads as a broken line rather than as a count nobody has. The
+            // heading beside it carries the "Not read" note; the sentence says
+            // the rest.
+            <Text style={{ ...ty.label, color: t.ink3 }}>We couldn’t read your planned days. Try again from the day panel above.</Text>
           ) : planStatus === 'loading' ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Reading your planned days…</Text>
           ) : coming.length === 0 ? (
