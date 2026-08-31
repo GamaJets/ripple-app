@@ -448,6 +448,22 @@ export default function Calendar() {
       // the client the slot "was offered to your coach's other clients" whether
       // anyone had been found or anyone had been reached. Three outcomes, not one:
       // offered, nobody to offer it to, or we tried and could not.
+      // Free the slot BEFORE telling anyone it is free. This ran the other way
+      // round: every other client on the coach's book was pushed "first to book
+      // it gets it" while the session was still booked, so whoever moved
+      // quickest was refused by a slot that had not been released yet. And the
+      // release was fired and forgotten on top of that, so a cancellation the
+      // server refused still sent that push and still told this client they
+      // were cancelled.
+      const freed = await releaseSession(s.id);
+      if (!freed) {
+        Alert.alert(
+          'Not cancelled',
+          `Your ${timeLabel(s.startsAt)} session is still booked — that did not save, so nothing has changed and nobody has been told. Check your connection and try again.`,
+          [{ text: 'OK' }],
+        );
+        return;
+      }
       const others = await reofferSlot(s.id);
       // TF-32, and the worst of it: this sentence lands on OTHER people's
       // phones. It used to interpolate `coach.name`, which on the client app is
@@ -466,7 +482,6 @@ export default function Calendar() {
       const offered = others.length === 0
         ? null
         : (await sendPushChecked(others, 'A PT slot just opened', `${timeLabel(s.startsAt)} with your coach just opened up — first to book it gets it.`, { route: '/(client)/calendar' })).ok;
-      releaseSession(s.id);
       // Late cancel (within 24h): the session is charged — keep the credit drawn. Otherwise refund it.
       // `refundSession` returns `{ok:false}` when there is no pack to credit and
       // when the server refused the update, and its answer was discarded — so
@@ -474,7 +489,7 @@ export default function Calendar() {
       // comes to believe they are holding a credit they do not have.
       const refund = late ? { ok: false } : await refundSession(s.trainerId);
       { const n = await sessionsRemaining(); if (n != null) setPackLeft(n); }
-      sendPush([s.trainerId], 'Session cancelled', `A client cancelled ${DOW[new Date(s.startsAt).getDay()]} ${timeLabel(s.startsAt)}. The slot re-opened.${late ? ' (Late cancel — charged.)' : ''}`, { route: '/(trainer)/calendar' });
+      const toldCoach = await sendPushChecked([s.trainerId], 'Session cancelled', `A client cancelled ${DOW[new Date(s.startsAt).getDay()]} ${timeLabel(s.startsAt)}. The slot re-opened.${late ? ' (Late cancel — charged.)' : ''}`, { route: '/(trainer)/calendar' });
 
       const lines: string[] = [];
       if (late) lines.push('Cancelled within 24 hours — this session is charged from your package.');
@@ -483,6 +498,7 @@ export default function Calendar() {
       lines.push(offered === true ? `The freed slot was offered to your coach's other clients.`
         : offered === false ? `The slot is open again, but we couldn't tell your coach's other clients about it.`
         : `The slot is open again on your coach's calendar.`);
+      if (!toldCoach.ok) lines.push('We couldn’t notify your coach — message them if this session is soon.');
       Alert.alert('Cancelled', lines.join('\n\n'), [{ text: 'OK' }]);
     };
     // No figure: the amount is between the client and their coach, and this app

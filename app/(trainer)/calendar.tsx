@@ -192,7 +192,7 @@ export default function TrainerSchedule() {
     );
   }
 
-  function doCancel(s: TrainingSession) {
+  async function doCancel(s: TrainingSession) {
     const others = roster.filter((c) => c.id !== s.clientId).map((c) => c.name);
     // `cancelSession` prices the late-cancel from a plain number, so a rate that
     // is not known is passed as 0 and the resulting `feeAmount` is not printed —
@@ -200,14 +200,38 @@ export default function TrainerSchedule() {
     // fabrication the client app was making: a figure about money, on the screen
     // where somebody decides whether a cancellation costs anything.
     const res = cancelSession(s, sessionFee ?? 0, roster.map((c) => c.id));
-    releaseSession(s.id);
-    if (s.clientId) sendPush([s.clientId], 'Session cancelled', `Your ${timeLabel(s.startsAt)} session on ${DOW[new Date(s.startsAt).getDay()]} was cancelled.`, { route: '/(client)/calendar' });
+    // Free the slot first, and only say so if the server actually freed it.
+    // This was fired and forgotten, and the roster was then pushed "first to
+    // book it gets it" about a session that was still booked — so the quickest
+    // client to respond was the one turned away.
+    const freed = await releaseSession(s.id);
+    if (!freed) {
+      Alert.alert(
+        'Not cancelled',
+        `${timeLabel(s.startsAt)} with ${nameOf(s.clientId)} is still booked — that did not save, so nothing has changed and nobody has been told. Try again.`,
+        [{ text: 'OK' }],
+      );
+      return;
+    }
+    const toldClient = s.clientId
+      ? await sendPushChecked([s.clientId], 'Session cancelled', `Your ${timeLabel(s.startsAt)} session on ${DOW[new Date(s.startsAt).getDay()]} was cancelled.`, { route: '/(client)/calendar' })
+      : { ok: true };
     const _openTo = roster.filter((c) => c.id !== s.clientId).map((c) => c.id);
-    if (_openTo.length) sendPush(_openTo, 'A slot just opened', `${timeLabel(s.startsAt)} on ${DOW[new Date(s.startsAt).getDay()]} is available — first to book it gets it.`, { route: '/(client)/calendar' });
+    const offered = _openTo.length
+      ? (await sendPushChecked(_openTo, 'A slot just opened', `${timeLabel(s.startsAt)} on ${DOW[new Date(s.startsAt).getDay()]} is available — first to book it gets it.`, { route: '/(client)/calendar' })).ok
+      : null;
     Alert.alert(
       'Session cancelled',
       `${timeLabel(s.startsAt)} with ${nameOf(s.clientId)} was cancelled.\n\n` +
-      `${nameOf(s.clientId)} was sent a notification. The slot is open again and ${others.length} other client${others.length === 1 ? '' : 's'} can book it (${others.slice(0, 3).join(', ')}${others.length > 3 ? '…' : ''}) — first to book takes it.` +
+      (toldClient.ok
+        ? `${nameOf(s.clientId)} was sent a notification. `
+        : `We couldn’t notify ${nameOf(s.clientId)} — tell them yourself, especially if this session is soon. `) +
+      `The slot is open again on your calendar. ` +
+      (offered === null
+        ? 'You have no other clients to offer it to.'
+        : offered
+        ? `Your ${others.length} other client${others.length === 1 ? '' : 's'} ${others.length === 1 ? 'was' : 'were'} told it is free (${others.slice(0, 3).join(', ')}${others.length > 3 ? '…' : ''}) — first to book takes it.`
+        : `We couldn’t tell your other clients about it, so it is open but nobody has been asked.`) +
       // Repple does not charge anything. This used to say the fee "applies",
       // which described a charge that no code anywhere makes. It also printed
       // the rate with no dollar sign in front of it, and printed it whatever it

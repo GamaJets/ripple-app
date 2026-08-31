@@ -212,8 +212,11 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
   };
 
   const releaseSession: SessionsValue['releaseSession'] = async (id) => {
-    setSessions((p) => p.map((x) => (x.id === id ? { ...x, status: 'available', clientId: null, released: true } : x)));
-    if (!USE_SUPABASE) return false;
+    // Drawn only once the server has actually freed it. Painting the slot open
+    // first meant a refused cancellation left the screen showing a free slot
+    // that was still somebody's booked session.
+    const apply = () => setSessions((p) => p.map((x) => (x.id === id ? { ...x, status: 'available', clientId: null, released: true } : x)));
+    if (!USE_SUPABASE) { apply(); return false; }
     // Trainer path (RLS-owned direct update) or client path (RPC) — the one the
     // caller is allowed to do takes effect. Both were fired and neither result
     // looked at, so "neither was allowed" was indistinguishable from success.
@@ -221,11 +224,23 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
     // changes zero rows, so the returned rows are what has to be counted.
     try {
       const { data, error } = await supabase.from('sessions').update({ status: 'available', client_id: null, released: true }).eq('id', id).select('id');
-      if (!error && data && data.length) return true;
+      if (!error && data && data.length) { apply(); return true; }
     } catch { /* fall through to the client-side RPC */ }
+    // The client path. Same rule as booking: the RPC frees the slot only when
+    // the caller is the client actually holding it, and until it reported that,
+    // `!error` called a cancellation that changed nothing a success — with the
+    // screen going on to tell the whole roster a slot had opened that had not.
     try {
-      const { error } = await supabase.rpc('cancel_session', { p_session: id });
-      return !error;
+      const { data, error } = await supabase.rpc('cancel_session', { p_session: id });
+      if (error) return false;
+      let freed: boolean;
+      if (typeof data === 'boolean') freed = data;
+      else {
+        const { data: row, error: readErr } = await supabase.from('sessions').select('status').eq('id', id).maybeSingle();
+        freed = !readErr && !!row && row.status === 'available';
+      }
+      if (freed) apply();
+      return freed;
     } catch { return false; }
   };
 
