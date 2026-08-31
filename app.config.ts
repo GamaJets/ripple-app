@@ -43,13 +43,54 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     name: id.name,
     scheme: id.scheme,
     icon: id.icon,
-    ios: { ...(config.ios ?? {}), bundleIdentifier: id.bundle },
+    ios: {
+      ...(config.ios ?? {}),
+      bundleIdentifier: id.bundle,
+      // Universal links, CLIENT APP ONLY and only for /join.
+      //
+      // A custom scheme cannot be what a coach puts in an Instagram bio:
+      // `repple://join?c=…` is not tappable on the web and does nothing to
+      // somebody who has not installed the app yet. https://repplefitness.com/join
+      // is, and with this it opens the app directly for anybody who has.
+      //
+      // Only /join, and only here, on purpose. Password reset and email
+      // confirmation are shared by all three apps, and if all three claimed
+      // those paths iOS would hand the link to whichever it felt like — a coach
+      // resetting their password could land in the client app. Joining is
+      // something only a client does, so /join has exactly one honest owner.
+      ...(variant === 'client'
+        ? { associatedDomains: ['applinks:repplefitness.com', 'applinks:www.repplefitness.com'] }
+        : null),
+    },
     android: {
       ...(config.android ?? {}),
       package: id.bundle,
       // Same ripple foreground for all three; the plate behind it carries the
       // colour, matching the iOS tile.
       adaptiveIcon: { ...(config.android?.adaptiveIcon ?? {}), backgroundColor: id.tile },
+      // Android App Links — the same decision as associatedDomains above, and
+      // the same scope. `autoVerify` is what makes Android open the app without
+      // asking; it requires /.well-known/assetlinks.json to name this package
+      // and the SHA-256 of the certificate the app is actually signed with,
+      // which under Play App Signing is Google's, not the upload key.
+      //
+      // Verification failing is not a regression: the link simply opens the
+      // browser, which is what it does today.
+      ...(variant === 'client'
+        ? {
+            intentFilters: [
+              {
+                action: 'VIEW',
+                autoVerify: true,
+                data: [
+                  { scheme: 'https', host: 'repplefitness.com', pathPrefix: '/join' },
+                  { scheme: 'https', host: 'www.repplefitness.com', pathPrefix: '/join' },
+                ],
+                category: ['BROWSABLE', 'DEFAULT'],
+              },
+            ],
+          }
+        : null),
     },
   };
 };

@@ -1,0 +1,13 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["REPLACE_WITH_APPLE_TEAM_ID.com.washateria.repple"],
+        "components": [
+          { "/": "/join", "comment": "A coach's join link, so it opens the app rather than Safari" },
+          { "/": "/join/*", "comment": "Any future sub-path of the same" }
+        ]
+      }
+    ]
+  }
+}

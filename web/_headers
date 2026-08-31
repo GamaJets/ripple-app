@@ -1,0 +1,5 @@
+
+# Apple refuses an association file that is not served as JSON, and this one
+# deliberately has no .json extension, so nothing else infers the type for it.
+/.well-known/apple-app-site-association
+  Content-Type: application/json
