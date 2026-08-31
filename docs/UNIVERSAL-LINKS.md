@@ -11,7 +11,7 @@ paths the OS would hand the link to whichever it liked, and a coach resetting
 their password could land in the client app. Joining is something only a client
 does, so `/join` has exactly one honest owner.
 
-## Both files currently contain a placeholder and will NOT verify
+## assetlinks.json still contains a placeholder and will NOT verify
 
 That is deliberate and it is safe: a file that fails verification means the link
 opens the browser, which is exactly what happens today. It does not break
@@ -19,9 +19,8 @@ anything. It just does not work yet.
 
 ### `apple-app-site-association`
 
-Replace `REPLACE_WITH_APPLE_TEAM_ID` with the Apple Developer **Team ID** —
-ten characters, at <https://developer.apple.com/account> under Membership.
-The value becomes `TEAMID.com.washateria.repple`.
+**Done.** The Team ID is `GR7PT3S232` (Washateria LLC, enrolled as an
+Organization), so the appID reads `GR7PT3S232.com.washateria.repple`.
 
 Notes that bite:
 - The file has **no `.json` extension**. Do not add one.
