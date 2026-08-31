@@ -14,6 +14,7 @@ import {
   CURRENT_RELEASE, RELEASES, compareVersions, isVersion, releasesFor,
   storeNotes, unseenReleases,
   type Audience, type Release,
+  firstRunReleases,
 } from './releaseNotes';
 
 const errors: string[] = [];
@@ -178,6 +179,47 @@ for (const aud of ALL) {
   const text = storeNotes(aud, latest.version);
   ok(text.length > 0, `${aud}: the newest release produces store text`);
   ok(text.length <= 4000, `${aud}: store text fits App Store Connect's 4000-character field`);
+}
+
+// ── the first run after the feature shipped ────────────────────────────────
+//
+// The whole point. `unseenReleases(null, …)` is empty, and null is what every
+// account has the first time this code runs, so without this the release that
+// INTRODUCED the changelog is the one release nobody is ever shown.
+{
+  const REL = [
+    { version: '2.0.0', date: '2026-08-31', entries: [{ kind: 'new', apps: ['client'], title: 'A thing' }] },
+    { version: '1.0.0', date: '2026-01-01', entries: [{ kind: 'new', apps: ['client'], title: 'An older thing' }] },
+  ] as unknown as Parameters<typeof firstRunReleases>[3];
+
+  // Somebody who has had an account since January was here for the change.
+  eq(firstRunReleases('2026-01-15T09:00:00Z', '2.0.0', 'client', REL).length, 1,
+    'an existing account is shown the release that introduced the sheet');
+
+  // Only the current one — not everything back to the day they joined.
+  eq(firstRunReleases('2025-06-01T09:00:00Z', '2.0.0', 'client', REL)[0].version, '2.0.0',
+    'and only the current release, not the whole history');
+
+  // Somebody who signed up after it shipped learns nothing from being told.
+  eq(firstRunReleases('2026-09-02T09:00:00Z', '2.0.0', 'client', REL).length, 0,
+    'an account created after the release is not shown it');
+  eq(firstRunReleases('2026-08-31T00:00:00Z', '2.0.0', 'client', REL).length, 0,
+    'nor one created the day it shipped');
+
+  // An age we do not know is not evidence somebody is owed a changelog.
+  eq(firstRunReleases(null, '2.0.0', 'client', REL).length, 0, 'unknown account age shows nothing');
+  eq(firstRunReleases(undefined, '2.0.0', 'client', REL).length, 0, 'undefined account age shows nothing');
+  eq(firstRunReleases('not a date', '2.0.0', 'client', REL).length, 0, 'an unparseable date shows nothing');
+
+  // A release with nothing for this reader's app is not an empty sheet.
+  eq(firstRunReleases('2026-01-15T09:00:00Z', '2.0.0', 'owner', REL).length, 0,
+    'a release with no entries for this app is not shown');
+
+  // A current version that is not in the list cannot be shown.
+  eq(firstRunReleases('2026-01-15T09:00:00Z', '3.0.0', 'client', REL).length, 0,
+    'a version the list does not carry shows nothing');
+  eq(firstRunReleases('2026-01-15T09:00:00Z', 'nonsense', 'client', REL).length, 0,
+    'an unparseable current version shows nothing');
 }
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }

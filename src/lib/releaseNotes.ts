@@ -358,6 +358,66 @@ export function unseenReleases(seen: string | null, current: string, audience: A
   );
 }
 
+/**
+ * What to show on the FIRST run after this feature existed at all.
+ *
+ * ── The bug this exists to end ────────────────────────────────────────────
+ *
+ * `unseenReleases(null, …)` returns nothing, and null is what EVERY account
+ * has the first time this runs — the key has never been written for anybody.
+ * So the release that introduced the whole feature was the one release nobody
+ * would ever be told about: every existing user got silently stamped at it and
+ * would first see a sheet at the release after.
+ *
+ * Reported plainly: "I have opened both client and coach apps and there was no
+ * page upon opening that said what has been updated since last logged in."
+ *
+ * The reasoning behind the silent stamp is still right for the case it was
+ * written for. Somebody who installed Repple this morning learns nothing from
+ * a list of things that used to be broken, and opening a brand-new app to a
+ * changelog is the single most common way this feature becomes an annoyance.
+ * What the old code could not do is TELL THE TWO APART, because both look
+ * identical from local storage: no stored position.
+ *
+ * The fact that separates them is not local. It is when the ACCOUNT was
+ * created, which the server knows. Somebody whose account predates this
+ * release was here for the changes and should be told; somebody who signed up
+ * after it shipped was not, and should not.
+ *
+ * Only the CURRENT release is shown, never the whole history back to the day
+ * they joined. On this one run there is no "since you last looked" to honour —
+ * the app has never told them anything — so the honest scope is what is new in
+ * the version they are holding.
+ *
+ * @param createdAtISO when the account was created. Null or unparseable means
+ *   stamp silently: an unknown age is not evidence somebody is owed a
+ *   changelog, and guessing wrong here spams every new signup.
+ */
+export function firstRunReleases(
+  createdAtISO: string | null | undefined,
+  current: string,
+  audience: Audience,
+  releases: Release[] = RELEASES,
+): Release[] {
+  if (!isVersion(current)) return [];
+  if (!createdAtISO) return [];
+  const created = Date.parse(String(createdAtISO));
+  if (Number.isNaN(created)) return [];
+
+  const mine = releasesFor(audience, releases).filter((r) => r.version.trim() === current.trim());
+  if (mine.length === 0) return [];
+  const rel = mine[0];
+
+  const shipped = Date.parse(rel.date);
+  // A release with an unreadable date cannot be placed against the account, and
+  // an unplaceable release is not grounds to interrupt somebody.
+  if (Number.isNaN(shipped)) return [];
+  // Signed up on or after the day it shipped: this is not news to them, it is
+  // the app they installed.
+  if (created >= shipped) return [];
+  return [rel];
+}
+
 /** Semver-ish compare on dot-separated numbers. Returns >0 when a is newer. */
 export function compareVersions(a: string, b: string): number {
   const pa = String(a).split('.').map((n) => parseInt(n, 10) || 0);

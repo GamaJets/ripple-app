@@ -39,8 +39,9 @@ import { Cta } from './kit';
 import { sp, layout, radius, hairline, type as ty } from '../theme/scale';
 import {
   CURRENT_RELEASE, RELEASES, MY_AUDIENCE, isVersion, releasesFor, unseenReleases,
-  type Release,
+  firstRunReleases, type Release,
 } from '../lib/releaseNotes';
+import { supabase } from '../lib/supabase';
 import { reportError } from '../lib/reportError';
 
 /** One key per account. See the header for why this is not one key per device. */
@@ -186,12 +187,32 @@ export function useWhatsNew(userId: string | null, hold = false) {
       const seen = await readSeen(userId);
       if (off) return;
       if (seen === null) {
-        // A brand-new account — or one whose stored position we could not read.
-        // Record where they are, silently, so the NEXT release is the first one
-        // they are told about. Somebody who never saw the old behaviour learns
-        // nothing from being told it changed.
-        void writeSeen(userId, CURRENT_RELEASE);
-        setUnseen([]);
+        // No stored position. That is TWO different people wearing one absence:
+        // somebody who signed up this morning, and somebody who has used Repple
+        // for months and is simply running the first build that has this
+        // feature at all. Local storage cannot tell them apart — it has nothing
+        // either way — so this asks the server how old the account is.
+        //
+        // Getting this wrong in the old code meant the release that introduced
+        // the changelog was the one release nobody was ever shown.
+        let createdAt: string | null = null;
+        try {
+          const { data } = await supabase.auth.getUser();
+          createdAt = data?.user?.created_at ?? null;
+        } catch {
+          // Unknown age. firstRunReleases treats that as "stamp silently",
+          // which is the harmless direction: the cost is one missed changelog,
+          // and the cost of guessing the other way is a sheet in front of every
+          // new signup.
+        }
+        if (off) return;
+        const first = firstRunReleases(createdAt, CURRENT_RELEASE, MY_AUDIENCE);
+        // Stamped now only when there is nothing to show. When there IS, the
+        // stamp waits for the dismissal, exactly as it does on every other
+        // run — a sheet recorded as read before it was read is the same bug in
+        // a different place.
+        if (first.length === 0) void writeSeen(userId, CURRENT_RELEASE);
+        setUnseen(first);
         return;
       }
       setUnseen(unseenReleases(seen, CURRENT_RELEASE, MY_AUDIENCE));
