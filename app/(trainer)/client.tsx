@@ -46,12 +46,13 @@
 // cannot be supported it is an em-dash with a reason beside it, never a zero:
 // a zero here is a specific claim about somebody's month.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, ScrollView } from 'react-native';
+import { View, Text, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
+import type { Theme } from '../../src/theme/tokens';
 import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Cta, Ghost, Notice, Flag, fig } from '../../src/ui/kit';
-import { sp, layout, hairline, type as ty } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
 import { useSettings } from '../../src/ui/settings';
@@ -76,7 +77,9 @@ import { fetchSharedInbox } from '../../src/lib/photoShare';
 import { type Inbox } from '../../src/lib/photoInbox';
 import { weightDeltaIn } from '../../src/lib/units';
 import { bodyLine } from '../../src/lib/clientBody';
-import { COACHED_MODE_SHORT } from '../../src/lib/types';
+import {
+  COACHED_MODES, COACHED_MODE_SHORT, COACHED_MODE_NOTE_COACH, type CoachedMode,
+} from '../../src/lib/types';
 import {
   lastSeenLine, goalsLine, weekLine, photosLine, listLine, programmeLine,
   attention, noAccountNote, unaskedNote,
@@ -84,6 +87,29 @@ import {
 
 const GOAL_COLS = 'id, kind, target_value, title, target_date, achieved_at, created_at';
 const ITEM_COLS = 'id, label, icon, active, created_at, updated_at';
+
+/**
+ * A selectable pill — the same one the Schedule and the roster sheet use, and
+ * takes the theme as a prop for the same reason they do: the screen's hook
+ * order is part of its contract.
+ *
+ * `busy` is not `disabled` under another name. The chip keeps its ink and keeps
+ * its selected mark; it only stops taking a second tap while the first one is
+ * still in the air. Two writes racing to one row leaves the client classified
+ * as whichever answer came back last, which is not necessarily the one the
+ * coach pressed last — and nothing on screen would say which had won.
+ */
+function Chip({ t, label, on, busy, onPress }: {
+  t: Theme; label: string; on: boolean; busy: boolean; onPress: () => void;
+}) {
+  return (
+    <Pressable onPress={busy ? undefined : onPress} accessibilityRole="button"
+      accessibilityState={{ selected: on, disabled: busy }}
+      style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface2, opacity: busy && !on ? 0.5 : 1 }}>
+      <Text style={{ ...ty.label, fontWeight: on ? '500' : '400', color: on ? t.brandInk : t.ink2 }}>{label}</Text>
+    </Pressable>
+  );
+}
 
 export default function ClientScreen() {
   const t = useTheme();
@@ -365,6 +391,52 @@ export default function ClientScreen() {
     return () => { live = false; };
   }, [canRead, id]);
 
+  /* ── how the coach delivers to this person ──────────────────────────────── */
+
+  // Delivery could be set exactly once — in the Add Client sheet — and never
+  // again. A client who started online and now comes in on Thursdays stayed
+  // 'Online' forever, on the roster filter, in the owner's split, and on the
+  // Book button at the top of this screen, which an online-only client has no
+  // calendar behind. `setClientMode` has been sitting in roster.tsx unused.
+  //
+  // Two pieces of state rather than one, because "in the air" and "did not
+  // reach the server" are different things to say and only one of them is a
+  // warning.
+  const [modeSaving, setModeSaving] = useState<CoachedMode | null>(null);
+  const [modeUnsaved, setModeUnsaved] = useState<CoachedMode | null>(null);
+  // Same reset every other read on this screen does when the route is pointed
+  // at somebody else: a warning about one person's delivery must not survive
+  // onto the next person's page.
+  useEffect(() => { setModeSaving(null); setModeUnsaved(null); }, [id]);
+
+  /**
+   * Whether this screen is entitled to draw three buttons with one of them
+   * lit. Under 'error' the roster is not the server's answer — an empty list
+   * there means the read was refused, not that the book is empty — so a
+   * `mode` taken off it is a value of unknown provenance, and lighting a chip
+   * from it would assert how somebody is coached on the strength of a read
+   * that failed. 'partial' is fine: the people listed are real, this client is
+   * one of them, and their row came back whole.
+   */
+  const modeKnown = !!client && r.status !== 'error' && r.status !== 'loading';
+
+  const pickMode = async (m: CoachedMode) => {
+    if (!id || modeSaving) return;
+    setModeSaving(m);
+    setModeUnsaved(null);
+    const stored = await r.setClientMode(id, m);
+    setModeSaving(null);
+    // `setClientMode` writes the coach's answer to this device BEFORE it tries
+    // the server and keeps it there either way, so by the time `false` comes
+    // back the chips already show `m` — and quietly flipping them back would
+    // be its own lie, because the override is on disk and will be there at the
+    // next launch. False does not mean lost; it means only this phone knows.
+    // That is the sentence the coach needs, because the alternative is finding
+    // the client Online in their own app a week later and having no idea when
+    // the two devices stopped agreeing.
+    setModeUnsaved(stored ? null : m);
+  };
+
   /* ── the briefing ───────────────────────────────────────────────────────── */
 
   const nowMs = Date.now();
@@ -615,10 +687,65 @@ export default function ClientScreen() {
 
         <Rule />
 
+        {/* ── the one thing here that is yours to change ────────────────────
+            Small on purpose. It is one word about somebody, sitting where a
+            coach looks when the arrangement has changed — not a decision the
+            screen is about. The line underneath is the same sentence the Add
+            Client and invite sheets show, because "Hybrid" on its own is a
+            word rather than a choice anybody can make. */}
+        {id ? (
+          <Section>
+            <SectionHead title="How You Coach Them" />
+            {r.status === 'error' ? (
+              <Flag tone={t.warn}>
+                Your roster could not be read, and their delivery is a column on it. Three buttons
+                with one of them already pressed would be a claim about how you coach {who} taken
+                off a read that failed, so this says nothing instead. Try the Clients tab again,
+                and it will be settable here once the roster comes back.
+              </Flag>
+            ) : !modeKnown ? (
+              <Flag tone={t.ink3}>
+                {r.status === 'loading'
+                  ? `Reading your roster. How you coach ${who} is on it.`
+                  : `${who} is not on your book, so there is no coaching arrangement here to classify.`}
+              </Flag>
+            ) : client ? (
+              <>
+                <View style={{ flexDirection: 'row', gap: sp.sm }}>
+                  {COACHED_MODES.map((m) => (
+                    <Chip key={m} t={t} label={COACHED_MODE_SHORT[m]} on={client.mode === m}
+                      busy={!!modeSaving} onPress={() => { void pickMode(m); }} />
+                  ))}
+                </View>
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                  {COACHED_MODE_NOTE_COACH[client.mode]}
+                </Text>
+                {modeSaving ? (
+                  <View style={{ marginTop: sp.md }}>
+                    <Flag tone={t.ink3}>
+                      Saving {COACHED_MODE_SHORT[modeSaving].toLowerCase()}…
+                    </Flag>
+                  </View>
+                ) : modeUnsaved ? (
+                  <View style={{ marginTop: sp.md }}>
+                    <Flag tone={t.warn}>
+                      Not saved. {COACHED_MODE_SHORT[modeUnsaved]} is on this phone only — the server
+                      kept the delivery it already had, so {who}&rsquo;s own app and your other devices
+                      are still on that one and this screen is the only place the two disagree. Tap
+                      it again to retry.
+                    </Flag>
+                  </View>
+                ) : null}
+              </>
+            ) : null}
+          </Section>
+        ) : null}
+
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
-          Notes, feedback, tags, meal-plan targets and their delivery are on the client sheet on
-          your Clients screen. Everything on this screen is read-only: a goal, a planned day and a
-          tick are the client&rsquo;s own, and none of them can be changed from here.
+          Notes, feedback, tags and meal-plan targets are on the client sheet on your Clients
+          screen. Everything else here is read-only: a goal, a planned day and a tick are the
+          client&rsquo;s own, and none of them can be changed from here. How you coach somebody is
+          yours rather than theirs, which is why it is the one thing above that you can set.
         </Text>
 
       </ScrollView>

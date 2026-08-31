@@ -418,7 +418,26 @@ export function RosterProvider({ children }: { children: ReactNode }) {
     putBack();
     return false;
   };
+  // Drop the local echo for one client. Called the moment the server accepts a
+  // change, because from then on the server is the answer and this override
+  // would only shadow it — including a change the same coach makes on another
+  // device, which is the exact thing the note on `modeOverrides` says must not
+  // happen. The override was being written unconditionally and never removed,
+  // so every classification a coach ever made outranked the server for good.
+  const forgetMode = (id: string) => {
+    setModeOverrides((p) => {
+      if (!(id in p)) return p;
+      const next = { ...p };
+      delete next[id];
+      try { AsyncStorage.setItem(MODE_KEY, JSON.stringify(next)); } catch { /* the in-memory drop still applies this session */ }
+      return next;
+    });
+  };
+
   const setClientMode = async (id: string, mode: CoachedMode): Promise<boolean> => {
+    // Written first so the chip responds to the tap. It is the only home an
+    // unsynced answer has — and, below, it is given up as soon as there is a
+    // synced one.
     rememberMode(id, mode);
     // Durably persist to Supabase so the classification follows the client across
     // devices and feeds owner analytics (RLS: a trainer may update their own clients).
@@ -430,14 +449,24 @@ export function RosterProvider({ children }: { children: ReactNode }) {
     // Counting the returned rows is the only way to tell.
     try {
       const { data, error } = await supabase.from('clients').update({ mode }).eq('id', id).select('id');
-      if (!error && data && data.length) return true;
+      if (!error && data && data.length) { accepted(id, mode); return true; }
     } catch { /* fall through to the coach_clients attempt */ }
     try {
       const { data, error } = await supabase.from('coach_clients').update({ mode }).eq('id', id).select('id');
-      return !error && !!data && data.length > 0;
+      if (!error && data && data.length) { accepted(id, mode); return true; }
+      return false;
     } catch { return false; }
   };
-  // Apply overrides on top of whatever mode the roster came with.
+  // The server took it: move the value onto the roster row itself and let the
+  // local echo go. Doing both together is what keeps the chip from flicking
+  // back to the old mode in the gap before the next roster read.
+  const accepted = (id: string, mode: CoachedMode) => {
+    setRoster((p) => p.map((c) => (c.id === id ? { ...c, mode } : c)));
+    forgetMode(id);
+  };
+
+  // Apply overrides on top of whatever mode the roster came with. What is left
+  // here is only ever an answer the server has not taken yet.
   const shown = Object.keys(modeOverrides).length ? roster.map((c) => (modeOverrides[c.id] ? { ...c, mode: modeOverrides[c.id] } : c)) : roster;
   return <Ctx.Provider value={{ roster: shown, status, addClient, removeClient, setClientMode }}>{children}</Ctx.Provider>;
 }
