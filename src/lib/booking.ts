@@ -150,10 +150,31 @@ export function lateCancelFee(
  * at a different number, not a formatting slip. Where the currency is unknown
  * the figure is printed alone — it is the coach's own, and they know what it is
  * in — and the caller's sentence says so.
+ *
+ * That last clause was not true of a single caller. Both sentences below, and
+ * the standing-appointment one in src/lib/recurring.ts, interpolated this
+ * straight into prose: "your coach's late-cancellation fee of 25 applies". A
+ * bare 25 in a sentence is read in whatever money the reader is thinking in,
+ * which is the exact failure `money()` withholds an amount to avoid — the
+ * figure looks stated, so nobody goes and sets the currency. `unstatedCurrency`
+ * below is the missing half, and every prose site now appends it.
  */
 export function feeAmountLine(amount: number, currency: string | null | undefined): string {
   if (!currency) return String(amount);
   return money(Math.round(amount * 100), currency) ?? String(amount);
+}
+
+/**
+ * The clause that has to follow a fee whose currency nobody set.
+ *
+ * Empty for a stated currency, so it can be appended blindly. It is a separate
+ * export rather than folded into `feeAmountLine` because that function also
+ * fills value SLOTS — the Amount cell on the two calendars — where a dash and a
+ * column heading already carry the doubt and a sentence would not fit. A slot
+ * may print the figure alone; a sentence may not.
+ */
+export function unstatedCurrency(currency: string | null | undefined): string {
+  return currency ? '' : ' Your coach hasn’t set a currency, so ask them what that amount is in.';
 }
 
 /** How the notice period reads in a sentence: "24 hours", "1 hour", "48 hours". */
@@ -179,7 +200,7 @@ export function cancelWarningLine(v: FeeVerdict, noticeHours: number): string {
     case 'unpriced':
       return `This is inside ${w}, so your coach's late-cancellation policy applies. They haven't set an amount here, so ask them what it is — Repple doesn't charge it.`;
     case 'fee':
-      return `This is inside ${w}, so your coach's late-cancellation fee of ${feeAmountLine(v.amount, v.currency)} applies. Repple doesn't take this payment — it's recorded for you and your coach to settle.`;
+      return `This is inside ${w}, so your coach's late-cancellation fee of ${feeAmountLine(v.amount, v.currency)} applies. Repple doesn't take this payment — it's recorded for you and your coach to settle.${unstatedCurrency(v.currency)}`;
   }
 }
 
@@ -197,7 +218,7 @@ export function feeRecordedLine(
   if (!charged) return null;
   const sum = amount != null && Number.isFinite(amount) ? feeAmountLine(amount, currency) : null;
   return sum
-    ? `A late-cancellation fee of ${sum} has been recorded on your account. Repple doesn't take this payment — settle it with your coach.`
+    ? `A late-cancellation fee of ${sum} has been recorded on your account. Repple doesn't take this payment — settle it with your coach.${unstatedCurrency(currency)}`
     : 'A late-cancellation fee has been recorded on your account. Repple doesn’t take this payment — settle it with your coach.';
 }
 

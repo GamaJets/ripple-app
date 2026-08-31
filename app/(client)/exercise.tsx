@@ -153,9 +153,16 @@ export default function ExerciseScreen() {
           // actually changes it, rather than a grey silhouette implying a
           // demonstration we do not have.
           <Notice tone={t.ink3} kicker="Demonstration"
-            title={videoStatus === 'loading' ? 'Looking for a Clip…'
-              : videoStatus === 'error' ? 'We Couldn’t Check for a Clip'
-              : detail ? 'No Demonstration Yet' : signedOut ? 'Sign In to See This' : 'Not in Our Catalogue'}
+            // Sentence case. A <Notice title> is a sentence, not a label — it
+            // renders at ty.head with no transform, and every other one in
+            // app/(client) is written as prose, including the one on line 108
+            // of this same file ("This could not be read"). With no clip and no
+            // grant anywhere on the platform, this branch is the most-read
+            // string in the product, and it was the only Title-Cased sentence
+            // among them.
+            title={videoStatus === 'loading' ? 'Looking for a clip…'
+              : videoStatus === 'error' ? 'We couldn’t check for a clip'
+              : detail ? 'No demonstration yet' : signedOut ? 'Sign in to see this' : 'Not in our catalogue'}
             note={videoStatus === 'loading'
               ? 'Your coach’s video library is still being read.'
               : videoStatus === 'error'
@@ -235,7 +242,7 @@ export default function ExerciseScreen() {
               <>
                 <Rule />
                 <Section>
-                  <SectionHead title="How to Do It" note={`${detail.instructions.length} steps`} />
+                  <SectionHead title="How to Do It" note={`${detail.instructions.length} step${detail.instructions.length === 1 ? '' : 's'}`} />
                   {detail.instructions.map((step, n) => (
                     <View key={n} style={{ flexDirection: 'row', gap: sp.md, marginBottom: sp.md }}>
                       <Text style={{ ...ty.label, fontWeight: '700', color: t.ink3, minWidth: 18 }}>{n + 1}</Text>

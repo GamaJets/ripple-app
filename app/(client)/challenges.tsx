@@ -175,9 +175,15 @@ export default function Challenges() {
                     <View style={{ flexDirection: 'row', gap: sp.md, alignItems: 'center' }}>
                       <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{windowLine(c)}</Text>
                       {c.joined ? (
-                        <Ghost label="Joined" onPress={() => doLeave(c)} />
+                        // "Joined" is a STATUS, and this control does not
+                        // report it — it removes the member from the
+                        // leaderboard, with no confirmation. VoiceOver read it
+                        // out as "Joined, button" to somebody about to lose
+                        // their place. A button says what it does; the sheet
+                        // behind it has always said "Leave Challenge".
+                        <Ghost label="Leave" onPress={() => doLeave(c)} />
                       ) : (
-                        <Cta label={phase === 'upcoming' ? 'Join early' : 'Join'} disabled={!canJoin(c)} onPress={() => doJoin(c)} />
+                        <Cta label={phase === 'upcoming' ? 'Join Early' : 'Join'} disabled={!canJoin(c)} onPress={() => doJoin(c)} />
                       )}
                     </View>
                   </View>
@@ -213,8 +219,16 @@ export default function Challenges() {
                   "you have not joined" can never be drawn as "nobody is here". */}
               {!sheet.joined ? (
                 <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>
-                  Join to see the other athletes. Until you do, this challenge is just you against the goal —
-                  your score so far is {scoreText(sheet.metric, sheet.myScore)} {sheet.unit} of {sheet.goal}.
+                  {/* `scoreText` returns an em dash for a score that could not
+                      be worked out, and an em dash is an answer in a slot and a
+                      hole in a sentence: this read "your score so far is — days
+                      of 20", with a second em dash already in the same sentence
+                      four words earlier, so it parsed as a broken clause rather
+                      than as a missing figure. Where there is no score the
+                      clause is dropped instead of being filled with a dash. */}
+                  {sheet.myScore == null
+                    ? `Join to see the other athletes. Until you do, this challenge is just you against the goal of ${sheet.goal} ${sheet.unit} — we do not have a score for you yet.`
+                    : `Join to see the other athletes. Until you do, this challenge is just you against the goal — your score so far is ${scoreText(sheet.metric, sheet.myScore)} ${sheet.unit} of ${sheet.goal}.`}
                 </Text>
               ) : null}
 

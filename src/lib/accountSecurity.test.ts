@@ -37,8 +37,23 @@ ok(/match/i.test(String(passwordProblem('newpassword', 'newpassw0rd', 'old'))), 
 ok(passwordProblem('samepassword', 'samepassword', 'samepassword') != null,
   'setting the password you already have is refused — GoTrue rejects it anyway, with a worse sentence');
 ok(passwordProblem('        ', '        ', 'old') != null, 'a password of only spaces is a typo, not a choice');
+// The module's rule is about LEADING AND TRAILING spaces (accountSecurity.ts),
+// and this said "spaces INSIDE" — a different property, and one the input does
+// not even exercise. Worse, `=== null` cannot see trimming at all: a version
+// that trimmed ' has spaces ' would hand back 'has spaces', still ten
+// characters, still equal to its own confirm, still unlike 'old', and would
+// return null exactly as this expected. The two below can only pass if the
+// spaces survive.
 eq(passwordProblem(' has spaces ', ' has spaces ', 'old'), null,
-  'but spaces INSIDE a password are real characters and are not trimmed away');
+  'spaces around a password are accepted — they are characters somebody typed');
+// Six spaces and two letters. Kept, it is eight characters and allowed;
+// trimmed, it is two and would be refused for being under the minimum.
+eq(passwordProblem('      ab', '      ab', 'old'), null,
+  'and they COUNT — trimming this would drop it under the minimum and refuse it');
+// And the same characters cannot be mistaken for the password already in use,
+// which is the other place a silent trim would surface.
+eq(passwordProblem(' password1 ', ' password1 ', 'password1'), null,
+  'a password that differs from the current one only by its spaces is a different password');
 
 /* ── the email form ───────────────────────────────────────────────────────── */
 

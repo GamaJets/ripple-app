@@ -20,7 +20,18 @@ const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
   // A leading slash would produce a double slash, which some CDNs 404 on.
   ok(frameUrls(['/Barbell_Curl/0.jpg'])[0] === `${FRAME_BASE}/Barbell_Curl/0.jpg`,
     'a leading slash is trimmed rather than doubled');
-  ok(frameUrls(['Anterior_Tibialis-SMR/0.jpg']).length === 1, 'hyphens and dots in the folder are fine');
+  // The folder character class is `[\w.-]`, so the fixture has to carry all
+  // three. It used to be 'Anterior_Tibialis-SMR', which has an underscore and a
+  // hyphen and no dot at all — the only dot in it was the .jpg extension every
+  // other fixture here already has, so the "dots" half of this sentence was
+  // never tested and a class narrowed to `[\w-]` would have passed it.
+  ok(frameUrls(['Anterior_Tibialis-SMR.v2/0.jpg']).length === 1, 'hyphens and dots in the folder are fine');
+  // `?? ''` rather than `[0].endsWith(...)`: when the folder is rejected the
+  // array is empty, and indexing it would throw a TypeError that aborts the run
+  // instead of pushing a named failure onto `errors` the way this file reports
+  // everything else.
+  ok((frameUrls(['Anterior_Tibialis-SMR.v2/0.jpg'])[0] ?? '').endsWith('/Anterior_Tibialis-SMR.v2/0.jpg'),
+    'and the folder reaches the CDN with those characters intact rather than stripped');
 }
 
 // ── absence is an answer, not an empty string ──────────────────────────────

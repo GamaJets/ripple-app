@@ -195,13 +195,15 @@ const KNOWN = new Map([
   //     heading — codeCountLine(), an accessibilityLabel and a share message
   //     all read it mid-sentence.
 
-  ['app/(trainer)/calendar.tsx:split', { count: 2, why:
-    'Two <ListRow title> entries — "Weekly Availability" and "Block Out Time" — open sheets headed ' +
-    '"Weekly availability" and "Block out time" in the same file, so the name changes as the coach ' +
-    'taps it. The edit is four characters and belongs in that file: capitalise the two ty.head ' +
-    'sheet titles at lines 1216 and 1266 to match the rows that open them. It was not made here ' +
-    'because another change is in flight in app/(trainer)/calendar.tsx tonight.' }],
-
+  // app/(trainer)/calendar.tsx:split — CLOSED. The entry named its own edit —
+  // capitalise the two ty.head sheet titles to match the <ListRow title> rows
+  // that open them — and deferred it only because another change was in flight
+  // in that file. That change landed, so the deferral had outlived its argument
+  // while the entry went on quoting line numbers that had moved by fifteen
+  // lines. The sheets are now headed "Weekly Availability" and "Block Out Time",
+  // so a coach reads the same name on the row and on the sheet it opens. The
+  // entry is deleted rather than zeroed: a zero is still an exemption, and there
+  // is nothing left to exempt.
 ]);
 
 /* ── files ────────────────────────────────────────────────────────────────── */

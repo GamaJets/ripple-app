@@ -1228,7 +1228,7 @@ export default function TrainerSchedule() {
       <Modal visible={availOpen} animationType="slide" transparent onRequestClose={() => setAvailOpen(false)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setAvailOpen(false)} />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, maxHeight: '82%', ...elevation.e2 }}>
-          <Text style={{ ...ty.head, color: t.ink }}>Weekly availability</Text>
+          <Text style={{ ...ty.head, color: t.ink }}>Weekly Availability</Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.md }}>Set the times you offer every week, then generate open slots.</Text>
           <ScrollView showsVerticalScrollIndicator={false}>
             {availSlots.length === 0 ? (
@@ -1278,7 +1278,7 @@ export default function TrainerSchedule() {
       <Modal visible={blockOpen} animationType="slide" transparent onRequestClose={() => setBlockOpen(false)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setBlockOpen(false)} />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, maxHeight: '82%', ...elevation.e2 }}>
-          <Text style={{ ...ty.head, color: t.ink }}>Block out time</Text>
+          <Text style={{ ...ty.head, color: t.ink }}>Block Out Time</Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.md }}>
             {DOW[selDate.getDay()]} {selD} {MON[selM].slice(0, 3)} — nobody can book across this, and any open slots inside it are withdrawn.
           </Text>

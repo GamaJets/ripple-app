@@ -155,6 +155,14 @@ ok(/Repple doesn’t take this payment/.test(occurrenceDetail({ kind: 'fee', amo
   const none = occurrenceDetail({ kind: 'fee', amount: 40, currency: null }, 24);
   ok(/\b40\b/.test(none) && !/[$£€]/.test(none),
     'an unknown currency prints the bare figure and invents no symbol');
+  // Inventing no symbol was only ever half of it. This sentence is prose, not a
+  // slot with a heading over it, so a naked 40 is an amount in whatever money
+  // the reader happens to think in — the failure money() withholds an amount to
+  // avoid. The bare figure is allowed here because the clause below is what
+  // makes it honest, and this is the assertion that notices if it goes missing.
+  ok(/currency/i.test(none), 'and the sentence says the currency was never set, rather than leaving 40 to be read as anything');
+  ok(!/currency/i.test(nzd) && !/currency/i.test(gbp),
+    'while a fee in a currency the gym did choose carries no such clause');
 }
 ok(!/AED|USD|\$/.test(RECURRING_END_RULE + RECURRING_CREDIT_NOTE + RECURRING_CLASH_NOTE),
   'none of the standing sentences names a currency');

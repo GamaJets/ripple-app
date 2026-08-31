@@ -136,7 +136,11 @@ export default function Restaurant() {
                   </Pressable>); })}
               </View>
               <KpiRow items={[
-                { label: 'kcal', value: fig(est.kcal) },
+                // KpiRow labels render at ty.caption, which is NOT uppercased,
+                // so this read "kcal | Protein | Carbs | Fat" — one lowercase
+                // word among three Title-Cased siblings. The unit belongs in
+                // `unit`, where the other three already put theirs.
+                { label: 'Energy', value: fig(est.kcal), unit: 'kcal' },
                 { label: 'Protein', value: fig(est.protein), unit: 'g' },
                 { label: 'Carbs', value: fig(est.carbs), unit: 'g' },
                 { label: 'Fat', value: fig(est.fat), unit: 'g' },

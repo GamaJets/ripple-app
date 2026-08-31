@@ -186,10 +186,20 @@ const g = weightGoal(84, 84);
 ok(JSON.stringify(planFor(g).observed) === JSON.stringify(projectionOf(g, SERIES, NOW)),
   'the observed trend must come from projectionOf unchanged — no second rate calculation lives here');
 ok(observedRateKg(fast) != null, 'readings spanning four weeks support a measured pace');
-const shortSeries: Point[] = [{ t: iso(-2), v: 90.4 }, { t: iso(-1), v: 90.0 }];
+// Built FROM MIN_TREND_DAYS rather than from two hand-picked days. The message
+// has always claimed the boundary — "MIN_TREND_DAYS - 1 days apart" — while the
+// fixture was iso(-2) to iso(-1), a span of one day. So the sentence rendered
+// "6 days apart" over readings 6 days closer together than that, and the case
+// it named was tested nowhere: a projectionOf using `days > 1` in place of
+// `days >= 7` would have satisfied it. The pair below is the real boundary, and
+// the pair after it is the first span that does earn a pace.
+const shortSeries: Point[] = [{ t: iso(-(MIN_TREND_DAYS - 1)), v: 90.4 }, { t: iso(0), v: 90.0 }];
 const shortPlan = planFor(g, shortSeries);
 ok(observedRateKg(shortPlan) === null,
   `readings ${MIN_TREND_DAYS - 1} days apart are water, not a trend, and must yield no pace`);
+const justEnough: Point[] = [{ t: iso(-MIN_TREND_DAYS), v: 90.4 }, { t: iso(0), v: 90.0 }];
+ok(observedRateKg(planFor(g, justEnough)) != null,
+  `and one more day — ${MIN_TREND_DAYS} — is the span that does, so the threshold is pinned from both sides`);
 ok(shortPlan.kind === 'derived', 'but they are still enough to plan from — the target and the date are what set the rate');
 ok(observedRateKg({ kind: 'enum', reason: 'no-goal', observed: null }) === null, 'no goal means no observed pace');
 

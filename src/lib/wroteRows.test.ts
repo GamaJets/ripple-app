@@ -97,8 +97,16 @@ ok(writeFailure('That plan', { error: new Error('permission denied'), count: 1 }
 
 // A PostgREST error is a plain object, not an Error instance — `error` is read
 // for truthiness precisely so that shape counts.
-ok(writeFailure('That plan', { error: { code: '42501', message: 'row-level security' }, count: null }) !== null,
+// `count: 1`, not `count: null`. With a null count the missing-count arm above
+// already fails, so `!== null` was satisfied whether or not the plain object in
+// `error` was noticed at all — the fixture removed the only variable the
+// sentence is about. A confirmed single row is the only shape under which
+// nothing but the error can produce a failure.
+const bareErr = writeFailure('That plan', { error: { code: '42501', message: 'row-level security' }, count: 1 });
+ok(bareErr !== null,
   'a bare PostgREST error object is an error; it does not have to be an Error instance');
+ok(/could not be saved/i.test(bareErr ?? ''),
+  'and it is diagnosed as a refusal, not as a row count — those send a reader to two different places');
 
 // ── falsy-but-present values are not errors ───────────────────────────────
 //

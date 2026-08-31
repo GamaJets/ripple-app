@@ -165,9 +165,16 @@ export default function Habits() {
           {/* A refused read leaves rows off the list. Naming that is the whole
               point of `status` — an unticked (or absent) habit under 'error'
               means unknown, and the coach's dashboard reads the same rows. */}
+          {/* 'partial' is the same harm by a different route and had no arm
+              anywhere on this screen: `useHabits` sets it when the ticks or the
+              coach items exceed the row cap, so rows are genuinely missing from
+              the list below and an empty circle is genuinely unknown. */}
           {unknown ? (
             <Notice tone={t.warn} kicker="Checklist" title="Some of today’s list is missing"
               note="We couldn’t read your targets or your ticks just now, so anything below may be short a line — and an empty circle here doesn’t mean you skipped it." />
+          ) : h.status === 'partial' ? (
+            <Notice tone={t.warn} kicker="Checklist" title="Some of today’s list is missing"
+              note="There is more on your record than we can read at once, so a line may be missing below and an empty circle here doesn’t mean you skipped it." />
           ) : null}
 
           {/* A target the app does not have is not a row. Where the client can
@@ -179,7 +186,11 @@ export default function Habits() {
             </View>
           ))}
 
-          {h.habits.length === 0 && !unknown && h.gaps.length === 0 ? (
+          {/* `!unknown` let 'partial' through to a sentence that says the list
+              is genuinely empty, which is exactly the claim a truncated read
+              cannot support. The notice above now covers 'partial' and says so;
+              this stays silent there rather than contradicting it. */}
+          {h.habits.length === 0 && h.status === 'ready' && h.gaps.length === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3, paddingVertical: sp.md }}>
               Nothing on today’s list. Rest days and un-set targets both look like this — set a goal or ask your coach for one.
             </Text>

@@ -12,18 +12,15 @@
 // ever reaches the coach with a placeholder in it where a client's name should
 // be.
 //
-// Not wired into `npm test` — package.json and tsconfig.test.json belong to
-// another agent this session. Run it with:
+// Run by `npm test`, under tsconfig.test.json, like every other suite here.
 //
-//   npx tsc src/lib/overwriteGuard.test.ts --outDir .tmp-overwriteguard \
-//     --module node16 --moduleResolution node16 --target ES2020 --strict \
-//     --ignoreConfig ; node .tmp-overwriteguard/lib/overwriteGuard.test.js
-//
-// `--ignoreConfig` because naming a file on the command line means tsconfig.json
-// is not loaded and the current TypeScript errors rather than proceeding
-// silently. It also takes @types/node with it, so the one `process.exit` at the
-// bottom reports TS2591 while still emitting — hence `;` rather than `&&`. Under
-// tsconfig.test.json, where this belongs, "types": ["node"] settles it.
+// This header used to carry a hand-rolled `npx tsc … --ignoreConfig` invocation
+// and the sentence "Not wired into `npm test` — package.json and
+// tsconfig.test.json belong to another agent this session". That stopped being
+// true when the entry landed in package.json, and a header saying a suite does
+// not run is worse than no header: it invites the next reader to assume nothing
+// is watching this file, and to reach for a command that no longer matches how
+// it is built.
 import { guardOverwrite } from './overwriteGuard';
 import type { LoadStatus } from '../ui/loadStatus';
 

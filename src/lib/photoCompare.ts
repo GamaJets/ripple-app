@@ -60,6 +60,10 @@ import { dateParts } from './localDate';
 // against figures in a unit they do not think in. The unit is a parameter and
 // not a hook because this module is pure and asserted against under plain node.
 import { weightIn, weightDeltaIn, type WeightUnit } from './units';
+// The one character the whole app signs a loss with. Imported rather than
+// re-typed because a second '−' literal in the tree is a second thing that can
+// be typed as a hyphen by mistake — which is exactly what happened here.
+import { MINUS } from './deltaLabel';
 
 /**
  * The measurement shape this file needs. Deliberately the minimum, so both
@@ -285,10 +289,27 @@ export function readingText(v: number | null, unit: string): string {
 
 /** A change for the screen, signed so the direction is unambiguous. A measured
  *  zero prints as 0, because "you did not change" is something the scans
- *  actually said. */
+ *  actually said.
+ *
+ *  The minus is U+2212 from ./deltaLabel, not the ASCII hyphen that
+ *  `${v}` produced here for every loss. That was the same two-characters-for-
+ *  one-idea defect already fixed on the Progress screen's metric column — a
+ *  member who read "−1.4 kg" on Progress and "-1.4 kg" on this table was
+ *  looking at one measurement drawn two ways, and a hyphen at figure size next
+ *  to a digit reads as a dash in the sentence rather than as a sign. The
+ *  Compare screen prints no other minus, so nothing here contradicted itself
+ *  and nothing caught it: src/lib/photoCompare.test.ts asserted the hyphen was
+ *  correct, in a file whose own prose one screen down writes "−1 lb".
+ *
+ *  The sign stays hand-rolled rather than going through `deltaSign` because
+ *  this column's zero rule is deliberately NOT deltaLabel's: `compareDelta` has
+ *  already rounded, and a measured no-change must print "0 kg" beside a "—"
+ *  that means "not measured". `Math.abs` keeps the digits byte-identical to
+ *  what shipped. delta-ok: the sign is the shared MINUS and the zero arm is
+ *  explicit; only the character changed. */
 export function deltaText(v: number | null, unit: string): string {
   if (v === null) return '—';
-  return `${v > 0 ? '+' : ''}${v} ${unit}`;
+  return `${v > 0 ? '+' : v < 0 ? MINUS : ''}${Math.abs(v)} ${unit}`;
 }
 
 /**

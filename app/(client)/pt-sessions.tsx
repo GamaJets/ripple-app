@@ -26,7 +26,7 @@ import { isWhole } from '../../src/ui/loadStatus';
 import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
 import { useSessions } from '../../src/ui/sessions';
 import { useClientData } from '../../src/ui/clientData';
-import { sessionsRemaining } from '../../src/lib/connect';
+import { sessionPacks } from '../../src/lib/connect';
 
 const fmt = (iso: string) => { const d = new Date(iso); return d.toLocaleDateString() + ' · ' + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); };
 
@@ -61,10 +61,17 @@ export default function PtSessions() {
   //   null       we could not read it. A dash, and a sentence saying so, so a
   //              client holding ten credits is never shown a zero.
   const [left, setLeft] = useState<number | null>(null);
+  // Whether any session pack has EVER been bought, which is a different
+  // question from how many sessions are left on one and was being answered with
+  // the same number. `packBalance` returns a real 0 for a member with no
+  // purchases at all, so this screen greeted everybody — including somebody
+  // with no coach — with "0 · Nothing left on a pack" and an amber "Buy
+  // another". Both sentences describe a pack that never existed.
+  const [hasPacks, setHasPacks] = useState(false);
   const [leftRead, setLeftRead] = useState(false);
   const loadLeft = useCallback(async () => {
-    const n = await sessionsRemaining();
-    setLeft(n); setLeftRead(true);
+    const b = await sessionPacks();
+    setLeft(b?.left ?? null); setHasPacks((b?.lines.length ?? 0) > 0); setLeftRead(true);
   }, []);
   useEffect(() => { loadLeft(); }, [loadLeft]);
 
@@ -112,14 +119,18 @@ export default function PtSessions() {
           <>
             <Hero label="Sessions Remaining" figure={fig(left)}
               note={left == null ? 'We could not read your balance'
-                : left === 0 ? 'Nothing left on a pack'
+                : left === 0 ? (hasPacks ? 'Nothing left on a pack' : 'You have not bought a session pack')
                 : 'Across your active session packs'} />
             {left == null ? (
               <Flag tone={t.crit}>
                 We couldn&apos;t read how many sessions you have left. This is not a statement that you
                 have none — anything you have paid for is still yours.
               </Flag>
-            ) : left === 0 ? (
+            ) : left === 0 && hasPacks ? (
+              // Only somebody who HAS bought a pack can be told to buy another
+              // one. Shown to everybody, this warned members with no coach that
+              // a session they had not booked was not covered by a pack they
+              // had never had.
               <Flag tone={t.warn}>
                 Your next session is not covered by a pack. Buy another from your coach, or arrange it
                 with them directly.
@@ -149,8 +160,13 @@ export default function PtSessions() {
               record, not about this screen, and only a whole read may make it. */}
           {pending.length === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>
+              {/* 'partial' fell through to the confident sentence, and it is
+                  the one status where a pending session may simply not have
+                  come back — leaving a client told nobody is waiting on them
+                  while their coach's pay waits on those approvals. */}
               {sessionStatus === 'loading' ? 'Reading your sessions…'
                 : sessionStatus === 'error' ? 'We couldn’t read your sessions, so we can’t say whether your coach is waiting on you. Nothing has been approved or declined by this.'
+                : !sessionsWhole ? 'You have more sessions on record than we can read at once, so we can’t say whether one is waiting on you. Nothing has been approved or declined by this.'
                 : 'Nothing to approve right now.'}
             </Text>
           ) : null}

@@ -137,7 +137,26 @@ export function credentialLine(c: Pick<Credential, 'issuer' | 'reference'>): str
   return parts.join(' · ');
 }
 
-/** "Expired 4 March 2026", "Renews in 12 days", "No expiry given". */
+/** The three shapes MONTHS below draws, so the doc and the code agree: the
+ *  docstring here used to promise "Expired 4 March 2026" and "Renews in 12
+ *  days", and the function produced neither. */
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/**
+ * A `YYYY-MM-DD` as a person writes it — "4 Mar 2027" — or null when it is not
+ * one. Locale-free on purpose: this module is asserted against under plain
+ * node, and `toLocaleDateString` would make the sentence depend on the device.
+ */
+function dateWords(iso: string | null | undefined): string | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso ?? ''));
+  if (!m) return null;
+  const mo = Number(m[2]);
+  if (mo < 1 || mo > 12) return null;
+  return `${Number(m[3])} ${MONTHS[mo - 1]} ${m[1]}`;
+}
+
+/** "Expired 12 days ago", "Expires in 12 days", "Valid to 4 Mar 2027",
+ *  "No expiry date given". */
 export function expiryLine(c: Pick<Credential, 'expiresOn'>, today: string): string {
   const state = credentialState(c, today);
   if (state === 'no-expiry') return 'No expiry date given';
@@ -147,7 +166,13 @@ export function expiryLine(c: Pick<Credential, 'expiresOn'>, today: string): str
     return n === 0 ? 'Expired today' : `Expired ${n} day${n === 1 ? '' : 's'} ago`;
   }
   if (state === 'expiring') return d === 0 ? 'Expires today' : `Expires in ${d} day${d === 1 ? '' : 's'}`;
-  return `Valid to ${c.expiresOn}`;
+  // The raw column, straight into a sentence a client reads: a current
+  // certification rendered as "Valid to 2027-03-04 · Stated by the coach" —
+  // a database date sitting in prose beside three siblings that all speak
+  // English. It is also the one branch coachCredentials.test.ts never
+  // asserted, which is why it stayed.
+  const words = dateWords(c.expiresOn);
+  return words ? `Valid to ${words}` : 'No expiry date given';
 }
 
 /**

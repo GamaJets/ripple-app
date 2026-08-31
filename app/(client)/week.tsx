@@ -16,8 +16,11 @@ import { useClientData } from '../../src/ui/clientData';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { buildProgram } from '../../src/lib/programs';
+import { scheduledDay } from '../../src/lib/checklist';
 
 const WEEK = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+/** WEEK is Monday-first; `Date.getDay()` is Sunday-first. */
+const jsWeekday = (i: number) => (i + 1) % 7;
 
 export default function ThisWeek() {
   const t = useTheme();
@@ -42,7 +45,26 @@ export default function ThisWeek() {
   const dstr = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
   const logged = new Set(log.map((l) => dstr(new Date(l.t))));
 
-  const trainingDays = program.days.length;
+  // What each of the seven rows is actually going to say, decided ONCE so the
+  // count in the heading and the list underneath it cannot disagree.
+  //
+  // This used to be `program.days[i % program.days.length]`. A Mon/Wed/Fri plan
+  // has three days, so the modulo painted a session onto all seven weekdays:
+  // Push, Pull, Legs, Push, Pull, Legs, Push — Wednesday's session shown on
+  // Tuesday, no rest day anywhere, under a heading that read "3 training days a
+  // week" and a footer that repeated it. The screen contradicted itself twice
+  // on one scroll, and the plan it drew was not the plan the coach wrote.
+  //
+  // `scheduledDay` is the exact weekday match src/lib/checklist.ts already used
+  // for the daily checklist, for the reason written on it there: a plan day
+  // that lands nowhere near the real day is a line telling somebody they owe a
+  // leg session on a day their plan gives them off.
+  const rows = WEEK.map((label, i) => ({ label, i, day: scheduledDay(program.days, jsWeekday(i)) }));
+  // The number of days the member will actually see a session on — not
+  // `program.days.length`, which counts days the plan names but this week does
+  // not place (a coach program whose day fell outside Mon–Sun would be counted
+  // and never drawn).
+  const trainingDays = rows.filter((r) => r.day).length;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
@@ -75,26 +97,31 @@ export default function ThisWeek() {
         ) : null}
 
         <Section>
-          <SectionHead title="The Plan" note={`${trainingDays} training day${trainingDays === 1 ? '' : 's'} a week`} />
+          <SectionHead title="The Plan" note={trainingDays === 0 ? 'No days scheduled' : `${trainingDays} training day${trainingDays === 1 ? '' : 's'} a week`} />
 
-          {WEEK.map((label, i) => {
+          {rows.map(({ label, i, day: workout }) => {
             const date = new Date(monday); date.setDate(monday.getDate() + i);
-            const workout = (program.days && program.days.length) ? program.days[i % program.days.length] : { day: '', focus: 'Rest Day', exercises: [] };
             const isToday = i === jsToMon;
             const done = logged.has(dstr(date));
+            // A rest day says so and stays tappable — somebody who trains on a
+            // day off still wants Train, and the log below still marks it.
+            const focus = workout ? workout.focus : 'Rest day';
+            const sub = workout
+              ? `${workout.exercises.length} exercise${workout.exercises.length === 1 ? '' : 's'}${workout.cardio ? ` · ${workout.cardio}` : ''}`
+              : 'Nothing scheduled — train anyway if you want to';
             return (
               <View key={label}>
                 {i > 0 ? <Rule /> : null}
                 <Pressable onPress={() => router.push('/(client)/workouts')} accessibilityRole="button"
-                  accessibilityLabel={`${label} ${date.getDate()}. ${workout.focus}. ${done ? 'Logged' : isToday ? 'Today' : 'Open Train'}`}
+                  accessibilityLabel={`${label} ${date.getDate()}. ${focus}. ${done ? 'Logged' : isToday ? 'Today' : 'Open Train'}`}
                   style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
                   <View style={{ width: 38 }}>
                     <Text style={{ ...ty.micro, color: isToday ? t.ink2 : t.ink3 }}>{label}</Text>
                     <Text style={{ ...value(17), color: isToday ? t.ink : t.ink2, marginTop: 2 }}>{date.getDate()}</Text>
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{workout.focus}</Text>
-                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{workout.exercises.length} exercises{workout.cardio ? ` · ${workout.cardio}` : ''}</Text>
+                    <Text style={{ ...ty.body, fontWeight: '500', color: workout ? t.ink : t.ink2, textTransform: 'capitalize' }}>{focus}</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{sub}</Text>
                   </View>
                   {done ? (
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
@@ -115,7 +142,14 @@ export default function ThisWeek() {
         <Rule />
 
         <Section>
-          <Text style={{ ...ty.caption, color: t.ink3 }}>This program runs {trainingDays} training day{trainingDays === 1 ? '' : 's'} a week. Tap any day to open Train and log it.</Text>
+          {/* Says what the rows above it say. A plan with no day landing in this
+              week gets its own sentence rather than "runs 0 training days a
+              week", which reads as a plan that asks nothing of anybody. */}
+          <Text style={{ ...ty.caption, color: t.ink3 }}>
+            {trainingDays === 0
+              ? 'None of this program\u2019s days fall in this week. Tap any day to open Train and log a session anyway.'
+              : `This program runs ${trainingDays} training day${trainingDays === 1 ? '' : 's'} a week. Tap any day to open Train and log it.`}
+          </Text>
         </Section>
       </ScrollView>
     </SafeAreaView>

@@ -9,12 +9,11 @@
 // So most of what follows asserts what the strings must NOT contain, and that
 // the three outcomes cannot be mistaken for one another.
 //
-// Not wired into `npm test` — package.json and tsconfig.test.json belong to
-// another agent this session. Run it with:
-//
-//   npx tsc src/lib/endCoaching.test.ts --outDir .tmp-endcoaching \
-//     --module node16 --moduleResolution node16 --target ES2020 --strict \
-//     && node .tmp-endcoaching/endCoaching.test.js
+// Run by `npm test`, under tsconfig.test.json, like every other suite here. The
+// "Not wired into `npm test`" note that used to sit here — with a hand-rolled
+// tsc command beside it — stopped being true when the entry landed in
+// package.json, and a header claiming a suite does not run tells the next reader
+// that nothing is watching this file.
 import {
   coachLabel, leaveCoachPrompt, leaveOutcome, endCoachingErrorMessage,
   type EndCoachingResult,

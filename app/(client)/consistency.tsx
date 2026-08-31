@@ -115,7 +115,10 @@ export default function Consistency() {
               ? `${freezes} freeze${freezes === 1 ? '' : 's'} in reserve · best run not all read`
               : 'Best run not all read'
             : freezes > 0
-            ? `Best ${best} · ${freezes} freeze${freezes === 1 ? '' : 's'} in reserve`
+            // "Best 14 · 2 freezes in reserve" — fourteen what? The other arm
+            // of this same ternary says "Best 14 days", so the unit was lost on
+            // exactly one of the two paths through one sentence.
+            ? `Best ${best} day${best === 1 ? '' : 's'} · ${freezes} freeze${freezes === 1 ? '' : 's'} in reserve`
             : `Best ${best} day${best === 1 ? '' : 's'} · no freezes yet`}
         />
 

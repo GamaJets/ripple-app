@@ -102,6 +102,21 @@ eq(expiryLine(cred({ expiresOn: '2026-09-02' }), TODAY), 'Expires in 2 days',
 eq(expiryLine(cred({ expiresOn: '2026-08-31' }), TODAY), 'Expires today', 'today reads as today');
 eq(expiryLine(cred({ expiresOn: '2026-08-30' }), TODAY), 'Expired 1 day ago', 'one day past is singular');
 
+// The 'current' branch — the one this file used to skip, and therefore the one
+// that shipped a database column into a sentence. "Valid to 2027-03-04 · Stated
+// by the coach" is what a client read under a coach's certification, three
+// siblings away from "Expires in 12 days".
+eq(expiryLine(cred({ expiresOn: '2027-03-04' }), TODAY), 'Valid to 4 Mar 2027',
+  'a current certification names its date in words, not as an ISO column');
+eq(expiryLine(cred({ expiresOn: '2027-12-25' }), TODAY), 'Valid to 25 Dec 2027',
+  'a two-digit day loses no leading zero and gains no padding');
+ok(!/\d{4}-\d{2}-\d{2}/.test(expiryLine(cred({ expiresOn: '2027-03-04' }), TODAY)),
+  'and no branch of this function may print a YYYY-MM-DD at all');
+// A date the column should not hold, but might: unparseable is the same answer
+// as absent, because "Valid to" with nothing after it is worse than either.
+eq(expiryLine(cred({ expiresOn: '2027-13-04' }), TODAY), 'No expiry date given',
+  'a month that is not a month is not a date');
+
 // ── Sorting: an expired claim is shown, just not first ─────────────────────
 const sorted = sortCredentials([
   cred({ id: 'lapsed', title: 'Lapsed', expiresOn: '2020-01-01' }),
@@ -113,9 +128,18 @@ eq(sorted.map((c) => c.id).join(','), 'soon,later,lifetime,lapsed',
   'soonest expiry first, undated after the dated ones, expired last');
 // Sorting must not mutate the caller's array — a screen re-sorting on every
 // render would otherwise shuffle a list under somebody's finger.
-const original = [cred({ id: 'b', title: 'B', expiresOn: '2027-01-01' }), cred({ id: 'a', title: 'A', expiresOn: null })];
-sortCredentials(original, TODAY);
-eq(original[0].id, 'b', 'sortCredentials leaves its input alone');
+//
+// The fixture is deliberately in the WRONG order for the sort: a lifetime
+// qualification sorts after a dated one, so sortCredentials has to move these
+// two. It used to be written the other way round, already sorted, which meant
+// `list.sort()` in place — the exact regression this guards — left element 0
+// where it was and the assertion passed. A no-op check on an already-sorted
+// array is not a check that the array was left alone.
+const original = [cred({ id: 'a', title: 'A', expiresOn: null }), cred({ id: 'b', title: 'B', expiresOn: '2027-01-01' })];
+const sortedCopy = sortCredentials(original, TODAY);
+eq(sortedCopy.map((c) => c.id).join(','), 'b,a', 'the returned list is genuinely reordered, so there is something to have mutated');
+eq(original.map((c) => c.id).join(','), 'a,b', 'and the caller’s own array is untouched, in full and in order');
+ok(sortedCopy !== original, 'the sort hands back a new array rather than the one it was given');
 
 // ── Insurance: the answer a gym asks for ───────────────────────────────────
 //

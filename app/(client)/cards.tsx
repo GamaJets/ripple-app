@@ -19,7 +19,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, Cta, Ghost } from '../../src/ui/kit';
+import { Rule, Section, Cta, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, radius, elevation, type as ty, value } from '../../src/theme/scale';
 import type { Theme } from '../../src/theme/tokens';
 import { useClientData } from '../../src/ui/clientData';
@@ -62,7 +62,14 @@ export default function Cards() {
   const best = longestStreak(log);
   const prs = personalRecords(log).sort((a, b) => b.est1RM - a.est1RM);
   const topPr = prs[0];
-  const w = c.weightSeries;
+  // `weightSeries` is derived from the SCANS, and this file asked the workout
+  // log's status about everything and the scans' status about nothing. Under a
+  // refused scan read the series is empty, so a member with twenty weigh-ins
+  // was shown "Weigh in twice to unlock" — the same false claim about their own
+  // record that the long note below refuses to make about their training log.
+  // app/(client)/social.tsx checks exactly this on exactly this provider.
+  const scansKnown = isWhole(c.scansStatus);
+  const w = scansKnown ? c.weightSeries : [];
   const wDelta = w.length > 1 ? +(w[w.length - 1].v - w[0].v).toFixed(1) : 0;
   // The change in the client's unit, converted as one span and rounded once at
   // the end rather than at each weigh-in. A measured half-kilo that rounds to a
@@ -97,7 +104,12 @@ export default function Cards() {
     // as a milestone with Share still enabled, and a client on a live 40-day
     // streak was invited to publicly announce a streak of zero.
     { kicker: 'Streak', big: hasStreak ? String(streak) : '—', unit: hasStreak ? (streak === 1 ? 'day' : 'days') : '', sub: hasStreak ? `Best ever: ${best} days` : logKnown ? 'Log a workout to start a streak' : UNREAD, available: hasStreak },
-    { kicker: 'Top Lift', big: hasPr ? String(weightIn(topPr.est1RM, wu)) : '—', unit: hasPr ? wu : '', sub: hasPr ? `${topPr.exercise} · est 1RM` : logKnown ? 'Log a lift to unlock' : UNREAD, available: hasPr },
+    // `fig`, not `String`. `weightIn` returns `number | null`, and `String(null)`
+    // is the four-letter word "null" — which this card would have drawn at 56pt
+    // as the figure somebody screenshots and posts. That is the exact failure
+    // fig() was written for, and this was the one screen in the app printing a
+    // convertible weight without it.
+    { kicker: 'Top Lift', big: hasPr ? fig(weightIn(topPr.est1RM, wu)) : '—', unit: hasPr ? wu : '', sub: hasPr ? `${topPr.exercise} · est 1RM` : logKnown ? 'Log a lift to unlock' : UNREAD, available: hasPr },
     // No second weigh-in means no measured change — show the card locked rather
     // than a manufactured "+0 kg since you started".
     // `hasProgress` asks whether there are two weigh-ins; it never asked
@@ -107,12 +119,20 @@ export default function Cards() {
     // asked of the figure that will actually be printed, in the member's own
     // unit, so a change too small to show at this grain does not become a
     // shareable milestone either.
-    { kicker: 'Progress', big: moved ? deltaLabel(wDeltaShown, { since: null }) : '—', unit: moved ? wu : '', sub: moved ? 'Since you started' : hasProgress ? 'No change since your first weigh-in' : 'Weigh in twice to unlock', available: moved },
+    { kicker: 'Progress', big: moved ? deltaLabel(wDeltaShown, { since: null }) : '—', unit: moved ? wu : '', sub: moved ? 'Since you started' : hasProgress ? 'No change since your first weigh-in' : scansKnown ? 'Weigh in twice to unlock' : 'We couldn’t read your weigh-ins', available: moved },
   ];
   const card = cards[idx];
   const shareText = (i: number) => {
     if (i === 0) return `${streak}-day training streak on ${appName} (best: ${best}). Every rep ripples out.`;
-    if (i === 1) return topPr ? `New milestone on ${appName}: ${topPr.exercise} — estimated 1RM ${weightIn(topPr.est1RM, wu)}${wu}. The work is working.` : `Chasing my first PR on ${appName}.`;
+    // The lift converted BEFORE the sentence is built, and the sentence
+    // withheld when it comes back null. Interpolating it straight in sent
+    // "estimated 1RM nullkg" out of the phone, into a post, permanently.
+    if (i === 1) {
+      const lift = topPr ? weightIn(topPr.est1RM, wu) : null;
+      return lift != null && topPr
+        ? `New milestone on ${appName}: ${topPr.exercise} — estimated 1RM ${lift}${wu}. The work is working.`
+        : `Chasing my first PR on ${appName}.`;
+    }
     // Never a zero: this string leaves the phone. The card is unavailable
     // when nothing moved, so this is unreachable then — and if it ever is
     // reached it says what happened rather than posting a change of none as
@@ -156,7 +176,7 @@ export default function Cards() {
           <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.md }}>
             {card.available ? 'Tip: screenshot the card above to post the visual too.'
               : logKnown ? 'This card unlocks once there is something real to show.'
-              : 'Cards stay locked until we can read your log — nothing has been lost.'}
+              : 'Cards stay locked until we can read your record — nothing has been lost.'}
           </Text>
         </Section>
 

@@ -150,7 +150,24 @@ ok(!planStale(writtenForNutFree, 'meat', ['nuts'], 4).stale,
   'a plan against the profile it was written for is not stale');
 eq(planStaleLine(planStale(writtenForNutFree, 'meat', ['nuts'], 4), 'Priya'), null,
   'and has no sentence to say about itself');
-ok(!planStale(writtenForNutFree, 'meat', ['nuts'] as Allergen[], 4).stale, 'order-independently');
+// Order-independence needs two allergens listed the other way round. This used
+// to repeat the call above verbatim — `['nuts']` against `['nuts'] as
+// Allergen[]`, a compile-time cast over a ONE-element list, in which there is
+// no order to vary. It could not have caught `sameSet` losing its `.sort()`,
+// which is the whole property the word "order-independently" is claiming.
+const twoAllergens = client({ avoid: ['nuts', 'shellfish'] as Allergen[] });
+const writtenForTwo = seedPlan(twoAllergens, WRITTEN);
+ok(!planStale(writtenForTwo, 'meat', ['shellfish', 'nuts'] as Allergen[], 4).stale,
+  'the same two allergens listed in the other order are the same two allergens — order-independently');
+// The whole verdict, not just its `stale` flag: `addedAvoid` and `droppedAvoid`
+// are what the coach's sentence is built from, and an order-sensitive
+// comparison would name an allergen as newly disclosed that the plan was
+// already written against.
+eq(JSON.stringify(planStale(writtenForTwo, 'meat', ['shellfish', 'nuts'] as Allergen[], 4)),
+   JSON.stringify(planStale(writtenForTwo, 'meat', ['nuts', 'shellfish'] as Allergen[], 4)),
+  'and the two orderings produce the same verdict in every field, not merely the same flag');
+ok(planStale(writtenForTwo, 'meat', ['shellfish'] as Allergen[], 4).stale,
+  'while genuinely dropping one of them is a change, so the comparison is not simply blind to the list');
 
 // A disclosure AFTER the plan was written. This is the case with a person on
 // the other end of it.

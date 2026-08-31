@@ -80,7 +80,17 @@ export default function Reminders() {
     // two states they are in.
     const wanted = (hydration ? Math.max(0, Math.floor((endH - startH) / every) + 1) : 0) + supps.length;
     if (!pushAvailable()) {
-      Alert.alert('Saved', 'Saved. Reminders start sending once the notifications build is installed from TestFlight.');
+      // Two things wrong with what this used to say. The body opened by
+      // repeating the title word for word ("Saved" / "Saved."), and the
+      // sentence promised an outcome nothing in this file delivers: reminders
+      // are scheduled HERE, at the moment Save is pressed, and nothing anywhere
+      // re-schedules them from the saved payload later. `useEffect` on mount
+      // reads the settings into state and stops. So a member who saved before
+      // the notifications build would have got nothing after it either, for as
+      // long as they never came back to this screen — while being told the
+      // opposite in the one sentence they were given about it.
+      Alert.alert('Settings saved, nothing scheduled yet',
+        'This build cannot schedule notifications, so no reminder has been set. Your settings are kept — open this screen and save again once notifications are working and they will be scheduled then.');
     } else if (newIds.length === 0) {
       Alert.alert(
         wanted === 0 ? 'Saved' : 'Saved, but nothing will be sent',
@@ -140,8 +150,8 @@ export default function Reminders() {
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, marginBottom: sp.lg }}>Gentle daily nudges for hydration and supplements.</Text>
 
         {!pushAvailable() ? (
-          <Notice kicker="Not sending yet" title="Save them now, they'll start later"
-            note="Your reminders start sending once the notifications build installs from TestFlight." />
+          <Notice kicker="Not sending yet" title="Nothing can be scheduled on this build"
+            note="You can set your reminders up here and they are kept. They are only scheduled at the moment you save, so come back and save again once notifications are working — otherwise nothing will be sent." />
         ) : null}
 
         <Rule />

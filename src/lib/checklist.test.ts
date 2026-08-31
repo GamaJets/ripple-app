@@ -3,7 +3,7 @@
 // The assertions that matter here are the negative ones: that an absent target
 // produces NO row rather than a default one. A test that only checks the happy
 // path would have passed against the five-item constant this replaces.
-import { buildChecklist, scheduledFocus, donePercent, coachHabitId, COACH_ID_PREFIX, type ChecklistInput } from './checklist';
+import { buildChecklist, scheduledFocus, scheduledDay, donePercent, coachHabitId, COACH_ID_PREFIX, type ChecklistInput } from './checklist';
 import { buildProgram } from './programs';
 
 const errors: string[] = [];
@@ -83,6 +83,34 @@ ok(scheduledFocus([], 1) === null, 'a plan with no days schedules nothing');
 ok(labelOf({ ...NOTHING, todaysTrainingFocus: 'Pull' }, 'train') === 'Train — Pull', 'the training row names the session');
 ok(!ids({ ...NOTHING, todaysTrainingFocus: '   ' }).includes('train'), 'a blank focus is not a session');
 ok(!ids(NOTHING).includes('train'), 'a rest day carries no training row');
+
+// ── the same match, returning the whole day, for the screen that draws a week ──
+//
+// `app/(client)/week.tsx` drew `days[i % days.length]` across all seven
+// weekdays, so a three-day plan filled every day, put Wednesday's session on
+// Tuesday, showed no rest day at all, and captioned the result "3 training days
+// a week". These assertions are about the week that screen now draws: seven
+// slots, three of them sessions, four of them genuinely nothing.
+{
+  const week = [1, 2, 3, 4, 5, 6, 0].map((wd) => scheduledDay(ppl, wd));   // Mon → Sun
+  ok(week.filter(Boolean).length === 3, `a three-day plan fills three of the seven days, got ${week.filter(Boolean).length}`);
+  ok(week[0]?.focus === 'Push', 'Monday is the Monday session');
+  ok(week[2]?.focus === 'Pull', 'and Wednesday is the WEDNESDAY session, not the second one in the list');
+  ok(week[1] === null, 'Tuesday is a rest day and must not borrow Wednesday\'s session');
+  ok(week[6] === null, 'nor may Sunday wrap round to Monday\'s');
+  // The whole day, not one field of it: the week screen prints the exercise
+  // count and the cardio line off this object, and a copy narrowed to
+  // { day, focus } would have sent it back to indexing the array by hand.
+  ok((week[0]?.exercises.length ?? 0) > 0, 'the day comes back whole, exercises and all');
+  ok(scheduledDay([], 1) === null, 'a plan with no days schedules nothing');
+  ok(scheduledDay([{ day: 'Nonesuch', focus: 'X' }], 1) === null, 'a day naming no real weekday lands on none of them');
+  ok(scheduledDay([{ day: 'monday', focus: 'X' }], 1)?.focus === 'X', 'the match is on the first three letters, case-insensitively');
+  // scheduledFocus is now defined in terms of scheduledDay, so the two must not
+  // be able to disagree about which day of the week it is.
+  for (const wd of [0, 1, 2, 3, 4, 5, 6]) {
+    ok(scheduledFocus(ppl, wd) === (scheduledDay(ppl, wd)?.focus ?? null), `focus and day agree on weekday ${wd}`);
+  }
+}
 
 // ── coach items ──
 const coached = buildChecklist({

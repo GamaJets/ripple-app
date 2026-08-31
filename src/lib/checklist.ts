@@ -136,12 +136,35 @@ export function scheduledFocus(
   days: readonly Pick<ProgramDay, 'day' | 'focus'>[],
   weekday: number,
 ): string | null {
+  const d = scheduledDay(days, weekday);
+  if (!d) return null;
+  const focus = String(d.focus || '').trim();
+  return focus || null;
+}
+
+/**
+ * The whole plan day that falls on `weekday` (0 Sun … 6 Sat), or null for a day
+ * the program does not schedule.
+ *
+ * The same exact match as `scheduledFocus`, returning the day rather than one
+ * field of it, for the screen that has to draw the exercise count and the
+ * cardio line too. It exists because `app/(client)/week.tsx` — the screen whose
+ * entire job is showing the week — painted `days[i % days.length]` across all
+ * seven weekdays. A three-day Mon/Wed/Fri plan therefore rendered a session on
+ * every day, Wednesday's session on Tuesday, and no rest day anywhere, under a
+ * heading that read "3 training days a week". The count and the list were both
+ * on screen at once and they disagreed.
+ *
+ * Generic over the day shape so a caller keeps its own fields: this returns the
+ * caller's object, not a copy narrowed to what this module happens to name.
+ */
+export function scheduledDay<D extends { day: string }>(
+  days: readonly D[],
+  weekday: number,
+): D | null {
   for (const d of days) {
     const key = String(d.day || '').trim().slice(0, 3).toLowerCase();
-    if (DAY_TO_WEEKDAY[key] === weekday) {
-      const focus = String(d.focus || '').trim();
-      return focus || null;
-    }
+    if (DAY_TO_WEEKDAY[key] === weekday) return d;
   }
   return null;
 }

@@ -192,15 +192,41 @@ export function useGlucose(personId?: string): GlucoseData {
     const fresh = unsaved(read.readings, rows.map((r) => r.external_id).filter((x): x is string => !!x));
     if (fresh.length === 0) return { added: 0 };
 
-    const { error } = await supabase.from('glucose_readings').insert(
+    // `{ count: 'exact' }`, and the count is what is reported.
+    //
+    // This used to return `fresh.length` — the number of rows it TRIED to write
+    // — and treat a 23505 as a partial success, on the reasoning that "the
+    // colliding rows are already stored". That reasoning is wrong about
+    // Postgres: an insert of many rows is ONE statement, so a single collision
+    // with `glucose_external_once` aborts the whole batch and NOTHING lands.
+    // The member was then shown "Imported — 40 readings added." over a table
+    // that had gained nothing, and with `glucose_readings` empty an import is
+    // the only way anything ever reaches this screen, so that alert was the
+    // entire evidence they had. `remove` and `setSharedFlag` twenty lines below
+    // have counted their rows since they were written; this was the one write
+    // in the file that asked the server nothing.
+    const { error, count } = await supabase.from('glucose_readings').insert(
       fresh.map((r) => ({ client_id: target, taken_at: r.at, mmol_l: r.mmol, external_id: r.externalId, source: 'health' })),
+      { count: 'exact' },
     );
-    // An insert that partly collided with the unique index is not a failure of
-    // the import — the colliding rows are already stored, which is the outcome
-    // wanted. Anything else is reported rather than swallowed.
-    if (error && error.code !== '23505') return { added: 0, reason: 'Those readings could not be saved. Try again in a moment.' };
+    if (error) {
+      // A collision means these readings are already here — which is a fine
+      // outcome and not a fault, but it is not "added" either, and saying so is
+      // what stops somebody importing again and again to fix a number that was
+      // never going to move.
+      if (error.code === '23505') {
+        await refresh();
+        return { added: 0, reason: 'Those readings are already in Repple, so nothing new was added.' };
+      }
+      return { added: 0, reason: 'Those readings could not be saved. Try again in a moment.' };
+    }
     await refresh();
-    return { added: fresh.length };
+    // A null count is "nobody counted", not "none" — the same rule
+    // src/lib/wroteRows.ts states for updates and deletes.
+    if (count == null) {
+      return { added: 0, reason: 'They were sent, but the server did not say how many it stored. Pull down to refresh and check before importing again.' };
+    }
+    return { added: count };
   }, [readOnly, target, rows, refresh]);
 
   const addManual = useCallback(async (mmol: number, at?: string): Promise<boolean> => {

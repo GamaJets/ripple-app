@@ -129,7 +129,18 @@ eq(agoLabel(null, '2026-08-30'), null, 'no date, no claim about age');
 }
 
 // A bare date renders as the day that was written, in every zone.
-ok(dayLabel('2026-08-01').includes('1'), 'a bare date labels as its own day, never the day before');
+//
+// `.includes('1')` was not that check. The defect this line names is
+// `new Date('2026-08-01')` landing on UTC midnight and printing 31 Jul for
+// every reader west of Greenwich — and "31 Jul 2026" contains a '1', so the
+// assertion passed under exactly the failure its own message forbids, in all
+// three of the zones test:zones runs. Compared against the same formatter over
+// a LOCALLY built 1 August instead, which pins the day itself and stays true
+// whatever locale the runner formats in.
+const AUG1 = new Date(2026, 7, 1).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+const JUL31 = new Date(2026, 6, 31).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+eq(dayLabel('2026-08-01'), AUG1, 'a bare date labels as its own day');
+ok(dayLabel('2026-08-01') !== JUL31, 'and never as the day before — which is what UTC midnight would make it');
 eq(dayLabel(null), '—', 'no date is a dash');
 
 /* ── staleness: how stale, not merely "old" ────────────────────────────── */

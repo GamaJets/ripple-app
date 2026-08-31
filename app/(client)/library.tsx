@@ -54,7 +54,7 @@ import { catalogueValue as cap, num } from '../../src/lib/format';
 import { Image as ExpoImage } from 'expo-image';
 import { sp, layout, radius, elevation, type as ty, numeric } from '../../src/theme/scale';
 import { useSettings } from '../../src/ui/settings';
-import { liftLabel } from '../../src/lib/units';
+import { liftLabel, readLift } from '../../src/lib/units';
 import { frameUrls } from '../../src/lib/exerciseMedia';
 import { signMedia, needsSigning } from '../../src/ui/signedMedia';
 
@@ -174,7 +174,21 @@ export default function Library() {
   // Blank weight is 0 and stays 0 — that is a bodyweight set, which is a real
   // set, and the log already renders a 0 kg set as bodyweight rather than as a
   // missing figure.
-  setBanked((p) => [...p, [r, parseFloat(kg.replace(',', '.')) || 0]]);
+  //
+  // `readLift` and not `parseFloat`. The box was read as KILOGRAMS whatever the
+  // member reads in and was labelled "KG" for everybody, so a member in pounds
+  // typed 225 and 225 kilograms — 496 lb — went into their training log, their
+  // volume, their estimated 1RM and next session's target. The chip beside the
+  // box made it visible and nobody read it that way: it printed the stored
+  // kilograms back through `liftLabel`, so 225 typed came straight back as
+  // "496 lb". This is the same defect app/(client)/scan-machine.tsx documents
+  // having fixed, on the same control, in the same words.
+  //
+  // It also refuses text that is not a number instead of silently making it a
+  // bodyweight set, and states its bound in the unit on screen.
+  const load = readLift(kg, wu);
+  if (!load.ok) { Alert.alert('Check that load', load.reason); return; }
+  setBanked((p) => [...p, [r, load.kg ?? 0]]);
   setReps(''); setKg('');
   tapLight();
  };
@@ -182,7 +196,12 @@ export default function Library() {
   if (!open || saving) return;
   // Whatever is still in the fields counts — asking somebody to press "add set"
   // and then "log" for a single set is how a set gets lost between the two.
-  const pending = (parseInt(reps, 10) || 0) > 0 ? [...banked, [parseInt(reps, 10), parseFloat(kg.replace(',', '.')) || 0] as [number, number]] : banked;
+  // The unread field goes through `readLift` too. A load that only ever reached
+  // the log by this path would otherwise have been the one set in the session
+  // stored in the wrong unit — the hardest kind of wrong figure to ever notice.
+  const trailing = readLift(kg, wu);
+  if (!trailing.ok) { Alert.alert('Check that load', trailing.reason); return; }
+  const pending = (parseInt(reps, 10) || 0) > 0 ? [...banked, [parseInt(reps, 10), trailing.kg ?? 0] as [number, number]] : banked;
   if (!pending.length) { Alert.alert('Nothing to log', 'Add a set first — reps, and the weight if there was one.'); return; }
   setSaving(true);
   // No `kcal`. Train derives an energy estimate across a whole session's work;
@@ -243,8 +262,15 @@ export default function Library() {
     </ScrollView>
 
     <Section>
-     <SectionHead title={group === 'All' ? 'All Exercises' : group}
-      note={status === 'ready' && list.length ? `${list.length} exercise${list.length === 1 ? '' : 's'}` : undefined} />
+     {/* Named for what it holds — the clips this member's coach has filmed —
+         and not "All Exercises", which is the heading of the OTHER section
+         sixty lines down. With no clips uploaded anywhere yet, the two put
+         "ALL EXERCISES / No clips yet" directly above "ALL EXERCISES · 604 of
+         604" and 604 rows: the same heading twice, saying opposite things. A
+         reader resolves that by believing the list, and concludes the sentence
+         is broken rather than that it is about something else. */}
+     <SectionHead title={group === 'All' ? 'Clips from Your Coach' : `${group} Clips`}
+      note={status === 'ready' && list.length ? `${list.length} clip${list.length === 1 ? '' : 's'}` : undefined} />
      {status === 'ready' && list.length ? (
       <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.xs }}>Tap one to watch it — and to log the sets you just did.</Text>
      ) : null}
@@ -275,9 +301,9 @@ export default function Library() {
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md, textAlign: 'center' }}>
          {videos.length === 0
           ? 'No clips yet — they appear here as your coach uploads them.'
-          : term && group !== 'All' ? `Nothing in ${group} matches “${q.trim()}”.`
-          : term ? `No exercises match “${q.trim()}”.`
-          : `Nothing filed under ${group}.`}
+          : term && group !== 'All' ? `No clip in ${group} matches “${q.trim()}”.`
+          : term ? `No clip matches “${q.trim()}”.`
+          : `No clips filed under ${group}. Every ${group} movement we know is listed further down.`}
         </Text>
         {videos.length > 0 && filtering ? (
          <View style={{ marginTop: sp.md }}>
@@ -425,10 +451,13 @@ export default function Library() {
           style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 9, paddingVertical: 5, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
           {/* 0 kg is a bodyweight set, not a missing weight — so it is named
               rather than printed as "0kg", which reads like a lost figure.
-              The load itself now reads in the member's own unit: it was typed
-              into the box below THROUGH `readLift`, which stores kilograms, and
+              The load itself reads in the member's own unit: it is typed into
+              the box below THROUGH `readLift`, which stores kilograms, and
               printing those kilograms straight back handed a pounds member a
-              different number from the one they had just typed. */}
+              different number from the one they had just typed. For a while
+              this comment was the only true half of that sentence — the chip
+              converted and the box did not, so the two disagreed by a factor
+              of 2.2 and the chip was reporting the bug every time. */}
           <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{s[0]}×{s[1] > 0 ? liftLabel(s[1], wu) : 'bodyweight'}</Text>
           <Text style={{ ...ty.caption, color: t.ink3 }}>×</Text>
          </Pressable>
@@ -444,7 +473,9 @@ export default function Library() {
          style={{ ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 10 }} />
        </Field>
        <Text style={{ ...ty.caption, color: t.ink3, paddingBottom: 12 }}>×</Text>
-       <Field label="KG" a11y="Load in kilograms, blank for a bodyweight set">
+       {/* The member's own unit, not a fixed "KG" — the label and the
+           conversion move together, and this is the box where they did not. */}
+       <Field label={wu.toUpperCase()} a11y={`Load in ${wu === 'kg' ? 'kilograms' : 'pounds'}, blank for a bodyweight set`}>
         <TextInput value={kg} onChangeText={setKg} keyboardType="numeric"
          style={{ ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 10 }} />
        </Field>

@@ -9,7 +9,7 @@ import { supabase } from './supabase';
 import { reportError } from './reportError';
 import { capLimit, capped, TruncatedRead, ROW_CAP } from './rowCap';
 import { writeFailure } from './wroteRows';
-import { packBalance, readDraw, drew, drawReason, type PackPurchase } from './packDraw';
+import { packBalance, readDraw, drew, drawReason, type PackPurchase, type PackBalance } from './packDraw';
 import type { LoadStatus } from '../ui/loadStatus';
 
 export interface ConnectStatus { stripe_account_id: string | null; charges_enabled: boolean; details_submitted: boolean }
@@ -291,6 +291,28 @@ export async function fetchMyPurchases(): Promise<Purchase[] | null> {
  * missed, and it feeds the screen the other two protect.
  */
 export async function sessionsRemaining(trainerId?: string): Promise<number | null> {
+  // One place does this arithmetic, and it is tested: `packBalance` returns
+  // null for an unread history and a real 0 for an empty one, which is the
+  // distinction this function exists to preserve. See src/lib/packDraw.ts.
+  return (await sessionPacks(trainerId))?.left ?? null;
+}
+
+/**
+ * The same read, keeping the PACKS as well as the number left on them.
+ *
+ * `sessionsRemaining` throws the lines away, and a caller holding only the
+ * number cannot tell 0-because-you-used-them-all from 0-because-you-have-never-
+ * bought-one. app/(client)/pt-sessions.tsx was showing the second as the first:
+ * with `client_purchases` empty, every member read a hero of "0 · Nothing left
+ * on a pack" and an amber flag telling them to "Buy another" — two sentences
+ * asserting a pack that never existed, to somebody who may not even have a
+ * coach. app/(client)/packages.tsx already guarded the identical warning with
+ * `balance.lines.length > 0`; it simply had the lines to hand and this screen
+ * did not.
+ *
+ * Null still means the read did not land, exactly as before.
+ */
+export async function sessionPacks(trainerId?: string): Promise<PackBalance | null> {
   try {
     const { data: auth } = await supabase.auth.getUser();
     const uid = auth?.user?.id; if (!uid) return null;
@@ -299,10 +321,7 @@ export async function sessionsRemaining(trainerId?: string): Promise<number | nu
     const { data, error } = await q;
     if (error) { reportError('connect.sessionsRemaining', error); return null; }
     if (!data) return null;
-    // One place does this arithmetic, and it is tested: `packBalance` returns
-    // null for an unread history and a real 0 for an empty one, which is the
-    // distinction this function exists to preserve. See src/lib/packDraw.ts.
-    return packBalance(data as PackPurchase[]).left;
+    return packBalance(data as PackPurchase[]);
   } catch (e) { reportError('connect.sessionsRemaining', e); return null; }
 }
 

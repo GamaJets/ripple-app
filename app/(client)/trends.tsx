@@ -151,8 +151,18 @@ export default function Trends() {
             <Spark data={weeks.map((w) => volumeIn(w.vol, wu))} labels={weeks.map((w) => w.iso)} unit={` ${wu}`} />
           ) : (
             <Text style={{ ...ty.label, color: t.ink3 }}>
+              {/* Four arms, matching the Strength Trend block below, which has
+                  had them all along. `logKnown` is `isWhole(logStatus)`, so it
+                  is false while the FIRST read is still in flight — and this
+                  screen therefore opened, on every launch, by telling every
+                  member that their training log could not be read. It is also
+                  false under 'partial', where the log very much was read. Two
+                  sections on one screen, one telling the truth about the same
+                  status and one not. */}
               {logKnown
                 ? 'No training volume logged yet — the trend charts as soon as you log a set.'
+                : logStatus === 'loading' ? 'Reading your training log…'
+                : logStatus === 'partial' ? 'More logged sets than this screen can read at once, so there is no honest ten-week total to chart over them.'
                 : 'We couldn’t read your training log, so there is nothing to chart here yet. Your history is intact.'}
             </Text>
           )}
@@ -198,20 +208,26 @@ export default function Trends() {
                       // the answer — an unchanged 1RM could report a pound of
                       // progress, and a genuine 2.5 kg gain could read as 5 lb
                       // one session and 6 lb the next.
-                      label: 'Est. 1RM', value: fig(est1RMIn(last, wu)), unit: wu,
+                      // Gated like the volume row above it. Under 'partial'
+                      // `series` is whatever fitted in the read, so the count,
+                      // the maximum and the baseline day are all figures over
+                      // an unknown fraction of the member's training — and the
+                      // "since" date is not when they started, it is where the
+                      // read stopped.
+                      label: 'Est. 1RM', value: logKnown ? fig(est1RMIn(last, wu)) : fig(null), unit: logKnown ? wu : undefined,
                       // `deltaShown >= 0` put a plus on an unchanged 1RM, and
                       // `delta >= 0` gave that same nothing the accent dot the
                       // row uses to mean "you moved the right way". Both now
                       // ask the figure that is printed, which has its own arm
                       // for nothing. The day the session series starts is named
                       // rather than left to be inferred from the chart below.
-                      good: deltaMoved(deltaShown) ? deltaSign(deltaShown) === '+' : undefined,
-                      delta: series.length >= 2 && deltaMoved(deltaShown)
+                      good: logKnown && deltaMoved(deltaShown) ? deltaSign(deltaShown) === '+' : undefined,
+                      delta: logKnown && series.length >= 2 && deltaMoved(deltaShown)
                         ? deltaLabel(deltaShown, { since: shortDayLabel(series[0].t), unit: wu })
-                        : undefined,
+                        : logKnown ? undefined : 'not all read',
                     },
-                    { label: 'Best', value: fig(est1RMIn(maxE, wu)), unit: wu },
-                    { label: 'Sessions', value: fig(series.length) },
+                    { label: 'Best', value: logKnown ? fig(est1RMIn(maxE, wu)) : fig(null), unit: logKnown ? wu : undefined },
+                    { label: 'Sessions', value: logKnown ? fig(series.length) : fig(null) },
                   ]} />
                   {series.length >= 2 ? (<>
                     <View style={{ height: sp.lg }} />

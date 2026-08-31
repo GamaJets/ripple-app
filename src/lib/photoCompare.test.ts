@@ -144,7 +144,15 @@ ok(compareDelta(null, null) === null, 'two unmeasured days give no delta');
 ok(readingText(80.1, 'kg') === '80.1 kg', 'a real reading prints with its unit');
 ok(readingText(null, 'kg') === '—', 'an absent reading is a dash, never a zero');
 ok(readingText(0, 'kg') === '0 kg', 'a genuine zero still prints as a zero — the dash is for absence only');
-ok(deltaText(-2.3, 'kg') === '-2.3 kg', 'a loss prints signed');
+// The minus is U+2212, the character every other movement in the app is
+// signed with — NOT the ASCII hyphen this line used to require. Asserting the
+// hyphen is what kept the Compare table drawing a loss differently from the
+// Progress screen's identical figure for as long as it did: a passing test told
+// every reader afterwards that the wrong character was the intended one. The
+// second assertion names the hyphen explicitly so that regressing to it fails
+// here rather than looking like a whitespace difference in a diff.
+ok(deltaText(-2.3, 'kg') === '\u22122.3 kg', `a loss prints signed, got "${deltaText(-2.3, 'kg')}"`);
+ok(!deltaText(-2.3, 'kg').includes('-'), 'and signs it with U+2212, not with an ASCII hyphen');
 ok(deltaText(2.3, 'kg') === '+2.3 kg', 'a gain prints with an explicit plus, so the direction cannot be misread');
 ok(deltaText(0, 'kg') === '0 kg', 'a measured no-change prints as 0');
 ok(deltaText(null, 'kg') === '—', 'an uncomputable change is a dash');
@@ -251,7 +259,7 @@ ok(spanLabel(null) === '—', 'an unparseable interval is a dash, not "0 days ap
 {
   const rows = compareRows(PHOTO_A, PHOTO_B, SCANS, 'lb');
   ok(readingText(rows[0].before, rows[0].unit) === '182 lb', `got "${readingText(rows[0].before, rows[0].unit)}"`);
-  ok(deltaText(rows[0].delta, rows[0].unit) === '-5 lb', `got "${deltaText(rows[0].delta, rows[0].unit)}"`);
+  ok(deltaText(rows[0].delta, rows[0].unit) === '\u22125 lb', `got "${deltaText(rows[0].delta, rows[0].unit)}"`);
   ok(deltaText(rows[2].delta, rows[2].unit) === '+2 lb', 'a gain still prints with an explicit plus in pounds');
   ok(readingText(rows[1].before, rows[1].unit) === '24.1 %', 'body fat still carries its own unit through unchanged');
   ok(!rows.some((r) => r.unit === 'kg'), 'and no row in a pounds reader\'s table is labelled kg');
@@ -293,7 +301,7 @@ ok(spanLabel(null) === '—', 'an unparseable interval is a dash, not "0 days ap
 
   ok(s.includes('1 Aug 2026 → 11 Aug 2026'), 'both dates are in it, in the order they happened');
   ok(s.includes('10 days apart'), 'and the interval between them');
-  ok(s.includes('Weight: 82.4 kg → 80.1 kg (-2.3 kg)'), 'each row carries both readings AND the change, so no figure stands alone');
+  ok(s.includes('Weight: 82.4 kg \u2192 80.1 kg (\u22122.3 kg)'), `each row carries both readings AND the change, so no figure stands alone — got "${s.split('\n')[2]}"`);
   ok(s.includes(COMPARE_DISCLAIMER), 'the standing sentence goes with the figures rather than staying behind on the screen');
   ok(s.includes('not attached'), 'and it says outright that the pictures did not go');
 

@@ -103,7 +103,13 @@ const KNOWN = new Map([
     '`deltaText`, whose zero is deliberate and pinned by src/lib/photoCompare.test.ts: "a ' +
     'measured no-change prints as 0". It sits in a side-by-side compare column where a dash ' +
     'already means "not measured", so 0 and — are the two answers that column needs and neither ' +
-    'is a sign on nothing.' }],
+    'is a sign on nothing. ' +
+    'The MINUS arm was added later and is the shared U+2212 from deltaLabel: the loss arm used ' +
+    'to fall through to `${v}`, so every loss on the Compare table rendered with an ASCII ' +
+    'hyphen while the same measurement on Progress rendered with a real minus. This check could ' +
+    'not see it — the hyphen is not in its sign class, deliberately, because the defect it ' +
+    'hunts is a sign on a zero — and three assertions in photoCompare.test.ts required the ' +
+    'hyphen outright.' }],
 ]);
 
 /** `delta-ok: <why>` on this line or the one above it. The reason is the point

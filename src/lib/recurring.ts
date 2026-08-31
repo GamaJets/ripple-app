@@ -37,7 +37,7 @@
 // decision, one fee at most.
 import {
   insideNoticeWindow, lateCancelFee, noticeHoursOf, noticeLabel,
-  feeAmountLine, type CancellationPolicy, type FeeVerdict,
+  feeAmountLine, unstatedCurrency, type CancellationPolicy, type FeeVerdict,
 } from './booking';
 
 /** Sunday-first, matching `extract(dow)` in Postgres and `Date.getDay()`, so
@@ -263,7 +263,7 @@ export function occurrenceDetail(v: FeeVerdict, noticeHours: number): string {
     case 'unpriced':
       return `Frees this one only — the rest of the standing appointment is untouched. This is inside ${w}, so your coach’s policy applies; they haven’t set an amount, so ask them.`;
     case 'fee':
-      return `Frees this one only — the rest of the standing appointment is untouched. This is inside ${w}, so a late-cancellation fee of ${feeAmountLine(v.amount, v.currency)} is recorded. Repple doesn’t take this payment.`;
+      return `Frees this one only — the rest of the standing appointment is untouched. This is inside ${w}, so a late-cancellation fee of ${feeAmountLine(v.amount, v.currency)} is recorded. Repple doesn’t take this payment.${unstatedCurrency(v.currency)}`;
   }
 }
 

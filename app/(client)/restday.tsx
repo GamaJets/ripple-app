@@ -18,6 +18,8 @@ import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { isWhole } from '../../src/ui/loadStatus';
 import { deloadCheck } from '../../src/lib/training';
 import { weekStats } from '../../src/lib/streaks';
+import { volumeHeadline } from '../../src/lib/units';
+import { useSettings } from '../../src/ui/settings';
 
 export default function RestDay() {
   const t = useTheme();
@@ -36,6 +38,7 @@ export default function RestDay() {
   // at the far end, and 'loading' printed "You have room to train — 0 training
   // days this week" on the first frame, before anything had been read at all.
   const known = isWhole(logStatus);
+  const wu = useSettings().weightUnit;
 
   const info = useMemo(() => {
     const dl = deloadCheck(log);
@@ -48,6 +51,8 @@ export default function RestDay() {
   }, [log]);
 
   const { dl, wk, restToday } = info;
+  // Tonnes for a metric reader, pounds for an imperial one. See volumeHeadline.
+  const vol = volumeHeadline(wk.volumeKg, wu);
   const tone = !known ? t.warn : dl.due ? t.s3 : restToday ? t.warn : t.brand;
   // "You are well recovered" was a claim this screen is not entitled to make.
   // Everything here is inferred from the TRAINING LOG: it knows how much you
@@ -120,7 +125,13 @@ export default function RestDay() {
             { label: 'Hard Weeks', value: known ? fig(dl.hardWeeks) : fig(null) },
             // `(0/1000).toFixed(1)` is "0.0" — a tonnage printed to one decimal
             // place, which reads as measured rather than as absent.
-            { label: 'Volume This Week', value: known ? (wk.volumeKg / 1000).toFixed(1) : fig(null), unit: known ? 't' : undefined },
+            //
+            // And it was a TONNAGE for everybody. This screen never asked what
+            // unit the member reads in, so a pounds reader was handed a metric
+            // tonne with no note — the one conversion `volumeHeadline` exists
+            // to make, for the reason written on it: the tonne has no imperial
+            // counterpart safe to print, so an imperial reader gets the pounds.
+            { label: 'Volume This Week', value: known ? fig(vol?.figure.toLocaleString()) : fig(null), unit: known && vol ? vol.unit : undefined },
           ]} />
         </Section>
 

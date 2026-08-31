@@ -237,11 +237,24 @@ const sane = (v: { label: string; detail: string }, where: string) => {
   // Step 4 — the re-auth succeeds and the verdicts are cleared. This is the
   // "reconnecting must visibly resolve" requirement, as an assertion: with the
   // dead verdict gone, both screens must say Connected without a relaunch.
+  // Recovery is asked with the sleep scope, because that is the only thing that
+  // makes it a different screen from Devices. Passing it no metric — as this
+  // step used to — made `recovery(cleared)` the same call as `devices(cleared)`
+  // against the same pure function, so "both screens must agree on the state"
+  // was comparing a value to itself and could not fail however far the two
+  // screens drifted. The re-auth that just succeeded is the one that granted
+  // the scope, so the sleep proof here is 'ok'.
   const cleared: TokenProof = { kind: 'none' };
+  const grantedSleep: LinkFacts['metric'] = { name: 'sleep', proof: { kind: 'ok', at: NOW + 3000 } };
   const d4 = devices(cleared);
-  const r4 = recovery(cleared);
+  const r4 = recovery(cleared, grantedSleep);
   ok(d4.connected && r4.connected, 'step 4: after a successful re-auth both screens must say connected');
   ok(d4.state === r4.state, 'step 4: both screens must agree on the state, not just the flag');
+  ok(d4.state === 'live', 'step 4: and the state they agree on is plain "live" — nothing is still blocked');
+  // The failure this replay was written against, one step on: Recovery going on
+  // saying "reconnect" after the reconnect worked. It can only be caught while
+  // Recovery is being asked its own question.
+  ok(r4.action === null, 'step 4: Recovery stops asking for a reconnect once the scope it wanted has been granted');
   ok(!/reconnect/i.test(d4.detail + r4.detail), 'step 4: nothing may still be asking for a reconnect that just happened');
 }
 

@@ -308,7 +308,12 @@ export default function Recovery() {
    figure={fig(cups)}
    unit={goalCups != null ? `of ${goalCups} glasses` : cups === 1 ? 'glass today' : 'glasses today'}
    arc={pct == null ? undefined : pct / 100}
-   arcLabel="recovered"
+   // The ring is glasses drunk against the water goal, so that is what it is
+   // announced as. It said "recovered", and Hero renders arcLabel as
+   // `${pct}% ${arcLabel}` — so a VoiceOver user on the Recovery screen was
+   // told "75% recovered", a recovery score this app does not compute, read
+   // out of a water count, on the one screen where they would believe it.
+   arcLabel="of today's water goal"
    // "Goal met today — nice." is a congratulation, and a filled ring is the
    // same congratulation without words. Both were drawn from a count the
    // caveat underneath admits may be missing glasses logged on another device
@@ -381,7 +386,7 @@ export default function Recovery() {
    <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>From your devices</Text>
    {connectedKey === '' ? (
     <Text style={{ ...ty.label, color: t.ink3 }}>
-     No device connected. Connect a watch or a ring in Watch &amp; devices and your nights appear here, each one labelled with which device recorded it.
+     No device connected. Connect a watch or a ring in Watch &amp; Devices and your nights appear here, each one labelled with which device recorded it.
     </Text>
    ) : sleepReads.status === 'loading' ? (
     <Text style={{ ...ty.label, color: t.ink3 }}>Reading your devices…</Text>
@@ -452,7 +457,9 @@ export default function Recovery() {
        Apple Health was readable and holds no sleep for these nights. If you have been wearing your watch, Sleep sharing is probably switched off for Repple — Health ▸ Sharing ▸ Apps ▸ Repple.
       </Text>
       <View style={{ alignSelf: 'flex-start', marginTop: sp.sm }}>
-       <Ghost label={askingHealth ? 'Asking…' : 'Allow sleep in Apple Health'} onPress={askHealthForSleep} />
+       {/* Title Case, like every other button on this screen — "Fix in Watch &
+          Devices", "Log a Recovery Session", "Log Sleep", "Add a Glass". */}
+      <Ghost label={askingHealth ? 'Asking…' : 'Allow Sleep in Apple Health'} onPress={askHealthForSleep} />
       </View>
      </View>
     ) : null}
@@ -525,8 +532,13 @@ export default function Recovery() {
     </Text>
    ) : recoverySessions.length === 0 ? (
     <Text style={{ ...ty.label, color: t.ink3 }}>
-     Nothing logged yet. {RECOVERY_ACTIVITIES.join(', ')} — duration and heart rate are kept; there is no
-     calorie figure, because heating up is not work.
+     {/* RECOVERY_ACTIVITIES are button labels — "Breathwork, Cold Plunge,
+         Contrast Therapy, Massage, Sauna, Steam Room" — and splicing six of
+         them mid-sentence set a running empty state in Title Case. Lowercased
+         here rather than in recoveryActs.ts, because the same names ARE
+         buttons everywhere else and are correctly capitalised there. */}
+     Nothing logged yet. Sauna, steam, cold plunge, contrast therapy, massage and breathwork all belong
+     here — duration and heart rate are kept; there is no calorie figure, because heating up is not work.
     </Text>
    ) : (
     recoverySessions.map((l, i) => (

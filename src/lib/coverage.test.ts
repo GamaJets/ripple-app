@@ -45,7 +45,7 @@ import { estimateDish, searchDishes, DISHES } from './restaurant';
 import { normaliseEmail, inviteState, isExpired as inviteExpired, isRedeemable as inviteRedeemable, expiryFor as inviteExpiryFor, daysUntilExpiry, inviteBlocker, screenInvites, summariseInvites, DEFAULT_VALID_DAYS, type MemberInvite } from './memberInvites';
 import { exerciseSlug, sameExercise, findExercise, videoForExercise, type ExerciseRef, isAcademyClip } from './exerciseId';
 import { weekStartOf, weekDays, shiftWeek, hoursSpanned, shiftHours, hourLabel, buildRota, coverage, shiftsByDay, rosterByTrainer, summariseRota, shiftFromHours, type Shift, type DemandBlock } from './gymRota';
-import { photoObjectPath, isOwnPhotoPath, sortOldestFirst, comparePair, daysApart, photosNote, missingFileCount, rowToPhoto, PHOTO_PATH_RE, type ProgressPhoto } from './progressPhotos';
+import { photoObjectPath, isOwnPhotoPath, sortOldestFirst, comparePair, daysApart, photosNote, missingFileCount, rowToPhoto, PHOTO_PATH_RE, SIGNED_URL_TTL_S, type ProgressPhoto } from './progressPhotos';
 import { viewerMaySee, shareStateOf, shareLabel, sharedNote, sharedCount, sendBlocker, sentPhotos, sortNewestShared, missingSharedFiles, revokeCaveat, SHARED_URL_TTL_S, type ShareGrant, type CoachLink, type SharedPhoto } from './photoShare';
 import { monthlyHistory, monthKey, monthLabel, yearRows, peakVolume, intensity, bestMonth, trainedMonths, gaps, longestGap, monthsSinceLast, historySpan, stageOf, historyNote, lifetimeTotals, prTimeline, volumeArc, tonnes } from './longView';
 import { buildPassConversion, hostsOf, intervalOf, coversDate, daysBetween, dateOf, attributionSentence, suppressionSentence, CAUSAL_CAVEAT, MONEY_NOTE, type PassConversionRecord } from './passConversion';
@@ -96,7 +96,16 @@ ok(_ics.startsWith('BEGIN:VCALENDAR') && _ics.trimEnd().endsWith('END:VCALENDAR'
 ok(_ics.includes('DTSTART:20260720T090000Z') && _ics.includes('DTEND:20260720T100000Z'), 'ics start/end utc');
 ok(_ics.includes('SUMMARY:Training\\, with\\; coach'), 'ics escapes comma/semicolon');
 ok((_ics.match(/BEGIN:VEVENT/g) || []).length === 1, 'ics one event');
-ok(buildIcs([], 'X', 0).includes('X-WR-CALNAME:X'), 'ics empty calendar still valid');
+// The message says "valid", so the envelope is what has to be checked — the
+// calendar NAME being present says nothing about the file parsing. As written
+// this passed for a buildIcs that returned the X-WR-CALNAME line and nothing
+// else, which is not a calendar at all. The envelope check four lines up was
+// already there to copy.
+const _emptyIcs = buildIcs([], 'X', 0);
+ok(_emptyIcs.startsWith('BEGIN:VCALENDAR') && _emptyIcs.trimEnd().endsWith('END:VCALENDAR'),
+  'ics empty calendar is still a well-formed calendar, not a bare header');
+ok(_emptyIcs.includes('X-WR-CALNAME:X'), 'and still carries the name it was given');
+ok(!_emptyIcs.includes('BEGIN:VEVENT'), 'with no event invented to fill it');
 // ── restaurant estimator ──
 const _burrito = DISHES.find((d) => d.id === 'burrito')!;
 ok(estimateDish(_burrito, 1).kcal === _burrito.kcal, 'full portion = base kcal');
@@ -105,7 +114,15 @@ ok(estimateDish(_burrito, 0.5).protein === Math.round(_burrito.protein * 0.5), '
 ok(estimateDish(_burrito, 1).name === _burrito.name && estimateDish(_burrito, 2).name.includes('2'), 'portion label');
 ok(searchDishes('ramen').length === 1 && searchDishes('ramen')[0].id === 'ramen', 'search by name');
 ok(searchDishes('mexican').every((d) => d.cuisine === 'Mexican'), 'search by cuisine');
-ok(searchDishes('').length === DISHES.length || searchDishes('').length === 40, 'empty query returns catalog');
+// `|| length === 40` was an escape hatch, not a second case: DISHES holds 40
+// rows, so the two arms are the same number today, and the day a 41st dish is
+// added the first arm goes false, the second holds, and the assertion stays
+// green under a message — "returns catalog" — that has become untrue. The page
+// size is the honest property, and it survives the catalogue growing.
+const _blank = searchDishes('');
+ok(_blank.length === Math.min(DISHES.length, 40),
+  `an empty query returns the catalogue, up to the page size — got ${_blank.length} of ${DISHES.length}`);
+ok(_blank.every((d, i) => d.id === DISHES[i].id), 'and it is the head of the catalogue, in order, rather than an arbitrary slice');
 // ── streak freeze ──
 // 5-day chain (days 0..4), miss day 5, then trained days 6,7 -> a freeze bridges day 5.
 const gapLog: WorkoutEntry[] = [0,1,2,3,4,6,7,8,9,10,11,12].map((n) => ({ t: day(n), exercise: 'X', sets: [[8,50]] as [number,number][] }));
@@ -1730,8 +1747,18 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
     ok(classFillState(20, 16) === 'open', 'and 4 left is not');
     ok(classFillState(8, 6) === 'nearly',
        '2 left in a small class is nearly full, where a flat percentage would have said otherwise');
-    ok(classFillState(60, 9) === 'open' && classFillState(60, 51) === 'nearly',
-       'and 9 left in a class of 60 is roomy, where a flat count of 3 would have said otherwise');
+    // Split, because the message on the joined version described the wrong call
+    // and described it backwards: it said "9 left in a class of 60 is roomy"
+    // while the second half of its own condition pinned 9 left as `nearly`. A
+    // reader chasing a classFillState regression was being told the opposite of
+    // the rule the line enforces. In this block's vocabulary the second argument
+    // is BOOKED and the message counts what is LEFT, so 60/51 is the 9-left case.
+    ok(classFillState(60, 9) === 'open', '51 left in a class of 60 is roomy');
+    ok(classFillState(60, 51) === 'nearly',
+       'and 9 left in a class of 60 is nearly full, where a flat count of 3 would have said otherwise');
+    // The boundary itself, which is where `<=` turning into `<` would hide. 15%
+    // of 60 is exactly 9, so 9 left is the last nearly-full and 10 left is open.
+    ok(classFillState(60, 50) === 'open', 'and one seat more than the threshold is open again');
     ok(classFillState(0, 0) === 'full',
        'a class with no capacity cannot be joined');
   }
@@ -2305,7 +2332,14 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
 
   // ── the one thing revocation cannot reach, pinned to the TTL that bounds it ──
   ok(SHARED_URL_TTL_S === 5 * 60, 'a coach URL lasts five minutes, so taking a photo back bites in minutes');
-  ok(SHARED_URL_TTL_S < 60 * 60, 'and far less than the hour a member gets for their own photos');
+  // Against the member's own TTL rather than against a literal 3600. The
+  // invariant worth holding is the RELATIONSHIP — a link handed to somebody
+  // else must expire well before one the owner opens for themselves — and
+  // comparing to a hardcoded hour left that relationship unwatched: dropping
+  // SIGNED_URL_TTL_S to five minutes would make this message false with the
+  // test still green.
+  ok(SHARED_URL_TTL_S * 2 <= SIGNED_URL_TTL_S,
+    `and far less than the ${SIGNED_URL_TTL_S / 60} minutes a member gets for their own photos — got ${SHARED_URL_TTL_S / 60}`);
   ok(revokeCaveat().includes('five minutes'), 'and the app says out loud how long an already-open link keeps working');
 }
 
@@ -4602,7 +4636,17 @@ function by2(v: ReturnType<typeof buildStaff>, id: string) {
     'a whole-day figure says so on the screen');
   const activeNote = caloriesNote(caloriesLeft(2040, 0, 700, 891, 'active'));
   ok(activeNote.includes('active kcal burned'), 'and an active figure says that instead');
-  ok(!activeNote.includes('All Day'), 'never both labels on one number');
+  // Lowercase, because the sentence is lowercase. This guard used to look for
+  // the Title-Cased 'All Day' — wording nutrition.ts has not produced since the
+  // shouted version of this card was fixed — so it was a check that could not
+  // fire: had the active branch regressed into printing the whole-day sentence,
+  // the note would have read "…burned all day, rest included" and this would
+  // still have passed. Its sibling two lines up was already checking the same
+  // phrase in the case the module actually emits.
+  ok(!activeNote.includes('all day') && !activeNote.includes('rest included'),
+    'never both labels on one number — an active figure does not also claim to be the whole day');
+  ok(!totalNote.includes('active kcal'),
+    'and the whole-day figure does not claim to be the active one either');
 
   // The kind travels with the figure rather than being re-derived downstream.
   ok(caloriesLeft(2040, 0, 100, 50).burnKind === 'active', 'active is the default kind');
@@ -4643,8 +4687,14 @@ function by2(v: ReturnType<typeof buildStaff>, id: string) {
   // Measured twice and unchanged is a FACT, and it is reported: "15% → 15%".
   // That is not the bug this suite is guarding. The bug was a change of zero
   // reported off a SINGLE reading, where no comparison existed to make.
-  ok(lines.some((l) => /body fat/i.test(l) && /15/.test(l)),
-    'a metric measured twice and unchanged still reports both readings');
+  // Pinned whole. `/15/` on its own was satisfied by a single 15 anywhere on
+  // the line, so a regression that collapsed the unchanged pair back to one
+  // reading — the very thing the comment above says IS reported — would have
+  // passed it. The exact string also pins the unsigned zero in the brackets,
+  // which is deltaSign's rule arriving here: "(+0%)" and "(−0%)" are both a
+  // direction attached to a movement that did not happen.
+  ok(lines.includes('Body Fat 15% → 15% (0%)'),
+    `a metric measured twice and unchanged reports BOTH readings, and signs neither — got ${JSON.stringify(lines)}`);
 
   // ── the CSV another app has to read ──
   ok(PROGRESS_CSV_HEADER.join(',') === 'date,weight_kg,body_fat_pct,skeletal_muscle_kg',
@@ -4652,14 +4702,24 @@ function by2(v: ReturnType<typeof buildStaff>, id: string) {
   const csv = progressCsv([row('2026-01-04', 80, null, 33)]);
   ok(csv.includes('2026-01-04'), 'dates go out ISO, not in the exporter\'s locale');
   ok(/,,/.test(csv.split(/\r?\n/)[1]), 'a missing body fat is an EMPTY cell, never a zero');
-  ok(!/80\.0*,,/.test('') && csv.includes('80'), 'and a real figure is written plainly');
+  // The whole data row, rather than "does 80 appear anywhere". The first
+  // conjunct here used to run its regex against a literal '' — a constant true
+  // wearing a guard's clothes — leaving `csv.includes('80')`, which the header
+  // line alone could not satisfy but any stray 80 could.
+  ok(csv.split(/\r?\n/)[1] === '2026-01-04,80,,33',
+    `a real figure is written plainly — no trailing .0, and the unmeasured column beside it stays empty — got ${JSON.stringify(csv.split(/\r?\n/)[1])}`);
 
   // one scan: say what it is, do not dress it as progress
   const single = progressSummary('Tim', [row('2026-01-04', 80, 22, 33)], 'Repple', 'kg');
   ok(!/0\.0/.test(single), 'a lone scan is never summarised as a change of zero');
   ok(/80/.test(single), 'it states the reading instead');
 
-  ok(progressSpanLabel([]) !== '' || true, 'an empty span does not throw');
+  // `X || true` was an unconditional pass: it asserted nothing about the value
+  // and could not even have caught the throw it named, since a throw aborts the
+  // run before any of this is collected. What is worth pinning is the sentence,
+  // because "0 scans" in the share sheet would be a count of a thing nobody has.
+  ok(progressSpanLabel([]) === 'No scans yet',
+    `an empty span names itself in words rather than counting to zero — got ${JSON.stringify(progressSpanLabel([]))}`);
 }
 
 

@@ -20,7 +20,7 @@
 import {
   CANCEL_WINDOW_HOURS, DEFAULT_NOTICE_HOURS,
   isLateCancellation, insideNoticeWindow, noticeHoursOf, lateCancelFee,
-  feeAmountLine, noticeLabel, cancelWarningLine, feeRecordedLine,
+  feeAmountLine, unstatedCurrency, noticeLabel, cancelWarningLine, feeRecordedLine,
   waitlistOrder, nextWaitlistClaim, waitlistPosition, waitlistLine, ordinal,
   type CancellationPolicy, type WaitlistEntry,
 } from './booking';
@@ -128,6 +128,17 @@ eq(feeAmountLine(25, null), '25', 'no currency means no symbol — the bare figu
 ok(!/AED/.test(feeAmountLine(25, null)), 'and above all not AED, which is the operating record and not this coach');
 eq(feeAmountLine(12.5, 'GBP'), 'GBP 12.50', 'minor units survive the trip through cents');
 
+// The other half of the bare figure, and the half that was missing. The header
+// of this file, and of feeAmountLine itself, both promised that where the
+// currency is unknown "the sentence explains itself" — and no sentence did, so
+// a member read "a late-cancellation fee of 25 applies" and had no way to know
+// what 25 was. A bare figure in a slot is a slot with a heading over it; a bare
+// figure in prose is an amount in whatever money the reader is thinking in.
+eq(unstatedCurrency('GBP'), '', 'a stated currency needs no apology, so the clause is empty and can be appended blindly');
+eq(unstatedCurrency(undefined), unstatedCurrency(null), 'an absent key reads the same as an explicit null');
+ok(/currency/i.test(unstatedCurrency(null)), 'and an unset one says the word, so the reader knows what is missing');
+ok(!/\d/.test(unstatedCurrency(null)), 'without inventing a second figure to explain the first');
+
 eq(noticeLabel(1), '1 hour', 'one hour is singular');
 eq(noticeLabel(24), '24 hours', 'and everything else is not');
 
@@ -148,6 +159,16 @@ ok(/Repple doesn't take this payment/.test(feeWarn), 'and the app says plainly t
 ok(!/\$/.test(feeWarn), 'no dollar sign anywhere near a fee');
 ok(/48 hours/.test(warn(policy({ noticeHours: 48 }), 30, 48)), "the coach's own notice period is the one quoted");
 
+// The warning for a coach whose gym never named a currency. This is the
+// assertion that fails if the explanation is ever dropped again and the
+// sentence goes back to quoting a naked number at somebody about to be charged.
+const bareWarn = warn(policy({ fee: 25, currency: null }), 2);
+ok(/fee of 25\b/.test(bareWarn), 'the amount is still stated — the coach set it and the member is entitled to it');
+ok(/currency/i.test(bareWarn), 'and the sentence says the currency is not on record, which is what "the bare figure" was always meant to come with');
+ok(!/GBP|AED|\$|£|€/.test(bareWarn), 'no money is invented to fill the gap');
+ok(bareWarn.endsWith(unstatedCurrency(null)), 'and it is the module’s own clause, verbatim, not a paraphrase that can drift from it');
+ok(!/currency/i.test(feeWarn), 'while a fee in a stated currency carries no such clause — the explanation appears only where it is true');
+
 // Not one branch of the warning may claim Repple charges anything.
 for (const [label, line] of [
   ['in time', warn(policy({}), 48)],
@@ -167,6 +188,10 @@ ok(rec != null && /GBP 25\.00/.test(rec), 'a recorded fee is quoted with its amo
 ok(rec != null && /settle it with your coach/.test(rec), 'and named as theirs to settle, not ours to collect');
 const recNoAmount = feeRecordedLine(true, null, 'GBP');
 ok(recNoAmount != null && !/null|NaN|0\.00/.test(recNoAmount), 'a recorded fee whose amount did not come back prints no number at all');
+ok(rec != null && !/currency/i.test(rec), 'a recorded fee in a stated currency explains nothing, because there is nothing to explain');
+const recNoCcy = feeRecordedLine(true, 25, null);
+ok(recNoCcy != null && /\b25\b/.test(recNoCcy) && /currency/i.test(recNoCcy),
+  'and the record of a fee in no stated currency names the figure AND says the money behind it was never set');
 
 /* ── the waitlist is an order, and the order is the product ─────────────── */
 

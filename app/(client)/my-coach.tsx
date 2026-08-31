@@ -218,8 +218,14 @@ export default function MyCoach() {
           <View style={{ marginTop: sp.xl }}>
             <Text style={{ ...ty.body, color: t.ink }}>You are training on your own.</Text>
             <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-              If a coach has given you a six-digit code, enter it on Find a Trainer and they will get your
-              request.
+              {/* Six CHARACTERS, not six digits: CODE_ALPHABET in
+                  src/lib/joinCode.ts is letters and digits with the ambiguous
+                  ones removed, so a real code looks like K7M2QX. Find a
+                  Trainer, where the code is actually typed, has always said
+                  "six characters"; this was the one screen that told the member
+                  to expect something other than what is in their hand. */}
+              If a coach has given you a six-character code, enter it on Find a Trainer and they will get
+              your request.
             </Text>
             <View style={{ marginTop: sp.lg }}>
               <Ghost label="Find a Trainer" onPress={() => go('/(client)/trainers')} />

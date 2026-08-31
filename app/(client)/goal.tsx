@@ -199,7 +199,13 @@ export default function Goal() {
 
         {g.status === 'error' ? (
           <Section>
-            <Notice tone="warn" kicker="Not loaded" title="Your goals could not be read"
+            {/* `t.warn`, not the string "warn". Notice's `tone` is a COLOUR —
+                it becomes Card's borderColor and the status dot's
+                backgroundColor — so the literal resolved to no colour at all
+                and the one banner whose whole job is to be noticed lost its
+                mark. It was the only tone= string literal in the tree; every
+                other call passes a theme token. */}
+            <Notice tone={t.warn} kicker="Not loaded" title="Your goals could not be read"
               note="This is not an empty list — it’s an unread one. Nothing below is missing because you haven’t set it. Pull back and open this again once you’re connected." />
           </Section>
         ) : g.status === 'loading' ? (

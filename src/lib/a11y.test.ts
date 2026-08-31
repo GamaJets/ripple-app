@@ -76,8 +76,13 @@ const GROUNDS = ['bg', 'surface', 'surface2', 'surface3'] as const;
 const INKS = ['ink', 'ink2', 'ink3'] as const;
 // Status colours are MARKS by house rule — a dot beside ink-coloured text, a
 // ring, a card's hairline — so 3:1 is the bar they must clear. See Flag() in
-// kit.tsx, and the audit note at the bottom of this file about the screens that
-// still draw them as text.
+// kit.tsx. This file measures the palettes and says nothing about the screens;
+// the screens are held by scripts/check-contrast.mjs, which fails the build on
+// any `color:` naming a status token. The audit note that used to sit at the
+// bottom of this file — a hand-written list of the screens that still drew a
+// status colour as text — is gone because that list is now empty and the check
+// is what keeps it so. A pointer to a note nobody can find reads as a record
+// somebody kept, which is worse than no pointer at all.
 const STATUS = ['good', 'warn', 'serious', 'crit'] as const;
 // Chart series. A line you must follow to read the chart is a graphical object
 // under WCAG 1.4.11 and needs 3:1 against what it is drawn on.

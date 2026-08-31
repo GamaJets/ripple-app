@@ -148,11 +148,16 @@ export default function Measurements() {
     // The three arms — a movement, no movement, and no earlier entry — are
     // deltaLabel's, so this cannot drift out of step with the same sentence on
     // Progress. `prev` is non-null exactly when `waistMove` is.
+    // `noBaseline` says WHICH baseline is missing. An entry holds one row per
+    // body part per date, so a session where somebody taped their chest and not
+    // their waist is ordinary — and "First entry" was then printed on their
+    // fifth tape session, because `waistMove` is null whenever the previous
+    // entry has no waist, not only when there is no previous entry.
     note={deltaLabel(waistMove, {
-     since: prev ? fmtDate(prev.at) : null,
+     since: prev && prev.waist != null ? fmtDate(prev.at) : null,
      unit: lu,
      noChange: 'Unchanged',
-     noBaseline: 'First entry',
+     noBaseline: prev ? 'No waist measured last time' : 'First entry',
     }) + ` · measured ${dayLabel(latest.at)}${latestAgo ? ` · ${latestAgo}` : ''}`}
    />
   ) : null}
@@ -178,13 +183,19 @@ export default function Measurements() {
        <Text style={{ ...ty.label, color: t.ink2 }}>{label}</Text>
        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
         <Text style={{ ...ty.label, ...numeric, fontWeight: '500', color: t.ink }}>{fig(lengthLabel(raw, lu))}</Text>
-        {d != null && d !== 0 ? (
-         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, minWidth: 62, justifyContent: 'flex-end' }}>
-          <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: goalRead(key, d) ? t.brand : t.ink3 }} />
-          <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{deltaLabel(d, { since: null, unit: lu })}</Text>
+        {/* "This did not move" and "there is no earlier reading of THIS site"
+            were both printed as the same em dash, so a member could not tell an
+            unchanged waist from one they had not taped last time — while the
+            hero six rows above, over the same arithmetic, kept them apart as
+            "Unchanged" and "First entry". The dot is a direction mark and is
+            drawn only where there is a direction. */}
+        {d != null ? (
+         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, minWidth: 78, justifyContent: 'flex-end' }}>
+          {d !== 0 ? <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: goalRead(key, d) ? t.brand : t.ink3 }} /> : null}
+          <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{deltaLabel(d, { since: null, unit: lu, noChange: 'Unchanged' })}</Text>
          </View>
         ) : (
-         <Text style={{ ...ty.caption, color: t.ink3, minWidth: 62, textAlign: 'right' }}>—</Text>
+         <Text style={{ ...ty.caption, color: t.ink3, minWidth: 78, textAlign: 'right' }}>{prev ? 'Not measured' : '—'}</Text>
         )}
        </View>
       </View>

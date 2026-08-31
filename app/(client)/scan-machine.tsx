@@ -282,8 +282,15 @@ export default function ScanMachine() {
                   <View style={{ backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: 11, paddingVertical: 5 }}>
                     <Text style={{ ...ty.caption, fontWeight: '500', color: t.ink }}>{group}</Text>
                   </View>
-                  <Pressable onPress={() => { setCardio((c) => !c); }} hitSlop={6}>
-                    <Text style={{ ...ty.caption, color: t.ink3 }}>{cardio ? 'Cardio' : 'Strength'} · switch</Text>
+                  {/* "Strength · switch" — a lowercase verb hanging off a
+                      Title-Cased sibling in a ·-joined run, at caption size
+                      where nothing is uppercased for it. It was also the only
+                      control on the screen a screen reader was told nothing
+                      about: an unnamed Pressable reading out its own body. */}
+                  <Pressable onPress={() => { setCardio((c) => !c); }} hitSlop={6}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Logged as ${cardio ? 'cardio' : 'strength'}. Switch to ${cardio ? 'strength' : 'cardio'}`}>
+                    <Text style={{ ...ty.caption, color: t.ink3 }}>{cardio ? 'Cardio' : 'Strength'} · Switch</Text>
                   </Pressable>
                 </View>
               ) : null}

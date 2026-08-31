@@ -50,17 +50,27 @@ export default function Records() {
       set a PR yet". Saying that to a lifter whose log simply did not load
       reports their whole board as gone, on the screen whose entire job is to
       keep a record of it. */}
-  {prs.length === 0 && logStatus === 'error' ? (<>
+  {/* Shown whenever the read failed, not only when the board came back empty.
+      `useWorkoutLog` does NOT clear `log` on a failed refresh, so a reload that
+      failed over rows already in memory rendered the whole board — hero, count,
+      ranked list — with no banner and no retry anywhere on the screen. A stale
+      PR board is the one thing this screen must never present as current. */}
+  {logStatus === 'error' ? (<>
    <Rule />
    <Section>
     <Notice tone={t.warn} kicker="Records" title="We couldn’t read your training log"
-     note="Your records are safe — this screen can't see them right now. Nothing has been reset.">
+     note={prs.length === 0
+      ? "Your records are safe — this screen can't see them right now. Nothing has been reset."
+      : "The board below is what this phone had before the read failed. It is real, but it may not be current — a record set since is not on it. Nothing has been reset."}>
      <View style={{ marginTop: sp.lg }}>
       <Cta label="Try Again" wide onPress={reload} />
      </View>
     </Notice>
    </Section>
-  </>) : prs.length === 0 && logStatus === 'loading' ? (<>
+  </>) : null}
+
+  {prs.length === 0 && logStatus === 'error' ? null
+   : prs.length === 0 && logStatus === 'loading' ? (<>
    <Rule />
    <Section>
     <Text style={{ ...ty.body, color: t.ink3 }}>Loading your records…</Text>
@@ -68,8 +78,16 @@ export default function Records() {
   </>) : prs.length === 0 ? (<>
    <Rule />
    <Section>
-    <SectionHead title="No Records Yet" />
-    <Text style={{ ...ty.body, color: t.ink2 }}>No records yet — log a strength workout to set your first PR.</Text>
+    {/* 'partial' had no arm of its own and fell into "No Records Yet". A
+        truncated read holds the newest thousand sessions, and a lifter whose
+        weighted sets are all older than that was told their whole board is
+        empty. */}
+    <SectionHead title={logStatus === 'partial' ? 'No Records in This Read' : 'No Records Yet'} />
+    <Text style={{ ...ty.body, color: t.ink2 }}>
+     {logStatus === 'partial'
+      ? 'You have logged more sessions than this screen can read in one go, and there were no weighted sets among the ones it read. This is not a statement that you have no records.'
+      : 'No records yet — log a strength workout to set your first PR.'}
+    </Text>
    </Section>
   </>) : (<>
    {/* An empty board has three causes and the FULL board has a fourth. Every

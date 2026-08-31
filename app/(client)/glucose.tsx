@@ -183,7 +183,11 @@ export default function Glucose() {
             <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>Could not be read just now.</Text>
           ) : g.paired.length === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-              {g.pairedStatus === 'ready' ? 'No meals logged in the last 14 days.' : 'Still loading.'}
+              {/* 'partial' is a read that FINISHED, so telling the member it
+                  is still loading is a screen misreporting its own state. */}
+              {g.pairedStatus === 'ready' ? 'No meals logged in the last 14 days.'
+                : g.pairedStatus === 'loading' ? 'Still loading.'
+                : 'More on record than we can read at once, so we can’t say what is around your meals.'}
             </Text>
           ) : (
             [...g.paired].reverse().map((p, i) => (
@@ -227,7 +231,9 @@ export default function Glucose() {
             <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>Could not be read just now.</Text>
           ) : g.readings.length === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-              {known ? 'Nothing recorded in the last 14 days.' : 'Still loading.'}
+              {known ? 'Nothing recorded in the last 14 days.'
+                : g.status === 'loading' ? 'Still loading.'
+                : 'More on record than we can read at once, so this is not a statement that nothing was recorded.'}
             </Text>
           ) : (
             g.readings.slice(0, 60).map((r, i) => (

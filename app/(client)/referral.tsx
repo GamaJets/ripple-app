@@ -123,8 +123,14 @@ export default function Referral() {
               // No invented fallback. A code this screen made up is a code the
               // server has not registered, so anything a friend did with it
               // would be credited to nobody — and the reader would never know.
+              // "It hasn't changed" asserted a code the reader may never have
+              // seen: `setCode(c)` runs before this branch, so this is what a
+              // FIRST load failure shows too, and with no referral code issued
+              // yet a first load is the common case. The sentence now claims
+              // only what is true either way.
               <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.md }}>
-                We couldn’t reach your code just now. It hasn’t changed — try again in a moment.
+                We couldn’t reach your code just now. Nothing has been changed or cancelled — try again in
+                a moment.
               </Text>
             )}
 
@@ -157,10 +163,19 @@ export default function Referral() {
             </Text>
           ) : null}
 
+          {/* The summary line in the card above already says "Nobody has used
+              your code yet." — `summaryLine('ready', 0, 0)` is that exact
+              sentence — so this repeated it word for word two hundred pixels
+              down. One fact, twice, in two registers, reads as two facts. This
+              says only the part the card cannot: what this list is for. */}
           {status === 'ready' && rows.length === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>
-              Nobody has used your code yet. When somebody does, they appear here.
+              Anyone who joins on your code appears here, with the date they came.
             </Text>
+          ) : null}
+
+          {status === 'loading' ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>Reading who has joined…</Text>
           ) : null}
 
           {status === 'ready' ? rows.map((r, i) => (

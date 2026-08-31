@@ -206,9 +206,19 @@ export default function Classes() {
                 : `No classes scheduled${branch ? ' at ' + branch : ''} yet`}
             </Text>
             <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: 6, maxWidth: 300 }}>
+              {/* 'partial' had no branch here either, so it inherited the
+                  'ready' sentence and told the member their gym has not added
+                  any classes — directly under a heading saying the opposite.
+                  Two sentences in one empty state contradicting each other is
+                  worse than either alone: the reader picks the one that sounds
+                  like an answer, and the one that sounds like an answer is the
+                  wrong one. */}
               {classStatus === 'error'
                 ? 'This is not a statement that your gym has none on. Check again when you have signal.'
-                : classStatus === 'loading' ? '' : 'Classes appear here as soon as your gym adds them to the schedule.'}
+                : classStatus === 'loading' ? ''
+                : classStatus === 'partial'
+                  ? 'Your gym has more classes on than we can read in one go, and the ones for this filter were not among them. Clear the filter or check again in a moment.'
+                  : 'Classes appear here as soon as your gym adds them to the schedule.'}
             </Text>
           </View>
         ) : null}

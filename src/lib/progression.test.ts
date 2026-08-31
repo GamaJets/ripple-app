@@ -126,7 +126,16 @@ const eq = (a: unknown, b: unknown, msg: string) => ok(a === b, `${msg} — got 
     { tip: one([[9, 100], [9, 100]], ['ok', 'hard']), what: 'in range but hard' },
     { tip: one([[9, 100], [9, 100]], ['easy', 'easy']), what: 'in range and easy' },
   ];
-  eq(branches.length, 7, 'one assertion per hardcoded kilogram that was in this function');
+  // Seven DISTINCT cues, not merely seven entries in this array. The version
+  // this replaces read `eq(branches.length, 7, …)` — the length of a literal
+  // declared twelve lines above, checked against the number it was written
+  // with. Nothing from the module was involved and it could not fail. What it
+  // was reaching for is that each of the seven fixtures lands on its own branch:
+  // if two of them collapsed into one cue, the loop below would still pass
+  // every rationale (both would be unit-clean) while a whole branch had
+  // silently stopped existing.
+  eq(new Set(branches.map(({ tip }) => tip.rationale)).size, branches.length,
+    `each fixture reaches a branch of its own — got ${new Set(branches.map(({ tip }) => tip.rationale)).size} distinct cues from ${branches.length} fixtures`);
   for (const { tip, what } of branches) {
     ok(!!tip, `the ${what} branch produces a tip`);
     ok(!/\bkgs?\b/i.test(tip.rationale), `the ${what} cue never says kilograms to a pounds member — got "${tip.rationale}"`);
