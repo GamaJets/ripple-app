@@ -39,7 +39,7 @@ import { unsentNote } from '../../src/lib/offlineQueue';
 import { readFoodEdit, foodChanged } from '../../src/lib/entryEdit';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
 import { useWearables } from '../../src/ui/wearables';
-import { Rule, Section, SectionHead, Hero, Ghost, ListRow, Flag, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, Ghost, ListRow, Flag, Field, fig } from '../../src/ui/kit';
 import { sp, layout, radius, elevation, type as ty, numeric } from '../../src/theme/scale';
 
 type Food = { n: string; k: number; p: number; c: number; f: number };
@@ -522,12 +522,16 @@ export default function FoodLog() {
  <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>{readFailed ? "Photo reading isn't available yet, so nothing was estimated from your picture — enter the calories and macros and they'll be logged against this photo." : 'AI estimate from your photo — adjust anything before logging.'}</Text>
  <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Meal name</Text>
  <TextInput value={estN} onChangeText={setEstN} placeholder="What was it?" placeholderTextColor={t.ink3} style={{ ...field, marginBottom: sp.md }} />
+ {/* "P C F" over three boxes, and no unit on any of them. Grams is the only
+     thing a macro can be, but the reader has to know that already — and the
+     box next to them is calories, which is not grams, so the row taught that
+     the numbers here are whatever each column happens to mean. Named in full
+     with the unit, the same way app/(trainer)/my-nutrition.tsx does it. */}
  <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.lg }}>
- {[['kcal', estK, setEstK], ['P', estP, setEstP], ['C', estC, setEstC], ['F', estF, setEstF]].map(([lbl, val, set]: any) => (
- <View key={lbl} style={{ flex: 1 }}>
- <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>{lbl}</Text>
+ {[['Calories', 'kcal', estK, setEstK], ['Protein', 'g', estP, setEstP], ['Carbs', 'g', estC, setEstC], ['Fat', 'g', estF, setEstF]].map(([lbl, hint, val, set]: any) => (
+ <Field key={lbl} label={lbl} hint={hint} a11y={`${lbl} in ${hint === 'g' ? 'grams' : 'calories'}`}>
  <TextInput value={val} onChangeText={set} keyboardType="numeric" style={{ ...field, ...numeric, paddingHorizontal: 10 }} />
- </View>
+ </Field>
  ))}
  </View>
  <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Portion</Text>
@@ -567,12 +571,14 @@ export default function FoodLog() {
  </Text>
  <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Meal name</Text>
  <TextInput value={edN} onChangeText={setEdN} placeholder="What was it?" placeholderTextColor={t.ink3} style={{ ...field, marginBottom: sp.md }} />
+ {/* The correction sheet, and the one that opens with numbers ALREADY in the
+     boxes — so this is where a bare "P" over a filled field is worst: the
+     reader is about to change a figure without being told what it measures. */}
  <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.lg }}>
- {[['kcal', edK, setEdK], ['P', edP, setEdP], ['C', edC, setEdC], ['F', edF, setEdF]].map(([lbl, val, set]: any) => (
- <View key={lbl} style={{ flex: 1 }}>
- <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>{lbl}</Text>
+ {[['Calories', 'kcal', edK, setEdK], ['Protein', 'g', edP, setEdP], ['Carbs', 'g', edC, setEdC], ['Fat', 'g', edF, setEdF]].map(([lbl, hint, val, set]: any) => (
+ <Field key={lbl} label={lbl} hint={hint} a11y={`${lbl} in ${hint === 'g' ? 'grams' : 'calories'}`}>
  <TextInput value={val} onChangeText={set} keyboardType="numeric" style={{ ...field, ...numeric, paddingHorizontal: 10 }} />
- </View>
+ </Field>
  ))}
  </View>
  <Pressable onPress={saveEdit} disabled={edBusy} accessibilityRole="button"

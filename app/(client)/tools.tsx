@@ -38,30 +38,64 @@ import {
   liftingMacros, rangeLabel,
   PROTEIN_G_PER_KG_LEAN, FAT_G_PER_KG_BODYWEIGHT,
 } from '../../src/lib/liftingMacros';
+import { useSettings } from '../../src/ui/settings';
+import {
+  readLift, liftIn, liftLabel, est1RMIn, weightIn, weightLabel, convertedNote, plain,
+  type WeightUnit,
+} from '../../src/lib/units';
+import { est1RM } from '../../src/lib/streaks';
+import { BARS, loadBar } from '../../src/lib/plateMath';
 
-const PLATES = [25, 20, 15, 10, 5, 2.5, 1.25];
-
-function OneRM({ t }: { t: Theme }) {
- const [w, setW] = useState('60');
+function OneRM({ t, wu }: { t: Theme; wu: WeightUnit }) {
+ // Empty, not "60". A prefilled number on a screen that used to assume
+ // kilograms is the defect in miniature: the same 60 means two different loads
+ // to two clients, and the one who reads in pounds has no way to tell which it
+ // was taken as. Nothing is shown until something is typed into a labelled box.
+ const [w, setW] = useState('');
  const [r, setR] = useState('5');
- const weight = parseFloat(w) || 0, reps = parseInt(r, 10) || 0;
- const oneRm = weight && reps ? Math.round(weight * (1 + reps / 30)) : 0;
+ // The typed load makes the same trip to kilograms that a logged set makes, and
+ // through the same reader — so "225" here and "225" in the workout log are the
+ // same load, and text that is not a number is refused rather than quietly
+ // becoming 0 and estimating a one-rep max from it.
+ const read = readLift(w, wu);
+ const kg = read.ok ? read.kg : null;
+ const reps = parseInt(r, 10) || 0;
+ // Epley, computed on the record's own kilograms and through the very function
+ // History's personal records use. The formula does not care about units, but
+ // WHICH figure it is applied to does: estimating in pounds and converting the
+ // answer would put this screen a pound or two away from the PR list for the
+ // same set, and two screens disagreeing about one lift is how a client learns
+ // not to trust either.
+ const oneRmKg = kg && reps ? est1RM(kg, reps) : 0;
+ // `?? 0` only for the empty case: est1RMIn returns null when it is handed
+ // nothing, which is exactly when there is no estimate to show.
+ const oneRm = est1RMIn(oneRmKg || null, wu) ?? 0;
  const pcts = [100, 95, 90, 85, 80, 75, 70];
  const inp = { ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11, flex: 1, textAlign: 'center' } as const;
  return (
  <View>
  <Section>
  <SectionHead title="Your Best Set" />
- <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'center' }}>
- <TextInput value={w} onChangeText={setW} keyboardType="numeric" style={inp} placeholder="kg" placeholderTextColor={t.ink3} accessibilityLabel="Weight in kilograms" />
- <Text style={{ ...ty.label, color: t.ink3 }}>kg ×</Text>
- <TextInput value={r} onChangeText={setR} keyboardType="numeric" style={inp} placeholder="reps" placeholderTextColor={t.ink3} accessibilityLabel="Repetitions" />
- <Text style={{ ...ty.label, color: t.ink3 }}>reps</Text>
+ {/* The unit was in a placeholder and in a bare "kg ×" beside the box, and
+     the placeholder is drawn only while the field is EMPTY. So the moment a
+     load was typed the screen stopped saying what it was reading, and it was
+     reading kilograms whatever the client had chosen. Field's label stays. */}
+ <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'flex-end' }}>
+ <Field label="Weight" hint={wu} a11y={`Weight in ${wu === 'lb' ? 'pounds' : 'kilograms'}`}>
+ <TextInput value={w} onChangeText={setW} keyboardType="numeric" style={inp} placeholder={wu} placeholderTextColor={t.ink3} />
+ </Field>
+ <Text style={{ ...ty.label, color: t.ink3, paddingBottom: 13 }}>×</Text>
+ <Field label="Reps">
+ <TextInput value={r} onChangeText={setR} keyboardType="numeric" style={inp} placeholder="reps" placeholderTextColor={t.ink3} />
+ </Field>
  </View>
  </Section>
 
- <Hero label="Estimated 1RM · Epley" figure={fig(oneRm)} unit="kg"
- note={oneRm ? `From ${weight} kg × ${reps} reps` : 'Enter a weight and rep count.'} />
+ {/* A refused load says so where the answer would have been, rather than
+     leaving the last good estimate on screen next to a number it was not
+     computed from. */}
+ <Hero label="Estimated 1RM · Epley" figure={fig(oneRm || null)} unit={wu}
+ note={!read.ok ? read.reason : oneRm ? `From ${liftLabel(kg, wu)} × ${reps} reps` : 'Enter a weight and rep count.'} />
 
  {oneRm > 0 ? (<>
  <Rule />
@@ -72,7 +106,10 @@ function OneRM({ t }: { t: Theme }) {
  {i > 0 ? <Rule /> : null}
  <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: sp.md }}>
  <Text style={{ ...ty.body, ...numeric, color: t.ink2 }}>{p}%</Text>
- <Text style={{ ...ty.body, ...numeric, fontWeight: '600', color: t.ink }}>{Math.round((oneRm * p) / 100)} kg</Text>
+ {/* Each percentage is taken off the KILOGRAM estimate and read out once,
+     rather than off the already-converted figure — so the 100% row is the
+     hero to the pound rather than a pound away from it. */}
+ <Text style={{ ...ty.body, ...numeric, fontWeight: '600', color: t.ink }}>{fig(est1RMIn((oneRmKg * p) / 100, wu))} {wu}</Text>
  </View>
  </View>
  ))}
@@ -82,15 +119,25 @@ function OneRM({ t }: { t: Theme }) {
  );
 }
 
-function PlateCalc({ t }: { t: Theme }) {
- const [target, setTarget] = useState('100');
- const [bar, setBar] = useState(20);
- const total = parseFloat(target) || 0;
- const perSide = Math.max(0, (total - bar) / 2);
- const plates: number[] = [];
- let rem = perSide;
- for (const p of PLATES) { while (rem >= p - 1e-9) { plates.push(p); rem = +(rem - p).toFixed(3); } }
- const achievable = +(bar + plates.reduce((a, p) => a + p, 0) * 2).toFixed(2);
+function PlateCalc({ t, wu }: { t: Theme; wu: WeightUnit }) {
+ // Empty rather than "100", for the reason the 1RM box is: a prefilled number
+ // on a screen that assumed kilograms means one thing to the client who chose
+ // them and something 2.2 times heavier to the client who did not.
+ const [target, setTarget] = useState('');
+ // WHICH bar, not how heavy. The rack changes with the unit, and a bar held as
+ // the number 20 would survive a flip to pounds as a "20 lb bar" — a bar no gym
+ // owns. src/lib/plateMath.ts says why the imperial pair is 45 and 35 rather
+ // than the metric pair converted to 44.09 and 33.07.
+ const [barIdx, setBarIdx] = useState(0);
+ const bars = BARS[wu];
+ const bar = bars[Math.min(barIdx, bars.length - 1)];
+ // The typed target makes the same trip to kilograms and back that a logged set
+ // makes, so this screen and the workout log agree on what "225 lb" is before a
+ // single plate is chosen — and a target that is not a number is refused, in the
+ // unit it was typed in, instead of becoming 0 and loading an empty bar.
+ const read = readLift(target, wu);
+ const asked = read.ok ? liftIn(read.kg, wu) : null;
+ const load = loadBar(asked, bar, wu);
  const inp = { ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11, flex: 1, textAlign: 'center' } as const;
  return (
  <View>
@@ -99,18 +146,18 @@ function PlateCalc({ t }: { t: Theme }) {
  {/* "total kg" was a placeholder, so the one number on this screen you type
      rather than read lost its unit as soon as it had a value — and the two
      bar buttons beside it are both labelled in kg, which makes a bare figure
-     next to them read like a third one. */}
+     next to them read like a third one. Both now name the client's own unit. */}
  <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'flex-end' }}>
- <Field label="Target total" hint="kg">
- <TextInput value={target} onChangeText={setTarget} keyboardType="numeric" style={inp} />
+ <Field label="Target total" hint={wu}>
+ <TextInput value={target} onChangeText={setTarget} keyboardType="numeric" style={inp} placeholder={wu} placeholderTextColor={t.ink3} />
  </Field>
  <Text style={{ ...ty.label, color: t.ink3, paddingBottom: 13 }}>bar</Text>
- {[20, 15].map((b) => {
- const on = bar === b;
+ {bars.map((b, i) => {
+ const on = i === barIdx;
  return (
- <Pressable key={b} onPress={() => setBar(b)} accessibilityRole="button" accessibilityState={{ selected: on }}
+ <Pressable key={b} onPress={() => setBarIdx(i)} accessibilityRole="button" accessibilityState={{ selected: on }}
  style={{ paddingHorizontal: sp.md, paddingVertical: 11, borderRadius: radius.sm, backgroundColor: on ? t.brand : t.surface2 }}>
- <Text style={{ ...ty.label, ...numeric, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{b}kg</Text>
+ <Text style={{ ...ty.label, ...numeric, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{b} {wu}</Text>
  </Pressable>
  );
  })}
@@ -119,30 +166,36 @@ function PlateCalc({ t }: { t: Theme }) {
 
  <Rule />
 
+ {load ? (<>
  <Section>
  <SectionHead title="Per Side" />
+ {/* "Each Side" is what the PLATES BELOW weigh, not half the gap between the
+     target and the bar. The two differ whenever the rack cannot make the
+     number asked for, and the old screen printed the second one — 41.5 a
+     side over a list of plates adding to 41.25, under a loadable total of
+     102.5. Three figures that cannot all be true. */}
  <KpiRow items={[
- { label: 'Each Side', value: fig(perSide), unit: 'kg' },
- { label: 'Plates a Side', value: fig(plates.length) },
- { label: 'Loadable Total', value: fig(achievable), unit: 'kg' },
+ { label: 'Each Side', value: fig(load.perSide), unit: wu },
+ { label: 'Plates a Side', value: fig(load.plates.length) },
+ { label: 'Loadable Total', value: fig(load.total), unit: wu },
  ]} />
  </Section>
 
- {plates.length ? (<>
+ {load.plates.length ? (<>
  <Rule />
  <Section>
- <SectionHead title="Load, Heaviest First" />
+ <SectionHead title="Load, Heaviest First" note={`${wu} a side`} />
  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
- {plates.map((p, i) => (
+ {load.plates.map((p, i) => (
  <View key={i} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: sp.sm }}>
  <Text style={{ ...ty.label, ...numeric, fontWeight: '600', color: t.ink }}>{p}</Text>
  </View>
  ))}
  </View>
- {achievable !== total ? (
+ {!load.exact ? (
  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.md }}>
  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn }} />
- <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>Closest loadable: {achievable} kg</Text>
+ <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>Closest loadable: {plain(load.total)} {wu}</Text>
  </View>
  ) : (
  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>Loads exactly.</Text>
@@ -150,7 +203,21 @@ function PlateCalc({ t }: { t: Theme }) {
  </Section>
  </>) : (
  <Section>
- <Text style={{ ...ty.label, color: t.ink3 }}>Just the bar ({bar} kg).</Text>
+ <Text style={{ ...ty.label, color: t.ink3 }}>Just the bar ({bar} {wu}).</Text>
+ </Section>
+ )}
+ </>) : (
+ <Section>
+ {/* Three different silences, and none of them may look like an answer: a
+     refusal, an empty box, and a target lighter than the bar itself. The
+     old screen answered all three with a bar loaded to 0. */}
+ <Text style={{ ...ty.label, color: t.ink3 }}>
+ {!read.ok
+ ? read.reason
+ : asked == null
+ ? 'Enter the total you want on the bar, the bar included.'
+ : `${plain(asked)} ${wu} is lighter than the ${bar} ${wu} bar on its own.`}
+ </Text>
  </Section>
  )}
  </View>
@@ -170,7 +237,7 @@ function TargetRow({ t, name, grams, from }: { t: Theme; name: string; grams: st
  );
 }
 
-function MacroRef({ t }: { t: Theme }) {
+function MacroRef({ t, wu }: { t: Theme; wu: WeightUnit }) {
  const c = useClientData();
  const router = useRouter();
  // The client's own two figures and nothing else. Null all the way through when
@@ -185,25 +252,38 @@ function MacroRef({ t }: { t: Theme }) {
  {m ? (<>
  <Section>
  <SectionHead title="Your Figures" note="Your latest scan or measurement" />
+ {/* The client's own bodyweight, read out the way every other screen reads
+     it. It was printed in kilograms here whatever they had chosen, which is
+     the same figure their profile shows in pounds — two numbers for one
+     body, and no way to tell which the grams below were worked out from. */}
  <KpiRow items={[
- { label: 'Bodyweight', value: fig(c.weightKg), unit: 'kg' },
+ { label: 'Bodyweight', value: fig(weightIn(c.weightKg, wu)), unit: wu },
  { label: 'Body Fat', value: fig(c.bodyFatPct), unit: '%' },
- { label: 'Lean Mass', value: fig(m.leanMassKg), unit: 'kg' },
+ { label: 'Lean Mass', value: fig(weightIn(m.leanMassKg, wu)), unit: wu },
  ]} />
+ {convertedNote(wu) ? (
+ <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{convertedNote(wu)}</Text>
+ ) : null}
  </Section>
 
  <Rule />
 
  <Section>
  <SectionHead title="Your Daily Targets" />
+ {/* The working stays in kilograms even for a pounds reader, and deliberately.
+     The guideline itself is published per kilogram — there is no "2 g per lb"
+     rule to quote, and inventing one by dividing would put a number on screen
+     that no source stands behind. The grams are the same grams either way; the
+     figures above are the ones that had to follow the client's unit, and the
+     converted note there is what stops "64 kg" here reading as a discrepancy. */}
  <TargetRow t={t} name="Protein" grams={rangeLabel(m.protein)}
- from={`${PROTEIN_G_PER_KG_LEAN.low}–${PROTEIN_G_PER_KG_LEAN.high} g per kg of your ${fig(m.leanMassKg)} kg lean mass`} />
+ from={`${PROTEIN_G_PER_KG_LEAN.low}–${PROTEIN_G_PER_KG_LEAN.high} g per kg of your ${fig(weightLabel(m.leanMassKg, 'kg'))} lean mass`} />
  <Rule />
  {/* Fat is the one taken off TOTAL bodyweight. It is the distinction the
  table draws and the one that gets lost when somebody does this in
  their head at the rack. */}
  <TargetRow t={t} name="Fat" grams={rangeLabel(m.fat)}
- from={`${FAT_G_PER_KG_BODYWEIGHT.low}–${FAT_G_PER_KG_BODYWEIGHT.high} g per kg of your ${fig(c.weightKg)} kg bodyweight`} />
+ from={`${FAT_G_PER_KG_BODYWEIGHT.low}–${FAT_G_PER_KG_BODYWEIGHT.high} g per kg of your ${fig(weightLabel(c.weightKg, 'kg'))} bodyweight`} />
  {m.proteinPerMeal ? (<>
  <Rule />
  <TargetRow t={t} name="Protein a meal" grams={rangeLabel(m.proteinPerMeal)}
@@ -261,6 +341,25 @@ function MacroRef({ t }: { t: Theme }) {
 export default function Tools() {
  const t = useTheme();
  const router = useRouter();
+ // The unit every other screen in the app reads weights in. This one ignored
+ // it: a client who thinks in pounds typed 225, the 1RM tab took it as 225 kg,
+ // and the plate tab answered with a metric rack on a 20 kg bar.
+ //
+ // ── What this screen can and cannot know ─────────────────────────────────
+ //
+ // It cannot tell a client who CHOSE kilograms from one who has never been
+ // asked. `clients.weight_unit` is NULL until somebody taps the setting, and
+ // src/ui/settings.tsx resolves that NULL to the app default before this hook
+ // hands anything over — so there is no null arriving here to honour, and a
+ // second read of that column from the gym floor would only move the guess
+ // somewhere else.
+ //
+ // What this screen can do is stop the assumption being SILENT, which is what
+ // made the wrong answer wrong. Every box names its unit in a label that stays,
+ // every figure carries it, and the line under the tabs says which unit the
+ // tools are working in and leads to the one place it is chosen. A client who
+ // reads in pounds finds out before they type, not after they load the bar.
+ const wu = useSettings().weightUnit;
  // A caller can name the tab. Meals links here for the macro reference, and
  // landing that reader on the 1RM estimator is how "why is tapping macros
  // sending you to lifting tools?" got reported — the destination was right and
@@ -317,7 +416,21 @@ export default function Tools() {
  })}
  </View>
 
- {tab === '1rm' ? <OneRM t={t} /> : tab === 'plates' ? <PlateCalc t={t} /> : <MacroRef t={t} />}
+ {/* Which unit these calculators are working in, said out loud and always —
+     including to the client who has never chosen one and is therefore being
+     shown the app's default. It is one tap from here to the setting, because a
+     client standing at a rack being told the wrong unit needs to change it now,
+     not find their way to Profile → Settings first. */}
+ <Pressable onPress={() => router.push('/(client)/settings')} accessibilityRole="button"
+ accessibilityLabel={`Working in ${wu === 'lb' ? 'pounds' : 'kilograms'}. Change your weight unit in Settings.`}
+ hitSlop={{ top: 6, bottom: 6, left: 0, right: 0 }}
+ style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: sp.md }}>
+ <Text style={{ ...ty.caption, color: t.ink3 }}>
+ Working in {wu === 'lb' ? 'pounds' : 'kilograms'} · Change
+ </Text>
+ </Pressable>
+
+ {tab === '1rm' ? <OneRM t={t} wu={wu} /> : tab === 'plates' ? <PlateCalc t={t} wu={wu} /> : <MacroRef t={t} wu={wu} />}
  </ScrollView>
  </SafeAreaView>
  );

@@ -32,7 +32,7 @@
 // withheld and says why — the same gesture as src/lib/overwriteGuard.ts.
 import { useEffect, useState, type ReactNode } from 'react';
 import {
-  View, Text, ScrollView, Pressable, TextInput, KeyboardAvoidingView, Platform, Alert,
+  View, Text, ScrollView, Pressable, TextInput, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -162,7 +162,15 @@ export default function IntakeScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top', 'bottom']}>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+      {/* No KeyboardAvoidingView. This screen is registered `href: null` in the
+          client tabs, so it draws BELOW a navigator header, and that is exactly
+          the case KeyboardAvoidingView gets wrong: it subtracts the keyboard's
+          window-absolute top edge from its own parent-relative layout, so it
+          under-lifts by the header's height. There is no docked bar here to
+          lift — every field is in this ScrollView — so the whole job is the
+          ScrollView's own `automaticallyAdjustKeyboardInsets`, which iOS
+          computes in window coordinates and therefore gets right under a header
+          of any height, in either orientation. See src/ui/keyboardLift.ts. */}
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 60 }}
         showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
 
@@ -445,7 +453,6 @@ export default function IntakeScreen() {
           </>
         ) : null}
       </ScrollView>
-      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }

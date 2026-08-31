@@ -14,7 +14,7 @@ import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Notice, Cta, Ghost } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Notice, Cta, Ghost, Field } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { pushAvailable, scheduleDailyReminder, cancelReminders } from '../../src/ui/pushNotifications';
 
@@ -44,7 +44,7 @@ export default function Reminders() {
   const addSupp = () => {
     const nm = name.trim(); const h = parseInt(sh, 10); const m = parseInt(sm, 10);
     if (!nm) { Alert.alert('Name it', 'Give the supplement or reminder a name.'); return; }
-    if (isNaN(h) || h < 0 || h > 23 || isNaN(m) || m < 0 || m > 59) { Alert.alert('Check the time', 'Use 24-hour time, e.g. 08 : 00.'); return; }
+    if (isNaN(h) || h < 0 || h > 23 || isNaN(m) || m < 0 || m > 59) { Alert.alert('Check the time', 'Use 24-hour time — 08:00 is eight in the morning, 20:00 is eight in the evening.'); return; }
     setSupps((p) => [...p, { id: newId(), name: nm, hour: h, minute: m }]);
     setName(''); setSh('08'); setSm('00');
   };
@@ -84,6 +84,26 @@ export default function Reminders() {
       <Text style={{ ...ty.label, fontWeight: cur === val ? '600' : '500', color: cur === val ? t.brandInk : t.ink2 }}>{label}</Text>
     </Pressable>
   );
+  // What the hour and minute boxes will actually schedule, in the 12-hour form
+  // most people think in.
+  //
+  // ── Why an echo rather than an am/pm control ──────────────────────────────
+  //
+  // The obvious alternative is to drop the 24-hour clock and offer AM/PM. It was
+  // not taken: every reminder in this file is scheduled on a 0–23 hour, the
+  // validation below is written in those terms, and an extra segmented control
+  // is one more thing that can be left on the wrong setting — a mis-set toggle
+  // reads exactly as right as a correct one. An echo cannot be mis-set. It
+  // states the consequence of what is already typed, before the reminder is
+  // created, which is the moment the ambiguity is still free to fix.
+  const suppH = parseInt(sh, 10);
+  const suppM = parseInt(sm, 10);
+  // Deliberately the same bounds as addSupp's refusal, so the sentence on screen
+  // and the alert cannot disagree about what counts as a time.
+  const suppOk = !isNaN(suppH) && suppH >= 0 && suppH <= 23 && !isNaN(suppM) && suppM >= 0 && suppM <= 59;
+  const suppEcho = suppOk
+    ? `Reminds you every day at ${fmt(suppH, suppM)}.`
+    : 'Use a 24-hour time — 20:30 is half past eight in the evening.';
   const num = { ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11, width: 54, textAlign: 'center' } as const;
 
   return (
@@ -128,13 +148,34 @@ export default function Reminders() {
             <View>
               <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 6 }}>Every</Text>
               <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.md }}>{seg(2, every, setEvery, '2 hours')}{seg(3, every, setEvery, '3 hours')}{seg(4, every, setEvery, '4 hours')}</View>
-              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 6 }}>Between</Text>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
-                <TextInput value={String(startH)} onChangeText={(x) => setStartH(Math.min(23, Math.max(0, parseInt(x, 10) || 0)))} keyboardType="number-pad" style={num} />
-                <Text style={{ ...ty.label, color: t.ink3 }}>to</Text>
-                <TextInput value={String(endH)} onChangeText={(x) => setEndH(Math.min(23, Math.max(0, parseInt(x, 10) || 0)))} keyboardType="number-pad" style={num} />
-                <Text style={{ ...ty.caption, ...numeric, color: t.ink3, flex: 1 }}>{fmt(startH, 0)} – {fmt(endH, 0)}</Text>
+              {/* Two bare boxes reading [9] to [21] under the word "Between".
+                  Nothing said they were hours, and nothing said they were a
+                  24-hour clock — so somebody who wants nudges until nine in the
+                  evening types 9 and switches them off for the whole afternoon.
+                  The labels stay put (a placeholder would not), the hint names
+                  the clock, and the sentence beside them says the same times
+                  back in the 12-hour form most people think in. */}
+              <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: sp.sm }}>
+                <Field label="From" hint="24h" style={{ flex: 0 }} a11y="First nudge, hour on a 24-hour clock">
+                  <TextInput value={String(startH)} onChangeText={(x) => setStartH(Math.min(23, Math.max(0, parseInt(x, 10) || 0)))} keyboardType="number-pad" style={num} />
+                </Field>
+                <Text style={{ ...ty.label, color: t.ink3, paddingBottom: 13 }}>to</Text>
+                <Field label="To" hint="24h" style={{ flex: 0 }} a11y="Last nudge, hour on a 24-hour clock">
+                  <TextInput value={String(endH)} onChangeText={(x) => setEndH(Math.min(23, Math.max(0, parseInt(x, 10) || 0)))} keyboardType="number-pad" style={num} />
+                </Field>
+                <Text style={{ ...ty.caption, ...numeric, color: t.ink3, flex: 1, paddingBottom: 13 }}>{fmt(startH, 0)} – {fmt(endH, 0)}</Text>
               </View>
+              {/* The scheduling loop below counts UP from the first hour to the
+                  last, so a window that ends before it starts silently produces
+                  no nudges at all — and the save then reports "0 reminders" in
+                  the same breath as the window it did not honour. Said here,
+                  while it can still be corrected. */}
+              {startH > endH ? (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.sm }}>
+                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn }} />
+                  <Text style={{ ...ty.caption, color: t.ink2 }}>No nudges yet — the last hour is earlier in the day than the first.</Text>
+                </View>
+              ) : null}
             </View>
           ) : null}
         </Section>
@@ -151,13 +192,27 @@ export default function Reminders() {
               <Pressable accessibilityLabel="Remove reminder" accessibilityRole="button" onPress={() => removeSupp(s.id)} hitSlop={6}><Icon name="minus" size={16} color={t.ink3} /></Pressable>
             </View>
           ))}
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.md }}>
-            <TextInput value={name} onChangeText={setName} placeholder="e.g. Creatine" placeholderTextColor={t.ink3}
-              style={{ flex: 1, ...ty.body, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 }} />
-            <TextInput value={sh} onChangeText={setSh} keyboardType="number-pad" style={num} />
-            <Text style={{ ...ty.body, fontWeight: '500', color: t.ink3 }}>:</Text>
-            <TextInput value={sm} onChangeText={setSm} keyboardType="number-pad" style={num} />
+          {/* [08]:[00] beside a name, with nothing saying which clock. This is
+              the one that actually costs something: the hydration hours have
+              always had their times echoed back beside them and this row had
+              nothing — so somebody adding a magnesium reminder for eight in the
+              evening types 8, gets 08:00, and is woken by it instead. The
+              labels stay put where the placeholders did not, and the line below
+              says what is about to be scheduled before it is. */}
+          <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: sp.sm, marginTop: sp.md }}>
+            <Field label="Name">
+              <TextInput value={name} onChangeText={setName} placeholder="e.g. Creatine" placeholderTextColor={t.ink3}
+                style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 }} />
+            </Field>
+            <Field label="Hour" hint="24h" style={{ flex: 0 }} a11y="Hour on a 24-hour clock">
+              <TextInput value={sh} onChangeText={setSh} keyboardType="number-pad" style={num} />
+            </Field>
+            <Text style={{ ...ty.body, fontWeight: '500', color: t.ink3, paddingBottom: 13 }}>:</Text>
+            <Field label="Min" style={{ flex: 0 }} a11y="Minutes past the hour">
+              <TextInput value={sm} onChangeText={setSm} keyboardType="number-pad" style={num} />
+            </Field>
           </View>
+          <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 6 }}>{suppEcho}</Text>
           <View style={{ marginTop: sp.md, alignItems: 'flex-start' }}>
             <Ghost label="Add Reminder" icon="plus" onPress={addSupp} />
           </View>

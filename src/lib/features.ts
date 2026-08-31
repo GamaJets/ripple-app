@@ -131,6 +131,17 @@ export const CLIENT_FEATURES: Feature[] = [
   { key: 'social', label: 'Share & Social', note: 'Share your progress from the share sheet', route: '/(client)/social', icon: 'share', area: 'me', keywords: 'instagram tiktok share social post story sheet' },
   { key: 'packages', label: 'Memberships & Packs', note: 'What you have bought, and what is left', route: '/(client)/packages', icon: 'trophy', area: 'me', keywords: 'package packages pack sessions left remaining credits subscription membership purchase bought paid renew' },
   { key: 'offers', label: 'Offers', note: 'Redeem a code from your gym', route: '/(client)/offers', icon: 'grid', area: 'me', keywords: 'offer offers code promo promotion discount voucher redeem coupon' },
+  // Your coach's own paperwork, not Repple's. The release signed on joining is
+  // a different document belonging to a different party and is not on this
+  // screen — see the header of coach-documents.tsx. 'waiver', 'par-q' and
+  // 'consent' are in the keywords because those are the words printed on the
+  // thing the member is holding when they come looking for it.
+  { key: 'coach-documents', label: "Your Coach's Documents", note: 'Waivers and forms your coach asks you to read', route: '/(client)/coach-documents', icon: 'pencil', area: 'me', keywords: 'document documents waiver par-q parq form consent house rules paperwork sign accept read coach studio' },
+  // The bell in the dashboard header still opens the message thread, so this
+  // row and the hub row are the only ways in. Listed as an inbox rather than as
+  // "notifications", which in this app is also the name of a settings toggle —
+  // 'push', 'alerts' and 'inbox' all land here.
+  { key: 'notifications', label: 'Notifications', note: 'Bookings, cancellations and anything your gym has sent you', route: '/(client)/notifications', icon: 'bell', area: 'me', keywords: 'notification notifications inbox alerts push updates announcements bookings cancellations unread bell' },
   { key: 'referral', label: 'Invite Friends', note: 'Share the app with a friend', route: '/(client)/referral', icon: 'share', area: 'me', keywords: 'refer referral invite friend share code' },
   { key: 'devices', label: 'Watch & Devices', note: 'Apple Watch, WHOOP, Garmin…', route: '/(client)/devices', icon: 'clock', area: 'me', keywords: 'apple watch wearable heart rate' },
   { key: 'music', label: 'Music & Playlists', note: 'AI workout playlists', route: '/(client)/music', icon: 'play', area: 'me', keywords: 'spotify playlist songs' },
@@ -183,7 +194,10 @@ export interface NavItem {
 //
 // checklists and client-goals both DO have a roster picker built in and open
 // perfectly well with no params, which is why they are listed and the rest of
-// the per-client screens are not.
+// the per-client screens are not. client-nutrition and client-report are the
+// same shape — each reads `clientId` if it is given one and falls back to its
+// own picker if it is not — so both are listed here AND pushed with the id from
+// app/(trainer)/client.tsx, which is the way a coach actually reaches them.
 export const TRAINER_NAV: NavItem[] = [
   { key: 'clients', label: 'Clients', note: 'Your roster, progress & detail', route: '/(trainer)/dashboard', icon: 'people', keywords: 'roster invite add' },
   { key: 'builder', label: 'Programs', note: 'Build & assign training programs', route: '/(trainer)/builder', icon: 'train', keywords: 'program template workout' },
@@ -195,6 +209,15 @@ export const TRAINER_NAV: NavItem[] = [
   { key: 'library', label: 'Exercise Library', note: 'What you can programme, and what you have filmed', route: '/(trainer)/library', icon: 'grid', keywords: 'exercise library catalogue movements coverage filmed clips muscles' },
   { key: 'checklists', label: 'Client Checklists', note: 'The daily lines you set one client', route: '/(trainer)/checklists', icon: 'check', keywords: 'checklist checklists daily tasks habits client adherence ticked' },
   { key: 'client-goals', label: 'Working Toward', note: 'What a client is aiming at, and how it is going', route: '/(trainer)/client-goals', icon: 'target', keywords: 'goal goals target working toward client aim weight measurement' },
+  { key: 'client-nutrition', label: "A Client's Nutrition", note: 'Their targets, and the week of meals you write them', route: '/(trainer)/client-nutrition', icon: 'meals', keywords: 'nutrition meals macros calories diet plan client food week allergens targets deltas' },
+  { key: 'client-report', label: 'Client Report', note: 'The handover document at the end of a block', route: '/(trainer)/client-report', icon: 'pencil', keywords: 'report handover document summary end of block twelve week pdf share export client progress what we did' },
+  // The screen that does something with the drift figure. 'quiet', 'ghosting'
+  // and 'churn' are the words a coach uses for this; 'drift' is the word the
+  // code uses, and both have to find it.
+  { key: 'nudges', label: 'Quiet Clients', note: 'Who has gone quiet, and a draft you send yourself', route: '/(trainer)/nudges', icon: 'bell', keywords: 'nudge nudges quiet drift lapsed inactive ghosting churn at risk reach out check in draft message' },
+  { key: 'invoices', label: 'Invoices', note: 'Issue a document for what somebody paid you', route: '/(trainer)/invoices', icon: 'grid', keywords: 'invoice invoices bill receipt issue self employed paid cash transfer document statement number vat tax' },
+  { key: 'credentials', label: 'Credentials & Reviews', note: 'Your qualifications, and replying to what clients wrote', route: '/(trainer)/credentials', icon: 'trophy', keywords: 'credential credentials qualification qualifications certification insured insurance review reviews rating reply cpd rep level' },
+  { key: 'documents', label: 'Your Documents', note: 'Your own waivers and forms, and who has accepted them', route: '/(trainer)/documents', icon: 'pencil', keywords: 'document documents waiver par-q parq form consent house rules paperwork upload accepted acceptance required studio' },
   { key: 'broadcast', label: 'Broadcast', note: 'Message a whole segment of clients at once', route: '/(trainer)/broadcast', icon: 'message', keywords: 'broadcast announce message all clients bulk segment tag push' },
   { key: 'broadcast-session', label: 'Share a Session', note: 'Your clip and caption, into any app you post from', route: '/(trainer)/broadcast-session', icon: 'share', keywords: 'publish post social clip session caption platforms share marketing' },
   { key: 'analytics', label: 'Analytics', note: 'Adherence, revenue & at-risk clients', route: '/(trainer)/analytics', icon: 'chart', keywords: 'stats retention revenue' },
@@ -212,6 +235,7 @@ export const TRAINER_NAV: NavItem[] = [
   { key: 'profile', label: 'Profile', note: 'Your bio, offers & rate', route: '/(trainer)/profile', icon: 'me', keywords: 'bio rate offers public profile' },
   // Sign out lives here, and it was findable from nowhere.
   { key: 'settings', label: 'Settings', note: 'Account, sign out, your data & version', route: '/(trainer)/settings', icon: 'settings', keywords: 'settings account sign out signout log out logout export my data delete account version build units' },
+  { key: 'notifications', label: 'Notifications', note: 'Bookings, cancellations and anything sent to you', route: '/(trainer)/notifications', icon: 'bell', keywords: 'notification notifications inbox alerts push updates announcements unread bell' },
 ];
 
 export const OWNER_NAV: NavItem[] = [
@@ -242,6 +266,7 @@ export const OWNER_NAV: NavItem[] = [
   { key: 'deletions', label: 'Deletion Requests', note: 'Members who asked to be erased, and the 30-day clock', route: '/(owner)/deletions', icon: 'clock', keywords: 'delete deletion erase gdpr account removal request privacy' },
   { key: 'feedback', label: 'Feedback Inbox', note: 'What testers are saying', route: '/(owner)/feedback', icon: 'message', keywords: 'feedback testers bugs ideas reviews' },
   { key: 'settings', label: 'Settings', note: 'Who you are signed in as, your data, and deleting your account', route: '/(owner)/settings', icon: 'settings', keywords: 'settings account sign out signout log out logout export data delete account' },
+  { key: 'notifications', label: 'Notifications', note: 'What the gym has been told, in one list', route: '/(owner)/notifications', icon: 'bell', keywords: 'notification notifications inbox alerts push updates announcements unread bell' },
 ];
 
 export function searchNav(list: NavItem[], q: string): NavItem[] {

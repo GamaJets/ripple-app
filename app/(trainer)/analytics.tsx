@@ -475,6 +475,22 @@ export default function TrainerAnalytics() {
               </View>
             </View>
           ))}
+
+          {/* The list above names them and stops. This is the row that does
+              something about it, and it sits directly under the names because
+              that is the second the coach wants it — not three taps away in a
+              hub they had no reason to open.
+
+              Shown whatever the roster read did. On 'error' the list above says
+              nothing was suggested, and nudges.tsx keeps the same three states
+              apart on its own read; withholding the row when the read failed
+              would hide the screen precisely when the coach cannot see who has
+              gone quiet from here either. */}
+          <View style={{ marginTop: sp.md }}>
+            <ListRow icon="bell" title="Quiet Clients"
+              note="Who is breaking their own pattern, and a draft you read and send yourself"
+              onPress={() => router.push('/(trainer)/nudges')} />
+          </View>
         </Section>
 
         <Rule />
@@ -512,6 +528,15 @@ export default function TrainerAnalytics() {
         <Section>
           <ListRow icon="chart" title="Payments"
             onPress={() => router.push('/(trainer)/payments')} />
+          {/* Beside Payments because it is the other half of the same sum —
+              what came in, and what was spent to bring it in. Not a screen this
+              change added: ad-spend.tsx was reachable ONLY from an Explore
+              search result, which finds it for a coach who already knows the
+              phrase "ad spend" and for nobody else. The screen a coach is
+              standing on when they wonder what marketing cost them is this one. */}
+          <ListRow icon="trending" title="Ad Spend"
+            note="What your ads cost, and what they brought in"
+            onPress={() => router.push('/(trainer)/ad-spend')} />
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
             {sessionFee == null
               ? 'Set a session rate in your profile to see what a new client is worth.'

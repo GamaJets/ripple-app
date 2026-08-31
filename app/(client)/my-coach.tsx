@@ -433,6 +433,11 @@ export default function MyCoach() {
               <ListRow icon="message" title="Message" note="Your thread with them" onPress={() => go('/(client)/messages')} />
               <ListRow icon="calendar" title="Book a Session" note="Their open times" onPress={() => go('/(client)/calendar')} />
               <ListRow icon="trophy" title="Packs & Memberships" note="What you have bought from them" onPress={() => go('/(client)/packages')} />
+              {/* On the screen about this coach, because that is the only place
+                  the answer to "whose waiver is this?" is already on the page.
+                  The same row is in the Me hub for the member who is looking
+                  for a form rather than for their coach. */}
+              <ListRow icon="pencil" title="Their Documents" note="Waivers and forms they ask you to read" onPress={() => go('/(client)/coach-documents')} />
             </Section>
 
             <Section>

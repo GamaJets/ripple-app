@@ -15,7 +15,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { num } from '../../src/lib/format';
 import { planDayIndex, planDayOverride, planStale } from '../../src/lib/mealPlan';
-import { View, Text, Pressable, ScrollView, Modal, TextInput, Alert, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, Pressable, ScrollView, Modal, TextInput, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
 import { buildPlan, snackIdeas, SNACK_SHARE, swapIndex, groceryData, DEPTS, DEPT_ICO, ALLERGENS, type PlannedMeal } from '../../src/lib/meals';

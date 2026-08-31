@@ -394,6 +394,42 @@ export default function CoachProfile() {
 
         <Rule />
 
+        {/* ── what a stranger judges you on ──────────────────────────────── */}
+        {/* Directly under the directory opt-in, because this is what the
+            directory SHOWS — the toggle above decides whether clients can see
+            you, and this row is the rest of what they see when they do.
+
+            Outside the `p.access !== 'ok'` branch on purpose. That branch
+            withholds the profile EDITOR when this coach's own `trainers` row
+            could not be read, which is right for a form that would silently
+            drop what is typed into it. Credentials and reviews are different
+            reads with their own three-state handling, and a coach whose profile
+            row failed is exactly the coach who needs to check whether a client
+            can see a review they have not answered. */}
+        <Section>
+          <SectionHead title="Credentials & Reviews" />
+          <ListRow icon="trophy" title="Credentials & Reviews"
+            note="Your qualifications and insurance, and your right of reply to what clients wrote"
+            onPress={() => router.push('/(trainer)/credentials')} />
+        </Section>
+
+        <Rule />
+
+        {/* ── your paperwork, not Repple's ───────────────────────────────── */}
+        {/* Its own section rather than a row under Account, for the reason the
+            screen itself opens with: the waiver a client signs on joining is
+            Repple's and the coach cannot read it, and these are the coach's own
+            — a studio waiver, a par-form, house rules. Filing them together
+            under one heading is how the two get confused. */}
+        <Section>
+          <SectionHead title="Your Paperwork" />
+          <ListRow icon="pencil" title="Your Documents"
+            note="Waivers and forms you ask clients to accept, and who has accepted them"
+            onPress={() => router.push('/(trainer)/documents')} />
+        </Section>
+
+        <Rule />
+
         {/* ── the coach's own training ───────────────────────────────────── */}
         {/* Its own section rather than a row under Account, because the thing
             that has to be legible from the outside is WHOSE training it is.
@@ -415,6 +451,13 @@ export default function CoachProfile() {
             Repple Coach had none of the three before this. */}
         <Section>
           <SectionHead title="Account" />
+          {/* Above Settings, because Settings holds the switch that decides
+              whether pushes are sent and this holds the pushes themselves —
+              and a coach hunting for "notifications" will otherwise find only
+              the toggle and conclude there is no inbox. There is: the Clients
+              tab has no bell, so this row and Explore are the only ways in. */}
+          <ListRow icon="bell" title="Notifications" note="Bookings, cancellations and anything sent to you"
+            onPress={() => router.push('/(trainer)/notifications')} />
           <ListRow icon="settings" title="Settings" note="Who you are signed in as, your data, and deleting your account"
             onPress={() => router.push('/(trainer)/settings')} />
           {/* Reported as "there is no sign out button on the coach app". There
@@ -446,6 +489,14 @@ export default function CoachProfile() {
           <SectionHead title="Money" />
           <ListRow icon="people" title="Payments" note="Get paid by clients — memberships & packs"
             onPress={() => router.push('/(trainer)/payments')} />
+          {/* Under Payments and above Billing, in that order, because the three
+              rows are three different people's money and the order says whose:
+              what clients pay you, what you hand THEM as a record of it, and
+              what you pay Repple. The row above takes the money and produces
+              nothing anybody can be given — that gap is the whole reason
+              invoices.tsx exists, and the two belong next to each other. */}
+          <ListRow icon="grid" title="Invoices" note="Issue a document for what somebody paid you, and see what you have issued"
+            onPress={() => router.push('/(trainer)/invoices')} />
           <ListRow icon="chart" title="Billing & Subscription" note="Your plan, payment method & invoices"
             onPress={() => router.push('/(trainer)/billing')} />
         </Section>

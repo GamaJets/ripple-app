@@ -293,6 +293,18 @@ export default function OwnerOverview() {
             onPress={() => router.push('/(owner)/promotions')} />
           <ListRow icon="calendar" title="Classes & Payroll" note="Attendance, fill rates & trainer pay per check-in"
             onPress={() => router.push('/(owner)/class-analytics')} />
+          {/* Last in the quiet list rather than a bell in the header: the owner
+              app has no bell anywhere, so this row and Explore are the whole of
+              the way in. Ops keeps the announcements a gym SENDS; this is the
+              other direction — what has been sent to it. */}
+          <ListRow icon="bell" title="Notifications" note="What the gym has been told, in one list"
+            onPress={() => router.push('/(owner)/notifications')} />
+          {/* Also not a screen this change added. feedback.tsx was reachable
+              only from an Explore search result — an inbox nobody opens is the
+              same as no inbox, and an owner does not search for a screen they
+              have never been shown exists. */}
+          <ListRow icon="message" title="Feedback Inbox" note="What testers and members are saying"
+            onPress={() => router.push('/(owner)/feedback')} />
         </Section>
       </ScrollView>
 

@@ -156,6 +156,7 @@ const HUB_ICON: Record<string, IconName> = {
   '/(client)/foodlog': 'meals', '/(client)/coach': 'chat', '/(client)/messages': 'message', '/(client)/reminders': 'bell', '/(client)/packages': 'trophy',
   '/(client)/social': 'share', '/(client)/devices': 'clock', '/(client)/music': 'play',
   '/(client)/appearance': 'palette', '/(client)/settings': 'settings', '/(client)/trainers': 'people', '/(client)/feedback': 'message',
+  '/(client)/coach-documents': 'pencil', '/(client)/notifications': 'bell',
 };
 const HUB_GROUPS: { title: string; items: { label: string; note: string; route: string }[] }[] = [
   // First, deliberately. Pairing a watch is not an occasional settings errand —
@@ -199,9 +200,20 @@ const HUB_GROUPS: { title: string; items: { label: string; note: string; route: 
     // The coach you HAVE, above the directory of coaches you do not. There was
     // no screen for the former until part 130 made one possible.
     { label: 'Your Coach', note: 'Who is coaching you, and what they can see', route: '/(client)/my-coach' },
+    // Directly under Your Coach, because these are that coach's own papers and
+    // not Repple's. The release signed on joining is a different document owned
+    // by a different party, and coach-documents.tsx says so on its face — a
+    // member who cannot tell the two apart takes a dispute to the wrong people.
+    { label: "Your Coach's Documents", note: 'Waivers and forms your coach asks you to read', route: '/(client)/coach-documents' },
     { label: 'Find a Trainer', note: 'Have a code from your coach? Enter it here', route: '/(client)/trainers' },
     { label: 'Memberships & Packs', note: 'Your session packs & payments', route: '/(client)/packages' },
     { label: 'AI Coach', note: 'Chat with your AI coach', route: '/(client)/coach' },
+    // Immediately above Messages, because the two are constantly mistaken for
+    // each other and the pairing is the explanation: this is what was SENT to
+    // you, the row below is what you and your coach have SAID to each other.
+    // The bell in the dashboard header still opens the thread rather than this,
+    // so until that changes this row and Explore are the only ways in.
+    { label: 'Notifications', note: 'Bookings, cancellations and anything your gym has sent you', route: '/(client)/notifications' },
     { label: 'Messages', note: 'Chat with your coach', route: '/(client)/messages' },
     // Not "Post progress to Instagram / TikTok". Nothing in this app is
     // connected to a social network — the NETWORKS list whose Connect button
@@ -391,8 +403,14 @@ export default function Profile() {
   // the length costs nothing, and Explore is the shortcut rather than the door.
   //
   // Every route below was checked against app/(client)/ before this shipped —
-  // all 28 resolve to a real file. A row pointing at nothing is worse than no
+  // all 32 resolve to a real file. A row pointing at nothing is worse than no
   // row, so if one is ever deleted, delete its row here in the same change.
+  //
+  // That count said 28 while there were 30 rows, which is the ordinary fate of
+  // a number kept by hand. Both halves of the claim are now checked by a script
+  // rather than by this sentence: scripts/check-reachable.mjs fails if a route
+  // named here does not exist on disk, and fails if a route file in app/ is
+  // named by nothing anywhere — the Reminders failure, from the other side.
   const hubGroups = HUB_GROUPS.map((g) => ({ ...g, items: g.items.filter((it) => cd.coachingMode !== 'solo' || !soloHidden.has(it.route)) }));
   const G = layout.gutter;
 

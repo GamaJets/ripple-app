@@ -1031,6 +1031,17 @@ export default function ClientScreen() {
             tone={weekStatus === 'error' ? t.warn : undefined}
             onPress={go('/(trainer)/client-week')} />
 
+          {/* Beside the training week rather than under it, because the two are
+              the same week seen from either side of the plate: what they are
+              lifting and what they are eating while they do it. Pushed with the
+              id like every row here — client-nutrition falls back to its own
+              roster picker when it is opened without one, so a coach who
+              arrives from Explore is asked who they mean, and a coach who
+              arrives from here is not asked twice. */}
+          <ListRow icon="meals" title="What They're Eating"
+            note={`${who}'s calorie and macro targets, and the week of meals you write them.`}
+            onPress={go('/(trainer)/client-nutrition')} />
+
           {/* `checklists.tsx` starts on its own client picker and does not read
               `clientId` off the route — the row this replaced on the dashboard
               sheet pushed it without one for the same reason. So the summary
@@ -1059,6 +1070,17 @@ export default function ClientScreen() {
               ? `${client.unread} unread from them in your thread.`
               : 'Open your thread with them.'}
             onPress={go('/(trainer)/chat')} />
+
+          {/* Last, because it is the only row here that is the END of something
+              rather than a way into it — twelve weeks, a move, a handover to
+              another coach. It belongs on this screen and not only in Explore:
+              the document is ABOUT a named person, and the moment a coach wants
+              one is the moment they are standing on that person's screen. The
+              id goes with it for the same reason the rows above pass it; open
+              from Explore and client-report asks who the report is for. */}
+          <ListRow icon="pencil" title={`Write ${who} a Report`}
+            note={`The handover document at the end of a block — read from ${who}'s record, not from memory.`}
+            onPress={go('/(trainer)/client-report')} />
         </Section>
 
         <Rule />

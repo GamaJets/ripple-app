@@ -132,9 +132,9 @@ const KNOWN = new Map([
     'Coaching cues built as prose — "Try 60kg" — in a pure module with no access to a client. The ' +
     'unit has to arrive as an argument, the way the currency now arrives at money(). Has its own ' +
     'progression.test.ts, so the change is assertable.' }],
-  ['app/(client)/tools.tsx:unit', { count: 7, why:
-    'The calculators. Every figure is derived from a stored metric value and labelled kg on the way ' +
-    'out; useSettings().weightUnit is already imported by its sibling screens.' }],
+  // app/(client)/tools.tsx:unit — was 7, now 0. The calculators read the member's
+  // own kg/lb preference, so the entry is gone rather than zeroed: a zero would
+  // still be an exemption, and there is nothing left to exempt.
   ['app/(client)/nutrition.tsx:unit', { count: 5, why:
     'Rate-of-change and target sentences on the meal plan. `plan.targetKg` is genuinely stored in ' +
     'kilograms — it is the LABEL that is wrong, not the store.' }],

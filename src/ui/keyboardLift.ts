@@ -49,6 +49,7 @@
 // at the old height for the rest of the session.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Keyboard, Platform, type View } from 'react-native';
+import { liftFor } from '../lib/keyboardLift';
 
 export interface KeyboardLift {
   /** Put this on the bar that must stay above the keyboard. */
@@ -77,12 +78,8 @@ export function useKeyboardLift(): KeyboardLift {
       const node = ref.current;
       if (node == null || typeof screenY !== 'number' || !isFinite(screenY)) return;
       node.measureInWindow((_x, y, _w, h) => {
-        // A view that has not been laid out measures as zeros or as NaN
-        // depending on the platform. Neither is a position, and treating one as
-        // a position slams the bar to the top of the screen.
-        if (!isFinite(y) || !isFinite(h) || h <= 0) return;
-        const restingBottom = y + h + applied.current;
-        settle(Math.max(0, Math.round(restingBottom - screenY)));
+        const next = liftFor({ barY: y, barHeight: h, applied: applied.current, keyboardScreenY: screenY });
+        if (next != null) settle(next);
       });
     };
 

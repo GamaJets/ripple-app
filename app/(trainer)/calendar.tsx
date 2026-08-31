@@ -17,14 +17,15 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
-import { Rule, Section, SectionHead, Hero, ListRow, Cta, Ghost, Flag, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, ListRow, Cta, Ghost, Flag, Field, fig } from '../../src/ui/kit';
 import { sp, layout, radius, elevation, type as ty, numeric } from '../../src/theme/scale';
 import { insideNoticeWindow, feeAmountLine, noticeLabel, type CancellationPolicy } from '../../src/lib/booking';
 import { useSessions, useSessionWaitlistCounts, useLateCancelCharges, useMyCancellationPolicy, promoteWaitlist } from '../../src/ui/sessions';
 import { useAvailability, upcomingDates, useRecurringSeries, deviceTimeZone } from '../../src/ui/availability';
 import {
   DOW_NAMES, SERIES_HORIZON_DAYS, SERIES_MINUTES, RECURRING_CLASH_NOTE, RECURRING_CREDIT_NOTE,
-  cancelOptions, clashLine, createdLine, seriesLabel, type RecurringSeries,
+  cancelOptions, clashLine, createdLine, seriesLabel,
+  type CancelOption, type RecurringSeries,
 } from '../../src/lib/recurring';
 import { useRoster } from '../../src/ui/roster';
 import type { TrainingSession } from '../../src/lib/types';
@@ -45,6 +46,11 @@ function dayKey(iso: string) {
 function timeLabel(iso: string) {
   const d = new Date(iso); let h = d.getHours(); const ap = h >= 12 ? 'pm' : 'am'; h = h % 12 || 12;
   const m = d.getMinutes(); return `${h}${m ? ':' + String(m).padStart(2, '0') : ''}${ap}`;
+}
+/** "Tue 8 Sep" — the way every other date on this screen is written. */
+function dateLabel(iso: string) {
+  const d = new Date(iso);
+  return `${DOW[d.getDay()]} ${d.getDate()} ${MON[d.getMonth()].slice(0, 3)}`;
 }
 
 /**
@@ -245,6 +251,51 @@ export default function TrainerSchedule() {
   const [avDow, setAvDow] = useState(1);
   const [avHour, setAvHour] = useState(9);
   const [avMinute, setAvMinute] = useState(0);
+  /* ── Standing appointments ────────────────────────────────────────────────
+   *
+   * "Ana trains with me at seven every Tuesday" — the single most common fact
+   * about a personal trainer's week, and until supabase/parts/135 there was
+   * nowhere in this product to put it. What a coach did instead was press
+   * Generate, wait for Ana to book each slot by hand, and press Generate again
+   * next month. The arrangement now lives on the server and a daily job writes
+   * it out as ordinary booked sessions eight weeks ahead, so nothing on this
+   * screen generates anything and nobody re-taps anything.
+   *
+   * `seriesStatus` carries the same discipline as every other read here, and it
+   * matters more on this one than almost anywhere: an empty list under 'error'
+   * means the arrangements COULD NOT BE READ. "You have no standing
+   * appointments" said to a coach who has five is how somebody gets stood up.
+   */
+  const { series, status: seriesStatus, reload: reloadSeries, create: createSeries, end: endSeries } = useRecurringSeries();
+  // Either party may end a standing appointment — an agreement one side cannot
+  // leave is not one — so the arrangement a coach is looking at may have been
+  // ended on the client's phone since this screen loaded. Re-read on focus, the
+  // same reason the calendar and the fees are.
+  useFocusEffect(useCallback(() => { reloadSeries(); }, [reloadSeries]));
+  // What is running. An ended arrangement stays in the table for the record and
+  // is not listed — a coach's screen is their week, not their history — but it
+  // is counted, so the empty state can tell "you have never made one" apart
+  // from "the one you had, you ended".
+  const standing = series.filter((s) => s.active);
+  const endedCount = series.length - standing.length;
+  // The zone a new arrangement would be stored against. Null when the runtime
+  // cannot say, and `create` refuses rather than guessing at UTC — an
+  // appointment pinned to the wrong zone is seven in the morning somewhere
+  // nobody involved lives.
+  const devTz = deviceTimeZone();
+  const [seriesOpen, setSeriesOpen] = useState(false);
+  const [srClient, setSrClient] = useState<string | null>(null);
+  const [srDow, setSrDow] = useState(1);
+  const [srHour, setSrHour] = useState(9);
+  const [srMinute, setSrMinute] = useState(0);
+  const [srDur, setSrDur] = useState(60);
+  const [srBusy, setSrBusy] = useState(false);
+  // The arrangement the two-option sheet is open for. There is deliberately no
+  // "which option is selected" state to go with it: a sheet that remembers a
+  // choice is a sheet that can be confirmed without being read, and the two
+  // choices here have different consequences and different prices.
+  const [endFor, setEndFor] = useState<RecurringSeries | null>(null);
+  const [endBusy, setEndBusy] = useState(false);
   // `addSession(...).ok` means only that the slot did not overlap one already on
   // this screen. Whether it reached the server is `saved`, and that is the half
   // that decides whether a client can ever see the slot — so a slot the server
@@ -314,6 +365,154 @@ export default function TrainerSchedule() {
       'Saved on this phone only',
       `${when} is in your weekly list here, but it did not reach the server — so it is not on your other devices, and generating open slots from it may not work.\n\nIt has not been lost. Check your connection and remove and re-add it once you are back online.`,
       [{ text: 'OK' }],
+    );
+  };
+
+  /** Who a standing appointment is with. `my_session_series` hands the coach the
+   *  client's profile name; the roster is the fallback for a client whose
+   *  profile carries no name, so a row never renders a blank where a person is. */
+  const seriesWho = (s: RecurringSeries) =>
+    s.clientName ?? roster.find((c) => c.id === s.clientId)?.name ?? 'this client';
+
+  /**
+   * The concrete session that the next occurrence IS.
+   *
+   * A series row knows WHEN the next one starts; cancelling it needs the
+   * session row itself, because an occurrence is an ordinary booked session and
+   * goes through the ordinary button. Matched on the instant and the client
+   * rather than guessed at, and null is a real answer this screen handles: the
+   * calendar may not have been read, or the occurrence may have been cancelled
+   * already. The sheet then offers the option without an action and says which
+   * of those it is, rather than wiring a destructive button to a hope.
+   */
+  const nextOccurrenceOf = (s: RecurringSeries): TrainingSession | null => {
+    if (!s.nextAt) return null;
+    const at = Date.parse(s.nextAt);
+    if (!Number.isFinite(at)) return null;
+    return sessions.find((x) => x.status === 'booked' && x.clientId === s.clientId
+      && Date.parse(x.startsAt) === at) ?? null;
+  };
+
+  /**
+   * Agree a standing appointment.
+   *
+   * Everything the server did is reported, INCLUDING the dates that did not
+   * take. A clash is not a failure — part 135 skips that one date, keeps the
+   * arrangement and creates every other date — but the skipped dates are the
+   * coach's to place by hand, so a report that said only "8 sessions booked"
+   * would be hiding the two hours a client is expecting and will not get.
+   */
+  const createSeriesNow = async () => {
+    if (!srClient) return;
+    const who = nameOf(srClient);
+    const when = seriesLabel({ dow: srDow, hour: srHour, minute: srMinute });
+    // The same client at the same time twice is not refused anywhere: there is
+    // no unique index on the arrangement. What a coach would see is a second
+    // series whose every date clashed with the first, reported as "8 dates were
+    // skipped because you were already booked then" — true, and baffling. Only
+    // claimed when the list was actually read; under 'error' we do not know.
+    if (seriesStatus === 'ready' && standing.some((s) => s.clientId === srClient
+      && s.dow === srDow && s.hour === srHour && s.minute === srMinute)) {
+      Alert.alert(
+        'Already standing',
+        `${who} already has ${when.charAt(0).toLowerCase()}${when.slice(1)} with you, so nothing was changed.`,
+        [{ text: 'OK' }],
+      );
+      return;
+    }
+    setSrBusy(true);
+    const res = await createSeries({
+      clientId: srClient, dow: srDow, hour: srHour, minute: srMinute, durationMin: srDur,
+    });
+    setSrBusy(false);
+    if (!res.ok) {
+      Alert.alert(
+        'Not set up',
+        `${when} with ${who} was not created, so nothing has changed and ${who} has not been booked.\n\n${res.error}`,
+        [{ text: 'OK' }],
+      );
+      return;
+    }
+    setSeriesOpen(false);
+    // The occurrences were written on the server inside that same call, so the
+    // calendar this screen is holding is a read that predates every one of
+    // them. Without this the coach is told eight sessions are booked and can
+    // see none of them on the grid they are looking at.
+    await refresh();
+    const rep = res.report;
+    const made = createdLine(rep.created);
+    const skipped = clashLine(rep.skipped, rep.clashedOn);
+    const lines = [`${when} with ${who} is standing. Neither of you has to book it again.`];
+    // `createdLine` returns null rather than "0 sessions booked", so the case
+    // where nothing took gets a sentence of its own instead of an announcement
+    // of a success that did not happen.
+    lines.push(made ?? 'No sessions were booked just now. The arrangement itself is saved.');
+    if (skipped) {
+      lines.push(skipped);
+      // Deliberately not "we will try those again". Nothing does.
+      lines.push('Those dates are yours to place by hand if you want them.');
+    }
+    Alert.alert(
+      rep.created ? 'Standing appointment set' : 'Saved, but nothing was booked',
+      lines.join('\n\n'),
+      [{ text: 'Done' }],
+    );
+  };
+
+  /**
+   * End the arrangement. THIS IS NOT A CANCELLATION AND IT CHARGES NOTHING.
+   *
+   * The obvious implementation of "stop this repeating" is a loop over the
+   * future occurrences calling the ordinary cancellation, and on a year-long
+   * arrangement that bills somebody a late-cancellation fee for every session
+   * in the horizon — for a decision taken two months in advance.
+   * `end_session_series` does not go near `cancel_my_session`, and `charged`
+   * comes back from the server stated as false, so the alert below reports what
+   * the server did rather than what this screen believes it did.
+   *
+   * `p_effective` is the date of the NEXT OCCURRENCE, not today. That argument
+   * is the whole of the second half of the promise: called with its default,
+   * `end_session_series` removes every occurrence after today, next Tuesday
+   * included — the one session the sheet has just told the coach will stay
+   * booked. See `occurrenceDateOf`.
+   */
+  const endSeriesNow = async (s: RecurringSeries) => {
+    const who = seriesWho(s);
+    const keepUntil = s.nextAt ? occurrenceDateOf(s.nextAt, s.tz) : null;
+    setEndBusy(true);
+    const res = await endSeries(s.id, keepUntil);
+    setEndBusy(false);
+    if (!res.ok) {
+      Alert.alert(
+        'Still standing',
+        `${seriesLabel(s)} with ${who} is still running — that did not save, so nothing has changed, no session has been removed and ${who} has not been told.\n\n${res.error}`,
+        [{ text: 'OK' }],
+      );
+      return;
+    }
+    setEndFor(null);
+    // The later occurrences were deleted server-side; this screen is still
+    // drawing them on the grid until it re-reads.
+    await refresh();
+    const r = res.report;
+    Alert.alert(
+      'Standing appointment ended',
+      `${seriesLabel(s)} with ${who} will not repeat again.\n\n`
+      + (r.removed
+        ? `${r.removed} later session${r.removed === 1 ? '' : 's'} ${r.removed === 1 ? 'was' : 'were'} removed from your calendar and theirs.`
+        : 'There were no later sessions on the books, so nothing was removed.')
+      + '\n\n'
+      // Read from the server rather than asserted here. This branch can only be
+      // reached by a server that broke its own promise, and it is said out loud
+      // rather than swallowed: a fee that appeared without anybody deciding to
+      // charge one is the coach's to find, not ours to hide.
+      + (r.charged
+        ? `The server reported a charge against this, which it should never do — check Late-Cancellation Fees below before you settle anything with ${who}.`
+        : 'Nothing was charged for any of them, however close they were.')
+      + (s.nextAt && keepUntil
+        ? `\n\nThe next one — ${dateLabel(s.nextAt)} at ${timeLabel(s.nextAt)} — is still booked, on purpose. If that one has to go as well, cancel it on its own from that day and your notice policy prices that session alone.`
+        : ''),
+      [{ text: 'Done' }],
     );
   };
 
@@ -620,6 +819,55 @@ export default function TrainerSchedule() {
     ]);
   }
 
+  /* ── The two things a coach can do to a standing appointment ─────────────
+   *
+   * CANCELLING ONE OCCURRENCE AND ENDING THE SERIES ARE DIFFERENT ACTS WITH
+   * DIFFERENT CONSEQUENCES, and the sheet below never collapses them into one
+   * button. `cancelOptions` in src/lib/recurring is the statement of the rule —
+   * it prices the single cancellation, it refuses to price the ending under
+   * every policy and every notice window, and it says that ending removes every
+   * occurrence EXCEPT the next one. Both options are drawn from it so that this
+   * screen cannot come to disagree with the module the tests hold the promise
+   * against.
+   */
+  const endPolicy: CancellationPolicy | null = lcPolicy.status === 'ready'
+    ? { applies: lcPolicy.applies, noticeHours: lcPolicy.noticeHours, fee: lcPolicy.fee, currency: lcPolicy.currency }
+    : null;
+  const endNext = endFor ? nextOccurrenceOf(endFor) : null;
+  const endOptions = endFor
+    // `upcoming` is the count the SERVER reports for the arrangement, not one
+    // counted out of `sessions` here: this screen's calendar is capped, and a
+    // capped read would understate how much the coach is about to remove.
+    ? cancelOptions({ startsAt: endFor.nextAt ?? '', policy: endPolicy, upcoming: endFor.upcoming })
+    : [];
+
+  /**
+   * What cancelling the ONE session does, said to the person doing it.
+   *
+   * `occurrenceDetail` from src/lib/recurring is deliberately NOT printed here,
+   * and the reason is the whole point of this sheet. That sentence is written
+   * for the CLIENT — "your coach doesn't charge…", "ask them", and in the
+   * branch that bites, "a late-cancellation fee of 40 is recorded". None of it
+   * is true of this button. A coach freeing their own client's hour goes
+   * through `releaseSession`, not `cancel_my_session`; part 126 prices a
+   * cancellation the CLIENT makes, and nothing is charged to anybody on this
+   * path — which is exactly what the ordinary Cancel button on the day below
+   * already tells them. Printing a fee against this option would make cancelling
+   * one Tuesday look dearer than ending the whole arrangement, and a coach
+   * quietly ending a standing agreement to dodge a fee that was never going to
+   * be raised is precisely the wrong tap this sheet exists to prevent.
+   *
+   * The facts still come from the option: `affects` is 1, and the verdict is
+   * what decides whether the notice window is worth mentioning at all.
+   */
+  const occurrenceLine = (o: CancelOption, s: RecurringSeries) => {
+    const day = DOW_NAMES[((s.dow % 7) + 7) % 7];
+    const base = `Frees that one hour and leaves the standing appointment running — next ${day} is still next ${day}. Whoever is first on that session’s waitlist takes it.`;
+    return o.verdict && o.verdict.kind !== 'in-time'
+      ? `${base} It is inside your ${noticeLabel(lcPolicy.noticeHours)} notice period, but you are the one cancelling it — so nothing is charged to ${seriesWho(s)}.`
+      : base;
+  };
+
   const G = layout.gutter;
   const totalSlots = booked.length + open.length;
   /**
@@ -771,6 +1019,73 @@ export default function TrainerSchedule() {
             <ListRow icon="share" title="Export Schedule" note="Send your booked sessions to your calendar app"
               onPress={exportSchedule} />
           ) : null}
+        </Section>
+
+        <Rule />
+
+        {/* ── standing appointments ────────────────────────────────────────
+            Listed here rather than inside the weekly-availability sheet
+            because availability is an OFFER and this is an AGREEMENT. The
+            sessions already exist — booked, on both calendars, eight weeks
+            out — and nobody presses Generate to keep them coming. */}
+        <Section>
+          <SectionHead title="Standing Appointments"
+            note={seriesStatus === 'error' ? 'Not read' : 'Set one up'}
+            onPress={seriesStatus === 'error' ? undefined : () => { setSrClient(null); setSeriesOpen(true); }} />
+
+          {/* An empty list under 'error' means the arrangements could not be
+              READ, and "you have no standing appointments" said to a coach who
+              trains somebody every Tuesday is the named recurring bug in
+              src/ui/loadStatus.ts. Warn as a mark rather than as label ink,
+              for the same contrast reason as the day above. */}
+          {seriesStatus === 'error' ? (
+            <Flag tone={t.warn}>
+              Your standing appointments could not be read, so none can be listed. This is a connection problem, not a statement that you have none — every arrangement you have agreed is still running, and its sessions are still on your calendar and your clients’. Setting a new one up is off until the list loads, so you can’t agree the same hour twice without seeing it.
+            </Flag>
+          ) : seriesStatus === 'loading' ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>Reading your standing appointments…</Text>
+          ) : standing.length === 0 ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>
+              {seriesStatus === 'partial'
+                ? 'Nothing came back, but only part of the list loaded — so this is not a statement that you have none. Pull down to refresh.'
+                : endedCount
+                  ? `Nothing is standing right now. The ${endedCount === 1 ? 'one you ended is' : `${endedCount} you have ended are`} not listed here.`
+                  : 'No standing appointments yet. Set one up and the same hour is booked for the same client every week — neither of you has to book it again.'}
+            </Text>
+          ) : standing.map((s, i) => (
+            <View key={s.id}>
+              {i > 0 ? <Rule /> : null}
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
+                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.brand }} />
+                <View style={{ flex: 1 }}>
+                  <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: t.ink }}>{seriesLabel(s)}</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                    {seriesWho(s)} · {s.durationMin} min · {s.upcoming
+                      ? `${s.upcoming} booked ahead`
+                      : 'nothing on the books ahead'}
+                  </Text>
+                  {s.nextAt ? (
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                      Next {dateLabel(s.nextAt)} at {timeLabel(s.nextAt)}
+                    </Text>
+                  ) : null}
+                  {/* The hour on a series is a wall-clock hour in the zone it
+                      was agreed in, not in the zone the reader is standing in.
+                      Said only when they differ, which is a coach abroad — and
+                      is exactly when "Every Tuesday at 7:00 am" would otherwise
+                      be read as seven o'clock where they are now. */}
+                  {s.tz && devTz && s.tz !== devTz ? (
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                      That time is {s.tz.split('/').pop()?.replace(/_/g, ' ')} time, where it was agreed.
+                    </Text>
+                  ) : null}
+                </View>
+                {/* Named for both things it opens. A button that said "End"
+                    would be a button that had already chosen. */}
+                <Ghost label="Cancel or End" onPress={() => setEndFor(s)} />
+              </View>
+            </View>
+          ))}
         </Section>
 
         <Rule />
@@ -1067,6 +1382,177 @@ export default function TrainerSchedule() {
               <View style={{ flex: 2 }}><Cta label={addClient ? 'Book Session' : 'Add Open Slot'} wide onPress={handleAdd} /></View>
             </View>
           </View>
+        </View>
+      </Modal>
+
+      {/* ── standing-appointment sheet ────────────────────────────────────── */}
+      <Modal visible={seriesOpen} animationType="slide" transparent onRequestClose={() => setSeriesOpen(false)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setSeriesOpen(false)} />
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, maxHeight: '86%', ...elevation.e2 }}>
+          <Text style={{ ...ty.head, color: t.ink }}>Standing appointment</Text>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>
+            The same client at the same time every week. Repple books it {Math.round(SERIES_HORIZON_DAYS / 7)} weeks ahead and keeps going from there on its own.
+          </Text>
+          <ScrollView showsVerticalScrollIndicator={false}>
+            <Field label="Client">
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
+                {roster.map((c) => (
+                  <Chip key={c.id} t={t} label={c.name} on={c.id === srClient} onPress={() => setSrClient(c.id)} />
+                ))}
+              </View>
+            </Field>
+            {/* There is no "open slot" here and there cannot be: an arrangement
+                is between two named people, and `create_session_series` refuses
+                anybody who is not this coach's client with a 42501. An empty
+                roster has three quite different causes and they must not look
+                alike. */}
+            {roster.length === 0 ? (
+              rosterStatus === 'error' ? (
+                <Flag tone={t.warn} style={{ marginTop: sp.sm }}>
+                  Your clients could not be read, so none can be listed. This is a connection problem, not an empty book — pull down on the calendar to refresh and try again.
+                </Flag>
+              ) : (
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                  {rosterStatus === 'loading'
+                    ? 'Reading your clients…'
+                    : 'No clients on your roster yet, so there is nobody to arrange this with. Add one from the Clients tab.'}
+                </Text>
+              )
+            ) : rosterStatus === 'partial' ? (
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                Part of your roster did not load, so somebody may be missing from this list.
+              </Text>
+            ) : null}
+
+            <View style={{ height: sp.lg }} />
+            <Field label="Day">
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm }}>
+                {DOW.map((d, i) => <Chip key={d} t={t} label={d} on={srDow === i} onPress={() => setSrDow(i)} />)}
+              </ScrollView>
+            </Field>
+
+            <View style={{ height: sp.lg }} />
+            {/* The same control the other two sheets use. Quarter hours across
+                all twenty-four, because `session_series_minute_chk` accepts
+                exactly those four minutes and a coach's day starts when their
+                first client's does. */}
+            <Field label="Time" hint={avTime(srHour, srMinute)}>
+              <TimeGrid t={t} hour={srHour} minute={srMinute} onHour={setSrHour} onMinute={setSrMinute} />
+            </Field>
+
+            <View style={{ height: sp.lg }} />
+            <Field label="Length" hint="minutes">
+              <View style={{ flexDirection: 'row', gap: sp.sm }}>
+                {DURS.map((d) => (
+                  <View key={d} style={{ flex: 1 }}>
+                    <Pressable onPress={() => setSrDur(d)} accessibilityRole="button"
+                      accessibilityState={{ selected: d === srDur }} accessibilityLabel={`${d} minutes`}
+                      style={{ paddingVertical: sp.sm, borderRadius: radius.pill, alignItems: 'center', backgroundColor: d === srDur ? t.brand : t.surface2 }}>
+                      <Text style={{ ...ty.label, ...numeric, fontWeight: d === srDur ? '500' : '400', color: d === srDur ? t.brandInk : t.ink2 }}>{d}m</Text>
+                    </Pressable>
+                  </View>
+                ))}
+              </View>
+            </Field>
+
+            <View style={{ height: sp.xl }} />
+            {/* The two things a coach is owed before they agree to this, in the
+                words src/lib/recurring holds so the apps and the database
+                cannot come to describe it differently. */}
+            <Flag tone={t.ink3}>{RECURRING_CREDIT_NOTE}</Flag>
+            <View style={{ height: sp.sm }} />
+            <Flag tone={t.ink3}>{RECURRING_CLASH_NOTE}</Flag>
+            {!devTz ? (<>
+              <View style={{ height: sp.sm }} />
+              <Flag tone={t.warn}>
+                This device can’t say what time zone it is in, and a weekly appointment has to be stored against one — otherwise seven in the morning quietly becomes six or eight the Sunday the clocks move. Set the zone in your phone’s settings and come back.
+              </Flag>
+            </>) : null}
+          </ScrollView>
+          <View style={{ height: sp.lg }} />
+          <Cta wide disabled={!srClient || !devTz || srBusy}
+            label={srBusy
+              ? 'Setting It Up…'
+              : srClient
+                ? `Book Every ${DOW_NAMES[srDow]} at ${avTime(srHour, srMinute)}`
+                : 'Pick a Client First'}
+            onPress={() => { void createSeriesNow(); }} />
+          <View style={{ height: sp.sm }} />
+          <Ghost label="Cancel" onPress={() => setSeriesOpen(false)} />
+        </View>
+      </Modal>
+
+      {/* ── cancel one, or end the arrangement ────────────────────────────────
+          THE TWO OPTIONS ARE NEVER COLLAPSED INTO ONE BUTTON, and neither of
+          them is the default. Cancelling one occurrence is an ordinary
+          cancellation of an ordinary session; ending the arrangement charges
+          nothing, ever, and deliberately leaves the next occurrence standing.
+          A coach who taps "cancel" and silently ends a standing agreement, or
+          who ends one and unexpectedly bills a client, is the failure this
+          sheet exists to prevent — so each option carries what confirming it
+          actually does, in words, above its own button. */}
+      <Modal visible={!!endFor} animationType="slide" transparent onRequestClose={() => setEndFor(null)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setEndFor(null)} />
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, maxHeight: '86%', ...elevation.e2 }}>
+          {endFor ? (<>
+            <Text style={{ ...ty.head, color: t.ink }}>One session, or the arrangement?</Text>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>
+              {seriesLabel(endFor)} with {seriesWho(endFor)}. These are two different things and they do two different things.
+            </Text>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {endOptions.map((o, i) => (
+                <View key={o.scope}>
+                  {i > 0 ? <Rule /> : null}
+                  <View style={{ paddingVertical: sp.md }}>
+                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{o.label}</Text>
+                    {/* The series sentence is printed exactly as the module
+                        writes it. It is the statement of the rule, it names no
+                        amount and no currency, and every branch of it says what
+                        ending costs — which is nothing. */}
+                    <Text style={{ ...ty.label, color: t.ink2, marginTop: 5 }}>
+                      {o.scope === 'series' ? o.detail : occurrenceLine(o, endFor)}
+                    </Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 5 }}>
+                      {o.affects === 1 ? 'Affects 1 booked session.' : `Affects ${o.affects} booked sessions.`}
+                    </Text>
+                    <View style={{ marginTop: sp.md }}>
+                      {o.scope === 'series' ? (
+                        <Ghost label={endBusy ? 'Ending…' : 'End the Standing Appointment'}
+                          onPress={() => { if (!endBusy) void endSeriesNow(endFor); }} />
+                      ) : endNext ? (
+                        // The ordinary cancel button, on the ordinary session,
+                        // through the ordinary path — the same call the day
+                        // list makes. A second cancellation path written here
+                        // is how the two would come to price the same tap
+                        // differently.
+                        // The confirm is fired after the sheet has finished
+                        // dismissing, not in the same tick. An iOS alert raised
+                        // while a modal is animating away is presented from a
+                        // view controller that is on its way out and never
+                        // appears — and the tap that vanishes on this button is
+                        // a coach who then reaches for the other one.
+                        <Ghost label="Cancel That Session Only"
+                          onPress={() => { const one = endNext; setEndFor(null); setTimeout(() => confirmCancel(one), 350); }} />
+                      ) : (
+                        <Flag tone={t.warn}>
+                          {!endFor.nextAt
+                            ? 'There is no next session on the books to cancel — either it has not been written out yet, or it has already been cancelled.'
+                            : !known
+                              ? 'Your calendar could not be read, so that session cannot be found to cancel. This is a connection problem — pull down to refresh and try again. The arrangement itself is untouched.'
+                              : 'That session is not among the ones this screen has loaded. Open its day on the calendar above and cancel it from there.'}
+                        </Flag>
+                      )}
+                    </View>
+                  </View>
+                </View>
+              ))}
+            </ScrollView>
+            <View style={{ height: sp.lg }} />
+            {/* The only emphasised button on the sheet is the one that does
+                nothing. Neither of the two above may be the default: one of
+                them ends an arrangement two people made. */}
+            <Cta label="Change Nothing" wide onPress={() => setEndFor(null)} />
+          </>) : null}
         </View>
       </Modal>
     </SafeAreaView>
