@@ -81,7 +81,7 @@ import {
   lengthIn, lengthLabel, lengthToCm, lengthDeltaIn, plain, convertedNote,
 } from '../../src/lib/units';
 import { agoLabel, dayLabel, shortDayLabel, daysBetween, todayISO, STALE_AFTER_DAYS } from '../../src/lib/bodyFigures';
-import { deltaLabel } from '../../src/lib/deltaLabel';
+import { deltaLabel, deltaSign } from '../../src/lib/deltaLabel';
 import { num1 } from '../../src/lib/format';
 
 // The range a human weighs, in the kilograms this app stores. Metric because
@@ -458,8 +458,11 @@ export default function MyProgress() {
             )}
             <View style={{ marginTop: sp.lg }}>
               <KpiRow items={[
-                { label: 'Since Last', value: sinceLast == null ? fig(null) : `${sinceLast > 0 ? '+' : sinceLast < 0 ? '−' : ''}${plain(Math.abs(sinceLast))}`, unit: sinceLast == null ? undefined : wu },
-                { label: 'Since Start', value: sinceStart == null ? fig(null) : `${sinceStart > 0 ? '+' : sinceStart < 0 ? '−' : ''}${plain(Math.abs(sinceStart))}`, unit: sinceStart == null ? undefined : wu },
+                // The sign is asked at `plain`'s own three decimals, so the
+                // sign and the figure beside it can never disagree about
+                // whether anything moved.
+                { label: 'Since Last', value: sinceLast == null ? fig(null) : `${deltaSign(sinceLast, 3)}${plain(Math.abs(sinceLast))}`, unit: sinceLast == null ? undefined : wu },
+                { label: 'Since Start', value: sinceStart == null ? fig(null) : `${deltaSign(sinceStart, 3)}${plain(Math.abs(sinceStart))}`, unit: sinceStart == null ? undefined : wu },
                 // A count over an unread or truncated list is not a count.
                 { label: 'Weigh-ins', value: weighWhole ? fig(weighed.length) : fig(null) },
               ]} />

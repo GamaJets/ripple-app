@@ -44,6 +44,7 @@ import { goalsEmptyLine, parseGoal, goalText } from '../../src/lib/coachPrefs';
 import { useMonthlyHistory } from '../../src/ui/useMrrHistory';
 import { useSessions } from '../../src/ui/sessions';
 import { myTenantCurrency } from '../../src/lib/subscriptions';
+import { deltaSign } from '../../src/lib/deltaLabel';
 import { wholeMoney } from '../../src/lib/coachMoney';
 
 export default function TrainerAnalytics() {
@@ -408,7 +409,7 @@ export default function TrainerAnalytics() {
               // directly under a line that correctly prints "AED 1,500 at your
               // AED 50 session rate". One screen, two currencies, neither of
               // them necessarily the gym's.
-              : revHist.delta !== 0 ? `${revHist.delta > 0 ? '+' : '−'}${priced(Math.abs(revHist.delta)) ?? Math.abs(revHist.delta).toLocaleString()} vs last mo`
+              : revHist.delta !== 0 ? `${deltaSign(revHist.delta, 0)}${priced(Math.abs(revHist.delta)) ?? Math.abs(revHist.delta).toLocaleString()} vs last mo`
               : 'Tracking started'}
             onPress={() => router.push('/(trainer)/payments')} />
           {/* This drew the wrong months, not merely undated ones. The

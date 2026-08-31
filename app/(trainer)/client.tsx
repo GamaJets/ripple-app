@@ -96,6 +96,7 @@ import { recentWindow, summariseAdherence, type ChecklistRow, type TickRow } fro
 import { fetchSharedInbox } from '../../src/lib/photoShare';
 import { type Inbox } from '../../src/lib/photoInbox';
 import { weightDeltaIn } from '../../src/lib/units';
+import { deltaLabel } from '../../src/lib/deltaLabel';
 import { bodyLine } from '../../src/lib/clientBody';
 import {
   COACHED_MODES, COACHED_MODE_SHORT, COACHED_MODE_NOTE_COACH, type CoachedMode,
@@ -901,7 +902,10 @@ export default function ClientScreen() {
                       {x.before ? x.before.mmol.toFixed(1) : '—'} → {x.peak ? x.peak.mmol.toFixed(1) : '—'}
                     </Text>
                     <Text style={{ ...ty.label, color: t.ink, width: 48, textAlign: 'right' }}>
-                      {x.rise == null ? '—' : `${x.rise > 0 ? '+' : ''}${x.rise.toFixed(1)}`}
+                      {/* A rise of 0.04 mmol/L formatted as "0.0" and was
+                          then given a plus. Shown as arithmetic, and a rise
+                          the monitor did not record is not arithmetic. */}
+                      {deltaLabel(x.rise, { since: null, noChange: '0.0', noBaseline: '—' })}
                     </Text>
                   </View>
                 ))}
@@ -971,7 +975,7 @@ export default function ClientScreen() {
           <KpiRow items={[
             {
               label: 'Weight Change',
-              value: delta == null ? '—' : `${delta > 0 ? '+' : ''}${fig(delta)}`,
+              value: delta == null ? '—' : deltaLabel(delta, { since: null, noChange: 'No change' }),
               unit: delta == null ? undefined : wu,
             },
             { label: 'In the App', value: fig(seen ? seen.seenDays : null), unit: seen ? `/ ${seen.windowDays} days` : undefined },

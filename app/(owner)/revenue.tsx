@@ -22,7 +22,7 @@ import { sp, layout, type as ty, numeric } from '../../src/theme/scale';
 import { usePlatformTrainers } from '../../src/ui/trainers';
 import { useTenant, gymMoney } from '../../src/ui/tenant';
 import { gymRollup, type TrainerLike } from '../../src/lib/ownerAnalytics';
-import { deltaLabel } from '../../src/lib/deltaLabel';
+import { deltaLabel, deltaSign } from '../../src/lib/deltaLabel';
 import { useSessionsHistory } from '../../src/ui/useMrrHistory';
 
 export default function OwnerRevenue() {
@@ -134,7 +134,7 @@ export default function OwnerRevenue() {
             // currency, and both have to be branched on before the value is
             // interpolated — `${null}` puts the word "null" in the sentence.
             : delta !== 0
-            ? `${delta > 0 ? '+' : '−'}${num(Math.abs(delta))} vs last month${gymMoney(revenue30, cur) != null ? ` · ${gymMoney(revenue30, cur)} at your fee` : ''}`
+            ? `${deltaSign(delta, 0)}${num(Math.abs(delta))} vs last month${gymMoney(revenue30, cur) != null ? ` · ${gymMoney(revenue30, cur)} at your fee` : ''}`
             : gymMoney(revenue30, cur) != null
               ? `${gymMoney(revenue30, cur)} at your session fee`
               : revenue30 != null
@@ -184,7 +184,7 @@ export default function OwnerRevenue() {
               last mo" under a heading saying Sessions, and an owner had no way
               to know which of the two the screen meant. */}
           <SectionHead title="Sessions Trend"
-            note={delta !== 0 ? `${delta > 0 ? '+' : '−'}${num(Math.abs(delta))} session${Math.abs(delta) === 1 ? '' : 's'} vs last mo` : 'Tracking started'} />
+            note={delta !== 0 ? `${deltaSign(delta, 0)}${num(Math.abs(delta))} session${Math.abs(delta) === 1 ? '' : 's'} vs last mo` : 'Tracking started'} />
           {months >= 2 ? (
             /* With the holes, and with the months. See the same note on the
                owner dashboard: filtering the nulls out drew the line over four

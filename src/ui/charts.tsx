@@ -5,6 +5,7 @@ import { View, Text } from 'react-native';
 import Svg, { Polyline, Polygon, Circle, Line } from 'react-native-svg';
 import { useTheme } from './components';
 import { axisLabel, segments, readablePoints } from '../lib/chartAxis';
+import { deltaArrow, deltaLabel, deltaSign } from '../lib/deltaLabel';
 // `value` is aliased to `figure` so it can't shadow <DeltaBadge/>'s `value` prop.
 import { sp, radius, type as ty, numeric, value as figure } from '../theme/scale';
 
@@ -72,12 +73,15 @@ export function Sparkline({ data, w = 260, h = 56, color, labels }: {
 /** An up/down delta chip. The direction is a dot; the figure stays ink. */
 export function DeltaBadge({ value, unit = '', suffix = '' }: { value: number; unit?: string; suffix?: string }) {
   const t = useTheme();
-  const up = value >= 0;
-  const c = up ? t.brand : t.crit;
+  // `value >= 0` made zero an increase: the badge drew ▲, printed a plus and
+  // painted the mark in the accent colour for a figure that had not moved.
+  // Nothing moved is its own state, and it is neither of the two.
+  const sign = deltaSign(value);
+  const c = sign === '' ? t.ink3 : sign === '+' ? t.brand : t.crit;
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.sm, paddingVertical: 3 }}>
       <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: c }} />
-      <Text style={{ ...ty.caption, ...numeric, fontWeight: '500', color: t.ink }}>{up ? '▲' : '▼'} {up ? '+' : ''}{value}{unit}</Text>
+      <Text style={{ ...ty.caption, ...numeric, fontWeight: '500', color: t.ink }}>{deltaArrow(value)} {deltaLabel(value, { since: null, unit, noChange: 'No change' })}</Text>
       {suffix ? <Text style={{ ...ty.caption, color: t.ink3 }}>{suffix}</Text> : null}
     </View>
   );

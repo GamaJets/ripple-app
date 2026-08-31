@@ -35,7 +35,7 @@ import { useSettings } from '../../src/ui/settings';
 import { lengthIn, lengthLabel, lengthToCm, lengthDeltaIn, plain, convertedNote } from '../../src/lib/units';
 import { agoLabel, dayLabel, shortDayLabel, daysBetween, todayISO, STALE_AFTER_DAYS } from '../../src/lib/bodyFigures';
 import { useClientData } from '../../src/ui/clientData';
-import { movementIsProgress } from '../../src/lib/deltaLabel';
+import { deltaLabel, movementIsProgress } from '../../src/lib/deltaLabel';
 
 // Which tape sites a goal has an opinion about. A waist and a hip measurement
 // follow the fat, so Fat Loss and Tone want them down; a chest, an arm and a
@@ -145,12 +145,15 @@ export default function Measurements() {
     // was — not just the date it is being compared against. A waist with no
     // date is a rumour, and a five-week-old one presented as current is a
     // rumour with a number on it.
-    note={(waistMove !== null && waistMove !== 0
-     ? `${waistMove < 0 ? '−' : '+'}${plain(Math.abs(waistMove))} ${lu} since ${fmtDate(prev!.at)}`
-     : waistMove === 0
-     ? `Unchanged since ${fmtDate(prev!.at)}`
-     : 'First entry')
-     + ` · measured ${dayLabel(latest.at)}${latestAgo ? ` · ${latestAgo}` : ''}`}
+    // The three arms — a movement, no movement, and no earlier entry — are
+    // deltaLabel's, so this cannot drift out of step with the same sentence on
+    // Progress. `prev` is non-null exactly when `waistMove` is.
+    note={deltaLabel(waistMove, {
+     since: prev ? fmtDate(prev.at) : null,
+     unit: lu,
+     noChange: 'Unchanged',
+     noBaseline: 'First entry',
+    }) + ` · measured ${dayLabel(latest.at)}${latestAgo ? ` · ${latestAgo}` : ''}`}
    />
   ) : null}
   {/* Where a figure is stale, how stale. The client is the only person who can
@@ -178,7 +181,7 @@ export default function Measurements() {
         {d != null && d !== 0 ? (
          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, minWidth: 62, justifyContent: 'flex-end' }}>
           <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: goalRead(key, d) ? t.brand : t.ink3 }} />
-          <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{d > 0 ? '+' : '−'}{plain(Math.abs(d))} {lu}</Text>
+          <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{deltaLabel(d, { since: null, unit: lu })}</Text>
          </View>
         ) : (
          <Text style={{ ...ty.caption, color: t.ink3, minWidth: 62, textAlign: 'right' }}>—</Text>

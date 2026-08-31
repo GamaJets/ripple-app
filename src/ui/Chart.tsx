@@ -5,6 +5,7 @@ import Svg, { Polyline, Path, Circle, Line, Defs, LinearGradient, Stop } from 'r
 import { useTheme } from './components';
 import { type as ty, numeric } from '../theme/scale';
 import { axisLabel } from '../lib/chartAxis';
+import { deltaArrow, deltaLabel } from '../lib/deltaLabel';
 
 export interface Point { t: string; v: number }
 
@@ -48,7 +49,10 @@ export function TrendChart({ data, unit = '', color, height = 150, goodDown = fa
         {/* Direction is a dot; the delta itself stays ink. */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
           <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: good ? t.good : t.serious }} />
-          <Text style={{ ...ty.caption, ...numeric, fontWeight: '500', color: t.ink2 }}>{delta > 0 ? '▲' : '▼'} {Math.abs(delta)}{unit}</Text>
+          {/* An arrow is a sign drawn as a triangle, and `delta > 0 ? '▲' : '▼'`
+              pointed a series that had not moved downwards. Nothing draws no
+              arrow. */}
+          <Text style={{ ...ty.caption, ...numeric, fontWeight: '500', color: t.ink2 }}>{deltaArrow(delta)} {deltaLabel(delta, { since: null, unit, noChange: 'No change' })}</Text>
         </View>
         <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{fmt(last.t)} · {last.v}{unit}</Text>
       </View>

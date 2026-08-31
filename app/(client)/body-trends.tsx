@@ -52,7 +52,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { useClientData } from '../../src/ui/clientData';
-import { movementIsProgress } from '../../src/lib/deltaLabel';
+import { deltaLabel, movementIsProgress } from '../../src/lib/deltaLabel';
 import { useSettings } from '../../src/ui/settings';
 import { weightDeltaIn, weightIn } from '../../src/lib/units';
 import {
@@ -262,7 +262,7 @@ export default function BodyTrends() {
                         {/* "since your first scan" was wrong the moment the
                             first point was a weigh-in. The date it is actually
                             measured from is printed instead of guessed at. */}
-                        <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{delta > 0 ? '+' : '−'}{Math.abs(delta)} {unit} since {dayLabel(readings[0].at)}</Text>
+                        <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{deltaLabel(delta, { since: dayLabel(readings[0].at), unit })}</Text>
                       </View>
                     ) : (
                       <Text style={{ ...ty.caption, color: t.ink3 }}>No change since {dayLabel(readings[0].at)}</Text>

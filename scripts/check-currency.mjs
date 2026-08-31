@@ -175,10 +175,13 @@ const KNOWN = new Map([
   // the truth. One more was found while fixing them and is not a figure at all:
   // "no time left to spread the remaining kilos over", a unit typed into prose
   // with no number beside it to look wrong.
-  ['app/(trainer)/dashboard.tsx:unit', { count: 2, why:
-    "A client's weight delta on the coach's roster. The coach reads in THEIR unit and the client's " +
-    'delta is stored in kg, so this one needs `useSettings().weightUnit` on the coach side, not the ' +
-    "client's — see app/(trainer)/client-training.tsx, which already distinguishes the two." }],
+  // app/(trainer)/dashboard.tsx:unit — was 2, now 0. Both were a client's weight
+  // delta on the coach's roster, printed with a bare "kg" whatever the coach
+  // reads in. They now go through `weightDeltaIn` with `useSettings().weightUnit`
+  // taken on the COACH side, exactly as the entry said they needed to, and as
+  // app/(trainer)/client-training.tsx already did. The entry is deleted rather
+  // than zeroed: a zero is still an exemption, and there is nothing left to
+  // exempt.
   // app/(client)/calendar.tsx:unit — was 1, now 0. The one-line summary under a
   // logged workout in a day cell reads through `liftLabel` with the member's own
   // unit. Its neighbour, the cardio distance, deliberately does not convert:

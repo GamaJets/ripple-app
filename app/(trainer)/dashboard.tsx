@@ -41,6 +41,10 @@ import { View, Text, Pressable, ScrollView, Modal, TextInput, Alert, Image, Keyb
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { trialInfo } from '../../src/lib/trial';
+import { deltaLabel, movementIsProgress } from '../../src/lib/deltaLabel';
+import { weightDeltaIn, type WeightUnit } from '../../src/lib/units';
+import { useSettings } from '../../src/ui/settings';
+import { goalToEnum } from '../../src/lib/rosterMerge';
 import { billingAvailable } from '../../src/lib/billing';
 import { Icon, type IconName } from '../../src/ui/Icon';
 import { useTheme } from '../../src/ui/components';
@@ -273,6 +277,13 @@ export default function TrainerClients() {
   // refused read reached this screen as an empty list and was announced as
   // "No clients yet" — to a coach who has clients.
   const { roster, status: rosterStatus, addClient, removeClient, setClientMode } = useRoster();
+  // The COACH's unit, not the client's: this roster is read by the coach, and
+  // `weightDelta` is stored in kilograms. Both places it appeared printed a bare
+  // "kg" whatever the coach reads in. `weightDeltaIn` converts the SPAN once —
+  // subtracting two separately rounded pound readings is the bug that helper
+  // exists to prevent. See app/(trainer)/client-training.tsx, which already
+  // draws the same distinction.
+  const coachUnit: WeightUnit = useSettings().weightUnit;
   const rosterUnread = rosterStatus === 'error';
   const { tenant } = useTenant();
   // The signed-in coach. Their own sessions are keyed on this, not on a gym —
@@ -1068,9 +1079,15 @@ export default function TrainerClients() {
                         their weight exactly, which is a measurement nobody
                         took — the same invented zero the rest of this screen
                         renders as a dash. */}
-                    <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: c.weightDelta == null ? t.ink3 : c.weightDelta <= 0 ? t.brand : t.ink3 }} />
+                    {/* `<= 0` painted the accent dot for every client whose
+                        weight had come down — including the ones the coach
+                        recorded as building muscle, and including a delta of
+                        exactly zero, which is not a direction at all. The goal
+                        on the row decides it, and where the goal is unknown or
+                        has no opinion the mark stays neutral. */}
+                    <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: movementIsProgress(c.weightDelta, goalToEnum(c.goal), 'weight') ? t.brand : t.ink3 }} />
                     <Text style={{ ...ty.label, fontWeight: '500', ...numeric, color: t.ink }}>
-                      {c.weightDelta == null ? '—' : `${c.weightDelta > 0 ? '+' : ''}${c.weightDelta} kg`}
+                      {deltaLabel(weightDeltaIn(c.weightDelta, coachUnit), { since: null, unit: coachUnit, noChange: 'No change', noBaseline: '—' })}
                     </Text>
                   </View>
                   {/* Days a week, against what this person's own weeks used to
@@ -1132,7 +1149,7 @@ export default function TrainerClients() {
           {sel && (
             <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 30 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
               <Text style={{ ...ty.title, color: t.ink, textTransform: 'capitalize' }}>{sel.name}</Text>
-              <Text style={{ ...ty.label, color: t.ink3, marginTop: 3, marginBottom: sp.xl }}>{sel.goal} · {sel.weightDelta == null ? 'no scans yet' : `${sel.weightDelta > 0 ? '+' : ''}${sel.weightDelta} kg`} · {sel.adherence != null ? sel.adherence + '% adherence' : 'no check-ins yet'}</Text>
+              <Text style={{ ...ty.label, color: t.ink3, marginTop: 3, marginBottom: sp.xl }}>{sel.goal} · {sel.weightDelta == null ? 'no scans yet' : deltaLabel(weightDeltaIn(sel.weightDelta, coachUnit), { since: null, unit: coachUnit, noChange: 'no change', noBaseline: 'no scans yet' })} · {sel.adherence != null ? sel.adherence + '% adherence' : 'no check-ins yet'}</Text>
 
               <View style={{ marginBottom: sp.xl }}>
                 <SheetHead t={t} title="Delivery" />

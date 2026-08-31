@@ -16,6 +16,7 @@ import { Rule, Section, SectionHead, Ghost, Notice } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, value } from '../../src/theme/scale';
 import { useSettings } from '../../src/ui/settings';
 import { weightDeltaIn } from '../../src/lib/units';
+import { deltaLabel } from '../../src/lib/deltaLabel';
 import { useRoster } from '../../src/ui/roster';
 
 export default function Leaderboard() {
@@ -126,7 +127,7 @@ export default function Leaderboard() {
                     is converted as a SPAN through `weightDeltaIn`, so a genuine
                     0.4 kg move does not alternate between "0 lb" and "1 lb"
                     week to week off the back of nothing the client did. */}
-                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{c.goal} · {`${c.adherence}% adherence`} · {scanned ? `${(c.weightDelta as number) > 0 ? '+' : ''}${weightDeltaIn(c.weightDelta as number, wu)} ${wu}` : 'no scans — progress not counted'}</Text>
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{c.goal} · {`${c.adherence}% adherence`} · {scanned ? deltaLabel(weightDeltaIn(c.weightDelta as number, wu), { since: null, unit: wu, noChange: 'no change', noBaseline: 'no change' }) : 'no scans — progress not counted'}</Text>
                 <View style={{ height: 3, borderRadius: 2, backgroundColor: t.surface3, overflow: 'hidden', marginTop: 7 }}>
                   <View style={{ height: 3, borderRadius: 2, backgroundColor: t.brand, width: `${Math.round((score / maxScore) * 100)}%` }} />
                 </View>

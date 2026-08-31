@@ -21,6 +21,7 @@ import { usePlatformTrainers } from '../../src/ui/trainers';
 import { gymRollup, trainerHealth, type TrainerLike } from '../../src/lib/ownerAnalytics';
 import { riskLabel } from '../../src/lib/status';
 import { HealthPill } from '../../src/ui/charts';
+import { deltaSign } from '../../src/lib/deltaLabel';
 import { useSessionsHistory } from '../../src/ui/useMrrHistory';
 import { cohorts } from '../../src/lib/ownerAnalytics';
 import { ownerReportDoc, shareDoc } from '../../src/lib/exportShare';
@@ -199,7 +200,7 @@ export default function OwnerOverview() {
             : trainersUnread
             ? 'Your trainers could not be read'
             : delta !== 0
-            ? `${delta > 0 ? '+' : '−'}${num(Math.abs(delta))} vs last month`
+            ? `${deltaSign(delta, 0)}${num(Math.abs(delta))} vs last month`
             : roll.payroll30 == null
               ? 'Set a session fee in Ops to value these'
               // Null here also covers "the gym has not set a currency", and an
@@ -231,7 +232,7 @@ export default function OwnerOverview() {
               be drawn as one line. It was printed with a dollar sign in front
               of it, so a month up twelve sessions read "+$12 vs last mo". */}
           <SectionHead title="Sessions Trend"
-            note={delta !== 0 ? `${delta > 0 ? '+' : '−'}${num(Math.abs(delta))} session${Math.abs(delta) === 1 ? '' : 's'} vs last mo` : 'Tracking started'}
+            note={delta !== 0 ? `${deltaSign(delta, 0)}${num(Math.abs(delta))} session${Math.abs(delta) === 1 ? '' : 's'} vs last mo` : 'Tracking started'}
             onPress={() => router.push('/(owner)/revenue')} />
           {months >= 2 ? (
             /* The series goes in WITH its holes, and the months go in with it.
