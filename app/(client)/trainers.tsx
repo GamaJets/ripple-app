@@ -49,7 +49,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Cta, Ghost, Notice } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Cta, Ghost, Notice, PartialRead } from '../../src/ui/kit';
+import { capLimit, capped } from '../../src/lib/rowCap';
 import { sp, layout, radius, hairline, elevation, type as ty, value } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
 import { useInvites } from '../../src/ui/invites';
@@ -97,7 +98,14 @@ export default function FindTrainer() {
   // screen asserted the first in both cases — a client read "No coaches listed
   // yet" off a directory that was full, and concluded there was nobody on
   // Repple to hire. `status` is what the empty state is now gated on.
-  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  // 'partial' is a real state here and the type had no member for it, so a
+  // truncated read arrived as 'ready' and the count at the bottom of the screen
+  // rendered the row cap as the size of the directory. Worse than the count:
+  // the three reads COMPOUND. `trainers` truncating makes `ids` a prefix, the
+  // `profiles` `.in(ids)` a prefix of that, and coaches are silently dropped
+  // from a directory reporting itself complete — a coach who has paid to be
+  // listed simply is not there, and nobody is told.
+  const [status, setStatus] = useState<'loading' | 'ready' | 'partial' | 'error'>('loading');
   const [attempt, setAttempt] = useState(0);
   const [sel, setSel] = useState<Coach | null>(null);
   const [sent, setSent] = useState<Record<string, boolean>>({});
@@ -335,17 +343,28 @@ export default function FindTrainer() {
         // connection arrives as `error` set and `data` null, so a query read for
         // its `data` alone degrades into an empty directory that looks exactly
         // like an honest one. Every read below now checks `error` first.
-        const { data: rows, error: rowsErr } = await supabase
+        // Capped, and ordered so the cut is deterministic rather than
+        // whatever the planner happened to return — two loads of a truncated
+        // directory that disagree about who is in it are worse than one that
+        // is honestly short.
+        const { data: rowData, error: rowsErr } = await supabase
           .from('trainers')
           .select('id, bio, tagline, specialties, session_fee')
-          .eq('listed', true);
+          .eq('listed', true)
+          .order('id', { ascending: true })
+          .limit(capLimit());
         if (cancelled) return;
         if (rowsErr) throw rowsErr;
+        const page = capped((rowData ?? []) as any[]);
+        const rows = page.rows;
 
-        const ids = (rows ?? []).map((r: any) => r.id).filter((id: string) => id !== uid);
-        if (ids.length === 0) { setCoaches([]); setStatus('ready'); return; }
+        const ids = rows.map((r: any) => r.id).filter((id: string) => id !== uid);
+        if (ids.length === 0) { setCoaches([]); setStatus(page.truncated ? 'partial' : 'ready'); return; }
 
-        const { data: profs, error: profsErr } = await supabase.from('profiles').select('id, full_name').in('id', ids);
+        // `.in(ids)` with at most `ROW_CAP` ids can itself come back at the
+        // cap, and a name that did not arrive drops its coach from the list
+        // below — so this one is capped too and its truncation counts.
+        const { data: profs, error: profsErr } = await supabase.from('profiles').select('id, full_name').in('id', ids).limit(capLimit());
         if (cancelled) return;
         // Names live in `profiles`, not in `trainers`, and a coach we cannot name
         // is dropped below as an unfinished profile. So a failure here does not
@@ -354,9 +373,10 @@ export default function FindTrainer() {
         // directory as "No coaches listed yet". Having listings we cannot put a
         // name to is a failed load, and it is reported as one.
         if (profsErr) throw profsErr;
-        const nameById = new Map<string, string>((profs ?? []).map((p: any) => [p.id, p.full_name]));
+        const profPage = capped((profs ?? []) as any[]);
+        const nameById = new Map<string, string>(profPage.rows.map((p: any) => [p.id, p.full_name]));
 
-        const list: Coach[] = (rows ?? [])
+        const list: Coach[] = rows
           .filter((r: any) => ids.includes(r.id))
           .map((r: any) => ({
             id: r.id,
@@ -389,7 +409,7 @@ export default function FindTrainer() {
           }
         }
 
-        if (!cancelled) { setCoaches(list); setStatus('ready'); }
+        if (!cancelled) { setCoaches(list); setStatus(page.truncated || profPage.truncated ? 'partial' : 'ready'); }
 
         // ── the trust surface, in two calls for the whole page ───────────
         //
@@ -614,6 +634,8 @@ export default function FindTrainer() {
                 <Cta label="Try Again" wide onPress={() => setAttempt((n) => n + 1)} />
               </View>
             </Notice>
+          ) : status === 'partial' ? (
+            <PartialRead what="listed coaches" shown={coaches.length} onPress={() => setAttempt((n) => n + 1)} />
           ) : null}
 
           {status === 'loading' ? (

@@ -1111,7 +1111,7 @@ export default function TrainerClients() {
 
               <View style={{ marginTop: sp.md }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
-                  <Text style={{ ...ty.caption, color: t.ink3 }}>Plan adherence</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3 }}>Plan Adherence</Text>
                   <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{c.adherence != null ? c.adherence + '%' : 'no check-ins yet'}</Text>
                 </View>
                 {c.adherence != null ? <Bar t={t} pct={c.adherence} good={c.adherence >= 85} /> : null}

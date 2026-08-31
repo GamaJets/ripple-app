@@ -394,6 +394,29 @@ export default function CoachProfile() {
 
         <Rule />
 
+        {/* ── who is waiting on a reply ──────────────────────────────────── */}
+        {/* Its own section, above everything else here, because it is the thing
+            a coach opens the app to do and it was reachable from nowhere. The
+            chat screen is per-client and needs a clientId, so the only routes
+            into a conversation were a client's own page, a leaderboard row and
+            a push notification — all of which start from a client already
+            chosen. A coach with twenty clients could not find out who had
+            written to them.
+
+            Deliberately NOT next to the Notifications row under Account. The
+            bell is bookings and cancellations; this is people talking, and they
+            are two lists with two different answers. Filing them together is
+            what makes a coach look for a client's message among their booking
+            confirmations. */}
+        <Section>
+          <SectionHead title="Messages" />
+          <ListRow icon="message" title="Messages"
+            note="Every client conversation in one list, newest first, with who is waiting on a reply"
+            onPress={() => router.push('/(trainer)/messages')} />
+        </Section>
+
+        <Rule />
+
         {/* ── what a stranger judges you on ──────────────────────────────── */}
         {/* Directly under the directory opt-in, because this is what the
             directory SHOWS — the toggle above decides whether clients can see

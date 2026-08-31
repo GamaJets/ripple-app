@@ -216,7 +216,10 @@ export default function Goal() {
             ) : null}
 
             <Section>
-              <SectionHead title="Your Goals" note={goals.length ? `${open.length} open` : undefined} />
+              {/* 'partial' falls through the error/loading branches above and reaches
+    here, where `open.length` would be the size of the page rather than of
+    the list. Same rule as every other count in the app. */}
+        <SectionHead title="Your Goals" note={g.status === 'ready' && goals.length ? `${open.length} open` : undefined} />
               {!goals.length ? (
                 <Text style={{ ...ty.body, color: t.ink3 }}>
                   No goals yet. Set one below — a number to work toward, or anything else you’re chasing.

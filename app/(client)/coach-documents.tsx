@@ -49,6 +49,9 @@ export default function ClientCoachDocumentsScreen() {
   const [docs, setDocs] = useState<CoachDoc[]>([]);
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
   const [uid, setUid] = useState<string | null>(null);
+  /** Whether the read failed because nobody is signed in. A different sentence
+   *  from a read that failed on the wire, and a different thing to do about it. */
+  const [signedOut, setSignedOut] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   /** Which document the reader has opened at least once this session. Accepting
    *  is gated on it — see the note on `accept`. */
@@ -57,12 +60,22 @@ export default function ClientCoachDocumentsScreen() {
   const load = useCallback(async () => {
     if (!USE_SUPABASE) { setStatus('ready'); return; }
     try {
+      // Signed out is not 'ready'.
+      //
+      // 'ready' with an empty list is the ONE state that entitles this screen
+      // to say "Your coach hasn't added any paperwork", and a session that had
+      // merely expired landed in exactly it — so somebody with an unsigned
+      // waiver was told there was nothing to sign, which is the sentence the
+      // comment fifteen lines below says this file exists to prevent.
+      // `my_coach_documents` reads as the signed-in user; with no session it
+      // was never called at all.
       const { data: sess } = await supabase.auth.getSession();
-      if (!sess?.session) { setStatus('ready'); return; }
+      if (!sess?.session) { setSignedOut(true); setStatus('error'); return; }
       const { data: auth, error: authErr } = await supabase.auth.getUser();
       if (authErr) { setStatus('error'); return; }
       const id = auth?.user?.id ?? null;
-      if (!id) { setStatus('ready'); return; }
+      if (!id) { setSignedOut(true); setStatus('error'); return; }
+      setSignedOut(false);
       setUid(id);
       const { data, error } = await supabase.rpc('my_coach_documents');
       // An empty list under a failed read means the paperwork could not be
@@ -165,7 +178,9 @@ export default function ClientCoachDocumentsScreen() {
                 exists to prevent. */}
             {status === 'error' ? (
               <Flag tone={t.warn} style={{ marginTop: sp.lg }}>
-                This could not be read just now, so it isn’t a list of what your coach has asked for. Check again when you have signal.
+                {signedOut
+                  ? 'Your coach’s paperwork is only readable once you are signed in, so this screen could not look it up. This is not a list of what your coach has asked for.'
+                  : 'This could not be read just now, so it isn’t a list of what your coach has asked for. Check again when you have signal.'}
               </Flag>
             ) : (
               <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.lg }}>

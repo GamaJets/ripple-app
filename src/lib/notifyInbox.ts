@@ -131,6 +131,43 @@ export function inboxIcon(route: string | null | undefined): InboxIcon {
 }
 
 /**
+ * The heading to draw over a row's body, or null for no heading at all.
+ *
+ * ── The defect this closes ────────────────────────────────────────────────
+ *
+ * `title` is nullable — part 122 added the column and deliberately left it so,
+ * because `notify-message` had been writing rows without one since 2025. The
+ * inbox drew `item.title ?? f.title` for those, and `f.title` is the SCREEN's
+ * name. So a row whose body was "third rep" rendered under the heading
+ * "Notifications", on a screen called Notifications. Two such rows are in
+ * production right now and both look like real, titled notifications that say
+ * nothing.
+ *
+ * Borrowing the screen's name is the worst of the available answers: it is
+ * indistinguishable from a heading somebody wrote, so it does not read as
+ * missing, it reads as content — and the content is a tautology.
+ *
+ * ── Why only the message case gets a fallback ─────────────────────────────
+ *
+ * A heading invented for a row is a claim about that row, and only one kind of
+ * untitled row is actually known. Every title-less row in this table was
+ * written by `notify-message` after a chat message; that is what its
+ * `icon: 'message'` records, and "New message" is a true statement about it.
+ *
+ * Nothing else is guessed. An untitled row that came through notify_users()
+ * with a calendar icon might be a booking or a cancellation, and "Session
+ * update" over a cancellation is a worse lie than no heading, because it is a
+ * plausible one. Those rows return null and the screen draws the body alone,
+ * which is the whole of what is known about them.
+ */
+export function inboxHeading(title: string | null | undefined, icon: InboxIcon): string | null {
+  const t = (title ?? '').trim();
+  if (t) return t;
+  if (icon === 'message') return 'New message';
+  return null;
+}
+
+/**
  * Whether this push should also leave a row in the inbox.
  *
  * `body` matters because the table's body is `not null`: a push with a title
@@ -357,4 +394,153 @@ export function unreadBadge(unread: number, status: LoadStatus): UnreadBadge {
   }
   if (n === 0) return { kind: 'none' };
   return { kind: 'count', label: num(n), a11y: `Notifications. ${num(n)} unread.` };
+}
+
+/* ── What the inbox is allowed to destroy ──────────────────────────────────
+ *
+ * The inbox shipped able to read and to mark read, and with no way to remove
+ * anything, so the list only ever grew. This is the removal half, and the whole
+ * of the difficulty is that a DELETE is a write whose failure looks exactly
+ * like its success.
+ *
+ * Proved against production tonight, `set local role authenticated` with a real
+ * `request.jwt.claims`, every fixture rolled back:
+ *
+ *   C deletes D's row by id                      0 rows, NO ERROR
+ *   C marks D's row unread by id                 0 rows, NO ERROR
+ *   anon deletes every row in the table          0 rows, NO ERROR
+ *   C deletes their own row                      1 row
+ *
+ * Four different meanings — a stranger's row, a stale id, a signed-out caller,
+ * a real deletion — and three of them are the same answer. src/lib/wroteRows.ts
+ * is what turns the count into a sentence; this decides whether the control may
+ * be offered at all, which is the part that depends on LoadStatus.
+ *
+ * ── Why the gate is a function of LoadStatus and not a boolean ────────────
+ *
+ * 'loading' — nothing has come back. Anything on screen is a cached copy, and
+ *             a delete keyed on a cached id cannot be told apart from a stale
+ *             one. There is also nothing established to destroy yet.
+ *
+ * 'ready'   — the whole set, from the server. Everything is offered. This is
+ *             the only status under which "Clear Read" can name a NUMBER in
+ *             its confirmation and have that number be the truth.
+ *
+ * 'partial' — the rows are real but they are a prefix (src/lib/rowCap.ts).
+ *             Per-row removal is fine: each row named came back from the server
+ *             in THIS read, so "we read it and the delete matched nothing" is a
+ *             genuine failure and is reported as one.
+ *
+ *             "Clear Read" is REFUSED here, and this is the decision worth
+ *             arguing with. `delete where read = true` would sweep rows past
+ *             the cap that were never on screen, while the confirmation could
+ *             only offer a count taken over the prefix — asking somebody to
+ *             approve deleting 200 things and then deleting 1,400. That is a
+ *             figure computed from an unknown fraction of the set, which
+ *             src/ui/loadStatus.ts forbids, aimed at a destructive irreversible
+ *             action. Refused, and the screen says why rather than going quiet.
+ *
+ * 'error'   — the server did not answer. The list is a cache of unknown age; an
+ *             empty one means "could not be read", never "you have none". A
+ *             delete here cannot be confirmed either way, and a row vanishing
+ *             off a screen that already says "not confirmed" would be the app
+ *             inventing a fact. Nothing is offered.
+ */
+export interface InboxControls {
+  /** May a single row be removed? */
+  rowDelete: boolean;
+  /** May a single row be put back to unread? */
+  markUnread: boolean;
+  /** May "Clear Read" be offered? */
+  clearRead: boolean;
+  /** Why a control is withheld, in the reader's words. Null when everything is
+   *  offered. Shown on the screen — a control that silently disappears reads as
+   *  a bug, and under 'error' the reason is the whole point. */
+  withheld: string | null;
+}
+
+export function inboxControls(status: LoadStatus): InboxControls {
+  if (status === 'error') {
+    return {
+      rowDelete: false, markUnread: false, clearRead: false,
+      withheld: 'Removing is off while this list is unconfirmed. The server did not answer, so nothing here can be shown to have been deleted.',
+    };
+  }
+  if (status === 'loading') {
+    return { rowDelete: false, markUnread: false, clearRead: false, withheld: null };
+  }
+  if (status === 'partial') {
+    return {
+      rowDelete: true, markUnread: true, clearRead: false,
+      withheld: 'Clearing read notifications is off while this is only part of the list. It would remove notifications that are not on this screen and cannot be counted here.',
+    };
+  }
+  return { rowDelete: true, markUnread: true, clearRead: true, withheld: null };
+}
+
+/**
+ * The confirmation for "Clear Read", or null when there is nothing to offer.
+ *
+ * A single row is removed on one tap and this is not (see the note above
+ * `deletedNote`), so this one is confirmed and the confirmation names the
+ * figure. `num()` because it is a count of rows in a table with no ceiling and
+ * `1204 read notifications` is the defect scripts/check-numbers.mjs exists for.
+ *
+ * `readCount` is counted over the rows in hand, which is why this refuses
+ * anything but 'ready': under any other status that number is not the number
+ * the delete would match.
+ */
+export function clearReadPrompt(
+  readCount: number,
+  status: LoadStatus,
+): { label: string; title: string; message: string; confirm: string } | null {
+  if (!inboxControls(status).clearRead) return null;
+  const n = Number.isFinite(readCount) && readCount > 0 ? Math.floor(readCount) : 0;
+  if (n === 0) return null;
+  const one = n === 1;
+  return {
+    label: 'Clear Read',
+    // Title Case for the heading, sentence case for the sentence under it.
+    title: one ? 'Delete the read notification?' : `Delete ${num(n)} read notifications?`,
+    // Says what is NOT touched, because the fear this control raises is that it
+    // takes the unread ones too — and says the thing is gone for good, because
+    // it is: there is no undo and no copy anywhere else.
+    message: one
+      ? 'It will be removed from your inbox for good. Anything still unread stays where it is.'
+      : `They will be removed from your inbox for good. Anything still unread stays where it is.`,
+    confirm: one ? 'Delete' : 'Delete Them',
+  };
+}
+
+/**
+ * What to say after removing one row.
+ *
+ * Only the failure is worth a sentence: the row leaving the list IS the success
+ * message, and a "Deleted." note under a list that visibly shrank is noise. So
+ * this returns null when it worked, and the sentence names the row when it did
+ * not, because by then the row is back on screen and the reader needs to know
+ * which one and why.
+ *
+ * `why` comes from src/lib/wroteRows.ts. It is passed in rather than rebuilt so
+ * that "the server accepted the request and matched no rows" is worded once in
+ * this codebase.
+ */
+export function deletedNote(what: string, why: string | null): string | null {
+  if (!why) return null;
+  return `${what} is still in your inbox. ${why}`;
+}
+
+/**
+ * What to say after "Clear Read".
+ *
+ * Three outcomes and three sentences, the same shape `markAllRead` reports in,
+ * and for the same reason: a bulk write that matched nothing answers 204 with a
+ * Content-Range header of zero rows, which is what an RLS refusal answers too.
+ * "Done" would be a claim the server never made.
+ */
+export function clearedNote(ok: boolean, changed: number): string {
+  if (!ok) return 'Nothing was deleted — the server did not answer. Your inbox is unchanged.';
+  const n = Number.isFinite(changed) && changed > 0 ? Math.floor(changed) : 0;
+  if (n === 0) return 'Nothing was deleted. There was nothing marked read to remove.';
+  return n === 1 ? 'One read notification deleted.' : `${num(n)} read notifications deleted.`;
 }

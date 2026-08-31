@@ -236,6 +236,13 @@ export const TRAINER_NAV: NavItem[] = [
   // Sign out lives here, and it was findable from nowhere.
   { key: 'settings', label: 'Settings', note: 'Account, sign out, your data & version', route: '/(trainer)/settings', icon: 'settings', keywords: 'settings account sign out signout log out logout export my data delete account version build units' },
   { key: 'notifications', label: 'Notifications', note: 'Bookings, cancellations and anything sent to you', route: '/(trainer)/notifications', icon: 'bell', keywords: 'notification notifications inbox alerts push updates announcements unread bell' },
+  // The coach's thread list. It carries 'inbox' and 'unread' as keywords even
+  // though the row above does too, and that is deliberate rather than sloppy:
+  // both are words a coach uses for this, and a search that returns only the
+  // bell for "unread" sends somebody looking for a client's message to a list
+  // of booking confirmations they cannot reply from. The notes are what
+  // separate them.
+  { key: 'messages', label: 'Messages', note: 'Every client conversation, and who is waiting on a reply', route: '/(trainer)/messages', icon: 'message', keywords: 'message messages chat thread threads conversation conversations inbox unread reply client dm talk wrote' },
 ];
 
 export const OWNER_NAV: NavItem[] = [

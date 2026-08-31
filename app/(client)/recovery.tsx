@@ -309,7 +309,14 @@ export default function Recovery() {
    unit={goalCups != null ? `of ${goalCups} glasses` : cups === 1 ? 'glass today' : 'glasses today'}
    arc={pct == null ? undefined : pct / 100}
    arcLabel="recovered"
-   note={goalCups == null
+   // "Goal met today — nice." is a congratulation, and a filled ring is the
+   // same congratulation without words. Both were drawn from a count the
+   // caveat underneath admits may be missing glasses logged on another device
+   // — so under a failed water read the qualification arrived after the claim
+   // it qualifies. It now leads.
+   note={waterStatus === 'error'
+    ? 'Counted on this phone only — we couldn’t check it against your account.'
+    : goalCups == null
     ? 'No daily goal set — set one on Daily habits and this fills against it.'
     : cups >= goalCups ? 'Goal met today — nice.' : `${goalCups - cups} more to hit today's goal.`}
    onPress={goalCups == null ? () => router.push('/(client)/habits') : undefined}
@@ -503,10 +510,18 @@ export default function Recovery() {
 
   {/* ── logged recovery sessions ─────────────────────────────────────── */}
   <Section>
-   <SectionHead title="Recovery Sessions" note={recoverySessions.length ? `${recoverySessions.length} recent` : undefined} />
+   <SectionHead title="Recovery Sessions" note={isWhole(logStatus) && recoverySessions.length ? `${recoverySessions.length} recent` : undefined} />
    {logStatus === 'error' ? (
     <Text style={{ ...ty.label, color: t.ink2 }}>
      Your sessions could not be read, so none are shown. That is not the same as having logged none.
+    </Text>
+   ) : logStatus !== 'ready' ? (
+    // 'loading' and 'partial' both fell through to "Nothing logged yet", which
+    // is a claim about the member's log rather than about this read.
+    <Text style={{ ...ty.label, color: t.ink2 }}>
+     {logStatus === 'loading'
+      ? 'Reading your sessions…'
+      : 'Your log goes further back than this screen can read in one go, so recent recovery sessions may be missing from this list.'}
     </Text>
    ) : recoverySessions.length === 0 ? (
     <Text style={{ ...ty.label, color: t.ink3 }}>

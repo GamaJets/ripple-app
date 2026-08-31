@@ -299,7 +299,12 @@ export default function Library() {
     <Section>
      <SectionHead
       title="All Exercises"
-      note={cat.status === 'ready' || cat.status === 'partial' ? `${catList.length} of ${cat.rows.length}` : undefined}
+      // 'partial' was opted IN to this figure, and loadStatus.ts is explicit
+              // that it must not be: under truncation `cat.rows.length` is exactly
+              // the cap, so "50 of 1,000" reads as the size of the catalogue. The
+              // PartialRead banner below already says the list is not all of it;
+              // this is the figure it was warning about.
+              note={cat.status === 'ready' ? `${catList.length} of ${cat.rows.length}` : undefined}
      />
      {cat.status === 'loading' ? (
       <Text style={{ ...ty.label, color: t.ink3 }}>Reading the exercise catalogue…</Text>

@@ -1309,7 +1309,7 @@ export default function Train() {
                             ) : null}
                             <Pressable onPress={() => { tapLight(); setHrEntry(l); }} accessibilityRole="button" accessibilityLabel={'Heart rate for ' + l.exercise} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: sp.md, alignSelf: 'flex-start', backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 7 }}>
                               <Icon name="heart" size={13} color={t.brand} />
-                              <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>Heart rate</Text>
+                              <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>Heart Rate</Text>
                             </Pressable>
                           </View>
                         </View>
@@ -1372,7 +1372,7 @@ export default function Train() {
           <TextInput value={cxName} onChangeText={setCxName} autoFocus returnKeyType="done" onSubmitEditing={commitCx} blurOnSubmit={false} placeholder="Exercise name (e.g. Cable fly)" placeholderTextColor={t.ink3} style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 12, marginBottom: sp.md }} />
           <View style={{ flexDirection: 'row', gap: sp.md, marginBottom: sp.lg }}>
             <View style={{ flex: 1 }}><Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.xs }}>Target sets</Text><TextInput value={cxSets} onChangeText={setCxSets} keyboardType="numeric" placeholderTextColor={t.ink3} style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 }} /></View>
-            <View style={{ flex: 1 }}><Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.xs }}>Target reps</Text><TextInput value={cxReps} onChangeText={setCxReps} keyboardType="numeric" placeholderTextColor={t.ink3} style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 }} /></View>
+            <View style={{ flex: 1 }}><Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.xs }}>Target Reps</Text><TextInput value={cxReps} onChangeText={setCxReps} keyboardType="numeric" placeholderTextColor={t.ink3} style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 }} /></View>
           </View>
           <Pressable disabled={!cxName.trim()} onPress={commitCx} style={{ backgroundColor: cxName.trim() ? t.brand : t.surface2, borderRadius: radius.sm, paddingVertical: 13, alignItems: 'center', marginBottom: sp.sm }}>
             <Text style={{ ...ty.label, fontWeight: '600', color: cxName.trim() ? t.brandInk : t.ink3 }}>{editingKey ? 'Save changes' : 'Add to today'}</Text>
@@ -1529,7 +1529,7 @@ function ZonePanel({ t, liveZone, liveSample, zoneSecs }: {
   if (!liveZone && !hasZones) {
     return (
       <View style={{ marginTop: sp.xl, paddingVertical: sp.md, paddingHorizontal: sp.md, backgroundColor: t.surface2, borderRadius: radius.sm }}>
-        <Text style={{ ...ty.label, fontWeight: '600', color: t.ink }}>Heart-rate zones</Text>
+        <Text style={{ ...ty.label, fontWeight: '600', color: t.ink }}>Heart-rate Zones</Text>
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
           Connect a watch under Train → Watch &amp; devices and your zones appear here live while you train.
         </Text>

@@ -21901,3 +21901,147 @@ comment on function public.coach_threads() is
 -- call it. All three are named.
 revoke execute on function public.coach_threads() from public, anon;
 grant execute on function public.coach_threads() to authenticated;
+
+-- ▶ a-notification-you-can-throw-away.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- A notification you can throw away.
+--
+-- The inbox shipped tonight (part 122, src/ui/notifications.tsx) can read and
+-- can mark read. It cannot remove anything, so the list only ever grows: a
+-- member who has been at a gym two years and never deletes a thing has every
+-- cancellation, every offer and every invoice from those two years in one
+-- scrolling column. This is the database half of giving them a delete.
+--
+-- ── What the feature needed: NOTHING. Measured, not assumed ────────────────
+--
+-- Before writing a line, the two questions the house rule asks — is there a
+-- DELETE policy, and is there a grant behind it, because RLS NARROWS a grant
+-- and never creates one:
+--
+--   policy   notif_self, `for all using (user_id = auth.uid())`. FOR ALL
+--            covers DELETE. It has covered DELETE since 01-schema.sql.
+--   grant    `authenticated` holds DELETE on public.notifications.
+--   index    notifications_user_id_read_idx is (user_id, read) — exactly the
+--            predicate the bulk "clear read" delete uses. Nothing to add.
+--
+-- So no policy and no grant is created here, and no new function either. The
+-- per-row delete is a PostgREST `delete({ count: 'exact' }).eq('id', …)` and
+-- the bulk one is `.eq('user_id', me).eq('read', true)`; both come back with a
+-- row count, which is the only thing that separates a refusal from a no-op, so
+-- neither needs the RPC treatment mark_notifications_read() got. There is
+-- consequently no SECURITY DEFINER function in this file to pin a search_path
+-- on or revoke from public and anon — a fact worth writing down, because "no
+-- new function" is the cheapest possible answer to the question and it is only
+-- available if somebody checks whether one is needed.
+--
+-- Proved live before this file was written, `set local role authenticated`
+-- with a real request.jwt.claims, fixtures rolled back, on two accounts that
+-- hold no production notification between them:
+--
+--   C deletes their own unread row                    1 row
+--   C "clear read": delete where read = true          2 rows (both C's)
+--   D's rows after C cleared                          2, untouched
+--   C deletes D's row by id                           0 rows, NO ERROR
+--   C marks D's row unread by id                      0 rows, NO ERROR
+--   D marks their OWN read row unread                 1 row
+--   D "clear read" after that                         0 rows — the row D
+--                                                     un-read is protected by
+--                                                     being unread, which is
+--                                                     the point of the control
+--
+-- The three real notification rows in this table were counted either side and
+-- fingerprinted by id: 3 rows / e00cfbbc88772574ce41e3c40641a43c before, and
+-- the identical count and fingerprint after. Nothing of anybody's was touched.
+--
+-- ── What this file DOES change, and why it is worth a part ────────────────
+--
+-- Two things found while measuring the above. Neither blocks the feature;
+-- both are the shape 147-a-price-list-is-not-a-public-document.sql closed on
+-- four other tables, and this table has just acquired a user-facing,
+-- irreversible destructive path, which is the moment to look at it.
+--
+--   1 · `anon` held DELETE, INSERT, SELECT and UPDATE on public.notifications.
+--
+--       The stock grant class 119-revoke-truncate.sql found on 80 of 89 tables
+--       and deliberately left standing. `anon` is the publishable key compiled
+--       into the shipped app, and the only thing standing between it and this
+--       table is notif_self — which denies it, because auth.uid() is null for
+--       an unauthenticated caller and `user_id = null` matches nothing.
+--
+--       RLS was doing all of the work, and the table was one dropped or
+--       loosened policy away from every notification in the product being
+--       readable, and now deletable, by anybody holding a key that ships inside
+--       an App Store binary. That is exactly what part 147 found on
+--       stripe_webhook_events and fixed for the same reason.
+--
+--       Measured, and note the shape of the BEFORE, which is the whole
+--       argument for the change:
+--
+--                          BEFORE                     AFTER
+--         anon SELECT      0 rows, NO ERROR           REFUSED 42501
+--         anon DELETE      0 rows, NO ERROR           REFUSED 42501
+--         anon INSERT      REFUSED 42501 (RLS)        REFUSED 42501 (grant)
+--
+--       A silent empty set is the wrong answer to a caller with no business
+--       here. It is also indistinguishable — over PostgREST it is a 204 with a
+--       Content-Range of zero rows — from a signed-in user deleting a row that
+--       is not theirs, and from a signed-in user deleting a row that is theirs
+--       and has already gone. The app now has a control that has to tell those
+--       apart; removing one of the ways to produce that answer is worth doing
+--       on the same night.
+--
+--   2 · notif_self applied to {public} rather than to `authenticated`.
+--
+--       Which is what let `anon` reach the policy at all, and what would let
+--       the next stock ALTER DEFAULT PRIVILEGES grant reach it again. Part 147
+--       moved pkg_read and pkg_write for precisely this reason: "that is not
+--       cosmetic: it is what stops the next stock `anon` grant from reaching
+--       them."
+--
+--       The policy is otherwise UNCHANGED in what it permits. The one addition
+--       is an explicit `with check`, which is not a narrowing: a FOR ALL policy
+--       with no with_check already uses its USING expression as the check, so
+--       this writes down what Postgres was already doing. Part 122's whole
+--       design rests on that behaviour — "an authenticated client may insert
+--       notifications for THEMSELVES and nobody else, which is exactly
+--       backwards for this feature", which is why notify_users() exists — so
+--       making it explicit rather than emergent is worth the two lines.
+--
+-- ── Nothing legitimate loses a door. Enumerated, then proved ──────────────
+--
+--   the `notify-message` edge function   SERVICE_ROLE key (supabase/functions/
+--                                        notify-message/index.ts line 24).
+--                                        Bypasses RLS and holds its own grant.
+--   notify_users()                       SECURITY DEFINER, owned by postgres,
+--                                        granted to authenticated only.
+--   mark_notifications_read()            SECURITY INVOKER, granted to
+--                                        authenticated, and reads the table as
+--                                        the caller — so it needs the
+--                                        `authenticated` grants, which are
+--                                        untouched here.
+--   the three inbox screens              all authenticated.
+--
+-- There is no unauthenticated reader or writer of this table anywhere in the
+-- repository. Proved after the change, in the same rolled-back transaction:
+--
+--   C SELECTs their own notifications                 1 row
+--   C DELETEs their own row                           1 row
+--   a signed-in stranger DELETEs C's row              0 rows, NO ERROR
+--   C calls mark_notifications_read()                 1
+--   C calls notify_users() addressed to themselves    1 row written
+--   C INSERTs a row for a stranger, directly          REFUSED 42501 (RLS) —
+--                                                     still backwards, still
+--                                                     what part 122 relies on
+--
+-- Idempotent. Safe to re-run.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+revoke select, insert, update, delete on public.notifications from anon;
+
+drop policy if exists notif_self on public.notifications;
+create policy notif_self on public.notifications
+  for all
+  to authenticated
+  using (user_id = (select auth.uid()))
+  with check (user_id = (select auth.uid()));

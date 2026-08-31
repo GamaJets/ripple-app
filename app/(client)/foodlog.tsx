@@ -261,7 +261,13 @@ export default function FoodLog() {
  const burn = target ? dayBurn(target, wToday) : null;
  const burned = burn?.burned ?? 0;
  // Same function the Meals tab calls, so the two cannot drift apart again.
- const remK = target ? caloriesLeft(target.kcal, tot.k, burned, burn?.budgeted ?? 0, burn?.kind).net : 0;
+ // null, not 0, when there is no target to subtract from. `dayWhole` is true
+ // for a member with no weight on record — the log read perfectly well — so the
+ // hero rendered "Calories Remaining · 0 kcal" over its own note saying "add
+ // your weight for a target", and `fig(0)` is the string "0" rather than a
+ // dash. The screen contradicted itself: a fabricated figure above an honest
+ // caption.
+ const remK = target ? caloriesLeft(target.kcal, tot.k, burned, burn?.budgeted ?? 0, burn?.kind).net : null;
 
  const fillEst = (n: string, k: number, p: number, c: number, f: number) => { setEstN(n); setEstK(String(k)); setEstP(String(p)); setEstC(String(c)); setEstF(String(f)); setReadFailed(false); setReading(false); };
  const takeMealPhoto = async (fromCamera: boolean) => {
@@ -331,15 +337,15 @@ export default function FoodLog() {
 
  {/* ── the hero: what is left in the day ──────────────────────────── */}
  <Hero
- label={remK >= 0 ? 'Calories Remaining' : 'Calories Over'}
- figure={dayWhole ? fig(Math.abs(remK)) : fig(null)}
+ label={remK == null ? 'Calories Eaten' : remK >= 0 ? 'Calories Remaining' : 'Calories Over'}
+ figure={!dayWhole ? fig(null) : remK == null ? fig(tot.k) : fig(Math.abs(remK))}
  unit="kcal"
  note={!dayWhole
   ? "We couldn't read all of today's log, so anything already eaten may be missing from this. What is listed below is real; the number left in the day is not something we can work out yet."
   : (target ? `${num(tot.k)} of ${num(target.kcal)} kcal eaten${burned ? ` · ${num(burned)} kcal burned` : ''}` : `${num(tot.k)} kcal eaten${burned ? ` · ${num(burned)} kcal burned` : ''} · add your weight for a target`)}
  arc={dayWhole && target && target.kcal ? tot.k / target.kcal : undefined}
  arcLabel="of today's calories eaten"
- tone={dayWhole && remK < 0 ? t.crit : undefined}
+ tone={dayWhole && remK != null && remK < 0 ? t.crit : undefined}
  />
 
  <Rule />

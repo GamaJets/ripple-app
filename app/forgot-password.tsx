@@ -79,7 +79,7 @@ export default function ForgotPassword() {
                 <Cta wide disabled={!canGo} onPress={send} label={busy ? 'Sending…' : 'Send Reset Link'} />
               </View>
               <Pressable onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Back to sign in" style={{ marginTop: sp.lg, alignItems: 'center', paddingVertical: sp.sm }}>
-                <Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>Back to sign in</Text>
+                <Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>Back to Sign In</Text>
               </Pressable>
               {!USE_SUPABASE ? (
                 <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.lg }}>Demo mode — no email is actually sent. Real reset links go out once the backend is connected.</Text>

@@ -825,8 +825,15 @@ export default function Scans() {
           // order, and the movement clause names the day it is measured FROM
           // rather than saying "your previous scan" and hoping.
           note={bfNow
+            // Zero is its own case. `bfMove <= 0` put a minus sign in front of
+            // it, so a reading that had not moved at all rendered as "−0%
+            // since Aug 25" — which reads as a small drop, and is the kind of
+            // small drop somebody is pleased about. There is no such thing as
+            // negative nothing.
             ? (bfMove !== null && bfWas
-                ? `${bfMove <= 0 ? '−' : '+'}${Math.abs(bfMove)}% since ${bodyDayLabel(bfWas.at)} · `
+                ? (bfMove === 0
+                    ? `No change since ${bodyDayLabel(bfWas.at)} · `
+                    : `${bfMove < 0 ? '−' : '+'}${Math.abs(bfMove)}% since ${bodyDayLabel(bfWas.at)} · `)
                 : 'First reading · ') + measuredNote(bfNow, today)
             : scansReading ? 'Reading your scans…'
             : !scansWhole ? 'Your scans could not be read in full — this is not a body with nothing measured on it.'
@@ -1227,7 +1234,7 @@ export default function Scans() {
             </View>
             <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>Snap or upload your report, pick the scan date, enter the numbers.</Text>
             <View style={{ flexDirection: 'row', gap: sp.md, marginBottom: sp.md }}>
-              <Pressable accessibilityLabel="Take a progress photo" accessibilityRole="button" onPress={() => pick(true)} style={{ flex: 1, backgroundColor: t.surface2, borderRadius: radius.md, paddingVertical: sp.lg, alignItems: 'center', gap: 5 }}><Icon name="camera" size={22} color={t.ink} /><Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>Take photo</Text></Pressable>
+              <Pressable accessibilityLabel="Take a progress photo" accessibilityRole="button" onPress={() => pick(true)} style={{ flex: 1, backgroundColor: t.surface2, borderRadius: radius.md, paddingVertical: sp.lg, alignItems: 'center', gap: 5 }}><Icon name="camera" size={22} color={t.ink} /><Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>Take Photo</Text></Pressable>
               <Pressable accessibilityLabel="Add photo from library" accessibilityRole="button" onPress={() => pick(false)} style={{ flex: 1, backgroundColor: t.surface2, borderRadius: radius.md, paddingVertical: sp.lg, alignItems: 'center', gap: 5 }}><Icon name="plus" size={22} color={t.ink} /><Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>Upload scan</Text></Pressable>
             </View>
             {img && (

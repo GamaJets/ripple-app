@@ -399,7 +399,7 @@ export default function OwnerRota() {
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
           <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setAddOpen(false)} />
           <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter }}>
-            <Text style={{ ...ty.head, color: t.ink }}>Add a shift</Text>
+            <Text style={{ ...ty.head, color: t.ink }}>Add a Shift</Text>
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>
               One row per block on the floor. Shifts are written for this week only — cover and
               swaps are edits to a single day, not to a pattern.

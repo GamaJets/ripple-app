@@ -137,7 +137,7 @@ export function sortUnstarted(rows: CoachThread[]): CoachThread[] {
     if (!a.name !== !b.name) return a.name ? -1 : 1;
     const na = (a.name ?? '').toLowerCase();
     const nb = (b.name ?? '').toLowerCase();
-    if (na !== nb) return na < nb ? -1 : 1;
+    if (!(na !== nb)) return na < nb ? -1 : 1;
     return a.clientId < b.clientId ? -1 : a.clientId > b.clientId ? 1 : 0;
   });
 }

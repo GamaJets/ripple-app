@@ -181,7 +181,19 @@ eq(threadPreview(thread()).text, 'No messages yet', 'a client with no thread say
   eq(threadWhen('2026-08-31T19:45:00Z', now), '15m', 'minutes');
   eq(threadWhen('2026-08-31T17:00:00Z', now), '3h', 'hours');
   eq(threadWhen('2026-08-29T20:00:00Z', now), '2d', 'days');
-  eq(threadWhen('2026-08-20T20:00:00Z', now), '20/8', 'past a week, a date rather than arithmetic');
+  // Past a week it is a date rather than arithmetic — and the date is the
+  // READER's, so this is stated against the local calendar rather than against
+  // a literal. `npm run test:zones` runs the suite in Los Angeles, Auckland and
+  // Dubai, and 2026-08-20T20:00:00Z is the 20th in one of those and the 21st in
+  // the other two; a hardcoded '20/8' asserts a timezone, not a format. The
+  // `+ 1` on the month is what this is really guarding: getMonth() is 0-based
+  // and every date in the app has been off by a month for it at least once.
+  {
+    const iso = '2026-08-20T20:00:00Z';
+    const d = new Date(Date.parse(iso));
+    eq(threadWhen(iso, now), `${d.getDate()}/${d.getMonth() + 1}`, 'past a week, the local day and month');
+    ok(/^\d{1,2}\/\d{1,2}$/.test(threadWhen(iso, now) ?? ''), 'and it is a date, not a duration');
+  }
   // A clock that puts the message in the future must not print "-3m".
   eq(threadWhen('2026-08-31T20:05:00Z', now), 'now', 'a message from the future reads as now, not as a negative');
   eq(threadWhen(null, now), null, 'no timestamp, no label');

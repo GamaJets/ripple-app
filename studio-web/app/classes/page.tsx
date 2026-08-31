@@ -95,6 +95,12 @@ interface Trainer { id: string; name: string | null }
 export default function Classes() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
   const [gymName, setGymName] = useState<string | null>(null);
+  // Whether the gym's NAME could not be READ, as distinct from there being no
+  // gym. The read below still drops the error into a `no-error-ok:` — no figure
+  // on this page depends on the name — but the rail printed "No gym linked" for
+  // either, and that is a sentence about the owner's ACCOUNT produced by a
+  // query that failed. Carrying this one bit is what lets the rail say which.
+  const [gymNameUnread, setGymNameUnread] = useState(false);
   const [classes, setClasses] = useState<GymClass[] | null>(null);
   const [trainers, setTrainers] = useState<Trainer[] | null>(null);
   const [upcoming, setUpcoming] = useState<number | null>(null);
@@ -142,9 +148,11 @@ export default function Classes() {
       if (!live) return;
       setMe(who);
       if (!who?.tenantId) { setClasses([]); setTrainers([]); setUpcoming(0); return; }
-      // no-error-ok: the gym's name is a header label; without it the header is blank and every figure below is unaffected
-      const { data: t } = await supabase.from('tenants').select('name').eq('id', who.tenantId).single();
-      if (live) setGymName(t?.name ?? null);
+      // The error is now read off the result. Not because the name matters — it is
+      // a label — but because "we could not ask" and "there is no gym" must not
+      // arrive at the rail as the same null. See the Shell's gymNameUnread prop.
+      const { data: t, error: tErr } = await supabase.from('tenants').select('name').eq('id', who.tenantId).single();
+      if (live) { setGymName(tErr ? null : t?.name ?? null); setGymNameUnread(!!tErr); }
       await load(who.tenantId, days);
     })();
     return () => { live = false; };
@@ -196,7 +204,7 @@ export default function Classes() {
 
   if (me.roleUnknown) {
     return (
-      <Shell me={me} gymName={gymName} current="/classes">
+      <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/classes">
         <h1>We could not read your account</h1>
         <p style={{ color: 'var(--ink2)', marginTop: 8, maxWidth: '62ch' }}>
           Your profile did not load, so this console does not know what you are —
@@ -209,7 +217,7 @@ export default function Classes() {
 
   if (me.role !== 'owner') {
     return (
-      <Shell me={me} gymName={gymName} current="/classes">
+      <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/classes">
         <h1>Not your console</h1>
         <p style={{ color: 'var(--ink2)', marginTop: 10 }}>
           Class performance across every coach is an owner's screen. Your own classes and their
@@ -240,7 +248,7 @@ export default function Classes() {
   const unmarked = (classes ?? []).filter((c) => c.booked > 0 && c.attended === 0);
 
   return (
-    <Shell me={me} gymName={gymName} current="/classes">
+    <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/classes">
       <h1>Classes</h1>
       <p style={{ color: 'var(--ink3)', marginTop: 6, fontSize: 13 }}>
         Fill is how much of the room sold. Show is how much of what sold turned up. They are

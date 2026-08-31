@@ -192,7 +192,10 @@ export default function Measurements() {
 
   {/* ── history ─────────────────────────────────────────────────────── */}
   <Section>
-   <SectionHead title="History" note={entries.length ? `${entries.length} entries` : undefined} />
+   {/* `${entries.length} entries` over a truncated read prints the cap as a
+     total. `readFailed` is 'error' only, and that is right for the LIST —
+     the rows are real — but a count over them is not. */}
+        <SectionHead title="History" note={status === 'ready' && entries.length ? `${entries.length} entries` : undefined} />
    {entries.length === 0 ? (
     <Text style={{ ...ty.label, color: t.ink3 }}>{readFailed
      ? 'Your measurement history could not be read, so nothing is listed here. That is not the same as having none — try again once you have a connection, and it will be exactly as you left it.'

@@ -16,8 +16,10 @@
 //      untrusted on the way out of the database, exactly as a route param is in
 //      src/lib/backTo.ts.
 import {
-  KNOWN_PUSHES, inboxAge, inboxDecision, inboxIcon, safeRoute, unreadBadge, type InboxIcon,
+  KNOWN_PUSHES, inboxAge, inboxDecision, inboxIcon, inboxHeading, safeRoute, unreadBadge,
+  inboxControls, clearReadPrompt, deletedNote, clearedNote, type InboxIcon,
 } from './notifyInbox';
+import { writeFailure } from './wroteRows';
 import type { LoadStatus } from '../ui/loadStatus';
 
 const errors: string[] = [];
@@ -273,6 +275,207 @@ for (const st of STATUSES) {
       `${st}/${n}: a drawn mark says what it means`);
     if (b.kind === 'count') ok(!/^\d{4,}$/.test(b.label), `${st}/${n}: “${b.label}” carries its separator`);
   }
+}
+
+/* ── the heading a row is drawn with ────────────────────────────────────────
+ *
+ * The defect: `notifications.title` is nullable and the inbox drew
+ * `item.title ?? f.title`, where `f.title` is the SCREEN's own name. Two rows
+ * in production render right now as a heading reading "Notifications" over a
+ * body reading "third rep", on a screen called Notifications. It does not look
+ * like a missing heading — it looks like a real one that says nothing.
+ */
+
+eq(inboxHeading('Session cancelled', 'calendar'), 'Session cancelled', 'a row with a heading keeps it');
+eq(inboxHeading('  Session cancelled  ', 'calendar'), 'Session cancelled', 'a heading is trimmed, not rejected');
+
+// The one untitled kind that is actually known. Every title-less row in this
+// table was written by notify-message after a chat message, which is what its
+// icon records, so this is a true sentence about it and not a guess.
+eq(inboxHeading(null, 'message'), 'New message', 'an untitled chat row says what it is');
+eq(inboxHeading('', 'message'), 'New message', 'an empty title is no title');
+eq(inboxHeading('   ', 'message'), 'New message', 'a whitespace title is no title');
+eq(inboxHeading(undefined, 'message'), 'New message', 'a missing title is no title');
+
+// Everything else draws no heading rather than an invented one. "Session
+// update" over a cancellation is a worse lie than silence, because it is
+// plausible enough to be believed.
+eq(inboxHeading(null, 'calendar'), null, 'an untitled calendar row is not given a guessed heading');
+eq(inboxHeading(null, 'bell'), null, 'an untitled unclassified row draws no heading');
+eq(inboxHeading(null, 'sparkle'), null, 'an untitled offer draws no heading');
+eq(inboxHeading(null, 'pencil'), null, 'an untitled intake ask draws no heading');
+
+// The actual regression guard: whatever this returns, it is never the name of
+// the screen it is drawn on. All three apps call that screen "Notifications".
+const EVERY_ICON: InboxIcon[] = ['bell', 'calendar', 'message', 'sparkle', 'heart', 'dumbbell', 'trophy', 'info', 'pencil'];
+for (const ic of EVERY_ICON) {
+  const h = inboxHeading(null, ic);
+  ok(h !== 'Notifications', `an untitled ${ic} row does not borrow the screen's name`);
+  ok(h === null || h.length > 0, `an untitled ${ic} row draws a real heading or none at all`);
+}
+// And a row that genuinely IS titled "Notifications" keeps it — the rule is
+// about the fallback, not about censoring a word.
+eq(inboxHeading('Notifications', 'bell'), 'Notifications', 'a real heading is never second-guessed');
+
+/* ── what the inbox may destroy ─────────────────────────────────────────────
+ *
+ * A DELETE is a write whose failure looks exactly like its success — proved
+ * live: a stranger deleting another account's notification comes back 0 rows,
+ * no error, and so does a signed-out caller deleting the entire table. These
+ * assertions are about the half that can be decided without a server: whether
+ * the control is offered at all, which depends on how much of the list is
+ * actually known.
+ */
+
+// 'ready' — the whole set from the server. Everything is offered, and this is
+// the only status under which a figure over the list is the truth.
+eq(inboxControls('ready').rowDelete, true, 'a confirmed list can have a row removed');
+eq(inboxControls('ready').markUnread, true, 'a confirmed list can have a row put back to unread');
+eq(inboxControls('ready').clearRead, true, 'a confirmed list can be cleared of read rows');
+eq(inboxControls('ready').withheld, null, 'nothing is withheld over a confirmed list, so nothing is explained');
+
+// 'error' — the list is a cached copy of unknown age and an empty one means
+// "could not be read". A row vanishing from a screen that already says it is
+// unconfirmed would be the app inventing a fact.
+eq(inboxControls('error').rowDelete, false, 'nothing is deleted over a list the server did not confirm');
+eq(inboxControls('error').markUnread, false, 'nor is read state changed over one');
+eq(inboxControls('error').clearRead, false, 'and certainly not in bulk');
+ok((inboxControls('error').withheld ?? '').length > 0, 'the reason the controls are gone is said, not left to be noticed');
+
+// 'partial' — the rows are real but they are a prefix. Per-row removal is fine:
+// each row named came back from the server in THIS read. Clear Read is not:
+// the statement would sweep rows past the cap while the confirmation could only
+// count the ones on screen.
+eq(inboxControls('partial').rowDelete, true, 'a row that came back in a truncated read is still a row we read');
+eq(inboxControls('partial').markUnread, true, 'so its read state can be changed too');
+eq(inboxControls('partial').clearRead, false, 'a bulk delete over a prefix would remove what it could not count');
+ok((inboxControls('partial').withheld ?? '').length > 0, 'and the screen says why the bulk control is missing');
+
+// 'loading' — nothing has come back. Anything on screen is a cache and there is
+// nothing established to destroy.
+eq(inboxControls('loading').rowDelete, false, 'nothing is destroyed before the first read lands');
+eq(inboxControls('loading').clearRead, false, 'including in bulk');
+eq(inboxControls('loading').withheld, null, 'and no explanation is owed for a control that is about to appear');
+
+// The rule that matters most, stated over the whole type rather than status by
+// status: 'ready' is the ONLY status that may clear in bulk. Written this way
+// so that a fifth LoadStatus, or a reordered branch that falls through to the
+// permissive default, fails here rather than shipping a bulk delete over a set
+// nobody has all of.
+for (const st of STATUSES) {
+  eq(inboxControls(st).clearRead, st === 'ready', `${st}: bulk clearing is offered only over a whole, confirmed list`);
+  if (!inboxControls(st).rowDelete) {
+    eq(inboxControls(st).markUnread, false, `${st}: a list too uncertain to delete from is too uncertain to re-mark`);
+  }
+}
+
+/* ── the confirmation for Clear Read ────────────────────────────────────── */
+
+// The button and its confirmation come from one function, so they cannot come
+// apart: no prompt means no button.
+eq(clearReadPrompt(4, 'partial'), null, 'no bulk prompt over a truncated read');
+eq(clearReadPrompt(4, 'error'), null, 'no bulk prompt over a failed read');
+eq(clearReadPrompt(4, 'loading'), null, 'no bulk prompt before the first read lands');
+eq(clearReadPrompt(0, 'ready'), null, 'nothing marked read means nothing to offer');
+eq(clearReadPrompt(-3, 'ready'), null, 'a negative count offers nothing');
+eq(clearReadPrompt(Number.NaN, 'ready'), null, 'NaN offers nothing');
+
+const p4 = clearReadPrompt(4, 'ready')!;
+ok(p4 != null, 'four read notifications over a confirmed list can be cleared');
+eq(p4.title, 'Delete 4 read notifications?', 'the confirmation names the figure');
+ok(/unread stays/i.test(p4.message), 'and says what it does NOT touch, which is the fear the control raises');
+ok(/for good/i.test(p4.message), 'and that it is irreversible, because it is');
+
+const p1 = clearReadPrompt(1, 'ready')!;
+eq(p1.title, 'Delete the read notification?', 'one row is not "1 read notifications"');
+eq(p1.confirm, 'Delete', 'and its button is singular too');
+
+// A count of rows in a table with no ceiling. `1204 read notifications` is the
+// defect scripts/check-numbers.mjs exists for, and a confirmation dialog is
+// exactly the place an unseparated figure gets approved without being read.
+ok(clearReadPrompt(1204, 'ready')!.title.includes('1,204'), 'four digits in a confirmation carry a separator');
+ok(clearReadPrompt(12045, 'ready')!.title.includes('12,045'), 'five digits too');
+ok(!/\d{4,}/.test(clearReadPrompt(1204, 'ready')!.title), 'and no unseparated run of digits survives anywhere in it');
+
+// House style: Title Case for a button, sentence case for the sentence.
+for (const n of [1, 2, 40, 1204]) {
+  const p = clearReadPrompt(n, 'ready')!;
+  ok(/^[A-Z]/.test(p.title) && p.title.endsWith('?'), `${n}: the confirmation asks a question`);
+  ok(/^[A-Z][^.]*\./.test(p.message), `${n}: the note under it is a sentence`);
+  eq(p.label, 'Clear Read', `${n}: the button is Title Case`);
+}
+
+/* ── what is said afterwards ────────────────────────────────────────────────
+ *
+ * Never report success the server did not give. `writeFailure` is what turns a
+ * row count into the sentence; these check that a success is silent and a
+ * failure is not.
+ */
+
+eq(deletedNote('Session cancelled', null), null, 'a delete that worked needs no announcement — the row is gone');
+
+// The three ways a single delete fails, through the real writeFailure so the
+// wording cannot drift from src/lib/wroteRows.ts.
+const refused = deletedNote('Session cancelled', writeFailure('This notification', { error: new Error('nope') }))!;
+ok(refused.startsWith('Session cancelled is still in your inbox.'), 'a refused delete names the row and says it is still there');
+
+const uncounted = deletedNote('Session cancelled', writeFailure('This notification', { error: null, count: null }))!;
+ok(/did not say whether/.test(uncounted), 'a delete nobody counted is reported as uncounted, not as done');
+
+const nomatch = deletedNote('Session cancelled', writeFailure('This notification', { error: null, count: 0 }))!;
+ok(/matched no rows/.test(nomatch), 'zero rows is reported as zero rows');
+ok(/still in your inbox/.test(nomatch), 'and the reader is told the row did not go anywhere');
+
+// The one that must never happen: a count of 1 is a real deletion and produces
+// no failure sentence at all.
+eq(writeFailure('This notification', { error: null, count: 1 }), null, 'one row deleted is a delete that happened');
+
+/* ── and after Clear Read ───────────────────────────────────────────────── */
+
+// Three outcomes, three sentences. The middle one is the one that gets written
+// as "Done" everywhere else and is the reason the count is asked for.
+ok(/did not answer/.test(clearedNote(false, 0)), 'a failed clear says the server did not answer');
+ok(/unchanged/.test(clearedNote(false, 0)), 'and that the inbox is unchanged');
+// A failure that somehow carries a count is still a failure. Ordering the `ok`
+// check first is what makes that true, and this is the assertion that pins it.
+ok(/did not answer/.test(clearedNote(false, 9)), 'a count on a failed call does not turn it into a success');
+
+ok(/Nothing was deleted/.test(clearedNote(true, 0)), 'a clear that matched nothing says so');
+ok(/nothing marked read/.test(clearedNote(true, 0)), 'and says why, rather than reading as a failure');
+eq(clearedNote(true, 1), 'One read notification deleted.', 'one row is not "1 read notifications deleted"');
+eq(clearedNote(true, 4), '4 read notifications deleted.', 'four rows are counted');
+eq(clearedNote(true, 1204), '1,204 read notifications deleted.', 'and a four-digit count carries its separator');
+for (const n of [0, 1, 4, 999, 1204, 99999]) {
+  ok(!/\d{4,}/.test(clearedNote(true, n)), `${n}: no unseparated run of digits reaches the reader`);
+}
+
+/* ── the badge and a delete cannot disagree ─────────────────────────────────
+ *
+ * The bell's mark is `unreadBadge(items.filter(i => !i.read).length, status)`,
+ * derived on every render and never stored. That is the whole defence against
+ * the bell and the list disagreeing after a delete, so it is worth stating what
+ * it buys: removing an unread row lowers the figure by exactly one, and putting
+ * a row back to unread raises it by exactly one.
+ */
+{
+  type Row = { read: boolean };
+  const rows: Row[] = [{ read: false }, { read: false }, { read: true }, { read: false }];
+  const mark = (rs: Row[]) => unreadBadge(rs.filter((r) => !r.read).length, 'ready');
+  eq((mark(rows) as { label: string }).label, '3', 'three unread to begin with');
+  // Delete one unread row.
+  eq((mark(rows.slice(1)) as { label: string }).label, '2', 'deleting an unread row lowers the bell by one');
+  // Delete the read one: the figure does not move.
+  eq((mark(rows.filter((_, i) => i !== 2)) as { label: string }).label, '3', 'deleting a read row does not move the bell');
+  // Put the read one back to unread.
+  eq((mark(rows.map((r, i) => (i === 2 ? { read: false } : r))) as { label: string }).label, '4',
+    'marking a row unread raises the bell by one');
+  // Clear Read removes every read row and touches no unread one.
+  eq((mark(rows.filter((r) => !r.read)) as { label: string }).label, '3', 'clearing read rows leaves the unread count alone');
+  // And the empty inbox after everything is deleted draws no mark — under
+  // 'ready', where that is a true statement.
+  eq(mark([]).kind, 'none', 'an inbox emptied by hand shows no mark');
+  // But the same empty list under 'error' still does not say "none".
+  eq(unreadBadge(0, 'error').kind, 'unknown', 'an empty inbox under a failed read is still not "you have none"');
 }
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }

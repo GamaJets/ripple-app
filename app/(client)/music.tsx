@@ -163,6 +163,17 @@ export default function Music() {
  };
 
  // When a playlist is on screen, changing mode/intensity/length re-matches it live.
+ // ── Two lines of copy that promised something this screen stopped doing ──
+ //
+ // Both said tracks are "matched on tempo and energy". That is true of the
+ // BUILT-IN list, which carries a bpm and an energy figure per track. It is not
+ // true of the path a connected member takes: `generate` below searches
+ // Spotify by keyword and sets `bpm: null, energy: null`, because Spotify's
+ // Audio Features endpoint is closed to development-mode apps — the code says
+ // so in as many words, three lines from where the tracks are built. So the
+ // headline of the screen advertised a mechanism that had been removed from
+ // the path most people are on. The per-list caption underneath already names
+ // which list is which honestly, and is where that distinction belongs.
  useEffect(() => { setPl((cur) => cur ? generatePlaylist({ mode, intensity, minutes }, salt) : cur); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [mode, intensity, minutes]);
 
  const generate = async (nextSalt = salt, nextIntensity = intensity) => {
@@ -227,7 +238,7 @@ export default function Music() {
  </View>
 
  <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.lg }}>
- Play your own playlists, or build one matched to the session — tempo and energy picked for the work, not for the mood.
+ Play your own playlists, or build one for the session — picked for the work, not for the mood.
  </Text>
 
  <Rule />
@@ -392,7 +403,7 @@ export default function Music() {
  <View style={{ alignItems: 'center', paddingVertical: sp.xl }}>
  <Icon name="play" size={26} color={t.ink3} />
  <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md, textAlign: 'center' }}>
- No playlist yet. Pick a session type and tap Generate — tracks are matched on tempo and energy.
+ No playlist yet. Pick a session type and tap Generate.
  </Text>
  </View>
  )}

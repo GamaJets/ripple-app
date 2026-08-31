@@ -260,6 +260,12 @@ interface BucketRow {
 export default function Analytics() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
   const [gymName, setGymName] = useState<string | null>(null);
+  // Whether the gym's NAME could not be READ, as distinct from there being no
+  // gym. The read below still drops the error into a `no-error-ok:` — no figure
+  // on this page depends on the name — but the rail printed "No gym linked" for
+  // either, and that is a sentence about the owner's ACCOUNT produced by a
+  // query that failed. Carrying this one bit is what lets the rail say which.
+  const [gymNameUnread, setGymNameUnread] = useState(false);
 
   const [memberships, setMemberships] = useState<Read<Membership>>(reading);
   const [visits, setVisits] = useState<Read<Visit>>(reading);
@@ -316,10 +322,11 @@ export default function Analytics() {
         setDoor({ state: null, at: null });
         return;
       }
-      // no-error-ok: the gym's name is a caption. Its absence renders as a dash
-      // in the shell and changes no figure on this page.
-      const { data: t } = await supabase.from('tenants').select('name').eq('id', who.tenantId).single();
-      if (live) setGymName(t?.name ?? null);
+      // The error is now read off the result. Not because the name matters — it is
+      // a label — but because "we could not ask" and "there is no gym" must not
+      // arrive at the rail as the same null. See the Shell's gymNameUnread prop.
+      const { data: t, error: tErr } = await supabase.from('tenants').select('name').eq('id', who.tenantId).single();
+      if (live) { setGymName(tErr ? null : t?.name ?? null); setGymNameUnread(!!tErr); }
       await load(who.tenantId);
     })();
     return () => { live = false; };
@@ -544,7 +551,7 @@ export default function Analytics() {
 
   if (me.roleUnknown) {
     return (
-      <Shell me={me} gymName={gymName} current="/analytics">
+      <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/analytics">
         <h1>We could not read your account</h1>
         <p style={{ color: 'var(--ink2)', marginTop: 8, maxWidth: '62ch' }}>
           Your profile did not load, so this console does not know what you are —
@@ -557,7 +564,7 @@ export default function Analytics() {
 
   if (me.role !== 'owner') {
     return (
-      <Shell me={me} gymName={gymName} current="/analytics">
+      <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/analytics">
         <h1>Not your console</h1>
         <p style={{ color: 'var(--ink2)', marginTop: 10 }}>
           Whether the gym is growing or shrinking is the owner&rsquo;s question. Your
@@ -568,7 +575,7 @@ export default function Analytics() {
   }
 
   return (
-    <Shell me={me} gymName={gymName} current="/analytics">
+    <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/analytics">
       <h1>Analytics</h1>
       <p style={{ color: 'var(--ink3)', marginTop: 6, fontSize: 13 }}>
         Not what is true today — which way it is moving. Who arrived, who left,

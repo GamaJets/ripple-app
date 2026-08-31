@@ -61,7 +61,7 @@ export function LockScreen() {
         <Pressable onPress={() => { try { auth.signOut(); } catch { /* the lock lifts either way */ } }}
           hitSlop={8} accessibilityRole="button" accessibilityLabel="Sign out"
           style={{ paddingVertical: sp.md }}>
-          <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>Sign out</Text>
+          <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>Sign Out</Text>
         </Pressable>
       </View>
     </SafeAreaView>

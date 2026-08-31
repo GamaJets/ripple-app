@@ -208,6 +208,12 @@ interface Pack {
 export default function CoachRoster() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
   const [gymName, setGymName] = useState<string | null>(null);
+  // Whether the gym's NAME could not be READ, as distinct from there being no
+  // gym. The read below still drops the error into a `no-error-ok:` — no figure
+  // on this page depends on the name — but the rail printed "No gym linked" for
+  // either, and that is a sentence about the owner's ACCOUNT produced by a
+  // query that failed. Carrying this one bit is what lets the rail say which.
+  const [gymNameUnread, setGymNameUnread] = useState(false);
   const [rows, setRows] = useState<Row[] | null>(null);
   const [packs, setPacks] = useState<Pack[] | null>(null);
   const [packsErr, setPacksErr] = useState(false);
@@ -486,10 +492,11 @@ export default function CoachRoster() {
       setMe(who);
       if (!who) return;
       if (who.tenantId) {
-        // no-error-ok: an unreadable gym name renders as a dash in the frame;
-        // the roster below does not depend on it.
-        const { data: t } = await supabase.from('tenants').select('name').eq('id', who.tenantId).single();
-        if (live) setGymName(t?.name ?? null);
+        // The error is now read off the result. Not because the name matters — it
+        // is a label — but because "we could not ask" and "there is no gym" must
+        // not arrive at the rail as the same null. See Shell's gymNameUnread.
+        const { data: t, error: tErr } = await supabase.from('tenants').select('name').eq('id', who.tenantId).single();
+        if (live) { setGymName(tErr ? null : t?.name ?? null); setGymNameUnread(!!tErr); }
       }
       if (who.role !== 'trainer' && who.role !== 'owner') return;
       await load(who.id);
@@ -527,7 +534,7 @@ export default function CoachRoster() {
   // out of a query that failed.
   if (me.roleUnknown) {
     return (
-      <Shell me={me} gymName={gymName} current="/coach/roster">
+      <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/coach/roster">
         <h1>We could not read your account</h1>
         <p style={{ color: 'var(--ink2)', marginTop: 8, maxWidth: '62ch' }}>
           Your profile did not load, so this console does not know what you are —
@@ -540,7 +547,7 @@ export default function CoachRoster() {
 
   if (me.role !== 'trainer' && me.role !== 'owner') {
     return (
-      <Shell me={me} gymName={gymName} current="/coach/roster">
+      <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/coach/roster">
         <h1>This screen is for coaches</h1>
         <p style={{ color: 'var(--ink2)', marginTop: 10, maxWidth: 560 }}>
           A roster is one coach&rsquo;s own book of clients, so there is nothing here to
@@ -718,7 +725,7 @@ export default function CoachRoster() {
   ];
 
   return (
-    <Shell me={me} gymName={gymName} current="/coach/roster">
+    <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/coach/roster">
       <h1>Roster</h1>
       <p style={{ color: 'var(--ink3)', marginTop: 6, fontSize: 13, maxWidth: 640 }}>
         Your clients — the ones linked to you, not the gym&rsquo;s whole book. Ordered

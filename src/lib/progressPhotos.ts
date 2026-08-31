@@ -1,3 +1,4 @@
+import { capLimit, assertWhole } from './rowCap';
 // Progress photos — the persistence layer that app/(client)/scans.tsx was
 // missing. Until now that screen kept photos in useState: no upload, no
 // bucket, no row, gone at unmount. It said so out loud ("N on screen") because
@@ -211,14 +212,31 @@ export async function listProgressPhotos(): Promise<ProgressPhoto[]> {
   const sb = db();
   const uid = await requireUid(sb);
 
+  // Capped, and a truncated read THROWS rather than returning a prefix.
+  //
+  // This was the only read here with no `.limit()`, and the ordering made it
+  // the worst possible shape: ascending, so PostgREST's silent 1000-row ceiling
+  // (see ./rowCap.ts) would have dropped the NEWEST photos — the "after" half
+  // of a before-and-after — and the screens then printed "N saved" and "N of
+  // these have no picture behind them any more" as totals over what was left.
+  //
+  // Descending puts the cut at the far end, and the throw is what rowCap.ts
+  // asks for when the rows feed a figure: both call sites (compare.tsx and
+  // scans.tsx) already catch a thrown read and render "Could not load your
+  // photos just now" rather than an empty gallery, so a truncated read reaches
+  // the member as a stated failure instead of a quiet subtraction from their
+  // own history. `sortOldestFirst` at the end restores the order the screens
+  // draw in, so nothing downstream changes.
   const { data, error } = await sb
     .from('progress_photos')
     .select('id, client_id, taken_at, image_path, weight_kg, body_fat_pct')
     .eq('client_id', uid)
-    .order('taken_at', { ascending: true });
+    .order('taken_at', { ascending: false })
+    .order('id', { ascending: false })
+    .limit(capLimit());
   if (error) throw error;
 
-  const rows = (data ?? []) as ProgressPhotoRow[];
+  const rows = assertWhole((data ?? []) as ProgressPhotoRow[], 'your progress photos');
   if (rows.length === 0) return [];
 
   const { data: signed, error: signErr } = await sb.storage

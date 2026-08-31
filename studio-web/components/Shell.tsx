@@ -116,11 +116,26 @@ export function contextOf(path: string): NavContext {
 export function Shell({
   me,
   gymName,
+  gymNameUnread,
   current,
   children,
 }: {
   me: Me;
   gymName: string | null;
+  /**
+   * True when the gym's name could not be READ, as opposed to not existing.
+   *
+   * `gymName: null` was carrying both facts and the rail printed "No gym
+   * linked" for either — a statement about the owner's ACCOUNT, made out of a
+   * query that failed, on pages that deliberately discard that read's error
+   * because the name is only a label. The label is only a label; the sentence
+   * under it is not. Same distinction, and same reason, as `roleUnknown` on
+   * `Me`: a refused read is not a fact about who somebody is.
+   *
+   * Optional, so a page that genuinely checks the read and shows a banner about
+   * it need not pass anything.
+   */
+  gymNameUnread?: boolean;
   current: string;
   children: React.ReactNode;
 }) {
@@ -181,7 +196,11 @@ export function Shell({
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
           }}
         >
-          {gymName ?? <span className="dash">No gym linked</span>}
+          {gymName ?? (
+            <span className="dash">
+              {gymNameUnread ? 'Gym name unread' : 'No gym linked'}
+            </span>
+          )}
         </div>
 
         {contexts.length > 1 && (

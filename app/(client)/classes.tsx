@@ -194,7 +194,16 @@ export default function Classes() {
                 timetable. A member reading "no classes scheduled" does not turn
                 up to one that is running. */}
             <Text style={{ ...ty.head, color: t.ink, textAlign: 'center' }}>
-              {classStatus === 'error' ? 'The timetable could not be read' : classStatus === 'loading' ? 'Loading' : `No classes scheduled${branch ? ' at ' + branch : ''} yet`}
+              {classStatus === 'error' ? 'The timetable could not be read'
+                : classStatus === 'loading' ? 'Loading'
+                // 'partial' was the one status with no branch. With a branch
+                // filter over a capped timetable, `filtered.length === 0` is
+                // reachable while classes ARE running at that branch — they
+                // simply fell past the row limit — and "No classes scheduled at
+                // Shoreditch yet" is exactly the sentence that stops a member
+                // turning up to one.
+                : classStatus === 'partial' ? 'More timetable than we can read at once'
+                : `No classes scheduled${branch ? ' at ' + branch : ''} yet`}
             </Text>
             <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: 6, maxWidth: 300 }}>
               {classStatus === 'error'

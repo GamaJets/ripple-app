@@ -322,7 +322,7 @@ export default function OwnerEquipment() {
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
           <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setAddOpen(false)} />
           <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter }}>
-            <Text style={{ ...ty.head, color: t.ink }}>Add equipment</Text>
+            <Text style={{ ...ty.head, color: t.ink }}>Add Equipment</Text>
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>
               One row per kind of kit. Use quantity for identical units.
             </Text>

@@ -381,7 +381,7 @@ export default function OwnerMembers() {
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
           <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setAddOpen(false)} />
           <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter }}>
-            <Text style={{ ...ty.head, color: t.ink }}>Open a membership</Text>
+            <Text style={{ ...ty.head, color: t.ink }}>Open a Membership</Text>
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>
               Find someone in your gym who does not already hold an active membership.
             </Text>

@@ -71,6 +71,12 @@ const STATUS_WORD: Record<EquipmentStatus, string> = {
 export default function EquipmentPage() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
   const [gymName, setGymName] = useState<string | null>(null);
+  // Whether the gym's NAME could not be READ, as distinct from there being no
+  // gym. The read below still drops the error into a `no-error-ok:` — no figure
+  // on this page depends on the name — but the rail printed "No gym linked" for
+  // either, and that is a sentence about the owner's ACCOUNT produced by a
+  // query that failed. Carrying this one bit is what lets the rail say which.
+  const [gymNameUnread, setGymNameUnread] = useState(false);
   const [kit, setKit] = useState<Equipment[] | null>(null);
   const [classes, setClasses] = useState<GymClass[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -108,9 +114,11 @@ export default function EquipmentPage() {
       if (!live) return;
       setMe(who);
       if (!who?.tenantId) { setKit([]); setClasses([]); return; }
-      // no-error-ok: the gym's name is a header label; without it the header is blank and every figure below is unaffected
-      const { data: t } = await supabase.from('tenants').select('name').eq('id', who.tenantId).single();
-      if (live) setGymName(t?.name ?? null);
+      // The error is now read off the result. Not because the name matters — it is
+      // a label — but because "we could not ask" and "there is no gym" must not
+      // arrive at the rail as the same null. See the Shell's gymNameUnread prop.
+      const { data: t, error: tErr } = await supabase.from('tenants').select('name').eq('id', who.tenantId).single();
+      if (live) { setGymName(tErr ? null : t?.name ?? null); setGymNameUnread(!!tErr); }
       await load(who.tenantId);
     })();
     return () => { live = false; };
@@ -121,7 +129,7 @@ export default function EquipmentPage() {
 
   if (me.roleUnknown) {
     return (
-      <Shell me={me} gymName={gymName} current="/equipment">
+      <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/equipment">
         <h1>We could not read your account</h1>
         <p style={{ color: 'var(--ink2)', marginTop: 8, maxWidth: '62ch' }}>
           Your profile did not load, so this console does not know what you are —
@@ -134,7 +142,7 @@ export default function EquipmentPage() {
 
   if (me.role !== 'owner' && me.role !== 'trainer') {
     return (
-      <Shell me={me} gymName={gymName} current="/equipment">
+      <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/equipment">
         <h1>Not your console</h1>
         <p style={{ color: 'var(--ink2)', marginTop: 10 }}>The equipment register is for gym staff.</p>
       </Shell>
@@ -159,7 +167,7 @@ export default function EquipmentPage() {
   const unread = (rows: unknown[] | null): Unread => (rows !== null ? null : err ? 'failed' : 'loading');
 
   return (
-    <Shell me={me} gymName={gymName} current="/equipment">
+    <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/equipment">
       <h1>Equipment</h1>
       <p style={{ color: 'var(--ink3)', marginTop: 6, fontSize: 13 }}>
         What the gym owns, what is out of action, and which classes that takes

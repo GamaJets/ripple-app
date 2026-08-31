@@ -119,6 +119,8 @@
     "src/lib/historyWindow.test.ts",
     "src/lib/notifyCopy.test.ts",
     "src/lib/clipOwner.test.ts",
-    "src/lib/gymMoney.test.ts"
+    "src/lib/gymMoney.test.ts",
+    "src/lib/coachThreads.test.ts",
+    "src/lib/deltaLabel.test.ts"
   ]
 }

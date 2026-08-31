@@ -276,7 +276,10 @@ export default function Bookings() {
 
         {/* ── what you have booked ───────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Upcoming" note={items.length > 0 ? `${items.length} booked` : undefined} />
+          {/* `bookingsWhole` is computed above and used correctly for the
+              empty state; the count beside it was gated only on non-emptiness,
+              so under 'partial' it printed a subtotal as a total. */}
+          <SectionHead title="Upcoming" note={bookingsWhole && items.length > 0 ? `${items.length} booked` : undefined} />
           {items.map((it, i) => (
             <View key={it.id}>
               {i > 0 ? <Rule /> : null}
@@ -318,7 +321,7 @@ export default function Bookings() {
           <>
             <Rule />
             <Section>
-              <SectionHead title="Waiting For" note={waitStatus === 'error' ? 'Not read' : myQueue.length > 0 ? `${myQueue.length} slot${myQueue.length === 1 ? '' : 's'}` : undefined} />
+              <SectionHead title="Waiting For" note={waitStatus === 'error' ? 'Not read' : waitStatus === 'ready' && myQueue.length > 0 ? `${myQueue.length} slot${myQueue.length === 1 ? '' : 's'}` : undefined} />
               {waitStatus === 'error' ? (
                 <Text style={{ ...ty.label, color: t.ink3 }}>
                   We couldn’t read your waitlists. This is not a statement that you are on none — any place you hold still stands, and a slot that frees can still be booked for you.

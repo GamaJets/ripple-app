@@ -31,6 +31,7 @@ import { useHabits } from '../../src/ui/habits';
 import { unsentNote } from '../../src/lib/offlineQueue';
 import { donePercent } from '../../src/lib/checklist';
 import { useClientData } from '../../src/ui/clientData';
+import { isWhole } from '../../src/ui/loadStatus';
 
 // The same bounds clients_step_goal_check, clients_sleep_goal_hours_check
 // (supabase/parts/60) and clients_water_goal_glasses_check (part 70) enforce.
@@ -51,6 +52,17 @@ export default function Habits() {
   // that the client did none of the things asked of them today.
   const pct = donePercent(h.doneCount, h.habits.length);
   const unknown = h.status === 'error';
+  // `unknown` was only consulted inside the `pct == null` branch, so it only
+  // ever spoke when the LIST was empty. `h.status` is the worst of several
+  // reads and the TICKS are one of them — a failed tick read leaves the list
+  // intact and every box unticked, so the screen printed a filled arc, a
+  // percentage and "3 of 4 done" over a day nobody could read. Which is the
+  // exact thing the notice further down apologises for in advance: "an empty
+  // circle here doesn't mean you skipped it".
+  //
+  // The figure follows the same rule as everywhere else: it is shown when the
+  // read behind it is whole, and withheld otherwise.
+  const doneKnown = isWhole(h.status);
   const c = useClientData();
   const [stepDraft, setStepDraft] = useState('');
   const [sleepDraft, setSleepDraft] = useState('');
@@ -72,12 +84,14 @@ export default function Habits() {
         {/* ── the hero: today, in one number ──────────────────────────────── */}
         <Hero
           label="Today's Progress"
-          figure={fig(pct)}
-          unit={pct == null ? undefined : '%'}
-          arc={pct == null ? undefined : pct / 100}
+          figure={doneKnown ? fig(pct) : fig(null)}
+          unit={!doneKnown || pct == null ? undefined : '%'}
+          arc={!doneKnown || pct == null ? undefined : pct / 100}
           arcLabel="of today's habits done"
-          note={pct == null
-            ? (unknown ? 'We could not load today’s list' : 'Nothing on today’s list yet')
+          note={!doneKnown
+            ? (unknown ? 'We could not read today’s list or what you have ticked off it' : h.status === 'loading' ? 'Reading today’s list…' : 'Not all of today’s list could be read')
+            : pct == null
+            ? 'Nothing on today’s list yet'
             : `${h.doneCount} of ${h.habits.length} done`}
         />
 
@@ -128,7 +142,7 @@ export default function Habits() {
 
         {/* ── checklist ──────────────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Checklist" note={h.habits.length ? `${h.doneCount} done` : undefined} />
+          <SectionHead title="Checklist" note={doneKnown && h.habits.length ? `${h.doneCount} done` : undefined} />
 
           {/* The list is built from this person's own plan and targets, which is
               the question TF-31 asked outright. Saying so costs one line and

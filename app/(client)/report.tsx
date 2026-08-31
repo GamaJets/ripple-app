@@ -36,18 +36,39 @@ import { currentStreak, weekStats, personalRecords, streakMilestone } from '../.
 import { useState, useEffect } from 'react';
 import { askCoach, coachAvailable } from '../../src/lib/coach';
 import { compositionInsights } from '../../src/lib/inbodyMetrics';
+import { isWhole } from '../../src/ui/loadStatus';
 
 export default function WeeklyReport() {
   const t = useTheme();
   const router = useRouter();
+  // Four providers, every one of which reports a LoadStatus, and this screen
+  // read none of them.
+  //
+  // It is the worst place in the client app for that, because the figures do
+  // not stop at the screen: `factLines` below is the ONLY source of fact handed
+  // to the summariser, and the model writes it back to the member in the second
+  // person. So a failed workout read produced, in warm prose signed by their
+  // coach's app, "No logged workouts this week — a fresh chance to get one on
+  // the board" to somebody who trained four times. And a failed scan read
+  // produced "No weigh-ins or scans yet" under the heading Body.
+  //
+  // Every figure here is a weekly or lifetime aggregate, so the gate is
+  // `isWhole` throughout: 'partial' is a prefix and 'loading' is nothing yet.
   const c = useClientData();
-  const { log } = useWorkoutLog();
-  const { entries } = useMeasurements();
+  const { log, status: logStatus } = useWorkoutLog();
+  const { entries, status: mStatus } = useMeasurements();
   // `latestSent`, not `latest`. A weekly report is a summary of what the coach
   // can see, and `latest` may be a check-in still sitting on this phone with no
   // signal — reporting it as part of the record would tell the client their
   // coach has read something nobody has sent.
-  const { latestSent: checkIn } = useCheckIns();
+  const { latestSent: checkIn, status: ciStatus } = useCheckIns();
+  const trainingWhole = isWhole(logStatus);
+  const bodyWhole = isWhole(c.status);
+  const mWhole = isWhole(mStatus);
+  // What the report as a whole can stand behind. A weekly summary assembled
+  // from four reads is only as complete as its worst one, and the narrative
+  // draws on all four at once.
+  const reportWhole = trainingWhole && bodyWhole && mWhole && isWhole(ciStatus);
   const st = useSettings();
   const wu = st.weightUnit;
   const lu = st.lengthUnit;
@@ -59,11 +80,13 @@ export default function WeeklyReport() {
 
   const wSeries = c.weightSeries;
   const wDelta = wSeries.length > 1 ? +(wSeries[wSeries.length - 1].v - wSeries[0].v).toFixed(1) : 0;
-  // Only report a body if the client has actually recorded one.
-  const hasBody = wSeries.length > 0;
+  // Only report a body if the client has actually recorded one — AND if we were
+  // able to read what they recorded. An empty `weightSeries` under a failed
+  // profile read is not a client who has never been weighed.
+  const hasBody = bodyWhole && wSeries.length > 0;
 
-  const mLatest = entries[0];
-  const mPrev = entries[1];
+  const mLatest = mWhole ? entries[0] : undefined;
+  const mPrev = mWhole ? entries[1] : undefined;
   const waistD = mLatest && mPrev && mLatest.waist != null && mPrev.waist != null ? +(mLatest.waist - mPrev.waist).toFixed(1) : null;
   // Both changes in the client's unit, each converted as a whole span rather
   // than as two endpoints rounded and then subtracted — 0.4 kg is 0.88 lb, and
@@ -77,18 +100,25 @@ export default function WeeklyReport() {
   const weekStart = new Date(today); weekStart.setDate(today.getDate() - 6);
   const range = `${weekStart.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – ${today.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
 
-  const comp = compositionInsights(c.scans);
+  const comp = compositionInsights(isWhole(c.scansStatus) ? c.scans : []);
+  // Facts only. A line built from a read that did not land whole is not a
+  // weaker fact, it is a false one — and this list is the model's only input,
+  // so anything left out of it simply is not spoken about, which is the
+  // outcome we want.
   const factLines = [
-    `Trained ${wk.workouts} time(s) across ${wk.days} active day(s).`,
-    `Volume ${(wk.volumeKg / 1000).toFixed(1)} tonnes, ~${num(wk.kcal)} kcal.`,
-    `Streak ${streak} day(s).`,
+    trainingWhole ? `Trained ${wk.workouts} time(s) across ${wk.days} active day(s).` : '',
+    trainingWhole ? `Volume ${(wk.volumeKg / 1000).toFixed(1)} tonnes, ~${num(wk.kcal)} kcal.` : '',
+    trainingWhole ? `Streak ${streak} day(s).` : '',
+    // Said to the model in as many words, so it does not fill the silence with
+    // a guess about a quiet week.
+    trainingWhole ? '' : 'Their training log could not be read this week. Do not say they did not train, do not mention a streak, and do not comment on volume.',
     // These lines are the summariser's only source of fact, so they carry the
     // client's own units: a model handed "82 kg" writes back "you're at 82 kg"
     // to somebody who has never used a kilogram in their life.
     hasBody ? [`Weight ${fig(weightLabel(c.weightKg, wu))} (${wDeltaShown > 0 ? '+' : ''}${wDeltaShown} ${wu} overall)`,
       c.bodyFatPct != null ? `body fat ${c.bodyFatPct}%` : null,
       c.muscleKg != null ? `muscle ${fig(weightLabel(c.muscleKg, wu))}` : null].filter(Boolean).join(', ') + '.' : '',
-    waistDShown != null ? `Waist ${fig(lengthLabel(mLatest.waist, lu))} (${waistDShown > 0 ? '+' : ''}${waistDShown} ${lu}).` : '',
+    waistDShown != null && mLatest ? `Waist ${fig(lengthLabel(mLatest.waist, lu))} (${waistDShown > 0 ? '+' : ''}${waistDShown} ${lu}).` : '',
     checkIn ? `Check-in energy ${checkIn.energy}/5, sleep ${checkIn.sleep}/5, mood ${checkIn.mood}/5, adherence ${checkIn.adherence}/5.` : '',
     comp.improving.length ? `Body composition improving: ${comp.improving.join(', ')}.` : '',
     comp.watch.length ? `Body composition to watch: ${comp.watch.join(', ')}.` : '',
@@ -96,15 +126,21 @@ export default function WeeklyReport() {
   ].filter(Boolean);
   const fallbackNarrative = (() => {
     const bits: string[] = [];
-    if (wk.workouts > 0) bits.push(`You trained ${wk.workouts} time${wk.workouts === 1 ? '' : 's'} over ${wk.days} day${wk.days === 1 ? '' : 's'}, moving ${(wk.volumeKg / 1000).toFixed(1)} tonnes of volume.`);
+    // "No logged workouts this week" was printed for a failed read as readily
+    // as for a quiet week, and it is the sentence a member is most likely to
+    // believe and least able to check.
+    if (!trainingWhole) bits.push(logStatus === 'loading'
+      ? 'Reading your week…'
+      : 'We could not read your training this week, so this summary leaves it out. It is not a week with nothing in it.');
+    else if (wk.workouts > 0) bits.push(`You trained ${wk.workouts} time${wk.workouts === 1 ? '' : 's'} over ${wk.days} day${wk.days === 1 ? '' : 's'}, moving ${(wk.volumeKg / 1000).toFixed(1)} tonnes of volume.`);
     else bits.push('No logged workouts this week — a fresh chance to get one on the board.');
-    if (streak > 0) bits.push(`Your streak is at ${streak} day${streak === 1 ? '' : 's'} — keep it alive.`);
+    if (trainingWhole && streak > 0) bits.push(`Your streak is at ${streak} day${streak === 1 ? '' : 's'} — keep it alive.`);
     // Gated on the CONVERTED change: a fifth of a kilogram is under half a
     // pound, and "your weight is down 0 lb" is worse than saying nothing.
-    if (wDeltaShown !== 0) bits.push(`Weight is ${wDeltaShown > 0 ? 'up' : 'down'} ${Math.abs(wDeltaShown)} ${wu} overall${wDeltaShown <= 0 ? ', trending your way' : ''}.`);
+    if (bodyWhole && wDeltaShown !== 0) bits.push(`Weight is ${wDeltaShown > 0 ? 'up' : 'down'} ${Math.abs(wDeltaShown)} ${wu} overall${wDeltaShown <= 0 ? ', trending your way' : ''}.`);
     if (comp.improving.length) bits.push(`On composition, ${comp.improving.slice(0, 2).join(' and ')} moved the right way.`);
     else if (comp.watch.length) bits.push(`Keep an eye on ${comp.watch.slice(0, 2).join(' and ')} from your latest scan.`);
-    if (checkIn && checkIn.adherence <= 3) bits.push(`Your last check-in put adherence at ${checkIn.adherence}/5 — worth refocusing next week.`);
+    if (isWhole(ciStatus) && checkIn && checkIn.adherence <= 3) bits.push(`Your last check-in put adherence at ${checkIn.adherence}/5 — worth refocusing next week.`);
     return bits.join(' ');
   })();
   const [narrative, setNarrative] = useState(fallbackNarrative);
@@ -130,7 +166,7 @@ export default function WeeklyReport() {
     // still unknown and used to print the 20% / 0 kg placeholders.
     { label: 'Body Fat', value: c.bodyFatPct != null ? `${c.bodyFatPct}` : '—', unit: c.bodyFatPct != null ? '%' : undefined },
     { label: 'Muscle', value: fig(weightIn(c.muscleKg, wu)), unit: c.muscleKg != null ? wu : undefined },
-    ...(waistDShown != null ? [{ label: 'Waist', value: fig(lengthIn(mLatest.waist, lu)), unit: lu, delta: `${waistDShown > 0 ? '+' : ''}${waistDShown} ${lu}`, good: waistD != null && waistD <= 0 }] : []),
+    ...(waistDShown != null && mLatest ? [{ label: 'Waist', value: fig(lengthIn(mLatest.waist, lu)), unit: lu, delta: `${waistDShown > 0 ? '+' : ''}${waistDShown} ${lu}`, good: waistD != null && waistD <= 0 }] : []),
   ];
 
   return (
@@ -150,14 +186,22 @@ export default function WeeklyReport() {
           </View>
         ) : null}
 
-        <Hero label="Trained This Week" figure={fig(wk.workouts)} unit={wk.workouts === 1 ? 'session' : 'sessions'}
-          note={`${wk.days} active day${wk.days === 1 ? '' : 's'}${streak > 0 ? ` · ${streak}-day streak` : ''}`} />
+        {/* The whole hero is a count over the week's log. A dash and a
+            sentence, not a zero — "Trained This Week: 0" is the single most
+            demoralising thing this app can put in front of somebody who did. */}
+        <Hero label="Trained This Week" figure={trainingWhole ? fig(wk.workouts) : fig(null)}
+          unit={trainingWhole ? (wk.workouts === 1 ? 'session' : 'sessions') : undefined}
+          note={trainingWhole
+            ? `${wk.days} active day${wk.days === 1 ? '' : 's'}${streak > 0 ? ` · ${streak}-day streak` : ''}`
+            : logStatus === 'loading' ? 'Reading your training log…'
+            : logStatus === 'partial' ? 'More logged than this screen can read in one go, so a week counted from it would be short.'
+            : 'We couldn’t read your training log. This is not a week with nothing in it.'} />
 
         <Rule />
 
         <Section>
           <SectionHead title="Training" />
-          <KpiRow items={[
+          <KpiRow items={trainingWhole ? [
             // Volume stays in tonnes for every client. It is the one figure on
             // this screen with no imperial counterpart worth printing: the
             // choices are 27,558 lb, which nobody reads, or short tons, a unit
@@ -167,6 +211,10 @@ export default function WeeklyReport() {
             { label: 'Volume', value: `${(wk.volumeKg / 1000).toFixed(1)}`, unit: 't', delta: `${wk.kcal.toLocaleString()} kcal` },
             { label: 'Streak', value: `${streak}`, unit: streak === 1 ? 'day' : 'days', delta: streak > 0 ? 'running' : 'not started', good: streak > 0 },
             { label: 'PRs on Record', value: fig(prs.length), delta: 'all-time' },
+          ] : [
+            { label: 'Volume', value: fig(null), unit: 't' },
+            { label: 'Streak', value: fig(null) },
+            { label: 'PRs on Record', value: fig(null), delta: 'not read' },
           ]} />
         </Section>
 
@@ -177,7 +225,13 @@ export default function WeeklyReport() {
           {hasBody ? (
             <KpiRow items={bodyItems} />
           ) : (
-            <Text style={{ ...ty.label, color: t.ink3 }}>No weigh-ins or scans yet — log one and this fills in.</Text>
+            // "No weigh-ins or scans yet" is a claim about the member's record,
+            // and `hasBody` is false equally when the profile read failed.
+            <Text style={{ ...ty.label, color: t.ink3 }}>
+              {c.status === 'loading' ? 'Reading your measurements…'
+                : !bodyWhole ? 'We couldn’t read your weigh-ins and scans, so there is nothing to report here. They are on your record.'
+                : 'No weigh-ins or scans yet — log one and this fills in.'}
+            </Text>
           )}
         </Section>
 
@@ -185,7 +239,7 @@ export default function WeeklyReport() {
           <View>
             <Rule />
             <Section>
-              <SectionHead title="Your week in a nutshell" />
+              <SectionHead title="Your week in a nutshell" note={reportWhole ? undefined : 'from what loaded'} />
               <Text style={{ ...ty.body, color: t.ink2 }}>{narrative}</Text>
             </Section>
           </View>

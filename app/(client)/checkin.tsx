@@ -150,7 +150,11 @@ export default function CheckIn() {
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon="back" onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Daily</Text>
+            {/* Said "Daily" over a title reading "Weekly Check-in", above a
+                line calling it a weekly pulse. One of the three had to move and
+                it is the kicker: the screen sends one check-in, the coach reads
+                it weekly, and nothing here is daily. */}
+            <Text style={{ ...ty.micro, color: t.ink3 }}>For your coach</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Weekly Check-in</Text>
           </View>
         </View>

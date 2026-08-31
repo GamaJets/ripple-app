@@ -234,7 +234,12 @@ export default function Glucose() {
               </View>
             ))
           )}
-          {g.readings.length > 60 ? (
+          {/* Gated with everything else on this screen, which it was not: it
+              sat outside the unreadable/known ternary above, so under 'error'
+              it printed a count of stale rows directly beneath "Could not be
+              read just now", and under 'partial' it printed the row cap as a
+              total. `known` is `status === 'ready'`. */}
+          {known && g.readings.length > 60 ? (
             <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>Showing the most recent 60 of {g.readings.length}.</Text>
           ) : null}
         </Section>

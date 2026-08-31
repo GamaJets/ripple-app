@@ -51,14 +51,18 @@
 // bell ever needs to update without a remount, promoting this to a provider is
 // the change to make.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { View, Text, Pressable, ScrollView, RefreshControl } from 'react-native';
+import { View, Text, Pressable, ScrollView, RefreshControl, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { capLimit, capped } from '../lib/rowCap';
-import { inboxAge, inboxIcon, safeRoute, unreadBadge } from '../lib/notifyInbox';
+import {
+  inboxAge, inboxIcon, inboxHeading, safeRoute, unreadBadge,
+  inboxControls, clearReadPrompt, deletedNote, clearedNote,
+} from '../lib/notifyInbox';
+import { writeFailure } from '../lib/wroteRows';
 import type { AppVariant } from '../lib/variant';
 import { useTheme } from './components';
 import { Icon, type IconName } from './Icon';
@@ -73,6 +77,10 @@ export interface InboxItem {
   /** Short heading. Null for rows written before part 122 added the column,
    *  and for the ones `notify-message` still writes without one. */
   title: string | null;
+  /** What to actually draw as the heading, which is not always `title`. Null
+   *  means draw no heading — see `inboxHeading`. Resolved here, once per row,
+   *  rather than at each of the three places that want to name the row. */
+  heading: string | null;
   body: string;
   icon: IconName;
   /** Already validated against this build's route group. Null means the row is
@@ -106,15 +114,18 @@ const legacyMessageRoute = (group: AppVariant): string | null =>
 const rowToItem = (r: any, group: AppVariant): InboxItem => {
   const isLegacyMessage = !r.route && String(r.icon ?? '') === 'message';
   const route = r.route ?? (isLegacyMessage ? legacyMessageRoute(group) : null);
+  const icon = isLegacyMessage ? 'message' : inboxIcon(r.route);
+  const title = r.title != null && String(r.title).trim() ? String(r.title).trim() : null;
   return {
     id: String(r.id),
-    title: r.title != null && String(r.title).trim() ? String(r.title).trim() : null,
+    title,
+    heading: inboxHeading(title, icon),
     body: String(r.body ?? ''),
     // The stored icon is a caller-supplied string in a text column and is NOT
     // trusted to be an IconName — a row whose icon says 'x' would render
     // nothing at all. It is derived from the route instead, so every row draws
     // something, with the legacy message rows recognised above.
-    icon: (isLegacyMessage ? 'message' : inboxIcon(r.route)) as IconName,
+    icon: icon as IconName,
     // Through safeRoute either way, including the value this file just chose:
     // one path for validating a route means the group check cannot be skipped
     // by whichever branch somebody adds next.
@@ -140,6 +151,48 @@ export interface InboxValue {
   markAllRead: () => Promise<{ ok: boolean; changed: number }>;
   /** Mark one row read. Same contract. */
   markRead: (id: string) => Promise<{ ok: boolean; changed: number }>;
+  /** Put one row back to unread. The mirror of `markRead`, same contract. */
+  markUnread: (id: string) => Promise<{ ok: boolean; changed: number }>;
+  /** Remove one row for good. `why` is the sentence to show when it did not
+   *  happen, from src/lib/wroteRows.ts, and is null when it did. The row is
+   *  only taken off the list once the server has said it is gone. */
+  remove: (id: string) => Promise<{ ok: boolean; why: string | null }>;
+  /** Remove every row of mine that is marked read. Returns how many the server
+   *  actually deleted — the count is the only thing that separates "there was
+   *  nothing to clear" from "the policy refused every row". */
+  clearRead: () => Promise<{ ok: boolean; changed: number }>;
+}
+
+/**
+ * Am I really signed in, as the account these rows were read for?
+ *
+ * A PostgREST DELETE matching zero rows is not an error: it answers 204 with a
+ * Content-Range header of zero rows, byte-for-byte what an RLS refusal answers.
+ * Proved live tonight — `set local role authenticated` with a real
+ * `request.jwt.claims`, a stranger deleting another account's notification:
+ * 0 rows, no error. Signed out entirely, deleting the whole table: 0 rows, no
+ * error.
+ *
+ * So before a zero can be reported as a failure of the ROW, the caller has to
+ * rule out that it was a failure of the SESSION. `getUser()` reaches the server
+ * and rejects when there is no valid one, which is exactly the distinction
+ * `getSession()` cannot make — it reads a token off the phone that may have
+ * expired hours ago. The load path deliberately uses `getSession()` (a
+ * rejection there is a signed-out user, not a failed read); this is the one
+ * place the stronger check is worth its round trip, because the alternative is
+ * telling somebody their notification could not be deleted when the truth is
+ * that they are no longer signed in.
+ *
+ * Same shape as src/ui/pushNotifications.ts `registerForPush`, which gates its
+ * `push_tokens` upsert on getUser() for the same reason.
+ */
+async function signedInAs(expected: string | null): Promise<boolean> {
+  if (!expected) return false;
+  try {
+    const { data, error } = await supabase.auth.getUser();
+    if (error) return false;
+    return data?.user?.id === expected;
+  } catch { return false; }
 }
 
 export function useNotifications(group: AppVariant): InboxValue {
@@ -244,13 +297,148 @@ export function useNotifications(group: AppVariant): InboxValue {
     } catch { return { ok: false, changed: 0 }; }
   }, []);
 
+  /**
+   * Put a row back to unread. The exact mirror of `markRead`, down to the
+   * `.eq('read', true)` guard and the `.select('id')`, so that the two cannot
+   * drift into reporting differently.
+   *
+   * It is here because it is CHEAP — one column, one row, a policy that already
+   * permits it, no new function and no new grant — and because an inbox is used
+   * as a to-do list. "Your coach asked for your intake" gets opened on a train
+   * and dealt with at home, and without this the only way to keep it in view is
+   * to not open it, which makes the unread mark a lie in the other direction.
+   */
+  const markUnread = useCallback(async (id: string): Promise<{ ok: boolean; changed: number }> => {
+    if (!USE_SUPABASE || !uid.current) return { ok: false, changed: 0 };
+    try {
+      const { data, error } = await supabase
+        .from('notifications')
+        .update({ read: false })
+        .eq('id', id)
+        .eq('read', true)
+        .select('id');
+      if (error) return { ok: false, changed: 0 };
+      const changed = (data ?? []).length;
+      // The badge is `items.filter(i => !i.read).length` and is DERIVED, never
+      // stored. That is what keeps the bell honest through this: putting a row
+      // back to unread raises the count by exactly one because there is only one
+      // number and this is it. A separate counter kept alongside the list is how
+      // a bell and a list come to disagree.
+      if (changed) setItems(listRef.current.map((i) => (i.id === id ? { ...i, read: false } : i)), uid.current);
+      return { ok: true, changed };
+    } catch { return { ok: false, changed: 0 }; }
+  }, []);
+
+  /**
+   * Delete one row.
+   *
+   * ── The row is read before it is deleted ──────────────────────────────────
+   *
+   * `listRef.current.find(...)` is the read, and it is not a formality. "Zero
+   * rows affected" is only evidence of a failure once it is established that a
+   * row was there — and this list came back through `notif_self` moments ago,
+   * so a row in it is a row the server showed this account. An id that is not
+   * in the list is refused rather than sent, because a zero from an id nobody
+   * read would be unattributable.
+   *
+   * ── The row leaves the screen only after the server says it is gone ───────
+   *
+   * Not optimistic. `deleteEntry` in app/(client)/workouts.tsx made exactly
+   * this mistake and its comment records the fix: the row left the screen
+   * whether or not the delete landed, so a refused one looked done and came
+   * back at the next launch. Server first means there is no restore path to get
+   * wrong, and a failed delete leaves the row exactly where it was — which is
+   * the requirement, reached by not creating the problem.
+   *
+   * ── `{ count: 'exact' }` is the whole point ───────────────────────────────
+   *
+   * Without it `count` is null and src/lib/wroteRows.ts reports "the server did
+   * not say whether it changed anything", which is the honest answer to a call
+   * site that forgot to ask. With it, zero is a fact and gets a sentence.
+   */
+  const remove = useCallback(async (id: string): Promise<{ ok: boolean; why: string | null }> => {
+    if (!USE_SUPABASE || !uid.current) return { ok: false, why: 'This notification could not be deleted.' };
+    const row = listRef.current.find((i) => i.id === id);
+    if (!row) return { ok: false, why: 'That notification is no longer on this list, so nothing was deleted.' };
+    if (!(await signedInAs(uid.current))) {
+      return { ok: false, why: 'Nothing was deleted — you are not signed in on this device any more. Sign in and try again.' };
+    }
+    try {
+      const res = await supabase
+        .from('notifications')
+        .delete({ count: 'exact' })
+        .eq('id', id);
+      // `what` is the row in the reader's words, because writeFailure puts it
+      // at the front of a sentence they will actually read.
+      const why = writeFailure('This notification', res);
+      if (why) return { ok: false, why };
+      setItems(listRef.current.filter((i) => i.id !== id), uid.current);
+      return { ok: true, why: null };
+    } catch {
+      return { ok: false, why: 'Nothing was deleted — the server did not answer.' };
+    }
+  }, []);
+
+  /**
+   * Delete every row of mine that is marked read.
+   *
+   * ── Why this is scoped by predicate and not by a list of ids ──────────────
+   *
+   * Sending the ids that are on screen would make the statement mean "the read
+   * ones you can see", and the person asked for the read ones. The screen only
+   * offers this under 'ready' (see `inboxControls`), where those two sets are
+   * the same set — and under 'partial', where they are not, the control is not
+   * offered at all rather than quietly meaning the narrower thing.
+   *
+   * ── Why `.eq('user_id', …)` is here when the SELECT deliberately has none ──
+   *
+   * The read above says so in its own comment: no second copy of `notif_self`,
+   * because a duplicated rule is a weaker rule that eventually disagrees with
+   * the policy. That argument is about a READ, where the cost of the policy
+   * being wrong is seeing too much.
+   *
+   * This is a DELETE with no id in it. If `notif_self` is ever loosened or
+   * dropped — and part 147 found a live policy that had silently drifted back
+   * to an older definition — the blast radius of this one statement is every
+   * read notification in the product. The column costs nothing, cannot be more
+   * permissive than the policy, and turns that from a catastrophe into a no-op.
+   * Verified live that RLS alone already scopes it correctly: one account's
+   * clear-read deleted 2 of their own rows and none of the other account's.
+   */
+  const clearRead = useCallback(async (): Promise<{ ok: boolean; changed: number }> => {
+    const me = uid.current;
+    if (!USE_SUPABASE || !me) return { ok: false, changed: 0 };
+    if (!(await signedInAs(me))) return { ok: false, changed: 0 };
+    try {
+      const res = await supabase
+        .from('notifications')
+        .delete({ count: 'exact' })
+        .eq('user_id', me)
+        .eq('read', true);
+      // Zero is NOT a failure here, unlike the single-row delete: "nothing was
+      // marked read" is a real and common outcome, and the caller is handed the
+      // count so it can say which happened. `count == null` is a failure though
+      // — it means nobody counted — which is what writeFailure checks for.
+      if (res.error || res.count == null) return { ok: false, changed: 0 };
+      setItems(listRef.current.filter((i) => !i.read), me);
+      return { ok: true, changed: res.count };
+    } catch { return { ok: false, changed: 0 }; }
+  }, []);
+
   return {
     items,
+    // Derived from the list on every render rather than tracked alongside it.
+    // Deleting an unread row lowers this by one, marking one unread raises it by
+    // one, and the bell cannot come to disagree with the list because there is
+    // no second number for it to disagree with.
     unread: items.filter((i) => !i.read).length,
     status,
     refresh: load,
     markAllRead,
     markRead,
+    markUnread,
+    remove,
+    clearRead,
   };
 }
 
@@ -351,7 +539,7 @@ export interface InboxFraming {
 export function NotificationInbox(f: InboxFraming) {
   const t = useTheme();
   const router = useRouter();
-  const { items, unread, status, refresh, markAllRead, markRead } = useNotifications(f.group);
+  const { items, unread, status, refresh, markAllRead, markRead, markUnread, remove, clearRead } = useNotifications(f.group);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   // Tracked here rather than read off `status`. A pull-to-refresh does not put
@@ -376,6 +564,16 @@ export function NotificationInbox(f: InboxFraming) {
   // no ceiling, and `1204 new` is what num() exists to stop.
   const badge = unreadBadge(unread, status);
 
+  // What this screen is allowed to destroy, given how the read went. The whole
+  // rule and its reasoning are in src/lib/notifyInbox.ts; the short version is
+  // that nothing may be deleted over a list nobody confirmed ('error'), and
+  // "Clear Read" may not be offered over a list that is only a prefix
+  // ('partial') because its confirmation would name a number taken over part of
+  // the set while the statement itself would sweep all of it.
+  const controls = inboxControls(status);
+  const readCount = items.filter((i) => i.read).length;
+  const clearPrompt = clearReadPrompt(readCount, status);
+
   const onMarkAll = async () => {
     if (busy) return;
     setBusy(true);
@@ -390,6 +588,79 @@ export function NotificationInbox(f: InboxFraming) {
           ? 'Nothing was unread.'
           : `Marked ${res.changed} as read.`);
     } finally { setBusy(false); }
+  };
+
+  /* ── Removing ───────────────────────────────────────────────────────────
+   *
+   * WHICH CONTROL, AND WHY NOT A SWIPE. There is no swipe-to-delete anywhere in
+   * this codebase — no Swipeable, no PanResponder, nothing to be consistent
+   * with — so adding one here would introduce a gesture that exists on exactly
+   * one screen, is invisible to a screen reader, and has no discoverable
+   * affordance. The house pattern for a destructive action on a row is an
+   * explicit trailing control: `app/(client)/workouts.tsx` puts a `minus` in
+   * `t.crit` at the end of every logged exercise, with an accessibilityLabel
+   * naming the thing. That is what is used here, unchanged.
+   *
+   * WHETHER IT CONFIRMS. It does NOT, and that is a deliberate departure from
+   * the confirm-everything habit of `deleteEntry` and `app/(owner)/deletions.tsx`.
+   * The reason is what the row IS. Deleting a workout entry destroys the record
+   * of something somebody did; deleting the account of a member cascades across
+   * 39 tables. A notification is a COPY of something that already happened —
+   * the session is still cancelled, the invoice is still owed, the booking is
+   * still in the calendar — so the cost of a mis-tap is losing a duplicate of a
+   * fact that is still recorded in the place it belongs.
+   *
+   * Against that sits the cost of confirming: an inbox is triaged, and forty
+   * rows at two taps each is eighty taps, which is precisely the pressure that
+   * drives somebody to the bulk control instead. Making the per-row action one
+   * tap is what keeps the dangerous control from being the convenient one.
+   *
+   * What replaces the confirmation is verification: `remove()` does not take the
+   * row off the list until the server has said it is gone, and says so in a
+   * sentence when it has not.
+   */
+  const onDelete = async (item: InboxItem) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const res = await remove(item.id);
+      // Only the failure gets a sentence. The row disappearing IS the success
+      // message, and a note under a list that visibly shrank is noise.
+      setNote(deletedNote(item.heading ?? 'That notification', res.why));
+    } finally { setBusy(false); }
+  };
+
+  /** Back to unread, so the inbox can be used as a to-do list. Offered only on
+   *  rows that are read — on an unread row it is a control that does nothing. */
+  const onMarkUnread = async (item: InboxItem) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const res = await markUnread(item.id);
+      setNote(res.ok && res.changed
+        ? null
+        : 'That notification was not marked unread — the server did not confirm it, so it still reads as read.');
+    } finally { setBusy(false); }
+  };
+
+  /** Clear Read. Confirmed, and the confirmation names the figure — see
+   *  `clearReadPrompt`, which is also what decides the control may be shown. */
+  const onClearRead = () => {
+    if (busy || !clearPrompt) return;
+    Alert.alert(
+      clearPrompt.title,
+      clearPrompt.message,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: clearPrompt.confirm, style: 'destructive', onPress: async () => {
+          setBusy(true);
+          try {
+            const res = await clearRead();
+            setNote(clearedNote(res.ok, res.changed));
+          } finally { setBusy(false); }
+        } },
+      ],
+    );
   };
 
   const open = async (item: InboxItem) => {
@@ -417,7 +688,10 @@ export function NotificationInbox(f: InboxFraming) {
           </View>
           {badge.kind === 'count' ? (
             <View style={{ paddingHorizontal: sp.md, paddingVertical: 5, borderRadius: radius.pill, backgroundColor: t.brand }}>
-              <Text style={{ ...ty.micro, fontWeight: '700', color: t.brandInk }}>{badge.label} new</Text>
+              {/* caption, not micro: micro uppercases, and "3 NEW" is the same
+                  defect as the "2H" timestamp below — a word beside a figure,
+                  shouted. */}
+              <Text style={{ ...ty.caption, fontWeight: '700', color: t.brandInk }}>{badge.label} new</Text>
             </View>
           ) : null}
         </View>
@@ -457,43 +731,128 @@ export function NotificationInbox(f: InboxFraming) {
         ) : null}
 
         {items.map((item, i) => (
-          <Pressable
+          <View
             key={item.id}
-            onPress={() => void open(item)}
-            accessibilityRole="button"
-            accessibilityLabel={`${item.title ?? 'Notification'}. ${item.body}`}
-            accessibilityState={{ selected: !item.read }}
-            style={{ flexDirection: 'row', gap: sp.md, paddingVertical: sp.lg, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}
+            style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingVertical: sp.lg, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}
           >
-            <View style={{ width: 34, height: 34, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center', backgroundColor: item.read ? t.surface2 : t.surface3 }}>
-              <Icon name={item.icon} size={17} color={item.read ? t.ink3 : t.brand} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
-                <Text style={{ ...ty.label, fontWeight: item.read ? '500' : '700', color: t.ink, flex: 1 }} numberOfLines={1}>
-                  {item.title ?? f.title}
-                </Text>
-                <Text style={{ ...ty.micro, color: t.ink3 }}>{inboxAge(item.at)}</Text>
-                {/* The unread mark is per row and needs no whole-list read to
-                    be true: this row came back with read=false, whatever the
-                    status of the set it arrived in. */}
-                {!item.read ? <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: t.brand }} /> : null}
+            {/* The row's own tap target stops at the controls. Nesting the
+                delete inside the Pressable that opens the notification would
+                make one of them swallow the other's tap on Android, and the
+                one that lost would be whichever the platform felt like. */}
+            <Pressable
+              onPress={() => void open(item)}
+              accessibilityRole="button"
+              accessibilityLabel={`${item.heading ?? 'Notification'}. ${item.body}`}
+              accessibilityState={{ selected: !item.read }}
+              style={{ flex: 1, flexDirection: 'row', gap: sp.md }}
+            >
+              <View style={{ width: 34, height: 34, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center', backgroundColor: item.read ? t.surface2 : t.surface3 }}>
+                <Icon name={item.icon} size={17} color={item.read ? t.ink3 : t.brand} />
               </View>
-              <Text style={{ ...ty.label, color: item.read ? t.ink3 : t.ink2, marginTop: 3 }}>{item.body}</Text>
-              {item.route ? null : (
-                // A row whose stored route this build will not follow. Saying
-                // so is better than a tap that appears to do nothing.
-                <Text style={{ ...ty.micro, color: t.ink3, marginTop: 4 }}>Nothing to open</Text>
-              )}
-            </View>
-          </Pressable>
+              <View style={{ flex: 1 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
+                  {/* NOT `item.title ?? f.title`. That drew the SCREEN's name —
+                      "Notifications" — over every untitled row, which reads as
+                      a heading somebody wrote and says nothing. `inboxHeading`
+                      returns a true one or none at all; when it is none the
+                      body moves up into this line's place and the age still
+                      has a row to sit on. */}
+                  {item.heading ? (
+                    <Text style={{ ...ty.label, fontWeight: item.read ? '500' : '700', color: t.ink, flex: 1 }} numberOfLines={1}>
+                      {item.heading}
+                    </Text>
+                  ) : (
+                    <View style={{ flex: 1 }} />
+                  )}
+                  {/* ty.caption, not ty.micro: micro carries
+                      `textTransform: 'uppercase'` and rendered a two-hour-old
+                      notification as "2H". A unit beside a figure is lowercase
+                      everywhere else in this app (kg, kcal, min), and an
+                      uppercased aside shouts as loudly as the heading it sits
+                      next to. Same change, same reason, as the `Field` hint in
+                      src/ui/kit.tsx. */}
+                  <Text style={{ ...ty.caption, color: t.ink3 }}>{inboxAge(item.at)}</Text>
+                  {/* The unread mark is per row and needs no whole-list read to
+                      be true: this row came back with read=false, whatever the
+                      status of the set it arrived in. */}
+                  {!item.read ? <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: t.brand }} /> : null}
+                </View>
+                <Text style={{ ...ty.label, color: item.read ? t.ink3 : t.ink2, marginTop: item.heading ? 3 : 0 }}>{item.body}</Text>
+                {item.route ? null : (
+                  // A row whose stored route this build will not follow. Saying
+                  // so is better than a tap that appears to do nothing. Caption
+                  // rather than micro for the same reason as the age above:
+                  // this is a sentence, and micro would shout it.
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>Nothing to open</Text>
+                )}
+              </View>
+            </Pressable>
+
+            {/* Back to unread, on read rows only — on an unread row it is a
+                control that cannot do anything. `eye-off` because that is what
+                it means: not seen. */}
+            {controls.markUnread && item.read ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Mark ${item.heading ?? 'this notification'} as unread`}
+                onPress={() => void onMarkUnread(item)}
+                hitSlop={8}
+                style={{ padding: 4 }}
+              >
+                <Icon name="eye-off" size={16} color={t.ink3} />
+              </Pressable>
+            ) : null}
+
+            {/* The house control for a destructive row action, taken verbatim
+                from app/(client)/workouts.tsx: a `minus` in the critical tone
+                with a label that names the row. `color` on an Icon is a prop
+                and not a text style, which is why t.crit is allowed here and
+                is not what scripts/check-contrast.mjs is looking for. */}
+            {controls.rowDelete ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Delete ${item.heading ?? 'this notification'}`}
+                onPress={() => void onDelete(item)}
+                hitSlop={8}
+                style={{ padding: 4 }}
+              >
+                <Icon name="minus" size={16} color={t.crit} />
+              </Pressable>
+            ) : null}
+          </View>
         ))}
 
-        {items.some((i) => !i.read) ? (
-          <View style={{ marginTop: layout.section, alignItems: 'flex-start' }}>
-            <Ghost label={busy ? 'Marking…' : 'Mark All Read'} icon="check" onPress={() => void onMarkAll()} />
+        {items.length > 0 && (items.some((i) => !i.read) || clearPrompt) ? (
+          <View style={{ marginTop: layout.section, flexDirection: 'row', flexWrap: 'wrap', gap: sp.md }}>
+            {items.some((i) => !i.read) ? (
+              <Ghost label={busy ? 'Working…' : 'Mark All Read'} icon="check" onPress={() => void onMarkAll()} />
+            ) : null}
+            {/* Only ever rendered under 'ready' with something to clear —
+                `clearReadPrompt` returns null otherwise, so the button and its
+                confirmation can never come apart. There is deliberately no
+                "Clear All": see the note below. */}
+            {clearPrompt ? (
+              <Ghost label={busy ? 'Working…' : clearPrompt.label} icon="minus" onPress={onClearRead} />
+            ) : null}
           </View>
         ) : null}
+
+        {/* Why a control is missing, rather than it silently not being there.
+            Under 'error' this is the important one: the screen already says the
+            list is unconfirmed, and this says what that costs. */}
+        {controls.withheld && items.length > 0 ? (
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>{controls.withheld}</Text>
+        ) : null}
+
+        {/* WHY THERE IS NO "CLEAR ALL".
+            An unread notification is one the person has not seen, and the only
+            bulk control that cannot destroy something unseen is one scoped to
+            `read = true`. A "Clear All" over a truncated read deletes rows that
+            were never on screen; over a failed one it deletes on the strength
+            of a cached list nobody confirmed. And the escape hatch already
+            exists and is two taps — Mark All Read, then Clear Read — which
+            forces the person to state "I have seen these" before "remove
+            these". That is a better sequence than one button that means both. */}
       </ScrollView>
     </SafeAreaView>
   );

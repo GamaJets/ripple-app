@@ -160,7 +160,11 @@ export default function Compare() {
   // The rows are only built when the scans are actually known. Under 'error'
   // the table is replaced by a sentence, because a table of dashes says "there
   // was no scan on those days" and that is not what a failed read means.
-  const rows = pair && cd.scansStatus !== 'error' && cd.scansStatus !== 'loading'
+  // `!== 'error' && !== 'loading'` admits 'partial'. Under it a scan that fell
+  // past the row cap renders as an em dash, and the comment further down says
+  // an em dash here means "no scan that day" — so a truncated read would tell
+  // the member they were not measured on a day they were.
+  const rows = pair && cd.scansStatus === 'ready'
     ? compareRows(pair.before.takenAt, pair.after.takenAt, cd.scans, wu)
     : null;
   const dayOf = (p: ProgressPhoto) => new Date(p.takenAt).toLocaleDateString();

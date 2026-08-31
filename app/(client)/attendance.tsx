@@ -286,7 +286,9 @@ export default function Attendance() {
           <>
             <Rule />
             <Section>
-              <SectionHead title="On record, date unknown" note={`${undated.length}`} />
+              {/* Every other figure on this screen goes through `countable`
+                  (`status === 'ready'`); this one did not. */}
+              <SectionHead title="On record, date unknown" note={countable ? `${undated.length}` : undefined} />
               <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.sm }}>
                 Classes you booked whose details this app cannot read, so there is no date to put them on. They are listed here rather than dropped or guessed onto a day, and they are not counted above.
               </Text>
