@@ -145,7 +145,7 @@ function WaiverScreen({ state, accept, reload }: {
               below and we’ll record it.
             </Text>
             <View style={{ marginTop: sp.md, alignSelf: 'flex-start' }}>
-              <Cta label="Try Again" onPress={reload} tone={t.surface} />
+              <Cta label="Try Again" onPress={reload} />
             </View>
           </View>
         ) : null}

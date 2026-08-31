@@ -10,11 +10,11 @@
 // became one hero figure, the six bordered cards became hairline-separated
 // sections, and the day grid now reads through weight and the accent rather
 // than through boxes and 800-weight text.
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { View, Text, Pressable, ScrollView, Alert, Modal } from 'react-native';
 import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { Rule, Section, SectionHead, Hero, ListRow, Cta, Ghost, fig } from '../../src/ui/kit';
@@ -63,7 +63,12 @@ export default function TrainerSchedule() {
   const t = useTheme();
   const now = new Date();
   const router = useRouter();
-  const { sessions, addSession, releaseSession, removeSession } = useSessions();
+  const { sessions, addSession, releaseSession, removeSession, refresh } = useSessions();
+  // The other side of this booking happens on somebody else's phone. Re-read on
+  // focus so what is on screen is the diary as it stands, not as it stood at
+  // launch — including a slot that has just been taken.
+  useFocusEffect(useCallback(() => { refresh(); }, [refresh]));
+
   const { roster, status: rosterStatus } = useRoster();
   const { tenant } = useTenant();
   const { sessionFee } = useMyTrainerProfile();
@@ -170,7 +175,8 @@ export default function TrainerSchedule() {
     if (!saved) {
       Alert.alert(
         'Not booked',
-        `${timeLabel(s.startsAt)} with ${who} could not be saved, so it is not on your calendar and ${who} has not been booked. Try again.`,
+        `${timeLabel(s.startsAt)} with ${who} was not saved, so it is not on your calendar and ${who} has not been booked.\n\n` +
+          'Either the save failed, or somebody booked that time while this screen was open — your diary now allows only one session at a time. Pull down to refresh and check before trying again.',
         [{ text: 'OK' }],
       );
       return;

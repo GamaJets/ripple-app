@@ -21,7 +21,7 @@
 // addSession's `{ ok }` shape is untouched — screens destructure it — but it now
 // also carries `saved`, a promise that resolves to whether the row reached the
 // server.
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { overlaps } from '../lib/booking';
 import type { TrainingSession } from '../lib/types';
 import { scheduleLocal } from './pushNotifications';
@@ -52,6 +52,10 @@ interface SessionsValue {
   releaseSession: (id: string) => Promise<boolean>;
   /** Resolves true only when the row was actually deleted server-side. */
   removeSession: (id: string) => Promise<boolean>;
+  /** Re-read the calendar from the server. Screens call this on focus, so a
+   *  booking made on somebody else's phone is on this one by the time its owner
+   *  looks at it. */
+  refresh: () => Promise<void>;
   /** Client confirms a delivered session, with an optional comment for the trainer.
    *  Goes through the `approve_session` RPC — a client has no write access to
    *  `sessions` or `session_approvals` directly. */
@@ -71,20 +75,24 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
   const [uid, setUid] = useState<string | null>(null);
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
 
-  useEffect(() => {
+  // Pulled out of the mount effect so the screens can ask for it again. A
+  // booking made on the client's phone lands in the database and fires a push,
+  // but this provider only ever read the calendar once, at launch — so the
+  // coach opened the notification onto the same stale screen they were already
+  // looking at, and the session they had just been told about was not on it.
+  const hydrate = useCallback(async (cancelled: () => boolean = () => false) => {
     if (!USE_SUPABASE) return;
-    let cancelled = false;
-    (async () => {
+    {
       try {
         // No session is a true answer, not a failed check. getUser() REJECTS
         // when nobody is signed in, and treating that as an error latched this
         // provider into 'error' on the first tick — before anybody had signed
         // in — where it stayed, because the effect never ran a second time.
         const { data: sess } = await supabase.auth.getSession();
-        if (cancelled) return;
+        if (cancelled()) return;
         if (!sess?.session) { setStatus('ready'); return; }
         const { data: auth, error: authErr } = await supabase.auth.getUser();
-        if (cancelled) return;
+        if (cancelled()) return;
         if (authErr) { setStatus('error'); return; }
         const id = auth?.user?.id;
         if (!id) { setStatus('ready'); return; }
@@ -98,7 +106,7 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
         // ahead. Newest-first keeps the future and drops the ancient history.
         const { data, error } = await supabase.from('sessions').select('*')
           .order('starts_at', { ascending: false }).order('id', { ascending: false }).limit(capLimit());
-        if (cancelled) return;
+        if (cancelled()) return;
         if (error) { setStatus('error'); return; }
         // A confirmed empty calendar is a real answer and now reports itself as
         // one, instead of returning down the same path as a failed read.
@@ -130,13 +138,18 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
             });
           }
         } catch { /* sessions still load */ }
-        if (cancelled) return;
+        if (cancelled()) return;
         setSessions(rows);
         setStatus(page.truncated ? 'partial' : 'ready');
-      } catch { if (!cancelled) setStatus('error'); }
-    })();
+      } catch { if (!cancelled()) setStatus('error'); }
+    }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    hydrate(() => cancelled);
     return () => { cancelled = true; };
-  }, [authRev]);
+  }, [authRev, hydrate]);
 
   const addSession: SessionsValue['addSession'] = (s) => {
     if (overlaps(s.startsAt, s.durationMin, sessions)) return { ok: false };
@@ -242,7 +255,7 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
     return { ok: true };
   };
 
-  return <Ctx.Provider value={{ sessions, status, addSession, bookSession, releaseSession, removeSession, approveSession }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ sessions, status, refresh: () => hydrate(), addSession, bookSession, releaseSession, removeSession, approveSession }}>{children}</Ctx.Provider>;
 }
 
 export function useSessions(): SessionsValue {

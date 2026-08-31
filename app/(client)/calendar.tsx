@@ -61,11 +61,11 @@
 // screen (tagline, bio, specialties, offers, fee) come from the `trainers`
 // table, which a client has no row in, so those arrive empty rather than
 // borrowed from the reader.
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { View, Text, Pressable, ScrollView, Alert, Modal, TextInput } from 'react-native';
 import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Hero, KpiRow, Card, ListRow, Cta, Ghost, Notice, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../../src/theme/scale';
@@ -167,7 +167,12 @@ export default function Calendar() {
   const t = useTheme();
   const router = useRouter();
   const now = new Date();
-  const { sessions, bookSession, releaseSession } = useSessions();
+  const { sessions, bookSession, releaseSession, refresh } = useSessions();
+  // The other side of this booking happens on somebody else's phone. Re-read on
+  // focus so what is on screen is the diary as it stands, not as it stood at
+  // launch — including a slot that has just been taken.
+  useFocusEffect(useCallback(() => { refresh(); }, [refresh]));
+
   // Still the source of the session fee and of the profile fields in the sheet
   // below, all of which come back empty for a client. It is no longer the source
   // of the coach's name or face — see the TF-32 note at the top of this file.
