@@ -364,7 +364,16 @@ export default function Home() {
               card underneath talk about two different things. */}
           <SectionHead
             title={today.route.includes('workouts') ? `Today · ${workout.focus}` : 'Today'}
-            note={logKnown ? `${wk.workouts} of ${goalDays} this week` : undefined}
+            // "6 of 3 this week" is arithmetically true and reads as a bug.
+            // A goal is a floor, not a quota, and a client who trained twice as
+            // often as they meant to should not be shown a fraction that looks
+            // like a rendering fault. Past the goal it says so instead; the
+            // count itself is never hidden, because the number they earned is
+            // the point.
+            note={!logKnown ? undefined
+              : wk.workouts > goalDays ? `${wk.workouts} this week · goal was ${goalDays}`
+                : wk.workouts === goalDays ? `${wk.workouts} of ${goalDays} this week · goal met`
+                  : `${wk.workouts} of ${goalDays} this week`}
           />
           <ActionCard
             ring={logKnown && goalDays ? wk.workouts / goalDays : 0}
