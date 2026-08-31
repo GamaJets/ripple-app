@@ -152,9 +152,9 @@ const hidden = mergeAttendance(
 );
 eq(hidden.events.length, 0, 'an event with no readable date is kept off the dated timeline');
 eq(hidden.undated.length, 1, 'and is NOT dropped — the member did book it');
-eq(hidden.undated[0].day, null, 'it is carried with no day rather than a guessed one');
-eq(hidden.undated[0].at, null, 'and no time');
-eqJson(hidden.undated[0].outcome, { kind: 'unknown' },
+eq(hidden.undated[0]?.day, null, 'it is carried with no day rather than a guessed one');
+eq(hidden.undated[0]?.at, null, 'and no time');
+eqJson(hidden.undated[0]?.outcome, { kind: 'unknown' },
   'nothing is claimed about a class we cannot read');
 
 const markedButHidden = mergeAttendance(

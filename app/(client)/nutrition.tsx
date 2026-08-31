@@ -195,7 +195,25 @@ export default function Nutrition() {
     const asset = res.assets[0];
     setLogBusy(true); let done = false;
     let nb = asset.base64; try { const mm = await ImageManipulator.manipulateAsync(asset.uri, [{ resize: { width: 1512 } }], { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true }); if (mm.base64) nb = mm.base64; } catch {}
-    if (visionAvailable() && nb) { const r = await analyzeMeal(nb, 'image/jpeg'); if (r) { fl.addFood({ name: r.name, kcal: r.kcal, protein: r.protein, carbs: r.carbs, fat: r.fat, via: 'photo' }); notifySuccess(); Alert.alert('Logged', r.name + ' · ' + r.kcal + ' kcal added to today.'); done = true; } }
+    if (visionAvailable() && nb) {
+      const r = await analyzeMeal(nb, 'image/jpeg');
+      if (r) {
+        // `logFood` distinguishes three outcomes and this said "added to today"
+        // over all of them. A meal the server REFUSED is not on the record, and
+        // a meal that could not be sent is waiting rather than counted — both
+        // were being reported as logged, which is how somebody eats to a
+        // calorie figure that is missing a meal.
+        const out = await fl.logFood({ name: r.name, kcal: r.kcal, protein: r.protein, carbs: r.carbs, fat: r.fat, via: 'photo' });
+        if (out === 'refused') {
+          Alert.alert('Not logged', `${r.name} could not be saved, so it is not on today's record.`);
+        } else {
+          notifySuccess();
+          Alert.alert(out === 'unsent' ? 'Logged — waiting to send' : 'Logged',
+            `${r.name} · ${num(r.kcal)} kcal${out === 'unsent' ? '. It is kept on this phone and goes up when you have signal.' : ' added to today.'}`);
+        }
+        done = true;
+      }
+    }
     setLogBusy(false);
     // Nothing is logged when the photo cannot be read. Guessing macros here is
     // worse than logging nothing — the client would be planning around a number

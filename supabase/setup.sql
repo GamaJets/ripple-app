@@ -17752,6 +17752,11 @@ begin
   return new;
 end $fn$;
 
+-- A trigger function is reached by the trigger firing, never by a caller, so
+-- nothing needs EXECUTE on it. Stated rather than left to Supabase's stock
+-- default privileges, which hand it to both API roles.
+revoke all on function public.coach_documents_immutable_guard() from public, anon, authenticated;
+
 drop trigger if exists coach_documents_immutable on public.coach_documents;
 create trigger coach_documents_immutable
   before update on public.coach_documents
@@ -17773,18 +17778,42 @@ create policy coach_documents_coach_r on public.coach_documents
   for select to authenticated
   using (coach_id = (select auth.uid()));
 
+-- ── The `exists` that must NOT be written inline here ────────────────────
+--
+-- The acceptance clause reads `coach_document_acceptances`, whose own SELECT
+-- policy reads `coach_documents` (a coach sees acceptances of their documents).
+-- Written as a plain sub-select, those two policies call each other and every
+-- read of either table fails 42P17, infinite recursion — which is exactly the
+-- fault part 54 had to undo across the whole video library, where it looked
+-- like an empty library rather than like an error. It was reproduced here, on
+-- the first insert, before this note existed.
+--
+-- `has_accepted_coach_doc` is SECURITY DEFINER, so its own read of the
+-- acceptances table does not re-enter a policy, and the cycle terminates. Same
+-- device, same reason, as `can_use_message_thread` in part 124.
+create or replace function public.has_accepted_coach_doc(p_document uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+  select exists (
+    select 1 from public.coach_document_acceptances a
+     where a.document_id = p_document
+       and a.client_id = (select auth.uid()));
+$fn$;
+
+revoke all on function public.has_accepted_coach_doc(uuid) from public, anon;
+grant execute on function public.has_accepted_coach_doc(uuid) to authenticated;
+
 drop policy if exists coach_documents_client_r on public.coach_documents;
 create policy coach_documents_client_r on public.coach_documents
   for select to authenticated
   using (
     exists (select 1 from public.clients c
              where c.id = (select auth.uid()) and c.trainer_id = coach_documents.coach_id)
-    and (
-      retired_at is null
-      or exists (select 1 from public.coach_document_acceptances a
-                  where a.document_id = coach_documents.id
-                    and a.client_id = (select auth.uid()))
-    )
+    and (retired_at is null or public.has_accepted_coach_doc(id))
   );
 
 -- Uploading is a plain insert, checked. Own row, own folder, and the folder
@@ -18921,6 +18950,13 @@ as $function$
    where v.member_id = auth.uid() and v.class_id is not null
 $function$;
 
+-- `authenticated` MUST keep EXECUTE: a policy's USING clause is evaluated as
+-- the querying role, so revoking it would make gym_classes unreadable rather
+-- than more private. Supabase's linter flags every such function (0029) and
+-- flags 86 others in this project alongside it — is_owner_of, my_tenant,
+-- book_class, class_counts. Calling it directly over /rest/v1/rpc returns the
+-- caller their own class ids, which they can already list out of their own
+-- class_bookings, so the exposed route discloses nothing the tables do not.
 revoke execute on function public.my_class_history() from public, anon;
 grant  execute on function public.my_class_history() to authenticated;
 

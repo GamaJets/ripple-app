@@ -169,6 +169,11 @@ begin
   return new;
 end $fn$;
 
+-- A trigger function is reached by the trigger firing, never by a caller, so
+-- nothing needs EXECUTE on it. Stated rather than left to Supabase's stock
+-- default privileges, which hand it to both API roles.
+revoke all on function public.coach_documents_immutable_guard() from public, anon, authenticated;
+
 drop trigger if exists coach_documents_immutable on public.coach_documents;
 create trigger coach_documents_immutable
   before update on public.coach_documents

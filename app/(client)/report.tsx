@@ -43,7 +43,11 @@ export default function WeeklyReport() {
   const c = useClientData();
   const { log } = useWorkoutLog();
   const { entries } = useMeasurements();
-  const { latest: checkIn } = useCheckIns();
+  // `latestSent`, not `latest`. A weekly report is a summary of what the coach
+  // can see, and `latest` may be a check-in still sitting on this phone with no
+  // signal — reporting it as part of the record would tell the client their
+  // coach has read something nobody has sent.
+  const { latestSent: checkIn } = useCheckIns();
   const st = useSettings();
   const wu = st.weightUnit;
   const lu = st.lengthUnit;

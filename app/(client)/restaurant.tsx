@@ -37,11 +37,18 @@ export default function Restaurant() {
   }, [q, cuisine]);
 
   const est = sel ? estimateDish(sel, portion) : null;
-  const logIt = () => {
+  const logIt = async () => {
     if (!est) return;
-    fl.addFood({ name: est.name, kcal: est.kcal, protein: est.protein, carbs: est.carbs, fat: est.fat, via: 'manual' });
+    // Awaited and branched. This announced "added to today" whatever the
+    // server said, including when it refused the row outright.
+    const out = await fl.logFood({ name: est.name, kcal: est.kcal, protein: est.protein, carbs: est.carbs, fat: est.fat, via: 'manual' });
+    if (out === 'refused') {
+      Alert.alert('Not logged', `${est.name} could not be saved, so it is not on today's record. Your choice is still here — try again in a moment.`);
+      return;
+    }
     setSel(null); setPortion(1);
-    Alert.alert('Logged', `${est.name} · ${num(est.kcal)} kcal added to today.`);
+    Alert.alert(out === 'unsent' ? 'Logged — waiting to send' : 'Logged',
+      `${est.name} · ${num(est.kcal)} kcal${out === 'unsent' ? '. It is kept on this phone and goes up when you have signal.' : ' added to today.'}`);
   };
 
   const G = layout.gutter;

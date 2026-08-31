@@ -126,6 +126,17 @@ export default function Classes() {
           <Ghost icon="back" onPress={() => router.back()} />
         </View>
 
+        {/* The other half of the same subject, and the half the member has never
+            had: this screen is what is COMING, and app/(client)/attendance.tsx
+            is what already happened. The gym has held that record from both ends
+            — the register a coach ticks and the door log in `gym_visits` — and
+            until now only the gym could read it. Put here rather than only on a
+            tab because a member wondering whether to book a class is the same
+            member wondering how often they have actually been coming. */}
+        <View style={{ flexDirection: 'row', marginTop: sp.lg }}>
+          <Ghost label="My Attendance" onPress={() => router.push('/(client)/attendance')} />
+        </View>
+
         {branches.length > 1 ? (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: sp.lg }} contentContainerStyle={{ gap: sp.sm }}>
             {chip('All branches', branch === null, () => setBranch(null))}

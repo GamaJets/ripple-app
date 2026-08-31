@@ -134,6 +134,13 @@ as $function$
    where v.member_id = auth.uid() and v.class_id is not null
 $function$;
 
+-- `authenticated` MUST keep EXECUTE: a policy's USING clause is evaluated as
+-- the querying role, so revoking it would make gym_classes unreadable rather
+-- than more private. Supabase's linter flags every such function (0029) and
+-- flags 86 others in this project alongside it — is_owner_of, my_tenant,
+-- book_class, class_counts. Calling it directly over /rest/v1/rpc returns the
+-- caller their own class ids, which they can already list out of their own
+-- class_bookings, so the exposed route discloses nothing the tables do not.
 revoke execute on function public.my_class_history() from public, anon;
 grant  execute on function public.my_class_history() to authenticated;
 

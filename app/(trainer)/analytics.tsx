@@ -406,14 +406,16 @@ export default function TrainerAnalytics() {
               : revHist.delta !== 0 ? `${revHist.delta > 0 ? '+' : '−'}${priced(Math.abs(revHist.delta)) ?? Math.abs(revHist.delta).toLocaleString()} vs last mo`
               : 'Tracking started'}
             onPress={() => router.push('/(trainer)/payments')} />
-          {revHist.months >= 2 ? (<>
-          <Spark data={revHist.series.filter((v): v is number => v != null)} />
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: sp.sm }}>
-            {revHist.labels.map((l, i) => (
-              <Text key={i} style={{ ...ty.micro, letterSpacing: 0.4, color: t.ink3 }}>{revHist.series[i] != null ? l : ''}</Text>
-            ))}
-          </View>
-          </>) : revHist.status === 'loading' ? (
+          {/* This drew the wrong months, not merely undated ones. The
+              `.filter()` threw away exactly the nulls monthlyHistory.ts exists
+              to produce, so the LINE plotted 4 points across the full width
+              while the LABEL ROW printed 6 evenly spaced — putting every point
+              above the wrong month, by up to two. Nothing on screen gave a
+              reason to doubt it. Spark takes the holes now and keeps each
+              reading in its own slot. */}
+          {revHist.months >= 2 ? (
+          <Spark data={revHist.series} labels={revHist.labels} />
+          ) : revHist.status === 'loading' ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Reading the months you have recorded…</Text>
           ) : revHist.status === 'error' ? (
             // "Not enough history yet" is a statement about this coach's

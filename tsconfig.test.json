@@ -101,6 +101,9 @@
     "src/lib/referralCredit.test.ts",
     "src/lib/shareAsset.test.ts",
     "src/lib/chartAxis.test.ts",
-    "src/lib/attendance.test.ts"
+    "src/lib/attendance.test.ts",
+    "src/lib/recurring.test.ts",
+    "src/lib/coachDocs.test.ts",
+    "src/lib/subscriptionScope.test.ts"
   ]
 }
