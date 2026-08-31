@@ -131,6 +131,21 @@ export default function ClientNutrition() {
   // composed at all — see guardPlan.
   const [profile, setProfile] = useState<Profile | null>(null);
   const [profileStatus, setProfileStatus] = useState<LoadStatus>('ready');
+  // Whether the SCANS read failed, as opposed to coming back short or coming
+  // back empty. All three used to end at the same place: the error was reported
+  // to telemetry and then dropped, `scans` stayed `[]`, and the status was set
+  // from `scanTruncated` alone — which is false when the read never happened.
+  // So a refused scan read was recorded as 'ready', i.e. as "this client has
+  // never been scanned", and that is the one thing it does not mean.
+  //
+  // It mattered twice over. `weightKg` falls back to `manual_weight_kg` when no
+  // scan is found, so a client who had typed a weight got a plan composed
+  // against the TYPED figure while their own Meals tab stayed scaled to their
+  // newest scan — two different bodies, no sign of it on either screen — and
+  // guardPlan saw 'ready', so Send was live. A client who had typed nothing was
+  // told "there is nothing to scale a plan to… they set every one of them in
+  // their own app", which blames them for our connection.
+  const [scansUnread, setScansUnread] = useState(false);
   const [series, setSeries] = useState<{ weight: { t: string; v: number }[] } | null>(null);
   const [goals, setGoals] = useState<ReturnType<typeof readGoals>['goals']>([]);
   const [goalStatus, setGoalStatus] = useState<LoadStatus>('ready');
@@ -179,8 +194,10 @@ export default function ClientNutrition() {
 
     let scans: ScanRow[] = [];
     let scanTruncated = false;
+    let scanFailed = false;
     if (scanRes.error) {
       reportError('clientNutrition.scans', scanRes.error, { clientId: id });
+      scanFailed = true;
     } else {
       const page = capped((scanRes.data ?? []) as unknown as ScanRow[]);
       scans = page.rows; scanTruncated = page.truncated;
@@ -234,8 +251,15 @@ export default function ClientNutrition() {
       bodyFatPct: lastBf ? asNum(lastBf.body_fat_pct) : asNum(row.manual_body_fat_pct),
     });
     // Truncated scans are 'partial' rather than 'ready': the weight this plan
-    // is scaled to would be taken from an unknown fraction of their record.
-    setProfileStatus(scanTruncated ? 'partial' : 'ready');
+    // is scaled to would be taken from an unknown fraction of their record. A
+    // REFUSED scan read is at least as bad — none of their record arrived — and
+    // used to fall through to 'ready', which is why it is named here rather
+    // than left to `scanTruncated`, a flag that is false precisely when the
+    // read did not happen. Both block Send through guardPlan; the Flag below
+    // says which of the two it was, because "came back short" and "did not come
+    // back" are different things to tell a coach.
+    setScansUnread(scanFailed);
+    setProfileStatus(scanFailed || scanTruncated ? 'partial' : 'ready');
   }, []);
 
   useEffect(() => {
@@ -445,9 +469,9 @@ export default function ClientNutrition() {
                 {profileStatus === 'partial' ? (
                   <Section>
                     <Flag tone={t.warn}>
-                      Their scans came back at the row limit, so the weight this plan is scaled to
-                      was taken from an unknown fraction of their record. The week can be read; it
-                      should not be sent on this.
+                      {scansUnread
+                        ? `Their scans could not be read, so this screen does not know what ${who} weighs. Any weight shown below is one they typed themselves, and their own Meals tab scales to their newest scan — so the two can be different bodies. The week can be read; it should not be sent on this, and an empty scan record here is not a claim that they have never been scanned.`
+                        : 'Their scans came back at the row limit, so the weight this plan is scaled to was taken from an unknown fraction of their record. The week can be read; it should not be sent on this.'}
                     </Flag>
                   </Section>
                 ) : null}

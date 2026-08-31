@@ -144,6 +144,26 @@ function Wheel({ items, index, onChange, t }: { items: string[]; index: number; 
   );
 }
 
+/**
+ * The coach's name for use INSIDE a sentence, or "Your coach" when it could
+ * not be read.
+ *
+ * `fig()` is right for a figure slot, where a dash means "not measured" and
+ * sits alone under a label. It is wrong as the subject of a sentence: with an
+ * unreadable name this screen rendered
+ *
+ *     "— cannot see any of your photos."
+ *
+ * which reads as a line that lost its first word. "Your coach" is a
+ * description rather than a name, so unlike the heading in `my-coach.tsx` —
+ * which deliberately refuses this substitution, because there it would look
+ * like somebody actually called that — it states only what is true.
+ */
+function coachSubject(name: string | null | undefined): string {
+  const n = (name ?? '').trim();
+  return n || 'Your coach';
+}
+
 export default function Scans() {
   const t = useTheme();
   const router = useRouter();
@@ -969,12 +989,12 @@ export default function Scans() {
               </Text>
             ) : shares.length === 0 ? (
               <Text style={{ ...ty.label, color: t.ink3 }}>
-                {fig(coach.name)} cannot see any of your photos. Press and hold one to send it — one photo at a time, and only the one you pick.
+                {coachSubject(coach.name)} cannot see any of your photos. Press and hold one to send it — one photo at a time, and only the one you pick.
               </Text>
             ) : (
               <View>
                 <Text style={{ ...ty.label, color: t.ink2, marginBottom: sp.sm }}>
-                  {fig(coach.name)} can open {shares.length === 1 ? 'this one' : `these ${shares.length}`}, and nothing else:
+                  {coachSubject(coach.name)} can open {shares.length === 1 ? 'this one' : `these ${shares.length}`}, and nothing else:
                 </Text>
                 {shares.map((g) => {
                   const p = photos?.find((x) => x.id === g.photoId) ?? null;

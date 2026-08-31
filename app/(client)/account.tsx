@@ -50,6 +50,28 @@ import {
  *  that did not land must never render as "nothing outstanding". */
 type PendingState = { email: string | null } | 'failed' | null;
 
+/**
+ * The address on the account for use INSIDE a sentence, or a description of it
+ * when it could not be read.
+ *
+ * `fig()` is right for the figure slot at the top of the screen, where a dash
+ * under a label means "not read". Inside a sentence it is wrong, and here it
+ * would not even draw a dash: `email` is `auth.user?.email || ''`, and `fig('')`
+ * is the empty string. So an account whose email did not come back rendered
+ * "Your account still uses  and will keep using it until you open that link" —
+ * a sentence with a hole where its object should be, which reads as the screen
+ * having broken rather than as a fact nobody has.
+ *
+ * "The address you have been using" is a description rather than an address, so
+ * unlike the heading in `my-coach.tsx` — which refuses this substitution because
+ * there it would look like somebody actually called that — it cannot be mistaken
+ * for a value. It is true of anybody standing on this screen, because signing in
+ * is how they got here.
+ */
+function signInAddress(email: string): string {
+  return email.trim() || 'the address you have been using';
+}
+
 export default function Account() {
   const t = useTheme();
   const router = useRouter();
@@ -138,14 +160,14 @@ export default function Account() {
       }
       if (res.outcome === 'pending') {
         Alert.alert('Check your inbox — nothing has changed yet',
-          `We have sent a confirmation to ${res.requested}. Your account still uses ${fig(email)} and will keep using it until you open that link.\n\n`
+          `We have sent a confirmation to ${res.requested}. Your account still uses ${signInAddress(email)} and will keep using it until you open that link.\n\n`
           + 'If the link is never opened, nothing happens and your old address goes on working.');
         return;
       }
       // 'unknown'. Said plainly rather than rounded to either neighbour.
       Alert.alert('We could not confirm what happened',
         `Your request went in, but we could not read your account back to see whether the address changed straight away or a confirmation was sent to ${res.requested}.\n\n`
-        + `Check that inbox, and sign in with ${fig(email)} until you know otherwise. Nothing has been lost either way.`);
+        + `Check that inbox, and sign in with ${signInAddress(email)} until you know otherwise. Nothing has been lost either way.`);
     } finally { setEmBusy(false); }
   };
 
@@ -175,7 +197,11 @@ export default function Account() {
           <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: sp.md, paddingBottom: sp.md, borderBottomWidth: hairline, borderBottomColor: t.ring }}>
             <Text style={{ ...ty.label, color: t.ink3 }}>On your account</Text>
             <Text style={{ ...ty.body, color: t.ink, flex: 1, textAlign: 'right' }} numberOfLines={1}>
-              {auth.loading ? 'Checking…' : fig(email)}
+              {/* `|| null` and not the empty string `email` already is: `fig('')` is the
+                  empty string, so an unread address left this slot blank under its
+                  label — indistinguishable from an account with no email at all.
+                  The dash is how the rest of the app says "not read". */}
+              {auth.loading ? 'Checking…' : fig(email || null)}
             </Text>
           </View>
 
@@ -198,7 +224,7 @@ export default function Account() {
             </View>
           ) : pending.email ? (
             <Flag tone={t.warn} style={{ marginTop: sp.md }}>
-              {`A change to ${pending.email} is waiting to be confirmed. Until the link in that inbox is opened, your account still uses ${fig(email)} and that is what you sign in with.`}
+              {`A change to ${pending.email} is waiting to be confirmed. Until the link in that inbox is opened, your account still uses ${signInAddress(email)} and that is what you sign in with.`}
             </Flag>
           ) : null}
 
@@ -251,7 +277,7 @@ export default function Account() {
 
         <Section>
           <Text style={{ ...ty.caption, color: t.ink3 }}>
-            Forgotten the current one? Sign out and use “Forgot password” on the sign-in screen — that sends a link to {fig(email)}.
+            Forgotten the current one? Sign out and use “Forgot password” on the sign-in screen — that sends a link to {signInAddress(email)}.
           </Text>
         </Section>
       </ScrollView>

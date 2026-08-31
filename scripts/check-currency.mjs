@@ -445,6 +445,27 @@ for (const file of files) {
       /['"`][$£€¥₹₩₽]['"`]\s*\+/,                          // '$' + n
       new RegExp(`\\(\\s*(${CODE})\\s*\\)`),                 // a label reading "Price (AED)"
       /\(\s*[$£€¥₹₩₽]\s*\)/,                               // a label reading "Price ($)"
+      // `<Text>${fee}</Text>` — a dollar sign in front of a JSX EXPRESSION
+      // CONTAINER, which is the one shape of this rule the list above could
+      // not see. `$${x}` is a dollar before a template interpolation and was
+      // covered; `£{x}` is a symbol before a JSX container and was covered;
+      // `${x}` is BOTH a dollar-before-a-container and, character for
+      // character, an ordinary template interpolation — so it was left out
+      // rather than flag every template literal in the app.
+      //
+      // That gap is where the bug lived: app/(client)/trainers.tsx printed
+      // `<Text …>${c.sessionFee}</Text>` in the Find a Trainer directory, so
+      // every coach priced in dirhams was quoted to clients in dollars, on the
+      // one figure somebody picks a coach by. The coach's own profile screen
+      // had been corrected and told them "Repple does not print a symbol it has
+      // not been told"; this was the half still printing one.
+      //
+      // Disambiguated two ways, both cheap and both checked against the whole
+      // tree: only in `.tsx` (JSX lives there; the HTML builders that legitimately
+      // write `>${` are .ts), and only on a line with no backtick on it (a
+      // template literal spanning lines opens on an earlier one). Together those
+      // give zero false positives across app, src and studio-web.
+      ...(rel.endsWith('.tsx') && !line.includes('`') ? [/>\s*\$\{/] : []),
     ].find((r) => r.test(line));
     if (beside) {
       flag(file, i, 'currency', `a currency typed beside a figure — ${(line.match(beside) || [''])[0].trim()}`,

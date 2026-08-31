@@ -94,8 +94,24 @@ export default function ShareKit() {
   const [days, setDays] = useState<number>(7);
 
   /** The coach's own sessions. NULL means the read has not landed OR failed —
-   *  which is the same thing to every figure below, and is never a zero. */
+   *  which is the same thing to every FIGURE below, and is never a zero. */
   const [rows, setRows] = useState<PtSession[] | null>(null);
+  /**
+   * Whether the read is still in flight.
+   *
+   * `rows === null` is the right answer for every figure — nothing may be put
+   * on a card either way — but it is the wrong answer for the SENTENCE, and the
+   * sentence is what the coach reads. This screen opens on the week card with
+   * `rows` null, so the first thing on it, every single time and before any
+   * request had come back, was a notice headed "Could not read your sessions".
+   * Nothing had failed; nothing had been asked yet.
+   *
+   * `null` was collapsing three facts — not read yet, read failed, not signed
+   * in yet — onto the one wording that asserts a failure. Every sibling screen
+   * keeps them apart (payments.tsx and ad-spend.tsx both carry a loading flag);
+   * this one had no loading state at all.
+   */
+  const [sessionsPending, setSessionsPending] = useState(true);
   const [busy, setBusy] = useState(false);
 
   // The client-result inputs. Nothing here is remembered between shares: a
@@ -109,22 +125,27 @@ export default function ShareKit() {
   const [okName, setOkName] = useState(false);
 
   useEffect(() => {
-    if (authLoading) return;
+    // Still settling who is signed in. Nothing has been asked for yet, so the
+    // read is pending rather than failed.
+    if (authLoading) { setSessionsPending(true); return; }
     let live = true;
-    if (!coachId) { setRows(null); return; }
+    if (!coachId) { setRows(null); setSessionsPending(true); return; }
+    setSessionsPending(true);
     (async () => {
       try {
         // Widest span once, narrowed in memory. Switching between 7 and 30 days
         // is a thing a coach does while deciding what to post, and re-reading
         // on every tap would put a spinner in the middle of that.
         const mine = await fetchMySessions(supabase, coachId, windowStart(31), new Date().toISOString());
-        if (live) setRows(mine);
+        if (live) { setRows(mine); setSessionsPending(false); }
       } catch (e) {
         reportError('shareKit.mySessions', e);
         // Explicitly back to null, not to []. An empty array here would build a
         // card saying the coach did nothing this week and post it under their
         // name — the exact failure src/lib/shareAsset.ts is written to refuse.
-        if (live) setRows(null);
+        // The read is no longer pending, though: this IS the failed case, and
+        // it is the only one that may say so.
+        if (live) { setRows(null); setSessionsPending(false); }
       }
     })();
     return () => { live = false; };
@@ -359,10 +380,18 @@ export default function ShareKit() {
               </View>
             </View>
           ) : (
+            // A pending read is not a failed one. `build.reason` is 'unread'
+            // for both, because to the CARD they are the same refusal — but to
+            // the coach they are not, and this is the line they read.
+            build.reason === 'unread' && sessionsPending ? (
+              <Notice kicker="Reading your sessions" title="No card yet"
+                note="Still reading what you have delivered. Nothing has failed — the figures for a card appear here once the read lands." />
+            ) : (
             <Notice tone={build.reason === 'unread' ? undefined : t.brand}
               kicker={build.reason === 'unread' ? 'Could not read your sessions' : build.reason === 'consent' ? 'Their call, not yours' : 'Nothing to put on it yet'}
               title="No card"
               note={build.why} />
+            )
           )}
         </Section>
 

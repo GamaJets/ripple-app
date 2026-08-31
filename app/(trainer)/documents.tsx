@@ -279,10 +279,20 @@ export default function CoachDocumentsScreen() {
               </Flag>
             ) : (
               <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.lg }}>
+                {/* `live` counts documents in CIRCULATION, and the sentence for
+                    an empty one claimed nothing had ever been added — while the
+                    RETIRED section below listed the documents that had. A
+                    document cannot be edited here, so retiring one and issuing
+                    a replacement is the documented way to change anything: the
+                    coach who followed that route was told, on the same screen
+                    that was showing them their own retired waiver, that they
+                    had added no paperwork. The two cases are separated now, and
+                    only the genuinely empty one says nothing was ever added. */}
                 {status === 'loading' ? 'Reading your documents.'
                   : status === 'partial' ? 'Showing the most recent of your documents — there are more than fit in one read.'
-                    : live.length === 0 ? 'You haven’t added any paperwork yet.'
-                      : `${live.length} document${live.length === 1 ? '' : 's'} in circulation.`}
+                    : live.length === 0 && retired.length === 0 ? 'You haven’t added any paperwork yet.'
+                      : live.length === 0 ? `Nothing is in circulation — the ${retired.length === 1 ? 'document you have added has' : `${retired.length} documents you have added have`} all been retired.`
+                        : `${live.length} document${live.length === 1 ? '' : 's'} in circulation.`}
               </Text>
             )}
 

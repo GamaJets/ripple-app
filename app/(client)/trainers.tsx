@@ -685,9 +685,21 @@ export default function FindTrainer() {
                     </View>
                   ) : null}
                 </View>
+                {/* No currency symbol. `trainers` has a `session_fee numeric`
+                    and no currency column at all, and part 99 made
+                    `tenants.currency` NULLABLE on purpose — Repple is
+                    white-labelled and a gym that has not said which money it
+                    charges in is not to be guessed at. A '$' stood here, so a
+                    client browsing a directory of coaches priced in dirhams
+                    read every one of them in dollars: not a formatting slip but
+                    a different amount, on the figure somebody picks a coach by.
+                    The coach's own profile screen already prints this bare and
+                    tells them "Repple does not print a symbol it has not been
+                    told" — this is the screen that sentence was describing, and
+                    it was the half still printing one. */}
                 {c.sessionFee > 0 ? (
                   <View style={{ alignItems: 'flex-end' }}>
-                    <Text style={{ ...value(17), color: t.ink }}>${c.sessionFee}</Text>
+                    <Text style={{ ...value(17), color: t.ink }}>{c.sessionFee}</Text>
                     <Text style={{ ...ty.caption, color: t.ink3 }}>/ session</Text>
                   </View>
                 ) : null}
@@ -713,10 +725,13 @@ export default function FindTrainer() {
                 </View>
               </View>
 
+              {/* Same rule as the list row above, and the same reason: the app
+                  has never been told what this figure is denominated in, so it
+                  states the number and not a currency nobody chose. */}
               {sel.sessionFee > 0 ? (
                 <View style={{ flexDirection: 'row', alignItems: 'baseline', marginBottom: sp.lg }}>
                   <Text style={{ ...ty.micro, color: t.ink3, flex: 1 }}>Session fee</Text>
-                  <Text style={{ ...value(20), color: t.ink }}>${sel.sessionFee}</Text>
+                  <Text style={{ ...value(20), color: t.ink }}>{sel.sessionFee}</Text>
                   <Text style={{ ...ty.caption, color: t.ink3, marginLeft: 4 }}>/ session</Text>
                 </View>
               ) : null}

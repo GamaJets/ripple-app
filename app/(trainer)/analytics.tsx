@@ -403,14 +403,25 @@ export default function TrainerAnalytics() {
               just been recorded — nothing was, deliberately: an unsound figure
               written here would be indistinguishable from a real month forever
               after. */}
+          {/* The '$' that used to sit here was removed in the currency sweep,
+              but the `?? delta.toLocaleString()` behind it was left — so with
+              no currency set this printed the month-on-month change as a BARE
+              number, "+1,500 vs last mo", directly under a hero that had just
+              said the gym has not set a currency and the sessions cannot be
+              priced. A bare figure is read in whatever money the reader happens
+              to be thinking in, which is the same wrong amount with fewer clues
+              than a wrong symbol would have given. 35 of the 54 live tenants
+              have `tenants.currency` NULL, so withholding is the COMMON path
+              through this line, not the edge case.
+
+              Withheld the way every other amount on this screen is withheld,
+              and the reason named rather than left as a dash — the coach can
+              act on "no currency set", and an owner is the one who sets it. */}
           <SectionHead title="Revenue Trend"
             note={revenue == null ? 'This month not recorded'
-              // This '$' survived the currency sweep IN THIS FILE — it sits
-              // directly under a line that correctly prints "AED 1,500 at your
-              // AED 50 session rate". One screen, two currencies, neither of
-              // them necessarily the gym's.
-              : revHist.delta !== 0 ? `${deltaSign(revHist.delta, 0)}${priced(Math.abs(revHist.delta)) ?? Math.abs(revHist.delta).toLocaleString()} vs last mo`
-              : 'Tracking started'}
+              : revHist.delta === 0 ? 'Tracking started'
+              : priced(Math.abs(revHist.delta)) == null ? 'No currency set'
+              : `${deltaSign(revHist.delta, 0)}${priced(Math.abs(revHist.delta))} vs last mo`}
             onPress={() => router.push('/(trainer)/payments')} />
           {/* This drew the wrong months, not merely undated ones. The
               `.filter()` threw away exactly the nulls monthlyHistory.ts exists
@@ -555,9 +566,25 @@ export default function TrainerAnalytics() {
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setGoalOpen(false)} />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30 }}>
           <Text style={{ ...ty.title, color: t.ink, marginBottom: sp.lg }}>Set Your Goals</Text>
-          <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Monthly revenue target ({fig(gymCur)})</Text>
+          {/* The parenthetical names the unit the coach is typing in, so with
+              no currency set it rendered as the literal label "Monthly revenue
+              target (—)" — a bracket around a dash, which names nothing and
+              reads as a rendering fault rather than as a missing setting. It is
+              the common case, not a rare one: 35 of the 54 live tenants have
+              `tenants.currency` NULL. Dropped entirely when there is no unit to
+              name, and the sentence under the field says what that means. */}
+          <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Monthly revenue target{gymCur ? ` (${gymCur})` : ''}</Text>
           <TextInput value={gRev} onChangeText={setGRev} keyboardType="number-pad" placeholder="4000" placeholderTextColor={t.ink3}
-            style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 11, marginBottom: sp.md }} />
+            style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 11, marginBottom: gymCur ? sp.md : 6 }} />
+          {/* Said where the unit would have been named, so a coach typing 4000
+              into a box with no currency on it knows why — and knows the target
+              is still saved and still compared, it just cannot be printed as an
+              amount anywhere on the screen above. */}
+          {!gymCur ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
+              Your gym has not set a currency, so this target is saved as a plain number and shown as a dash rather than an amount. An owner sets one in the gym settings.
+            </Text>
+          ) : null}
           <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Client target</Text>
           <TextInput value={gCli} onChangeText={setGCli} keyboardType="number-pad" placeholder="12" placeholderTextColor={t.ink3}
             style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 11, marginBottom: sp.xl }} />

@@ -908,7 +908,17 @@ export default function TrainerSchedule() {
           // from a partial read it would show a coach a filled-up week off a
           // fraction of it.
           arc={countable && totalSlots ? booked.length / totalSlots : undefined}
-          arcLabel="of today's slots booked"
+          // Said as "of today's slots booked", and the ring measures nothing of
+          // the kind: `booked` and `open` are filtered from the WHOLE loaded
+          // calendar (this screen pages through months), so the proportion is
+          // over every slot the coach has, not over one day. The visible note
+          // beside it already says "of your slots are filled", with no day in
+          // it — so the sighted reading and the spoken one disagreed, and only
+          // the spoken one was wrong. arcLabel is the screen reader's entire
+          // sentence for this ring ("33% of today's slots booked"), which makes
+          // it the one place a scope can be misstated with nothing on screen to
+          // contradict it.
+          arcLabel="of your slots booked"
         />
 
         <Rule />

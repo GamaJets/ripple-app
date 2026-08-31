@@ -62,6 +62,7 @@ import { areaLabel } from '../../src/lib/injuries';
 import { supabase } from '../../src/lib/supabase';
 import { askCoach } from '../../src/lib/coach';
 import { useRoster } from '../../src/ui/roster';
+import { isWhole } from '../../src/ui/loadStatus';
 import { useCoachFeedback } from '../../src/ui/feedback';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
 import { slotsFor, searchMeals, mealAt, type Slot } from '../../src/lib/meals';
@@ -556,6 +557,21 @@ export default function TrainerClients() {
     return () => { cancelled = true; };
   }, [sel]);
   const active = roster.length;
+  // How many clients there are, as opposed to how many came back.
+  //
+  // `active` is the length of whatever loaded, and it leads this screen as the
+  // hero figure. Under a refused read that is a large, confident "0" beside the
+  // words "Active Clients" — telling a coach with a full book that they have
+  // none, which is the most expensive sentence this app can say. Under a
+  // TRUNCATED read it is worse, because a plausible smaller number gives the
+  // coach nothing to doubt: analytics.tsx refuses 'partial' alongside 'error'
+  // for exactly this reason, and this screen is the one people actually open.
+  //
+  // Null unless the roster read was whole; `fig()` renders that as a dash, and
+  // the note below says which of the two it is. The rows themselves are still
+  // listed either way — the PEOPLE who loaded are real, it is only the COUNT of
+  // them that may not be quoted.
+  const rosterCount = isWhole(rosterStatus) ? active : null;
 
   // ── the coach's own sessions, read once for the two figures that need them ─
   //
@@ -860,8 +876,19 @@ export default function TrainerClients() {
         {/* ── the hero: one number leads the screen ───────────────────────── */}
         <Hero
           label="Active Clients"
-          figure={fig(active)}
-          note={rosterUnread ? 'Your roster could not be read in full' : active === 0 ? 'No clients yet — add or invite your first below.' : driftNote()}
+          figure={fig(rosterCount)}
+          // 'partial' gets its own sentence rather than falling through to the
+          // drift summary. It used to print the short count with no hint that
+          // it was short, and the drift note underneath it ("2 drifting") was
+          // computed over the same fragment — two figures about a book neither
+          // of them had seen the whole of.
+          note={rosterStatus === 'error'
+            ? 'Your roster could not be read, so this is not a count of zero. The clients listed below are the ones that did come back.'
+            : rosterStatus === 'partial'
+              ? 'Only part of your roster came back, so it cannot be counted — a subtotal here would read as your whole book.'
+              : rosterStatus === 'loading'
+                ? 'Reading your roster…'
+                : active === 0 ? 'No clients yet — add or invite your first below.' : driftNote()}
           tone={toContact == null ? t.ink3 : toContact > 0 ? t.warn : t.brand}
           onPress={() => router.push('/(trainer)/analytics')}
         />

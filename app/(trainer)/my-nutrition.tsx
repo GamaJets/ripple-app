@@ -378,6 +378,17 @@ export default function MyNutrition() {
                 <Text style={{ ...ty.caption, color: t.ink3 }}>
                   {cd.profileStatus === 'loading'
                     ? 'Reading your profile…'
+                    // `target` is withheld whenever profileStatus is not
+                    // 'ready', but only `scansStatus` was consulted for the
+                    // REASON — so a failed PROFILE read with the scans read
+                    // perfectly fine fell through to the last branch and told a
+                    // coach with scans already on record that nothing had ever
+                    // measured them. Both halves were false: it was a refused
+                    // read, and the "Add My Body Scan" button underneath could
+                    // not have cleared it. The two reads are independent in
+                    // clientData.tsx, so this one needs its own sentence.
+                    : cd.profileStatus === 'error'
+                      ? 'Your profile could not be read, so there is no weight or body-fat figure here to build a target from. That is not a statement that nothing has measured you. What is logged above is still your real intake.'
                     : cd.scansStatus === 'loading'
                       ? 'Reading your body composition…'
                       : cd.scansStatus === 'error'
@@ -387,7 +398,11 @@ export default function MyNutrition() {
                         ? 'Your body composition could not be read, so there is no target to build from it. That is not the same as never having been measured. What is logged above is still your real intake.'
                         : 'There is no daily target here because nothing has measured you. A target is built from a weight and a body-fat percentage, and those come from a body scan. Add one on My Progress and this fills in. What is logged above is still your real intake.'}
                 </Text>
-                {cd.scansStatus !== 'loading' && cd.scansStatus !== 'error' ? (
+                {/* Withheld under a failed PROFILE read as well as a failed
+                    scan one: adding a scan does not clear a profile that could
+                    not be read, and a button that cannot do what the sentence
+                    above it needs is worse than no button. */}
+                {cd.profileStatus !== 'error' && cd.scansStatus !== 'loading' && cd.scansStatus !== 'error' ? (
                   <View style={{ marginTop: sp.md }}>
                     <Ghost label="Add My Body Scan" icon="scale" onPress={() => router.push('/(trainer)/my-progress')} />
                   </View>

@@ -327,7 +327,22 @@ export default function Templates() {
                       many training programmes as there are ticks, with no undo
                       and nothing told to the clients — so it waits until the
                       screen knows what it would be replacing. */}
-                  <Cta label={plan.label ?? `Assign to ${pickedIds.length || 0} client${pickedIds.length === 1 ? '' : 's'}`} wide
+                  {/* `planFanOut` is shared with the Groups screen, and with
+                      nobody ticked it answers in that screen's vocabulary:
+                      "Nobody In This Group Yet". This screen has no groups —
+                      the sheet opens with `setPicked({})` and the coach's whole
+                      client list sitting directly above the button — so on
+                      every fresh open the primary control named a group that
+                      does not exist and told the coach it was empty while their
+                      clients were on screen. The `??` fallback written for this
+                      case could never run, because `plan.label` is null only
+                      once at least one client is ticked. Asked before the
+                      shared guard, so the guard keeps answering for every other
+                      refusal (the overwrite check, a missing programme) where
+                      its wording is right. */}
+                  <Cta label={pickedIds.length === 0
+                    ? 'Pick Who Gets This'
+                    : (plan.label ?? `Assign to ${pickedIds.length} client${pickedIds.length === 1 ? '' : 's'}`)} wide
                     disabled={pickedIds.length === 0 || !plan.allowed} onPress={doAssign} />
                 </View>
               </View>
