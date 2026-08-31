@@ -1,0 +1,65 @@
+-- ═══════════════════════════════════════════════════════════════════════════
+-- The coach's own cancellation policy, which they have not been able to read.
+--
+-- 131-a-join-code-is-not-directory-information.sql did the right thing in the
+-- right way: `join_code` was readable by every signed-in account, you cannot
+-- subtract one column from a table-wide grant, so it revoked SELECT on
+-- `trainers` outright and granted back a named list.
+--
+--     grant select (id, tenant_id, bio, tagline, offers, specialties,
+--                   session_fee, listed) on public.trainers to authenticated;
+--
+-- The list was assembled from an enumeration of live readers, and that
+-- enumeration named four. There are five. `src/ui/sessions.tsx` reads
+--
+--     .select('late_cancel_applies, late_cancel_notice_hours,
+--              late_cancel_fee, tenant_id').eq('id', <the coach's own uid>)
+--
+-- and those three columns are not in the grant. A column-level SELECT that
+-- names a column you hold no grant on is refused 42501 — RLS never gets a look
+-- in, because this is a privilege check and the row is not the question.
+--
+-- ── Why nothing caught it ─────────────────────────────────────────────────
+--
+-- The three columns were added by 126-the-late-fee-and-the-waitlist.sql, FIVE
+-- FILES BEFORE 131, on the same night. So the reader existed when the
+-- enumeration was written; it simply was not one of the four screens anybody
+-- opened. 131's own "Verified live" list records what was tested — the
+-- directory query, a client refused on `join_code`, `my_coach_profile()`,
+-- `my_join_code()` — and this screen is not among them.
+--
+-- `scripts/check-schema.mjs` compares COLUMNS, not grants, so a short grant is
+-- invisible to it. The failure is silent in the other direction too: the hook
+-- sets `status='error'` on any error and the screen renders its unreadable
+-- state, so a coach sees a policy editor that cannot load rather than a stack
+-- trace anybody would report.
+--
+-- ── What the coach could and could not do meanwhile ───────────────────────
+--
+-- Note the asymmetry, because it is the worst part. 131 left INSERT and UPDATE
+-- untouched, so the debounced write at src/ui/sessions.tsx:787 still WORKS. The
+-- coach could not read their late-cancellation policy and could still overwrite
+-- it — with the defaults the hook falls back to when the read fails. A screen
+-- that cannot see the stored value but can replace it is how a policy somebody
+-- set months ago becomes 24 hours and no fee.
+--
+-- ── The grant, and only the grant ─────────────────────────────────────────
+--
+-- No policy changes. Which ROWS of `trainers` anyone may see is unchanged and
+-- still decided by `trainers_self_rw`, `trainers_assigned_client_r`,
+-- `trainers_peer_r`, `trainers_owner_r` and `trainers_public_directory_r`. A
+-- grant widens the column list; RLS still chooses the rows, and `join_code`
+-- stays out of both lists, which was 131's whole point.
+--
+-- A client linked to this coach can now read these three columns on their own
+-- coach's row, via `trainers_assigned_client_r`. That is correct rather than
+-- merely tolerable: it is the cancellation policy that will be charged to THEM,
+-- and a fee a member cannot look up before they cancel is one they find out
+-- about afterwards.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+grant select (late_cancel_applies, late_cancel_notice_hours, late_cancel_fee)
+  on public.trainers to authenticated;
+
+-- `anon` is deliberately not included, for the reason 131 gives: it holds no
+-- SELECT on this table at all and no unauthenticated path reads it.

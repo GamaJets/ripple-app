@@ -96,12 +96,33 @@ ok(seriesFrom([], []).weight.length === 0, 'a client with nothing on record has 
 
 const goal = readGoal(goalRow({ target_value: 84, created_at: '2026-01-01T09:00:00.000Z' })) as GoalTarget;
 const prog = progressOf(goal, seriesFor(series, 'weight'));
-// Baseline 90 kg (the last reading at or before the goal was set is the Jan 5
-// scan, the earliest there is), now 87, target 84: half way.
-ok(prog?.start === 90, 'progress is measured from the reading the goal started at');
+// Baseline 90 kg, now 87, target 84: half way.
+//
+// This exercises `startPoint`'s FALLBACK arm, not its primary rule. The goal was
+// set on Jan 1 and the earliest reading is the Jan 5 scan, so there is no
+// reading "at or before" it and `before ?? sorted[0]` returns the earliest one
+// after. The comment used to claim Jan 5 WAS "the last reading at or before the
+// goal was set", which cannot be true of a date four days later — and it left
+// the primary arm looking covered when nothing here touched it. It is covered
+// immediately below now.
+ok(prog?.start === 90, 'with no reading before the goal, the earliest one after it stands in as the baseline');
 ok(prog?.current === 87, 'against the latest one, whichever source it came from');
 ok(prog?.pct === 50, `half of a 6 kg span is 50%, got ${prog?.pct}`);
 ok(prog?.reached === false, 'and 87 has not crossed 84');
+
+// The PRIMARY arm, which nothing here reached until now: a goal set AFTER some
+// readings is measured from the last one at or before it, not from the earliest
+// on record. This is the rule the paragraph above claimed to be demonstrating.
+// The same client, the same three weight points (Jan 5: 90, Feb 5: 88,
+// Feb 20: 87), with the goal set on Feb 10 — so the baseline is the Feb 5
+// reading of 88, and the earliest reading of 90 must NOT be used.
+{
+  const later = readGoal(goalRow({ target_value: 84, created_at: '2026-02-10T09:00:00.000Z' })) as GoalTarget;
+  const lp = progressOf(later, seriesFor(series, 'weight'));
+  ok(lp?.start === 88, `a goal set after a reading is measured from that reading, not the earliest on record — got ${lp?.start}`);
+  ok(lp?.current === 87, 'still against the latest reading');
+  ok(lp?.pct === 25, `1 kg of a 4 kg span is 25%, got ${lp?.pct}`);
+}
 
 ok(progressOf(goal, seriesFor(seriesFrom([], []), 'weight')) === null,
   'a goal with no readings behind it yields no progress at all — not 0%');

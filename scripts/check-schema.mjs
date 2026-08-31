@@ -588,10 +588,27 @@ function parseSetup(raw) {
 
   // scripts/build-supabase-setup.mjs writes `-- ▶ name.sql` above each part, so
   // a column can be traced back to the file that adds it.
+  //
+  // The marker is NOT the filename. The builder writes
+  // `f.replace(/^\d+-/, '')`, dropping the ordering prefix, so the marker for
+  // `133-a-coach-can-write-a-week.sql` reads `a-coach-can-write-a-week.sql`.
+  // This used to print `supabase/parts/${mark}` straight out, which named a
+  // file that does not exist — for every one of the 137 parts, in the one line
+  // of output whose whole job is to send somebody to the source of a column.
+  // The prefix is put back by looking the stripped name up in the directory.
+  const byStripped = new Map();
+  try {
+    for (const f of readdirSync('supabase/parts')) {
+      if (f.endsWith('.sql')) byStripped.set(f.replace(/^\d+-/, ''), f);
+    }
+  } catch { /* fall back to the marker as written */ }
   const marks = [...raw.matchAll(/^-- ▶ (.+\.sql)$/gm)].map((m) => ({ at: m.index, part: m[1] }));
   const partAt = (index) => {
     let name = SETUP_SQL;
-    for (const m of marks) { if (m.at > index) break; name = `supabase/parts/${m.part}`; }
+    for (const m of marks) {
+      if (m.at > index) break;
+      name = `supabase/parts/${byStripped.get(m.part) ?? m.part}`;
+    }
     return name;
   };
 

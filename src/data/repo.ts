@@ -90,7 +90,7 @@ export const mockRepo: Repo = {
 };
 
 // ── Supabase implementation ──────────────────────────────────────────────────
-// Row shapes come straight from supabase/schema.sql. Mappers convert snake_case
+// Row shapes come straight from supabase/setup.sql. Mappers convert snake_case
 // DB rows to the camelCase domain types the UI expects.
 type ClientRow = {
   id: string; sex: 'f' | 'm'; dob: string; height_cm: number;

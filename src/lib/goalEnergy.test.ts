@@ -25,7 +25,11 @@ const NOW = Date.parse('2026-03-01T09:00:00.000Z');
 const iso = (daysFromNow: number) => new Date(NOW + daysFromNow * DAY).toISOString();
 
 // One client throughout: 90 kg, 24% body fat, moderately active. Lean mass
-// 68.4 kg, so maintenance lands near 2,400 kcal.
+// 68.4 kg, BMR 1,847, so maintenance is 2,586 kcal. (This said "near 2,400",
+// which contradicted the same file's own working further down — the intake
+// floor case quotes "a 2,586 kcal maintenance" — and every expected figure in
+// the clamp block is derived from TDEE, so a reader checking the arithmetic
+// against 2,400 concludes the assertions are wrong when they are right.)
 const BODY: BodyStats = { weightKg: 90, bodyFatPct: 24, activity: 1.4, goal: 'tone', diet: 'meat' };
 const TDEE = maintenanceFor(BODY).tdee;
 

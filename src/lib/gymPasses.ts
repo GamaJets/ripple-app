@@ -310,9 +310,11 @@ function rowToPass(r: any): GymPass {
     usesTotal: r.uses_total,
     usesSpent: r.uses_spent ?? 0,
     paidCents: r.paid_cents ?? null,
-    // Not `?? 'AED'`. The column is `not null default 'AED'` so in practice
-    // this is always set — but "in practice" is what the whole currency bug was
-    // made of, and the branch that fires when it is not must not invent one.
+    // Not `?? 'AED'`. The column is NOT NULL and — since supabase/parts/150 —
+    // carries NO DEFAULT, so a write that omits the currency fails with 23502
+    // rather than filing dirhams nobody chose, and a read always finds one. The
+    // branch below therefore does not fire in practice, but "in practice" is
+    // what the whole currency bug was made of and it must not invent one.
     // Null flows to money(), which withholds the figure and lets the screen
     // draw a dash.
     currency: r.currency ?? null,

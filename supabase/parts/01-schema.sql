@@ -63,7 +63,27 @@ create table if not exists scans (
   image_path         text,                    -- storage key of the uploaded sheet
   created_at         timestamptz not null default now()
 );
-create index if not exists on scans (client_id, taken_at);
+create index if not exists scans_client_id_taken_at_idx on scans (client_id, taken_at);
+
+-- ── These six indexes are NAMED, and the names are not cosmetic ────────────
+--
+-- They read `create index if not exists on scans (...)` — with no name — for
+-- long enough that nothing noticed. That is a SYNTAX ERROR: Postgres requires
+-- an index name whenever IF NOT EXISTS is given, and rejects the statement at
+-- parse time with 42601 before it ever looks at the table. All six were in
+-- setup.sql too, so a fresh build from it aborted at the first one and no
+-- database could be created from this repo at all.
+--
+-- The live database has all six, under exactly the names written in now:
+-- `scans_client_id_taken_at_idx` and its five siblings. Those are the names
+-- Postgres GENERATES when you omit both the name and IF NOT EXISTS, which is
+-- how the statement must have read when it actually ran — the `if not exists`
+-- was added afterwards and broke what it was meant to make safe.
+--
+-- So the names are the live ones deliberately, not new ones: re-running this
+-- file against the existing database has to be the no-op that IF NOT EXISTS
+-- promises, and a fresh name would build a second copy of an index that is
+-- already there.
 
 -- ── Progress photos ─────────────────────────────────────────────────────────
 create table if not exists progress_photos (
@@ -110,7 +130,7 @@ create table if not exists workout_logs (
   avg_hr      int,
   source      text default 'manual'            -- 'manual' | 'watch'
 );
-create index if not exists on workout_logs (client_id, logged_at);
+create index if not exists workout_logs_client_id_logged_at_idx on workout_logs (client_id, logged_at);
 
 -- ── Meal plans (generated, cached; regenerated on stat change) ──────────────
 create table if not exists meal_plans (
@@ -132,7 +152,7 @@ create table if not exists sessions (
   released     boolean not null default false, -- re-offered after a cancellation
   created_at   timestamptz not null default now()
 );
-create index if not exists on sessions (trainer_id, starts_at);
+create index if not exists sessions_trainer_id_starts_at_idx on sessions (trainer_id, starts_at);
 
 -- recurring availability templates (generate concrete sessions ahead of time)
 create table if not exists availability_templates (
@@ -170,7 +190,7 @@ create table if not exists messages (
   body       text not null,
   created_at timestamptz not null default now()
 );
-create index if not exists on messages (client_id, created_at);
+create index if not exists messages_client_id_created_at_idx on messages (client_id, created_at);
 
 -- ── Food log (search / barcode / photo entries against a daily macro target) ─
 create table if not exists food_logs (
@@ -184,7 +204,7 @@ create table if not exists food_logs (
   fat        numeric(6,1) not null default 0,
   via        text not null default 'search' check (via in ('search','barcode','photo','manual'))
 );
-create index if not exists on food_logs (client_id, logged_at);
+create index if not exists food_logs_client_id_logged_at_idx on food_logs (client_id, logged_at);
 
 -- ── Notifications (backs the in-app bell; pushed via APNs/FCM edge fn) ───────
 create table if not exists notifications (
@@ -196,12 +216,33 @@ create table if not exists notifications (
   read       boolean not null default false,
   created_at timestamptz not null default now()
 );
-create index if not exists on notifications (user_id, read);
+create index if not exists notifications_user_id_read_idx on notifications (user_id, read);
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- Row Level Security — the heart of multi-tenant isolation.
--- Enable RLS on every table; policies below are the starting set. Clients see
--- only their own rows; trainers see their clients' rows within their tenant.
+--
+-- READ THE LIST, NOT THIS SENTENCE. This header used to say "enable RLS on
+-- every table", and it was never true of the block underneath it: this file
+-- creates EIGHTEEN tables and switches RLS on for TWELVE. The six left out are
+-- `tenants`, `trainers`, `exercises`, `exercise_videos`, `availability_templates`
+-- and `session_waitlist`.
+--
+-- That sentence is the whole reason the hole lasted. A policy on a table with
+-- RLS off is inert — Postgres never consults it — but it READS as protection,
+-- so 28-fix-profiles-recursion.sql adding policies to `tenants` and
+-- `exercise_videos` made them look covered while Supabase's default grants to
+-- anon and authenticated still applied in full. The anon key ships inside the
+-- app. 38-tenant-isolation.sql is the file that found it and turned RLS on for
+-- four of the six (`trainers` came in 23-trainer-directory.sql, `exercises` in
+-- 49-exercise-video-library.sql); read its section 3 for what was exposed.
+--
+-- The starting policies below are also narrower than "within their tenant"
+-- suggests: `scans_trainer_read` and `food_trainer_read` test `clients.trainer_id`
+-- and nothing else. There is no tenant term anywhere in this file. Tenant
+-- scoping arrives later, in 38.
+--
+-- Clients see only their own rows; a trainer sees the rows of a client whose
+-- `trainer_id` is them.
 -- ═══════════════════════════════════════════════════════════════════════════
 alter table profiles              enable row level security;
 alter table clients               enable row level security;

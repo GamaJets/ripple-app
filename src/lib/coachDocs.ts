@@ -266,10 +266,27 @@ export const COACH_DOC_IMMUTABLE_NOTE =
   + 'record, and can still read what they agreed to.';
 
 /** Who can open the file. Said plainly, because a coach uploading a document is
- *  entitled to know who it reaches. */
+ *  entitled to know who it reaches.
+ *
+ *  This used to end "…loses access to everything except what they accepted",
+ *  which is not what the policies do. `can_read_coach_doc` — the function a
+ *  signed URL is checked against — is `owner = auth.uid()` OR "a row in
+ *  `clients` where `id = auth.uid()` and `trainer_id = the owner`". There is no
+ *  acceptance branch in it at all, so when `clients.trainer_id` moves, EVERY
+ *  document goes with it, accepted or not. supabase/parts/135-a-coachs-own-
+ *  paperwork.sql says so in its own words beside that policy.
+ *
+ *  The exception was borrowed from COACH_DOC_IMMUTABLE_NOTE above, where it IS
+ *  true: `coach_documents_client_r` is `(retired_at is null or
+ *  has_accepted_coach_doc(id))`, so acceptance rescues a RETIRED document —
+ *  within the same coaching relationship, which is the clause that got dropped
+ *  in the move. A coach deciding what to put in front of a client was being
+ *  told their leavers keep the paperwork they signed. They do not, and the
+ *  acceptance RECORD that does survive is a document id and a timestamp. */
 export const COACH_DOC_REACH_NOTE =
-  'Only you and the clients you currently coach can open these. Nobody else at the gym can, and a client '
-  + 'who moves to another coach loses access to everything except what they accepted.';
+  'Only you and the clients you currently coach can open these. Nobody else at the gym can — and if a '
+  + 'client moves to another coach they lose access to all of it, including anything they accepted. '
+  + 'Their record of having accepted it stays.';
 
 /** "4 of 9 have accepted" — the coach's summary for one document.
  *

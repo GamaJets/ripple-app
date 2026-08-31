@@ -118,10 +118,20 @@ grant execute on function public.redeem_promo(text) to authenticated;
 
 -- ── What THIS member has redeemed ──────────────────────────────────────────
 --
--- SECURITY DEFINER for the same reason `redeem_promo` is: a member must not
--- hold a select grant on `promos`, or they can read the gym's whole list of
--- codes — including the ones aimed at people who have not joined yet. This
--- joins on their behalf and returns only rows they redeemed themselves.
+-- SECURITY DEFINER for the same reason `redeem_promo` is: a member must not be
+-- able to read `promos`, or they see the gym's whole list of codes — including
+-- the ones aimed at people who have not joined yet. This joins on their behalf
+-- and returns only rows they redeemed themselves.
+--
+-- WHAT ACTUALLY STOPS THEM IS RLS, NOT THE ABSENCE OF A GRANT. This used to say
+-- "a member must not hold a select grant on `promos`" — but nothing revokes
+-- `promos` from `authenticated`, so under this project's stock defaults the
+-- grant is there (verified live: authenticated holds SELECT, INSERT, UPDATE and
+-- DELETE). What returns zero rows is `promos_owner`, the only policy on the
+-- table. Stating it the other way round inverts the rule the rest of this
+-- schema keeps writing down — RLS narrows a GRANT, it never confers one — and
+-- would have somebody "secure" this by revoking a grant that was never the
+-- thing holding the line.
 create or replace function public.my_promo_redemptions()
 returns table (code text, discount int, redeemed_at timestamptz)
 language sql

@@ -1,9 +1,17 @@
 // Tests for plateMath — the barbell fill, in the unit the gym stocks.
 //
 // The defect these exist for: app/(client)/tools.tsx hardcoded a kilogram rack
-// and a 20 kg bar, so a client who reads in pounds typed 225 and was told to
-// load 25 + 20 + 15 + 2.5 kg a side onto a 20 kg bar. Not a mislabel — a
-// different bar, different plates, and a total of 495 lb.
+// and a 20 kg bar, so a client who reads in pounds typed 225 — meaning 225 lb —
+// and got the fill for 225 KILOGRAMS: 102.5 a side, which that greedy loop
+// filled with repeats as 25 + 25 + 25 + 25 + 2.5 kg, on a 20 kg bar. Not a
+// mislabel — a different bar, different plates, and a total of 496 lb where the
+// client asked for 225.
+//
+// (The plate list here used to read "25 + 20 + 15 + 2.5", which is 62.5 a side.
+// That is not what the old code produced — it filled greedily WITH repeats,
+// `while (rem >= p)` — and it does not come to the total quoted beside it
+// either: 62.5 a side on a 20 kg bar is 145 kg, about 320 lb. Two wrong numbers
+// in one sentence, in the anecdote that explains why this whole module exists.)
 //
 // So the assertions are about HARDWARE, not about arithmetic. The one that
 // matters most is that a pound answer is made of plates a pound gym owns:

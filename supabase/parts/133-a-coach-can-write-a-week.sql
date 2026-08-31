@@ -26,11 +26,17 @@
 --
 --  1. `meal_plans.client_id` references `clients(id)`. Every live coaching
 --     table — `coach_nutrition`, `assigned_programs`, `coach_feedback` —
---     references `profiles(id)`. There is no `coach_id` column at all, so the
---     policy on it (`meal_plans_trainer_rw`) has to go looking for
---     `clients.trainer_id`, and cannot express the thing part 69 was written to
---     express: THIS coach wrote THIS row. A plan with no author cannot be
---     scoped to one.
+--     references `profiles(id)`. There is no `coach_id` column at all, so any
+--     policy on it would have to go looking for `clients.trainer_id`, and could
+--     not express the thing part 69 was written to express: THIS coach wrote
+--     THIS row. A plan with no author cannot be scoped to one.
+--
+--     (This named that policy `meal_plans_trainer_rw`. There is no such policy
+--     and there never was: 01-schema.sql enables RLS on `meal_plans` and creates
+--     nothing for it, so the table has been deny-all since the beginning. That
+--     is a STRONGER version of the argument than the one the name implied, and
+--     naming a policy that does not exist sends the reader looking for a rule to
+--     preserve when there is none.)
 --
 --  2. Its comment in 01-schema says what it is: "generated, cached;
 --     regenerated on stat change". It is a cache of a computation, not a record

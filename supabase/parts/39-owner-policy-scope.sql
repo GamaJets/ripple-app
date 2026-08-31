@@ -56,10 +56,20 @@
 --     precise failure 28-fix-profiles-recursion.sql existed to remove, and the
 --     remedy there applies here: ask through SECURITY DEFINER.
 --
---   * `app_errors` reaches its tenant only through profiles, and there is no
---     owner-scoped SELECT policy on profiles — an inline sub-select would
---     return no rows for the very caller it is meant to authorise, silently
---     emptying the owner's crash inbox.
+--   * `app_errors` reaches its tenant only through profiles. When this was
+--     written there was no owner-scoped SELECT policy on profiles, so an
+--     inline sub-select would have returned no rows for the very caller it is
+--     meant to authorise, silently emptying the owner's crash inbox.
+--
+--     THAT IS NO LONGER THE CASE, and this file cannot claim otherwise:
+--     38-tenant-isolation.sql — which, as the exercise_videos note at the
+--     bottom of this file says, sorts and runs immediately BEFORE this one —
+--     adds `profiles_owner_r` (`my_role() = 'owner' and tenant_id =
+--     my_tenant()`). The SECURITY DEFINER route below is still the right one,
+--     but on the coach_clients recursion argument above rather than on this;
+--     keeping the dead reason would have somebody "simplify" it back to an
+--     inline sub-select on the strength of a premise that has been false since
+--     the part before this one.
 --
 -- profiles.tenant_id is the spine (37-member-invites.sql rewrites it, and
 -- clients.tenant_id, when a member moves gyms), so it is the right source. The

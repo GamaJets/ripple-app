@@ -33,8 +33,14 @@
 //
 //  1. AN INVENTED CURRENCY. An ISO code as a fallback or a default:
 //     `?? 'AED'`, `|| 'GBP'`, `currency = 'AED'`. This is the exact shape of
-//     both bugs above. The database columns are `not null default 'AED'`, so
-//     the fallback is invisible at every layer once it has been written.
+//     both bugs above. The database columns WERE `not null default 'AED'`,
+//     which is what made the fallback invisible at every layer once it had been
+//     written — the schema answered with the same guess the code did, so
+//     nothing ever disagreed. supabase/parts/150 dropped those defaults (the
+//     columns stay NOT NULL), so an omitted currency now fails the write with
+//     23502 instead. That closes the storage half and not this one: a fallback
+//     in the app still produces a currency nobody chose, and now it also
+//     satisfies the NOT NULL and gets filed. This check is what stops it.
 //
 //  2. A BARE money() CALL. One argument, in a file that imports `money` from
 //     gymRecord. `money()`'s currency parameter is `currency?:` rather than

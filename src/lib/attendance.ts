@@ -2,7 +2,7 @@
 //
 // Two tables hold it and neither was ever read by the client app.
 // `class_bookings.attended_at` is the register a coach ticks in
-// app/(trainer)/class-checkin.tsx; `gym_visits` (supabase/parts/32-gym-visits.sql)
+// app/(trainer)/class-checkin.tsx; `gym_visits` (supabase/parts/32-door-log.sql)
 // is the door log, which exists precisely because register-only attendance
 // under-counts — part 32's own words: "every member who walks in, trains on the
 // floor and leaves is invisible". Both are about the member. Only the gym could

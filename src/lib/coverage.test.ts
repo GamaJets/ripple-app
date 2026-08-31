@@ -124,7 +124,13 @@ ok(_blank.length === Math.min(DISHES.length, 40),
   `an empty query returns the catalogue, up to the page size — got ${_blank.length} of ${DISHES.length}`);
 ok(_blank.every((d, i) => d.id === DISHES[i].id), 'and it is the head of the catalogue, in order, rather than an arbitrary slice');
 // ── streak freeze ──
-// 5-day chain (days 0..4), miss day 5, then trained days 6,7 -> a freeze bridges day 5.
+// Days 0..4, then a miss on day 5, then days 6..12 — TWELVE active days, which
+// is what makes this fixture work: `freezeBudget` is
+// `min(2, floor(activeDays/10))`, so twelve days buys exactly one freeze, and
+// that freeze bridges day 5 to join the two runs into 12.
+// (This said "trained days 6,7". Seven active days would buy a budget of ZERO
+// and a streak of 7, so a reader reasoning from the description concludes both
+// assertions below are asserting something false.)
 const gapLog: WorkoutEntry[] = [0,1,2,3,4,6,7,8,9,10,11,12].map((n) => ({ t: day(n), exercise: 'X', sets: [[8,50]] as [number,number][] }));
 ok(currentStreak(gapLog, Date.now()) === 5, 'raw streak stops at gap = 5');
 ok(freezeBudget(gapLog) === 1, 'freezeBudget: 12 days -> 1');
@@ -1197,7 +1203,15 @@ for (const v of variants) {
   ok(Math.min(gap, 360 - gap) < 30, `${v}: accent and icon are the same hue family (${gap.toFixed(0)}deg apart)`);
 }
 
-// Legibility: the accent carries button labels, so brand-ink must contrast.
+// Ordering, NOT legibility: the accent must be no darker than the icon plate it
+// sits beside, so the pair reads as one family with the accent forward. This
+// compares two BRAND colours to each other by luminance. It computes no ink
+// colour and no contrast ratio, and says nothing about whether a label is
+// readable on the accent — the header here used to claim it did ("the accent
+// carries button labels, so brand-ink must contrast"), which would send anybody
+// investigating an unreadable button to a guard that has never existed. Label
+// legibility is `readableInkOn` in src/theme/tokens.ts, held by
+// scripts/check-contrast.mjs.
 const lum = (hex: string) => {
   const n = parseInt(hex.slice(1), 16);
   return ((n >> 16) * 0.299 + ((n >> 8) & 255) * 0.587 + (n & 255) * 0.114);
@@ -3686,11 +3700,14 @@ function by2(v: ReturnType<typeof buildStaff>, id: string) {
 }
 
 // ── pass conversion: used a pass, then joined ──
-// PASTE THE IMPORT LINE AT THE TOP OF src/lib/coverage.test.ts:
 //
-// import { buildPassConversion, hostsOf, intervalOf, coversDate, daysBetween, dateOf, attributionSentence, suppressionSentence, CAUSAL_CAVEAT, MONEY_NOTE, type PassConversionRecord } from './passConversion';
-//
-// ── and this block ABOVE the final `if (errors.length)` guard ──
+// (An authoring note used to sit here telling the reader to PASTE an import at
+// the top of this file and to put this block above the final guard. Both were
+// done when the block landed: the import is at line 51, and the guard is at the
+// end of the file where it has always been. Followed literally it produces a
+// duplicate import and a compile error, and read literally it says this file is
+// missing something. Removed rather than corrected — it was a message from one
+// author to another, not a fact about the code.)
 {
   const PC_TODAY = '2026-08-26';
   const pcPass = (
@@ -4255,7 +4272,7 @@ function by2(v: ReturnType<typeof buildStaff>, id: string) {
 
 /* -- date-only values ------------------------------------------------------
  *
- * Fourteen columns in this schema are Postgres `date` — a bare YYYY-MM-DD with
+ * TWENTY-THREE columns in this schema are Postgres `date` — a bare YYYY-MM-DD with
  * no time and no offset. Date.parse resolves one to UTC midnight anyway, and
  * every local getter then reads back the day before, west of Greenwich:
  *

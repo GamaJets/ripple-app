@@ -185,8 +185,16 @@ ok(/keeps that record/i.test(COACH_DOC_IMMUTABLE_NOTE),
 
 // Who can open the file, said plainly.
 ok(/Nobody else at the gym/i.test(COACH_DOC_REACH_NOTE), 'no owner branch, and the copy says so');
-ok(/moves to another coach loses access/i.test(COACH_DOC_REACH_NOTE),
-  'and the end of the relationship is described, because that is what the policy actually does');
+// The regex used to stop at "moves to another coach loses access", under the
+// message "that is what the policy actually does" — while the sentence went on
+// to say "except what they accepted", which the policy does NOT do. The
+// unasserted tail was the false half, so the assertion vouched for a promise it
+// never read. `can_read_coach_doc` has no acceptance branch: when
+// `clients.trainer_id` moves, every document goes, accepted or not.
+ok(/lose access to all of it, including anything they accepted/i.test(COACH_DOC_REACH_NOTE),
+  'a leaver loses the accepted documents too — the copy must not promise an exception the policy has no branch for');
+ok(!/except what they accepted/i.test(COACH_DOC_REACH_NOTE),
+  'and must not carry the old exception, which was borrowed from the RETIRED-document rule inside a live relationship');
 
 eq(isUuid(COACH), true, 'a uuid is a uuid');
 eq(isUuid('e5135000-0000-0000-0000'), false, 'and a truncated one is not');

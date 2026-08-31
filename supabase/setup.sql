@@ -73,7 +73,27 @@ create table if not exists scans (
   image_path         text,                    -- storage key of the uploaded sheet
   created_at         timestamptz not null default now()
 );
-create index if not exists on scans (client_id, taken_at);
+create index if not exists scans_client_id_taken_at_idx on scans (client_id, taken_at);
+
+-- ── These six indexes are NAMED, and the names are not cosmetic ────────────
+--
+-- They read `create index if not exists on scans (...)` — with no name — for
+-- long enough that nothing noticed. That is a SYNTAX ERROR: Postgres requires
+-- an index name whenever IF NOT EXISTS is given, and rejects the statement at
+-- parse time with 42601 before it ever looks at the table. All six were in
+-- setup.sql too, so a fresh build from it aborted at the first one and no
+-- database could be created from this repo at all.
+--
+-- The live database has all six, under exactly the names written in now:
+-- `scans_client_id_taken_at_idx` and its five siblings. Those are the names
+-- Postgres GENERATES when you omit both the name and IF NOT EXISTS, which is
+-- how the statement must have read when it actually ran — the `if not exists`
+-- was added afterwards and broke what it was meant to make safe.
+--
+-- So the names are the live ones deliberately, not new ones: re-running this
+-- file against the existing database has to be the no-op that IF NOT EXISTS
+-- promises, and a fresh name would build a second copy of an index that is
+-- already there.
 
 -- ── Progress photos ─────────────────────────────────────────────────────────
 create table if not exists progress_photos (
@@ -120,7 +140,7 @@ create table if not exists workout_logs (
   avg_hr      int,
   source      text default 'manual'            -- 'manual' | 'watch'
 );
-create index if not exists on workout_logs (client_id, logged_at);
+create index if not exists workout_logs_client_id_logged_at_idx on workout_logs (client_id, logged_at);
 
 -- ── Meal plans (generated, cached; regenerated on stat change) ──────────────
 create table if not exists meal_plans (
@@ -142,7 +162,7 @@ create table if not exists sessions (
   released     boolean not null default false, -- re-offered after a cancellation
   created_at   timestamptz not null default now()
 );
-create index if not exists on sessions (trainer_id, starts_at);
+create index if not exists sessions_trainer_id_starts_at_idx on sessions (trainer_id, starts_at);
 
 -- recurring availability templates (generate concrete sessions ahead of time)
 create table if not exists availability_templates (
@@ -180,7 +200,7 @@ create table if not exists messages (
   body       text not null,
   created_at timestamptz not null default now()
 );
-create index if not exists on messages (client_id, created_at);
+create index if not exists messages_client_id_created_at_idx on messages (client_id, created_at);
 
 -- ── Food log (search / barcode / photo entries against a daily macro target) ─
 create table if not exists food_logs (
@@ -194,7 +214,7 @@ create table if not exists food_logs (
   fat        numeric(6,1) not null default 0,
   via        text not null default 'search' check (via in ('search','barcode','photo','manual'))
 );
-create index if not exists on food_logs (client_id, logged_at);
+create index if not exists food_logs_client_id_logged_at_idx on food_logs (client_id, logged_at);
 
 -- ── Notifications (backs the in-app bell; pushed via APNs/FCM edge fn) ───────
 create table if not exists notifications (
@@ -206,12 +226,33 @@ create table if not exists notifications (
   read       boolean not null default false,
   created_at timestamptz not null default now()
 );
-create index if not exists on notifications (user_id, read);
+create index if not exists notifications_user_id_read_idx on notifications (user_id, read);
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- Row Level Security — the heart of multi-tenant isolation.
--- Enable RLS on every table; policies below are the starting set. Clients see
--- only their own rows; trainers see their clients' rows within their tenant.
+--
+-- READ THE LIST, NOT THIS SENTENCE. This header used to say "enable RLS on
+-- every table", and it was never true of the block underneath it: this file
+-- creates EIGHTEEN tables and switches RLS on for TWELVE. The six left out are
+-- `tenants`, `trainers`, `exercises`, `exercise_videos`, `availability_templates`
+-- and `session_waitlist`.
+--
+-- That sentence is the whole reason the hole lasted. A policy on a table with
+-- RLS off is inert — Postgres never consults it — but it READS as protection,
+-- so 28-fix-profiles-recursion.sql adding policies to `tenants` and
+-- `exercise_videos` made them look covered while Supabase's default grants to
+-- anon and authenticated still applied in full. The anon key ships inside the
+-- app. 38-tenant-isolation.sql is the file that found it and turned RLS on for
+-- four of the six (`trainers` came in 23-trainer-directory.sql, `exercises` in
+-- 49-exercise-video-library.sql); read its section 3 for what was exposed.
+--
+-- The starting policies below are also narrower than "within their tenant"
+-- suggests: `scans_trainer_read` and `food_trainer_read` test `clients.trainer_id`
+-- and nothing else. There is no tenant term anywhere in this file. Tenant
+-- scoping arrives later, in 38.
+--
+-- Clients see only their own rows; a trainer sees the rows of a client whose
+-- `trainer_id` is them.
 -- ═══════════════════════════════════════════════════════════════════════════
 alter table profiles              enable row level security;
 alter table clients               enable row level security;
@@ -1676,6 +1717,20 @@ create trigger on_message_insert
 -- meaning the rest of the policies already assumed via is_owner_of(tenant_id).
 -- Reading the live policies, an owner can already see their tenant's profiles,
 -- clients, trainers and the tenant row itself. One table was missing.
+--
+-- ── THAT SENTENCE WAS WRONG, and 38 is where it was caught ────────────────
+--
+-- It was written from the LIVE policy list, which had drifted from the repo. Of
+-- the checked-in policies at this point there was no owner arm on `profiles` at
+-- all (only profiles_self and three trainer-scoped ones) and none on `clients`
+-- either — `clients_owner_r` turns up as live-only drift in part 142. So an
+-- owner reading their own members' profiles got an empty list, which the Studio
+-- members search renders as "nobody matches" rather than "you may not ask".
+--
+-- 38-tenant-isolation.sql section 8 quotes this very line and adds
+-- `profiles_owner_r`. The sentence is kept rather than deleted because reading
+-- these parts in order is how the schema is learnt, and an unqualified claim
+-- here sends somebody looking for a policy that does not exist until 38.
 --
 -- Without this an owner cannot read sessions at all, so "sessions delivered"
 -- and any payroll figure derived from it have nothing behind them. The portal
@@ -3284,10 +3339,20 @@ create policy profiles_owner_r on public.profiles for select
 --     precise failure 28-fix-profiles-recursion.sql existed to remove, and the
 --     remedy there applies here: ask through SECURITY DEFINER.
 --
---   * `app_errors` reaches its tenant only through profiles, and there is no
---     owner-scoped SELECT policy on profiles — an inline sub-select would
---     return no rows for the very caller it is meant to authorise, silently
---     emptying the owner's crash inbox.
+--   * `app_errors` reaches its tenant only through profiles. When this was
+--     written there was no owner-scoped SELECT policy on profiles, so an
+--     inline sub-select would have returned no rows for the very caller it is
+--     meant to authorise, silently emptying the owner's crash inbox.
+--
+--     THAT IS NO LONGER THE CASE, and this file cannot claim otherwise:
+--     38-tenant-isolation.sql — which, as the exercise_videos note at the
+--     bottom of this file says, sorts and runs immediately BEFORE this one —
+--     adds `profiles_owner_r` (`my_role() = 'owner' and tenant_id =
+--     my_tenant()`). The SECURITY DEFINER route below is still the right one,
+--     but on the coach_clients recursion argument above rather than on this;
+--     keeping the dead reason would have somebody "simplify" it back to an
+--     inline sub-select on the strength of a premise that has been false since
+--     the part before this one.
 --
 -- profiles.tenant_id is the spine (37-member-invites.sql rewrites it, and
 -- clients.tenant_id, when a member moves gyms), so it is the right source. The
@@ -6433,8 +6498,18 @@ create table if not exists public.goal_targets (
   )
 );
 
--- One live target per measured metric. A client aiming at two different weights
--- at once is a bug in whatever wrote the second row, not a state to render.
+-- One target ROW per measured metric — for all time, not just while it is live.
+-- The predicate is `kind <> 'custom'` and nothing else: there is no
+-- `achieved_at is null` term, so reaching a weight goal does not free the slot
+-- for a second one. (This said "one LIVE target", which describes a partial
+-- index that was never written.)
+--
+-- That is not a trap in practice because nothing INSERTS a second row:
+-- `setMeasuredGoal` in src/ui/goalTracker.tsx finds the existing row for the
+-- kind and UPDATEs it by id, precisely because PostgREST cannot name a partial
+-- index in an on_conflict. A client aiming at two different weights at once is
+-- a bug in whatever wrote the second row, not a state to render.
+--
 -- Custom goals are excluded: having several at a time is the normal case.
 create unique index if not exists idx_goal_targets_one_per_metric
   on public.goal_targets (client_id, kind)
@@ -6593,8 +6668,11 @@ comment on column public.clients.weight_unit is
 comment on column public.clients.length_unit is
   'How this client reads height and tape measurements: cm or in. NULL means they have not chosen. Storage is always centimetres.';
 
--- No policy changes. `clients` already carries the client-owns-their-row and
--- coach-can-read policies from 08-roster-access.sql / 38-tenant-isolation.sql,
+-- No policy changes. `clients` already carries the client-owns-their-row policy
+-- (`client_self`, 01-schema.sql) and the coach-can-read one
+-- (`clients_trainer_read`, 08-roster-access.sql) — this used to cite
+-- "08-roster-access.sql / 38-tenant-isolation.sql", and 38 creates no policy on
+-- `clients` at all,
 -- and a unit preference is exactly as sensitive as `diet` sitting beside it.
 --
 -- Trigger functions in this schema are not callable; see 51-advisor-tidy.sql.
@@ -6947,7 +7025,9 @@ grant execute on function public.my_coach() to authenticated;
 --
 -- and it governs the coach's read of `workouts`, `measurements`, `check_ins`,
 -- `habit_logs` (02-domain-schema.sql), `messages` (10), `goal_targets` (59),
--- `coach_checklist_items` (58) and `day_types` (62). The same shape written
+-- `coach_checklist_items` (58) and `planned_days` (62 — the FILE is named
+-- day-types, the TABLE it creates is `planned_days`; there has never been a
+-- `day_types` table, and this line used to name one). The same shape written
 -- long-hand governs `scans` and `food_logs` (01-schema.sql) and the client's
 -- own `profiles` row (08). All of it goes dark in the same statement:
 --
@@ -6985,17 +7065,27 @@ grant execute on function public.my_coach() to authenticated;
 -- deliberately, and the client keeps reading it through `client_id =
 -- auth.uid()` either way.
 --
--- ── THE RESIDUE THIS FILE DOES NOT CLEAR ──────────────────────────────────
+-- ── THE RESIDUE THIS FILE DID NOT CLEAR — CLOSED IN 69 ────────────────────
 --
--- `coach_feedback`, `coach_nutrition` and `assigned_programs` are policed in
+-- `coach_feedback`, `coach_nutrition` and `assigned_programs` WERE policed in
 -- 02-domain-schema.sql as `coach_id = auth.uid() or client_id = auth.uid()` —
 -- keyed on the relationship's own coach_id column, NOT on `trainer_id`. So a
--- former coach keeps read and write on the feedback, macro adjustments and
+-- former coach kept read and write on the feedback, macro adjustments and
 -- assigned programs they wrote for this client. Those are their own words about
--- their own work, which is arguable either way, but the WRITE half is not: a
--- coach who was let go can still assign a program. Narrowing those three
--- policies is a change to 02, not to this file, and it is named here so the
--- next reader finds it rather than discovers it.
+-- their own work, which is arguable either way, but the WRITE half was not: a
+-- coach who had been let go could still assign a programme.
+--
+-- 69-coach-content-scope.sql — which sorts and runs immediately after this file
+-- — closed it. It drops `prog_rw` / `nutri_rw` / `feedback_rw` and replaces each
+-- with a coach policy gated on `is_my_client(client_id)` in BOTH the USING and
+-- the WITH CHECK, plus a client-side SELECT on `client_id`. `is_my_client()`
+-- reads the `clients.trainer_id` this file nulls, so the access now ends with
+-- the relationship and there is nothing here left to remember.
+--
+-- Written in the past tense deliberately. As a present-tense open hole it read
+-- as work outstanding, and the next reader would either go and re-narrow
+-- policies that are already narrow or, worse, believe a former coach still has
+-- the write.
 --
 -- ── THE PHOTO TRIGGER, WHICH HAS NEVER ONCE FIRED ─────────────────────────
 --
@@ -7455,7 +7545,12 @@ alter table public.exercises add column if not exists source            text;
 comment on column public.exercises.image_paths is
   'Relative paths into the source dataset, resolved at read time — never URLs, so the media can be swapped without touching this table.';
 comment on column public.exercises.source is
-  'Where the row came from: ''repple'' for the hand-written originals, ''free-exercise-db'' for the public-domain import.';
+  'Where the row came from. FOUR values, not two: ''repple'' (hand-written original, untouched by any import), '
+  '''free-exercise-db'' (public-domain import), ''repple+free-exercise-db'' (one of ours that an import enriched — '
+  'the name and muscle group are still Repple''s, which is why on-conflict never updates them), and ''repdb'' '
+  '(added by part 74). Do NOT filter on source = ''repple'' to find the hand-written rows: this comment named only '
+  'the first two while the insert below writes 31 rows of the third, so that filter misses 31 of the 41 rows whose '
+  'name and group we authored.';
 
 insert into public.exercises
   (id, name, muscle_group, is_cardio, category, equipment, level, mechanic, force,
@@ -8505,7 +8600,15 @@ create index if not exists exercises_animation_path_idx
 -- the mistake Hevy actually shipped, on the page we were sent as the example to
 -- follow. Here there is no mapping step to get wrong.
 --
--- ── Names are NOT preserved on conflict, unlike part 71 ───────────────────
+-- ── Names ARE preserved on conflict, exactly as in part 71 ────────────────
+--
+-- This heading used to read "Names are NOT preserved on conflict, unlike part
+-- 71", which is the opposite of both the SQL below it and the paragraph under
+-- it. `on conflict (id) do update set` omits `name` and `muscle_group` here
+-- just as part 71 does. Anybody skimming headings would have concluded that
+-- re-running this file renames catalogue rows — and src/lib/machines.ts,
+-- src/lib/focus.ts and `buildProgram()` all resolve exercises BY NAME, so that
+-- belief is the one that gets a programme silently repointed.
 --
 -- Part 71 refused to update name or muscle_group, because programs and logs
 -- reference a row by the name it has. That still holds for OUR original rows.
@@ -12880,10 +12983,20 @@ grant execute on function public.redeem_promo(text) to authenticated;
 
 -- ── What THIS member has redeemed ──────────────────────────────────────────
 --
--- SECURITY DEFINER for the same reason `redeem_promo` is: a member must not
--- hold a select grant on `promos`, or they can read the gym's whole list of
--- codes — including the ones aimed at people who have not joined yet. This
--- joins on their behalf and returns only rows they redeemed themselves.
+-- SECURITY DEFINER for the same reason `redeem_promo` is: a member must not be
+-- able to read `promos`, or they see the gym's whole list of codes — including
+-- the ones aimed at people who have not joined yet. This joins on their behalf
+-- and returns only rows they redeemed themselves.
+--
+-- WHAT ACTUALLY STOPS THEM IS RLS, NOT THE ABSENCE OF A GRANT. This used to say
+-- "a member must not hold a select grant on `promos`" — but nothing revokes
+-- `promos` from `authenticated`, so under this project's stock defaults the
+-- grant is there (verified live: authenticated holds SELECT, INSERT, UPDATE and
+-- DELETE). What returns zero rows is `promos_owner`, the only policy on the
+-- table. Stating it the other way round inverts the rule the rest of this
+-- schema keeps writing down — RLS narrows a GRANT, it never confers one — and
+-- would have somebody "secure" this by revoking a grant that was never the
+-- thing holding the line.
 create or replace function public.my_promo_redemptions()
 returns table (code text, discount int, redeemed_at timestamptz)
 language sql
@@ -13464,7 +13577,10 @@ revoke execute on function public.touch_hydration_log() from public, anon, authe
 --                                         and is_owner_of(tenant_id))
 --     ann_owner_rw for all    using/check (is_owner_of(tenant_id))
 --
--- `is_owner_of()` is `profiles.role = 'owner'`, so as it stands a TRAINER
+-- `is_owner_of(t)` is `profiles.role = 'owner' AND profiles.tenant_id = t` —
+-- the tenant clause matters and this used to omit it, which is precisely the
+-- lesson parts 106 and 120 exist to teach ("`role = 'owner'` is never an
+-- authorisation on its own"). So as it stands a TRAINER
 -- cannot insert an announcement at all, and a client reads by tenancy — every
 -- announcement in their gym, from anybody, including one written for a
 -- different coach's roster. Neither half is what the client dashboard's "From
@@ -13946,7 +14062,9 @@ comment on column public.feedback.resolved_at is
 
 -- ── 3 · Why an RPC and not an UPDATE policy ────────────────────────────────
 --
--- `feedback` has three SELECT policies and no UPDATE policy at all, which is
+-- `feedback` has TWO select policies (`fb_own`, `fb_owner`) plus one insert
+-- policy (`fb_insert`) — this said three SELECT, counting the insert — and no
+-- UPDATE policy at all, which is
 -- why the button could never have worked. The obvious repair is to mirror
 -- `fb_owner` for update — and it is the wrong one, for the reason part 101 sets
 -- out at length: RLS cannot restrict WHICH COLUMNS an update touches. An UPDATE
@@ -16926,13 +17044,36 @@ grant all    on public.metric_history to service_role;
 --
 -- `app/(client)/trainers.tsx` is a DIRECTORY — the coaches who have opted in
 -- to being found. There is no screen anywhere for the coach a client is
--- already working with, and there is no way to build one, because a client
--- cannot read that coach's row: `trainers_peer_r` is trainer-to-trainer, and
--- `profiles_public_directory_r` only covers `trainers.listed = true`, which
--- defaults to false. So a client whose coach found THEM — by join code, which
--- is the normal case — cannot see their coach's bio, their specialties, or
--- what they offer, while a stranger browsing the directory can see all three
--- for a listed coach.
+-- already working with.
+--
+-- The missing half is `profiles`: no policy lets a client read an unlisted
+-- coach's `profiles` row, so their NAME and AVATAR are unreachable —
+-- `trainers_peer_r` is trainer-to-trainer, and `profiles_public_directory_r`
+-- only covers `trainers.listed = true`, which defaults to false. A client whose
+-- coach found THEM, by join code, which is the normal case, cannot put a face
+-- or a name to them, while a stranger browsing the directory can.
+--
+-- ── CORRECTION: the `trainers` ROW ITSELF WAS ALWAYS READABLE ─────────────
+--
+-- This opened by saying a client "cannot read that coach's row" and that there
+-- was "no way to build" the screen. That is not true and was not true when it
+-- was written. `trainers_assigned_client_r` (23-trainer-directory.sql, never
+-- dropped) is
+--
+--     for select using (exists (select 1 from coach_clients
+--       where coach_clients.trainer_id = trainers.id
+--         and coach_clients.id = (select auth.uid())))
+--
+-- and a linked client is exactly a `coach_clients` row keyed on their own uid
+-- (src/ui/CoachRequests.tsx writes it on accept). So bio, tagline, specialties,
+-- offers and session_fee were reachable all along.
+-- 131-a-join-code-is-not-directory-information.sql, written the same night,
+-- opens by saying so — "`trainers_assigned_client_r` gives a client their own
+-- coach's row … a client should see their coach" — and the two headers cannot
+-- both be believed.
+--
+-- What follows is still the right shape, for the `profiles` half and for the
+-- column argument below. Only the premise needed correcting.
 --
 -- ── Why a function and not a policy ────────────────────────────────────────
 --
@@ -17039,6 +17180,13 @@ grant select (id, tenant_id, bio, tagline, offers, specialties, session_fee, lis
 --   src/ui/coachProfile.tsx      bio, tagline, offers, specialties, session_fee, listed
 --   src/lib/gymTrainers.ts       id
 --   studio-web /revenue, /staff  id
+--
+-- THAT LIST WAS ONE READER SHORT, and part 151 is the repair. src/ui/sessions.tsx
+-- reads `late_cancel_applies, late_cancel_notice_hours, late_cancel_fee` off the
+-- coach's own row — columns added by part 126, five files before this one, on the
+-- same night — and they are missing from the grant above, so that read was
+-- refused 42501 and the coach's cancellation-policy editor could not load. Do not
+-- read this enumeration as the current column list; read the grants.
 -- and every join-code path is a SECURITY DEFINER RPC (`my_join_code`,
 -- `my_join_codes`, `my_join_code_stats`, `create_join_code`,
 -- `rotate_join_code`, `revoke_join_code`, `my_code_returns`, `join_by_code`),
@@ -17317,11 +17465,17 @@ comment on column public.client_subscription_payments.amount_cents is
 --
 --  1. `meal_plans.client_id` references `clients(id)`. Every live coaching
 --     table — `coach_nutrition`, `assigned_programs`, `coach_feedback` —
---     references `profiles(id)`. There is no `coach_id` column at all, so the
---     policy on it (`meal_plans_trainer_rw`) has to go looking for
---     `clients.trainer_id`, and cannot express the thing part 69 was written to
---     express: THIS coach wrote THIS row. A plan with no author cannot be
---     scoped to one.
+--     references `profiles(id)`. There is no `coach_id` column at all, so any
+--     policy on it would have to go looking for `clients.trainer_id`, and could
+--     not express the thing part 69 was written to express: THIS coach wrote
+--     THIS row. A plan with no author cannot be scoped to one.
+--
+--     (This named that policy `meal_plans_trainer_rw`. There is no such policy
+--     and there never was: 01-schema.sql enables RLS on `meal_plans` and creates
+--     nothing for it, so the table has been deny-all since the beginning. That
+--     is a STRONGER version of the argument than the one the name implied, and
+--     naming a policy that does not exist sends the reader looking for a rule to
+--     preserve when there is none.)
 --
 --  2. Its comment in 01-schema says what it is: "generated, cached;
 --     regenerated on stat change". It is a cache of a computation, not a record
@@ -18174,7 +18328,10 @@ drop policy if exists coachdoc_obj_owner_read  on storage.objects;
 --
 -- ── What was here before ─────────────────────────────────────────────────
 --
--- `trainer_availability` (part 09 + the `minute` column) is a WEEKLY TEMPLATE:
+-- `trainer_availability` (created in 24-trainer-availability.sql; the `minute`
+-- column comes from 103-availability-quarter-hours.sql — this used to cite
+-- "part 09", which is 09-sessions-access.sql and never mentions the table) is a
+-- WEEKLY TEMPLATE:
 -- seven days by twenty-four hours of "I am free then". The coach's calendar
 -- screen turns it into concrete rows with a Generate button that walks four
 -- weeks forward and inserts open slots. That is availability, and availability
@@ -19294,11 +19451,18 @@ begin
   if p_issued_on is null then
     raise exception 'an invoice has to carry the date it was issued';
   end if;
-  -- A day's grace on each side of the server's own date, which is UTC. The app
-  -- passes the DEVICE's local date, and the widest real timezone offset is
-  -- under 15 hours — so a legitimate local "today" is never more than one day
-  -- from the server's. Anything beyond that is a typed date, and a document
-  -- dated next month is not a record of something that happened.
+  -- A day's grace AHEAD of the server's own date, which is UTC. The app passes
+  -- the DEVICE's local date, and the widest real timezone offset is under 15
+  -- hours — so a legitimate local "today" is never more than one day past the
+  -- server's. Anything beyond that is a typed date, and a document dated next
+  -- month is not a record of something that happened.
+  --
+  -- One side only. This said "on each side", which reads as a symmetric window;
+  -- there is no lower bound here and none anywhere else, so an invoice may be
+  -- backdated without limit. That is deliberate — a coach writing up last
+  -- quarter's work is an ordinary thing and a floor would refuse it — but the
+  -- sentence claimed a guard that does not exist, which is worse than saying
+  -- nothing about the past at all.
   if p_issued_on > current_date + 1 then
     raise exception 'an invoice cannot be dated in the future';
   end if;
@@ -19666,12 +19830,29 @@ create trigger touch_coach_credential_t
   for each row execute function public.touch_coach_credential();
 
 -- `touch_coach_credential` and `guard_client_trainer_link` above keep their
--- default EXECUTE, and must. Neither is SECURITY DEFINER — a trigger function
--- runs as the role performing the write, so revoking EXECUTE from
--- `authenticated` would make the table unwritable rather than more private.
--- Called directly they raise "trigger functions can only be called as
--- triggers". The revoke-from-public-AND-anon rule is about definer functions,
--- and every definer function in §2 below has it.
+-- default EXECUTE here, and neither is SECURITY DEFINER. Called directly they
+-- raise "trigger functions can only be called as triggers". The
+-- revoke-from-public-AND-anon rule is about definer functions, and every
+-- definer function in §2 below has it.
+--
+-- ── THE REASON THIS ORIGINALLY GAVE WAS WRONG — read 141 instead ──────────
+--
+-- It said the two "must" keep their EXECUTE, because "a trigger function runs
+-- as the role performing the write, so revoking EXECUTE from `authenticated`
+-- would make the table unwritable rather than more private."
+--
+-- Postgres does not work that way. It checks EXECUTE on a trigger function when
+-- the TRIGGER IS CREATED, not each time it fires — which is what
+-- 51-advisor-tidy.sql, 141-the-grants-that-came-back.sql and part 146 all say,
+-- and they are right. 141 §2 then revokes EXECUTE from public, anon AND
+-- authenticated on every non-extension trigger function in `public`, these two
+-- included, and it sorts after this file. `coach_credentials` is still
+-- writable, which is the proof.
+--
+-- The sentence is corrected rather than deleted because it stated a general
+-- rule about trigger privileges that is the opposite of the one this schema is
+-- built on, next to the only two trigger functions in the file — the exact
+-- place somebody would come to learn it.
 comment on table public.coach_credentials is
   'Certifications and insurance a coach STATES about themselves. verification is ''self_declared'' for every row written through the API — authenticated holds no INSERT or UPDATE grant on verification, verified_at or verified_by, so a coach cannot mark their own claim checked. Nothing in the product may present one of these as verified by Repple.';
 comment on column public.coach_credentials.reference is
@@ -20176,8 +20357,17 @@ comment on function public.can_review_coach(uuid) is
 -- so a nudge can only ever be recorded against a client who is yours right
 -- now, and a coach cannot mint rows keyed to a stranger's uuid.
 --
--- `is_my_client` is invoker-rights (not SECURITY DEFINER) with its search_path
--- already pinned, and resolves through `clients_trainer_read`. No new
+-- `is_my_client` is invoker-rights (not SECURITY DEFINER) and resolves through
+-- `clients_trainer_read`. Its search_path is NOT pinned — this used to say it
+-- "already" was, and it never has been: the sole definition, in
+-- 02-domain-schema.sql, carries no `set search_path`, and nothing since adds
+-- one. (`is_owner_of` beside it WAS re-declared with one, by
+-- 28-fix-profiles-recursion.sql, which is probably where the belief came from;
+-- the sweeps in parts 51 and 141 both filter to trigger functions, so neither
+-- touches it.) It is stated here because a false "already verified" is what
+-- stops the check being made. Being SECURITY INVOKER it confers no privilege to
+-- escalate, which is why this is a documentation defect rather than a hole. No
+-- new
 -- SECURITY DEFINER function is introduced here, which is the preferred outcome:
 -- the ones that exist are the holes that have to be got right.
 --
@@ -20435,7 +20625,9 @@ end $$;
 -- can read a programme, no coach can write one, and nobody can see a charge.
 -- Production is fine only because production was never built from these files.
 --
--- The remaining twenty are on tables that do have declared policies. Seven of
+-- The remaining NINETEEN are on tables that do have declared policies (26 minus
+-- the seven above; this said twenty, while the breakdown that follows —
+-- 7 redundant + 6 load-bearing + 6 unnamed — has always summed to 19). Seven of
 -- them are strictly redundant with a declared one and are recorded, not
 -- endorsed — bc_self ⊂ cust_read, ca_self ⊂ conn_read, sub_self ⊂ sub_read,
 -- tp_manage = pkg_write, tp_read_active ⊂ pkg_read, exvid_write =
@@ -22131,3 +22323,167 @@ alter table trainer_packages     alter column currency drop default;
 
 -- The columns keep NOT NULL deliberately; see above. A write that omits the
 -- currency now fails with 23502 rather than filing dirhams nobody chose.
+
+-- ▶ the-column-grant-that-was-three-short.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- The coach's own cancellation policy, which they have not been able to read.
+--
+-- 131-a-join-code-is-not-directory-information.sql did the right thing in the
+-- right way: `join_code` was readable by every signed-in account, you cannot
+-- subtract one column from a table-wide grant, so it revoked SELECT on
+-- `trainers` outright and granted back a named list.
+--
+--     grant select (id, tenant_id, bio, tagline, offers, specialties,
+--                   session_fee, listed) on public.trainers to authenticated;
+--
+-- The list was assembled from an enumeration of live readers, and that
+-- enumeration named four. There are five. `src/ui/sessions.tsx` reads
+--
+--     .select('late_cancel_applies, late_cancel_notice_hours,
+--              late_cancel_fee, tenant_id').eq('id', <the coach's own uid>)
+--
+-- and those three columns are not in the grant. A column-level SELECT that
+-- names a column you hold no grant on is refused 42501 — RLS never gets a look
+-- in, because this is a privilege check and the row is not the question.
+--
+-- ── Why nothing caught it ─────────────────────────────────────────────────
+--
+-- The three columns were added by 126-the-late-fee-and-the-waitlist.sql, FIVE
+-- FILES BEFORE 131, on the same night. So the reader existed when the
+-- enumeration was written; it simply was not one of the four screens anybody
+-- opened. 131's own "Verified live" list records what was tested — the
+-- directory query, a client refused on `join_code`, `my_coach_profile()`,
+-- `my_join_code()` — and this screen is not among them.
+--
+-- `scripts/check-schema.mjs` compares COLUMNS, not grants, so a short grant is
+-- invisible to it. The failure is silent in the other direction too: the hook
+-- sets `status='error'` on any error and the screen renders its unreadable
+-- state, so a coach sees a policy editor that cannot load rather than a stack
+-- trace anybody would report.
+--
+-- ── What the coach could and could not do meanwhile ───────────────────────
+--
+-- Note the asymmetry, because it is the worst part. 131 left INSERT and UPDATE
+-- untouched, so the debounced write at src/ui/sessions.tsx:787 still WORKS. The
+-- coach could not read their late-cancellation policy and could still overwrite
+-- it — with the defaults the hook falls back to when the read fails. A screen
+-- that cannot see the stored value but can replace it is how a policy somebody
+-- set months ago becomes 24 hours and no fee.
+--
+-- ── The grant, and only the grant ─────────────────────────────────────────
+--
+-- No policy changes. Which ROWS of `trainers` anyone may see is unchanged and
+-- still decided by `trainers_self_rw`, `trainers_assigned_client_r`,
+-- `trainers_peer_r`, `trainers_owner_r` and `trainers_public_directory_r`. A
+-- grant widens the column list; RLS still chooses the rows, and `join_code`
+-- stays out of both lists, which was 131's whole point.
+--
+-- A client linked to this coach can now read these three columns on their own
+-- coach's row, via `trainers_assigned_client_r`. That is correct rather than
+-- merely tolerable: it is the cancellation policy that will be charged to THEM,
+-- and a fee a member cannot look up before they cancel is one they find out
+-- about afterwards.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+grant select (late_cancel_applies, late_cancel_notice_hours, late_cancel_fee)
+  on public.trainers to authenticated;
+
+-- `anon` is deliberately not included, for the reason 131 gives: it holds no
+-- SELECT on this table at all and no unauthenticated path reads it.
+
+-- ▶ a-join-code-nobody-can-read-but-anybody-could-write.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- A join code nobody could read, and every coach could write.
+--
+-- Part 131 established that `trainers.join_code` is a credential: a code is
+-- what attaches somebody to a coach, so it revoked table-wide SELECT and
+-- granted back a named list that deliberately excludes it. Part 141 closed the
+-- other half of the same hole, where `anon` could call `join_by_code` and use
+-- the table as an oracle to try codes against.
+--
+-- Neither touched the WRITE side. Measured live, before this file:
+--
+--     authenticated
+--       SELECT  bio, id, late_cancel_*, listed, offers, session_fee,
+--               specialties, tagline, tenant_id          -- no join_code, right
+--       UPDATE  … and join_code                          -- join_code, wrong
+--       INSERT  … and join_code                          -- join_code, wrong
+--
+-- So the column a coach is not allowed to READ was one they could SET.
+--
+--
+-- ── What that was worth, honestly ──────────────────────────────────────────
+--
+-- Less than it sounds, and worth writing down rather than overstating.
+--
+-- `trainers_join_code_uniq` is a UNIQUE index on `upper(join_code)`, so a coach
+-- could not take a code that belongs to somebody else — the insert is refused.
+-- What they COULD do is use that refusal: set their own code to a guess and
+-- read the outcome. Success means the code was free; 23505 means it is taken.
+-- That is an existence oracle over the credential space, which is the exact
+-- shape part 141 closed on the read side and which is no better for being
+-- reachable only by somebody who has signed up as a coach.
+--
+-- And knowing a code exists is not nothing. `join_by_code` turns a code into a
+-- pending request against that coach, so an enumerated set of live codes is a
+-- list of coaches somebody can queue requests at.
+--
+--
+-- ── Why revoking is safe ───────────────────────────────────────────────────
+--
+-- Nothing writes this column directly. Every operation on a join code in this
+-- product goes through an RPC — `create_join_code`, `rotate_join_code`,
+-- `revoke_join_code`, `my_join_code`, `my_join_code_stats`, `join_by_code` —
+-- and all six were confirmed live as SECURITY DEFINER with `search_path=public`
+-- pinned. A definer function runs as its owner, so it keeps writing the column
+-- after the caller's grant on it is gone.
+--
+-- Those functions are also where the rules live: the label length, the cap on
+-- how many live codes one coach may hold, the alphabet the code is drawn from.
+-- A direct UPDATE bypassed all of it. The grant was not a feature anybody used;
+-- it was the default privilege on a column added to a table that already had
+-- one, which is the same way `join_code` became readable in the first place.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ── The first attempt at this file was a no-op, and that is the lesson ─────
+--
+-- It read
+--
+--     revoke insert (join_code), update (join_code) on public.trainers
+--       from authenticated;
+--
+-- and changed nothing. `authenticated` holds INSERT and UPDATE at TABLE level,
+-- and a table-level grant is not a set of column grants you can subtract one
+-- from — it is a privilege over every column, including ones added later. The
+-- revoke reported success and `information_schema.column_privileges` still
+-- listed `join_code` under both.
+--
+-- This is the rule part 131 wrote down for SELECT — "you cannot subtract one
+-- column from a table-wide grant" — arriving again on the write side, where
+-- nobody had applied it. So the same shape is used: revoke the table
+-- privilege, grant back the named columns.
+--
+-- The lists below are every column of `trainers` EXCEPT `join_code`, which is
+-- the whole point, and they are written out rather than generated so that a
+-- column added later is excluded until somebody decides otherwise. A new
+-- column silently inheriting write access is how this happened.
+
+revoke insert, update on public.trainers from authenticated;
+
+grant insert (id, tenant_id, bio, tagline, offers, specialties, session_fee,
+              listed, late_cancel_applies, late_cancel_notice_hours,
+              late_cancel_fee)
+  on public.trainers to authenticated;
+
+grant update (bio, tagline, offers, specialties, session_fee, listed,
+              late_cancel_applies, late_cancel_notice_hours, late_cancel_fee)
+  on public.trainers to authenticated;
+
+-- `id` and `tenant_id` are insertable but NOT updatable: a coach's row is
+-- created against their own uid, and moving an existing row to another id or
+-- another gym is not an edit, it is a different row. DELETE is left as it was.
+--
+-- `anon` holds nothing on this table and is not re-granted anything here; part
+-- 131 revoked it wholesale and part 141 verified it. This file only narrows.

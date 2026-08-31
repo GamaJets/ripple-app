@@ -16,7 +16,11 @@
 // block asserts the opposite — an unreadable timestamp produces an em dash and
 // never a day. Every assertion in it has been checked to fail against the
 // obvious wrong version (`return String(raw)`, `?? new Date()`, a non-strict
-// regex); `npm run mutate --file src/lib/chartAxis.ts` puts them back.
+// regex); `npm run mutate -- --file src/lib/chartAxis.ts` puts them back.
+// The `--` is load-bearing and this line used to omit it: without it npm eats
+// the flag ("Unknown cli config") and hands scripts/mutate.mjs a bare path it
+// does not accept, so the run silently mutates the WHOLE tree instead of the
+// one file — minutes of work, and not the check the sentence promises.
 //
 // No expectation is written against a hardcoded "today", and no date is built
 // by parsing a string. `npm test` runs three times under three timezones

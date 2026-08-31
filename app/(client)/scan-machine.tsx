@@ -138,9 +138,14 @@ export default function ScanMachine() {
   // in, and the box was labelled "KG" for everybody. So a member in pounds
   // typed 225, and 225 KILOGRAMS — 496 lb — went permanently into their
   // training log, into their volume, their estimated 1RM and next session's
-  // target. It is the only load-entry point in the client app that did not
-  // convert: app/(client)/workouts.tsx converts at the keyboard in `LogRow`
-  // and scans.tsx does the same, both through `readLift`.
+  // target. It was the only load-entry point in the client app that did not
+  // convert: app/(client)/workouts.tsx converts at the keyboard in `LogRow`,
+  // app/(client)/library.tsx converts at its own load box, and both go through
+  // `readLift`. (This used to name scans.tsx as the second one. It is not a
+  // load-entry point at all — it records BODY composition and converts through
+  // `weightToKg` — and a reader sent there looking for `readLift` would find
+  // none, and might well add it: `readLift` caps at 600 kg because that is a
+  // barbell bound, which is not the right bound for a person on a scale.)
   //
   // `readLift` also refuses text that is not a number instead of silently
   // making it a bodyweight set, and states its bound in the unit on screen —

@@ -38,6 +38,13 @@ grant select (id, tenant_id, bio, tagline, offers, specialties, session_fee, lis
 --   src/ui/coachProfile.tsx      bio, tagline, offers, specialties, session_fee, listed
 --   src/lib/gymTrainers.ts       id
 --   studio-web /revenue, /staff  id
+--
+-- THAT LIST WAS ONE READER SHORT, and part 151 is the repair. src/ui/sessions.tsx
+-- reads `late_cancel_applies, late_cancel_notice_hours, late_cancel_fee` off the
+-- coach's own row — columns added by part 126, five files before this one, on the
+-- same night — and they are missing from the grant above, so that read was
+-- refused 42501 and the coach's cancellation-policy editor could not load. Do not
+-- read this enumeration as the current column list; read the grants.
 -- and every join-code path is a SECURITY DEFINER RPC (`my_join_code`,
 -- `my_join_codes`, `my_join_code_stats`, `create_join_code`,
 -- `rotate_join_code`, `revoke_join_code`, `my_code_returns`, `join_by_code`),

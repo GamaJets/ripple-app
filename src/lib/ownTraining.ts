@@ -24,7 +24,11 @@
 // A `sets` array is one pair per set, so five sets of eight is five identical
 // entries. Printed one by one that is "8 × 60 kg · 8 × 60 kg · 8 × 60 kg · …",
 // which is how nobody writes down a workout. Consecutive identical pairs
-// collapse to "5 × 8 · 60 kg" — and only CONSECUTIVE ones, because a drop set
+// collapse to "5 × 8 @ 60 kg" — the "@" deliberately, not a second separator;
+// see the note beside the line that builds it, which explains why " · " is
+// reserved for BETWEEN groups. (This example read "5 × 8 · 60 kg", using the
+// group separator for the load and contradicting that reasoning seventy lines
+// before it was given.) Only CONSECUTIVE pairs merge, because a drop set
 // that comes back up to the opening weight is a different session from one that
 // did not, and merging across the gap would hide it.
 import type { WorkoutEntry } from './mockData';

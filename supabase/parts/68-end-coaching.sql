@@ -58,7 +58,9 @@
 --
 -- and it governs the coach's read of `workouts`, `measurements`, `check_ins`,
 -- `habit_logs` (02-domain-schema.sql), `messages` (10), `goal_targets` (59),
--- `coach_checklist_items` (58) and `day_types` (62). The same shape written
+-- `coach_checklist_items` (58) and `planned_days` (62 — the FILE is named
+-- day-types, the TABLE it creates is `planned_days`; there has never been a
+-- `day_types` table, and this line used to name one). The same shape written
 -- long-hand governs `scans` and `food_logs` (01-schema.sql) and the client's
 -- own `profiles` row (08). All of it goes dark in the same statement:
 --
@@ -96,17 +98,27 @@
 -- deliberately, and the client keeps reading it through `client_id =
 -- auth.uid()` either way.
 --
--- ── THE RESIDUE THIS FILE DOES NOT CLEAR ──────────────────────────────────
+-- ── THE RESIDUE THIS FILE DID NOT CLEAR — CLOSED IN 69 ────────────────────
 --
--- `coach_feedback`, `coach_nutrition` and `assigned_programs` are policed in
+-- `coach_feedback`, `coach_nutrition` and `assigned_programs` WERE policed in
 -- 02-domain-schema.sql as `coach_id = auth.uid() or client_id = auth.uid()` —
 -- keyed on the relationship's own coach_id column, NOT on `trainer_id`. So a
--- former coach keeps read and write on the feedback, macro adjustments and
+-- former coach kept read and write on the feedback, macro adjustments and
 -- assigned programs they wrote for this client. Those are their own words about
--- their own work, which is arguable either way, but the WRITE half is not: a
--- coach who was let go can still assign a program. Narrowing those three
--- policies is a change to 02, not to this file, and it is named here so the
--- next reader finds it rather than discovers it.
+-- their own work, which is arguable either way, but the WRITE half was not: a
+-- coach who had been let go could still assign a programme.
+--
+-- 69-coach-content-scope.sql — which sorts and runs immediately after this file
+-- — closed it. It drops `prog_rw` / `nutri_rw` / `feedback_rw` and replaces each
+-- with a coach policy gated on `is_my_client(client_id)` in BOTH the USING and
+-- the WITH CHECK, plus a client-side SELECT on `client_id`. `is_my_client()`
+-- reads the `clients.trainer_id` this file nulls, so the access now ends with
+-- the relationship and there is nothing here left to remember.
+--
+-- Written in the past tense deliberately. As a present-tense open hole it read
+-- as work outstanding, and the next reader would either go and re-narrow
+-- policies that are already narrow or, worse, believe a former coach still has
+-- the write.
 --
 -- ── THE PHOTO TRIGGER, WHICH HAS NEVER ONCE FIRED ─────────────────────────
 --

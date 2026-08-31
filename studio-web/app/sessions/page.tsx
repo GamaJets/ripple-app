@@ -283,10 +283,15 @@ export default function Sessions() {
         periodTo: dates[dates.length - 1],
         amountCents: t.cents,
         sessionIds: t.rows.map((s) => s.id),
-        // Stated, never defaulted: gymSessions writes `currency ?? 'AED'` into
-        // payroll_settlements, so leaving this out does not merely mislabel the
-        // screen — it stamps the wrong money onto a permanent payment record
-        // that /accounting and /close later read back as fact.
+        // Stated, never defaulted. gymSessions USED TO write `currency ?? 'AED'`
+        // into payroll_settlements, stamping the wrong money onto a permanent
+        // payment record that /accounting and /close later read back as fact.
+        // `recordSettlement`'s `currency` is now a required `string` and
+        // supabase/parts/150 dropped the column's `'AED'` default, so omitting
+        // it no longer compiles and would be rejected by the database if it did.
+        // It is passed explicitly here because that is what makes the guard
+        // above — which refuses to settle at a gym with no currency — the thing
+        // the reader checks, rather than a defaulted value nobody sees.
         currency: ccy,
       });
       await load(me.tenantId);

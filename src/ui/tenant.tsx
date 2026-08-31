@@ -45,24 +45,39 @@ import { useAuthRevision } from './authRevision';
  * So `gymMoney` no longer touches this, `money()` has no default at all, and
  * an unknown currency is a withheld figure everywhere.
  *
- * ── what it is still FOR ──────────────────────────────────────────────────
+ * ── what it is still FOR, and what it is NOT ──────────────────────────────
  *
- * Every money column in the operating record declares `currency text not null
- * default 'AED'` — membership_plans, gym_payments, pass_types, guest_passes,
- * payroll settlements — and part 99 backfilled the existing tenants to it. So
- * rows written before a gym set its currency genuinely ARE denominated in this,
- * and Ops says so in as many words when it offers the setting: an owner
- * switching to GBP needs to know the history is in dirhams and this changes
- * only what is written from here on.
+ * This block used to justify the constant as "the historical denomination of
+ * the operating record": every money column declared `currency text not null
+ * default 'AED'`, so rows written before a gym chose a currency genuinely were
+ * dirhams, and Ops could name that to an owner as a fact about their own data.
  *
- * That is its one legitimate use: naming what the record already holds, in
- * prose, to an owner deciding something. Never as the currency of a figure.
+ * BOTH HALVES OF THAT ARE NOW FALSE, and leaving the sentence here is worse
+ * than deleting the constant would be — it is the reason a reviewer waves
+ * through a hardcoded currency in front of somebody's money.
  *
- * currency-ok: this constant IS the historical denomination of the operating
- * record — every money column declares `default 'AED'` and part 99 backfilled
- * to it — and Ops quotes it to an owner as a fact about their existing rows.
- * It is a named piece of history, not a fallback: nothing renders a figure
- * through it any more, and `money()` no longer has a default at all.
+ *   · supabase/parts/150 DROPPED the default on all seven money columns
+ *     (gym_invoices, gym_pass_types, gym_passes, gym_payments,
+ *     membership_plans, payroll_settlements, trainer_packages). They keep NOT
+ *     NULL, so a write that does not name the currency now fails with 23502
+ *     instead of quietly filing dirhams. Nothing defaults to AED any more.
+ *
+ *   · Part 150 dropped them precisely BECAUSE all seven tables were empty, and
+ *     they still are. There is no body of dirham-denominated rows for this
+ *     constant to name. The "history" it was said to describe does not exist.
+ *
+ * What part 99 actually backfilled was one column — `tenants.currency` — on
+ * the tenants that existed then. That is the whole of the AED that is really
+ * on record, and it is not a figure this constant denominates: those tenants
+ * have a currency, so they never reach a fallback.
+ *
+ * currency-ok: this constant is a NAMED PLACEHOLDER, not a denomination and
+ * not a fallback. Its single remaining use is app/(owner)/ops.tsx, which
+ * labels the empty session-fee field with it while telling the owner in the
+ * same breath that no currency is set and asking them to choose one. Nothing
+ * renders an established figure through it, `gymMoney` does not touch it, and
+ * `money()` has no default at all. Do not reintroduce it as a fallback, and do
+ * not let any copy claim it describes what a gym's records are already in.
  */
 export const GYM_CURRENCY = 'AED';
 

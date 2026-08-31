@@ -41,15 +41,27 @@
 //
 // 1. IT NEVER INTERPRETS. Not once, in anything this file writes. No "on
 //    track", no "good adherence", no grade, no percentage of attendance, no
-//    clinical word. The client's own report has a test scanning for sixteen
-//    forbidden phrases; this one has that list plus the ones a coach reaches
-//    for — "compliant", "consistent", "excellent", "poor". The temptation here
-//    is larger than it is on the client's copy, because a coach genuinely has
-//    an opinion and the document looks like the place to put it. It is: in the
-//    coach's own quoted block, attributed to them, and nowhere else.
+//    clinical word. The client's own report has a test scanning for FIFTEEN
+//    forbidden phrases; this one has that list plus the ten a coach reaches
+//    for — "compliant", "adherence", "excellent", "poor", "needs to" among
+//    them. The temptation here is larger than it is on the client's copy,
+//    because a coach genuinely has an opinion and the document looks like the
+//    place to put it. It is: in the coach's own quoted block, attributed to
+//    them, and nowhere else.
 //
-// 2. IT NEVER CLAIMS TO BE COMPLETE WHEN IT IS NOT. Five independent reads feed
-//    it and any can fail while the others land. A document assembled from a
+//    The count said "sixteen" and the examples named "consistent" and "poor".
+//    The list is fifteen; "consistent" was never scanned for on its own (only
+//    "consistent with", which is the client's entry); and "poor" was not
+//    scanned for at all, so the header claimed a guard against the single most
+//    obviously judgemental word in the set while the document was free to print
+//    it. Both are on the list now — see FORBIDDEN in coachClientReport.test.ts.
+//
+// 2. IT NEVER CLAIMS TO BE COMPLETE WHEN IT IS NOT. SIX independent reads feed
+//    it and any can fail while the others land. (This said five and the count
+//    is load-bearing: the sixth is `coachStatus`, the read that names the
+//    AUTHOR, and `coachReportCaveats` has always caveated it. A caller who
+//    believed the coach-identity read sat outside the completeness contract
+//    would treat an unattributed document as whole.) A document assembled from a
 //    failed read that prints an empty Injuries table has told the next coach
 //    this person has disclosed nothing — the single most dangerous false
 //    statement this app can make, and it is the same one whichever app makes
@@ -227,7 +239,11 @@ export interface CoachClientReportInput {
 export interface CoachClientReportDoc {
   html: string;
   text: string;
-  /** True only when all five reads were whole. */
+  /** True only when all SIX reads were whole — the five content sections and
+   *  the `coachStatus` read that names who prepared the document. `complete`
+   *  is `coachReportCaveats(...).length === 0`, and that function has always
+   *  caveated the author read; this said "five", which invited a caller to
+   *  treat an unattributed report as a whole one. */
   complete: boolean;
   caveats: string[];
 }

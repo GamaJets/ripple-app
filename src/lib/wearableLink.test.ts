@@ -14,8 +14,14 @@
 //   · a gap that reconnecting cannot fix never offers a reconnect, because
 //     offering one is what put this tester round the loop four times.
 //
-// Not wired into `npm test` — package.json and tsconfig.test.json belong to
-// another agent this session. Run it with:
+// WIRED IN. It is in tsconfig.test.json's `files` and in the `test` script, so
+// it runs under `npm test`, `npm run test:zones` and `preflight`, and breaking
+// it fails the build. This paragraph used to say "not wired into `npm test` —
+// package.json and tsconfig.test.json belong to another agent this session",
+// which was true for the hour it took that agent to land and has been false
+// since; left as written it tells the next reader that this suite is decorative.
+//
+// To run it alone, without the rest of the suite:
 //
 //   npx tsc src/lib/wearableLink.test.ts --outDir .tmp-wearablelink \
 //     --module node16 --moduleResolution node16 --target ES2020 --strict \

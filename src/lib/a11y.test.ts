@@ -71,8 +71,16 @@ ok(meetsMark('#767676', '#ffffff'), '3:1 is enough for a mark');
 /* ── the ten palettes ──────────────────────────────────────────────────── */
 
 const GROUNDS = ['bg', 'surface', 'surface2', 'surface3'] as const;
-// The three inks and the brand accent are all used as TEXT: scale.ts reserves
-// the accent for "the live metric and the primary action", which is type.
+// The three inks are what this file measures as TEXT. The brand accent is NOT
+// in the list, deliberately — see the note further down about why it is not
+// held to 4.5:1 here.
+//
+// This used to read "the three inks and the brand accent are all used as TEXT:
+// scale.ts reserves the accent for …", which was wrong three ways: the quoted
+// sentence is in src/ui/kit.tsx ("Accent colour marks the live metric and the
+// primary action, and nothing else"), src/theme/scale.ts does not contain the
+// word "accent" at all, and the accent is excluded from INKS on the very next
+// line. A reader would go to scale.ts for a rule that is not there.
 const INKS = ['ink', 'ink2', 'ink3'] as const;
 // Status colours are MARKS by house rule — a dot beside ink-coloured text, a
 // ring, a card's hairline — so 3:1 is the bar they must clear. See Flag() in

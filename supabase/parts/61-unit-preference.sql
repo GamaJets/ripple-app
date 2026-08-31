@@ -68,8 +68,11 @@ comment on column public.clients.weight_unit is
 comment on column public.clients.length_unit is
   'How this client reads height and tape measurements: cm or in. NULL means they have not chosen. Storage is always centimetres.';
 
--- No policy changes. `clients` already carries the client-owns-their-row and
--- coach-can-read policies from 08-roster-access.sql / 38-tenant-isolation.sql,
+-- No policy changes. `clients` already carries the client-owns-their-row policy
+-- (`client_self`, 01-schema.sql) and the coach-can-read one
+-- (`clients_trainer_read`, 08-roster-access.sql) — this used to cite
+-- "08-roster-access.sql / 38-tenant-isolation.sql", and 38 creates no policy on
+-- `clients` at all,
 -- and a unit preference is exactly as sensitive as `diet` sitting beside it.
 --
 -- Trigger functions in this schema are not callable; see 51-advisor-tidy.sql.

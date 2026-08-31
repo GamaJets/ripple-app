@@ -271,12 +271,29 @@ create trigger touch_coach_credential_t
   for each row execute function public.touch_coach_credential();
 
 -- `touch_coach_credential` and `guard_client_trainer_link` above keep their
--- default EXECUTE, and must. Neither is SECURITY DEFINER — a trigger function
--- runs as the role performing the write, so revoking EXECUTE from
--- `authenticated` would make the table unwritable rather than more private.
--- Called directly they raise "trigger functions can only be called as
--- triggers". The revoke-from-public-AND-anon rule is about definer functions,
--- and every definer function in §2 below has it.
+-- default EXECUTE here, and neither is SECURITY DEFINER. Called directly they
+-- raise "trigger functions can only be called as triggers". The
+-- revoke-from-public-AND-anon rule is about definer functions, and every
+-- definer function in §2 below has it.
+--
+-- ── THE REASON THIS ORIGINALLY GAVE WAS WRONG — read 141 instead ──────────
+--
+-- It said the two "must" keep their EXECUTE, because "a trigger function runs
+-- as the role performing the write, so revoking EXECUTE from `authenticated`
+-- would make the table unwritable rather than more private."
+--
+-- Postgres does not work that way. It checks EXECUTE on a trigger function when
+-- the TRIGGER IS CREATED, not each time it fires — which is what
+-- 51-advisor-tidy.sql, 141-the-grants-that-came-back.sql and part 146 all say,
+-- and they are right. 141 §2 then revokes EXECUTE from public, anon AND
+-- authenticated on every non-extension trigger function in `public`, these two
+-- included, and it sorts after this file. `coach_credentials` is still
+-- writable, which is the proof.
+--
+-- The sentence is corrected rather than deleted because it stated a general
+-- rule about trigger privileges that is the opposite of the one this schema is
+-- built on, next to the only two trigger functions in the file — the exact
+-- place somebody would come to learn it.
 comment on table public.coach_credentials is
   'Certifications and insurance a coach STATES about themselves. verification is ''self_declared'' for every row written through the API — authenticated holds no INSERT or UPDATE grant on verification, verified_at or verified_by, so a coach cannot mark their own claim checked. Nothing in the product may present one of these as verified by Repple.';
 comment on column public.coach_credentials.reference is

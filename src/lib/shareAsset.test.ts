@@ -68,8 +68,16 @@ const one = weekCard({ brand: 'W', spanLabel: 'Last 7 days', sessions: 1, minute
 ok(one.ok && one.card.headline === '1 session coached', 'one session is singular');
 
 const many = weekCard({ brand: 'Warehouse Gym', spanLabel: 'Last 7 days', sessions: 1240, minutes: 74_400, clients: 86 });
-ok(many.ok && many.card.stats[0].value === (1240).toLocaleString(),
-  'a four-figure session count carries its thousands separator, as everywhere else in the app');
+// Pinned against the literal, not against `(1240).toLocaleString()`. `num()` in
+// format.ts IS `Math.round(n).toLocaleString()`, so comparing to it compared the
+// expression to itself: the assertion passed whether or not a separator was
+// produced, while its message said the separator is what is being checked.
+// A literal '1,240' is not the fix either: the separator is locale-dependent and
+// this suite runs wherever the build does. So the property is asserted directly
+// — the rendered value is not the bare digits — which is exactly what "carries
+// its separator" means and holds in every locale that groups thousands.
+ok(many.ok && many.card.stats[0].value !== '1240' && /\d/.test(many.card.stats[0].value),
+  `a four-figure session count is GROUPED, not printed as bare digits — got "${many.ok ? many.card.stats[0].value : 'not ok'}"`);
 ok(many.ok && many.card.footer === 'Warehouse Gym', 'the footer is the tenant, never a hardcoded brand');
 
 // The caption is a sentence somebody could have written, not a filled-in

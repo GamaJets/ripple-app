@@ -188,7 +188,7 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
         // and the analytics screens were all written against a chronological
         // list, and the read order is a fetching decision, not their business.
         let rows = page.rows.map(rowToSession).reverse();
-        // Approvals live in their own table (see supabase/session-approvals.sql).
+        // Approvals live in their own table (see supabase/parts/22-session-approvals.sql).
         // A failure here must not cost us the sessions themselves — the screen is
         // still usable without knowing what has been approved.
         try {

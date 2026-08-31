@@ -25,7 +25,9 @@
 -- can read a programme, no coach can write one, and nobody can see a charge.
 -- Production is fine only because production was never built from these files.
 --
--- The remaining twenty are on tables that do have declared policies. Seven of
+-- The remaining NINETEEN are on tables that do have declared policies (26 minus
+-- the seven above; this said twenty, while the breakdown that follows —
+-- 7 redundant + 6 load-bearing + 6 unnamed — has always summed to 19). Seven of
 -- them are strictly redundant with a declared one and are recorded, not
 -- endorsed — bc_self ⊂ cust_read, ca_self ⊂ conn_read, sub_self ⊂ sub_read,
 -- tp_manage = pkg_write, tp_read_active ⊂ pkg_read, exvid_write =

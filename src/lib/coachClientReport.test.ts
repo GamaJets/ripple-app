@@ -148,19 +148,28 @@ const base = (over: Partial<CoachClientReportInput> = {}): CoachClientReportInpu
 }
 
 /* ── 2. it never interprets ────────────────────────────────────────────────
-   The client's own report scans for sixteen phrases. This one scans for those
-   plus the ones a COACH reaches for, because a coach genuinely has an opinion
+   The client's own report scans for FIFTEEN phrases (counted in
+   clientReport.test.ts; this said sixteen, and a reader auditing whether the
+   coach list is a strict superset goes looking for one that is not there).
+   This one scans for those fifteen plus the ten a COACH reaches for, because a
+   coach genuinely has an opinion
    and this document looks like the place to put it. It is — in the quoted
    block below, attributed, and nowhere else. */
 
 const FORBIDDEN = [
-  // the client report's sixteen
+  // the client report's fifteen, verbatim
   'healthy range', 'normal range', 'ideal weight', 'overweight', 'obese',
   'you should', 'we recommend', 'recommended', 'diagnos', 'suggests that',
   'consistent with', 'indicates', 'concerning', 'improvement', 'on track',
   // and the ones a coach writes
   'compliant', 'compliance', 'adherence', 'excellent', 'well done',
   'good progress', 'great work', 'needs to', 'should focus', 'attendance rate',
+  // 'poor' and 'consistent' were NAMED in coachClientReport.ts's header as
+  // phrases this list catches, and neither was on it — 'consistent with' is,
+  // and that one belongs to the client's half. A header that claims a guard
+  // is what stops anybody adding it, so they are here rather than struck from
+  // the sentence: 'poor' is the most plainly judgemental word in the set.
+  'poor', 'consistent',
 ];
 
 {

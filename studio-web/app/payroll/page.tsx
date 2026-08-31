@@ -345,10 +345,15 @@ export default function Payroll() {
     }
     for (const r of byTrainer.values()) {
       // A run with no currency is blocked, not merely displayed as a dash.
-      // `recordSettlement` writes `currency: run.currency ?? 'AED'` straight
-      // into `payroll_settlements`, so settling without one does not just LOOK
-      // wrong on this screen — it stamps the wrong money onto a permanent
-      // payment record that /accounting and /close then read back as fact.
+      // `recordSettlement` once wrote `currency: run.currency ?? 'AED'` into
+      // `payroll_settlements`, which stamped the wrong money onto a permanent
+      // payment record that /accounting and /close read back as fact. Its
+      // `currency` is now a REQUIRED `string` and supabase/parts/150 dropped the
+      // column's `'AED'` default, so that particular silent write is gone — but
+      // the block stays and is the point: without it this screen would offer a
+      // Settle button that can only ever throw, and a payroll run that fails at
+      // the database is a worse way to learn the currency is missing than being
+      // told so before pressing anything.
       r.blocker = settleBlocker(r.outstanding, r.line?.unmarked ?? 0)
         ?? (r.outstanding.length && !ccy
           ? 'This gym has not set its currency, so a settlement cannot say what money it is in.'

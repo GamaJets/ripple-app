@@ -120,8 +120,11 @@ ok(whoopOne.length === 1 && whoopOne[0].minutesAsleep === expectWhoop,
   `WHOOP asleep is light + slow wave + REM = ${expectWhoop} min, got ${whoopOne[0]?.minutesAsleep}`);
 ok(whoopOne[0]?.basis === 'asleep', 'a summed stage total is staged sleep');
 ok(whoopOne[0]?.night === whoopNight, `the night is the local day the sleep ended, got ${whoopOne[0]?.night}`);
-// The guard that matters: in-bed is 30272735 ms = 505 min, and reporting that
-// as sleep would add the 23 minutes awake to every WHOOP night.
+// The guard that matters: in-bed is 30272735 ms = 505 min against a staged
+// total of 457, so reporting in-bed as sleep would add 48 minutes to this
+// night. (This said 23 — the fixture's `total_awake_time_milli`. The two are
+// not the same number: WHOOP's in-bed total also exceeds the sum of its own
+// stage fields here, so the awake figure understates the error by half.)
 ok(whoopOne[0]?.minutesAsleep !== Math.round(30272735 / 60000),
   'time in bed is never reported as time asleep');
 

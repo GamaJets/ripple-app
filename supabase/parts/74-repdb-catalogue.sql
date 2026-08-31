@@ -19,7 +19,15 @@
 -- the mistake Hevy actually shipped, on the page we were sent as the example to
 -- follow. Here there is no mapping step to get wrong.
 --
--- ── Names are NOT preserved on conflict, unlike part 71 ───────────────────
+-- ── Names ARE preserved on conflict, exactly as in part 71 ────────────────
+--
+-- This heading used to read "Names are NOT preserved on conflict, unlike part
+-- 71", which is the opposite of both the SQL below it and the paragraph under
+-- it. `on conflict (id) do update set` omits `name` and `muscle_group` here
+-- just as part 71 does. Anybody skimming headings would have concluded that
+-- re-running this file renames catalogue rows — and src/lib/machines.ts,
+-- src/lib/focus.ts and `buildProgram()` all resolve exercises BY NAME, so that
+-- belief is the one that gets a programme silently repointed.
 --
 -- Part 71 refused to update name or muscle_group, because programs and logs
 -- reference a row by the name it has. That still holds for OUR original rows.

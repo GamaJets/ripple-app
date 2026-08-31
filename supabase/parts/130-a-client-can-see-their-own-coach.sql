@@ -2,13 +2,36 @@
 --
 -- `app/(client)/trainers.tsx` is a DIRECTORY — the coaches who have opted in
 -- to being found. There is no screen anywhere for the coach a client is
--- already working with, and there is no way to build one, because a client
--- cannot read that coach's row: `trainers_peer_r` is trainer-to-trainer, and
--- `profiles_public_directory_r` only covers `trainers.listed = true`, which
--- defaults to false. So a client whose coach found THEM — by join code, which
--- is the normal case — cannot see their coach's bio, their specialties, or
--- what they offer, while a stranger browsing the directory can see all three
--- for a listed coach.
+-- already working with.
+--
+-- The missing half is `profiles`: no policy lets a client read an unlisted
+-- coach's `profiles` row, so their NAME and AVATAR are unreachable —
+-- `trainers_peer_r` is trainer-to-trainer, and `profiles_public_directory_r`
+-- only covers `trainers.listed = true`, which defaults to false. A client whose
+-- coach found THEM, by join code, which is the normal case, cannot put a face
+-- or a name to them, while a stranger browsing the directory can.
+--
+-- ── CORRECTION: the `trainers` ROW ITSELF WAS ALWAYS READABLE ─────────────
+--
+-- This opened by saying a client "cannot read that coach's row" and that there
+-- was "no way to build" the screen. That is not true and was not true when it
+-- was written. `trainers_assigned_client_r` (23-trainer-directory.sql, never
+-- dropped) is
+--
+--     for select using (exists (select 1 from coach_clients
+--       where coach_clients.trainer_id = trainers.id
+--         and coach_clients.id = (select auth.uid())))
+--
+-- and a linked client is exactly a `coach_clients` row keyed on their own uid
+-- (src/ui/CoachRequests.tsx writes it on accept). So bio, tagline, specialties,
+-- offers and session_fee were reachable all along.
+-- 131-a-join-code-is-not-directory-information.sql, written the same night,
+-- opens by saying so — "`trainers_assigned_client_r` gives a client their own
+-- coach's row … a client should see their coach" — and the two headers cannot
+-- both be believed.
+--
+-- What follows is still the right shape, for the `profiles` half and for the
+-- column argument below. Only the premise needed correcting.
 --
 -- ── Why a function and not a policy ────────────────────────────────────────
 --

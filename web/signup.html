@@ -83,13 +83,20 @@ addEventListener('DOMContentLoaded', function () {
 
         <label class="fl" for="pw" style="margin-top:14px">Password</label>
         <div class="pw">
-          <input id="pw" type="password" autocomplete="new-password" required minlength="6" placeholder="At least 6 characters">
+          <input id="pw" type="password" autocomplete="new-password" required minlength="8" placeholder="At least 8 characters">
           <button type="button" class="eye" data-for="pw" aria-label="Show password" aria-pressed="false"></button>
         </div>
 
         <button id="go" type="submit" class="contact" style="width:100%;margin-top:18px;border:none;font-size:16px;justify-content:center">
           Create account
         </button>
+
+        <ul id="rules" class="tiny" style="margin-top:12px;list-style:none;padding:0;display:flex;flex-wrap:wrap;gap:6px"></ul>
+
+        <p class="tiny" style="margin-top:10px">
+          These are the account's actual requirements, not recommendations. Passwords that have appeared
+          in a public data breach are also refused, which can only be checked when you save.
+        </p>
       </form>
 
   <div id="resendWrap" hidden style="margin-top:18px">
@@ -253,6 +260,48 @@ addEventListener('DOMContentLoaded', function () {
     resendMsg.className = 'ok';
     resendMsg.textContent = 'Sent again. If it still does not arrive, email support@repplefitness.com and we will confirm you by hand.';
   });
+
+  /* ── what the account actually requires ──────────────────────────────────── */
+  // This page promised "At least 6 characters" and had `minlength="6"` on the
+  // box. The project enforces eight, plus a lowercase letter, an uppercase
+  // letter, a digit and a symbol, plus a server-side breach check — see
+  // src/lib/passwordRules.ts, where the rules were established by probing the
+  // signup endpoint rather than by reading one error message.
+  //
+  // The sweep that fixed this took app/welcome.tsx, app/reset-password.tsx,
+  // src/ui/components.tsx and web/reset-password.html, and missed this file —
+  // which is the ACCOUNT-CREATION page, the first password anybody types here.
+  // Six characters was refused, then refused again once per unmet class, so the
+  // page that promised the rule was the page that broke it.
+  //
+  // Kept in step with web/reset-password.html deliberately: two pages that set
+  // a password for the same account must not state different rules for it.
+  const RULES = [
+    ['8 characters or more', (v) => v.length >= 8],
+    ['a lowercase letter',   (v) => /[a-z]/.test(v)],
+    ['an uppercase letter',  (v) => /[A-Z]/.test(v)],
+    ['a number',             (v) => /[0-9]/.test(v)],
+    ['a symbol',             (v) => /[!@#$%^&*()_+\-=[\]{};'\\:"|<>?,./`~]/.test(v)],
+  ];
+  const rulesEl = $('rules');
+  function paintRules() {
+    const v = $('pw').value;
+    rulesEl.innerHTML = '';
+    for (const [label, test] of RULES) {
+      const okRule = test(v);
+      const li = document.createElement('li');
+      li.textContent = (okRule ? '\u2713 ' : '\u2022 ') + label;
+      li.style.cssText = 'padding:3px 9px;border-radius:999px;' + (okRule
+        ? 'background:rgba(13,148,136,.16);color:#0d9488'
+        : 'background:rgba(127,127,127,.14);opacity:.75');
+      rulesEl.appendChild(li);
+    }
+    // Never claim acceptance — the breach check happens server-side, against a
+    // corpus this page has no copy of.
+    go.disabled = !RULES.every(([, t]) => t(v));
+  }
+  $('pw').addEventListener('input', paintRules);
+  paintRules();
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();

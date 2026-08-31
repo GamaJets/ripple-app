@@ -3,7 +3,10 @@
 --
 -- ── What was here before ─────────────────────────────────────────────────
 --
--- `trainer_availability` (part 09 + the `minute` column) is a WEEKLY TEMPLATE:
+-- `trainer_availability` (created in 24-trainer-availability.sql; the `minute`
+-- column comes from 103-availability-quarter-hours.sql — this used to cite
+-- "part 09", which is 09-sessions-access.sql and never mentions the table) is a
+-- WEEKLY TEMPLATE:
 -- seven days by twenty-four hours of "I am free then". The coach's calendar
 -- screen turns it into concrete rows with a Generate button that walks four
 -- weeks forward and inserts open slots. That is availability, and availability

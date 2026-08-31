@@ -251,7 +251,10 @@ revoke execute on function public.touch_hydration_log() from public, anon, authe
 --                                         and is_owner_of(tenant_id))
 --     ann_owner_rw for all    using/check (is_owner_of(tenant_id))
 --
--- `is_owner_of()` is `profiles.role = 'owner'`, so as it stands a TRAINER
+-- `is_owner_of(t)` is `profiles.role = 'owner' AND profiles.tenant_id = t` —
+-- the tenant clause matters and this used to omit it, which is precisely the
+-- lesson parts 106 and 120 exist to teach ("`role = 'owner'` is never an
+-- authorisation on its own"). So as it stands a TRAINER
 -- cannot insert an announcement at all, and a client reads by tenancy — every
 -- announcement in their gym, from anybody, including one written for a
 -- different coach's roster. Neither half is what the client dashboard's "From

@@ -272,11 +272,18 @@ begin
   if p_issued_on is null then
     raise exception 'an invoice has to carry the date it was issued';
   end if;
-  -- A day's grace on each side of the server's own date, which is UTC. The app
-  -- passes the DEVICE's local date, and the widest real timezone offset is
-  -- under 15 hours — so a legitimate local "today" is never more than one day
-  -- from the server's. Anything beyond that is a typed date, and a document
-  -- dated next month is not a record of something that happened.
+  -- A day's grace AHEAD of the server's own date, which is UTC. The app passes
+  -- the DEVICE's local date, and the widest real timezone offset is under 15
+  -- hours — so a legitimate local "today" is never more than one day past the
+  -- server's. Anything beyond that is a typed date, and a document dated next
+  -- month is not a record of something that happened.
+  --
+  -- One side only. This said "on each side", which reads as a symmetric window;
+  -- there is no lower bound here and none anywhere else, so an invoice may be
+  -- backdated without limit. That is deliberate — a coach writing up last
+  -- quarter's work is an ordinary thing and a floor would refuse it — but the
+  -- sentence claimed a guard that does not exist, which is worse than saying
+  -- nothing about the past at all.
   if p_issued_on > current_date + 1 then
     raise exception 'an invoice cannot be dated in the future';
   end if;

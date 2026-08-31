@@ -491,8 +491,10 @@ export async function recordSettlement(
      * This was `currency?: string` written through as `run.currency ?? 'AED'`,
      * into a permanent payment record that /accounting and /close read back as
      * fact. Every settlement a non-UAE gym ever made was stored as dirhams, and
-     * nothing at any layer showed it: the column is `not null default 'AED'`,
-     * so the wrong value renders cleanly and looks considered. Both callers
+     * nothing at any layer showed it: the column WAS `not null default 'AED'`,
+     * so the wrong value rendered cleanly and looked considered. That default is
+     * gone as of supabase/parts/150 — the column is NOT NULL with none — so the
+     * database now refuses a settlement that does not name its money. Both callers
      * already pass the gym's own currency and block the settlement without one
      * — studio-web/app/payroll/page.tsx and studio-web/app/sessions/page.tsx —
      * so making it required costs nothing today and is what stops the third

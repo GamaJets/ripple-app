@@ -60,8 +60,18 @@ create table if not exists public.goal_targets (
   )
 );
 
--- One live target per measured metric. A client aiming at two different weights
--- at once is a bug in whatever wrote the second row, not a state to render.
+-- One target ROW per measured metric — for all time, not just while it is live.
+-- The predicate is `kind <> 'custom'` and nothing else: there is no
+-- `achieved_at is null` term, so reaching a weight goal does not free the slot
+-- for a second one. (This said "one LIVE target", which describes a partial
+-- index that was never written.)
+--
+-- That is not a trap in practice because nothing INSERTS a second row:
+-- `setMeasuredGoal` in src/ui/goalTracker.tsx finds the existing row for the
+-- kind and UPDATEs it by id, precisely because PostgREST cannot name a partial
+-- index in an on_conflict. A client aiming at two different weights at once is
+-- a bug in whatever wrote the second row, not a state to render.
+--
 -- Custom goals are excluded: having several at a time is the normal case.
 create unique index if not exists idx_goal_targets_one_per_metric
   on public.goal_targets (client_id, kind)

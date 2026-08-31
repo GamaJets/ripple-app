@@ -3,7 +3,7 @@
 // The gym has had this record from both ends since the beginning and the member
 // has never seen either half. `class_bookings.attended_at` is the register a
 // coach ticks in app/(trainer)/class-checkin.tsx and the owner console marks at
-// the desk; `gym_visits` is the door log, which supabase/parts/32-gym-visits.sql
+// the desk; `gym_visits` is the door log, which supabase/parts/32-door-log.sql
 // describes as the gym's whole attendance substrate and which until now was read
 // only by the Studio web console. A member walking through a door generated a
 // row about themselves they could not see.

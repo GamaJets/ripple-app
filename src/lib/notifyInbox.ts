@@ -91,8 +91,18 @@ const EXPIRING = /\bjust opened\b/i;
 /** A push confirming something the recipient can already see recorded. */
 const RECEIPT = /\bhas read your\b/i;
 
-/** Route prefix → the icon that route's notifications are drawn with. First
- *  match wins, so the longer, more specific prefixes come first. */
+/** Route → the icon that route's notifications are drawn with.
+ *
+ *  ORDER DOES NOT MATTER, despite the name of the local. `inboxIcon` matches a
+ *  WHOLE route — `r === prefix`, or the route with a query string on it — so no
+ *  entry can shadow another and reordering this table cannot change any answer.
+ *  This said "first match wins, so the longer, more specific prefixes come
+ *  first", which is false twice: the matching is not prefix matching, and the
+ *  list is not sorted that way ('/(client)/messages' precedes '/(trainer)/chat',
+ *  '/(client)/explore' precedes '/(client)/calendar'). Whole-route matching is
+ *  the deliberate choice and notifyInbox.test.ts pins it — '/(client)/calendar-archive'
+ *  gets the bell, not the calendar. Somebody who believed the old sentence would
+ *  "fix" a wrong icon by moving a line, and nothing would change. */
 const ICON_BY_ROUTE: ReadonlyArray<readonly [string, InboxIcon]> = [
   ['/(client)/messages', 'message'],
   ['/(trainer)/chat', 'message'],

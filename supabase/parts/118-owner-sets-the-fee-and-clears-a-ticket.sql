@@ -82,7 +82,9 @@ comment on column public.feedback.resolved_at is
 
 -- ── 3 · Why an RPC and not an UPDATE policy ────────────────────────────────
 --
--- `feedback` has three SELECT policies and no UPDATE policy at all, which is
+-- `feedback` has TWO select policies (`fb_own`, `fb_owner`) plus one insert
+-- policy (`fb_insert`) — this said three SELECT, counting the insert — and no
+-- UPDATE policy at all, which is
 -- why the button could never have worked. The obvious repair is to mirror
 -- `fb_owner` for update — and it is the wrong one, for the reason part 101 sets
 -- out at length: RLS cannot restrict WHICH COLUMNS an update touches. An UPDATE

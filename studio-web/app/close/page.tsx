@@ -707,9 +707,11 @@ async function fetchInvoices(tenantId: string, upToDay: string): Promise<GymInvo
     memberId: r.member_id,
     memberName: names.get(r.member_id) ?? null,
     amountCents: r.amount_cents ?? 0,
-    // Not `?? 'AED'`. The column is `not null default 'AED'` so this branch does
-    // not fire in practice — and "in practice" is exactly what the currency bug
-    // was made of. Null flows to money(), which withholds the figure.
+    // Not `?? 'AED'`. The column is NOT NULL and — since supabase/parts/150 —
+    // has NO DEFAULT, so a write that omits the currency is rejected and a read
+    // always finds one; this branch does not fire in practice. "In practice" is
+    // exactly what the currency bug was made of, so it is still written: null
+    // flows to money(), which withholds the figure.
     currency: r.currency ?? null,
     issuedOn: r.issued_on,
     dueOn: r.due_on ?? null,

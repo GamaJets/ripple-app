@@ -966,9 +966,11 @@ async function fetchTakings(tenantId: string, sinceIso: string): Promise<Taking[
     memberId: r.member_id ?? null,
     membershipId: r.membership_id ?? null,
     amountCents: Number.isFinite(r.amount_cents) ? r.amount_cents : null,
-    // Not `?? 'AED'`. The column is `not null default 'AED'`, so this branch
-    // does not fire in practice — and every currency bug in this repo was built
-    // out of "in practice". Null reaches money(), which withholds the figure.
+    // Not `?? 'AED'`. The column is NOT NULL and — since supabase/parts/150 —
+    // has NO DEFAULT, so a write that omits the currency is rejected and a read
+    // always finds one; this branch does not fire in practice. Every currency
+    // bug in this repo was built out of "in practice", so it is still written:
+    // null reaches money(), which withholds the figure.
     currency: r.currency ?? null,
     method: r.method ?? 'other',
     takenAt: r.taken_at,

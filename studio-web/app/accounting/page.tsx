@@ -1141,10 +1141,12 @@ async function fetchInvoices(tenantId: string, upToDay: string): Promise<Invoice
     // Not `?? 0`. An invoice with no amount is money of unknown size, and every
     // total on this page refuses rather than absorbs it.
     amountCents: r.amount_cents ?? null,
-    // Not `?? 'AED'`. The column is `not null default 'AED'`, so this branch
-    // does not fire in practice — and "in practice" is what every currency bug
-    // in this repo was made of. Null reaches money(), which withholds the
-    // figure, and sumOf() below refuses to total a set containing one.
+    // Not `?? 'AED'`. The column is NOT NULL and — since supabase/parts/150 —
+    // has NO DEFAULT, so a write that omits the currency is rejected outright
+    // and a read always finds one; this branch does not fire in practice. "In
+    // practice" is what every currency bug in this repo was made of, so it is
+    // still written: null reaches money(), which withholds the figure, and
+    // sumOf() below refuses to total a set containing one.
     currency: r.currency ?? null,
     issuedOn: r.issued_on,
     dueOn: r.due_on ?? null,

@@ -35,9 +35,12 @@ const eq = (a: unknown, b: unknown, msg: string) => ok(a === b, `${msg} — got 
   ok(!!lb, 'a suggestion comes back at all');
   ok(!/\bkg\b/i.test(lb!.reason), `a pounds member is never shown kilograms — got "${lb!.reason}"`);
   ok(/\blb\b/.test(lb!.reason), `and is shown pounds — got "${lb!.reason}"`);
-  // 60 kg is 132 lb. The assertion that names the defect: the old string
-  // carried the literal 60, so this fails loudly if the conversion is dropped.
-  ok(lb!.reason.includes('132'), `the load reads as 132 lb — got "${lb!.reason}"`);
+  // 60 kg is 132.277 lb, which `liftIn` rounds to the half pound it works in —
+  // LB_LIFT_STEP = 0.5 — so the string reads "132.5 lb", not "132 lb". The
+  // substring is still `132` because that is what fails loudly if the
+  // conversion is dropped and the literal 60 comes back; the MESSAGE said
+  // "132 lb", which told a reader the app prints a figure it does not print.
+  ok(lb!.reason.includes('132'), `the load reads as 132.5 lb — the half-pound grain liftIn rounds to — got "${lb!.reason}"`);
   ok(!lb!.reason.includes('60'), `and never as the raw 60 — got "${lb!.reason}"`);
   // 2.5 kg is 5.5 lb at the half-pound `liftDeltaIn` works in, and must not be
   // printed as a bare "2.5" beside a figure in pounds.

@@ -54,7 +54,12 @@ alter table public.exercises add column if not exists source            text;
 comment on column public.exercises.image_paths is
   'Relative paths into the source dataset, resolved at read time — never URLs, so the media can be swapped without touching this table.';
 comment on column public.exercises.source is
-  'Where the row came from: ''repple'' for the hand-written originals, ''free-exercise-db'' for the public-domain import.';
+  'Where the row came from. FOUR values, not two: ''repple'' (hand-written original, untouched by any import), '
+  '''free-exercise-db'' (public-domain import), ''repple+free-exercise-db'' (one of ours that an import enriched — '
+  'the name and muscle group are still Repple''s, which is why on-conflict never updates them), and ''repdb'' '
+  '(added by part 74). Do NOT filter on source = ''repple'' to find the hand-written rows: this comment named only '
+  'the first two while the insert below writes 31 rows of the third, so that filter misses 31 of the 41 rows whose '
+  'name and group we authored.';
 
 insert into public.exercises
   (id, name, muscle_group, is_cardio, category, equipment, level, mechanic, force,

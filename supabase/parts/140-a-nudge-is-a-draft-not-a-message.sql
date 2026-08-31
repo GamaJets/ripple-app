@@ -99,8 +99,17 @@
 -- so a nudge can only ever be recorded against a client who is yours right
 -- now, and a coach cannot mint rows keyed to a stranger's uuid.
 --
--- `is_my_client` is invoker-rights (not SECURITY DEFINER) with its search_path
--- already pinned, and resolves through `clients_trainer_read`. No new
+-- `is_my_client` is invoker-rights (not SECURITY DEFINER) and resolves through
+-- `clients_trainer_read`. Its search_path is NOT pinned — this used to say it
+-- "already" was, and it never has been: the sole definition, in
+-- 02-domain-schema.sql, carries no `set search_path`, and nothing since adds
+-- one. (`is_owner_of` beside it WAS re-declared with one, by
+-- 28-fix-profiles-recursion.sql, which is probably where the belief came from;
+-- the sweeps in parts 51 and 141 both filter to trigger functions, so neither
+-- touches it.) It is stated here because a false "already verified" is what
+-- stops the check being made. Being SECURITY INVOKER it confers no privilege to
+-- escalate, which is why this is a documentation defect rather than a hole. No
+-- new
 -- SECURITY DEFINER function is introduced here, which is the preferred outcome:
 -- the ones that exist are the holes that have to be got right.
 --

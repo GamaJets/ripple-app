@@ -355,16 +355,34 @@ export default function OwnerOps() {
                       owner sets it in the gym settings" over a control that did
                       not exist. A coach at such a gym cannot price a package at
                       all. So the ask is here, next to the fee it denominates. */}
+                  {/* This sentence used to tell the owner that {GYM_CURRENCY}
+                      "is what the rest of its operating record is recorded in".
+                      That was true when every money column carried `not null
+                      default 'AED'`; supabase/parts/150 dropped all seven of
+                      those defaults precisely because the tables were empty,
+                      and they still are. So the claim named a body of dirham
+                      rows that does not exist — telling an owner a fact about
+                      their own money that we cannot support is worse than
+                      telling them nothing, because it is the one thing here
+                      they have no way to check. It now says only what is true:
+                      the label is a placeholder standing in for an answer we
+                      have not been given. */}
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                    Your gym has not told us what it charges in, so figures are shown in {GYM_CURRENCY} — what
-                    the rest of its operating record is recorded in. Set it once and every screen follows.
+                    Your gym has not told us what it charges in, so the field above is only labelled
+                    {' '}{GYM_CURRENCY} as a placeholder. Set your currency once and every screen follows.
                   </Text>
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.md }}>
                     {CURRENCIES.map((c) => (
                       <Pressable key={c} onPress={async () => {
                         const saved = await updateTenant({ currency: c });
+                        // No claim about what came before. The old wording said
+                        // "existing figures were already recorded in AED",
+                        // which rested on the money columns defaulting to it —
+                        // a default supabase/parts/150 has since dropped. This
+                        // screen cannot see the gym's rows, so it states only
+                        // the thing the write it just made actually settles.
                         setFeeMsg(saved
-                          ? { bad: false, text: `Your gym is priced in ${c}. Existing figures were already recorded in ${GYM_CURRENCY}; this changes what new ones are written as.` }
+                          ? { bad: false, text: `Your gym is priced in ${c}. That is what every figure written from here on is denominated in.` }
                           : { bad: true, text: 'Not saved. Your gym still has no currency set.' });
                       }} accessibilityRole="button" accessibilityLabel={`Price this gym in ${c}`}
                         style={{ paddingHorizontal: 14, paddingVertical: 8, borderRadius: radius.pill, backgroundColor: t.surface2 }}>

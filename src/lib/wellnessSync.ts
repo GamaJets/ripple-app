@@ -39,9 +39,13 @@
  *
  * An entry written offline needs an id immediately — React keys it, the screen
  * lists it, and the client may log a second one before the first has been sent.
- * The server assigns uuids, so a local id has to be distinguishable from one:
- * `pushPending` uses this to decide what still has to go up, and `mergeLog`
- * uses it to decide which local rows survive a server answer.
+ * The server assigns uuids, so a local id has to be distinguishable from one.
+ * `mergeLog` below uses it twice over: to decide which local rows survive a
+ * server answer, and to build the `pending` list each screen then walks to send
+ * what has not gone up yet (src/ui/foodLog.tsx, src/ui/wellness.tsx and
+ * src/ui/checkins.tsx each do that inline). There is no `pushPending` function
+ * — this sentence used to name one, and a reader who went looking for the
+ * retry in a single shared place would not have found it in any of the three.
  *
  * `src/ui/availability.ts` makes the same distinction by asking whether the id
  * `includes('-')` — a uuid does, its local ids do not. That works, but it is a

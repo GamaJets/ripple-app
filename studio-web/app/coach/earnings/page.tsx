@@ -254,11 +254,13 @@ async function fetchMySettlements(tenantId: string, trainerId: string): Promise<
       periodFrom: r.period_from,
       periodTo: r.period_to,
       amountCents: r.amount_cents ?? 0,
-      // Not `?? 'AED'`. This is what a coach was actually handed; the column is
-      // `not null default 'AED'` so the branch does not fire in practice, and
-      // "in practice" is what every currency bug in this repo was made of. Null
-      // reaches money(), which withholds the figure rather than denominating
-      // somebody's pay for them.
+      // Not `?? 'AED'`. This is what a coach was actually handed. The column is
+      // NOT NULL and — since supabase/parts/150 — has NO DEFAULT, so a
+      // settlement that does not name its currency is rejected rather than
+      // filed as dirhams, and the branch below does not fire in practice. "In
+      // practice" is what every currency bug in this repo was made of, so it is
+      // still written: null reaches money(), which withholds the figure rather
+      // than denominating somebody's pay for them.
       currency: r.currency ?? null,
       sessionsCount: r.sessions_count ?? 0,
       method: r.method ?? 'transfer',

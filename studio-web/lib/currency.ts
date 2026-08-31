@@ -1,10 +1,18 @@
 // What money the gym counts in — and what to do when nobody has said.
 //
-// `money()` in src/lib/gymRecord.ts is declared `(cents, currency = 'AED')`.
+// `money()` in src/lib/gymRecord.ts WAS declared `(cents, currency = 'AED')`.
 // That default was defensible while every customer was in the UAE, and it is a
-// wrong number the moment one is not: a bare `money(630000)` prints
+// wrong number the moment one is not: a bare `money(630000)` printed
 // "AED 6,300.00" on a London gym's payroll screen, and a default that silently
 // applies LOOKS considered. Nobody reads it as a missing setting.
+//
+// That default is gone — `money()`'s currency parameter is now required, and
+// supabase/parts/150 dropped the matching `'AED'` default from all seven money
+// columns. This module is NOT therefore obsolete, and the paragraphs below are
+// why: `money()` renders a figure that already carries its own currency, and
+// this file answers the different question of what a figure denominated in THE
+// GYM's money is worth when the gym has not said. A null currency still has to
+// become a withheld figure rather than a guess, and that is `amount()`'s job.
 //
 // The database settled this already. `tenants.currency` (setup.sql, the
 // tenant-currency part) is deliberately NULLABLE and its own comment says:
@@ -18,8 +26,13 @@
 // currency wins and `money(cents, row.currency)` is used unchanged; this is for
 // the figures that have no currency of their own and inherit the gym's.
 //
-// Fixing `money()`'s default would be the real repair and it is one line, but
-// src/lib belongs to the phone app and is not ours to edit from here.
+// The line that used to sit here said fixing `money()`'s default "would be the
+// real repair and it is one line, but src/lib belongs to the phone app and is
+// not ours to edit from here". That repair has since been made — the parameter
+// is required and unpassed currency is a compile error. It is recorded rather
+// than deleted because as written it read as outstanding work, and the next
+// person to act on it would have gone looking for a default that is no longer
+// there.
 import { money } from '@lib/gymRecord';
 
 /** ISO 4217 as the gym set it, or null when the gym has not set one. The two
