@@ -22,6 +22,7 @@ import { createContext, useContext, useCallback, useEffect, useState, type React
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
+import { checkTenantBrand } from '../lib/tenantBrand';
 import { money } from '../lib/gymRecord';
 import type { LoadStatus } from './loadStatus';
 import { useAuthRevision } from './authRevision';
@@ -86,6 +87,27 @@ interface TenantValue {
    *  null tenant means we could not find out, NOT that the user has no gym —
    *  no screen should offer to create one on the strength of it. */
   status: LoadStatus;
+  /**
+   * Set when this gym belongs to a DIFFERENT brand than the app showing it.
+   *
+   * This provider used to resolve a tenant from `profiles.tenant_id` and stop
+   * there, which is fine while one brand exists and wrong the moment two do: a
+   * Brand A account opening Brand B's app was handed Brand A's gym, its
+   * members and its takings, rendered under Brand B's name, with nothing at any
+   * layer noting the swap.
+   *
+   * The REFUSAL lives in src/ui/auth.tsx, which signs a mismatched account out
+   * before any screen mounts, so in normal running this stays null. It is here
+   * for the window that survives that: a session already open when the brand
+   * column is first populated, or one whose guard came back 'unknown' because
+   * the RPC was unreachable at sign-in and reachable now.
+   *
+   * Null does NOT mean the brands match — it also covers "not asked yet" and
+   * "could not find out", both of which are treated as no objection on purpose
+   * (see src/lib/tenantBrand.ts on why this fails open). Read it as "a mismatch
+   * has been confirmed", never as "this tenant has been cleared".
+   */
+  brandMismatch: string | null;
   refresh: () => void;
   /** Owner-only; RLS enforces it. Returns false when the write is rejected. */
   updateTenant: (patch: Partial<Pick<Tenant, 'name' | 'brandColor' | 'sessionFee'>>) => Promise<boolean>;
@@ -98,6 +120,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
   const [tenant, setTenant] = useState<Tenant | null>(null);
   const [role, setRole] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [brandMismatch, setBrandMismatch] = useState<string | null>(null);
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
   const [tick, setTick] = useState(0);
   const refresh = useCallback(() => setTick((t) => t + 1), []);
@@ -114,7 +137,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
         // Signed out is not a failed read of the tenant — there is simply no
         // user to have one. getUser() rejects with no session, which latched
         // this at 'error' on the first tick and it never ran again.
-        if (!sess?.session) { setTenant(null); setStatus('ready'); setLoading(false); return; }
+        if (!sess?.session) { setTenant(null); setBrandMismatch(null); setStatus('ready'); setLoading(false); return; }
         const { data: auth, error: authErr } = await supabase.auth.getUser();
         if (cancelled) return;
         if (authErr) { reportError('tenant.load.auth', authErr); setStatus('error'); setLoading(false); return; }
@@ -129,6 +152,19 @@ export function TenantProvider({ children }: { children: ReactNode }) {
         // the tid line below reads as "this user has no gym".
         if (profErr) { reportError('tenant.load.profile', profErr); setStatus('error'); setLoading(false); return; }
         setRole(prof?.role ?? null);
+
+        // Whose gym is this, and is it ours to be showing? Asked through an
+        // RPC rather than by selecting `tenants.brand` below, for two reasons:
+        // the SELECT policies on `tenants` do not cover a plain member reading
+        // their own row (they get an empty set and no error), and selecting a
+        // column that does not exist yet would turn every owner's tenant read
+        // into an 'error' on the day this ships and the day part 101 is
+        // applied are not the same day. A verdict of 'unknown' — including the
+        // whole period before that part is applied — leaves this null and
+        // changes nothing.
+        const verdict = await checkTenantBrand();
+        if (cancelled) return;
+        setBrandMismatch(verdict.kind === 'mismatch' ? verdict.message : null);
 
         const tid = prof?.tenant_id ?? null;
         if (!tid) { setTenant(null); setStatus('ready'); setLoading(false); return; }
@@ -170,7 +206,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
   }, [tenant]);
 
   return (
-    <Ctx.Provider value={{ tenant, role, loading, status, refresh, updateTenant }}>{children}</Ctx.Provider>
+    <Ctx.Provider value={{ tenant, role, loading, status, brandMismatch, refresh, updateTenant }}>{children}</Ctx.Provider>
   );
 }
 

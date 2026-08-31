@@ -8,7 +8,7 @@
 // instead, fields lost their 1px borders for a `surface2` fill with a quiet
 // label above, and the notice is ink text beside a coloured dot rather than
 // coloured text.
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useRouter } from 'expo-router';
@@ -56,6 +56,16 @@ export default function Welcome() {
   const [busy, setBusy] = useState(false);
   const [refCode, setRefCode] = useState('');
   const [notice, setNotice] = useState<string | null>(null);
+
+  // A session refused at launch because it belongs to another brand has nobody
+  // to tell: it is turned away before this screen mounts, and all the reader
+  // sees is a sign-in screen where their account used to be. That is
+  // indistinguishable from being logged out at random, and the first thing
+  // anybody does about it is try their password again, then reset it. So the
+  // guard's own sentence is picked up here and shown in the notice card the
+  // screen already has. An interactive sign-in does not come through here —
+  // signIn throws the same sentence and the catch below prints it.
+  useEffect(() => { if (auth.brandNotice) setNotice(auth.brandNotice); }, [auth.brandNotice]);
 
   // Signing IN must not apply the new-password rules: an existing account may
   // hold a password created under the old, looser policy, and gating the button

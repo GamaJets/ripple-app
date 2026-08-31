@@ -9,7 +9,6 @@ import { registerForPush } from './pushNotifications';
 import {
   supabase,
   signIn as sbSignIn,
-  signUp as sbSignUp,
   signOut as sbSignOut,
   currentProfile,
   sendPasswordReset as sbSendPasswordReset,
@@ -21,10 +20,23 @@ import {
 import { resetPasswordUrl } from '../lib/deepLink';
 import { reportError } from '../lib/reportError';
 import { phoneAuthError } from '../lib/phone';
+import { checkTenantBrand, stampTenantBrand, signUpWithBrand, brandSignUpMetadata } from '../lib/tenantBrand';
 
 export type Role = 'owner' | 'trainer' | 'client';
 export interface AuthUser { id: string; name: string; email: string; role: Role }
 export interface SignUpResult { needsConfirmation: boolean }
+
+/**
+ * What a session turned out to be.
+ *
+ * `refused` carries a sentence, not a flag, because every caller of
+ * refreshFromSession has a different way of showing it — the welcome screen
+ * throws it into its notice card, the phone screen returns it as an OTP
+ * failure, and launch has nobody to throw at. A boolean would have each of them
+ * writing their own wording for a situation none of them can describe as well
+ * as the guard can. Both fields null means signed out.
+ */
+interface SessionOutcome { user: AuthUser | null; refused: string | null }
 
 // One shared Supabase identity signs in to all 3 portals (Client / Trainer /
 // Platform Owner) — the portal picker on `/` just routes by role, it isn't a
@@ -51,6 +63,17 @@ interface AuthValue {
   /** Exchange a code for a session. Only `ok: true` means they are signed in. */
   verifyPhoneCode: (e164: string, code: string, name?: string) => Promise<{ ok: true } | { ok: false; reason: string }>;
   signOut: () => void;
+  /**
+   * Why the last session was refused, when nobody was there to be told.
+   *
+   * The interactive paths get the sentence thrown or returned to them and show
+   * it themselves. A session rehydrated at LAUNCH has no such caller: it is
+   * refused before any screen exists, and without this the person would be
+   * silently dropped at the welcome screen with no account and no explanation —
+   * which reads exactly like being signed out for no reason. Cleared by the
+   * next successful sign-in.
+   */
+  brandNotice: string | null;
   /** Email a reset link. A no-op with no backend connected — there is no real
    *  inbox to send to, and pretending otherwise would have the reader waiting
    *  on mail that was never sent. */
@@ -72,14 +95,35 @@ const nameFromEmail = (email: string) => email.split('@')[0] || 'Athlete';
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
+  const [brandNotice, setBrandNotice] = useState<string | null>(null);
   // In live mode we don't know the persisted session until we've checked storage.
   const [loading, setLoading] = useState<boolean>(USE_SUPABASE);
 
   // Build an AuthUser from the current Supabase session (+ profile row if present).
-  async function refreshFromSession(): Promise<AuthUser | null> {
+  //
+  // Every way into this app converges here — email, phone, a rehydrated session
+  // at launch, and social once it is wired — which is why the brand guard sits
+  // here rather than at four call sites that would each have to remember it.
+  async function refreshFromSession(): Promise<SessionOutcome> {
     const { data: auth } = await supabase.auth.getUser();
     const u = auth.user;
-    if (!u) { setUser(null); return null; }
+    if (!u) { setUser(null); return { user: null, refused: null }; }
+
+    // Asked BEFORE the user is published to the tree. A provider that set
+    // `user` first and signed out a moment later would flash the wrong brand's
+    // app on screen, and any effect that fired in that window would fetch the
+    // wrong gym's data — the exact thing this is here to prevent.
+    const verdict = await checkTenantBrand();
+    if (verdict.kind === 'mismatch') {
+      // Sign out rather than merely refuse: leaving the session alive would
+      // have the next launch rehydrate it and refuse again forever, and the
+      // token would still be a valid token for another brand's data.
+      try { await sbSignOut(); } catch (e) { reportError('auth.brandGuard.signOut', e); }
+      setUser(null);
+      setBrandNotice(verdict.message);
+      return { user: null, refused: verdict.message };
+    }
+
     let role: Role = (u.user_metadata?.role as Role) || 'client';
     let name = (u.user_metadata?.full_name as string) || nameFromEmail(u.email || '');
     try {
@@ -88,8 +132,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch { /* profile row may not exist yet — fall back to auth metadata */ }
     const next: AuthUser = { id: u.id, name, email: u.email || '', role };
     setUser(next);
+    setBrandNotice(null);
     registerForPush().catch(() => {});
-    return next;
+    return { user: next, refused: null };
   }
 
   // Live: hydrate any persisted session on launch, and react to auth changes.
@@ -111,7 +156,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signIn = async (email: string, password: string) => {
     if (!USE_SUPABASE) { setUser({ id: 'local', name: nameFromEmail(email), email, role: 'client' }); return; }
     await sbSignIn(email, password);
-    await refreshFromSession();
+    // Thrown, not returned, because that is how this function already reports
+    // a bad password and the welcome screen already prints e.message.
+    const { refused } = await refreshFromSession();
+    if (refused) throw new Error(refused);
   };
 
   const signUp = async (name: string, email: string, password: string, role: Role = 'client'): Promise<SignUpResult> => {
@@ -119,10 +167,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser({ id: 'local', name: name.trim() || nameFromEmail(email), email, role });
       return { needsConfirmation: false };
     }
-    await sbSignUp(email, password, name.trim(), role);
+    // signUpWithBrand is sbSignUp plus `brand` in the metadata — see
+    // src/lib/tenantBrand.ts for why the value has to be there at creation and
+    // cannot be attached afterwards.
+    await signUpWithBrand(email, password, name.trim(), role);
     // If email confirmation is OFF, a session exists now; otherwise it does not.
     const { data } = await supabase.auth.getSession();
-    if (data.session) { await refreshFromSession(); return { needsConfirmation: false }; }
+    if (data.session) {
+      // Belt and braces for an account whose metadata did not survive the trip
+      // — a no-op when it did. Before the guard runs, because a brand-new
+      // account's own tenant is the one thing it is allowed to stamp.
+      await stampTenantBrand();
+      const { refused } = await refreshFromSession();
+      if (refused) throw new Error(refused);
+      return { needsConfirmation: false };
+    }
     return { needsConfirmation: true };
   };
 
@@ -133,11 +192,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    * here, so a first-time number signing in and a new member signing up are
    * the same gesture. That is the whole point of the change — David Lloyd asks
    * for a number and never mentions whether you already exist.
+   *
+   * That is also why the brand travels on THIS call rather than on the verify:
+   * `shouldCreateUser` means the auth.users row is written here, and metadata
+   * that arrives after the row exists is too late for handle_new_user() to see.
+   * For a number that already has an account Supabase ignores the data, which
+   * is the behaviour wanted — an existing member's brand is not up for revision
+   * by whichever app they happened to open.
    */
   const sendPhoneCode = async (e164: string): Promise<{ ok: true } | { ok: false; reason: string }> => {
     if (!USE_SUPABASE) return { ok: false, reason: 'Not connected to Repple, so no code was sent.' };
     try {
-      const { error } = await supabase.auth.signInWithOtp({ phone: e164, options: { shouldCreateUser: true } });
+      const { error } = await supabase.auth.signInWithOtp({ phone: e164, options: { shouldCreateUser: true, data: brandSignUpMetadata() } });
       if (error) { reportError('auth.sendPhoneCode', error); return { ok: false, reason: phoneAuthError(error.message) }; }
       return { ok: true };
     } catch (e: any) {
@@ -175,7 +241,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
         } catch (e) { reportError('auth.verifyPhoneCode.name', e); }
       }
-      await refreshFromSession();
+      // A verify may be the moment an account is created (shouldCreateUser),
+      // and the caller cannot tell which it was — so offer the stamp every
+      // time and let the server decide. It only ever fills a blank on a
+      // one-person tenant; see stampTenantBrand.
+      await stampTenantBrand();
+      const { refused } = await refreshFromSession();
+      // Returned rather than thrown, matching this function's own contract:
+      // the phone screen prints `reason` in the card it already has.
+      if (refused) return { ok: false, reason: refused };
       return { ok: true };
     } catch (e: any) {
       return { ok: false, reason: phoneAuthError(e?.message) };
@@ -189,6 +263,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     // Native OAuth needs provider config in Supabase + a deep-link handler.
     // Not wired for Phase 1 — surface a clear message; email sign-in is the path.
+    //
+    // WHEN IT IS WIRED, the brand needs two lines and neither is optional.
+    // signInWithOAuth takes no user-metadata argument — the account is created
+    // by the provider callback, with nothing of ours in it — so unlike email
+    // and phone this path cannot stamp the tenant at creation. After the
+    // session lands: `await stampTenantBrand()` (claims the fresh one-person
+    // tenant, no-op otherwise) and then `const { refused } = await
+    // refreshFromSession(); if (refused) throw new Error(refused);`. The guard
+    // itself needs nothing added — every session already funnels through
+    // refreshFromSession, including the one onAuthStateChange picks up.
     throw new Error('Social sign-in is not set up yet — please use email for now.');
   };
 
@@ -216,11 +300,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const completePasswordReset = async (newPassword: string) => {
     await sbUpdatePassword(newPassword);
-    await refreshFromSession();
+    const { refused } = await refreshFromSession();
+    // A recovery link opened in the wrong brand's app resets the password and
+    // then does not sign them in. Saying so beats leaving them on a screen
+    // that has just told them it worked.
+    if (refused) throw new Error(refused);
   };
 
   return (
-    <Ctx.Provider value={{ authed: !!user, user, loading, signIn, signUp, signInWithProvider, sendPhoneCode, verifyPhoneCode, signOut, sendPasswordReset, beginPasswordRecoveryWithTokenHash, beginPasswordRecoveryWithCode, beginPasswordRecoveryWithTokens, completePasswordReset }}>
+    <Ctx.Provider value={{ authed: !!user, user, loading, brandNotice, signIn, signUp, signInWithProvider, sendPhoneCode, verifyPhoneCode, signOut, sendPasswordReset, beginPasswordRecoveryWithTokenHash, beginPasswordRecoveryWithCode, beginPasswordRecoveryWithTokens, completePasswordReset }}>
       {children}
     </Ctx.Provider>
   );
