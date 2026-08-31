@@ -23,6 +23,15 @@ set -euo pipefail
 MSG="${1:?usage: scripts/publish.sh \"update message\"}"
 cd "$(dirname "$0")/.."
 
+# Where the bundling actually happens. Set below to a detached worktree at HEAD
+# rather than this directory, so an agent writing a file mid-publish cannot
+# reach the thing being bundled at all. The first version of this script only
+# ASSERTED the tree was clean, and within minutes of being written it correctly
+# refused two of three channels because an agent had written between publishes —
+# which left the three apps on different bundles. Refusing is better than
+# shipping the wrong thing, and not being reachable is better than refusing.
+PUBTREE=""
+
 clean_or_die() {
   local dirty
   dirty="$(git status --porcelain)"
@@ -35,6 +44,23 @@ clean_or_die() {
     exit 1
   fi
 }
+
+# A worktree needs the dependency tree and the public config to bundle. Both are
+# symlinked rather than copied: node_modules is gigabytes, and .env holds the
+# EXPO_PUBLIC_* values without which the bundle builds fine and then crashes on
+# launch with "supabaseUrl is required" — which is its own hard-won lesson.
+make_pubtree() {
+  PUBTREE="$(mktemp -d)/tree"
+  git worktree add --detach "$PUBTREE" HEAD >/dev/null
+  ln -s "$PWD/node_modules" "$PUBTREE/node_modules"
+  [ -f .env ] && cp .env "$PUBTREE/.env"
+  echo "bundling from a detached worktree at $(git -C "$PUBTREE" rev-parse --short HEAD)"
+}
+
+drop_pubtree() {
+  [ -n "$PUBTREE" ] && git worktree remove --force "$PUBTREE" >/dev/null 2>&1 || true
+}
+trap drop_pubtree EXIT
 
 echo "── tree must be a commit before anything else ──"
 clean_or_die
@@ -53,20 +79,21 @@ done
 
 echo
 echo "── publish ──"
+make_pubtree
 for ch in production coach-production owner-production; do
   case "$ch" in
     production)       V=client  ;;
     coach-production) V=trainer ;;
     owner-production) V=owner   ;;
   esac
-  # Re-asserted per channel rather than once at the top: the three publishes
-  # take minutes between them, which is long enough for an agent to write.
-  clean_or_die
   printf '%-20s ' "$ch"
-  EXPO_PUBLIC_APP_VARIANT="$V" npx eas-cli update \
-    --branch "$ch" --message "$MSG" \
-    --environment production --non-interactive 2>&1 \
-    | grep -oE 'Update group ID +[0-9a-f-]+' | head -1
+  # Run FROM the worktree. Nothing an agent does to the working tree between
+  # these three publishes can change what is bundled, so all three channels get
+  # the same commit — which is the property that failed the first time.
+  ( cd "$PUBTREE" && EXPO_PUBLIC_APP_VARIANT="$V" npx eas-cli update \
+      --branch "$ch" --message "$MSG" \
+      --environment production --non-interactive 2>&1 \
+      | grep -oE 'Update group ID +[0-9a-f-]+' | head -1 )
 done
 
 echo
