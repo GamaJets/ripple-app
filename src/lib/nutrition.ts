@@ -284,14 +284,27 @@ export function caloriesLeft(
  * because it is a unit symbol and "Kcal" is not one.
  */
 export function caloriesNote(cal: CaloriesLeft): string {
-  const head = `${num(cal.eaten)} of ${num(cal.target)} kcal Eaten`;
+  // ── Sentence case, deliberately ──────────────────────────────────────────
+  //
+  // This is a SENTENCE, not a label. It was written in Title Case and pinned
+  // that way by `coverage.test.ts`, so the client dashboard's first card read
+  //
+  //     "0 of 2,350 kcal Eaten · 2,648 kcal Burned All Day, Rest Included,
+  //      97 More Than Your Activity Level Assumes."
+  //
+  // which is the failure mode `check:caps` explicitly refuses to cause:
+  // over-capitalising body copy is a worse regression than the inconsistency
+  // it is meant to fix, because a sentence in Title Case reads as shouted
+  // rather than as tidy. Headings, labels and buttons take Title Case; running
+  // prose does not, and this is running prose on the busiest screen in the app.
+  const head = `${num(cal.eaten)} of ${num(cal.target)} kcal eaten`;
   if (!cal.burned) return head;
   // Say WHICH quantity. "1,309 burned" by mid-afternoon reads as a huge
   // training day when it is a WHOOP whole-day figure that is mostly the client
   // lying still, and somebody asked exactly that: where does it come from.
   const what = cal.burnKind === 'total'
-    ? `${num(cal.burned)} kcal Burned All Day, Rest Included`
-    : `${num(cal.burned)} Active kcal Burned`;
+    ? `${num(cal.burned)} kcal burned all day, rest included`
+    : `${num(cal.burned)} active kcal burned`;
   // Not "above a usual day" — asked twice, "based on what exactly?", and the
   // honest answer was not in the sentence. It is measured against the ACTIVITY
   // LEVEL on the profile: that multiplier is what decides how much movement
@@ -299,8 +312,8 @@ export function caloriesNote(cal: CaloriesLeft): string {
   // here knows what the client's actual recent days looked like, so it must
   // not claim to.
   const verdict = cal.extraBurned > 0
-    ? `${num(cal.extraBurned)} More Than Your Activity Level Assumes`
-    : 'Already in Your Target';
+    ? `${num(cal.extraBurned)} more than your activity level assumes`
+    : 'already in your target';
   return `${head} · ${what}, ${verdict}`;
 }
 

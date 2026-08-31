@@ -4532,21 +4532,28 @@ function by2(v: ReturnType<typeof buildStaff>, id: string) {
 
   // The wording. A burn figure printed beside a number it was NOT added to is
   // what made the old screen unreadable — it looked like it had been.
-  ok(caloriesNote(day).includes('More Than Your Activity Level Assumes'),
+  ok(caloriesNote(day).includes('more than your activity level assumes'),
     'a bigger day names what it is measured against, because "a usual day" does not');
-  ok(!caloriesNote(day).includes('Usual Day'),
+  ok(!caloriesNote(day).toLowerCase().includes('usual day'),
     'and never claims to know what the client\'s usual day was — nothing here has their history');
-  ok(!caloriesNote(day).includes('Already in Your Target'), 'and does not also claim it was ordinary');
+  ok(!caloriesNote(day).includes('already in your target'), 'and does not also claim it was ordinary');
   const ordinary = caloriesLeft(2040, 0, 700, budget);
-  ok(caloriesNote(ordinary).includes('Already in Your Target'),
+  ok(caloriesNote(ordinary).includes('already in your target'),
     'an ordinary day says the burn was already in the target rather than leaving it unexplained');
   ok(!caloriesNote(caloriesLeft(2040, 0, 0, budget)).toLowerCase().includes('burned'),
     'with no burn at all, the note does not mention burning');
-  ok(caloriesNote(day).startsWith('0 of 2,040 kcal Eaten'), 'the note still opens with eaten of target');
-  // Title case, with the minor words left alone and the unit symbol intact —
-  // "Kcal" is not a unit, and "0 Of 2,040" is not title case.
-  ok(caloriesNote(day).includes(' of ') && caloriesNote(day).includes(' Than Your '),
-    'short function words stay lowercase');
+  ok(caloriesNote(day).startsWith('0 of 2,040 kcal eaten'), 'the note still opens with eaten of target');
+  // Pinned in sentence case on purpose. These assertions previously held the
+  // Title-Cased wording in place, which is how a shouted sentence survived a
+  // capitalisation pass: the pass found the string already "correct" and the
+  // test would have failed if it had fixed it.
+  ok(!/ Eaten| Burned| More Than| Already In/.test(caloriesNote(day)),
+    'and it is a sentence, so it is not Title Cased'),
+  // Sentence case throughout, and the unit symbol intact — "Kcal" is not a
+  // unit. This assertion used to require " Than Your " with capitals, which is
+  // what kept the whole sentence shouting through a capitalisation pass.
+  ok(caloriesNote(day).includes(' of ') && caloriesNote(day).includes(' than your '),
+    'the sentence reads as a sentence, and kcal keeps its case');
   ok(caloriesNote(day).includes('kcal') && !caloriesNote(day).includes('Kcal'),
     'the unit symbol is not a word to capitalise');
 
@@ -4591,10 +4598,10 @@ function by2(v: ReturnType<typeof buildStaff>, id: string) {
 
   // The wording names the quantity, which is what makes the figure answerable.
   const totalNote = caloriesNote(caloriesLeft(2040, 0, 1309, 2511, 'total'));
-  ok(totalNote.includes('All Day') && totalNote.includes('Rest Included'),
+  ok(totalNote.includes('all day') && totalNote.includes('rest included'),
     'a whole-day figure says so on the screen');
   const activeNote = caloriesNote(caloriesLeft(2040, 0, 700, 891, 'active'));
-  ok(activeNote.includes('Active kcal Burned'), 'and an active figure says that instead');
+  ok(activeNote.includes('active kcal burned'), 'and an active figure says that instead');
   ok(!activeNote.includes('All Day'), 'never both labels on one number');
 
   // The kind travels with the figure rather than being re-derived downstream.
