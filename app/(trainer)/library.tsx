@@ -176,10 +176,17 @@ export default function TrainerLibrary() {
   // for the wrong reason.
   const ownershipKnown = coachId != null;
 
+  // "No clip" was reported from the screenshot as reading like a contradiction,
+  // and it was one. Every row already draws a picture — the catalogue's own
+  // demonstration still, which 601 of the 604 movements have — so a badge
+  // saying "No clip" sits directly beside visible proof that there is
+  // something to show. The badge was never about that picture: it is about
+  // whether a COACH has filmed this movement, which is what the section above
+  // it is titled. So it now says that, and stops denying the thumbnail.
   const clipNote = (c: Clip) =>
     c === 'mine' ? 'Your clip'
       : c === 'academy' ? 'Academy clip'
-        : c === 'none' ? 'No clip'
+        : c === 'none' ? 'Not filmed'
           : null;
 
   // Every figure here is a count over the rows we hold. Under 'partial' those
@@ -191,6 +198,10 @@ export default function TrainerLibrary() {
     const slug = exerciseSlug(r.name);
     return mine.has(slug) || academy.has(slug);
   }).length;
+  // Counted directly rather than as covered − filmed. A movement can carry
+  // both an Academy clip and one of yours, and the subtraction would drop
+  // every one of those from the Academy figure.
+  const academyFilmed = rows.filter((r) => academy.has(exerciseSlug(r.name))).length;
   // Both clip figures need BOTH reads whole: a catalogue prefix undercounts
   // the movements, and a clip-library prefix undercounts the matches.
   const clipCountable = countable && clipsKnown && ownershipKnown;
@@ -233,14 +244,18 @@ export default function TrainerLibrary() {
 
         <Section>
           <SectionHead title="What You Have Filmed" />
+          {/* "Nothing to Show" was wrong, not just blunt. It counted movements
+              with no coach clip — and 601 of the 604 carry a demonstration
+              animation the client can already watch, so there is something to
+              show for nearly all of them. Renamed to what it actually counts. */}
           <KpiRow items={[
             { label: 'Your Clips', value: clipCountable ? num(filmed) : '—' },
-            { label: 'Demonstrated', value: clipCountable ? num(covered) : '—' },
-            { label: 'Nothing to Show', value: clipCountable ? num(rows.length - covered) : '—' },
+            { label: 'Academy Clips', value: clipCountable ? num(academyFilmed) : '—' },
+            { label: 'Not Filmed', value: clipCountable ? num(rows.length - covered) : '—' },
           ]} />
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
             {clipCountable
-              ? 'Demonstrated counts your own clips plus the Academy ones your clients fall back to. Record your own on the Videos screen and yours is what they see instead.'
+              ? 'These count coaching clips, not whether a movement can be demonstrated — every exercise here already shows your client how it is done. Not Filmed means neither you nor the Academy has recorded one; record yours on the Videos screen and yours is what they see.'
               : 'These stay blank until both the catalogue and your clip library have been read in full, rather than reporting a figure computed from part of them.'}
           </Text>
         </Section>
