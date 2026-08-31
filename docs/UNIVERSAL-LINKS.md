@@ -69,7 +69,7 @@ in `assetlinks.json` today, because `/join` is scoped to the client app.
 | --- | --- | --- |
 | Repple (client) | `com.washateria.repple` | **still needed** — this is the one `/join` requires |
 | Repple Coach | `com.washateria.repple.coach` | `E6:A1:5C:00:C9:36:7A:99:B2:DD:15:25:72:1F:38:5E:B0:E1:AC:C9:8C:89:B5:31:F8:BB:6C:09:93:CD:8C:DE` |
-| Repple Studio | `com.washateria.repple.studio` | not needed yet |
+| Repple Studio | `com.washateria.repple.studio` | `96:90:E2:2D:D3:B1:25:88:6C:C4:BE:CE:F8:EB:2C:B6:D8:4F:C7:EA:38:4E:AD:2C:D9:CE:33:CD:2A:9D:DF:2F` |
 
 The coach one is kept for later, not used now. It becomes relevant only if the
 coach app is ever given app links of its own — password reset being the obvious
