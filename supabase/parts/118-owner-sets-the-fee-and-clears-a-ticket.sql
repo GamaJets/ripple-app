@@ -1,6 +1,15 @@
 -- ─────────────────────────────────────────────────────────────────────────
--- Two things the owner console asserts and the database will not let anybody
--- change: what a session is worth, and whether a support ticket is dealt with.
+-- Three things the owner console states about a gym that its owner has never
+-- been able to state back: what a session is worth, what colour the gym is, and
+-- whether a support ticket has been dealt with.
+--
+-- Two of them are the same fault. `session_fee` and `brand_color` are columns
+-- with DEFAULTS, and every gym in the live database holds those defaults
+-- unchanged — 75 of something, and the product's own teal. The screens spend
+-- both as though an owner had chosen them. Part 99 wrote the sentence this part
+-- applies twice: a default that silently applies LOOKS considered, which is the
+-- worst kind of wrong figure to put in front of somebody making a decision on
+-- it. The third is simpler — a button that wrote nothing at all.
 -- ─────────────────────────────────────────────────────────────────────────
 
 
@@ -131,3 +140,44 @@ end $$;
 revoke execute on function public.resolve_feedback(uuid, boolean) from public;
 revoke execute on function public.resolve_feedback(uuid, boolean) from anon;
 grant execute on function public.resolve_feedback(uuid, boolean) to authenticated;
+
+
+-- ── 4 · A brand colour nobody picked ───────────────────────────────────────
+--
+-- Same fault as the session fee, one column along, and it only matters now
+-- because something finally reads this column.
+--
+-- `tenants.brand_color` is `text default '#2dd4bf'` (part 01) — the teal the
+-- default palette is drawn in. Nothing in three apps has ever written it and,
+-- until this change, nothing had ever read it: the White-label Studio screen
+-- set the theme accent, which is AsyncStorage on one phone, and the gym's own
+-- row was never consulted. Checked live before writing this: 24 tenants, all 24
+-- holding exactly the default, none holding anything else.
+--
+-- app/(owner)/brand.tsx now applies `brand_color` as the app's accent, so that
+-- default stops being inert and starts being an instruction. Left as it is, the
+-- first owner to open the screen would have their Studio app repainted teal —
+-- over the amber every Studio build is drawn in (VARIANT_ACCENT in
+-- src/lib/variant.ts) — on the authority of a colour nobody chose. A default
+-- that silently applies LOOKS chosen; that is part 99's sentence and it is the
+-- same one here.
+--
+-- So the default goes, and the rows still carrying it are cleared to NULL,
+-- which is the answer that is actually true: this gym has not stated a colour.
+-- The screen then says so and offers the ten palettes, and the first tap writes
+-- a colour an owner picked — which every device that owner signs in on will
+-- then agree about, which is the whole point of the column.
+--
+-- The date is in the statement for the reason part 101 gives: a bare
+-- `where brand_color = '#2dd4bf'` re-run next year would silently un-choose
+-- teal for every gym that had deliberately picked it. This claims only what was
+-- already there, unchosen, on the day it was written.
+alter table public.tenants alter column brand_color drop default;
+
+update public.tenants set brand_color = null
+ where brand_color = '#2dd4bf' and created_at < timestamptz '2026-09-01';
+
+comment on column public.tenants.brand_color is
+  'The gym''s accent colour, #rgb or #rrggbb. NULL means the gym has not chosen one — '
+  'show the app''s own accent and ask, never a default dressed as a choice. '
+  'Was DEFAULT ''#2dd4bf'' until part 118.';

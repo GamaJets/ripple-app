@@ -23,6 +23,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase, loadMe, type Me } from '@/lib/supabase';
 import { Shell } from '@/components/Shell';
+import { amount, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
 import { DataTable, type Column } from '@/components/DataTable';
 import {
   fetchMemberships, fetchPayments, money,
@@ -58,6 +59,10 @@ const EMPTY: MemberRecord = {
 export default function Members() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
   const [gymName, setGymName] = useState<string | null>(null);
+  // `tenants.currency`. The payment ROWS below carry their own currency and use
+  // it; the two figures that SUM them across a member's history have none of
+  // their own, and inherit the gym's rather than a default.
+  const [ccy, setCcy] = useState<TenantCurrency>(null);
   const [rec, setRec] = useState<MemberRecord>(EMPTY);
   const [sel, setSel] = useState<string | null>(null);
 
@@ -95,10 +100,13 @@ export default function Members() {
         return;
       }
       const { data: t, error: tErr } = await supabase
-        .from('tenants').select('name').eq('id', who.tenantId).single();
+        .from('tenants').select('name, currency').eq('id', who.tenantId).single();
       // supabase-js resolves on a database error, so this is checked rather
       // than assumed: a null name here means "not read", not "unnamed gym".
-      if (live) setGymName(tErr ? null : t?.name ?? null);
+      if (live) {
+        setGymName(tErr ? null : t?.name ?? null);
+        setCcy(tErr ? null : ((((t as any)?.currency ?? '') as string).trim().toUpperCase() || null));
+      }
       await load(who.tenantId);
     })();
     return () => { live = false; };
@@ -212,10 +220,10 @@ export default function Members() {
         />
       </div>
 
-      <Roster rec={rec} dossiers={dossiers} reads={reads} sel={sel} onPick={setSel} />
+      <Roster rec={rec} dossiers={dossiers} reads={reads} sel={sel} onPick={setSel} ccy={ccy} />
 
       {chosen ? (
-        <Dossier d={chosen} rec={rec} active={active} onClose={() => setSel(null)} />
+        <Dossier d={chosen} rec={rec} active={active} onClose={() => setSel(null)} ccy={ccy} />
       ) : (
         <Section title="One member" sub="Pick somebody above to open their record.">
           <p style={{ padding: '26px 20px', margin: 0, color: 'var(--ink3)', fontSize: 13.5 }}>
@@ -283,12 +291,13 @@ async function fetchBookings(tenantId: string, sinceIso: string): Promise<Member
 
 type Read = { d: MemberDossier; r: ReturnType<typeof retentionRead> };
 
-function Roster({ rec, dossiers, reads, sel, onPick }: {
+function Roster({ rec, dossiers, reads, sel, onPick, ccy }: {
   rec: MemberRecord;
   dossiers: MemberDossier[] | null;
   reads: Read[] | null;
   sel: string | null;
   onPick: (id: string) => void;
+  ccy: TenantCurrency;
 }) {
   const readFor = useMemo(
     () => new Map((reads ?? []).map((x) => [x.d.memberId, x.r])),
@@ -328,7 +337,17 @@ function Roster({ rec, dossiers, reads, sel, onPick }: {
     },
     {
       key: 'paid', header: 'Paid', value: (d) => d.paidCents ?? null, numeric: true,
-      render: (d) => <Cell state={rec.payments.state} value={money(d.paidCents)} empty="nothing recorded" />,
+      // `amount`, not `money`. This column sums a member's payments and has no
+      // row currency of its own, so `money()` wrote "AED" over it — while the
+      // payments table inside the same dossier prints each row with its real
+      // currency. One member's money, shown two ways, on one screen.
+      render: (d) => (
+        <Cell
+          state={rec.payments.state}
+          value={amount(d.paidCents, ccy)}
+          empty={d.paidCents != null && !ccy ? NO_CURRENCY_NOTE : 'nothing recorded'}
+        />
+      ),
     },
     {
       key: 'read', header: 'Door vs timetable', value: (d) => {
@@ -369,8 +388,9 @@ function Roster({ rec, dossiers, reads, sel, onPick }: {
 
 /* ── one member ────────────────────────────────────────────────────────────── */
 
-function Dossier({ d, rec, active, onClose }: {
+function Dossier({ d, rec, active, onClose, ccy }: {
   d: MemberDossier; rec: MemberRecord; active: boolean | null; onClose: () => void;
+  ccy: TenantCurrency;
 }) {
   const r = rec.visits.state === 'ready' && rec.bookings.state === 'ready'
     ? retentionRead(d, { doorLogActive: !!active })
@@ -402,9 +422,10 @@ function Dossier({ d, rec, active, onClose }: {
       >
         <Kpi label="Membership" text={d.status ? cap(d.status) : null}
              note={d.planName ?? (rec.memberships.state === 'failed' ? 'not read' : 'no plan attached')} />
-        <Kpi label="Paid, all time" text={money(d.paidCents)}
+        <Kpi label="Paid, all time" text={amount(d.paidCents, ccy)}
              note={
                rec.payments.state === 'failed' ? 'payments not read'
+                 : d.paidCents != null && !ccy ? NO_CURRENCY_NOTE
                  : d.lastPaidAt ? `last ${new Date(d.lastPaidAt).toLocaleDateString()}`
                  : 'nothing recorded'
              } />
@@ -561,7 +582,7 @@ function Dossier({ d, rec, active, onClose }: {
               { key: 'rate', header: 'Rate', value: (s: PtSession) => s.rateCents ?? null, numeric: true,
                 render: (s: PtSession) => s.rateCents == null
                   ? <span className="dash">—</span>
-                  : money(s.rateCents) },
+                  : (amount(s.rateCents, ccy) ?? <span className="dash">{NO_CURRENCY_NOTE}</span>) },
             ]}
             rowKey={(s: PtSession) => s.id}
             empty={`No one-to-one in the last ${WINDOW_DAYS} days.`}

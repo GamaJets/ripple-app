@@ -157,6 +157,21 @@ export default function Classes() {
     return t?.name?.trim() ?? '';
   }, [trainers]);
 
+  /**
+   * Whether an empty `nameOf` is a fact about the gym or about the read.
+   *
+   * `nameOf` falls back through `trainers ?? []`, which is null when
+   * `fetchTrainerOptions` failed — the whole point of the allSettled above. A
+   * class that HAS a trainerId then came out nameless and the cell said "no
+   * coach recorded", which is a positive claim about the record, made in the
+   * one case where the record was never seen. The banner named the failed read;
+   * the cell underneath contradicted it.
+   */
+  const nameUnread = useCallback(
+    (c: GymClass): boolean => !c.instructor?.trim() && !!c.trainerId && trainers === null,
+    [trainers],
+  );
+
   // The shared row shape, so the shared rate maths can be used unchanged.
   // `kind` and `branch` are left empty rather than invented: neither is read by
   // this screen, and nothing below ever renders them.
@@ -327,9 +342,12 @@ export default function Classes() {
       ) : null}
 
       <Empties rows={rows} unread={unread} />
-      <Unmarked classes={unmarked} unread={unread} nameOf={nameOf} onOpen={setOpen} />
-      <ByCoach rows={rows} unread={unread} />
-      <EveryClass classes={classes ?? []} rows={rows} unread={unread} nameOf={nameOf} onOpen={setOpen} />
+      <Unmarked classes={unmarked} unread={unread} nameOf={nameOf} nameUnread={nameUnread} onOpen={setOpen} />
+      <ByCoach rows={rows} unread={unread} namesRead={trainers !== null} />
+      <EveryClass
+        classes={classes ?? []} rows={rows} unread={unread}
+        nameOf={nameOf} nameUnread={nameUnread} onOpen={setOpen}
+      />
 
       {open ? <Roster gymClass={open} onClose={() => { setOpen(null); refresh(); }} /> : null}
     </Shell>
@@ -453,8 +471,9 @@ function Empties({ rows, unread }: { rows: ClassSummaryRow[]; unread: Unread }) 
  * the register can be marked from here, because the owner reading this is the
  * person who noticed.
  */
-function Unmarked({ classes, unread, nameOf, onOpen }: {
+function Unmarked({ classes, unread, nameOf, nameUnread, onOpen }: {
   classes: GymClass[]; unread: Unread; nameOf: (c: GymClass) => string;
+  nameUnread: (c: GymClass) => boolean;
   onOpen: (c: GymClass) => void;
 }) {
   const cols: Column<GymClass>[] = [
@@ -464,7 +483,10 @@ function Unmarked({ classes, unread, nameOf, onOpen }: {
       }) },
     { key: 'title', header: 'Class', value: (c) => c.title },
     { key: 'coach', header: 'Coach', value: (c) => nameOf(c) || null,
-      render: (c) => nameOf(c) || <span className="dash">— no coach recorded</span> },
+      render: (c) => nameOf(c)
+        || <span className="dash">
+             {nameUnread(c) ? '— coach name not read' : '— no coach recorded'}
+           </span> },
     { key: 'booked', header: 'Booked', value: (c) => c.booked, numeric: true },
     { key: 'mark', header: '', value: () => 0, align: 'right',
       render: (c) => <button style={linkBtn} onClick={() => onOpen(c)}>Mark the register</button> },
@@ -493,7 +515,9 @@ function Unmarked({ classes, unread, nameOf, onOpen }: {
 
 interface CoachRow { key: string; name: string | null; rates: ClassRates; empty: number | null }
 
-function ByCoach({ rows, unread }: { rows: ClassSummaryRow[]; unread: Unread }) {
+function ByCoach({ rows, unread, namesRead }: {
+  rows: ClassSummaryRow[]; unread: Unread; namesRead: boolean;
+}) {
   const coaches = useMemo<CoachRow[]>(() => {
     const buckets = new Map<string, ClassSummaryRow[]>();
     for (const r of rows) {
@@ -521,7 +545,15 @@ function ByCoach({ rows, unread }: { rows: ClassSummaryRow[]; unread: Unread }) 
 
   const cols: Column<CoachRow>[] = [
     { key: 'coach', header: 'Coach', value: (c) => c.name,
-      render: (c) => c.name ?? <span className="dash">— not recorded</span> },
+      // Bucketed by trainerId, so these rows stay distinct — but with the coach
+      // names unread they are all labelled the same way, and "not recorded" is
+      // the wrong label for it. `unattributed` is the bucket of classes with no
+      // trainerId at all, and only that one is genuinely nothing the gym wrote
+      // down.
+      render: (c) => c.name
+        ?? <span className="dash">
+             {!namesRead && c.key !== 'unattributed' ? '— name not read' : '— not recorded'}
+           </span> },
     { key: 'ran', header: 'Ran', value: (c) => c.rates.classes, numeric: true },
     { key: 'booked', header: 'Booked', value: (c) => c.rates.booked, numeric: true },
     { key: 'empty', header: 'Empty places', value: (c) => c.empty, numeric: true,
@@ -549,9 +581,10 @@ function ByCoach({ rows, unread }: { rows: ClassSummaryRow[]; unread: Unread }) 
 
 /* ── every class ───────────────────────────────────────────────────────────── */
 
-function EveryClass({ classes, rows, unread, nameOf, onOpen }: {
+function EveryClass({ classes, rows, unread, nameOf, nameUnread, onOpen }: {
   classes: GymClass[]; rows: ClassSummaryRow[]; unread: Unread;
-  nameOf: (c: GymClass) => string; onOpen: (c: GymClass) => void;
+  nameOf: (c: GymClass) => string; nameUnread: (c: GymClass) => boolean;
+  onOpen: (c: GymClass) => void;
 }) {
   const rateOf = useMemo(() => {
     const m = new Map<string, ClassRates>();
@@ -566,7 +599,8 @@ function EveryClass({ classes, rows, unread, nameOf, onOpen }: {
       }) },
     { key: 'title', header: 'Class', value: (c) => c.title },
     { key: 'coach', header: 'Coach', value: (c) => nameOf(c) || null,
-      render: (c) => nameOf(c) || <span className="dash">—</span> },
+      render: (c) => nameOf(c)
+        || <span className="dash">{nameUnread(c) ? 'name not read' : '—'}</span> },
     { key: 'cap', header: 'Capacity', value: (c) => (c.capacity > 0 ? c.capacity : null), numeric: true,
       // Zero capacity is a class nobody sized, not a class with no room in it.
       render: (c) => c.capacity > 0 ? String(c.capacity) : <span className="dash">— not set</span> },

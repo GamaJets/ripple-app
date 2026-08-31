@@ -27,13 +27,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase, loadMe, type Me } from '@/lib/supabase';
 import { Shell } from '@/components/Shell';
+import { amount, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
 import { DataTable, type Column } from '@/components/DataTable';
 import {
   isDelivered, isAwaitingOutcome, isPayable, sessionProfileIds, namesById,
   markOutcome, PAY_DELIVERED_ONLY,
   type PtSession, type SessionOutcome,
 } from '@lib/gymSessions';
-import { money } from '@lib/gymRecord';
+// `money()` is reached through lib/currency's `amount()`: a session rate has no
+// currency of its own until payroll stamps one, so it inherits the gym's or is
+// not written at all.
 import { isoDate, fmtDay, fmtTime } from '@lib/format';
 import { COACHED_MODE_SHORT, readCoachedMode, type CoachedMode } from '@lib/types';
 
@@ -185,6 +188,15 @@ async function fetchApprovals(sessionIds: string[]): Promise<Map<string, Approva
 export default function Coach() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
   const [gymName, setGymName] = useState<string | null>(null);
+  // The gym's currency. A session rate has none of its own until payroll stamps
+  // one, so every amount on this screen inherits the gym's or is not written.
+  const [ccy, setCcy] = useState<TenantCurrency>(null);
+  // "The gym has not set a currency" and "the gym record would not read" both
+  // leave `ccy` null, and they send a coach to two different places: one to ask
+  // the owner to fill in a setting, the other to reload. This was a
+  // `no-error-ok` read while the row only supplied a sidebar label; it stopped
+  // being one the moment a figure depended on it.
+  const [gymErr, setGymErr] = useState<string | null>(null);
   const [sessions, setSessions] = useState<PtSession[] | null>(null);
   const [requests, setRequests] = useState<CoachRequest[] | null>(null);
   const [roster, setRoster] = useState<Roster[] | null>(null);
@@ -271,11 +283,13 @@ export default function Coach() {
       setMe(who);
       if (!who) return;
       if (who.tenantId) {
-        // no-error-ok: the gym's name is a label in the sidebar. A coach without
-        // a gym, and a gym we could not read, both leave it null and the page
-        // works either way — nothing below is scoped by it.
-        const { data: t } = await supabase.from('tenants').select('name').eq('id', who.tenantId).single();
-        if (live) setGymName(t?.name ?? null);
+        const { data: t, error: tErr } = await supabase
+          .from('tenants').select('name, currency').eq('id', who.tenantId).single();
+        if (live) {
+          setGymName(tErr ? null : ((t as any)?.name ?? null));
+          setCcy(tErr ? null : (((((t as any)?.currency ?? '') as string).trim().toUpperCase()) || null));
+          setGymErr(tErr ? (tErr.message || 'Your gym record could not be read.') : null);
+        }
       }
       if (who.role !== 'trainer' && who.role !== 'owner') return;
       await load(who.id);
@@ -410,6 +424,12 @@ export default function Coach() {
       </p>
 
       {err ? <Banner tone="crit">{err}</Banner> : null}
+      {gymErr ? (
+        <Banner tone="crit">
+          Your gym record could not be read, so any amount below is missing rather than
+          unpriced — the currency it would be written in is unknown, not unset: {gymErr}
+        </Banner>
+      ) : null}
 
       <div
         style={{
@@ -452,7 +472,8 @@ export default function Coach() {
               // no answer. Say which of the two this is.
               : priced.cents == null
                 ? priced.payable > 0 ? 'none of them carry a rate' : undefined
-                : `${money(priced.cents)} across ${priced.withRate} of ${priced.payable}`
+                : !ccy ? NO_CURRENCY_NOTE
+                : `${amount(priced.cents, ccy)} across ${priced.withRate} of ${priced.payable}`
           }
         />
       </div>
@@ -461,7 +482,7 @@ export default function Coach() {
         sessions={unmarked} unread={unread(unmarked)} approvals={approvals}
         approvalsUnread={unread(approvals)} names={names} onMark={mark}
       />
-      <Today sessions={todays} unread={unread(todays)} approvals={approvals} names={names} onMark={mark} />
+      <Today sessions={todays} unread={unread(todays)} approvals={approvals} names={names} onMark={mark} ccy={ccy} />
       <Requests requests={requests} unread={unread(requests)} names={names} me={me} onChange={refresh} setErr={setErr} />
       <Quiet rows={quiet} unread={unread(quiet)} names={names} />
     </Shell>
@@ -535,10 +556,11 @@ function Unmarked({ sessions, unread, approvals, approvalsUnread, names, onMark 
 
 /* ── today ─────────────────────────────────────────────────────────────────── */
 
-function Today({ sessions, unread, approvals, names, onMark }: {
+function Today({ sessions, unread, approvals, names, onMark, ccy }: {
   sessions: PtSession[] | null; unread: Unread;
   approvals: Map<string, Approval> | null;
   names: Map<string, string>; onMark: (s: PtSession, o: SessionOutcome) => void;
+  ccy: TenantCurrency;
 }) {
   const now = Date.now();
 
@@ -574,7 +596,7 @@ function Today({ sessions, unread, approvals, names, onMark }: {
       // payroll will price from the gym's fee later.
       render: (s) => s.rateCents == null
         ? <span className="dash">set at payroll</span>
-        : (money(s.rateCents) ?? <span className="dash">—</span>) },
+        : (amount(s.rateCents, ccy) ?? <span className="dash">{NO_CURRENCY_NOTE}</span>) },
     { key: 'mark', header: '', value: () => 0, align: 'right',
       render: (s) => (
         s.status === 'booked' && s.outcome === null && Date.parse(s.startsAt) <= now

@@ -30,6 +30,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase, loadMe, type Me } from '@/lib/supabase';
 import { Shell } from '@/components/Shell';
+import { amount, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
 import { DataTable, type Column } from '@/components/DataTable';
 import { fetchMemberships, fetchPlans, money } from '@lib/gymRecord';
 import { fetchVisits } from '@lib/gymVisits';
@@ -70,6 +71,9 @@ const OUTCOME_ORDER: HolderOutcome[] = ['joined-after', 'undecided', 'no-members
 export default function Passes() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
   const [gymName, setGymName] = useState<string | null>(null);
+  // `tenants.currency`. The Paid column sums a person's passes, so it has no
+  // single row's currency to borrow and inherits the gym's — or prints nothing.
+  const [ccy, setCcy] = useState<TenantCurrency>(null);
   const [rec, setRec] = useState<PassConversionRecord>(EMPTY);
 
   const load = useCallback(async (tenantId: string) => {
@@ -104,10 +108,13 @@ export default function Passes() {
         return;
       }
       const { data: t, error: tErr } = await supabase
-        .from('tenants').select('name').eq('id', who.tenantId).single();
+        .from('tenants').select('name, currency').eq('id', who.tenantId).single();
       // supabase-js RESOLVES on a database error, so this is checked rather
       // than assumed: a null name here means "not read", not "unnamed gym".
-      if (live) setGymName(tErr ? null : t?.name ?? null);
+      if (live) {
+        setGymName(tErr ? null : t?.name ?? null);
+        setCcy(tErr ? null : ((((t as any)?.currency ?? '') as string).trim().toUpperCase() || null));
+      }
       await load(who.tenantId);
     })();
     return () => { live = false; };
@@ -288,7 +295,7 @@ export default function Passes() {
         ) : null}
       </Section>
 
-      <Holders c={c} rec={rec} />
+      <Holders c={c} rec={rec} ccy={ccy} />
       <Hosts c={c} rec={rec} />
       <Money c={c} rec={rec} />
     </Shell>
@@ -448,7 +455,9 @@ function IntervalStrip({ days, median }: { days: number[]; median: number }) {
 
 /* ── holders ───────────────────────────────────────────────────────────────── */
 
-function Holders({ c, rec }: { c: PassConversion; rec: PassConversionRecord }) {
+function Holders({ c, rec, ccy }: {
+  c: PassConversion; rec: PassConversionRecord; ccy: TenantCurrency;
+}) {
   const cols: Column<PassHolder>[] = [
     {
       key: 'name', header: 'Holder', value: (h) => h.name ?? '￿',
@@ -484,7 +493,12 @@ function Holders({ c, rec }: { c: PassConversion; rec: PassConversionRecord }) {
     },
     {
       key: 'paid', header: 'Paid for passes', value: (h) => h.paidCents, numeric: true,
-      render: (h) => money(h.paidCents) ?? <span className="dash">no price recorded</span>,
+      // `amount`, not `money`: this is a sum over one person's passes with no
+      // currency of its own, and `money()` was writing the currency it defaults
+      // to over it. Two silences, and they are different — nobody recorded a
+      // price, or the gym never said what money it takes.
+      render: (h) => amount(h.paidCents, ccy)
+        ?? <span className="dash">{h.paidCents == null ? 'no price recorded' : NO_CURRENCY_NOTE}</span>,
     },
   ];
 

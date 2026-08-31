@@ -35,23 +35,32 @@ const KEY = 'repple.owner.financials';
 // between them showed one business in two currencies. Every figure on this
 // screen is one the owner typed into the form below, so it is never null; the
 // dash is there because gymMoney refuses to render an unknown as 0.00.
-const money = (n: number) => gymMoney(n) ?? '—';
+// Takes the gym's currency rather than the module default: part 99 added
+// `tenants.currency` so a white-labelled gym is not shown somebody else's
+// money. GYM_CURRENCY remains the fallback for a tenant that never set one.
+const moneyIn = (n: number, cur?: string | null) => gymMoney(n, cur) ?? '—';
 
-const FIELDS: { key: keyof FinInputs; label: string; hint: string }[] = [
-  { key: 'revenue', label: 'Total Revenue / Mo', hint: GYM_CURRENCY },
-  { key: 'expenses', label: 'Total Expenses / Mo', hint: GYM_CURRENCY },
-  { key: 'mrr', label: 'Recurring Membership Revenue', hint: GYM_CURRENCY },
+// `hint` is optional now. A money field's hint IS the gym's currency, and the
+// gym is not known at module scope — it was printing GYM_CURRENCY, the module
+// default, to every gym including the ones part 99 gave a currency of their
+// own. Absent means "money, in this gym's currency", filled in at render.
+const FIELDS: { key: keyof FinInputs; label: string; hint?: string }[] = [
+  { key: 'revenue', label: 'Total Revenue / Mo' },
+  { key: 'expenses', label: 'Total Expenses / Mo' },
+  { key: 'mrr', label: 'Recurring Membership Revenue' },
   { key: 'members', label: 'Active Members', hint: 'count' },
   { key: 'newMembers', label: 'Joined This Month', hint: 'count' },
   { key: 'churnedMembers', label: 'Left This Month', hint: 'count' },
-  { key: 'ptRevenue', label: 'Personal-training Revenue', hint: GYM_CURRENCY },
-  { key: 'classRevenue', label: 'Class Revenue', hint: GYM_CURRENCY },
+  { key: 'ptRevenue', label: 'Personal-training Revenue' },
+  { key: 'classRevenue', label: 'Class Revenue' },
 ];
 
 export default function Financials() {
   const t = useTheme();
   const router = useRouter();
   const { tenant } = useTenant();
+  const cur = tenant?.currency || GYM_CURRENCY;
+  const money = (n: number) => moneyIn(n, cur);
   const [fin, setFin] = useState<FinInputs>(emptyFinances);
   const [hydrated, setHydrated] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -201,7 +210,7 @@ export default function Financials() {
             {FIELDS.map((f) => (
               <View key={f.key} style={{ marginBottom: sp.md }}>
                 <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>
-                  {f.label} <Text style={{ ...ty.caption, color: t.ink3 }}>({f.hint})</Text>
+                  {f.label} <Text style={{ ...ty.caption, color: t.ink3 }}>({f.hint ?? cur})</Text>
                 </Text>
                 <TextInput
                   value={draft[f.key] ?? ''}

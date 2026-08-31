@@ -20,7 +20,7 @@ import type { Theme } from '../../src/theme/tokens';
 import { Rule, Section, SectionHead, Hero, KpiRow, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { classSummary, summariseClassRows, type ClassSummaryRow } from '../../src/lib/classAttendance';
-import { gymMoney, GYM_CURRENCY } from '../../src/ui/tenant';
+import { useTenant, gymMoney, GYM_CURRENCY } from '../../src/ui/tenant';
 import { reportError } from '../../src/lib/reportError';
 
 type Range = 'week' | 'month' | 'season';
@@ -51,6 +51,11 @@ function Bar({ t, label, note, pct, dim }: { t: Theme; label: string; note: stri
 }
 
 export default function OwnerClassAnalytics() {
+  // The gym's own currency (part 99), not the module default — this screen
+  // prints a pay rate a trainer is owed, which is the last figure that should
+  // be denominated in a guess.
+  const { tenant } = useTenant();
+  const cur = tenant?.currency || GYM_CURRENCY;
   const t = useTheme();
   const router = useRouter();
   const [range, setRange] = useState<Range>('week');
@@ -115,8 +120,8 @@ export default function OwnerClassAnalytics() {
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginBottom: sp.md }}>
       <Text style={{ ...ty.label, color: t.ink3, flex: 1 }}>Pay per attendee</Text>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md }}>
-        <Text style={{ ...ty.label, color: t.ink3 }}>{GYM_CURRENCY}</Text>
-        <TextInput value={rate} onChangeText={setRate} keyboardType="numeric" accessibilityLabel={`Pay per attendee in ${GYM_CURRENCY}`}
+        <Text style={{ ...ty.label, color: t.ink3 }}>{cur}</Text>
+        <TextInput value={rate} onChangeText={setRate} keyboardType="numeric" accessibilityLabel={`Pay per attendee in ${cur}`}
           style={{ ...ty.body, ...numeric, color: t.ink, paddingVertical: 9, minWidth: 44 }} />
       </View>
     </View>
@@ -168,9 +173,9 @@ export default function OwnerClassAnalytics() {
               — which is how Revenue came to say $ about the same gym. */}
           <Hero
             label="Trainer Payroll"
-            figure={rate$ > 0 ? fig(gymMoney(totals.payroll)) : '—'}
+            figure={rate$ > 0 ? fig(gymMoney(totals.payroll, cur)) : '—'}
             note={rate$ > 0
-              ? `${totals.attended} check-ins × ${gymMoney(rate$)} · ${totals.classes} classes · ${totals.showPct ?? '—'}% turned up`
+              ? `${totals.attended} check-ins × ${gymMoney(rate$, cur)} · ${totals.classes} classes · ${totals.showPct ?? '—'}% turned up`
               : `${totals.attended} check-ins · ${totals.classes} classes · ${totals.showPct ?? '—'}% turned up · enter your per-check-in rate below`}
           />
 
@@ -192,7 +197,7 @@ export default function OwnerClassAnalytics() {
 
           {/* ── payroll by trainer ───────────────────────────────────────── */}
           <Section>
-            <SectionHead title="Payroll by Trainer" note={rate$ > 0 ? (gymMoney(totals.payroll) ?? undefined) : undefined} />
+            <SectionHead title="Payroll by Trainer" note={rate$ > 0 ? (gymMoney(totals.payroll, cur) ?? undefined) : undefined} />
             {rateField}
             {byTrainer.map(([name, v], i) => (
               <View key={name} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
@@ -200,7 +205,7 @@ export default function OwnerClassAnalytics() {
                   <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{name}</Text>
                   <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{v.classes} classes · {v.attended} check-ins</Text>
                 </View>
-                <Text style={{ ...ty.body, fontWeight: '600', ...numeric, color: t.ink }}>{rate$ > 0 ? fig(gymMoney(v.attended * rate$)) : '—'}</Text>
+                <Text style={{ ...ty.body, fontWeight: '600', ...numeric, color: t.ink }}>{rate$ > 0 ? fig(gymMoney(v.attended * rate$, cur)) : '—'}</Text>
               </View>
             ))}
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>

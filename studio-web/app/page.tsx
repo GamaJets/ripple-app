@@ -11,13 +11,21 @@ import { supabase, loadMe, type Me } from '@/lib/supabase';
 import { Shell } from '@/components/Shell';
 import { DataTable, type Column } from '@/components/DataTable';
 import { PasswordField } from '@/components/PasswordField';
+import { amount, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
 import { fetchGymTrainers, payrollBlocker, type GymTrainer } from '@lib/gymTrainers';
 import { gymRollup, trainerHealth, type GymRollup } from '@lib/ownerAnalytics';
-import { fetchMemberships, fetchPayments, fetchPlans, summarise, money, type Membership } from '@lib/gymRecord';
+import { fetchMemberships, fetchPayments, fetchPlans, summarise, type Membership } from '@lib/gymRecord';
 import { fetchClasses, summariseAttendance, pct } from '@lib/gymSchedule';
 import { fetchVisits, summariseVisits } from '@lib/gymVisits';
 
-interface Gym { id: string; name: string | null; sessionFee: number | null }
+interface Gym {
+  id: string;
+  name: string | null;
+  sessionFee: number | null;
+  /** `tenants.currency`. Null means the gym has not set one — which the schema
+   *  says to render as a dash and ask about, never to fill in with a default. */
+  currency: string | null;
+}
 
 export default function Overview() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
@@ -55,10 +63,17 @@ export default function Overview() {
       // stated as facts about the gym: the sidebar says no gym is linked, and
       // the payroll note below says no fee is set. Neither is known to be true.
       const { data: t, error: tErr } = await supabase
-        .from('tenants').select('id, name, session_fee').eq('id', who.tenantId).single();
+        .from('tenants').select('id, name, session_fee, currency').eq('id', who.tenantId).single();
       if (!live) return;
       setGymErr(tErr ? (tErr.message || 'The gym record could not be read.') : null);
-      setGym(t && !tErr ? { id: t.id, name: t.name ?? null, sessionFee: t.session_fee ?? null } : null);
+      setGym(t && !tErr
+        ? {
+            id: t.id,
+            name: t.name ?? null,
+            sessionFee: t.session_fee ?? null,
+            currency: ((t.currency ?? '') as string).trim().toUpperCase() || null,
+          }
+        : null);
 
       try {
         const rows = await fetchGymTrainers(supabase, who.tenantId);
@@ -146,6 +161,7 @@ export default function Overview() {
   }
 
   const roll: GymRollup | null = trainers ? gymRollup(trainers, gym?.sessionFee ?? null) : null;
+  const ccy: TenantCurrency = gym?.currency ?? null;
 
   const cols: Column<GymTrainer>[] = [
     { key: 'name', header: 'Trainer', value: (t) => t.name },
@@ -223,10 +239,16 @@ export default function Overview() {
           margin: '20px 0 10px',
         }}
       >
-        <Kpi label="Taken · 30d" text={hub ? money(hub.revenueCents) : null}
-             note={hub && hub.revenueCents == null ? 'no payments recorded' : undefined} />
-        <Kpi label="Recurring / mo" text={hub ? money(hub.mrrCents) : null}
-             note={hub && hub.mrrCents == null ? 'no priced plan on an active membership' : undefined} />
+        {/* `amount`, not `money`. Both of these are sums with no currency of
+            their own, and `money()` prints "AED" over whatever it is not told —
+            a considered-looking figure in a currency this gym may never have
+            charged in. A dash naming the unset setting is the honest tile. */}
+        <Kpi label="Taken · 30d" text={hub ? amount(hub.revenueCents, ccy) : null}
+             note={hub && hub.revenueCents == null ? 'no payments recorded'
+               : hub && !ccy ? NO_CURRENCY_NOTE : undefined} />
+        <Kpi label="Recurring / mo" text={hub ? amount(hub.mrrCents, ccy) : null}
+             note={hub && hub.mrrCents == null ? 'no priced plan on an active membership'
+               : hub && !ccy ? NO_CURRENCY_NOTE : undefined} />
         <Kpi label="Active members" value={hub?.activeMembers ?? null} />
         <Kpi label="Class fill" text={hub ? pct(hub.fillRate) : null}
              note={hub && hub.fillRate == null ? 'no capacity recorded' : 'booked ÷ capacity'} />
@@ -252,15 +274,23 @@ export default function Overview() {
         <Kpi label="Sessions 30d" value={roll?.sessions30} />
         <Kpi
           label="Session value 30d"
-          value={roll?.payroll30 ?? null}
-          // A dash with no explanation reads as a bug. Say which of the three
-          // reasons it is: the gym could not be read, no fee is set, or work is
-          // still awaiting an outcome. The first was previously reported as the
-          // second, which sends an owner to check a setting that is already
-          // correct.
+          // MAJOR units from payroll30For, so ×100 to reach the minor units
+          // `amount` takes. It went out as a bare `value` before — a money
+          // figure with nothing at all to say what money it was, on the tile an
+          // owner reads first. Now it is either written in the gym's own
+          // currency or not written.
+          text={roll?.payroll30 == null ? null : amount(Math.round(roll.payroll30 * 100), ccy)}
+          // A dash with no explanation reads as a bug. Say which of the four
+          // reasons it is: the gym could not be read, no fee is set, work is
+          // still awaiting an outcome, or the gym has never said what money it
+          // charges in. The first was previously reported as the second, which
+          // sends an owner to check a setting that is already correct.
           note={gymErr ? 'gym record unread — fee unknown'
-                : trainers ? payrollBlocker(trainers, gym?.sessionFee ?? null) ?? undefined
-                : undefined}
+                : trainers
+                  ? payrollBlocker(trainers, gym?.sessionFee ?? null)
+                    ?? (roll?.payroll30 != null && !ccy ? NO_CURRENCY_NOTE : undefined)
+                    ?? undefined
+                  : undefined}
         />
         <Kpi label="Awaiting an outcome" value={roll?.unmarked30 ?? null}
              note={roll && roll.unmarked30 > 0 ? 'payroll cannot settle over these' : undefined} />

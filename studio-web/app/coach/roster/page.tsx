@@ -18,7 +18,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase, loadMe, type Me } from '@/lib/supabase';
 import { Shell } from '@/components/Shell';
 import { DataTable, type Column } from '@/components/DataTable';
-import { money } from '@lib/gymRecord';
+// `money()` is deliberately not imported: the only amount on this screen is a
+// pack price, and `client_purchases` carries no currency for it to print.
 import { COACHED_MODE_SHORT, readCoachedModeOrNull, type CoachedMode } from '@lib/types';
 import { goalLabel, sortGoals, GOAL_METRIC, type GoalTarget, type MeasuredKind } from '@lib/goalTargets';
 import { fmtDay } from '@lib/format';
@@ -777,10 +778,16 @@ function Packs({ packs, failed, rows }: { packs: Pack[] | null; failed: boolean;
         : `${Math.max(0, p.total - p.used)} of ${p.total}`,
     },
     {
-      key: 'paid', header: 'Paid', value: (p) => p.amountCents, numeric: true,
+      key: 'paid', header: 'Paid (minor units)', value: (p) => p.amountCents, numeric: true,
+      // No currency word, because there is no currency to state. `client_purchases`
+      // has no currency column — it lives on the `trainer_packages` row the
+      // purchase points at, and `package_id` is nullable — so `money()` was
+      // labelling every pack a coach ever sold with the currency it defaults to.
+      // /revenue reached the same wall and answers it the same way: the digits,
+      // said to be minor units, rather than a denomination nobody recorded.
       render: (p) => p.amountCents == null
         ? <span className="dash">— nothing recorded</span>
-        : money(p.amountCents),
+        : <span className="mono">{(p.amountCents / 100).toFixed(2)}</span>,
     },
     { key: 'status', header: 'Status', value: (p) => p.status },
     {
@@ -794,7 +801,7 @@ function Packs({ packs, failed, rows }: { packs: Pack[] | null; failed: boolean;
   return (
     <Section
       title="Packs you have sold"
-      sub="Every pack bought from you, including the ones that are used up. This is the read the Sessions-left column above stands on."
+      sub="Every pack bought from you, including the ones that are used up. This is the read the Sessions-left column above stands on. Amounts are minor units — the purchase record carries no currency, so none is printed."
     >
       {packs === null ? (
         <Unresolved state={failed ? 'failed' : 'loading'} what="your session packs" />

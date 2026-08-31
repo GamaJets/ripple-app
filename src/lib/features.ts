@@ -215,12 +215,33 @@ export const TRAINER_NAV: NavItem[] = [
 ];
 
 export const OWNER_NAV: NavItem[] = [
-  { key: 'overview', label: 'Overview', note: 'Platform health at a glance', route: '/(owner)/dashboard', icon: 'grid', keywords: 'dashboard home metrics' },
-  { key: 'trainers', label: 'Trainers & Billing', note: 'Roster, invites, plans & MRR', route: '/(owner)/trainers', icon: 'people', keywords: 'billing invite mrr plans' },
-  { key: 'brand', label: 'Brand Studio', note: 'White-label theme & logo', route: '/(owner)/brand', icon: 'palette', keywords: 'white label logo colour theme' },
+  // Six of nineteen screens, and two of the six described the app this used to
+  // be: "Platform health" and "Trainers & Billing — Roster, invites, plans &
+  // MRR", when what a trainer pays Repple was removed from that screen on the
+  // grounds that it is not a gym owner's business. Members, Rota, Equipment,
+  // Deletion Requests, Revenue, Financial Health, Promotions, Classes, the
+  // Library and Settings were all unreachable from search.
+  //
+  // Ops carries the session-fee keyword deliberately: three screens tell an
+  // owner to "set a session fee in Ops", so a search for "fee" has to land
+  // there. `explore` is the search screen itself, and `exercise` needs a name
+  // param it cannot be given from a bare route push — both stay out.
+  { key: 'overview', label: 'Overview', note: 'Your gym at a glance', route: '/(owner)/dashboard', icon: 'grid', keywords: 'dashboard home metrics' },
+  { key: 'trainers', label: 'Trainers', note: 'Your coaching staff, what they delivered, and invites', route: '/(owner)/trainers', icon: 'people', keywords: 'roster invite staff coach delivered sessions health' },
+  { key: 'members', label: 'Members', note: 'Memberships, freezes, cancellations and taking a payment', route: '/(owner)/members', icon: 'people', keywords: 'member membership freeze cancel payment plan renew desk' },
+  { key: 'revenue', label: 'Revenue', note: 'Sessions delivered, the trend and value per client', route: '/(owner)/revenue', icon: 'trending', keywords: 'revenue forecast unit economics value per client sessions trend' },
+  { key: 'financials', label: 'Financial Health', note: 'KPIs and a review of the figures you enter', route: '/(owner)/financials', icon: 'chart', keywords: 'financial health kpi retention margin expenses review' },
+  { key: 'classes', label: 'Classes & Payroll', note: 'Class fill rates, and trainer pay from check-ins', route: '/(owner)/class-analytics', icon: 'calendar', keywords: 'class attendance fill rate payroll pay per attendee analytics' },
+  { key: 'brand', label: 'Brand Studio', note: "Your gym's name and colour, saved to the gym", route: '/(owner)/brand', icon: 'palette', keywords: 'white label brand name colour theme palette rename' },
   { key: 'growth', label: 'Growth', note: 'Signups, funnel & promos', route: '/(owner)/growth', icon: 'trending', keywords: 'marketing funnel promos' },
-  { key: 'ops', label: 'Operations', note: 'Announcements, support & activity', route: '/(owner)/ops', icon: 'wrench', keywords: 'support inbox announce activity log' },
+  { key: 'promotions', label: 'Promotions', note: 'Create a code and push it to every member', route: '/(owner)/promotions', icon: 'sparkle', keywords: 'promo promotion code discount push offer campaign' },
+  { key: 'ops', label: 'Operations', note: 'Session fee, announcements, support & gym activity', route: '/(owner)/ops', icon: 'wrench', keywords: 'session fee rate payroll basis support inbox announce activity log' },
+  { key: 'rota', label: 'Trainer Rota', note: 'Who is on the floor when, against what is booked', route: '/(owner)/rota', icon: 'calendar', keywords: 'rota shift roster cover floor schedule staffing' },
+  { key: 'equipment', label: 'Equipment Register', note: 'What the gym owns, and what is due a service', route: '/(owner)/equipment', icon: 'wrench', keywords: 'equipment kit machine service maintenance repair register asset' },
+  { key: 'library', label: 'Exercise Library', note: 'Every movement the app can teach, and the kit each one needs', route: '/(owner)/library', icon: 'dumbbell', keywords: 'exercise library movement catalogue video demo coverage' },
+  { key: 'deletions', label: 'Deletion Requests', note: 'Members who asked to be erased, and the 30-day clock', route: '/(owner)/deletions', icon: 'clock', keywords: 'delete deletion erase gdpr account removal request privacy' },
   { key: 'feedback', label: 'Feedback Inbox', note: 'What testers are saying', route: '/(owner)/feedback', icon: 'message', keywords: 'feedback testers bugs ideas reviews' },
+  { key: 'settings', label: 'Settings', note: 'Who you are signed in as, your data, and deleting your account', route: '/(owner)/settings', icon: 'settings', keywords: 'settings account sign out signout log out logout export data delete account' },
 ];
 
 export function searchNav(list: NavItem[], q: string): NavItem[] {

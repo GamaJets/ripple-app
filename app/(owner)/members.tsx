@@ -53,6 +53,11 @@ export default function OwnerMembers() {
   const t = useTheme();
   const router = useRouter();
   const { tenant } = useTenant();
+  // The gym's own currency, not the module default. Part 99 added
+  // `tenants.currency` precisely so a white-labelled gym is not billed in
+  // somebody else's money; GYM_CURRENCY stays as the fallback for a tenant
+  // that has never set one.
+  const cur = tenant?.currency || GYM_CURRENCY;
 
   const [plans, setPlans] = useState<MembershipPlan[]>([]);
   const [rows, setRows] = useState<Membership[] | null>(null);
@@ -207,7 +212,7 @@ export default function OwnerMembers() {
 
         <Hero
           label="Recurring Revenue (monthly)"
-          figure={money(sum.mrrCents) ?? '—'}
+          figure={money(sum.mrrCents, cur) ?? "—"}
           note={failed
             ? 'The register could not be read, so recurring revenue is not known. This is a failed read, not a gym with no members.'
             : sum.mrrCents == null
@@ -435,10 +440,10 @@ export default function OwnerMembers() {
             {/* The currency comes from the one place the owner app keeps it,
                 so this label cannot drift from what money() prints two lines up
                 the screen. */}
-            <Text style={lab}>Amount ({GYM_CURRENCY})</Text>
+            <Text style={lab}>Amount ({cur})</Text>
             <TextInput value={amount} onChangeText={setAmount} autoFocus keyboardType="numeric"
               placeholder="0.00" placeholderTextColor={t.ink3} returnKeyType="done"
-              onSubmitEditing={() => { void commitPayment(); }} style={inp} accessibilityLabel={`Amount in ${GYM_CURRENCY}`} />
+              onSubmitEditing={() => { void commitPayment(); }} style={inp} accessibilityLabel={`Amount in ${cur}`} />
 
             <Text style={{ ...lab, marginTop: sp.md }}>Method</Text>
             <View style={{ flexDirection: 'row', gap: sp.sm, flexWrap: 'wrap' }}>

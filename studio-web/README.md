@@ -53,14 +53,28 @@ a module starts importing `react-native`, this build breaks. **Nothing in this
 directory may edit `src/lib`**: it is the phone app's tree, and the console is a
 consumer of it.
 
-## The two rules
+## The three rules
 
 **A figure with no value renders as `—`, never `0`.** A gym that has recorded no
 sessions and a gym with zero sessions are different facts, and the console is
 not allowed to blur them. `payroll30For` returns `null` when no session fee is
 set, and the KPI says *no session fee set* rather than showing a confident zero.
-There is no hardcoded currency anywhere: this is a white-label product and every
-amount goes through `money()`, which formats in the tenant's own currency.
+
+**No amount is written in a currency nobody chose.** Repple is white-labelled:
+a gym in London and a gym in Dubai run on this code and charge in their own
+money. `tenants.currency` is deliberately nullable and its own schema comment
+says null means *the gym has not set one — render a dash and ask, never assume*.
+`money()` in `src/lib/gymRecord.ts` nevertheless defaults its currency argument
+to `'AED'`, so a bare `money(630000)` prints `AED 6,300.00` on any gym's payroll
+screen. Nothing here calls it bare. A figure that has a currency of its own —
+a payment, an invoice, a payroll settlement each store one — is rendered with
+that row's currency. A figure that has none, because it was derived from the
+gym's session fee or summed across rows, goes through `amount()` in
+`lib/currency.ts`, which returns null when the gym has not set a currency; the
+screen then shows a dash naming the missing setting. `/payroll` and `/sessions`
+go further and **block settlement** without one, because `recordSettlement`
+writes `currency ?? 'AED'` into a permanent payment record that `/accounting`
+and `/close` later read back as fact.
 
 **A read that failed is never rendered as a read that came back empty.**
 supabase-js RESOLVES on a database error — `{ data: null, error }` — so
@@ -136,6 +150,7 @@ rows arrive.
     components/DataTable.tsx     the sortable table primitive; a missing cell is a dash
     components/PasswordField.tsx masked input with a reveal toggle, matching the app's
     lib/supabase.ts              client + `loadMe()` — id, role, tenant, and `roleUnknown`
+    lib/currency.ts              `amount()` — a figure in the gym's own money, or nothing
     lib/zip.ts                   a dependency-free zip writer, used only by /export
 
 `loadMe` returns three outcomes rather than two. A missing profile row is not

@@ -250,6 +250,30 @@ export function summarise(
 
 /** Minor units to a readable amount. Returns null for null so a caller cannot
  *  accidentally render "0.00" for something unknown. */
+/**
+ * A minor-unit amount, rendered with its currency.
+ *
+ * ── THE DEFAULT IS A HAZARD, AND IT IS DELIBERATE THAT IT SURVIVES ─────────
+ *
+ * `currency = 'AED'` means a caller who forgets the second argument prints a
+ * currency the gym may not use, with no error and nothing to notice. That is
+ * not hypothetical: 33 call sites across ten console pages called this bare,
+ * and TWO OF THEM WROTE THE RESULT TO DISK — `recordSettlement` stamps
+ * `run.currency ?? 'AED'`, so every settlement a non-UAE gym ever made was
+ * stored as dirhams and read back as fact by the accounting and month-end
+ * screens. Those call sites are fixed; this default is why they were wrong.
+ *
+ * It is not removed here because `tenants.currency` is nullable ON PURPOSE —
+ * a gym that has never chosen one must render a dash and be asked, not be
+ * assumed into a currency — and making the parameter required is a change to
+ * every caller in three apps and a console plus the assertion in
+ * coverage.test.ts that pins the current behaviour. That is a calm-morning
+ * change with a green test run behind it, not a 1am one.
+ *
+ * Until then: pass the currency. `gymMoney` in src/ui/tenant.tsx and
+ * `amount()` in studio-web/lib/currency.ts both take one and are the preferred
+ * doors.
+ */
 export function money(cents: number | null | undefined, currency = 'AED'): string | null {
   if (cents == null) return null;
   return `${currency} ${(cents / 100).toLocaleString(undefined, {

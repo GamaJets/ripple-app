@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { supabase, loadMe, type Me } from '@/lib/supabase';
 import { Shell } from '@/components/Shell';
+import { amount, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
 import { DataTable, type Column } from '@/components/DataTable';
 import {
   fetchPlans, createPlan, setPlanActive,
@@ -24,6 +25,10 @@ export default function Money() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
   const [gymName, setGymName] = useState<string | null>(null);
   const [gymNameErr, setGymNameErr] = useState<string | null>(null);
+  // `tenants.currency`. The two tiles below are sums across the gym's payments
+  // and plans, so they have no single row's currency to borrow — they inherit
+  // the gym's, and print nothing when the gym has not set one.
+  const [ccy, setCcy] = useState<TenantCurrency>(null);
 
   // Three independent reads, each carrying its own error. null means "not read
   // yet, or the read failed"; [] means "read, and the gym genuinely has none".
@@ -77,9 +82,10 @@ export default function Money() {
       // account, when the account is demonstrably linked (this is the branch
       // where tenantId exists) and all that failed was the name lookup.
       const { data: t, error: tErr } = await supabase
-        .from('tenants').select('name').eq('id', who.tenantId).single();
+        .from('tenants').select('name, currency').eq('id', who.tenantId).single();
       if (live) {
         setGymName(tErr ? null : ((t as any)?.name ?? null));
+        setCcy(tErr ? null : ((((t as any)?.currency ?? '') as string).trim().toUpperCase() || null));
         setGymNameErr(tErr ? (tErr.message || 'Could not read the gym name.') : null);
       }
       await load(who.tenantId);
@@ -149,8 +155,18 @@ export default function Money() {
           borderRadius: 0, overflow: 'hidden', margin: '20px 0 26px',
         }}
       >
-        <Kpi label="Taken (30 days)" text={money(sum?.takenCents)} note={sum?.takenCents == null ? (unread ?? 'nothing recorded yet') : `${sum.payments} payments`} />
-        <Kpi label="Recurring / month" text={money(sum?.mrrCents)} note={sum?.mrrCents == null ? (unread ?? 'no priced membership') : undefined} />
+        {/* `amount`, not `money`: these are sums with no currency of their own,
+            and `money()` writes "AED" over anything it is not told. The tiles go
+            to a dash naming the missing setting instead of a figure in a money
+            nobody chose. */}
+        <Kpi label="Taken (30 days)" text={amount(sum?.takenCents, ccy)}
+             note={sum?.takenCents == null ? (unread ?? 'nothing recorded yet')
+               : !ccy ? NO_CURRENCY_NOTE
+               : `${sum.payments} payments`} />
+        <Kpi label="Recurring / month" text={amount(sum?.mrrCents, ccy)}
+             note={sum?.mrrCents == null ? (unread ?? 'no priced membership')
+               : !ccy ? NO_CURRENCY_NOTE
+               : undefined} />
         <Kpi label="Active members" text={sum ? String(sum.activeMembers) : null} note={sum ? undefined : unread} />
         <Kpi label="Plans on sale" text={plans ? String(plans.filter((p) => p.active).length) : null} note={plans ? undefined : (plansErr ? 'the price book could not be read' : undefined)} />
       </div>

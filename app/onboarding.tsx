@@ -82,7 +82,7 @@ export default function Onboarding() {
     setSaving(true);
     const okWrite = await updateTenant(patch);
     setSaving(false);
-    if (!okWrite) { Alert.alert('Could not save', 'Your gym details were not saved. You can set them later under Brand.'); }
+    if (!okWrite) { Alert.alert('Could not save', 'Your gym details were not saved. The name and colour are under Brand; the session fee is under Ops.'); }
     router.replace('/(owner)/dashboard');
   };
 
