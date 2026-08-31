@@ -17,7 +17,7 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.washateria.repple",
       "infoPlist": {
-        "NSHealthShareUsageDescription": "Repple reads your heart rate, calories, steps, workouts and sleep, so your training, recovery and daily targets reflect what you actually did rather than what you remembered to type.",
+        "NSHealthShareUsageDescription": "Repple reads your heart rate, calories, steps, workouts and sleep, so your training, recovery and daily targets reflect what you actually did rather than what you remembered to type. If you use a continuous glucose monitor, Repple can also read the blood glucose it writes to Health, and shows it beside your food log. Blood glucose is asked for separately, only when you open that screen, and is never shared with your coach unless you turn sharing on.",
         "NSCameraUsageDescription": "Repple uses the camera to capture InBody scans and progress photos.",
         "NSPhotoLibraryUsageDescription": "Repple lets you upload InBody scans and progress photos.",
         "ITSAppUsesNonExemptEncryption": false,

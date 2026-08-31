@@ -13,6 +13,8 @@ import type { WearableProvider, ProviderMeta, DailyMetrics, WorkoutSample, HrPoi
 import { emptyMetrics } from './types';
 import { nightsFromIntervals, type SleepFamily, type SleepInterval, type SleepRead, type SleepReading } from '../sleepMerge';
 import { canRememberSleepAsk, hasAskedForSleep, markSleepAsked, shouldAutoAskForSleep } from './sleepAccess';
+import { canRememberGlucoseAsk, hasAskedForGlucose, markGlucoseAsked, shouldAutoAskForGlucose } from './glucoseAccess';
+import { parseHealthSamples, type GlucoseReading } from '../glucose';
 
 const meta: ProviderMeta = {
   id: 'apple',
@@ -508,3 +510,138 @@ export const appleHealth: WearableProvider = {
     return raw.filter((_, i) => i % step === 0);
   },
 };
+
+// ── Blood glucose ───────────────────────────────────────────────────────────
+//
+// A CGM — a Dexcom directly, an Abbott Libre through its companion app —
+// writes into Apple Health, so reading glucose is reading Health. No vendor
+// contract, no per-brand key, and every monitor that reaches Health reaches
+// Repple for free.
+//
+// DELIBERATELY NOT IN `permissionSet`. Adding BloodGlucose to the set every
+// client is asked for on connect would put a Blood Glucose toggle in front of
+// everybody, and almost nobody wears a CGM — which is exactly the thing the
+// comment on `permissionSet` refuses to do for ActiveEnergyBurned write. A
+// permission sheet listing things the app will not use is a sheet people stop
+// reading. So glucose is asked for on its own, when the person turns the
+// feature on, and `initHealthKit` only ever prompts for types iOS has not yet
+// decided about — so this raises exactly one extra sheet, listing one type.
+
+/** The one extra read type, asked for separately and only on request. */
+function glucosePermissionSet(k: any) {
+  const P = k.Constants.Permissions;
+  return { permissions: { read: [P.BloodGlucose], write: [] } };
+}
+
+/**
+ * Raise the sheet for blood glucose alone.
+ *
+ * Records the ask BEFORE calling, for the same reason `requestAuth` does:
+ * `initHealthKit`'s callback does not fire if the app is backgrounded while
+ * the sheet is up, and somebody who swipes a permission sheet away has
+ * answered it. Recording the intent means at most one automatic ask per
+ * device even if the app is killed mid-sheet.
+ */
+export function requestGlucoseAuth(): Promise<void> {
+  const k = hk();
+  if (!k || !k.Constants) return Promise.reject(new Error('HealthKit is not available in this build.'));
+  if (typeof k.initHealthKit !== 'function') return Promise.reject(new Error('The Apple Health module is not loaded in this build.'));
+  return markGlucoseAsked().then(
+    () => new Promise<void>((resolve, reject) => {
+      k.initHealthKit(glucosePermissionSet(k), (err: string) => (err ? reject(new Error(String(err))) : resolve()));
+    }),
+  );
+}
+
+/**
+ * How a glucose read went.
+ *
+ * The same three-way shape as SleepRead, and for the same reason: an empty
+ * list under 'error' means "we could not ask", an empty list under 'ready'
+ * means "Health holds nothing for this window", and a screen that renders
+ * those identically is the recurring bug src/ui/loadStatus.ts exists to stop.
+ */
+export interface GlucoseRead {
+  status: 'ready' | 'error' | 'unsupported';
+  readings: GlucoseReading[];
+  /** Human sentence for 'error' / 'unsupported'. Never shown for 'ready'. */
+  reason?: string;
+}
+
+/** Shared across screens so two mounting together raise one sheet, not two. */
+let glucoseAskInFlight: Promise<void> | null = null;
+
+function glucoseQuery(sinceDays: number) {
+  const start = new Date();
+  start.setDate(start.getDate() - Math.max(1, sinceDays));
+  return {
+    startDate: start.toISOString(),
+    endDate: new Date().toISOString(),
+    ascending: false,
+    // A CGM writes a sample every five minutes: 288 a day, ~2,000 a week. The
+    // cap is generous enough for a fortnight of continuous wear and finite
+    // enough that a long-dormant sensor cannot return a year in one query.
+    limit: 10000,
+    // No `unit` — RCTAppleHealthKit defaults blood glucose to mmol/L, which is
+    // what the column stores. Passing one would be the only way to make the
+    // number mean something other than what parseHealthSamples assumes.
+  };
+}
+
+/** Promisified glucose read that keeps "no such method" apart from "it failed". */
+function readGlucoseRows(options: any): Promise<{ ok: true; rows: any[] } | { ok: false; missing?: boolean; reason: string }> {
+  return new Promise((resolve) => {
+    const k = hk();
+    if (!k || typeof k.getBloodGlucoseSamples !== 'function') {
+      return resolve({ ok: false, missing: true, reason: 'This build of Repple cannot read blood glucose from Apple Health yet.' });
+    }
+    try {
+      k.getBloodGlucoseSamples(options, (err: any, res: any) => {
+        if (err) return resolve({ ok: false, reason: 'Apple Health did not answer. Try again in a moment.' });
+        resolve({ ok: true, rows: Array.isArray(res) ? res : [] });
+      });
+    } catch {
+      resolve({ ok: false, reason: 'Apple Health did not answer. Try again in a moment.' });
+    }
+  });
+}
+
+/**
+ * Recent glucose readings out of Apple Health.
+ *
+ * The automatic ask is the same mechanism sleep uses and rests on the same
+ * fact: HealthKit answers an UNREQUESTED read with an empty array, exactly as
+ * it answers a refused one, so nothing in the response can tell "never asked"
+ * from "declined" from "no sensor". The one thing that can is whether Repple
+ * has ever put BloodGlucose in front of this person on this device, and we
+ * know that because we make the call.
+ */
+export async function fetchGlucose(sinceDays = 7): Promise<GlucoseRead> {
+  if (!nativePresent()) {
+    return { status: 'unsupported', readings: [], reason: 'Apple Health is not available in this build.' };
+  }
+  const res = await readGlucoseRows(glucoseQuery(sinceDays));
+  if (!res.ok) {
+    return { status: res.missing ? 'unsupported' : 'error', readings: [], reason: res.reason };
+  }
+  let readings = parseHealthSamples(res.rows);
+
+  const auto = shouldAutoAskForGlucose({
+    present: true,
+    canRemember: canRememberGlucoseAsk(),
+    alreadyAsked: await hasAskedForGlucose(),
+    readOk: true,
+    readingCount: readings.length,
+  });
+  if (auto) {
+    if (!glucoseAskInFlight) glucoseAskInFlight = requestGlucoseAuth().catch(() => { /* declined, or the sheet never appeared */ });
+    await glucoseAskInFlight;
+    const again = await readGlucoseRows(glucoseQuery(sinceDays));
+    // A second read that fails leaves the first read's answer standing — that
+    // read succeeded, so the window is still known to be empty, and calling it
+    // an error here would report a failure that did not happen.
+    if (again.ok) readings = parseHealthSamples(again.rows);
+  }
+
+  return { status: 'ready', readings };
+}

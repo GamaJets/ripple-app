@@ -74,6 +74,8 @@
     "src/lib/adMatch.test.ts",
     "src/lib/foodSearch.test.ts",
     "src/lib/waiver.test.ts",
-    "src/lib/injuryExtract.test.ts"
+    "src/lib/injuryExtract.test.ts",
+    "src/lib/releaseNotes.test.ts",
+    "src/lib/glucose.test.ts"
   ]
 }

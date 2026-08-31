@@ -514,6 +514,11 @@ export default function Nutrition() {
           <QuickRow items={[
             { icon: 'meals', label: 'Food Log', onPress: () => router.push('/(client)/foodlog') },
             { icon: 'water', label: 'Recovery', onPress: () => router.push('/(client)/recovery') },
+            // On the MEALS tab rather than under devices, because glucose is
+            // only interesting next to what was eaten — which is the screen it
+            // opens onto. Shown to everybody: it costs one row, and somebody
+            // wearing a CGM should not have to know to look under wearables.
+            { icon: 'heart', label: 'Blood Sugar', onPress: () => router.push('/(client)/glucose') },
             // Reported as "why is tapping macros sending you to lifting tools?".
             // The macro reference does live on that screen — it works protein
             // and fat out of this client's own recorded weight and body fat —

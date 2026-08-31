@@ -23,6 +23,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
 import { sp, type as ty } from '../../src/theme/scale';
+import { useAuth } from '../../src/ui/auth';
+import { WhatsNewSheet, useWhatsNew } from '../../src/ui/WhatsNew';
 
 export default function TrainerLayout() {
   // This build is one of three separate apps. If the trainer portal is not
@@ -34,7 +36,13 @@ export default function TrainerLayout() {
   const t = useTheme();
   const insets = useSafeAreaInsets();
   const bottomPad = Math.max(insets.bottom, 10);
+  // What this coach missed while they were away, filtered to the coach app —
+  // they are not told about client-only changes. Keyed on the account, so a
+  // coach who has just made one is shown nothing at all.
+  const { user } = useAuth();
+  const whatsNew = useWhatsNew(user?.id ?? null);
   return (
+    <>
     <Tabs
       backBehavior="history"
       screenOptions={{
@@ -79,5 +87,7 @@ export default function TrainerLayout() {
       <Tabs.Screen name="settings" options={{ href: null, title: 'Settings' }} />
       <Tabs.Screen name="profile" options={{ title: 'Profile', tabBarIcon: ({ color }) => <Icon name="me" size={23} color={color} /> }} />
     </Tabs>
+    <WhatsNewSheet visible={whatsNew.visible} releases={whatsNew.releases} onClose={whatsNew.onClose} />
+    </>
   );
 }

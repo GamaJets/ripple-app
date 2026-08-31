@@ -11,7 +11,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
 import { sp, type as ty } from '../../src/theme/scale';
-import { WaiverGate } from '../../src/ui/waiver';
+import { WaiverGate, useWaiver } from '../../src/ui/waiver';
+import { useAuth } from '../../src/ui/auth';
+import { WhatsNewSheet, useWhatsNew } from '../../src/ui/WhatsNew';
 
 export default function ClientLayout() {
   // This build is one of three separate apps. If the client portal is not
@@ -23,6 +25,26 @@ export default function ClientLayout() {
   const t = useTheme();
   const insets = useSafeAreaInsets();
   const bottomPad = Math.max(insets.bottom, 10);
+
+  // What this client missed while they were away — and the one thing that
+  // outranks it.
+  //
+  // <WaiverGate> puts the release of liability on screen as a <Modal>, and this
+  // sheet is a <Modal> too. Two of those visible at once is a fight nobody
+  // wins: React Native presents them in its own order, and the one that loses
+  // is invisible until the other closes. That is survivable for news and
+  // absolutely not for the release — somebody who has not signed it must not be
+  // reading a feature list instead, and must never be able to dismiss their way
+  // past it by tapping a backdrop that belongs to a different sheet.
+  //
+  // So the gate's own question is asked again here and the news is held until
+  // it answers 'pass'. It is the same cheap read the gate makes, and asking it
+  // rather than guessing is what makes "the waiver always wins" a fact instead
+  // of a hope. The check behind the sheet still runs while it is held, so the
+  // notes are ready the moment the release is signed.
+  const waiver = useWaiver();
+  const { user } = useAuth();
+  const whatsNew = useWhatsNew(user?.id ?? null, waiver.applies && waiver.gate !== 'pass');
   return (
     <WaiverGate>
     <Tabs
@@ -92,6 +114,7 @@ export default function ClientLayout() {
       <Tabs.Screen name="pt-sessions" options={{ href: null, title: 'Personal Training' }} />
       <Tabs.Screen name="bookings" options={{ href: null, title: 'My Bookings' }} />
     </Tabs>
+    <WhatsNewSheet visible={whatsNew.visible} releases={whatsNew.releases} onClose={whatsNew.onClose} />
     </WaiverGate>
   );
 }

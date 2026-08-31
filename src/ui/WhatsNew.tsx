@@ -1,25 +1,68 @@
-// What changed since the version you last opened.
+// What changed since this person was last in the app.
 //
-// Shown once per version, on the first launch after an update, and reachable
-// any time from Settings. The content is `src/lib/releaseNotes.ts`, which also
-// produces the App Store text — so what a tester reads in TestFlight and what
-// they read in the app are the same sentences.
+// Not a changelog — what is new TO THEM. The rules live in
+// `src/lib/releaseNotes.ts` (tested in releaseNotes.test.ts); this file is the
+// screen and the one thing the screen has to remember: which release each
+// account was last shown. The same notes produce the App Store text, so what a
+// tester reads in TestFlight and what they read in the app are one set of
+// sentences.
 //
-// Deliberately not shown on a fresh install: `unseenReleases` returns nothing
-// for a null "last seen", because opening an app for the first time to a list
-// of things that used to be broken is a poor introduction to it.
-import { useCallback, useEffect, useState } from 'react';
+// ── Why the stamp is per account, not per device ──────────────────────────
+//
+// It was a single device-wide key. Two people share a phone, or a coach signs
+// out and a client signs in, and the second one inherits the first one's
+// position in the history — which is either "you have seen everything" (they
+// have not) or "you have seen nothing" (a brand-new account read a list of
+// things that used to be broken). Keyed per user id, a new account has no key,
+// which is exactly what a new account is: somebody who has missed nothing.
+//
+// The old device-wide key is deliberately NOT migrated. Reading it as a seed
+// would hand a brand-new account the previous occupant's old position and open
+// this sheet over their first ever launch, which is the one outcome this whole
+// screen must not produce. Treating them as new costs an existing reader one
+// silent release; the other way round costs the worst first impression the app
+// can make.
+//
+// ── Why it never blocks ───────────────────────────────────────────────────
+//
+// It is news. Tapping outside it, the close button and the hardware back all
+// dismiss it, and dismissing stamps, so it does not come back. It is mounted
+// inside each portal's own layout, under the app lock and — in the client app —
+// under the release of liability, so it can never be what somebody is reading
+// instead of the thing they actually have to deal with.
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { View, Text, Modal, Pressable, ScrollView } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from './components';
 import { Icon } from './Icon';
 import { Cta } from './kit';
 import { sp, layout, radius, hairline, type as ty } from '../theme/scale';
-import { APP_VERSION } from './appFeedback';
-import { RELEASES, unseenReleases, releasesFor, MY_AUDIENCE, type Release } from '../lib/releaseNotes';
+import {
+  CURRENT_RELEASE, RELEASES, MY_AUDIENCE, isVersion, releasesFor, unseenReleases,
+  type Release,
+} from '../lib/releaseNotes';
 import { reportError } from '../lib/reportError';
 
-const SEEN_KEY = 'repple.whatsNew.lastSeenVersion';
+/** One key per account. See the header for why this is not one key per device. */
+const seenKey = (userId: string) => `repple.whatsNew.lastSeen:${userId}`;
+
+async function readSeen(userId: string): Promise<string | null> {
+  try {
+    const v = await AsyncStorage.getItem(seenKey(userId));
+    // Anything we cannot place is handed on as null, which unseenReleases
+    // treats as "has missed nothing". A corrupt byte on disk must not turn into
+    // every note ever written.
+    return isVersion(v) ? v.trim() : null;
+  } catch {
+    // Storage unavailable. Saying nothing is the harmless direction: the
+    // alternative is announcing the same release on every launch forever.
+    return null;
+  }
+}
+
+async function writeSeen(userId: string, version: string) {
+  try { await AsyncStorage.setItem(seenKey(userId), version); } catch (e) { reportError('whatsNew.seen', e); }
+}
 
 function Body({ releases }: { releases: Release[] }) {
   const t = useTheme();
@@ -65,53 +108,46 @@ function Body({ releases }: { releases: Release[] }) {
 }
 
 /**
- * The sheet. `force` opens it from Settings with the full history rather than
- * only what is unseen.
+ * The sheet.
+ *
+ * `releases` is what to show; the caller has already worked out what this
+ * reader has not seen. `force` opens it from Settings with the whole history
+ * for this app instead, which is the one case where "nothing new" is a real
+ * answer worth printing.
  */
-export function WhatsNewSheet({ visible, force, onClose }: { visible: boolean; force?: boolean; onClose: () => void }) {
+export function WhatsNewSheet({ visible, force, releases, onClose }: {
+  visible: boolean;
+  force?: boolean;
+  releases?: Release[];
+  onClose: () => void;
+}) {
   const t = useTheme();
-  const [unseen, setUnseen] = useState<Release[]>([]);
-
-  useEffect(() => {
-    if (!visible) return;
-    if (force) { setUnseen(releasesFor(MY_AUDIENCE, RELEASES)); return; }
-    (async () => {
-      let seen: string | null = null;
-      try { seen = await AsyncStorage.getItem(SEEN_KEY); } catch { /* treated as a fresh install */ }
-      setUnseen(unseenReleases(seen, APP_VERSION, MY_AUDIENCE));
-    })();
-  }, [visible, force]);
-
-  const dismiss = useCallback(async () => {
-    // Stamp the CURRENT version, not the newest release listed: the point is
-    // "you have seen what this build brought", and a build can ship before its
-    // notes are written.
-    try { await AsyncStorage.setItem(SEEN_KEY, APP_VERSION); } catch (e) { reportError('whatsNew.seen', e); }
-    onClose();
-  }, [onClose]);
+  const shown = force ? releasesFor(MY_AUDIENCE, RELEASES) : (releases ?? []);
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={dismiss}>
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }}>
-        <Pressable style={{ flex: 1 }} onPress={dismiss} accessibilityLabel="Close" />
+        {/* News, not a gate: the backdrop dismisses it, and so does the phone's
+            own back gesture via onRequestClose. */}
+        <Pressable style={{ flex: 1 }} onPress={onClose} accessibilityLabel="Close" />
         <View style={{
           backgroundColor: t.bg, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md,
           paddingHorizontal: layout.gutter, paddingTop: sp.xl, paddingBottom: sp.xxl, maxHeight: '84%',
         }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginBottom: sp.sm }}>
             <Icon name="sparkle" size={16} color={t.brand} />
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Version {APP_VERSION}</Text>
+            <Text style={{ ...ty.micro, color: t.ink3 }}>Version {CURRENT_RELEASE}</Text>
           </View>
           <Text style={{ ...ty.title, color: t.ink, marginBottom: sp.lg }}>What’s New</Text>
           <ScrollView showsVerticalScrollIndicator={false}>
-            {unseen.length === 0 ? (
+            {shown.length === 0 ? (
               <Text style={{ ...ty.label, color: t.ink3, paddingVertical: sp.xl }}>
                 Nothing new since you last opened Repple.
               </Text>
-            ) : <Body releases={unseen} />}
+            ) : <Body releases={shown} />}
           </ScrollView>
           <View style={{ marginTop: sp.lg }}>
-            <Cta label="Got It" wide onPress={dismiss} />
+            <Cta label="Got It" wide onPress={onClose} />
           </View>
         </View>
       </View>
@@ -120,35 +156,55 @@ export function WhatsNewSheet({ visible, force, onClose }: { visible: boolean; f
 }
 
 /**
- * Decides whether to show the sheet on launch, and remembers the answer.
+ * Decides whether this account has anything to catch up on, and remembers the
+ * answer once they have read it.
  *
- * Returns the props for <WhatsNewSheet>. Mount once, high up, inside the auth
- * provider — there is nothing to tell somebody who is not signed in yet.
+ * `userId` is the account, not the device — pass null when nobody is signed in
+ * and nothing happens, because there is nothing to tell a sign-in screen.
+ *
+ * `hold` is for anything that outranks news. The client app passes the release
+ * of liability: somebody who has not signed it must be looking at it, not at a
+ * list of features. The check still runs while held, so the sheet is ready the
+ * moment the more important thing is dealt with.
+ *
+ * Mount the returned props on <WhatsNewSheet> inside the portal layout.
  */
-export function useWhatsNew(signedIn: boolean) {
-  const [visible, setVisible] = useState(false);
-  const [checked, setChecked] = useState(false);
+export function useWhatsNew(userId: string | null, hold = false) {
+  const [unseen, setUnseen] = useState<Release[]>([]);
+  const [dismissed, setDismissed] = useState(false);
+  // Which account we have already asked about, so a sign-out and a sign-in as
+  // somebody else asks again rather than reusing the first answer.
+  const askedFor = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!signedIn || checked) return;
+    if (!userId) { askedFor.current = null; setUnseen([]); setDismissed(false); return; }
+    if (askedFor.current === userId) return;
+    askedFor.current = userId;
+    setDismissed(false);
     let off = false;
     (async () => {
-      let seen: string | null = null;
-      try { seen = await AsyncStorage.getItem(SEEN_KEY); } catch { /* fresh install */ }
+      const seen = await readSeen(userId);
       if (off) return;
-      setChecked(true);
       if (seen === null) {
-        // First run since this feature shipped, or a fresh install. Record the
-        // current version silently so the NEXT update is the first one they
-        // are told about — showing a changelog to somebody who has never seen
-        // the old behaviour explains nothing.
-        try { await AsyncStorage.setItem(SEEN_KEY, APP_VERSION); } catch { /* shown again next launch, which is harmless */ }
+        // A brand-new account — or one whose stored position we could not read.
+        // Record where they are, silently, so the NEXT release is the first one
+        // they are told about. Somebody who never saw the old behaviour learns
+        // nothing from being told it changed.
+        void writeSeen(userId, CURRENT_RELEASE);
+        setUnseen([]);
         return;
       }
-      if (unseenReleases(seen, APP_VERSION, MY_AUDIENCE).length > 0) setVisible(true);
+      setUnseen(unseenReleases(seen, CURRENT_RELEASE, MY_AUDIENCE));
     })();
     return () => { off = true; };
-  }, [signedIn, checked]);
+  }, [userId]);
 
-  return { visible, onClose: () => setVisible(false) };
+  const onClose = useCallback(() => {
+    setDismissed(true);
+    // Stamped on dismissal, not on display: a sheet that appeared behind
+    // something else, or during a force-quit, was not read.
+    if (userId) void writeSeen(userId, CURRENT_RELEASE);
+  }, [userId]);
+
+  return { visible: !hold && !dismissed && unseen.length > 0, releases: unseen, onClose };
 }

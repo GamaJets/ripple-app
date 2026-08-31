@@ -8,6 +8,8 @@ import { groupAllowed } from '../../src/lib/variant';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
 import { sp, type as ty } from '../../src/theme/scale';
+import { useAuth } from '../../src/ui/auth';
+import { WhatsNewSheet, useWhatsNew } from '../../src/ui/WhatsNew';
 export default function OwnerLayout() {
   // This build is one of three separate apps. If the owner portal is not
   // the one it ships, nothing here is reachable — a deep link or a tapped
@@ -16,7 +18,13 @@ export default function OwnerLayout() {
   if (!groupAllowed('owner')) return <Redirect href="/" />;
 
   const t = useTheme();
+  // What this owner missed, filtered to the Studio app. A release whose only
+  // changes were a client's or a coach's is skipped entirely rather than
+  // opening an empty sheet at them.
+  const { user } = useAuth();
+  const whatsNew = useWhatsNew(user?.id ?? null);
   return (
+    <>
     <Tabs backBehavior="history" screenOptions={{ headerShown: false, tabBarStyle: { backgroundColor: t.surface, borderTopColor: t.ring, height: 62, paddingTop: sp.sm, paddingBottom: sp.sm }, tabBarActiveTintColor: t.brand, tabBarInactiveTintColor: t.ink3, tabBarLabelStyle: { ...ty.micro, textTransform: 'none', letterSpacing: 0.2, fontWeight: '500' }, sceneStyle: { backgroundColor: t.bg } }}>
       <Tabs.Screen name="dashboard" options={{ title: 'Overview', tabBarIcon: ({ color }) => <Icon name="grid" size={23} color={color} /> }} />
       <Tabs.Screen name="trainers" options={{ title: 'Trainers', tabBarIcon: ({ color }) => <Icon name="people" size={23} color={color} /> }} />
@@ -37,5 +45,7 @@ export default function OwnerLayout() {
       <Tabs.Screen name="promotions" options={{ href: null, title: 'Promotions' }} />
       <Tabs.Screen name="class-analytics" options={{ href: null, title: 'Classes & Payroll' }} />
     </Tabs>
+    <WhatsNewSheet visible={whatsNew.visible} releases={whatsNew.releases} onClose={whatsNew.onClose} />
+    </>
   );
 }

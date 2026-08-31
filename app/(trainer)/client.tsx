@@ -50,6 +50,7 @@ import { View, Text, ScrollView, Pressable, Modal, TextInput, Alert } from 'reac
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
+import { useGlucose } from '../../src/ui/glucoseData';
 import type { Theme } from '../../src/theme/tokens';
 import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Cta, Ghost, Notice, Flag, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/theme/scale';
@@ -479,6 +480,13 @@ export default function ClientScreen() {
   const deltaKg = client?.weightDelta ?? null;
   const delta = deltaKg == null ? null : weightDeltaIn(deltaKg, wu);
 
+  // Read-only, and empty unless the client has turned sharing on — the
+
+  // database decides that, not this screen. See parts/102-glucose.sql.
+
+  const gl = useGlucose(id ?? undefined);
+
+
   const go = (pathname: string) => () => {
     if (!id) return;
     router.push({ pathname, params: { clientId: id, name: fullName } } as any);
@@ -672,6 +680,82 @@ export default function ClientScreen() {
                 </Text>
               </View>
             ) : null}
+          </Section>
+        ) : null}
+
+        {/* ── Blood sugar, if they have chosen to show it ──────────────────
+            Three outcomes that a naive screen would render identically, and
+            they mean opposite things:
+
+              · the client has not turned sharing on — there may be a fortnight
+                of readings sitting in their app and it is not the coach's to
+                see. Say so, and say nothing about whether any exist.
+              · sharing is on and the window is empty — genuinely nothing
+                recorded.
+              · the read failed — unknown, and NOT "nothing recorded".
+
+            The database enforces the first of those (parts/102-glucose.sql);
+            this section only decides which sentence to print. */}
+        {id ? (
+          <Section>
+            <SectionHead title="Blood Sugar" />
+            {gl.sharedWithCoach === false ? (
+              <Text style={{ ...ty.body, color: t.ink2 }}>
+                {who} has not shared their glucose readings. Whether they have any is not
+                something this screen can tell you — they choose, in their own app, under Blood
+                Sugar.
+              </Text>
+            ) : gl.status === 'error' || gl.sharedWithCoach === null ? (
+              <Flag tone={t.warn}>
+                Their readings could not be read. This is not a statement that there are none.
+              </Flag>
+            ) : gl.status === 'loading' ? (
+              <Text style={{ ...ty.body, color: t.ink2 }}>Loading.</Text>
+            ) : gl.readings.length === 0 ? (
+              <Text style={{ ...ty.body, color: t.ink2 }}>
+                {who} is sharing, and their monitor has recorded nothing in the last 14 days.
+              </Text>
+            ) : (
+              <>
+                <View style={{ flexDirection: 'row', marginTop: sp.sm }}>
+                  {[
+                    { label: 'Latest', v: gl.summary.latest ? gl.summary.latest.mmol.toFixed(1) : null },
+                    { label: 'Average', v: gl.summary.averageMmol == null ? null : gl.summary.averageMmol.toFixed(1) },
+                    { label: 'Highest', v: gl.summary.highestMmol == null ? null : gl.summary.highestMmol.toFixed(1) },
+                    { label: 'In range', v: gl.summary.inTypicalPct == null ? null : `${gl.summary.inTypicalPct}%` },
+                  ].map((k) => (
+                    <View key={k.label} style={{ flex: 1 }}>
+                      <Text style={{ ...ty.micro, color: t.ink3 }}>{k.label}</Text>
+                      <Text style={{ ...ty.head, color: t.ink, marginTop: 2 }}>{fig(k.v)}</Text>
+                    </View>
+                  ))}
+                </View>
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                  mmol/L, last 14 days. {gl.summary.count} reading{gl.summary.count === 1 ? '' : 's'}.
+                </Text>
+
+                {/* Meals with a reading either side. Shown because it is the
+                    only part of this a coach can act on — and shown as
+                    arithmetic, never as a judgement about the meal. */}
+                {gl.paired.filter((x) => x.rise != null).slice(-5).reverse().map((x, i) => (
+                  <View key={x.meal.id} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, paddingVertical: sp.sm, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
+                    <Text style={{ ...ty.label, color: t.ink2, flex: 1 }} numberOfLines={1}>{x.meal.name}</Text>
+                    <Text style={{ ...ty.label, color: t.ink3 }}>
+                      {x.before ? x.before.mmol.toFixed(1) : '—'} → {x.peak ? x.peak.mmol.toFixed(1) : '—'}
+                    </Text>
+                    <Text style={{ ...ty.label, color: t.ink, width: 48, textAlign: 'right' }}>
+                      {x.rise == null ? '—' : `${x.rise > 0 ? '+' : ''}${x.rise.toFixed(1)}`}
+                    </Text>
+                  </View>
+                ))}
+
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                  What their monitor recorded, nothing more. Repple does not turn these into dietary
+                  advice and neither should this screen — targets are set with their clinician, and
+                  {' '}{who} can withdraw this at any time, which hides the history as well.
+                </Text>
+              </>
+            )}
           </Section>
         ) : null}
 
