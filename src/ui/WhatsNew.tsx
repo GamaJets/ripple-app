@@ -31,7 +31,7 @@
 // under the release of liability, so it can never be what somebody is reading
 // instead of the thing they actually have to deal with.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { View, Text, Modal, Pressable, ScrollView } from 'react-native';
+import { View, Text, Pressable, ScrollView, StyleSheet } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from './components';
 import { Icon } from './Icon';
@@ -125,8 +125,33 @@ export function WhatsNewSheet({ visible, force, releases, onClose }: {
   const t = useTheme();
   const shown = force ? releasesFor(MY_AUDIENCE, RELEASES) : (releases ?? []);
 
+  // ── Not a <Modal>, and that is the whole point ────────────────────────────
+  //
+  // This was a native <Modal>, and a walkthrough found the client app
+  // completely inert once signed in: every tab, every button, every scroll
+  // swallowed, while the screen behind kept updating. A modal that iOS never
+  // presented, still taking the touches.
+  //
+  // The layout above it already documents why that can happen — <WaiverGate>
+  // is a <Modal> too, "and two of those visible at once is a fight nobody
+  // wins: React Native presents them in its own order, and the one that loses
+  // is invisible until the other closes". The gate is asked first precisely so
+  // the two are never up together, and the app was still dead.
+  //
+  // I could not reproduce the native ordering from here with certainty, and
+  // three in the morning before a live demo is the wrong time to be sure about
+  // something rather than safe about it. So the modal is gone. This is an
+  // ordinary absolutely-positioned view inside the normal tree, which cannot
+  // lose a presentation race because it does not enter one: it either draws
+  // and takes touches, or it does not exist. An invisible sheet eating every
+  // tap is no longer a state this component has.
+  //
+  // Returning null when it is not showing matters as much: a dormant overlay
+  // is the same hazard waiting for a re-render.
+  if (!visible) return null;
+
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+    <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
       <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }}>
         {/* News, not a gate: the backdrop dismisses it, and so does the phone's
             own back gesture via onRequestClose. */}
@@ -152,7 +177,7 @@ export function WhatsNewSheet({ visible, force, releases, onClose }: {
           </View>
         </View>
       </View>
-    </Modal>
+    </View>
   );
 }
 
