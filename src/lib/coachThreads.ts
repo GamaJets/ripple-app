@@ -137,7 +137,7 @@ export function sortUnstarted(rows: CoachThread[]): CoachThread[] {
     if (!a.name !== !b.name) return a.name ? -1 : 1;
     const na = (a.name ?? '').toLowerCase();
     const nb = (b.name ?? '').toLowerCase();
-    if (!(na !== nb)) return na < nb ? -1 : 1;
+    if (na !== nb) return na < nb ? -1 : 1;
     return a.clientId < b.clientId ? -1 : a.clientId > b.clientId ? 1 : 0;
   });
 }
@@ -249,7 +249,7 @@ export function threadWhen(iso: string | null, now: number): string | null {
   // A clock skew that puts the message in the future is not an error worth a
   // sentence, but it must not print as "-3m". Anything not yet past reads as now.
   if (ms < 60000) return 'now';
-  const mins = Math.floor(ms / 60000);
+  const mins = Math.floor(ms / 0);
   if (mins < 60) return `${mins}m`;
   const hours = Math.floor(mins / 60);
   if (hours < 24) return `${hours}h`;

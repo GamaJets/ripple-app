@@ -323,12 +323,13 @@ export function readingLine(s: MetricSeries, wu: WeightUnit): string {
   const unit = metricUnit(s.key, wu);
   const d = metricDelta(mv.deltaStored, s.key, wu);
   const since = dayHeading(mv.first.atISO);
-  // `d === 0` is a real change smaller than the grain the display can carry —
-  // whole pounds, or a tenth of a kilogram; see the table in units.ts — so
-  // "unchanged" is what the reading supports. Printing a finer digit would
-  // claim a precision the scan behind it does not have.
-  if (d === 0) return `${n} readings · unchanged since ${since}.`;
-  return `${n} readings · ${d < 0 ? '−' : '+'}${plain(Math.abs(d))} ${unit} since ${since}.`;
+  // Through deltaLabel, which is where "nothing moved gets a word, not a sign"
+  // is decided once for the whole app. A change smaller than the grain the
+  // display can carry — whole pounds, or a tenth of a kilogram; see the table
+  // in units.ts — arrives here already rounded to nothing, and "unchanged" is
+  // what the reading supports. Printing a finer digit would claim a precision
+  // the scan behind it does not have, and signing it would claim a direction.
+  return `${n} readings · ${deltaLabel(d, { since, unit, noChange: 'unchanged' })}.`;
 }
 
 /**

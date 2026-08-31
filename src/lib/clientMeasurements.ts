@@ -240,11 +240,15 @@ export function siteChangeLine(h: SiteHistory, unit: LengthUnit): string {
   }
   const d = lengthDeltaIn(cm, unit);
   const since = dayHeading(h.previous.atISO);
-  // `d === 0` is a real change smaller than the tenth of a unit the display can
-  // carry (see the grain table in units.ts), so "unchanged" is what the reading
-  // supports — the alternative is printing a digit the tape cannot stand behind.
-  if (d == null || d === 0) return `Unchanged since ${since}.`;
-  return `${d < 0 ? '−' : '+'}${plain(Math.abs(d))} ${unit} since ${since}.`;
+  // Through deltaLabel: a change smaller than the tenth of a unit the display
+  // can carry (see the grain table in units.ts) rounds to nothing, and
+  // "unchanged" is what the reading supports — the alternative is printing a
+  // digit the tape cannot stand behind, with a sign in front of it.
+  // `noBaseline` is unreachable — `cm` is finite and `lengthDeltaIn` returns a
+  // number for it — but it is worded as "Unchanged" rather than left to the
+  // default, so that if it ever is reached the sentence still reads as a
+  // sentence about this site rather than about a missing reading.
+  return `${deltaLabel(d, { since, unit, noChange: 'Unchanged', noBaseline: `Unchanged since ${since}` })}.`;
 }
 
 /**
