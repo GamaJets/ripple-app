@@ -165,10 +165,21 @@ ok(!hasConversation(thread({ lastAt: 'not a date' })), 'an unparseable timestamp
   ];
   eq(sortUnstarted(sameName).map((t) => t.clientId).join(','), 'a,m,z',
     'two clients with the same name are ordered by id, stably');
-  // The two minimal pairs, each already in the WRONG order so that a comparator
-  // reporting "equal" instead of "after" leaves them where they are. A longer
-  // list can hide both: insertion sort only needs "is a before b" to be right,
-  // so a comparator that never says "after" still sorts most inputs correctly.
+  // The two minimal pairs, stated for the record rather than as a trap.
+  //
+  // `npm run mutate` reports eleven survivors in this file and every one of them
+  // is in a comparator's "after" arm — `? 1 : 0` becoming `? 0 : 0`, `<`
+  // becoming `<=`. They survive because they are EQUIVALENT, not because
+  // nothing is watching: V8's sort is a stable insertion/merge sort and only
+  // ever consults the comparator in the "does a come before b" direction, so
+  // returning 0 where the original returns 1 is absorbed by the stability. A
+  // brute force over every arrangement of four rows drawn from {no name, Ann,
+  // Mo, zoe} finds no input that tells them apart. Eight of the eleven are
+  // additionally unreachable: they are in the clientId tie-break, and clientId
+  // is a primary key, so no two rows can share one.
+  //
+  // Recorded here so the next person reading a survivor list does not spend the
+  // hour finding that out again.
   eq(sortUnstarted([thread({ clientId: 'x', name: null }), thread({ clientId: 'y', name: 'Ann' })])
     .map((t) => t.clientId).join(','), 'y,x', 'a client with no readable name sorts AFTER one with a name');
   eq(sortUnstarted([thread({ clientId: 'x', name: 'zoe' }), thread({ clientId: 'y', name: 'Ann' })])

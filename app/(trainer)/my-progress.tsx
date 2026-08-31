@@ -81,6 +81,7 @@ import {
   lengthIn, lengthLabel, lengthToCm, lengthDeltaIn, plain, convertedNote,
 } from '../../src/lib/units';
 import { agoLabel, dayLabel, shortDayLabel, daysBetween, todayISO, STALE_AFTER_DAYS } from '../../src/lib/bodyFigures';
+import { deltaLabel } from '../../src/lib/deltaLabel';
 import { num1 } from '../../src/lib/format';
 
 // The range a human weighs, in the kilograms this app stores. Metric because
@@ -415,11 +416,17 @@ export default function MyProgress() {
                 : !weighKnown
                   ? 'Your weigh-ins could not be read, so this is unknown rather than none.'
                   : 'No weigh-in of your own yet — log one below and the trend builds from it.')
-              : `${sinceLast != null && sinceLast !== 0
-                ? `${sinceLast < 0 ? '−' : '+'}${plain(Math.abs(sinceLast))} ${wu} since ${shortDayLabel(previous!.at)}`
-                : sinceLast === 0
-                  ? `Unchanged since ${shortDayLabel(previous!.at)}`
-                  : 'First weigh-in'} · measured ${dayLabel(latest!.at)}${latestAgo ? ` · ${latestAgo}` : ''}`}
+              // The three arms — a movement, no movement, and no earlier
+              // reading — are deltaLabel's own, so this line cannot drift out of
+              // step with the same sentence on the client's Progress hero.
+              // `previous` is non-null exactly when `sinceLast` is, so the
+              // baseline arm is never reached with a dash for a day.
+              : `${deltaLabel(sinceLast, {
+                since: previous ? shortDayLabel(previous.at) : null,
+                unit: wu,
+                noChange: 'Unchanged',
+                noBaseline: 'First weigh-in',
+              })} · measured ${dayLabel(latest!.at)}${latestAgo ? ` · ${latestAgo}` : ''}`}
           />
           {staleNote ? <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>{staleNote}</Text> : null}
           {weightNote && shownWeight != null ? (
@@ -521,8 +528,16 @@ export default function MyProgress() {
                       <Text style={{ ...ty.label, ...numeric, fontWeight: '500', color: t.ink }}>{fig(lengthLabel(raw, lu))}</Text>
                       {d != null && d !== 0 ? (
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, minWidth: 62, justifyContent: 'flex-end' }}>
-                          <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: d < 0 ? t.brand : t.ink3 }} />
-                          <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{d > 0 ? '+' : '−'}{plain(Math.abs(d))} {lu}</Text>
+                          {/* A neutral mark. This painted every falling tape
+                              site in the accent colour — the app's "well done"
+                              — and a chest, an arm or a thigh coming down is
+                              not that for a trainer training to put size on.
+                              Unlike the client's own screen there is no goal to
+                              ask here: this screen's own header records that the
+                              goal on `useClientData` is a constructed default
+                              for a trainer, so the honest mark is no claim. */}
+                          <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: t.ink3 }} />
+                          <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{deltaLabel(d, { since: null, unit: lu })}</Text>
                         </View>
                       ) : (
                         <Text style={{ ...ty.caption, color: t.ink3, minWidth: 62, textAlign: 'right' }}>—</Text>

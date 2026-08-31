@@ -34,6 +34,16 @@ import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/the
 import { useSettings } from '../../src/ui/settings';
 import { lengthIn, lengthLabel, lengthToCm, lengthDeltaIn, plain, convertedNote } from '../../src/lib/units';
 import { agoLabel, dayLabel, shortDayLabel, daysBetween, todayISO, STALE_AFTER_DAYS } from '../../src/lib/bodyFigures';
+import { useClientData } from '../../src/ui/clientData';
+import { movementIsProgress } from '../../src/lib/deltaLabel';
+
+// Which tape sites a goal has an opinion about. A waist and a hip measurement
+// follow the fat, so Fat Loss and Tone want them down; a chest, an arm and a
+// thigh are size, and nobody's goal is unambiguously less of them. Every site
+// on this screen used to paint a fall in the accent colour — src/lib/
+// clientMeasurements.ts names that in its own header as the thing it refuses
+// to return — so a client building an arm was congratulated for losing one.
+const GOAL_READS: Partial<Record<(typeof METRICS)[number]['key'], 'girth'>> = { waist: 'girth', hips: 'girth' };
 
 const fmtDate = shortDayLabel;
 
@@ -41,6 +51,16 @@ export default function Measurements() {
  const t = useTheme();
  const router = useRouter();
  const { entries, status, addEntry } = useMeasurements();
+ // The member's own goal, purely so the mark beside a fall can stop claiming to
+ // be good news for everybody. Nothing else on this screen reads it.
+ const cd = useClientData();
+ // True only where this member's goal actually wants this site smaller.
+ // `undefined` — no goal set, a goal with no opinion on girth, or a change that
+ // rounds to nothing — paints the neutral mark.
+ const goalRead = (key: (typeof METRICS)[number]['key'], d: number | null) => {
+  const metric = GOAL_READS[key];
+  return metric ? movementIsProgress(d, cd.goal, metric) === true : false;
+ };
  const [vals, setVals] = useState<Record<string, string>>({});
  const today = todayISO();
  // A failed read reaches `entries: []` by the same route an empty history does,
@@ -157,7 +177,7 @@ export default function Measurements() {
         <Text style={{ ...ty.label, ...numeric, fontWeight: '500', color: t.ink }}>{fig(lengthLabel(raw, lu))}</Text>
         {d != null && d !== 0 ? (
          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, minWidth: 62, justifyContent: 'flex-end' }}>
-          <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: d < 0 ? t.brand : t.ink3 }} />
+          <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: goalRead(key, d) ? t.brand : t.ink3 }} />
           <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{d > 0 ? '+' : '−'}{plain(Math.abs(d))} {lu}</Text>
          </View>
         ) : (

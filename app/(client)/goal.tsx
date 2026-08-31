@@ -30,6 +30,7 @@ import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/the
 import { useClientData } from '../../src/ui/clientData';
 import { useSettings } from '../../src/ui/settings';
 import { weightIn, weightToKg, weightDeltaIn, kgToLb, type WeightUnit } from '../../src/lib/units';
+import { deltaMoved, deltaSign } from '../../src/lib/deltaLabel';
 import { useGoalTracker } from '../../src/ui/goalTracker';
 import {
   progressOf, projectionOf, goalLabel, isMeasured, isOverdue, sortGoals,

@@ -81,6 +81,7 @@ import {
 } from '../../src/lib/clientMeasurements';
 import { isoToday } from '../../src/lib/dayPlan';
 import { kgToLb, lengthLabel, type WeightUnit } from '../../src/lib/units';
+import { deltaMoved, deltaSign } from '../../src/lib/deltaLabel';
 
 const GOAL_COLS = 'id, kind, target_value, title, target_date, achieved_at, created_at';
 const SCAN_COLS = 'taken_at, weight_kg, body_fat_pct, skeletal_muscle_kg';
@@ -106,6 +107,14 @@ function projectionLine(goal: GoalTarget, series: Point[], wu: WeightUnit, who: 
   // honest figure is 1.10 lb/wk, and whole pounds would make every pace between
   // 0.7 and 1.5 look identical.
   const rate = (v: number) => (unit === 'lb' ? kgToLb(v) : v);
+  // A pace is only quoted where it survives being printed. `weeklyRate === 0`
+  // is caught upstream as 'flat', but a rate of 0.004 kg/wk is not zero and
+  // formatted "+0.00 kg/wk" — a plus sign on a pace of nothing, offered to a
+  // coach as the basis of a finish date for somebody else's body.
+  const pace = (v: number) => {
+    const r = rate(v);
+    return deltaMoved(r, 2) ? ` (${deltaSign(r, 2)}${Math.abs(r).toFixed(2)} ${unit}/wk)` : '';
+  };
   switch (p.kind) {
     case 'reached':
       return `${who} has reached this one. It is theirs to mark done — worth a message.`;

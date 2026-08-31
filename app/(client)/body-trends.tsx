@@ -52,6 +52,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { useClientData } from '../../src/ui/clientData';
+import { movementIsProgress } from '../../src/lib/deltaLabel';
 import { useSettings } from '../../src/ui/settings';
 import { weightDeltaIn, weightIn } from '../../src/lib/units';
 import {
@@ -232,7 +233,19 @@ export default function BodyTrends() {
             // the two readings happened to fall.
             const rawDelta = Math.round((readings[readings.length - 1].value - readings[0].value) * 10) / 10;
             const delta = (m.weight ? weightDeltaIn(rawDelta, wu) : rawDelta) ?? rawDelta;
-            const improving = m.better === 'up' ? rawDelta >= 0 : rawDelta <= 0;
+            // `better` is a fixed property of the metric, so Weight was 'down'
+            // for everybody: a member training to Build Muscle saw the accent
+            // dot — this screen's "moving the right way" — for losing the
+            // weight they are working to put on. Their own goal decides it now,
+            // and `undefined` where the goal has no opinion paints the neutral
+            // mark rather than a verdict. `better` still stands for the InBody
+            // Score, which is a composite no goal wants lower.
+            //
+            // Zero is undefined too, on both paths: an unchanged reading is
+            // neither moving the right way nor the wrong one.
+            const improving: boolean | undefined = m.from === 'score'
+              ? (rawDelta > 0 ? true : rawDelta < 0 ? false : undefined)
+              : movementIsProgress(rawDelta, cd.goal, m.from);
             return (
               <View key={m.key}>
                 {mi > 0 ? <Rule /> : null}

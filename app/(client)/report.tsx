@@ -29,6 +29,7 @@ import { sp, layout, type as ty } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
 import { useSettings } from '../../src/ui/settings';
 import { weightIn, weightLabel, lengthIn, lengthLabel, lengthDeltaIn, weightDeltaIn } from '../../src/lib/units';
+import { deltaLabel, deltaMoved, movementIsProgress } from '../../src/lib/deltaLabel';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useMeasurements } from '../../src/ui/measurements';
 import { useCheckIns } from '../../src/ui/checkins';
@@ -115,10 +116,13 @@ export default function WeeklyReport() {
     // These lines are the summariser's only source of fact, so they carry the
     // client's own units: a model handed "82 kg" writes back "you're at 82 kg"
     // to somebody who has never used a kilogram in their life.
-    hasBody ? [`Weight ${fig(weightLabel(c.weightKg, wu))} (${wDeltaShown > 0 ? '+' : ''}${wDeltaShown} ${wu} overall)`,
+    // Through deltaLabel: an unchanged weight used to be stated to the model as
+    // "(0 kg overall)", which is a change of zero rather than the absence of
+    // one, and the model writes back about it as though something happened.
+    hasBody ? [`Weight ${fig(weightLabel(c.weightKg, wu))} (${deltaLabel(wDeltaShown, { since: null, unit: wu, noChange: 'no change' })} overall)`,
       c.bodyFatPct != null ? `body fat ${c.bodyFatPct}%` : null,
       c.muscleKg != null ? `muscle ${fig(weightLabel(c.muscleKg, wu))}` : null].filter(Boolean).join(', ') + '.' : '',
-    waistDShown != null && mLatest ? `Waist ${fig(lengthLabel(mLatest.waist, lu))} (${waistDShown > 0 ? '+' : ''}${waistDShown} ${lu}).` : '',
+    waistDShown != null && mLatest ? `Waist ${fig(lengthLabel(mLatest.waist, lu))} (${deltaLabel(waistDShown, { since: null, unit: lu, noChange: 'no change' })} since the previous tape reading).` : '',
     checkIn ? `Check-in energy ${checkIn.energy}/5, sleep ${checkIn.sleep}/5, mood ${checkIn.mood}/5, adherence ${checkIn.adherence}/5.` : '',
     comp.improving.length ? `Body composition improving: ${comp.improving.join(', ')}.` : '',
     comp.watch.length ? `Body composition to watch: ${comp.watch.join(', ')}.` : '',
@@ -137,7 +141,13 @@ export default function WeeklyReport() {
     if (trainingWhole && streak > 0) bits.push(`Your streak is at ${streak} day${streak === 1 ? '' : 's'} — keep it alive.`);
     // Gated on the CONVERTED change: a fifth of a kilogram is under half a
     // pound, and "your weight is down 0 lb" is worse than saying nothing.
-    if (bodyWhole && wDeltaShown !== 0) bits.push(`Weight is ${wDeltaShown > 0 ? 'up' : 'down'} ${Math.abs(wDeltaShown)} ${wu} overall${wDeltaShown <= 0 ? ', trending your way' : ''}.`);
+    // ", trending your way" was appended to every downward move. It is the one
+    // clause here that makes a judgement rather than a statement, and it made
+    // the same one for a member training to gain as for a member training to
+    // lose — congratulating somebody for moving away from their own goal. It is
+    // now asked of their goal, and left off entirely where the goal has no
+    // opinion.
+    if (bodyWhole && deltaMoved(wDeltaShown)) bits.push(`Weight is ${wDeltaShown > 0 ? 'up' : 'down'} ${Math.abs(wDeltaShown)} ${wu} overall${movementIsProgress(wDeltaShown, c.goal, 'weight') ? ', trending your way' : ''}.`);
     if (comp.improving.length) bits.push(`On composition, ${comp.improving.slice(0, 2).join(' and ')} moved the right way.`);
     else if (comp.watch.length) bits.push(`Keep an eye on ${comp.watch.slice(0, 2).join(' and ')} from your latest scan.`);
     if (isWhole(ciStatus) && checkIn && checkIn.adherence <= 3) bits.push(`Your last check-in put adherence at ${checkIn.adherence}/5 — worth refocusing next week.`);
@@ -160,13 +170,16 @@ export default function WeeklyReport() {
   }, [wk.workouts, wk.days, streak, wDelta, range]);
 
   const bodyItems = [
-    { label: 'Weight', value: fig(weightIn(c.weightKg, wu)), unit: wu, delta: wDeltaShown !== 0 ? `${wDeltaShown > 0 ? '+' : ''}${wDeltaShown} ${wu} overall` : 'no change', good: wDelta <= 0 },
+    // `good: wDelta <= 0` said that down is better whoever is reading it. A
+    // member training to Build Muscle was shown the accent dot — this row's
+    // "well done" — for losing the weight they are working to put on.
+    { label: 'Weight', value: fig(weightIn(c.weightKg, wu)), unit: wu, delta: deltaMoved(wDeltaShown) ? `${deltaLabel(wDeltaShown, { since: null, unit: wu })} overall` : 'no change', good: movementIsProgress(wDeltaShown, c.goal, 'weight') },
     // hasBody only checks that a weight exists — a client can log a weight in a
     // check-in without ever having a scan, in which case body fat and muscle are
     // still unknown and used to print the 20% / 0 kg placeholders.
     { label: 'Body Fat', value: c.bodyFatPct != null ? `${c.bodyFatPct}` : '—', unit: c.bodyFatPct != null ? '%' : undefined },
     { label: 'Muscle', value: fig(weightIn(c.muscleKg, wu)), unit: c.muscleKg != null ? wu : undefined },
-    ...(waistDShown != null && mLatest ? [{ label: 'Waist', value: fig(lengthIn(mLatest.waist, lu)), unit: lu, delta: `${waistDShown > 0 ? '+' : ''}${waistDShown} ${lu}`, good: waistD != null && waistD <= 0 }] : []),
+    ...(waistDShown != null && mLatest ? [{ label: 'Waist', value: fig(lengthIn(mLatest.waist, lu)), unit: lu, delta: deltaMoved(waistDShown) ? deltaLabel(waistDShown, { since: null, unit: lu }) : 'no change', good: movementIsProgress(waistDShown, c.goal, 'girth') }] : []),
   ];
 
   return (

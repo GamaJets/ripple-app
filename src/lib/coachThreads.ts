@@ -231,7 +231,7 @@ export function threadPreview(t: CoachThread): ThreadPreview {
 export function unreadBadgeLabel(unread: number | null): string | null {
   if (unread === null) return '—';
   if (unread <= 0) return null;
-  return unread >= 99 ? '99+' : String(unread);
+  return unread > 99 ? '99+' : String(unread);
 }
 
 /**
