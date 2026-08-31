@@ -442,3 +442,39 @@ Before submitting each of the three apps:
   Confirm their email addresses before email confirmation is turned back on, or
   the credentials in the review notes stop working on the day that toggle
   flips.
+
+---
+
+## 11. Stripe: Accounts v1 is enabled in TEST and not in LIVE — BLOCKER, 31 Aug 2026
+
+**Stripe → Settings → Account features → Accounts v1 support → Edit**
+
+Enabled in **Test mode** on 31 Aug 2026. **Not enabled in Live.** Coach
+onboarding fails the moment a real coach taps connect until it is.
+
+**Why it is off at all.** Repple's own Stripe account (`acct_1UAS5EAjLjlS8C2T`,
+"Repple", AED) was created fresh on 31 Aug, replacing an account managed by Wio
+Business — Stripe's own dashboard warned against building an integration on that
+one, and Connect would not have been available. New Stripe accounts ship with
+Accounts v1 **disabled**, because v1 is no longer the recommended way to create
+connected accounts.
+
+`supabase/functions/connect-onboard/index.ts:37` calls
+`stripe.accounts.create({ type: 'express' })`, which is v1. So the toggle is
+what makes the existing code work at all. It was found by triggering
+`account.updated` and reading the refusal, not by reasoning about it.
+
+**This is a stay of execution, not a fix.** The recommended path is
+`POST /v2/core/accounts`. Migrating is real work and is much cheaper to do
+BEFORE there are connected accounts, because a connected account cannot be moved
+between platforms — every coach would have to onboard again.
+
+**Also per-mode, and easy to miss:** the API key and BOTH webhook signing
+secrets are per-mode too. Going live means re-doing all of it in Live —
+`STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` (Repple Platform Events, 9 events,
+Your account) and `STRIPE_WEBHOOK_SECRET_CONNECT` (Repple Connected Accounts,
+`account.updated`, Connected accounts). Both destinations point at the same URL,
+`/functions/v1/stripe-webhook`, and the function tries both secrets.
+
+Verified working in test on 31 Aug: `checkout.session.completed` → 200,
+`account.updated` from a connected account → 200.
