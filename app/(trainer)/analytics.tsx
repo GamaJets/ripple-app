@@ -389,7 +389,11 @@ export default function TrainerAnalytics() {
               after. */}
           <SectionHead title="Revenue Trend"
             note={revenue == null ? 'This month not recorded'
-              : revHist.delta !== 0 ? `${revHist.delta > 0 ? '+' : '−'}$${Math.abs(revHist.delta).toLocaleString()} vs last mo`
+              // This '$' survived the currency sweep IN THIS FILE — it sits
+              // directly under a line that correctly prints "AED 1,500 at your
+              // AED 50 session rate". One screen, two currencies, neither of
+              // them necessarily the gym's.
+              : revHist.delta !== 0 ? `${revHist.delta > 0 ? '+' : '−'}${priced(Math.abs(revHist.delta)) ?? Math.abs(revHist.delta).toLocaleString()} vs last mo`
               : 'Tracking started'}
             onPress={() => router.push('/(trainer)/payments')} />
           {revHist.months >= 2 ? (<>

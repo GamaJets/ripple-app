@@ -26,7 +26,7 @@ const dayLabel = (iso: string) => { const d = new Date(iso); const t = new Date(
 export default function Classes() {
   const t = useTheme();
   const router = useRouter();
-  const { classes, myStatus, book, cancel, countsKnown } = useClasses();
+  const { classes, myStatus, status: classStatus, book, cancel, countsKnown } = useClasses();
   // The class reminder below is a notification, so it answers to the switch on
   // the Settings screen like every other one. That switch used to be wired to
   // nothing at all; now that it means something, a member who has turned
@@ -179,8 +179,17 @@ export default function Classes() {
 
         {filtered.length === 0 ? (
           <View style={{ paddingTop: sp.huge, alignItems: 'center' }}>
-            <Text style={{ ...ty.head, color: t.ink, textAlign: 'center' }}>No classes scheduled{branch ? ' at ' + branch : ''} yet</Text>
-            <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: 6, maxWidth: 300 }}>Classes appear here as soon as your gym adds them to the schedule.</Text>
+            {/* An empty timetable under a failed read is not an empty
+                timetable. A member reading "no classes scheduled" does not turn
+                up to one that is running. */}
+            <Text style={{ ...ty.head, color: t.ink, textAlign: 'center' }}>
+              {classStatus === 'error' ? 'The timetable could not be read' : classStatus === 'loading' ? 'Loading' : `No classes scheduled${branch ? ' at ' + branch : ''} yet`}
+            </Text>
+            <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: 6, maxWidth: 300 }}>
+              {classStatus === 'error'
+                ? 'This is not a statement that your gym has none on. Check again when you have signal.'
+                : classStatus === 'loading' ? '' : 'Classes appear here as soon as your gym adds them to the schedule.'}
+            </Text>
           </View>
         ) : null}
       </ScrollView>

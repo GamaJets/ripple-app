@@ -10,9 +10,8 @@
 // unwritten by anything.
 //
 // It also carried a `redeemed` number that no code path anywhere incremented.
-// The screens have already stopped printing it, because a zero presented as a
-// tracked metric is worse than no metric. What was missing was not the number
-// but the EVENT: nothing recorded that a person had used a code, so the one
+// The screens print it again now, from rows rather than from that column —
+// what was missing was never the number but the EVENT: nothing recorded that a person had used a code, so the one
 // question an owner runs a promotion to answer — did it bring anybody in —
 // could not be asked.
 //
@@ -61,7 +60,7 @@ const Ctx = createContext<PromosValue | null>(null);
 
 export function PromosProvider({ children }: { children: ReactNode }) {
   const authRev = useAuthRevision();
-  const { tenant } = useTenant();
+  const { tenant, status: tenantStatus } = useTenant();
   const [promos, setPromos] = useState<Promo[]>([]);
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
 
@@ -69,7 +68,19 @@ export function PromosProvider({ children }: { children: ReactNode }) {
 
   const refresh = useCallback(async () => {
     if (!USE_SUPABASE) { setStatus('ready'); return; }
-    if (!tenantId) return; // tenant.status says why; nothing to read against yet
+    // `!tenantId` is three different things: still loading, no gym, and a
+    // tenant read that FAILED. Returning early left `status` on 'loading'
+    // forever for all three, so the Promotions screen span rather than
+    // reporting — and this provider used to be in-memory, so the state never
+    // existed to get wrong before tonight.
+    //
+    // The tenant provider already tells them apart. Inherit its answer instead
+    // of inventing one.
+    if (!tenantId) {
+      setPromos([]);
+      setStatus(tenantStatus === 'loading' ? 'loading' : tenantStatus === 'error' ? 'error' : 'ready');
+      return;
+    }
     const { data, error } = await supabase
       .from('promos')
       .select('id, code, discount, active')
@@ -113,7 +124,7 @@ export function PromosProvider({ children }: { children: ReactNode }) {
       active: !!r.active,
     })));
     setStatus(page.truncated || !countsKnown ? 'partial' : 'ready');
-  }, [tenantId]);
+  }, [tenantId, tenantStatus]);
 
   useEffect(() => { void refresh(); }, [refresh, authRev]);
 

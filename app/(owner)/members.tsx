@@ -178,11 +178,20 @@ export default function OwnerMembers() {
     if (!Number.isFinite(major) || major <= 0) return;
     setBusy(true);
     try {
+      // The currency goes with the amount. The label above this form reads the
+      // gym's own currency, and `recordPayment` defaults to 'AED' when it is
+      // not told one — so a GBP gym's owner read "Amount (GBP)", typed 50, and
+      // the row was stored as dirhams, permanently, with nothing to notice.
+      //
+      // That gap opened when the LABEL was corrected earlier tonight and the
+      // WRITE was not: before it, both said AED and were at least consistent.
+      // A half-corrected currency is worse than an uncorrected one.
       await recordPayment(supabase, tenant.id, {
         memberId: payFor.memberId,
         amountCents: Math.round(major * 100),
         method,
         takenAt: new Date().toISOString(),
+        currency: cur,
       });
       setPayFor(null); setAmount(''); setMethod('card');
       await load();

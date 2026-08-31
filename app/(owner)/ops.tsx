@@ -50,6 +50,16 @@ import { fetchAllFeedback, type FeedbackRow } from '../../src/ui/appFeedback';
 import { usePlatformTrainers } from '../../src/ui/trainers';
 import { useTenant, gymMoney, GYM_CURRENCY } from '../../src/ui/tenant';
 import { parseSessionFee, sessionFeeFieldValue } from '../../src/lib/gymSettings';
+
+/**
+ * The currencies a gym can be priced in.
+ *
+ * A short list rather than every ISO code: this is a one-off setup question,
+ * and a scroller of 180 options is a worse answer than eight and a note. It is
+ * not a closed set in the database — `tenants.currency` is free text — so
+ * adding one here is the whole of adding one.
+ */
+const CURRENCIES = ['AED', 'GBP', 'USD', 'EUR', 'SAR', 'AUD', 'CAD', 'ZAR'] as const;
 import { capLimit } from '../../src/lib/rowCap';
 import { reportError } from '../../src/lib/reportError';
 import { supabase } from '../../src/lib/supabase';
@@ -301,17 +311,32 @@ export default function OwnerOps() {
                     accessibilityLabel={`Session fee in ${cur ?? GYM_CURRENCY}`}
                     style={{ ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11, flex: 1 }} />
                 </View>
-                {cur ? null : (
-                  // The gym has not set `tenants.currency`, so the code above the
-                  // field is the operating record's default rather than the
-                  // gym's own answer. Said out loud rather than left to look
-                  // chosen — part 99 exists because a defaulted currency reads
-                  // as a considered one.
+                {cur ? null : (<>
+                  {/* The gym has not set `tenants.currency`, and until tonight
+                      NOTHING IN THE PRODUCT COULD. `updateTenant` was the only
+                      write to `tenants` anywhere and its type excluded the
+                      column, while half a dozen screens told the owner "an
+                      owner sets it in the gym settings" over a control that did
+                      not exist. A coach at such a gym cannot price a package at
+                      all. So the ask is here, next to the fee it denominates. */}
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
                     Your gym has not told us what it charges in, so figures are shown in {GYM_CURRENCY} — what
-                    the rest of its operating record is recorded in.
+                    the rest of its operating record is recorded in. Set it once and every screen follows.
                   </Text>
-                )}
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.md }}>
+                    {CURRENCIES.map((c) => (
+                      <Pressable key={c} onPress={async () => {
+                        const saved = await updateTenant({ currency: c });
+                        setFeeMsg(saved
+                          ? { bad: false, text: `Your gym is priced in ${c}. Existing figures were already recorded in ${GYM_CURRENCY}; this changes what new ones are written as.` }
+                          : { bad: true, text: 'Not saved. Your gym still has no currency set.' });
+                      }} accessibilityRole="button" accessibilityLabel={`Price this gym in ${c}`}
+                        style={{ paddingHorizontal: 14, paddingVertical: 8, borderRadius: radius.pill, backgroundColor: t.surface2 }}>
+                        <Text style={{ ...ty.label, ...numeric, color: t.ink2 }}>{c}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                </>)}
                 {feeMsg ? (
                   <Text style={{ ...ty.caption, color: feeMsg.bad ? t.warn : t.ink3, marginTop: sp.sm }}>{feeMsg.text}</Text>
                 ) : (

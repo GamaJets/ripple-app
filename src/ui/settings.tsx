@@ -326,7 +326,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     latest.current = next;
     setS(next);
     AsyncStorage.setItem('repple.settings', JSON.stringify(next)).catch(() => {});
-    // Only the unit columns go up. The notification toggles stay on the device
+    // Only the unit columns go up. The notification preference now reaches the server: it is applied to `push_tokens`, so a handset that opted out receives nothing whatever a sending screen believes
     // because push permission genuinely is a property of this handset.
     const uid = writable.current;
     if (!uid || (patch.weightUnit === undefined && patch.lengthUnit === undefined)) return;

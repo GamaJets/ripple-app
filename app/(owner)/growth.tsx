@@ -1,10 +1,10 @@
 // Owner · Growth. Acquisition/retention snapshot + an interactive promo-code
 //
-// Promo rows show the discount only. They used to append "· N redeemed", but
-// nothing in the codebase ever increments `redeemed` — the sole write is the
-// literal `redeemed: 0` at creation — so it was a permanently-zero counter
-// presented as a tracked redemption metric. Same defect was fixed on the
-// Promotions screen; this was the second render site.
+// Promo rows carry a real redemption count. They once appended "· N redeemed"
+// over `promos.redeemed`, a column whose only write was the literal `0` at
+// creation, so it was removed as a fabricated metric. Part 104 made redemption
+// an event — a row per member per code — and the count is derived from those
+// rows, with a dash when the count could not be read.
 // tool: create referral/discount codes, toggle them on/off, track redemptions.
 //
 // Rebuilt on the instrument-panel kit (`src/ui/kit`) and the scale
@@ -248,12 +248,17 @@ export default function OwnerGrowth() {
                   {p.discountPct}% off · {p.redeemed < 0 ? '—' : p.redeemed} used
                 </Text>
               </View>
-              <Pressable onPress={() => toggleActive(p.id)} accessibilityRole="button"
+              {/* Awaited. `toggleActive` and `removePromo` became server calls
+                  that deliberately check the affected row count — and both call
+                  sites still threw the answer away, so a refused toggle or a
+                  refused delete was a silent no-op. The provider went to the
+                  trouble of finding out; the screen has to say. */}
+              <Pressable onPress={async () => { if (!await toggleActive(p.id)) Alert.alert('Not changed', `“${p.code}” could not be switched ${p.active ? 'off' : 'on'}, so it is still ${p.active ? 'active' : 'off'}.`); }} accessibilityRole="button"
                 style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: 11, paddingVertical: 6 }}>
                 <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: p.active ? t.brand : t.ink3 }} />
                 <Text style={{ ...ty.caption, color: t.ink2 }}>{p.active ? 'Active' : 'Off'}</Text>
               </Pressable>
-              <Pressable onPress={() => removePromo(p.id)} accessibilityLabel="Delete code" accessibilityRole="button" hitSlop={8}
+              <Pressable onPress={async () => { if (!await removePromo(p.id)) Alert.alert('Not deleted', `“${p.code}” could not be deleted, so it is still live and can still be redeemed.`); }} accessibilityLabel="Delete code" accessibilityRole="button" hitSlop={8}
                 style={{ paddingHorizontal: sp.xs, paddingVertical: sp.xs }}>
                 <Text style={{ ...ty.body, color: t.ink3 }}>×</Text>
               </Pressable>

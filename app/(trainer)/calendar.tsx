@@ -29,7 +29,7 @@ import { buildIcs, shareIcs } from '../../src/lib/exportShare';
 import { sendPushChecked } from '../../src/ui/pushNotifications';
 import { markOutcome } from '../../src/lib/gymSessions';
 import { supabase } from '../../src/lib/supabase';
-import { useTenant } from '../../src/ui/tenant';
+import { useTenant, gymMoney } from '../../src/ui/tenant';
 import { reportError } from '../../src/lib/reportError';
 
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -360,7 +360,9 @@ export default function TrainerSchedule() {
       (res.charged
         ? (sessionFee == null
           ? '\n\nInside 24h — your late-cancel policy would apply. Repple does not charge it; settle it with the client yourself.'
-          : `\n\nInside 24h — your $${sessionFee} late-cancel policy would apply. Repple does not charge it; settle it with the client yourself.`)
+          // The gym's currency, not a dollar sign. This sentence names a sum a
+          // coach will actually ask a client for.
+          : `\n\nInside 24h — your ${gymMoney(sessionFee, tenant?.currency) ?? `${sessionFee}`} late-cancel policy would apply. Repple does not charge it; settle it with the client yourself.`)
         : ''),
       [{ text: 'Done' }]
     );

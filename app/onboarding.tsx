@@ -177,7 +177,11 @@ export default function Onboarding() {
               accessibilityLabel="Gym name"
             />
 
-            <Text style={{ ...lab, marginTop: sp.lg }}>What one delivered session pays (AED)</Text>
+            {/* The very first money question the product asks an owner, and it
+                named a currency for them. `tenants.currency` exists; a gym
+                being set up has not chosen one yet, so the honest thing is to
+                ask for the number and not to put a currency on it. */}
+            <Text style={{ ...lab, marginTop: sp.lg }}>What one delivered session pays</Text>
             <TextInput
               value={fee}
               onChangeText={setFee}
@@ -187,7 +191,7 @@ export default function Onboarding() {
               returnKeyType="done"
               onSubmitEditing={() => { void saveGym(); }}
               style={inp}
-              accessibilityLabel="Session fee in dirhams"
+              accessibilityLabel="What one delivered session pays"
             />
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
               Payroll is counted against this. Left blank, the app shows a dash rather than

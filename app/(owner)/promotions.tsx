@@ -7,10 +7,14 @@
 // count became the screen's one hero figure, the two bordered boxes became
 // hairline-separated sections, and the Georgia serif header is gone.
 //
-// Also removed: each row's subtitle printed "· {p.redeemed} redeemed". Nothing
-// in the app ever increments `redeemed` — no redemption is recorded anywhere —
-// so the count was a zero presented as a tracked metric. A code now says what
-// it is and nothing it cannot know.
+// The redemption count is real again, and the history is worth keeping. Each
+// row once printed "· {p.redeemed} redeemed" against a `promos.redeemed`
+// column nothing incremented — a permanent zero presented as a tracked metric —
+// so it was removed rather than faked. Part 104 then made redemption an EVENT:
+// a row per member per code in `promo_redemptions`, counted from rows and never
+// from a stored counter, which cannot lose a write under concurrency the way
+// `set redeemed = redeemed + 1` can. The count below is that, and a dash where
+// the count itself could not be read.
 import { useState } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -171,7 +175,9 @@ export default function Promotions() {
                 </Text>
               </View>
               <Ghost label="Push" onPress={() => { const body = `${p.discountPct}% off with code ${p.code}`; pushToMembers(body).then((r) => Alert.alert(r.ok ? 'Queued' : 'Not sent', r.ok ? `Queued to ${r.queued} member${r.queued === 1 ? '' : 's'}.` : (r.error || 'The push did not go out.'))); }} />
-              <Pressable onPress={() => removePromo(p.id)} hitSlop={6} accessibilityRole="button" accessibilityLabel={'Remove ' + p.code}>
+              {/* The boolean was discarded here too: a code the server refused
+                  to delete vanished from the list and stayed redeemable. */}
+              <Pressable onPress={async () => { if (!await removePromo(p.id)) Alert.alert('Not deleted', `“${p.code}” could not be deleted, so it is still live and can still be redeemed.`); }} hitSlop={6} accessibilityRole="button" accessibilityLabel={'Remove ' + p.code}>
                 <Icon name="minus" size={16} color={t.ink3} />
               </Pressable>
             </View>

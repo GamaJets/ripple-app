@@ -31,6 +31,7 @@ import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { importSources, withHr, useImportedIds, isLogged, fetchRecent } from '../../src/ui/watchImport';
 import { parseWorkoutText } from '../../src/lib/workoutParse';
 import { useExerciseVideos, type VideoItem, type LibraryStatus } from '../../src/ui/exerciseVideos';
+import type { LoadStatus } from '../../src/ui/loadStatus';
 import { ExerciseVideo } from '../../src/ui/ExerciseVideo';
 // The same catalogue lookup and the same renderers the standalone exercise
 // screen uses. Imported rather than reimplemented: a second copy of the
@@ -176,7 +177,7 @@ export default function Train() {
   const _cp = useAssignedPrograms().getProgram(cd.id);
   const coachProgram = cd.coachingMode === 'solo' ? null : _cp;
   const w = useWearables();
-  const { log: workoutLog, addWorkouts, retryWorkouts, updateWorkout, removeWorkout } = useWorkoutLog();
+  const { log: workoutLog, status: workoutLogStatus, addWorkouts, retryWorkouts, updateWorkout, removeWorkout } = useWorkoutLog();
   // The unit the member reads a LOAD in. Deliberately left out of TF-37 —
   // barbell plates are metric hardware and tools.tsx does its plate maths
   // against a metric rack — and asked for since: "Need to be able to select kg
@@ -1258,7 +1259,7 @@ export default function Train() {
       </Modal>
 
       <Modal visible={session} animationType="slide" onRequestClose={() => setSession(false)}>
-        <SessionRunner t={t} unit={wu} exercises={planEx.filter((e) => !isInjHidden(e))} focus={workout.focus} nameOf={nameOf} age={ageFromDob(cd.dob)} restingKcalPerMin={restingKcalPerMin} log={workoutLog} injuries={cd.injuries} videos={exVideos} videoStatus={exVideoStatus} preferTrainerId={coachId} onComplete={addWorkouts} onRetry={retryWorkouts} onClose={() => setSession(false)} />
+        <SessionRunner t={t} unit={wu} exercises={planEx.filter((e) => !isInjHidden(e))} focus={workout.focus} nameOf={nameOf} age={ageFromDob(cd.dob)} restingKcalPerMin={restingKcalPerMin} log={workoutLog} logStatus={workoutLogStatus} injuries={cd.injuries} videos={exVideos} videoStatus={exVideoStatus} preferTrainerId={coachId} onComplete={addWorkouts} onRetry={retryWorkouts} onClose={() => setSession(false)} />
       </Modal>
 
       {/* Mounted only while a session is running, so its clock starts at zero
@@ -1792,7 +1793,7 @@ function SessionDemo({ t, name, videos, videoStatus, preferTrainerId }: {
   );
 }
 
-function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerMin, log, injuries, videos, videoStatus, preferTrainerId, onComplete, onRetry, onClose }: { t: Theme; unit: WeightUnit; exercises: ProgramExercise[]; focus: string; nameOf: (e: ProgramExercise) => string; age: number | null; restingKcalPerMin: number | null; log: WorkoutEntry[]; injuries: Injury[]; videos: VideoItem[]; videoStatus: LibraryStatus; preferTrainerId: string | null; onComplete: (entries: WorkoutEntry[]) => Promise<boolean>; onRetry: (entries: WorkoutEntry[]) => Promise<boolean>; onClose: () => void }) {
+function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerMin, log, logStatus, injuries, videos, videoStatus, preferTrainerId, onComplete, onRetry, onClose }: { t: Theme; unit: WeightUnit; exercises: ProgramExercise[]; focus: string; nameOf: (e: ProgramExercise) => string; age: number | null; restingKcalPerMin: number | null; log: WorkoutEntry[]; logStatus: LoadStatus; injuries: Injury[]; videos: VideoItem[]; videoStatus: LibraryStatus; preferTrainerId: string | null; onComplete: (entries: WorkoutEntry[]) => Promise<boolean>; onRetry: (entries: WorkoutEntry[]) => Promise<boolean>; onClose: () => void }) {
   const insets = useSafeAreaInsets();
   const topPad = Math.max(insets.top, 44);
   const { w, elapsed, liveSample, liveHr, hrPeak, sessionKcal, zoneSecs, liveZone } = useLiveVitals(age, restingKcalPerMin);
@@ -1950,8 +1951,24 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
     const wkg = read.kg ?? 0;
     const name = nameOf(exercises[idx]);
     const newE1 = wkg && r ? est1RM(wkg, r) : 0;
-    const priorBest = Math.max(priorBest1RM(log, name), ...done.map((s) => (s.kg && s.reps ? est1RM(s.kg, s.reps) : 0)), 0);
-    if (newE1 > 0 && newE1 > priorBest) { setPrMsg(`New PR on ${name}! ${fig(liftLabel(wkg, unit))} × ${r}`); setConfetti(true); }
+    // A personal record is a claim about EVERYTHING this person has ever
+    // lifted, so it can only be made when the whole history was read.
+    //
+    // `priorBest1RM` over an unread log returns 0, and every set beats 0 — so a
+    // failed read turned the first set of the session, and every set after it,
+    // into "New PR!" with confetti, mid-workout, in front of a coach. Under
+    // 'partial' the log is a prefix, which is the same problem more quietly:
+    // the record it is compared against may be in the half that did not arrive.
+    //
+    // Sets logged in THIS session are still compared, because those we watched
+    // happen — they just cannot, on their own, establish a lifetime best.
+    const historyWhole = logStatus === 'ready';
+    const priorBest = Math.max(
+      historyWhole ? priorBest1RM(log, name) : 0,
+      ...done.map((s) => (s.kg && s.reps ? est1RM(s.kg, s.reps) : 0)),
+      0,
+    );
+    if (historyWhole && newE1 > 0 && newE1 > priorBest) { setPrMsg(`New PR on ${name}! ${fig(liftLabel(wkg, unit))} × ${r}`); setConfetti(true); }
     setResults((prev) => { const n = prev.map((a) => [...a]); n[idx].push({ reps: r, kg: wkg }); return n; });
     // Only after the first set of an exercise. By set three they have done the
     // movement three times and do not need it offered again.

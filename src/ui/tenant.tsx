@@ -127,7 +127,7 @@ interface TenantValue {
   brandMismatch: string | null;
   refresh: () => void;
   /** Owner-only; RLS enforces it. Returns false when the write is rejected. */
-  updateTenant: (patch: Partial<Pick<Tenant, 'name' | 'brandColor' | 'sessionFee'>>) => Promise<boolean>;
+  updateTenant: (patch: Partial<Pick<Tenant, 'name' | 'brandColor' | 'sessionFee' | 'currency'>>) => Promise<boolean>;
 }
 
 const Ctx = createContext<TenantValue | null>(null);
@@ -229,6 +229,14 @@ export function TenantProvider({ children }: { children: ReactNode }) {
     if (patch.name !== undefined) row.name = patch.name;
     if (patch.brandColor !== undefined) row.brand_color = patch.brandColor;
     if (patch.sessionFee !== undefined) row.session_fee = patch.sessionFee;
+    // Currency was excluded from this type, and `updateTenant` is the ONLY
+    // write to `tenants` in the repository — so nothing anywhere could set a
+    // gym's currency. `provision_profile` inserts none and part 99 added no
+    // default, which means every gym created since then has `currency = NULL`
+    // permanently, and half a dozen screens tell its owner "an owner sets it in
+    // the gym settings" over a control that did not exist. Its coaches cannot
+    // price a package at all.
+    if (patch.currency !== undefined) row.currency = patch.currency;
     if (!Object.keys(row).length) return true;
     try {
       const { data, error } = await supabase.from('tenants').update(row).eq('id', tenant.id).select('id');

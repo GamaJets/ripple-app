@@ -128,7 +128,10 @@ export default function OwnerOverview() {
                 internal admin tool belonging to somebody else. */}
             <Text style={{ ...ty.micro, color: t.ink3 }}>Your gym</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }} numberOfLines={1}>
-              {tenant?.name?.trim() || 'Name your gym in Ops'}
+              {/* Said "in Ops". Ops gained the session FEE; the gym's NAME is
+                  in Brand. Sending an owner to the wrong screen for the one
+                  thing the hero is asking them to do. */}
+              {tenant?.name?.trim() || 'Name your gym in Brand'}
             </Text>
           </View>
           <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: 2 }}>

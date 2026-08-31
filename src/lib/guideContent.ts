@@ -333,7 +333,7 @@ const OWNER_TABS: GuideSection[] = [
     points: [
       'Who they carry and what they actually delivered, per trainer.',
       'Invite a trainer by email and they accept it in their own app.',
-      'Delivered sessions can only be given a value once your gym has a session fee. Until it has one, no figure is shown rather than a nought.',
+      'Delivered sessions can only be given a value once your gym has a session fee, which you set in Ops. Until it has one, no figure is shown rather than a nought.',
     ],
   },
   {
@@ -341,7 +341,7 @@ const OWNER_TABS: GuideSection[] = [
     summary: 'How the app looks to your members.',
     points: [
       'Set the app name and pick a palette. It applies live.',
-      'The choice is held on this device. It is not pushed to your members’ phones, so a second Studio handset is set up on its own.',
+      'Both are saved to the gym, not to this handset, so a second Studio phone shows the same branding.',
     ],
   },
   {
@@ -357,6 +357,8 @@ const OWNER_TABS: GuideSection[] = [
     title: 'Ops',
     summary: 'The day-to-day running of the gym.',
     points: [
+      'Set what one delivered session pays. Payroll and value-per-client are both worked out from it, and nothing shows a figure until it is set.',
+      'Announce writes a note to your trainers.',
       'Activity is your gym’s own feed: members joining, coaches joining, sessions marked delivered or missed, and codes being redeemed, as they happen.',
       'Triage the support inbox — the feedback people send from inside the app, in one list.',
       'Trainer Rota: who is on the floor when, against what is booked.',

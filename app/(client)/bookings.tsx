@@ -84,8 +84,13 @@ type Item = { id: string; kind: 'class' | 'pt'; title: string; sub: string; star
 export default function Bookings() {
   const t = useTheme();
   const router = useRouter();
-  const { classes, myStatus, cancel: cancelClass } = useClasses();
-  const { sessions, releaseSession } = useSessions();
+  const { classes, myStatus, status: classStatus, cancel: cancelClass } = useClasses();
+  const { sessions, status: sessionStatus, releaseSession } = useSessions();
+  // Either read failing makes this list a fragment, and a fragment must not be
+  // announced as "you have nothing booked" — the member then turns up to
+  // nothing, or fails to turn up to something.
+  const bookingsWhole = classStatus === 'ready' && sessionStatus === 'ready';
+  const bookingsFailed = classStatus === 'error' || sessionStatus === 'error';
   const peer = useThreadPeerName('client', null);
   const head = peerHeading(peer, 'coach');
   // A name, or null when there is none we may show. This screen has nowhere to
@@ -245,7 +250,13 @@ export default function Bookings() {
             </View>
           ))}
           {items.length === 0 ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>No upcoming bookings. Book a class or a PT session to get started.</Text>
+            <Text style={{ ...ty.label, color: t.ink3 }}>
+              {bookingsFailed
+                ? 'Your bookings could not be read, so this is not a statement that you have none. Check again when you have signal before assuming a session is not on.'
+                : !bookingsWhole
+                  ? 'Loading.'
+                  : 'No upcoming bookings. Book a class or a PT session to get started.'}
+            </Text>
           ) : null}
         </Section>
       </ScrollView>
