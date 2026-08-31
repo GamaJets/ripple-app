@@ -12,10 +12,29 @@ import Svg, { Circle, Polyline, Line } from 'react-native-svg';
 import { useTheme } from './components';
 import { Icon, type IconName } from './Icon';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../theme/scale';
+import { hitSlopFor } from '../lib/a11y';
 import {
   axisLabel, pointLabel, tickIndices, maxTicksForWidth,
   segments, readablePoints, hasInteriorGap, nearestPoint,
 } from '../lib/chartAxis';
+
+/* ── how this kit talks ───────────────────────────────────────────────────
+ *
+ * Two rules, applied to every component below.
+ *
+ * ONE CONTROL, ONE SENTENCE. A Kpi column is a label, a value, a unit and a
+ * note — four Texts, and to VoiceOver four separate stops that arrive as
+ * "Weight", "72.9", "kg", "down 400 grams this week" with a swipe between each.
+ * Where a group of Texts is really one fact, it is marked `accessible` and given
+ * the sentence a person would say. Where the visible text already IS the
+ * sentence, nothing is added — a label that repeats what is on screen costs a
+ * maintainer something and buys the reader nothing.
+ *
+ * COLOUR IS NEVER THE ONLY CHANNEL. A filled ring, a lit dot, a brand-coloured
+ * bar: each of these says something that a screen reader gets nothing of, and
+ * that a person with low vision or in bright sun may not get either. Every one
+ * of them below now carries its state in words as well.
+ */
 
 /* ── structure ────────────────────────────────────────────────────────────── */
 
@@ -41,7 +60,15 @@ export function fig(v: number | string | null | undefined): string {
 
 export function Rule({ inset = 0 }: { inset?: number }) {
   const t = useTheme();
-  return <View style={{ height: hairline, backgroundColor: t.ring, marginLeft: inset }} />;
+  // A hairline divides for the eye and means nothing to the ear. Hidden so a
+  // screen reader walking a long settings screen does not stop on each of the
+  // twenty rules between the rows it actually wants.
+  return (
+    <View
+      accessibilityElementsHidden importantForAccessibility="no-hide-descendants"
+      style={{ height: hairline, backgroundColor: t.ring, marginLeft: inset }}
+    />
+  );
 }
 
 /** Vertical rhythm between sections. Pairs with <Rule/>. */
@@ -59,7 +86,16 @@ export function SectionHead({ title, note, onPress }: { title: string; note?: st
     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: sp.lg }}>
       <Text style={{ ...ty.micro, color: t.ink3 }}>{title}</Text>
       {note ? (
-        <Pressable onPress={onPress} disabled={!onPress} hitSlop={8}>
+        // The chevron is drawn as a character, so it is also SPOKEN as one —
+        // "All activity right-pointing angle quotation mark". The label says the
+        // words and the role says it is a button, which is what the glyph was
+        // there to convey. 12pt of caption plus this slop reaches 44pt.
+        <Pressable
+          onPress={onPress} disabled={!onPress}
+          accessibilityRole={onPress ? 'button' : undefined}
+          accessibilityLabel={onPress ? note : undefined}
+          hitSlop={{ top: 14, bottom: 14, left: 12, right: 12 }}
+        >
           <Text style={{ ...ty.caption, color: t.ink3 }}>{note}{onPress ? ' ›' : ''}</Text>
         </Pressable>
       ) : null}
@@ -94,10 +130,16 @@ export function Hero({
   const t = useTheme();
   const mark = tone || t.brand;
   const R = 31, C = 2 * Math.PI * R;
+  // "Weight" / "72.9" / "kg" / "down 400 g since Monday" are one fact and were
+  // four stops. Said as the sentence a person would say. The ring keeps its own
+  // element after it, because it is a different quantity and often a different
+  // subject — see arcLabel.
+  const spoken = [label, [figure, unit].filter(Boolean).join(' '), note].filter(Boolean).join(', ');
   return (
     <Pressable onPress={onPress} disabled={!onPress}
       style={{ flexDirection: 'row', alignItems: 'center', gap: sp.xl, paddingTop: sp.xxl, paddingBottom: sp.xl }}>
-      <View style={{ flex: 1 }}>
+      <View style={{ flex: 1 }} accessible accessibilityLabel={spoken}
+        accessibilityRole={onPress ? 'button' : undefined}>
         <Text style={{ ...ty.micro, color: t.ink3 }}>{label}</Text>
         <View style={{ flexDirection: 'row', alignItems: 'baseline', marginTop: sp.sm }}>
           <Text style={{ ...ty.hero, ...numeric, color: t.ink }}>{figure}</Text>
@@ -179,6 +221,10 @@ export function ChipGrid({ items, tone }: { items: Chip[]; tone?: string }) {
           onPress={c.onPress}
           accessibilityRole="button"
           accessibilityLabel={c.label}
+          // 8 + 18 + 8 is a 34pt pill. These are the destination chips a client
+          // taps between sets; five points of slop a side is the difference
+          // between hitting one and hitting its neighbour.
+          hitSlop={{ top: hitSlopFor(34), bottom: hitSlopFor(34), left: 0, right: 0 }}
           style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: sp.sm }}
         >
           <Icon name={c.icon} size={14} color={mark} />
@@ -207,8 +253,19 @@ export function KpiRow({ items, onPress }: { items: KpiItem[]; onPress?: (i: Kpi
   const t = useTheme();
   return (
     <View style={{ flexDirection: 'row' }}>
-      {items.map((k, i) => (
-        <Pressable key={k.label} onPress={() => onPress?.(k)} disabled={!onPress || !k.route}
+      {items.map((k, i) => {
+        const live = !!onPress && !!k.route;
+        // The delta's direction is drawn as a dot in the accent colour when it
+        // is movement the client wants and in ink3 when it is not. That is the
+        // whole signal, and it is colour alone — so it is also said.
+        const spoken = [
+          k.label,
+          [k.value, k.unit].filter(Boolean).join(' '),
+          k.delta ? `${k.delta}${k.good ? ', on track' : ''}` : '',
+        ].filter(Boolean).join(', ');
+        return (
+        <Pressable key={k.label} onPress={() => onPress?.(k)} disabled={!live}
+          accessible accessibilityLabel={spoken} accessibilityRole={live ? 'button' : undefined}
           style={{
             flex: 1,
             paddingRight: sp.md,
@@ -234,7 +291,8 @@ export function KpiRow({ items, onPress }: { items: KpiItem[]; onPress?: (i: Kpi
             </View>
           ) : null}
         </Pressable>
-      ))}
+        );
+      })}
     </View>
   );
 }
@@ -253,7 +311,10 @@ export function Card({ children, onPress, tone, style }: {
       ...(tone ? { borderWidth: hairline, borderColor: tone } : null),
     }, style]}>{children}</View>
   );
-  return onPress ? <Pressable onPress={onPress}>{body}</Pressable> : body;
+  // A tappable card is a button and has to say so; without a role it announces
+  // its contents and gives no hint that anything happens if you double-tap.
+  // No label — a card's own text is already the sentence.
+  return onPress ? <Pressable onPress={onPress} accessibilityRole="button">{body}</Pressable> : body;
 }
 
 /** The primary action: a ring, two lines, one button. */
@@ -287,7 +348,16 @@ export function ActionCard({
             the column to it clipped the caption to "DAY ST…". It sizes to
             whichever is wider, the ring or the word under it. */}
         {ring != null ? (
-          <View style={{ alignItems: 'center' }}>
+          // Same problem the Hero's arc had, and the same answer: the fill is a
+          // proportion nobody says out loud, and the number inside it belongs to
+          // a different quantity again. ringNote is what the number counts, so
+          // it is what the element is called.
+          <View style={{ alignItems: 'center' }}
+            accessible
+            accessibilityRole="progressbar"
+            accessibilityLabel={[ringLabel, ringNote].filter(Boolean).join(' ') || undefined}
+            accessibilityValue={{ min: 0, max: 100, now: arcPct(ring) }}
+          >
             <View style={{ width: 56, height: 56 }}>
               <Svg width={56} height={56} viewBox="0 0 56 56">
                 <Circle cx="28" cy="28" r={R} fill="none" stroke={t.surface3} strokeWidth={2.5} />
@@ -343,8 +413,12 @@ export function Cta({ label, onPress, tone, wide, disabled }: {
 }) {
   const t = useTheme();
   return (
+    // 11 + 18 + 11 is 40pt tall, four short of the minimum, and this is the
+    // primary action on most screens — pressed one-handed, mid-set, with a wet
+    // thumb. Slop rather than padding, so nothing in any layout moves.
     <Pressable onPress={onPress} disabled={disabled}
       accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ disabled: !!disabled }}
+      hitSlop={{ top: 2, bottom: 2, left: 0, right: 0 }}
       style={{
         backgroundColor: disabled ? t.surface2 : (tone || t.brand), borderRadius: radius.sm,
         paddingVertical: 11, paddingHorizontal: wide ? 0 : sp.lg,
@@ -371,6 +445,60 @@ const ICON_NAMES: Partial<Record<IconName, string>> = {
 };
 
 /** A low-emphasis button — no border, just a barely-there fill. */
+/**
+ * A form field with a label that STAYS.
+ *
+ * ── Why this exists ───────────────────────────────────────────────────────
+ *
+ * Every numeric box in this app named its unit in the placeholder — "Minutes",
+ * "Distance (km)", "Watts (optional)", "kg". A placeholder is drawn only while
+ * the field is EMPTY, so on any form that opens holding values already typed —
+ * an edit sheet, a correction, anything read back from the log — all of them
+ * are gone, and what is left is a column of bare numerals:
+ *
+ *     CARDIO   [ 43 ]  [ 12.7 ]
+ *              [ 141 ]
+ *
+ * 43 minutes or 43 seconds; 12.7 km or miles; 141 watts, or a heart rate, which
+ * is what 141 looks like. Nothing on the screen said, and the one place the
+ * reader most needs the unit is the place they are about to CHANGE the number.
+ * A guess that lands is a wrong figure saved over a right one.
+ *
+ * So the label is a sibling of the input rather than a property of it, and the
+ * unit is part of the label rather than a hint inside the box. `hint` carries
+ * what the placeholder should have carried all along — "optional", "leave blank
+ * if unknown" — and is likewise always visible.
+ *
+ * The label is NOT repeated as an accessibility label on the input: VoiceOver
+ * reads a `TextInput` together with the text above it, and doing both makes it
+ * say the word twice. Pass `a11y` only where the visible label is too terse to
+ * stand alone as a spoken sentence.
+ */
+export function Field({ label, hint, children, style, a11y }: {
+  label: string;
+  hint?: string;
+  children: ReactNode;
+  style?: StyleProp<ViewStyle>;
+  a11y?: string;
+}) {
+  const t = useTheme();
+  return (
+    <View style={[{ flex: 1 }, style]}>
+      <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 6, marginBottom: 5 }}>
+        <Text
+          accessible
+          accessibilityLabel={a11y ?? undefined}
+          style={{ ...ty.micro, color: t.ink3 }}
+        >
+          {label}
+        </Text>
+        {hint ? <Text style={{ ...ty.micro, color: t.ink3, opacity: 0.75 }}>{hint}</Text> : null}
+      </View>
+      {children}
+    </View>
+  );
+}
+
 export function Ghost({ label, onPress, icon, a11yLabel }: {
   label?: string; onPress: () => void; icon?: IconName; a11yLabel?: string;
 }) {
@@ -378,7 +506,10 @@ export function Ghost({ label, onPress, icon, a11yLabel }: {
   const round = !label;
   const spoken = label || a11yLabel || (icon ? ICON_NAMES[icon] ?? icon : undefined);
   return (
+    // The round form is 38pt and the pill form 40pt tall; both are under 44, and
+    // the round one is the back button on nearly every screen in the app.
     <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={spoken}
+      hitSlop={round ? hitSlopFor(38) : { top: 2, bottom: 2, left: 0, right: 0 }}
       style={{
         backgroundColor: t.surface2,
         borderRadius: round ? radius.pill : radius.sm,
@@ -398,7 +529,7 @@ export function QuickRow({ items }: { items: { icon: IconName; label: string; on
   return (
     <View style={{ flexDirection: 'row', gap: sp.sm }}>
       {items.map((q) => (
-        <Pressable key={q.label} onPress={q.onPress}
+        <Pressable key={q.label} onPress={q.onPress} accessibilityRole="button"
           style={{ flex: 1, alignItems: 'center', paddingVertical: sp.md, borderRadius: radius.sm, backgroundColor: t.surface2 }}>
           <Icon name={q.icon} size={18} color={t.ink2} />
           <Text style={{ ...ty.micro, letterSpacing: 0.3, color: t.ink2, marginTop: 7 }}>{q.label}</Text>
@@ -420,7 +551,17 @@ export function Meter({ label, val, target, unit = 'g', dim }: {
   const t = useTheme();
   const pct = Math.max(0, Math.min(100, Math.round((val / (target || 1)) * 100)));
   return (
-    <View style={{ marginTop: sp.md }}>
+    // "Protein" and "84 / 150g" are two stops that read as two unrelated facts,
+    // and the 3px bar between them is the third — a proportion carried entirely
+    // by how far a coloured line travels. One element, one sentence, and the
+    // percentage said rather than drawn.
+    <View
+      accessible
+      accessibilityRole="progressbar"
+      accessibilityLabel={`${label}, ${val} of ${target}${unit}`}
+      accessibilityValue={{ min: 0, max: 100, now: pct }}
+      style={{ marginTop: sp.md }}
+    >
       <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
         <Text style={{ ...ty.caption, color: t.ink2 }}>{label}</Text>
         <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{val} / {target}{unit}</Text>
@@ -552,10 +693,30 @@ export function Spark({ data, h = 74, w = 320, labels, unit = '' }: {
         )}
       </View>
       <View
+        accessible
         accessibilityRole="adjustable"
         accessibilityLabel={labels
           ? `Trend line, ${axisLabel(labels[drawn[0].i])} to ${axisLabel(labels[last.i])} — touch to read a point`
           : 'Trend line — touch to read a point'}
+        // "adjustable" makes VoiceOver offer swipe-up and swipe-down, and until
+        // now nothing was listening: the gesture was advertised and did nothing,
+        // which is worse than not advertising it. These step through the points
+        // that EXIST — a swipe skips a hole rather than reading it as a value,
+        // the same rule the touch handler follows.
+        accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
+        onAccessibilityAction={(e) => {
+          const act = e.nativeEvent.actionName;
+          if (act !== 'increment' && act !== 'decrement') return;
+          const here = sel == null ? drawn[drawn.length - 1].i : sel;
+          const at = drawn.findIndex((p) => p.i === here);
+          const next = drawn[Math.max(0, Math.min(drawn.length - 1, (at < 0 ? drawn.length - 1 : at) + (act === 'increment' ? 1 : -1)))];
+          if (next) setSel(next.i);
+        }}
+        accessibilityValue={{
+          text: shownPoint == null
+            ? `${(Math.round(last.v * 10) / 10).toLocaleString('en-GB')}${unit}${labels ? `, ${pointLabel(labels[last.i])}` : ''}`
+            : `${shownValue}${unit}${when ? `, ${when}` : ''}`,
+        }}
         onStartShouldSetResponder={() => true}
         onMoveShouldSetResponder={() => true}
         onResponderGrant={(e) => pick(e.nativeEvent.locationX)}
@@ -622,8 +783,19 @@ export function Spark({ data, h = 74, w = 320, labels, unit = '' }: {
 /** Seven day-cells; filled ones are days trained. */
 export function WeekDots({ done }: { done: number }) {
   const t = useTheme();
+  // Seven 3px bars, and the only difference between a day trained and a day not
+  // is which of two colours the bar is. Nothing else on screen says the number,
+  // so to a screen reader this component was silent and to anyone who cannot
+  // separate the accent from surface3 it was seven identical dashes.
+  const n = Math.max(0, Math.min(7, Math.round(done)));
   return (
-    <View style={{ flexDirection: 'row', gap: 5, marginTop: sp.md }}>
+    <View
+      accessible
+      accessibilityRole="progressbar"
+      accessibilityLabel={n === 1 ? '1 of 7 days trained this week' : `${n} of 7 days trained this week`}
+      accessibilityValue={{ min: 0, max: 7, now: n }}
+      style={{ flexDirection: 'row', gap: 5, marginTop: sp.md }}
+    >
       {Array.from({ length: 7 }).map((_, i) => (
         <View key={i} style={{ flex: 1, height: 3, borderRadius: 2, backgroundColor: i < done ? t.brand : t.surface3 }} />
       ))}
@@ -662,12 +834,19 @@ export function Notice({ tone, kicker, title, note, children }: {
   const mark = tone || t.brand;
   return (
     <Card tone={mark} style={{ marginBottom: sp.md }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: sp.sm }}>
-        <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: mark }} />
-        <Text style={{ ...ty.micro, color: t.ink3 }}>{kicker}</Text>
+      {/* Kicker, title and note are one statement — "Not the whole list.
+          Showing the first 200. There are more members than fit in one read."
+          Three stops with a swipe between them is three fragments. `children`
+          stays outside the group because it is usually a button, and a button
+          inside an `accessible` View stops being reachable. */}
+      <View accessible accessibilityLabel={[kicker, title, note].filter(Boolean).join('. ')}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: sp.sm }}>
+          <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: mark }} />
+          <Text style={{ ...ty.micro, color: t.ink3 }}>{kicker}</Text>
+        </View>
+        <Text style={{ ...ty.head, color: t.ink }}>{title}</Text>
+        {note ? <Text style={{ ...ty.label, color: t.ink2, marginTop: 4 }}>{note}</Text> : null}
       </View>
-      <Text style={{ ...ty.head, color: t.ink }}>{title}</Text>
-      {note ? <Text style={{ ...ty.label, color: t.ink2, marginTop: 4 }}>{note}</Text> : null}
       {children}
     </Card>
   );

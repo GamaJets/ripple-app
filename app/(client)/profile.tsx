@@ -123,7 +123,13 @@ function Seg({ options, value: val, onChange, t }: { options: string[]; value: s
   return (
     <View style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: radius.sm, padding: 3 }}>
       {options.map((o) => (
-        <Pressable key={o} onPress={() => onChange(o)} style={{ paddingHorizontal: sp.md, paddingVertical: 7, borderRadius: radius.sm, backgroundColor: val === o ? t.brand : 'transparent' }}>
+        <Pressable key={o} onPress={() => onChange(o)}
+          // The chosen segment was carried by background colour alone, which a
+          // screen reader gets nothing of: every option read as a plain button
+          // and nothing said which one was on.
+          accessibilityRole="radio" accessibilityState={{ selected: val === o }}
+          hitSlop={{ top: 8, bottom: 8, left: 0, right: 0 }}
+          style={{ paddingHorizontal: sp.md, paddingVertical: 7, borderRadius: radius.sm, backgroundColor: val === o ? t.brand : 'transparent' }}>
           <Text style={{ ...ty.label, fontWeight: '600', color: val === o ? t.brandInk : t.ink3 }}>{o.toUpperCase()}</Text>
         </Pressable>
       ))}
@@ -144,6 +150,14 @@ const HUB_ICON: Record<string, IconName> = {
   '/(client)/appearance': 'palette', '/(client)/settings': 'settings', '/(client)/trainers': 'people', '/(client)/feedback': 'message',
 };
 const HUB_GROUPS: { title: string; items: { label: string; note: string; route: string }[] }[] = [
+  // First, deliberately. Pairing a watch is not an occasional settings errand —
+  // it is the thing a member opens Me to do in their first week and again every
+  // time a strap stops syncing, and it was the fifth group down, under roughly
+  // twenty-eight rows. A group's position is the only ranking this screen has.
+  { title: 'Devices & Media', items: [
+    { label: 'Watch & Devices', note: 'Apple Watch, WHOOP, Garmin…', route: '/(client)/devices' },
+    { label: 'Music & Playlists', note: 'AI workout playlists', route: '/(client)/music' },
+  ] },
   { title: 'Progress & Insights', items: [
     { label: 'Weekly Report', note: 'Your week at a glance · share it', route: '/(client)/report' },
     { label: 'Consistency', note: '12-week training heatmap', route: '/(client)/consistency' },
@@ -187,10 +201,6 @@ const HUB_GROUPS: { title: string; items: { label: string; note: string; route: 
     // and what is left is one React Native `Share.share()` call. The row now
     // describes the OS share sheet, which is the whole of what happens.
     { label: 'Share & Social', note: 'Share your progress from the share sheet', route: '/(client)/social' },
-  ] },
-  { title: 'Devices & Media', items: [
-    { label: 'Watch & Devices', note: 'Apple Watch, WHOOP, Garmin…', route: '/(client)/devices' },
-    { label: 'Music & Playlists', note: 'AI workout playlists', route: '/(client)/music' },
   ] },
   { title: 'Account', items: [
     { label: 'Appearance', note: 'Theme & accent colour', route: '/(client)/appearance' },
@@ -369,7 +379,7 @@ export default function Profile() {
   // Search is a second way to reach a screen. It is not a first one: it only
   // finds what somebody already knows to type, and a member who has never seen
   // "Strength Standards" will not search for it. So the hub lists everything
-  // again, collapsed by default group-by-group state (see `collapsed` above) so
+  // again, with per-group collapse (see `collapsed` above, expanded by default) so
   // the length costs nothing, and Explore is the shortcut rather than the door.
   //
   // Every route below was checked against app/(client)/ before this shipped —

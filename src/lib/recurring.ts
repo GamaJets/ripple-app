@@ -115,7 +115,7 @@ export function shapeSeries(rows: RawSeries[] | null | undefined): RecurringSeri
       clientId: String(r.client_id),
       clientName: typeof r.client_name === 'string' && r.client_name.trim() ? r.client_name.trim() : null,
       dow: num(r.dow, 0),
-      hour: num(r.hour, 1),
+      hour: num(r.hour, 0),
       minute: num(r.minute, 0),
       durationMin: num(r.duration_min, 60),
       tz: typeof r.tz === 'string' ? r.tz : '',

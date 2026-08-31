@@ -15,7 +15,7 @@ import { useRouter, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { tapLight } from '../../src/ui/haptics';
 import { Icon } from '../../src/ui/Icon';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, Notice, Flag, fig, ChipGrid } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, Notice, Flag, Field, fig, ChipGrid } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../../src/theme/scale';
 import type { Theme } from '../../src/theme/tokens';
 import { buildProgram, type ProgramExercise } from '../../src/lib/programs';
@@ -679,6 +679,41 @@ export default function Train() {
   };
   const inp = { color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 10, flex: 1, ...ty.body } as const;
 
+  // Rendered by `{showCal ? overlays : null}` inside the month sheet and by
+  // `{!showCal ? overlays : null}` outside it — see the note at the second one.
+  const overlays = (
+    <>
+      {editEntry ? (
+        <EditEntrySheet
+          t={t}
+          unit={wu}
+          suggestions={knownExercises}
+          entry={editEntry}
+          onClose={() => setEditEntry(null)}
+          // The sheet closes only once the server has the correction. It used
+          // to close on the tap and drop the boolean, which is this codebase's
+          // defining bug wearing a pencil icon: the calendar redrew with the
+          // corrected sets, the day's volume followed, and the row still said
+          // what it always had. `updateWorkout` now leaves `log` alone on
+          // failure, so the sheet reopening on the old figures is the truth.
+          onSave={async (patch) => {
+            const saved = await updateWorkout(editEntry, patch);
+            if (saved) { setEditEntry(null); tapLight(); }
+            return saved;
+          }}
+        />
+      ) : null}
+      <SessionHrSheet
+        visible={!!hrEntry}
+        onClose={() => setHrEntry(null)}
+        title={hrEntry?.exercise || ''}
+        startISO={hrEntry?.t || new Date().toISOString()}
+        durationMin={hrEntry ? (hrEntry.cardio?.mins || Math.max(20, (hrEntry.sets?.length || 0) * 4)) : 45}
+        age={ageFromDob(cd.dob)}
+      />
+    </>
+  );
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView ref={pageScroll} contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
@@ -938,17 +973,22 @@ export default function Train() {
                   thermoregulation rather than work, so a figure derived from
                   time and body weight would be invented. A recovery session is
                   how long it lasted. */}
-              <View style={{ flexDirection: 'row', gap: sp.sm }}>
-                <TextInput value={mins} onChangeText={setMins} keyboardType="numeric" placeholder="Time (min)" placeholderTextColor={t.ink3} style={inp} />
+              <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'flex-end' }}>
+                <Field label="Time" hint="min">
+                  <TextInput value={mins} onChangeText={setMins} keyboardType="numeric" style={inp} />
+                </Field>
                 {mode !== 'recovery' ? (
-                  <>
-                    <TextInput value={dist} onChangeText={setDist} keyboardType="numeric" placeholder="Distance" placeholderTextColor={t.ink3} style={inp} />
-                    <Pressable onPress={() => setUnit(unit === 'km' ? 'mi' : 'km')} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, justifyContent: 'center' }}>
-                      <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>{unit}</Text>
-                    </Pressable>
-                  </>
+                  <Field label="Distance" hint={unit}>
+                    <View style={{ flexDirection: 'row', gap: sp.sm }}>
+                      <TextInput value={dist} onChangeText={setDist} keyboardType="numeric" style={inp} />
+                      <Pressable accessibilityRole="button" accessibilityLabel={`Distance unit: ${unit === 'km' ? 'kilometres' : 'miles'}. Switch to ${unit === 'km' ? 'miles' : 'kilometres'}`}
+                        onPress={() => setUnit(unit === 'km' ? 'mi' : 'km')} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, justifyContent: 'center' }}>
+                        <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>{unit}</Text>
+                      </Pressable>
+                    </View>
+                  </Field>
                 ) : null}
-                <Pressable onPress={logCardio} style={{ backgroundColor: t.brand, borderRadius: radius.sm, paddingHorizontal: sp.lg, justifyContent: 'center' }}>
+                <Pressable onPress={logCardio} style={{ backgroundColor: t.brand, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: 11, justifyContent: 'center' }}>
                   <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>Log</Text>
                 </Pressable>
               </View>
@@ -1101,26 +1141,19 @@ export default function Train() {
 
       </ScrollView>
 
-      {editEntry ? (
-        <EditEntrySheet
-          t={t}
-          unit={wu}
-          suggestions={knownExercises}
-          entry={editEntry}
-          onClose={() => setEditEntry(null)}
-          // The sheet closes only once the server has the correction. It used
-          // to close on the tap and drop the boolean, which is this codebase's
-          // defining bug wearing a pencil icon: the calendar redrew with the
-          // corrected sets, the day's volume followed, and the row still said
-          // what it always had. `updateWorkout` now leaves `log` alone on
-          // failure, so the sheet reopening on the old figures is the truth.
-          onSave={async (patch) => {
-            const saved = await updateWorkout(editEntry, patch);
-            if (saved) { setEditEntry(null); tapLight(); }
-            return saved;
-          }}
-        />
-      ) : null}
+      {/* ── Why these two sheets are a variable rather than JSX in place ──────
+          Both are opened from TWO places: the rows on this screen, and the rows
+          inside the month sheet below. A `<Modal>` mounted here, as a SIBLING of
+          that month `<Modal>`, is presented in a window BENEATH it on iOS — so
+          tapping "Heart rate" or the pencil inside the month sheet set the state,
+          opened the sheet, and put it behind an opaque sheet the person was still
+          looking at. From the outside that is a button that does nothing.
+
+          So they are rendered in exactly one place at a time: inside the month
+          sheet while it is open, out here while it is not. One instance either
+          way, so no duplicated state and no two sheets fighting over the same
+          entry. */}
+      {!showCal ? overlays : null}
 
       <Modal visible={!!swapFor} transparent animationType="slide" onRequestClose={() => setSwapFor(null)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setSwapFor(null)} />
@@ -1256,6 +1289,7 @@ export default function Train() {
             </View>
           </ScrollView>
         </View>
+        {showCal ? overlays : null}
       </Modal>
 
       <Modal visible={session} animationType="slide" onRequestClose={() => setSession(false)}>
@@ -1303,14 +1337,6 @@ export default function Train() {
         </View>
         </KeyboardAvoidingView>
       </Modal>
-      <SessionHrSheet
-        visible={!!hrEntry}
-        onClose={() => setHrEntry(null)}
-        title={hrEntry?.exercise || ''}
-        startISO={hrEntry?.t || new Date().toISOString()}
-        durationMin={hrEntry ? (hrEntry.cardio?.mins || Math.max(20, (hrEntry.sets?.length || 0) * 4)) : 45}
-        age={ageFromDob(cd.dob)}
-      />
       <Confetti show={confetti} onDone={() => setConfetti(false)} />
     </SafeAreaView>
   );
@@ -1334,9 +1360,13 @@ function LogRow({ t, unit, onLog }: { t: Theme; unit: WeightUnit; onLog: (reps: 
   const [reps, setReps] = useState(''); const [kg, setKg] = useState('');
   const inp = { color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 9, flex: 1, ...ty.body } as const;
   return (
-    <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
-      <TextInput value={reps} onChangeText={setReps} keyboardType="numeric" placeholder="reps" placeholderTextColor={t.ink3} style={inp} />
-      <TextInput value={kg} onChangeText={setKg} keyboardType="numeric" placeholder={unit} placeholderTextColor={t.ink3} style={inp} />
+    <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md, alignItems: 'flex-end' }}>
+      <Field label="Reps">
+        <TextInput value={reps} onChangeText={setReps} keyboardType="numeric" style={inp} />
+      </Field>
+      <Field label={unit.toUpperCase()} a11y={unit === 'kg' ? 'Load in kilograms' : 'Load in pounds'}>
+        <TextInput value={kg} onChangeText={setKg} keyboardType="numeric" style={inp} />
+      </Field>
       <Pressable accessibilityRole="button" accessibilityLabel="Log set" onPress={() => {
         // The reps are checked HERE and said out loud. `logSet` guarded with a
         // bare `if (!reps) return`, so tapping this with an empty reps box —
@@ -1572,15 +1602,22 @@ function TimedSessionRunner({ t, kind, activity, age, restingKcalPerMin, default
           ) : (
             <Section>
               <SectionHead title="Anything to Add" />
-              <View style={{ flexDirection: 'row', gap: sp.sm }}>
-                <TextInput value={dist} onChangeText={setDist} keyboardType="numeric" placeholder="Distance" placeholderTextColor={t.ink3} style={inp} />
-                <Pressable onPress={() => setUnit(unit === 'km' ? 'mi' : 'km')} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, justifyContent: 'center' }}>
-                  <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>{unit}</Text>
-                </Pressable>
-              </View>
-              <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm }}>
-                <TextInput value={watts} onChangeText={setWatts} keyboardType="numeric" placeholder="Avg watts (optional)" placeholderTextColor={t.ink3} style={inp} />
-                <TextInput value={kcalIn} onChangeText={setKcalIn} keyboardType="numeric" placeholder="Calories (optional)" placeholderTextColor={t.ink3} style={inp} />
+              <Field label="Distance" hint={unit}>
+                <View style={{ flexDirection: 'row', gap: sp.sm }}>
+                  <TextInput value={dist} onChangeText={setDist} keyboardType="numeric" style={inp} />
+                  <Pressable accessibilityRole="button" accessibilityLabel={`Distance unit: ${unit === 'km' ? 'kilometres' : 'miles'}. Switch to ${unit === 'km' ? 'miles' : 'kilometres'}`}
+                    onPress={() => setUnit(unit === 'km' ? 'mi' : 'km')} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, justifyContent: 'center' }}>
+                    <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>{unit}</Text>
+                  </Pressable>
+                </View>
+              </Field>
+              <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
+                <Field label="Avg watts" hint="optional">
+                  <TextInput value={watts} onChangeText={setWatts} keyboardType="numeric" style={inp} />
+                </Field>
+                <Field label="Calories" hint="kcal · optional">
+                  <TextInput value={kcalIn} onChangeText={setKcalIn} keyboardType="numeric" style={inp} />
+                </Field>
               </View>
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
                 {sessionKcal != null && sessionKcal > 0
@@ -2286,10 +2323,14 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
           </View>
         ) : null; })() : null}
 
-        <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.xl, marginBottom: sp.sm }}>Log set {done.length + 1} · reps × {unit}</Text>
-        <View style={{ flexDirection: 'row', gap: sp.md }}>
-          <TextInput value={reps} onChangeText={setReps} keyboardType="numeric" placeholder="reps" placeholderTextColor={t.ink3} style={inp} />
-          <TextInput value={load} onChangeText={setLoad} keyboardType="numeric" placeholder={unit} placeholderTextColor={t.ink3} style={inp} />
+        <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.xl, marginBottom: sp.sm }}>Log set {done.length + 1}</Text>
+        <View style={{ flexDirection: 'row', gap: sp.md, alignItems: 'flex-end' }}>
+          <Field label="Reps">
+            <TextInput value={reps} onChangeText={setReps} keyboardType="numeric" style={inp} />
+          </Field>
+          <Field label={unit.toUpperCase()} a11y={unit === 'kg' ? 'Load in kilograms' : 'Load in pounds'}>
+            <TextInput value={load} onChangeText={setLoad} keyboardType="numeric" style={inp} />
+          </Field>
           <Pressable accessibilityLabel="Log set" accessibilityRole="button" onPress={logSet} style={{ backgroundColor: t.brand, borderRadius: radius.sm, paddingHorizontal: 22, justifyContent: 'center' }}><Icon name="check" size={18} color={t.brandInk} /></Pressable>
         </View>
 
@@ -2535,12 +2576,23 @@ function EditEntrySheet({ t, unit, entry, suggestions, onClose, onSave }: {
 
           {isCardio ? (
             <View style={{ marginTop: sp.xl }}>
-              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 6 }}>Cardio</Text>
+              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Cardio</Text>
+              {/* Labels, not placeholders. This sheet opens holding the numbers
+                  already logged, so every placeholder below was invisible from
+                  the moment it appeared — three bare numerals under one word,
+                  with nothing to say which was minutes, which was distance, or
+                  that 141 was watts rather than a heart rate. */}
               <View style={{ flexDirection: 'row', gap: sp.sm }}>
-                <TextInput value={mins} onChangeText={setMins} keyboardType="numeric" placeholder="Minutes" placeholderTextColor={t.ink3} style={{ ...inp, flex: 1 }} />
-                <TextInput value={dist} onChangeText={setDist} keyboardType="numeric" placeholder={`Distance (${entry.cardio!.unit})`} placeholderTextColor={t.ink3} style={{ ...inp, flex: 1 }} />
+                <Field label="Minutes">
+                  <TextInput value={mins} onChangeText={setMins} keyboardType="numeric" style={inp} />
+                </Field>
+                <Field label={`Distance · ${entry.cardio!.unit}`} a11y={`Distance in ${entry.cardio!.unit === 'mi' ? 'miles' : 'kilometres'}`}>
+                  <TextInput value={dist} onChangeText={setDist} keyboardType="numeric" style={inp} />
+                </Field>
               </View>
-              <TextInput value={watts} onChangeText={setWatts} keyboardType="numeric" placeholder="Watts (optional)" placeholderTextColor={t.ink3} style={{ ...inp, marginTop: sp.sm }} />
+              <Field label="Avg watts" hint="optional" style={{ marginTop: sp.md }}>
+                <TextInput value={watts} onChangeText={setWatts} keyboardType="numeric" style={inp} />
+              </Field>
             </View>
           ) : (
             <View style={{ marginTop: sp.xl }}>
@@ -2548,7 +2600,16 @@ function EditEntrySheet({ t, unit, entry, suggestions, onClose, onSave }: {
                   placeholder, which disappears the moment a row has a number
                   in it — and a column of loads with no unit over it is exactly
                   how somebody types pounds into a kilogram field. */}
-              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 6 }}>Sets · reps × {unit.toUpperCase()}</Text>
+              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Sets</Text>
+              {/* A heading over the whole block named the units once; these name
+                  the two columns, and stay put once there are numbers in them. */}
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginBottom: 6 }}>
+                <View style={{ width: 22 }} />
+                <Text style={{ ...ty.micro, color: t.ink3, flex: 1 }}>Reps</Text>
+                <Text style={{ ...ty.caption, color: 'transparent' }}>×</Text>
+                <Text style={{ ...ty.micro, color: t.ink3, flex: 1 }}>{unit.toUpperCase()}</Text>
+                <View style={{ width: 24 }} />
+              </View>
               {rows.map((r, i) => (
                 <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginBottom: sp.sm }}>
                   <Text style={{ ...ty.caption, color: t.ink3, width: 22 }}>{i + 1}</Text>
@@ -2568,8 +2629,9 @@ function EditEntrySheet({ t, unit, entry, suggestions, onClose, onSave }: {
           )}
 
           <View style={{ marginTop: sp.xl }}>
-            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 6 }}>Calories</Text>
-            <TextInput value={kcal} onChangeText={setKcal} keyboardType="numeric" placeholder="Leave blank if unknown" placeholderTextColor={t.ink3} style={inp} />
+            <Field label="Calories" hint="kcal · leave blank if unknown">
+              <TextInput value={kcal} onChangeText={setKcal} keyboardType="numeric" style={inp} />
+            </Field>
           </View>
         </ScrollView>
       </View>

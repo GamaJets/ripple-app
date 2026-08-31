@@ -47,7 +47,7 @@ export default function TrainerLayout() {
       backBehavior="history"
       screenOptions={{
         headerShown: false,
-        tabBarStyle: { backgroundColor: t.surface, borderTopColor: t.ring, height: 56 + bottomPad, paddingTop: sp.sm, paddingBottom: bottomPad },
+        tabBarStyle: { backgroundColor: t.surface, borderTopColor: t.ring, minHeight: 56 + bottomPad, paddingTop: sp.sm, paddingBottom: bottomPad },
         tabBarActiveTintColor: t.brand,
         tabBarInactiveTintColor: t.ink3,
         tabBarLabelStyle: { ...ty.micro, textTransform: 'none', letterSpacing: 0.2, fontWeight: '500' },
@@ -91,6 +91,9 @@ export default function TrainerLayout() {
       <Tabs.Screen name="client-nutrition" options={{ href: null, title: 'Their Nutrition' }} />
       <Tabs.Screen name="group" options={{ href: null, title: 'Group Programme' }} />
       <Tabs.Screen name="share-kit" options={{ href: null, title: 'Share Kit' }} />
+      <Tabs.Screen name="documents" options={{ href: null, title: 'Documents' }} />
+      <Tabs.Screen name="invoices" options={{ href: null, title: 'Invoices' }} />
+      <Tabs.Screen name="nudges" options={{ href: null, title: 'Nudges' }} />
       <Tabs.Screen name="profile" options={{ title: 'Profile', tabBarIcon: ({ color }) => <Icon name="me" size={23} color={color} /> }} />
     </Tabs>
     <WhatsNewSheet visible={whatsNew.visible} releases={whatsNew.releases} onClose={whatsNew.onClose} />
