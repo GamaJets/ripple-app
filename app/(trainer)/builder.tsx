@@ -65,6 +65,12 @@ import { useProgramGroups } from '../../src/ui/groupProgram';
 import { listNames } from '../../src/lib/groupProgram';
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+/** 's' unless there is exactly one of them. Four counts on this screen said
+ *  "1 exercises" — the Assign button, the Training Days head, the template rows
+ *  and the save sheet — because the day count was pluralised and the exercise
+ *  count beside it was not. A coach reads the button before an irreversible
+ *  write over somebody's training; it should be written in English. */
+const s = (n: number) => (n === 1 ? '' : 's');
 const LIB: { name: string; group: string }[] = [
   { name: 'Back Squat', group: 'Legs' }, { name: 'Front Squat', group: 'Legs' }, { name: 'Leg Press', group: 'Legs' },
   { name: 'Romanian Deadlift', group: 'Hamstrings' }, { name: 'Deadlift', group: 'Back' }, { name: 'Hip Thrust', group: 'Glutes' },
@@ -607,7 +613,7 @@ export default function Builder() {
 
         {/* ── templates ──────────────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Templates" note="Save as template" onPress={() => { setTplName(title); setSaveOpen(true); }} />
+          <SectionHead title="Templates" note="Save as Template" onPress={() => { setTplName(title); setSaveOpen(true); }} />
           <Ghost label="Start From a Template" icon="grid" onPress={() => setTplPick(true)} />
         </Section>
 
@@ -623,7 +629,7 @@ export default function Builder() {
               the bottom is what has to be held. */}
           {planGuard.allowed ? null : (
             <Notice tone={t.warn} kicker={programStatus === 'loading' ? 'Reading' : 'Programme'}
-              title={programStatus === 'loading' ? 'Reading Their Current Programme' : 'What they are on could not be read'}
+              title={programStatus === 'loading' ? 'Reading their current programme' : 'What they are on could not be read'}
               note={`${planGuard.reason} Nothing has been loaded into the builder, because an empty builder is not this client's plan.`} />
           )}
 
@@ -657,7 +663,7 @@ export default function Builder() {
         {/* ── days ───────────────────────────────────────────────────────── */}
         <Section>
           <SectionHead title="Training Days"
-            note={days.length ? `${days.length} day${days.length === 1 ? '' : 's'} · ${num(totalExercises)} exercises` : undefined} />
+            note={days.length ? `${days.length} day${s(days.length)} · ${num(totalExercises)} exercise${s(totalExercises)}` : undefined} />
 
           {days.length === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>
@@ -793,7 +799,7 @@ export default function Builder() {
             </View>
           ) : null}
           <View style={{ opacity: canAssign && planGuard.allowed && injuryGate.allowed ? 1 : 0.4 }} pointerEvents={canAssign && planGuard.allowed && injuryGate.allowed ? 'auto' : 'none'}>
-            <Cta wide label={injuryGate.label ?? planGuard.label ?? `Assign to ${client?.name ?? 'client'} · ${num(totalExercises)} exercises`} onPress={assign} />
+            <Cta wide label={injuryGate.label ?? planGuard.label ?? `Assign to ${client?.name ?? 'This Client'} · ${num(totalExercises)} exercise${s(totalExercises)}`} onPress={assign} />
           </View>
           {/* Not a gate. A coach may have every reason to programme around a
               knee deliberately — that is their judgement and their client. It
@@ -1041,7 +1047,7 @@ export default function Builder() {
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{tpl.name}</Text>
-                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{dc} days · {ec} exercises</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{num(dc)} day{s(dc)} · {num(ec)} exercise{s(ec)}</Text>
                   </View>
                   <Text style={{ ...ty.label, fontWeight: '500', color: t.brand }}>Use</Text>
                 </Pressable>
@@ -1061,7 +1067,7 @@ export default function Builder() {
         <View style={sheet}>
           <Text style={{ ...ty.title, color: t.ink }}>Save as Template</Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>
-            Reuse this program with other clients — {num(totalExercises)} exercises across {days.filter((d) => d.exercises.length).length} days.
+            Reuse this program with other clients — {num(totalExercises)} exercise{s(totalExercises)} across {num(days.filter((d) => d.exercises.length).length)} day{s(days.filter((d) => d.exercises.length).length)}.
           </Text>
           <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Template name</Text>
           <TextInput value={tplName} onChangeText={setTplName} placeholder="e.g. Push · Pull · Legs" placeholderTextColor={t.ink3}

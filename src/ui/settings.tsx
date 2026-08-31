@@ -73,7 +73,7 @@ import { reportError } from '../lib/reportError';
 import { useAuthRevision } from './authRevision';
 import { registerForPush, pushAvailable, handsetPushTokens, forgetRegisteredToken } from './pushNotifications';
 import { consentFromStored, recordPushConsent } from '../lib/pushConsent';
-import { assertWrote } from '../lib/wroteRows';
+import { assertWrote, writeFailure } from '../lib/wroteRows';
 import type { WeightUnit, LengthUnit } from '../lib/units';
 import { resolveUnits, deviceRegion, type UnitSource } from '../lib/unitPreference';
 
@@ -516,8 +516,20 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     // Written back to whichever table the read found the account in, so a
     // coach's choice lands somewhere durable and a client's keeps landing
     // where every other screen already reads it from.
-    supabase.from(unitHome.current).update(row).eq('id', uid)
-      .then(({ error }) => { if (error) reportError('settings.units.write', error); },
+    //
+    // Counted, not merely un-errored. An UPDATE that matches no row is a 204
+    // with `error` null — a coach whose `profiles` row the policy will not let
+    // them touch, or an id that has moved between the two tables since the read
+    // — so `if (error)` reported nothing and the choice quietly stayed on this
+    // handset. Nothing on screen claims otherwise either way, which is why this
+    // is a report rather than an alert; the point is that the report happens at
+    // all, so the unit a coach reads and TYPES on somebody else's record has an
+    // audit trail when it does not follow them to a second phone.
+    supabase.from(unitHome.current).update(row, { count: 'exact' }).eq('id', uid)
+      .then((r) => {
+        const why = writeFailure('Your units', r);
+        if (why) reportError('settings.units.write', r.error ?? new Error(why), { table: unitHome.current });
+      },
             (e: unknown) => reportError('settings.units.write', e));
   };
 

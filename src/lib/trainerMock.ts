@@ -53,6 +53,24 @@ export interface RosterClient {
    *  were not there. coach_clients.created_at has always held this; the roster
    *  selected it and then dropped it on the floor. */
   joinedAt?: string | null;
+  /** True when this row is a `coach_clients` note and nothing else — somebody
+   *  the coach typed into Add Client, who has no Repple account.
+   *
+   *  Load-bearing for app/(trainer)/client.tsx, which asks eight questions
+   *  about one person and must not ask any of them about this one: every policy
+   *  behind those reads goes through `is_my_client()`, which looks in
+   *  `clients`, so each of them returns zero rows and NO error — and zero rows
+   *  with no error is what this app renders as "they have none". The screen
+   *  used to tell the two apart by the id, on the belief that a hand-added
+   *  client's id is one the phone invented; `coach_clients.id` is
+   *  `uuid DEFAULT gen_random_uuid()`, so it is a real uuid from the first
+   *  round trip onward and the id has not been able to answer this since.
+   *  See src/lib/clientRecord.ts.
+   *
+   *  Undefined means the loader did not say — an older cached row, or the first
+   *  render before the roster arrives. It is not "false": only an explicit true
+   *  withholds a screen. */
+  handAdded?: boolean;
   injuries?: { area: string; severity: string; note?: string; isNew?: boolean }[];
   /** Disclosures they have marked recovered. Kept SEPARATE from `injuries`
    *  rather than folded in: the acknowledgement gate and the roster's "Injury"

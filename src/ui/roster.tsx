@@ -150,7 +150,14 @@ export function RosterProvider({ children }: { children: ReactNode }) {
           if (mcErr) partialFailure = true;
           const mcPage = capped(mc);
           if (mcPage.truncated) partialRead = true;
-          manual = mcPage.rows.map((r: any) => ({ id: r.id, name: r.name, goal: r.goal || 'General', weightDelta: null, adherence: null, lastActive: 'added by you', next: '—', unread: null, mode: readCoachedMode(r.mode), joinedAt: r.created_at ?? null }));
+          // `handAdded` is marked HERE, at the only place that knows which
+          // table the row came out of. Downstream nothing can work it out any
+          // more: `coach_clients.id` is uuid DEFAULT gen_random_uuid(), so a
+          // hand-added client's id is indistinguishable from a real client's,
+          // and app/(trainer)/client.tsx spent that similarity telling coaches
+          // that people with no account had disclosed no injuries and not
+          // filled in their intake. See src/lib/clientRecord.ts.
+          manual = mcPage.rows.map((r: any) => ({ id: r.id, name: r.name, goal: r.goal || 'General', weightDelta: null, adherence: null, lastActive: 'added by you', next: '—', unread: null, mode: readCoachedMode(r.mode), joinedAt: r.created_at ?? null, handAdded: true }));
         } catch { partialFailure = true; }
         // Ordered as well as capped. This read had no `.order()` at all, which
         // was harmless while it returned everything and stops being harmless the
@@ -280,7 +287,7 @@ export function RosterProvider({ children }: { children: ReactNode }) {
         //     not produce a smaller number, it produces a wrong one — often the
         //     wrong sign. Null, and the screen already renders that as no change
         //     recorded rather than as zero.
-        const real: RosterClient[] = linked.map((c: any) => { const sc = st[c.id]; return { id: c.id, name: names[c.id] || 'Client', goal: goalMap[c.goal] || 'General', weightDelta: scansTruncated ? null : sc.wDelta, adherence: sc.adh != null ? sc.adh : null, lastActive: sc.last ? ago(sc.last) : (statsTruncated ? '—' : 'no activity yet'), next: '—', unread: null, mode: readCoachedMode(c.mode), metrics: sc.mx ?? undefined, diet: c.diet ?? undefined, mealsPerDay: c.meals_per_day ?? undefined, avoid: Array.isArray(c.avoid) ? c.avoid : undefined, joinedAt: joined[c.id] ?? null, injuries: activeInjuries(Array.isArray(c.injuries) ? c.injuries : []).map((i: Injury) => ({ area: i.area, severity: i.severity, note: i.note, isNew: isRecent(i.at) })), pastInjuries: (Array.isArray(c.injuries) ? c.injuries : []).filter((i: Injury) => i.status === 'recovered').map((i: Injury) => ({ area: i.area, severity: i.severity, note: i.note })) }; });
+        const real: RosterClient[] = linked.map((c: any) => { const sc = st[c.id]; return { id: c.id, name: names[c.id] || 'Client', handAdded: false, goal: goalMap[c.goal] || 'General', weightDelta: scansTruncated ? null : sc.wDelta, adherence: sc.adh != null ? sc.adh : null, lastActive: sc.last ? ago(sc.last) : (statsTruncated ? '—' : 'no activity yet'), next: '—', unread: null, mode: readCoachedMode(c.mode), metrics: sc.mx ?? undefined, diet: c.diet ?? undefined, mealsPerDay: c.meals_per_day ?? undefined, avoid: Array.isArray(c.avoid) ? c.avoid : undefined, joinedAt: joined[c.id] ?? null, injuries: activeInjuries(Array.isArray(c.injuries) ? c.injuries : []).map((i: Injury) => ({ area: i.area, severity: i.severity, note: i.note, isNew: isRecent(i.at) })), pastInjuries: (Array.isArray(c.injuries) ? c.injuries : []).filter((i: Injury) => i.status === 'recovered').map((i: Injury) => ({ area: i.area, severity: i.severity, note: i.note })) }; });
         // ── One row per person, not one row per table ──────────────────────
         //
         // These two lists used to be concatenated, on the assumption that a
@@ -335,7 +342,7 @@ export function RosterProvider({ children }: { children: ReactNode }) {
     const n = name.trim();
     if (!n) return false;
     const localId = `c${SEQ++}`;
-    setRoster((p) => [...p, { id: localId, name: n, goal, weightDelta: null, adherence: null, lastActive: 'just added', next: '—', unread: null, mode, joinedAt: new Date().toISOString() }]);
+    setRoster((p) => [...p, { id: localId, name: n, goal, weightDelta: null, adherence: null, lastActive: 'just added', next: '—', unread: null, mode, joinedAt: new Date().toISOString(), handAdded: true }]);
     // Durable: persist to coach_clients so the roster survives restarts/devices.
     //
     // `uid` is null until the read effect above has resolved a session. A coach

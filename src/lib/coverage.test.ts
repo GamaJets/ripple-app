@@ -1836,7 +1836,18 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
     ok(isQueryableId('7D4CA6BF-2F1C-4B87-94F4-9B6BDD008AAD'),
        'and case does not matter, since Postgres accepts either');
     ok(!isQueryableId('c900'),
-       'a client added by hand on the phone is NOT — this is the id that took the whole read down');
+       'a locally-minted id is NOT — this is the id shape that took the whole read down');
+    // This message used to read "a client added by hand on the phone is NOT",
+    // and that sentence is what kept the bug alive: it says this function
+    // identifies hand-added CLIENTS, and it does not — it identifies id
+    // SHAPES. `coach_clients.id` is uuid DEFAULT gen_random_uuid(), so the
+    // moment the insert comes back a hand-added client has a real uuid and
+    // sails through here. app/(trainer)/client.tsx believed the old sentence
+    // and ran eight reads it was not entitled to run, then printed their empty
+    // answers as facts about a person with no account. Whether somebody has an
+    // account is the roster's to say — see src/lib/clientRecord.ts.
+    ok(isQueryableId('3f2b0c8e-11d4-4a7b-9c30-6d5e1f80a2b7'),
+       'a hand-added client who has reached the server has a perfectly good uuid, and this cannot tell');
     ok(!isQueryableId('') && !isQueryableId('local-3') && !isQueryableId('c1'),
        'nor any other local id shape');
     ok(!isQueryableId('7d4ca6bf-2f1c-4b87-94f4-9b6bdd008aa'),

@@ -306,7 +306,35 @@ export default function TrainerVideos() {
   // Whose clips are this coach's own. `coverageFor` below was already given
   // this and already told own clips from the rest; the row list was not.
   const myId = auth.user?.id ?? null;
-  const { templates } = useProgramTemplates();
+  const { templates, status: tplStatus } = useProgramTemplates();
+  // ── Whose programmes this section is about ─────────────────────────────
+  //
+  // The heading says "What Your Programmes Need", and the list under it has to
+  // be the coach's own work or the sentence is false. Two things stood between
+  // it and that, and the section was running with neither:
+  //
+  //  · `useProgramTemplates` seeds three built-in starters — Push · Pull ·
+  //    Legs, Fat-loss Circuit, Tone & Sculpt — so the list is NEVER empty. A
+  //    coach who has saved nothing (which, against phgfwzpkkwdysftlgkoq today,
+  //    is every coach: `program_templates` holds zero rows) was shown the
+  //    movements of three demonstration programmes, counted, and told how many
+  //    of them they had still to film. Nobody had written any of it.
+  //  · the status was never read. Under 'error' the starters are all that is
+  //    left standing where the coach's real library should be, so the coverage
+  //    would have been computed over somebody else's programmes and presented
+  //    as a fact about theirs — the same failure the provider's own header
+  //    describes for the picker.
+  //
+  // So: only rows the coach saved (the seeds carry a 'seed_' id, which is the
+  // provider's own marker), and only off a read that landed. With nothing
+  // saved there is nothing to say, `coverageLine` returns null for an empty
+  // list, and the whole section is absent rather than invented.
+  const savedTemplates = useMemo(
+    () => (tplStatus === 'error' || tplStatus === 'loading'
+      ? null
+      : templates.filter((tpl) => !tpl.id.startsWith('seed_'))),
+    [tplStatus, templates],
+  );
   // Every movement this coach has written into a template, however they spelt
   // it. Null while the library has not been read: a coverage claim built on a
   // failed read would tell a coach they have nothing filmed when they may have
@@ -322,8 +350,8 @@ export default function TrainerVideos() {
       : null),
     [cat.status, cat.rows],
   );
-  const coverage = status === 'error' || status === 'loading' ? null : coverageFor(
-    templates.flatMap((tpl) => tpl.program.days.flatMap((d) => d.exercises.map((e) => e.name))),
+  const coverage = status === 'error' || status === 'loading' || !savedTemplates ? null : coverageFor(
+    savedTemplates.flatMap((tpl) => tpl.program.days.flatMap((d) => d.exercises.map((e) => e.name))),
     vids,
     myId,
     illustratedSlugs,
@@ -793,10 +821,15 @@ export default function TrainerVideos() {
 
           <Pressable onPress={saveUpload} disabled={upBusy}
             accessibilityRole="button" accessibilityState={{ disabled: upBusy }}
-            accessibilityLabel={upBusy ? 'Uploading the clip' : (videoUploadAvailable() ? `Upload to library, seen by: ${visOf(upVis).label}` : 'Save clip to this device')}
+            accessibilityLabel={upBusy ? 'Uploading the clip' : (videoUploadAvailable() ? `Upload to Library, seen by: ${visOf(upVis).label}` : 'Save the clip to this device')}
             style={{ backgroundColor: t.brand, borderRadius: radius.sm, paddingVertical: 11, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: sp.sm, opacity: upBusy ? 0.7 : 1 }}>
             {upBusy ? <ActivityIndicator color={t.brandInk} /> : null}
-            <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>{upBusy ? 'Uploading…' : (videoUploadAvailable() ? 'Upload to library' : 'Save clip')}</Text>
+            {/* Title Case, like every other button on this screen and like
+                the <Cta label="Add to Library"> in the sheet beside it. Drawn
+                as a raw Pressable rather than a Cta so it can carry the
+                spinner, which is also why scripts/check-caps.mjs — which reads
+                the kit's own slots — never saw these two. */}
+            <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>{upBusy ? 'Uploading…' : (videoUploadAvailable() ? 'Upload to Library' : 'Save Clip')}</Text>
           </Pressable>
           <View style={{ height: sp.sm }} />
           <Ghost label="Cancel" onPress={() => { if (!upBusy) setPendUri(null); }} />
