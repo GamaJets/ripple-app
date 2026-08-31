@@ -46,13 +46,13 @@
 // cannot be supported it is an em-dash with a reason beside it, never a zero:
 // a zero here is a specific claim about somebody's month.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, ScrollView, Pressable } from 'react-native';
+import { View, Text, ScrollView, Pressable, Modal, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Cta, Ghost, Notice, Flag, fig } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
 import { useSettings } from '../../src/ui/settings';
@@ -61,7 +61,8 @@ import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
 import { capLimit, capped } from '../../src/lib/rowCap';
-import { areaLabel } from '../../src/lib/injuries';
+import { areaLabel, INJURY_AREAS } from '../../src/lib/injuries';
+import { askToRecordInjury } from '../../src/ui/injuryAsk';
 import { worstStatus, type LoadStatus } from '../../src/ui/loadStatus';
 import {
   assessDrift, fetchClientActivity, isQueryableId, DEFAULT_WINDOWS, DRIFT_LABEL,
@@ -478,6 +479,33 @@ export default function ClientScreen() {
     router.push({ pathname, params: { clientId: id, name: fullName } } as any);
   };
 
+  // Asking, not recording. A coach hears about a knee standing next to
+  // somebody and has nowhere to put it — and must not, because the disclosure
+  // has to be the client's for the gate to mean anything. So they ask.
+  const [askOpen, setAskOpen] = useState(false);
+  const [askArea, setAskArea] = useState<string | null>(null);
+  const [askNote, setAskNote] = useState('');
+  const [askBusy, setAskBusy] = useState(false);
+
+  const sendAsk = async () => {
+    if (!id || askBusy) return;
+    setAskBusy(true);
+    const r = await askToRecordInjury(id, askArea, askNote);
+    setAskBusy(false);
+    if (!r.sent) {
+      Alert.alert('Not sent', `${who} has not been asked${r.error ? ` (${r.error})` : ''}. Nothing was sent, so tell them yourself or try again.`, [{ text: 'OK' }]);
+      return;
+    }
+    setAskOpen(false); setAskArea(null); setAskNote('');
+    Alert.alert(
+      'Asked',
+      `It is in your thread with ${who}.` + (r.pushed
+        ? ` They were notified, and it lands in their injuries either way once they add it.`
+        : ` We couldn’t send them a notification, so they will see it next time they open their messages.`),
+      [{ text: 'Done' }],
+    );
+  };
+
   const G = layout.gutter;
 
   return (
@@ -615,6 +643,15 @@ export default function ClientScreen() {
                 one who has never heard of it, and it does not follow that
                 somebody who healed a thing is somebody it never happened to.
                 Not counted anywhere: it lights no flag and closes no gate. */}
+            {/* Offered whatever the list says. The case this exists for is
+                precisely the one where the list is empty and the coach knows
+                something it does not. */}
+            {!unasked && r.status !== 'error' && client ? (
+              <View style={{ marginTop: sp.md }}>
+                <Ghost label={`Ask ${who} to Record One`} icon="chat" onPress={() => setAskOpen(true)} />
+              </View>
+            ) : null}
+
             {client?.pastInjuries?.length ? (
               <View style={{ marginTop: sp.lg }}>
                 <Text style={{ ...ty.micro, color: t.ink3 }}>Recovered</Text>
@@ -832,6 +869,44 @@ export default function ClientScreen() {
         </Text>
 
       </ScrollView>
+
+      {/* ── ask them to record it ─────────────────────────────────────────── */}
+      <Modal visible={askOpen} animationType="slide" transparent onRequestClose={() => setAskOpen(false)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setAskOpen(false)} />
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: G, paddingBottom: 30, maxHeight: '82%', ...elevation.e2 }}>
+          <Text style={{ ...ty.head, color: t.ink }}>Ask {who} to record it</Text>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.md }}>
+            You cannot add this for them — an injury has to come from the person who has it, or the
+            programme gate it closes would mean nothing. This messages them and points them at the
+            right screen.
+          </Text>
+          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>What did they mention?</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.md }}>
+              {INJURY_AREAS.map((a) => (
+                <Pressable key={a.id} onPress={() => setAskArea(askArea === a.id ? null : a.id)}
+                  accessibilityRole="button" accessibilityState={{ selected: askArea === a.id }}
+                  style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: askArea === a.id ? t.brand : t.surface2 }}>
+                  <Text style={{ ...ty.label, color: askArea === a.id ? t.brandInk : t.ink2 }}>{a.label}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>In your words (optional)</Text>
+            <TextInput value={askNote} onChangeText={setAskNote} multiline
+              placeholder={`You mentioned your knee was sore after Tuesday…`}
+              placeholderTextColor={t.ink3}
+              style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, padding: sp.md, minHeight: 88, textAlignVertical: 'top' }} />
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+              They read this in your thread, so write it as you would say it. What they add is theirs,
+              and they can change or remove it whenever they like.
+            </Text>
+          </ScrollView>
+          <View style={{ height: sp.md }} />
+          <Cta wide disabled={askBusy} label={askBusy ? 'Sending…' : 'Send the Ask'} onPress={sendAsk} />
+          <View style={{ height: sp.sm }} />
+          <Ghost label="Cancel" onPress={() => setAskOpen(false)} />
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
