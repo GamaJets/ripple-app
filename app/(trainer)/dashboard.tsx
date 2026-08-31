@@ -1603,7 +1603,15 @@ export default function TrainerClients() {
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end' }}>
           <Pressable style={SCRIM} onPress={() => setBcOpen(false)} />
           <View style={sheet(t)}>
-            <Text style={{ ...ty.title, color: t.ink }}>Broadcast to All Clients</Text>
+            {/* Was "Broadcast to All Clients", which is the name of a
+                DIFFERENT screen — app/(trainer)/broadcast.tsx, whose own
+                subtitle is "Send one message to a whole segment of your
+                clients". So a coach met two all-client tools both called
+                Broadcast, and was sent from one to the other to do the thing
+                neither of them does. These are a NOTICE (posted once, seen on
+                every dashboard) and a MESSAGE (written into each person's
+                thread, with a push). Named for what they are. */}
+            <Text style={{ ...ty.title, color: t.ink }}>Post a Notice</Text>
             {/* This copy has now been wrong in both directions, which is worth
                 recording.
 
@@ -1622,7 +1630,7 @@ export default function TrainerClients() {
 
                 The rule this file keeps relearning: the sentence describes what
                 the write does TODAY, and it moves when the write moves. */}
-            <Text style={{ ...ty.label, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>Every client on your roster sees this on their dashboard. For a message in someone’s own thread, use Broadcast.</Text>
+            <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs, marginBottom: sp.lg }}>Every client on your roster sees this on their dashboard. It is not a message and does not land in anyone’s thread — for that, use Broadcast.</Text>
             <TextInput value={bcText} onChangeText={setBcText} placeholder="Your announcement…" placeholderTextColor={t.ink3} multiline style={{ ...field(t, 90), marginBottom: sp.lg }} />
             {/* Awaited, and the answer read. `addAnnouncement` reaches a server
                 now, so announcing "Posted" on the tap would be the same class of
@@ -1636,7 +1644,7 @@ export default function TrainerClients() {
                 return;
               }
               setBcText(''); setBcOpen(false);
-              Alert.alert('Posted', 'It is on your clients’ dashboards. For something that belongs in one person’s thread, use Broadcast.',
+              Alert.alert('Posted', 'It is on your clients’ dashboards. To write into people’s threads instead — everyone, or one tag — use Broadcast.',
                 [{ text: 'Open Broadcast', onPress: () => router.push('/(trainer)/broadcast') }, { text: 'Done', style: 'cancel' }]);
             }} />
           </View>

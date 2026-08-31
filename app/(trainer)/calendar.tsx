@@ -235,7 +235,13 @@ export default function TrainerSchedule() {
       else row = Array.isArray(data) ? data[0] : data;
     } catch { failed = true; }
     setBlkBusy(false);
-    const span = blkAllDay ? 'That whole day' : `${timeLabel(start.toISOString())} to ${blkTo % 12 || 12}${blkTo >= 12 ? 'pm' : 'am'}`;
+    // `hourLabel` rather than the arithmetic inline: 24 is midnight, and
+    // `24 % 12 || 12` is 12 while `24 >= 12` is pm — so blocking 6pm to
+    // midnight confirmed "6:00pm to 12pm", which is noon, the other end of the
+    // day, and reads as a span running backwards. The chip and the button
+    // already special-cased 24; the confirmation did not, so the sentence a
+    // coach reads LAST was the one that was wrong.
+    const span = blkAllDay ? 'That whole day' : `${timeLabel(start.toISOString())} to ${hourLabel(blkTo)}`;
     if (failed || !row?.ok) {
       Alert.alert(
         'Not blocked',
@@ -451,6 +457,10 @@ export default function TrainerSchedule() {
   // hour then minute is two short reads; one list of every quarter hour is a
   // drag through a haystack.
   const MINUTES = [0, 15, 30, 45];
+  /** An hour of the day as a person says it, including the 24 that means the
+   *  end of it. Written once because three places were saying it and only two
+   *  of them knew about midnight. */
+  const hourLabel = (h: number) => (h === 24 ? 'midnight' : `${h % 12 || 12}${h >= 12 ? 'pm' : 'am'}`);
   /** A weekly slot's start, written once so the list row, the heading above the
    *  picker and the Add button cannot drift apart. Minutes are always shown,
    *  including :00 — "Wed 9am" and "Wed 9:15am" side by side reads as two
@@ -767,14 +777,14 @@ export default function TrainerSchedule() {
               <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Until</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.md }}>
                 {HOURS.filter((h) => h > blkFrom).concat([24]).map((h) => (
-                  <Chip key={'bt' + h} t={t} label={h === 24 ? 'midnight' : `${h % 12 || 12}${h >= 12 ? 'pm' : 'am'}`} on={blkTo === h} onPress={() => setBlkTo(h)} />
+                  <Chip key={'bt' + h} t={t} label={hourLabel(h)} on={blkTo === h} onPress={() => setBlkTo(h)} />
                 ))}
               </ScrollView>
             </>) : null}
           </ScrollView>
           <View style={{ height: sp.md }} />
           <Cta wide disabled={blkBusy}
-            label={blkBusy ? 'Blocking…' : blkAllDay ? 'Block the Whole Day' : `Block ${blkFrom % 12 || 12}${blkFrom >= 12 ? 'pm' : 'am'} — ${blkTo === 24 ? 'midnight' : `${blkTo % 12 || 12}${blkTo >= 12 ? 'pm' : 'am'}`}`}
+            label={blkBusy ? 'Blocking…' : blkAllDay ? 'Block the Whole Day' : `Block ${hourLabel(blkFrom)} — ${hourLabel(blkTo)}`}
             onPress={doBlock} />
           <View style={{ height: sp.sm }} />
           <Ghost label="Cancel" onPress={() => setBlockOpen(false)} />

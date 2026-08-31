@@ -34,7 +34,8 @@
 // Exits non-zero on a missing usage string. The listing is informational — a
 // native dependency is not a defect, it is a fact about the next release.
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 
 /** Module → the Info.plist keys it cannot work without. */
 const NEEDS_PLIST = {
@@ -49,22 +50,51 @@ const NEEDS_PLIST = {
  * update; these do not, and a build made before one was added does not contain
  * it however current the JavaScript is.
  */
-const NATIVE = [
-  'expo-camera', 'expo-image-picker', 'expo-video', 'expo-notifications',
-  'expo-local-authentication', 'expo-secure-store', 'expo-dev-client',
-  'expo-updates', 'react-native-health', 'react-native-svg',
-  // Added after the PDF export was found never to have worked in ANY build.
-  // src/lib/exportShare.ts requires both inside a try/catch, which Metro treats
-  // as an optional dependency: an unresolvable one throws at runtime into the
-  // catch rather than failing the bundle. Neither was ever in package.json, so
-  // `Print` and `Sharing` were always null and the button was never offered.
-  // Nothing caught it — a typecheck does not see an untyped require, and this
-  // list only ever contained modules somebody had already declared, so a module
-  // nobody declared could not be missed from it.
+const HAND_DECLARED = [
+  // Modules Metro cannot see because the require is inside a try/catch, which
+  // it treats as optional: an unresolvable one throws at runtime into the catch
+  // rather than failing the bundle. src/lib/exportShare.ts does exactly this,
+  // and neither was ever in package.json, so `Print` and `Sharing` were always
+  // null and the PDF button was never offered in ANY build.
   'expo-print', 'expo-sharing',
 ];
 
+/**
+ * Every dependency that actually ships native code, DERIVED rather than listed.
+ *
+ * The list used to be written by hand, and the comment above it already named
+ * why that fails: "this list only ever contained modules somebody had already
+ * declared, so a module nobody declared could not be missed from it."
+ *
+ * It then failed again in exactly that way. `expo-clipboard` and
+ * `expo-document-picker` were added one morning, and neither was in the list —
+ * so this check reported a clean bill while the coach app's home tab imported
+ * Clipboard at module scope and could not render at all on any build made
+ * before they were added. Full preflight passed on an app that would not open.
+ *
+ * A package is native if it carries a podspec or declares itself an Expo
+ * module. That is a property of what is on disk, so a module nobody thought
+ * about is caught the moment it is installed.
+ */
+function derivedNative(names) {
+  const out = [];
+  for (const name of names) {
+    const dir = join('node_modules', name);
+    if (!existsSync(dir)) continue;
+    let native = existsSync(join(dir, 'expo-module.config.json'));
+    if (!native) {
+      try {
+        native = readdirSync(dir).some((f) => f.endsWith('.podspec'))
+          || existsSync(join(dir, 'android', 'build.gradle'));
+      } catch { /* unreadable package directory; the podspec test below still applies */ }
+    }
+    if (native) out.push(name);
+  }
+  return out;
+}
+
 const deps = JSON.parse(readFileSync('package.json', 'utf8')).dependencies ?? {};
+const NATIVE = [...new Set([...derivedNative(Object.keys(deps)), ...HAND_DECLARED])].sort();
 const installed = (m) => Object.prototype.hasOwnProperty.call(deps, m);
 
 let plist = {};
@@ -102,7 +132,30 @@ for (const [mod, keys] of Object.entries(NEEDS_PLIST)) {
 
 const present = NATIVE.filter(installed);
 console.log(`native modules (${present.length}) — none of these reach a phone without a new build:`);
-for (const m of present) console.log(`  ${m.padEnd(28)} ${deps[m]}`);
+for (const m of present) console.log(`  ${m.padEnd(30)} ${deps[m]}`);
+
+// ── and whether THIS machine's build actually contains them ────────────────
+//
+// The list above says what a build needs. It cannot say what the build on the
+// simulator has. `ios/` is gitignored and absent on CI, so this is a warning
+// rather than a failure — but it is the check that would have caught a coach
+// app red-screening on `Cannot find native module 'ExpoClipboard'` because
+// `pod install` had never been re-run after the dependency landed.
+const lockPath = join('ios', 'Podfile.lock');
+if (existsSync(lockPath)) {
+  const lock = readFileSync(lockPath, 'utf8');
+  const pod = (m) => m.split('-').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join('');
+  const absent = present.filter((m) => !lock.includes(pod(m)) && !lock.includes(m));
+  if (absent.length) {
+    console.error(`\nthis machine's ios/Podfile.lock does not mention ${absent.length} of them:`);
+    for (const m of absent) console.error(`  ${m}`);
+    console.error('\nA local build made from it will red-screen on the first screen that');
+    console.error('imports one. Run `npx expo run:ios` (or pod install) before demoing.');
+    console.error('EAS builds are unaffected: they install pods fresh from package.json.');
+  } else {
+    console.log(`\nthis machine's Podfile.lock has all ${present.length}.`);
+  }
+}
 
 if (missing.length) {
   console.error('\nInfo.plist usage strings that need a person:');
