@@ -45,7 +45,7 @@ import { billingAvailable } from '../../src/lib/billing';
 import { Icon, type IconName } from '../../src/ui/Icon';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
-import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Card, Cta, Ghost, Notice, PartialRead, ChipGrid, fig, Flag as KitFlag } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Card, Cta, Ghost, Notice, PartialRead, ChipGrid, Field, fig, Flag as KitFlag } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../../src/theme/scale';
 import { useMyTrainerProfile } from '../../src/ui/coachProfile';
 import { CoachRequests } from '../../src/ui/CoachRequests';
@@ -128,7 +128,9 @@ function CodeFig({ t, label, value }: { t: Theme; label: string; value: string }
 /** One selectable option. Every picker on this screen is built from these. */
 function Chip({ t, label, on, onPress }: { t: Theme; label: string; on: boolean; onPress: () => void }) {
   return (
-    <Pressable onPress={onPress} style={{
+    // Selected is a fill colour and nothing else. The other Chip helpers in the
+    // coach app (calendar.tsx, client.tsx) already say so; this one did not.
+    <Pressable onPress={onPress} accessibilityRole="button" accessibilityState={{ selected: on }} style={{
       flex: 1, alignItems: 'center', paddingVertical: 10,
       borderRadius: radius.sm, backgroundColor: on ? t.brand : t.surface2,
     }}>
@@ -362,6 +364,12 @@ export default function TrainerClients() {
   const [fb, setFb] = useState('');
   const [nnote, setNnote] = useState('');
   const [sel, setSel] = useState<RosterClient | null>(null);
+  // The meal picker is a slot on ONE client, so it cannot outlive the sheet
+  // that named them. Closing the client sheet while it is open leaves
+  // `mealPick` set, and the next client opened would have the picker spring up
+  // unasked — on their breakfast, ready to write a meal to somebody the coach
+  // had not chosen it for.
+  useEffect(() => { if (!sel) setMealPick(null); }, [sel]);
   const [addOpen, setAddOpen] = useState(false);
   const [newName, setNewName] = useState('');
   const [newGoal, setNewGoal] = useState('Fat loss');
@@ -1299,11 +1307,11 @@ export default function TrainerClients() {
                     the screen had guessed. Offering nothing is the only
                     version of this that cannot destroy what is on the server. */}
                 {nutriStatus === 'error' ? (
-                  <Text style={{ ...ty.label, color: t.warn }}>
+                  <KitFlag tone={t.warn}>
                     {sel.name.split(' ')[0]}&rsquo;s current adjustment could not be read, so it is not shown
                     and cannot be changed here — anything set now would overwrite figures we
                     cannot see. Their Meals tab is unaffected. Try again once you are connected.
-                  </Text>
+                  </KitFlag>
                 ) : nutriStatus === 'loading' ? (
                   <Text style={{ ...ty.label, color: t.ink3 }}>Reading their current targets…</Text>
                 ) : (
@@ -1399,10 +1407,10 @@ export default function TrainerClients() {
                     wrote down the thing they are half-remembering, and writing
                     it again, or worse, deciding it did not happen. */}
                 {notesStatus === 'error' ? (
-                  <Text style={{ ...ty.label, color: t.crit, marginBottom: sp.sm }}>
+                  <KitFlag tone={t.crit} style={{ marginBottom: sp.sm }}>
                     Your notes could not be read — this is not "no notes". Anything you save now
                     will still be stored, but check back once you have a connection.
-                  </Text>
+                  </KitFlag>
                 ) : notesStatus === 'loading' ? (
                   <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.sm }}>Reading your notes…</Text>
                 ) : getNotes(sel.id).length === 0 ? (
@@ -1505,6 +1513,44 @@ export default function TrainerClients() {
           )}
         </View>
               </KeyboardAvoidingView>
+
+      {/* ── coach meal picker ─────────────────────────────────────────────
+          Nested in the client sheet on purpose. "Choose" is only ever tapped
+          on a meal row above, and the picker reads `sel` for the diet, the
+          allergens and the name it writes to — it has no meaning without this
+          sheet open. As a sibling `<Modal>` at the screen root it was worse
+          than meaningless: iOS presents each modal in its own window and puts
+          one opened from the root beneath the sheet already showing, so
+          "Choose" set `mealPick`, mounted the picker out of sight behind the
+          client sheet, and left a coach tapping a button that never did
+          anything. Nested here it presents above the sheet it belongs to. */}
+      <Modal visible={!!mealPick} transparent animationType="slide" onRequestClose={() => setMealPick(null)}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+        <Pressable style={SCRIM} onPress={() => setMealPick(null)} />
+        <View style={sheet(t, { maxHeight: '80%' })}>
+          {mealPick && sel ? (
+            <>
+              <Text style={{ ...ty.title, color: t.ink, textTransform: 'capitalize' }}>Pick a {mealPick.slot.toLowerCase()}</Text>
+              <Text style={{ ...ty.label, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>For {sel.name.split(' ')[0]} · {sel.diet || 'meat'} plan · tap to assign</Text>
+              <TextInput value={mealQuery} onChangeText={setMealQuery} placeholder="Search meals…" placeholderTextColor={t.ink3} style={{ ...field(t), marginBottom: sp.md }} />
+              <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+                {searchMeals((sel.diet || 'meat') as any, mealPick.slot, mealQuery, 40, (sel.avoid ?? []) as any).map((m) => (
+                  <Pressable key={m.idx} onPress={() => { setNutri(sel.id, { mealOverride: { ...(getNutri(sel.id)?.mealOverride ?? {}), [mealPick.pos]: m.idx } }); setMealPick(null); }}
+                    style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: sp.md, borderBottomWidth: hairline, borderBottomColor: t.ring }}>
+                    <View style={{ flex: 1, marginRight: sp.md }}>
+                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }} numberOfLines={1}>{m.n}</Text>
+                      <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{m.k} kcal · P{m.p} / C{m.c} / F{m.f}</Text>
+                    </View>
+                    <Icon name="chevron" size={16} color={t.ink3} />
+                  </Pressable>
+                ))}
+              </ScrollView>
+            </>
+          ) : null}
+        </View>
+              </KeyboardAvoidingView>
+      </Modal>
+      {/* ── end of the client sheet, which the meal picker sits inside ──── */}
       </Modal>
 
       {/* ── add a client ─────────────────────────────────────────────────── */}
@@ -1924,15 +1970,28 @@ export default function TrainerClients() {
                       <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.sm }}>{returnLine(returns.status, c)}</Text>
                     ) : null}
                     {returns.status === 'ready' ? (
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.sm }}>
-                        <TextInput
-                          value={spendDraft[key] ?? ''}
-                          onChangeText={(v) => setSpendDraft((d) => ({ ...d, [key]: v }))}
-                          placeholder="What it cost you — leave empty if you don’t know"
-                          placeholderTextColor={t.ink3}
-                          keyboardType="decimal-pad"
-                          style={{ ...field(t), flex: 1 }}
-                        />
+                      // The whole sentence — what the box is FOR and that it may
+                      // be left empty — was a placeholder, so it was gone the
+                      // moment a figure was in it, and a coach coming back to
+                      // correct a recorded spend saw an unlabelled amount beside
+                      // a Save button. The currency is the one already recorded
+                      // against this code; where nothing is recorded yet there
+                      // is none to state, and Repple does not invent one (part
+                      // 99 — `tenants.currency` is nullable because a gym that
+                      // has not said is not to be guessed at).
+                      <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: sp.sm, marginTop: sp.sm }}>
+                        <Field
+                          label="What it cost you"
+                          hint={c.spend?.currency ? `${c.spend.currency} · leave empty to clear` : 'leave empty if you don’t know'}
+                          a11y={c.spend?.currency ? `What this code cost you, in ${c.spend.currency}` : 'What this code cost you'}
+                        >
+                          <TextInput
+                            value={spendDraft[key] ?? ''}
+                            onChangeText={(v) => setSpendDraft((d) => ({ ...d, [key]: v }))}
+                            keyboardType="decimal-pad"
+                            style={field(t)}
+                          />
+                        </Field>
                         <Ghost label={spendBusy === key ? 'Saving…' : 'Save'} onPress={() => { if (spendBusy) return; saveSpend(c); }} />
                       </View>
                     ) : null}
@@ -1975,34 +2034,6 @@ export default function TrainerClients() {
             </View>
           </View>
         </KeyboardAvoidingView>
-      </Modal>
-
-      {/* ── coach meal picker ────────────────────────────────────────────── */}
-      <Modal visible={!!mealPick} transparent animationType="slide" onRequestClose={() => setMealPick(null)}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-        <Pressable style={SCRIM} onPress={() => setMealPick(null)} />
-        <View style={sheet(t, { maxHeight: '80%' })}>
-          {mealPick && sel ? (
-            <>
-              <Text style={{ ...ty.title, color: t.ink, textTransform: 'capitalize' }}>Pick a {mealPick.slot.toLowerCase()}</Text>
-              <Text style={{ ...ty.label, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>For {sel.name.split(' ')[0]} · {sel.diet || 'meat'} plan · tap to assign</Text>
-              <TextInput value={mealQuery} onChangeText={setMealQuery} placeholder="Search meals…" placeholderTextColor={t.ink3} style={{ ...field(t), marginBottom: sp.md }} />
-              <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
-                {searchMeals((sel.diet || 'meat') as any, mealPick.slot, mealQuery, 40, (sel.avoid ?? []) as any).map((m) => (
-                  <Pressable key={m.idx} onPress={() => { setNutri(sel.id, { mealOverride: { ...(getNutri(sel.id)?.mealOverride ?? {}), [mealPick.pos]: m.idx } }); setMealPick(null); }}
-                    style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: sp.md, borderBottomWidth: hairline, borderBottomColor: t.ring }}>
-                    <View style={{ flex: 1, marginRight: sp.md }}>
-                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }} numberOfLines={1}>{m.n}</Text>
-                      <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{m.k} kcal · P{m.p} / C{m.c} / F{m.f}</Text>
-                    </View>
-                    <Icon name="chevron" size={16} color={t.ink3} />
-                  </Pressable>
-                ))}
-              </ScrollView>
-            </>
-          ) : null}
-        </View>
-              </KeyboardAvoidingView>
       </Modal>
 
       {/* ── AI check-in draft review ─────────────────────────────────────── */}

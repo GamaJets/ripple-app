@@ -63,7 +63,7 @@ import { progressDoc, progressCsv, progressSummary, progressSpanLabel, shareDoc,
 import { bodyReadings, latestBodyReading, measuredNote, stalenessNote, mixedSourceNote, readingsLabel, dayLabel as bodyDayLabel, agoLabel, todayISO, type BodyReading } from '../../src/lib/bodyFigures';
 import { useRouter } from 'expo-router';
 import { useBrand } from '../../src/ui/brand';
-import { Rule, Section, SectionHead, Hero, KpiRow, ActionCard, Cta, Ghost, Spark, fig, Flag } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, KpiRow, ActionCard, Cta, Ghost, Spark, Field, fig, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 import { Icon } from '../../src/ui/Icon';
 import { analyzeInBody, analyzePhysique, visionAvailable, lastVisionError, type PhysiqueVision } from '../../src/lib/vision';
@@ -1216,7 +1216,8 @@ export default function Scans() {
             </View>
             {img && (
               <View style={{ marginBottom: sp.md }}>
-                <Image source={{ uri: img }} style={{ width: '100%', height: 180, borderRadius: radius.md, backgroundColor: t.surface2 }} resizeMode="cover" />
+                <Image source={{ uri: img }} accessible accessibilityLabel="The scan you attached"
+                  style={{ width: '100%', height: 180, borderRadius: radius.md, backgroundColor: t.surface2 }} resizeMode="cover" />
                 {reading ? <Text style={{ ...ty.caption, fontWeight: '500', color: t.ink2, marginTop: 6 }}>Reading your scan…</Text> : <Text style={{ ...ty.caption, color: ocrMsg && ocrMsg.startsWith('Read') ? t.ink2 : t.ink3, marginTop: 6 }}>{ocrMsg || 'Scan attached — reading the numbers…'}</Text>}
               </View>
             )}
@@ -1237,13 +1238,22 @@ export default function Scans() {
                 </Text>
               </Pressable>
             )}
-            <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.lg }}>
-              <TextInput value={wt} onChangeText={setWt} keyboardType="numeric" placeholder={`Weight ${wu}`} placeholderTextColor={t.ink3}
-                accessibilityLabel={wu === 'kg' ? 'Weight in kilograms' : 'Weight in pounds'} style={input} />
-              <TextInput value={bf} onChangeText={setBf} keyboardType="numeric" placeholder="Body fat %" placeholderTextColor={t.ink3}
-                accessibilityLabel="Body fat percentage" style={input} />
-              <TextInput value={sm} onChangeText={setSm} keyboardType="numeric" placeholder={`Muscle ${wu}`} placeholderTextColor={t.ink3}
-                accessibilityLabel={wu === 'kg' ? 'Skeletal muscle in kilograms' : 'Skeletal muscle in pounds'} style={input} />
+            {/* The OCR fills all three of these, and the "use my scale's figure"
+                row above fills the first — so on the ordinary path these boxes
+                arrive with numbers in them and every placeholder that named
+                what they were had already gone. Weight and muscle share a unit
+                and body fat does not, which is exactly the row where three bare
+                numerals cannot be told apart. */}
+            <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.lg, alignItems: 'flex-end' }}>
+              <Field label="Weight" hint={wu} a11y={wu === 'kg' ? 'Weight in kilograms' : 'Weight in pounds'}>
+                <TextInput value={wt} onChangeText={setWt} keyboardType="numeric" style={input} />
+              </Field>
+              <Field label="Body fat" hint="%" a11y="Body fat percentage">
+                <TextInput value={bf} onChangeText={setBf} keyboardType="numeric" style={input} />
+              </Field>
+              <Field label="Muscle" hint={wu} a11y={wu === 'kg' ? 'Skeletal muscle in kilograms' : 'Skeletal muscle in pounds'}>
+                <TextInput value={sm} onChangeText={setSm} keyboardType="numeric" style={input} />
+              </Field>
             </View>
             {weightNote ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: -sp.md, marginBottom: sp.lg }}>{weightNote}</Text> : null}
             <Cta label="Save Scan & Update Profile" wide onPress={saveScan} />
@@ -1264,8 +1274,15 @@ export default function Scans() {
           </ScrollView>
         </View>
               </KeyboardAvoidingView>
-      </Modal>
 
+      {/* ── Why the date wheel lives in here ─────────────────────────────────
+          "Scan date" above is the only way to open it, and that row is inside
+          this sheet. While this sheet was a sibling of the date `<Modal>`, iOS
+          presented the wheel in a window BENEATH the one already on screen, so
+          tapping the date did nothing a person could see: the Add sheet just
+          sat there and the scan kept whatever date it had. A `<Modal>` nested
+          in the element tree of the modal it is opened from presents above it
+          on both platforms, which is the whole fix. */}
       <Modal visible={showDate} transparent animationType="slide" onRequestClose={() => setShowDate(false)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setShowDate(false)} />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 18 }}>
@@ -1284,6 +1301,9 @@ export default function Scans() {
           </View>
         </View>
       </Modal>
+      {/* ── end of the Add sheet, which the date wheel above sits inside ── */}
+      </Modal>
+
       <Modal visible={physOpen} transparent animationType="slide" onRequestClose={() => setPhysOpen(false)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)' }} onPress={() => setPhysOpen(false)} />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30 }}>

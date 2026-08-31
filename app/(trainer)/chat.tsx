@@ -32,13 +32,14 @@
 // client screen gives at length: a coach who thinks their demonstration went is
 // worse off than one who knows it did not.
 import { useRef, useState } from 'react';
-import { View, Text, TextInput, ScrollView, KeyboardAvoidingView, Platform, Image, Pressable, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, ScrollView, Image, Pressable, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
 import { Rule, Cta, Ghost } from '../../src/ui/kit';
+import { useKeyboardLift } from '../../src/ui/keyboardLift';
 import { HAS_NATIVE_VIDEO, UPDATE_REQUIRED_NOTE } from '../../src/ui/nativeModules';
 import { sp, layout, radius, type as ty } from '../../src/theme/scale';
 import { peerHeading, type PeerHeading } from '../../src/lib/threadPeer';
@@ -176,6 +177,7 @@ export default function CoachChat() {
   };
   const fmt = (iso: string) => { const d = new Date(iso); const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']; return `${days[d.getDay()]} ${d.getDate()}/${d.getMonth() + 1}`; };
   const G = layout.gutter;
+  const { ref: barRef, lift } = useKeyboardLift();
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
 
@@ -202,7 +204,11 @@ export default function CoachChat() {
       </View>
       <Rule />
 
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      {/* The compose bar is lifted by measurement rather than by
+          KeyboardAvoidingView, which under-lifted it by the height of the
+          navigator header and left the keyboard sitting over the field you were
+          typing into. See `src/ui/keyboardLift.ts` for why. */}
+      <View style={{ flex: 1, paddingBottom: lift }}>
 
         {/* ── the conversation ───────────────────────────────────────────── */}
         <ScrollView ref={scRef} contentContainerStyle={{ paddingHorizontal: G, paddingTop: sp.lg, paddingBottom: sp.sm }} onContentSizeChange={() => scRef.current?.scrollToEnd({ animated: true })} keyboardShouldPersistTaps="handled">
@@ -273,7 +279,7 @@ export default function CoachChat() {
             </Pressable>
           </View>
         ) : null}
-        <View style={{ flexDirection: 'row', gap: sp.md, paddingHorizontal: G, paddingVertical: sp.md, alignItems: 'center' }}>
+        <View ref={barRef} style={{ flexDirection: 'row', gap: sp.md, paddingHorizontal: G, paddingVertical: sp.md, alignItems: 'center' }}>
           <Pressable onPress={onAttach} accessibilityRole="button" accessibilityLabel="Add a photo or video" hitSlop={8}
             style={{ width: 40, height: 40, borderRadius: radius.md, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
             <Icon name="camera" size={18} color={t.ink2} />
@@ -284,7 +290,7 @@ export default function CoachChat() {
               same clip in the bucket twice and the thread twice with it. */}
           <Cta label={busy ? 'Sending…' : 'Send'} onPress={onSend} disabled={busy} />
         </View>
-      </KeyboardAvoidingView>
+      </View>
     </SafeAreaView>
   );
 }

@@ -7,12 +7,13 @@
 // hairline. Every provider, conditional and route is unchanged.
 import { useState, useRef, useEffect } from 'react';
 import { num } from '../../src/lib/format';
-import { View, Text, TextInput, Pressable, ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, Pressable, ScrollView, ActivityIndicator } from 'react-native';
 import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Rule } from '../../src/ui/kit';
+import { useKeyboardLift } from '../../src/ui/keyboardLift';
 import { sp, layout, radius, type as ty } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
 import { injurySummary } from '../../src/lib/injuries';
@@ -134,10 +135,14 @@ export default function Coach() {
   }, [params.ask]);
 
   const G = layout.gutter;
+  const { ref: barRef, lift } = useKeyboardLift();
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={8}>
+      {/* Measured rather than avoided — the `keyboardVerticalOffset={8}` that
+          used to sit here was a constant standing in for the navigator header,
+          and it was the wrong constant. See `src/ui/keyboardLift.ts`. */}
+      <View style={{ flex: 1, paddingBottom: lift }}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingHorizontal: G, paddingVertical: sp.md }}>
@@ -183,7 +188,7 @@ export default function Coach() {
 
         {/* ── composer ───────────────────────────────────────────────────── */}
         <Rule />
-        <View style={{ flexDirection: 'row', gap: sp.md, paddingHorizontal: G, paddingVertical: sp.md, alignItems: 'flex-end' }}>
+        <View ref={barRef} style={{ flexDirection: 'row', gap: sp.md, paddingHorizontal: G, paddingVertical: sp.md, alignItems: 'flex-end' }}>
           <TextInput value={input} onChangeText={setInput} placeholder="Ask your coach…" placeholderTextColor={t.ink3} multiline
             style={{ flex: 1, ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.md, paddingHorizontal: sp.lg, paddingVertical: sp.md, maxHeight: 120 }} />
           <Pressable onPress={() => send(input)} disabled={!input.trim() || busy}
@@ -192,7 +197,7 @@ export default function Coach() {
             <Text style={{ ...ty.head, color: t.brandInk }}>↑</Text>
           </Pressable>
         </View>
-      </KeyboardAvoidingView>
+      </View>
     </SafeAreaView>
   );
 }
