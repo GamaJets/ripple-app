@@ -176,7 +176,7 @@ export default function Close() {
 
   return (
     <Shell me={me} gymName={gymName} current="/close">
-      <h1>Month-end close</h1>
+      <h1>Month-End Close</h1>
       <p style={{ color: 'var(--ink3)', marginTop: 6, fontSize: 13 }}>
         What came in, what it was for, what is still owed, what does not
         reconcile, and what is still unmarked and therefore blocking payroll.
@@ -712,11 +712,40 @@ function sumOrNull(a: number | null, b: number | null): number | null {
  * the gym has not set one either, there is genuinely no answer and the screen
  * says so rather than picking.
  *
+ * ── why it asks the rows to AGREE ─────────────────────────────────────────
+ *
+ * This used to read `rec.payments.rows[0].currency` — the FIRST payment of the
+ * month, denominating the whole close. `gym_payments.currency` is `not null
+ * default 'AED'`, so any row written before the write path required a currency
+ * is a dirham row, and one of those sitting at the top of August printed a
+ * London gym's entire August — payroll, the per-trainer Pay column, the rate
+ * held, passes sold — in dirhams. None of those figures comes from a payment at
+ * all; they inherit the label. A close is what an owner reconciles against a
+ * bank statement and hands to an accountant.
+ *
+ * So a set of rows only gets to name the currency when every priced row in it
+ * names the same one. A set that disagrees has no single currency by
+ * definition, and the honest next question is the gym's own — not whichever row
+ * happened to sort first.
+ *
  * Only ever used for rendering; no total is asserted across currencies anywhere.
  */
+function agreedCurrency(rows: Array<{ currency: string | null }>): TenantCurrency {
+  // A row with no currency of its own does not agree with the others — it is
+  // silent, and silence is not consent to whatever the rest of them say.
+  const seen = new Set(rows.map((r) => r.currency));
+  return seen.size === 1 ? ([...seen][0] ?? null) : null;
+}
+
 function currencyOf(rec: CloseRecord, gym: TenantCurrency): TenantCurrency {
-  if (rec.payments.state === 'ready' && rec.payments.rows.length) return rec.payments.rows[0].currency;
-  if (rec.invoices.state === 'ready' && rec.invoices.rows.length) return rec.invoices.rows[0].currency;
+  if (rec.payments.state === 'ready' && rec.payments.rows.length) {
+    const agreed = agreedCurrency(rec.payments.rows);
+    if (agreed) return agreed;
+  }
+  if (rec.invoices.state === 'ready' && rec.invoices.rows.length) {
+    const agreed = agreedCurrency(rec.invoices.rows);
+    if (agreed) return agreed;
+  }
   return gym;
 }
 

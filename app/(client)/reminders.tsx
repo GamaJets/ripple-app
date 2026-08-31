@@ -66,12 +66,33 @@ export default function Reminders() {
     const payload: Saved = { hydration, every, startH, endH, supps, ids: newIds };
     setIds(newIds);
     await AsyncStorage.setItem(KEY, JSON.stringify(payload));
-    Alert.alert(
-      pushAvailable() ? 'Reminders set' : 'Saved',
-      pushAvailable()
-        ? `You'll get ${newIds.length} daily reminder${newIds.length === 1 ? '' : 's'}${hydration ? ` (hydration every ${every}h from ${fmt(startH, 0)}–${fmt(endH, 0)})` : ''}.`
-        : 'Saved. Reminders start sending once the notifications build is installed from TestFlight.'
-    );
+    // `pushAvailable()` answers whether the notifications MODULE is in this
+    // build. It says nothing about whether the member granted permission — and
+    // `scheduleDailyReminder` returns null for every reminder when they did
+    // not. So somebody who had declined notifications was shown the title
+    // "Reminders set" above the body "You'll get 0 daily reminders (hydration
+    // every 3h from 09:00 AM–09:00 PM)": a title, a count and a schedule that
+    // contradict each other, over nothing being scheduled at all.
+    //
+    // `newIds.length` is the only thing here that knows what actually happened,
+    // so it is what the title is chosen on. The settings are still saved either
+    // way — the member's answer is theirs — and the sentence says which of the
+    // two states they are in.
+    const wanted = (hydration ? Math.max(0, Math.floor((endH - startH) / every) + 1) : 0) + supps.length;
+    if (!pushAvailable()) {
+      Alert.alert('Saved', 'Saved. Reminders start sending once the notifications build is installed from TestFlight.');
+    } else if (newIds.length === 0) {
+      Alert.alert(
+        wanted === 0 ? 'Saved' : 'Saved, but nothing will be sent',
+        wanted === 0
+          ? 'No reminders are set. Turn hydration on or add a supplement, and they will be scheduled.'
+          : 'Your settings are saved, but this phone is not allowing notifications from us, so nothing was scheduled. Turn them on for this app in your phone’s Settings and save again.',
+      );
+    } else {
+      Alert.alert('Reminders set',
+        `You'll get ${newIds.length} daily reminder${newIds.length === 1 ? '' : 's'}${hydration ? ` (hydration every ${every}h from ${fmt(startH, 0)}–${fmt(endH, 0)})` : ''}.`
+        + (newIds.length < wanted ? ` ${wanted - newIds.length} could not be scheduled.` : ''));
+    }
   };
 
   // Which of the three is chosen is drawn as a fill and a half-step of weight.

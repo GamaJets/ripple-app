@@ -329,6 +329,27 @@ export default function CoachEarnings() {
   if (me === undefined) return <div style={{ padding: 40, color: 'var(--ink3)' }}>Loading…</div>;
   if (me === null) return <div style={{ padding: 40 }}><a href="/">Sign in</a></div>;
 
+  // A refused profile read is not a statement about who somebody is.
+  //
+  // `roleUnknown` exists in lib/supabase.ts for exactly this branch, and these
+  // three coach screens were the only ones in the console without it: the
+  // fifteen owner pages all carry it. Without it, an RLS hiccup on `profiles`
+  // arrived as `role: null`, fell into the refusal below, and told a working
+  // coach "your account is not a coaching account" — a claim about them, made
+  // out of a query that failed.
+  if (me.roleUnknown) {
+    return (
+      <Shell me={me} gymName={gymName} current="/coach/earnings">
+        <h1>We could not read your account</h1>
+        <p style={{ color: 'var(--ink2)', marginTop: 8, maxWidth: '62ch' }}>
+          Your profile did not load, so this console does not know what you are —
+          which is not the same as you not being a coach. Reload the page; if it
+          keeps happening the database refused the read rather than you.
+        </p>
+      </Shell>
+    );
+  }
+
   if (me.role !== 'trainer' && me.role !== 'owner') {
     // A plain sentence, not empty tables. Empty tables read as "you have earned
     // nothing", which is a far worse thing to tell somebody than "wrong screen".
@@ -339,6 +360,28 @@ export default function CoachEarnings() {
           Earnings shows one coach&rsquo;s delivered sessions and what they are owed for them.
           Your account is not a coaching account, so there is no book to show — that is not the
           same as a book with nothing in it.
+        </p>
+      </Shell>
+    );
+  }
+
+  // An account with no gym on it gets a sentence, not an earnings board.
+  //
+  // The effect above sets sessions and runs to [] in this case, so the screen
+  // read "Sessions delivered 0", "Nothing waiting — every finished session this
+  // month has an outcome" and "No payment has been recorded against this
+  // month's sessions yet." to a coach whose profile simply carries no
+  // tenant_id. Every one of those is a statement about their pay, made out of
+  // a query that was never run.
+  if (!me.tenantId) {
+    return (
+      <Shell me={me} gymName={gymName} current="/coach/earnings">
+        <h1>My earnings</h1>
+        <p style={{ color: 'var(--ink2)', marginTop: 10, maxWidth: '62ch' }}>
+          Your account is not linked to a gym, so there are no sessions to price
+          and no settlements to read. This is not a month in which you earned
+          nothing — it is an account with no gym on it. The gym&rsquo;s owner
+          sets that.
         </p>
       </Shell>
     );

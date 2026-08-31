@@ -119,7 +119,7 @@ export default function Challenges() {
               <Text style={{ ...ty.label, color: t.ink2 }}>We couldn’t check which challenges are running.</Text>
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>This is a connection problem, not an empty gym.</Text>
               <View style={{ marginTop: sp.lg, alignSelf: 'flex-start' }}>
-                <Ghost label="Try again" onPress={ch.reload} />
+                <Ghost label="Try Again" onPress={ch.reload} />
               </View>
             </View>
           ) : null}
@@ -231,7 +231,7 @@ export default function Challenges() {
                     Nobody has been removed from it — we just could not reach it.
                   </Text>
                   <View style={{ marginTop: sp.md, alignSelf: 'flex-start' }}>
-                    <Ghost label="Try again" onPress={() => loadBoard(sheet.id)} />
+                    <Ghost label="Try Again" onPress={() => loadBoard(sheet.id)} />
                   </View>
                 </View>
               ) : null}

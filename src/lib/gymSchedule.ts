@@ -8,6 +8,8 @@
 // Framework-agnostic, like gymTrainers and gymRecord: the Supabase client comes
 // in as an argument so neither front end owns this.
 
+import { assertWrote } from './wroteRows';
+
 type Queryable = { from: (table: string) => any; rpc?: (fn: string, args?: any) => any };
 
 export interface GymClass {
@@ -161,9 +163,20 @@ export async function createSeries(
   return rows.length;
 }
 
+/**
+ * Take a class off the timetable.
+ *
+ * The count is checked, not `error` alone — see src/lib/wroteRows.ts. A DELETE
+ * that matches nothing is a 204 with a null error, and the two policies on
+ * gym_classes (`is_owner_of(tenant_id)`, or `trainer_id = auth.uid()`) filter
+ * rather than refuse: an owner working from a board left open while somebody
+ * else deleted the same class saw the confirmation close, the week reload, and
+ * — because the timetable is merged from two sources and redrawn wholesale —
+ * had no way to tell "removed" from "was never removed".
+ */
 export async function deleteClass(sb: Queryable, classId: string): Promise<void> {
-  const { error } = await sb.from('gym_classes').delete().eq('id', classId);
-  if (error) throw error;
+  const r = await sb.from('gym_classes').delete({ count: 'exact' }).eq('id', classId);
+  assertWrote('That class', r);
 }
 
 /* ── the roster ────────────────────────────────────────────────────────────── */
@@ -199,16 +212,26 @@ export async function fetchRoster(sb: Queryable, classId: string): Promise<Roste
   return entries.sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''));
 }
 
-/** Mark someone present or not. Writes the booking row directly, which the
- *  owner may now do — previously only the class's own trainer could. */
+/**
+ * Mark someone present or not. Writes the booking row directly, which the
+ * owner may now do — previously only the class's own trainer could.
+ *
+ * The count is checked, not `error` alone — see src/lib/wroteRows.ts.
+ * `class_bookings_owner_w` is `is_owner_of(gc.tenant_id)` and is the ONLY
+ * policy granting UPDATE on this table, so a trainer's tick, or a tick against
+ * a booking the member cancelled while the register was open, matches zero rows
+ * and returns no error. The register is what the show rate is computed from and
+ * what the door log is reconciled against, so a tick that did not store is a
+ * class that reads as half-attended for good.
+ */
 export async function setAttendance(
   sb: Queryable, bookingId: string, present: boolean,
 ): Promise<void> {
-  const { error } = await sb
+  const r = await sb
     .from('class_bookings')
-    .update({ attended_at: present ? new Date().toISOString() : null })
+    .update({ attended_at: present ? new Date().toISOString() : null }, { count: 'exact' })
     .eq('id', bookingId);
-  if (error) throw error;
+  assertWrote(present ? 'That attendance tick' : 'Clearing that attendance tick', r);
 }
 
 /** Put a member on a class at the desk — a walk-in, or someone who phoned. */

@@ -72,9 +72,28 @@ export default function Records() {
     <Text style={{ ...ty.body, color: t.ink2 }}>No records yet — log a strength workout to set your first PR.</Text>
    </Section>
   </>) : (<>
+   {/* An empty board has three causes and the FULL board has a fourth. Every
+       figure here is a best-ever: "Heaviest Lift", "best set", the ranking
+       itself. A truncated read (src/lib/rowCap.ts) holds the newest thousand
+       sessions and nothing behind them, so a squat PR set two years ago is
+       simply not in the set — and the board would print the best of what
+       remained under the words "Personal Records" and rank it first. Said
+       before the hero, because the hero is the figure it qualifies. */}
+   {logStatus === 'partial' ? (<>
+    <Rule />
+    <Section>
+     <Notice tone={t.warn} kicker="Records" title="Read from your recent sessions only"
+      note="You have logged more sessions than this screen can read in one go, so this board is your best from the most recent ones. A record set before that is still on your log and is not on this list — nothing has been reset." >
+      <View style={{ marginTop: sp.lg }}>
+       <Cta label="Try Again" wide onPress={reload} />
+      </View>
+     </Notice>
+    </Section>
+   </>) : null}
+
    {/* ── the hero: the heaviest thing you have lifted ────────────────── */}
    <Hero
-    label="Heaviest Lift"
+    label={logStatus === 'partial' ? 'Heaviest Read' : 'Heaviest Lift'}
     figure={fig(est1RMIn(top.est1RM, wu))}
     unit={`${wu} est. 1RM`}
     note={`${top.exercise} · best set ${fig(liftLabel(top.weight, wu))} × ${top.reps} on ${dstr(top.at)}`}
@@ -88,7 +107,9 @@ export default function Records() {
    <Rule />
 
    <Section>
-    <SectionHead title="All Records" note={`${prs.length} lift${prs.length === 1 ? '' : 's'}`} />
+    {/* The count goes on a truncated read for the same reason the totals go
+        on Consistency: it is the size of what came back, not of the board. */}
+    <SectionHead title="All Records" note={logStatus === 'partial' ? undefined : `${prs.length} lift${prs.length === 1 ? '' : 's'}`} />
     {prs.map((pr, i) => (
      <View key={pr.exercise} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
       <Text style={{ ...ty.caption, ...numeric, color: t.ink3, width: 18 }}>{i + 1}</Text>

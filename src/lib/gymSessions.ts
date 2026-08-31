@@ -19,6 +19,7 @@
 // that says £7,060 because it counted the twelve is a dispute.
 
 import { assertWhole, capLimit } from './rowCap';
+import { assertWrote } from './wroteRows';
 
 type Queryable = { from: (table: string) => any };
 
@@ -219,7 +220,14 @@ export interface Settlement {
   periodFrom: string;
   periodTo: string;
   amountCents: number;
-  currency: string;
+  /** As the row states it, or null because it states none.
+   *
+   *  This was `string` with `?? 'AED'` behind it, so a settlement with no
+   *  currency was read back as dirhams and printed as fact on /sessions and
+   *  /payroll — while /accounting and /coach/earnings, which read the same
+   *  table with their own queries, mapped the null through and withheld the
+   *  figure. One row, shown two ways, and only the other two were honest. */
+  currency: string | null;
   sessionsCount: number;
   method: 'transfer' | 'cash' | 'payroll' | 'other';
   note: string | null;
@@ -431,6 +439,16 @@ export async function fetchAwaitingOutcome(
 /**
  * Record what happened. The rate is snapshotted at the same moment so that a
  * later change to the gym's fee cannot rewrite what this session cost.
+ *
+ * The count is checked, not `error` alone — see src/lib/wroteRows.ts. This is
+ * the write on `sessions` where a silent no-op costs the most, because the
+ * outcome is what payroll is computed from: an unmarked session is not paid,
+ * so an owner who marked twelve sessions delivered and had three of them match
+ * zero rows underpays a trainer and has a screen agreeing with them. Zero rows
+ * is reachable without any error at all — `sessions_gym_owner_u` requires
+ * `tenant_id is not null and is_owner_of(tenant_id)` and `sessions_trainer`
+ * requires `trainer_id = auth.uid()`, so a session belonging to neither, or one
+ * cancelled from the phone while the board was open, simply matches nothing.
  */
 export async function markOutcome(
   sb: Queryable,
@@ -440,8 +458,8 @@ export async function markOutcome(
 ): Promise<void> {
   const patch: Record<string, unknown> = { outcome };
   if (rateCents !== undefined) patch.rate_cents = rateCents;
-  const { error } = await sb.from('sessions').update(patch).eq('id', sessionId);
-  if (error) throw error;
+  const r = await sb.from('sessions').update(patch, { count: 'exact' }).eq('id', sessionId);
+  assertWrote('That outcome', r);
 }
 
 /**
@@ -467,7 +485,20 @@ export async function recordSettlement(
     sessionIds: string[];
     method?: 'transfer' | 'cash' | 'payroll' | 'other';
     note?: string | null;
-    currency?: string;
+    /**
+     * REQUIRED, and required is the fix.
+     *
+     * This was `currency?: string` written through as `run.currency ?? 'AED'`,
+     * into a permanent payment record that /accounting and /close read back as
+     * fact. Every settlement a non-UAE gym ever made was stored as dirhams, and
+     * nothing at any layer showed it: the column is `not null default 'AED'`,
+     * so the wrong value renders cleanly and looks considered. Both callers
+     * already pass the gym's own currency and block the settlement without one
+     * — studio-web/app/payroll/page.tsx and studio-web/app/sessions/page.tsx —
+     * so making it required costs nothing today and is what stops the third
+     * caller reintroducing it.
+     */
+    currency: string;
   },
 ): Promise<string> {
   const { data, error } = await sb.from('payroll_settlements').insert({
@@ -479,16 +510,38 @@ export async function recordSettlement(
     sessions_count: run.sessionIds.length,
     method: run.method ?? 'transfer',
     note: run.note ?? null,
-    currency: run.currency ?? 'AED',
+    currency: run.currency,
   }).select('id').single();
   if (error) throw error;
 
   const id = (data as any)?.id as string;
   if (run.sessionIds.length) {
-    const { error: e2 } = await sb.from('sessions')
-      .update({ settlement_id: id })
+    // The rows changed are counted — see src/lib/wroteRows.ts — and this is the
+    // write in the whole console where a silent no-op costs the most money.
+    //
+    // The two halves of this function were held to different standards: the
+    // insert above asks for the row back and checks it, and this asked only
+    // `if (e2)`. A PostgREST UPDATE matching zero rows returns 204 with a null
+    // error, and `sessions_gym_owner_u` (`tenant_id is not null and
+    // is_owner_of(tenant_id)`) filters rather than refuses. The settlement row
+    // therefore existed with NOT ONE session stamped: the run appeared under
+    // "Already paid" while every session in it stayed in "Owed now", payable
+    // again, by an owner who had just been told the trainer was settled.
+    const r2 = await sb.from('sessions')
+      .update({ settlement_id: id }, { count: 'exact' })
       .in('id', run.sessionIds);
-    if (e2) throw e2;
+    assertWrote('The sessions this settlement covers', r2);
+    if ((r2 as { count?: number | null }).count !== run.sessionIds.length) {
+      // A PARTIAL stamp is its own outcome and worse than none, because the
+      // unstamped remainder is silently payable a second time. The settlement
+      // row is deliberately left standing — it is a payment that was made — so
+      // this says exactly what is on the record and what is not.
+      throw new Error(
+        `The settlement was recorded, but only ${(r2 as { count?: number | null }).count ?? 0} of `
+        + `${run.sessionIds.length} sessions were stamped against it. The rest are still shown as unpaid `
+        + 'and could be settled twice. Reload before settling this trainer again.',
+      );
+    }
   }
   return id;
 }
@@ -509,7 +562,10 @@ export async function fetchSettlements(
     periodFrom: r.period_from,
     periodTo: r.period_to,
     amountCents: r.amount_cents ?? 0,
-    currency: r.currency ?? 'AED',
+    // Null through, never coerced. `money()` withholds an amount whose currency
+    // nobody chose, which is the whole point of it taking the currency as a
+    // required argument; coercing here defeated that before it was ever called.
+    currency: r.currency ?? null,
     sessionsCount: r.sessions_count ?? 0,
     method: r.method ?? 'transfer',
     note: r.note ?? null,
@@ -517,8 +573,13 @@ export async function fetchSettlements(
   }));
 }
 
-/** Undo a wrongly recorded outcome, returning the session to "not yet known". */
+/** Undo a wrongly recorded outcome, returning the session to "not yet known".
+ *
+ *  Counted for the same reason `markOutcome` is, and with the sharper edge:
+ *  this is the control somebody reaches for having just realised the record is
+ *  wrong. Telling them it is undone when nothing changed leaves the wrong
+ *  outcome standing with somebody now confident it does not. */
 export async function clearOutcome(sb: Queryable, sessionId: string): Promise<void> {
-  const { error } = await sb.from('sessions').update({ outcome: null }).eq('id', sessionId);
-  if (error) throw error;
+  const r = await sb.from('sessions').update({ outcome: null }, { count: 'exact' }).eq('id', sessionId);
+  assertWrote('Clearing that outcome', r);
 }

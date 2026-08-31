@@ -28,7 +28,8 @@ import { useTheme } from '../../src/ui/components';
 import { useClientData } from '../../src/ui/clientData';
 import { useSettings } from '../../src/ui/settings';
 import { weightDeltaIn } from '../../src/lib/units';
-import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, Notice, fig } from '../../src/ui/kit';
+import { isWhole } from '../../src/ui/loadStatus';
 import { sp, layout, type as ty } from '../../src/theme/scale';
 
 export default function Social() {
@@ -37,6 +38,15 @@ export default function Social() {
  const cd = useClientData();
  const wu = useSettings().weightUnit;
 
+ // `cd.scansStatus`, which this screen ignored entirely. It matters more here
+ // than anywhere else in the app: every figure below leaves the phone. Under
+ // 'error' `cd.scans` is empty and the screen said "Nothing to show yet · Log a
+ // second body scan" to somebody with twenty; under 'partial' `scans[0]` is not
+ // the member's FIRST scan, it is the oldest one that fitted in the read — and
+ // the whole premise of this screen, stated in its own heading, is "Since Your
+ // First Scan". A wrong figure in a share is not a display bug: it is posted,
+ // and it stays posted.
+ const scansWhole = isWhole(cd.scansStatus);
  const first = cd.scans[0];
  const latest = cd.scans[cd.scans.length - 1];
  const bfDrop = first && latest ? Math.round((first.bodyFatPct - latest.bodyFatPct) * 10) / 10 : 0;
@@ -49,7 +59,7 @@ export default function Social() {
  const wtDropShown = weightDeltaIn(wtDrop, wu) ?? 0;
  // Two scans are the minimum that can describe a change. One (or none) is not
  // progress, and printing a zero here would read as one.
- const measured = cd.scans.length >= 2;
+ const measured = scansWhole && cd.scans.length >= 2;
 
  const share = async () => {
  const msg = measured
@@ -80,13 +90,25 @@ export default function Social() {
  note={`Body fat ${bfDrop >= 0 ? 'down' : 'up'} ${Math.abs(bfDrop)}% across ${cd.scans.length} scans`}
  />
  ) : (
+ !scansWhole && cd.scansStatus !== 'loading' ? (
+ <View style={{ marginTop: sp.lg }}>
+  <Notice tone={t.warn} kicker="Your progress"
+   title={cd.scansStatus === 'error' ? 'We couldn’t read your scans' : 'Not all of your scans could be read'}
+   note={cd.scansStatus === 'error'
+    ? 'There is nothing to share from this screen right now, and that is a fault here rather than an absence in your record. Your scans are safe.'
+    : 'You have more scans on record than can be read in one go, and "since your first scan" means the first one — which may not be among them. A figure that would go into a post has to be the right one, so none is offered.'} />
+ </View>
+ ) : (
  <View style={{ paddingTop: sp.xxl, paddingBottom: sp.xl }}>
  <Text style={{ ...ty.micro, color: t.ink3 }}>Your progress</Text>
- <Text style={{ ...ty.head, color: t.ink, marginTop: sp.sm }}>Nothing to show yet</Text>
+ <Text style={{ ...ty.head, color: t.ink, marginTop: sp.sm }}>
+  {cd.scansStatus === 'loading' ? 'Reading your scans…' : 'Nothing to show yet'}
+ </Text>
  <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>
  Log a second body scan and the change between your first and your latest appears here — and in anything you share.
  </Text>
  </View>
+ )
  )}
 
  <Rule />

@@ -58,7 +58,8 @@ import {
   bodyReadings, measuredNote, stalenessNote, mixedSourceNote, readingsLabel,
   dayLabel, todayISO, type BodyReading,
 } from '../../src/lib/bodyFigures';
-import { Rule, Section, SectionHead, Ghost, Spark } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Ghost, Notice, Spark } from '../../src/ui/kit';
+import { isWhole } from '../../src/ui/loadStatus';
 import { sp, layout, type as ty, numeric, value } from '../../src/theme/scale';
 
 interface MetricDef {
@@ -97,6 +98,16 @@ export default function BodyTrends() {
   // provider in the same render as the series themselves, so the two cannot
   // drift apart between here and there.
   const scanCount = cd.scans.length;
+  // `cd.scansStatus` says whether `cd.scans` is the member's scan history or the
+  // shape a failed read leaves behind. Its own doc comment in clientData.tsx
+  // spells it out — under 'error' an empty `scans` means UNKNOWN, not "never
+  // measured" — and this screen, whose entire subject is that history, read
+  // neither it nor `profileStatus`. So a refused read printed "Every body metric
+  // across 0 scans" in the header, "Not Enough Readings Yet · Add another scan
+  // to see trends" in the body, and "Not enough data yet." under each of the
+  // four metrics, to somebody with twenty scans on record.
+  const bodyStatus = cd.scansStatus;
+  const bodyWhole = isWhole(bodyStatus);
   const readingsFor = (m: MetricDef): BodyReading[] => {
     switch (m.from) {
       case 'weight': return bodyReadings(cd.weightSeries, scanCount);
@@ -128,8 +139,9 @@ export default function BodyTrends() {
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>
-              Every body metric across {scans.length} scan{scans.length === 1 ? '' : 's'}
-              {cd.weightSeries.length > scanCount ? ' and your latest weigh-in' : ''}
+              {bodyWhole
+                ? `Every body metric across ${scans.length} scan${scans.length === 1 ? '' : 's'}${cd.weightSeries.length > scanCount ? ' and your latest weigh-in' : ''}`
+                : 'Every body metric you have on record'}
             </Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Composition Trends</Text>
           </View>
@@ -147,11 +159,36 @@ export default function BodyTrends() {
 
         <Rule />
 
+        {/* Said before the charts, because "Not Enough Readings Yet" below is a
+            claim about the member's record and this is the reason it may not be
+            one. Under 'partial' the readings shown are real but are not all of
+            them, which matters here more than on most screens: the FIRST
+            reading is the one a trend is measured from. */}
+        {!bodyWhole && bodyStatus !== 'loading' ? (
+          <Section>
+            <Notice
+              tone={t.warn}
+              kicker="Composition"
+              title={bodyStatus === 'error' ? 'We couldn’t read your scans' : 'Not all of your scans could be read'}
+              note={bodyStatus === 'error'
+                ? 'Nothing below is a statement about your body — it is a statement about a read that did not answer. Your scans are on your record and are not lost.'
+                : 'You have more readings on record than this screen can read in one go, so a trend drawn here starts where the read stopped rather than where you did.'}
+            />
+          </Section>
+        ) : null}
+
         {!anyTrend ? (
           <Section>
-            <SectionHead title="Not Enough Readings Yet" />
-            <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>Add another scan to see trends</Text>
-            <Text style={{ ...ty.label, color: t.ink3, marginTop: 4 }}>Once you've logged two or more readings, each metric graphs here so you can watch it move over time.</Text>
+            {/* Only a whole read may say the member has not got enough. */}
+            {!bodyWhole ? (
+              <Text style={{ ...ty.body, color: t.ink2 }}>
+                {bodyStatus === 'loading' ? 'Reading your scans…' : 'No trends can be drawn from what was read. That is not the same as having none — see above.'}
+              </Text>
+            ) : (<>
+              <SectionHead title="Not Enough Readings Yet" />
+              <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>Add another scan to see trends</Text>
+              <Text style={{ ...ty.label, color: t.ink3, marginTop: 4 }}>Once you've logged two or more readings, each metric graphs here so you can watch it move over time.</Text>
+            </>)}
           </Section>
         ) : (
           byMetric.map(({ m, readings }, mi) => {
@@ -171,7 +208,7 @@ export default function BodyTrends() {
                       {m.weight ? ` ${wu}` : ` ${m.unit}`} · {measuredNote(readings[0], today)}. A trend needs two.
                     </Text>
                   ) : (
-                    <Text style={{ ...ty.label, color: t.ink3 }}>{m.from === 'score' ? 'InBody score reads from your scan once the AI reader is connected.' : 'Not enough data yet.'}</Text>
+                    <Text style={{ ...ty.label, color: t.ink3 }}>{m.from === 'score' ? 'InBody score reads from your scan once the AI reader is connected.' : bodyWhole ? 'Not enough data yet.' : bodyStatus === 'loading' ? 'Reading…' : 'Nothing read for this one — see the note above.'}</Text>
                   )}
                 </Section>
               </View>

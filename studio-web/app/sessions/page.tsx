@@ -138,6 +138,42 @@ export default function Sessions() {
   // that renders one of them checks `sessions` first and shows a dash instead.
   const total = useMemo(() => payrollTotal(lines ?? []), [lines]);
 
+  // What each trainer is actually owed RIGHT NOW: marked, priced, payable and
+  // not already settled. Derived from the sessions rather than from the payroll
+  // line, because the line counts everything in the window while a settlement
+  // must only ever cover what has not been paid.
+  //
+  // Null when the sessions could not be read: an empty "Outstanding" list says
+  // every trainer is square, which is the single most expensive wrong sentence
+  // on this page.
+  const owed = useMemo(() => {
+    if (sessions === null) return null;
+    const feeCents = sessionFee == null ? null : Math.round(sessionFee * 100);
+    const byTrainer = new Map<string, { name: string | null; rows: PtSession[]; unmarked: number }>();
+    for (const s of sessions) {
+      const e = byTrainer.get(s.trainerId)
+        ?? { name: s.trainerName, rows: [] as PtSession[], unmarked: 0 };
+      if (isAwaitingOutcome(s)) e.unmarked += 1;
+      byTrainer.set(s.trainerId, e);
+    }
+    // The same fee `lines` was priced with, or this panel offers to settle a
+    // smaller number than the payroll table above it is showing.
+    for (const s of settleableSessions(sessions, policy, undefined, feeCents)) {
+      const e = byTrainer.get(s.trainerId);
+      if (e) e.rows.push(s);
+    }
+    return [...byTrainer.entries()]
+      .map(([trainerId, e]) => ({
+        trainerId, name: e.name, rows: e.rows, unmarked: e.unmarked,
+        cents: settlementAmount(e.rows, feeCents),
+        blocker: settleBlocker(e.rows, e.unmarked)
+          ?? (e.rows.length && !ccy
+            ? 'This gym has not set its currency, so a settlement cannot say what money it is in.'
+            : null),
+      }))
+      .filter((x) => x.rows.length > 0 || x.unmarked > 0);
+  }, [sessions, policy, sessionFee, ccy]);
+
   if (me === undefined) return <div style={{ padding: 40, color: 'var(--ink3)' }}>Loading…</div>;
   if (me === null) return <div style={{ padding: 40 }}><a href="/">Sign in</a></div>;
 
@@ -163,7 +199,28 @@ export default function Sessions() {
     );
   }
 
-  const tenantId = me.tenantId!;
+  // An account with no gym on it gets a sentence, not a payroll board.
+  //
+  // The load sets `sessions` to [] in this case, so every table below rendered
+  // its confident empty copy — "Nothing outstanding. Every marked session in
+  // this window has been settled." — to an owner whose profile simply carries no
+  // tenant_id. That is a claim about their trainers' pay, made from a query
+  // that was never run. The Overview has said this properly all along; this
+  // page had the same state and none of the sentence.
+  if (!me.tenantId) {
+    return (
+      <Shell me={me} gymName={gymName} current="/sessions">
+        <h1>Sessions</h1>
+        <p style={{ color: 'var(--ink2)', marginTop: 10, maxWidth: '62ch' }}>
+          Your account is not linked to a gym, so there are no one-to-ones to
+          read and nothing to settle. This is not a gym with no sessions in it —
+          it is an account with no gym on it. The owner sets that.
+        </p>
+      </Shell>
+    );
+  }
+
+  const tenantId = me.tenantId;
   const refresh = () => load(tenantId);
 
   const mark = async (s: PtSession, outcome: SessionOutcome) => {
@@ -214,42 +271,6 @@ export default function Sessions() {
       : gymError && total.priced < total.payable
         ? `Your gym could not be read, so there is no session fee to price the rest with: ${gymError}`
         : settlementBlocker(total);
-
-  // What each trainer is actually owed RIGHT NOW: marked, priced, payable and
-  // not already settled. Derived from the sessions rather than from the payroll
-  // line, because the line counts everything in the window while a settlement
-  // must only ever cover what has not been paid.
-  //
-  // Null when the sessions could not be read: an empty "Outstanding" list says
-  // every trainer is square, which is the single most expensive wrong sentence
-  // on this page.
-  const owed = useMemo(() => {
-    if (sessions === null) return null;
-    const feeCents = sessionFee == null ? null : Math.round(sessionFee * 100);
-    const byTrainer = new Map<string, { name: string | null; rows: PtSession[]; unmarked: number }>();
-    for (const s of sessions) {
-      const e = byTrainer.get(s.trainerId)
-        ?? { name: s.trainerName, rows: [] as PtSession[], unmarked: 0 };
-      if (isAwaitingOutcome(s)) e.unmarked += 1;
-      byTrainer.set(s.trainerId, e);
-    }
-    // The same fee `lines` was priced with, or this panel offers to settle a
-    // smaller number than the payroll table above it is showing.
-    for (const s of settleableSessions(sessions, policy, undefined, feeCents)) {
-      const e = byTrainer.get(s.trainerId);
-      if (e) e.rows.push(s);
-    }
-    return [...byTrainer.entries()]
-      .map(([trainerId, e]) => ({
-        trainerId, name: e.name, rows: e.rows, unmarked: e.unmarked,
-        cents: settlementAmount(e.rows, feeCents),
-        blocker: settleBlocker(e.rows, e.unmarked)
-          ?? (e.rows.length && !ccy
-            ? 'This gym has not set its currency, so a settlement cannot say what money it is in.'
-            : null),
-      }))
-      .filter((x) => x.rows.length > 0 || x.unmarked > 0);
-  }, [sessions, policy, sessionFee, ccy]);
 
   const settle = async (t: NonNullable<typeof owed>[number]) => {
     if (!me?.tenantId || t.blocker || !ccy) return;
@@ -529,7 +550,13 @@ function Settled({ runs, error }: { runs: Settlement[] | null; error: string | n
       // rewrite what was actually handed over. The row snapshots its CURRENCY
       // too, and dropping it printed every past run in whatever money the helper
       // defaults to rather than the money that actually left the account.
-      render: (r) => money(r.amountCents, r.currency) },
+      // `fetchSettlements` used to coerce a null currency to 'AED' on the way
+      // out, so a run that states no money printed as dirhams. It now passes
+      // the null through and money() withholds — which must not be allowed to
+      // fall out as an EMPTY cell, because a blank beside an amount reads as
+      // "nothing was paid" rather than "we cannot say in what".
+      render: (r) => money(r.amountCents, r.currency)
+        ?? <span className="dash">— this run records no currency</span> },
   ];
   return (
     <Section title="Already paid" sub="Amounts as they were when the money went out, not as today's rates would price them.">

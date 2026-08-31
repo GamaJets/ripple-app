@@ -20,6 +20,12 @@ import { Shell } from '@/components/Shell';
 import { DataTable, type Column } from '@/components/DataTable';
 // `money()` is deliberately not imported: the only amount on this screen is a
 // pack price, and `client_purchases` carries no currency for it to print.
+// The weight column used to be printed as a bare "84.2 kg", which was the last
+// hardcoded unit in this console and the reason it was in KNOWN in
+// scripts/check-currency.mjs. It now reads the signed-in coach's own
+// preference; lib/units.ts sets out whose unit that is and why, and what a
+// coach who has never chosen one is told.
+import { unitsFor, weightText, deltaText, unitSourceNote } from '@/lib/units';
 import { COACHED_MODE_SHORT, readCoachedModeOrNull, type CoachedMode } from '@lib/types';
 import { goalLabel, sortGoals, GOAL_METRIC, type GoalTarget, type MeasuredKind } from '@lib/goalTargets';
 import { fmtDay } from '@lib/format';
@@ -511,6 +517,27 @@ export default function CoachRoster() {
   if (me === undefined) return <div style={{ padding: 40, color: 'var(--ink3)' }}>Loading…</div>;
   if (me === null) return <div style={{ padding: 40 }}><a href="/">Sign in</a></div>;
 
+  // A refused profile read is not a statement about who somebody is.
+  //
+  // `roleUnknown` exists in lib/supabase.ts for exactly this branch, and these
+  // three coach screens were the only ones in the console without it: the
+  // fifteen owner pages all carry it. Without it, an RLS hiccup on `profiles`
+  // arrived as `role: null`, fell into the refusal below, and told a working
+  // coach "your account is not a coaching account" — a claim about them, made
+  // out of a query that failed.
+  if (me.roleUnknown) {
+    return (
+      <Shell me={me} gymName={gymName} current="/coach/roster">
+        <h1>We could not read your account</h1>
+        <p style={{ color: 'var(--ink2)', marginTop: 8, maxWidth: '62ch' }}>
+          Your profile did not load, so this console does not know what you are —
+          which is not the same as you not being a coach. Reload the page; if it
+          keeps happening the database refused the read rather than you.
+        </p>
+      </Shell>
+    );
+  }
+
   if (me.role !== 'trainer' && me.role !== 'owner') {
     return (
       <Shell me={me} gymName={gymName} current="/coach/roster">
@@ -525,6 +552,11 @@ export default function CoachRoster() {
   }
 
   const unread: Unread = ranked !== null ? null : err ? 'failed' : 'loading';
+
+  // The unit the person reading this screen thinks in — theirs, not each
+  // client's. See lib/units.ts for why a roster column has to be one unit.
+  const units = unitsFor(me);
+  const unitNote = unitSourceNote(units);
 
   // Every tile below is allowed to say "we do not know". None of them is
   // allowed to say a number it had to invent to fill the space.
@@ -629,12 +661,18 @@ export default function CoachRoster() {
         // dash — never 0 kg, and never "no progress", which is a claim about
         // the person rather than about the data.
         if (r.row.weightKg == null) return <span className="dash">— none logged</span>;
+        // Through `weightLabel` in src/lib/units.ts, the same function the phone
+        // screens use, so a coach cannot read one figure here and a differently
+        // rounded one in the app they had open five minutes ago. The delta is
+        // converted as a SPAN rather than by converting both ends and
+        // subtracting — see deltaText — and carries no unit word of its own,
+        // because the figure it sits beside has just named one.
         return (
           <span>
-            {r.row.weightKg.toFixed(1)} kg
+            {weightText(r.row.weightKg, units.weightUnit)}
             {r.row.scanDelta != null ? (
               <span style={{ color: 'var(--ink3)', fontSize: 11.5, marginLeft: 6 }}>
-                {r.row.scanDelta > 0 ? '+' : ''}{r.row.scanDelta.toFixed(1)} since first scan
+                {deltaText(r.row.scanDelta, units.weightUnit)} since first scan
               </span>
             ) : (
               <span style={{ color: 'var(--ink3)', fontSize: 11.5, marginLeft: 6 }}>
@@ -738,6 +776,13 @@ export default function CoachRoster() {
         title="Your clients"
         sub="Sorted by who needs you first. A dash is a reading that is missing, not a client doing nothing — the reason is beside it."
       >
+        {/* Said once, here, rather than beside every weight in the column. A
+            line of apology on every row is a nag that trains people to stop
+            reading it, and it does not get the unit chosen — the same call
+            src/lib/unitPreference.ts makes for the phone. */}
+        {unitNote ? (
+          <p style={{ margin: '0 14px 12px', fontSize: 12, color: 'var(--ink3)' }}>{unitNote}</p>
+        ) : null}
         {unread ? (
           <Unresolved state={unread} what="your roster" />
         ) : (

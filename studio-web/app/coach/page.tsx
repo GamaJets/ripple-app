@@ -383,6 +383,27 @@ export default function Coach() {
   // Owners are let in because plenty of them still coach, and this is their own
   // book rather than the gym's. Everyone else gets a sentence, not four empty
   // tables that look like a coach with no clients.
+  // A refused profile read is not a statement about who somebody is.
+  //
+  // `roleUnknown` exists in lib/supabase.ts for exactly this branch, and these
+  // three coach screens were the only ones in the console without it: the
+  // fifteen owner pages all carry it. Without it, an RLS hiccup on `profiles`
+  // arrived as `role: null`, fell into the refusal below, and told a working
+  // coach "your account is not a coaching account" — a claim about them, made
+  // out of a query that failed.
+  if (me.roleUnknown) {
+    return (
+      <Shell me={me} gymName={gymName} current="/coach">
+        <h1>We could not read your account</h1>
+        <p style={{ color: 'var(--ink2)', marginTop: 8, maxWidth: '62ch' }}>
+          Your profile did not load, so this console does not know what you are —
+          which is not the same as you not being a coach. Reload the page; if it
+          keeps happening the database refused the read rather than you.
+        </p>
+      </Shell>
+    );
+  }
+
   if (me.role !== 'trainer' && me.role !== 'owner') {
     return (
       <Shell me={me} gymName={gymName} current="/coach">
@@ -417,7 +438,7 @@ export default function Coach() {
 
   return (
     <Shell me={me} gymName={gymName} current="/coach">
-      <h1>Your day</h1>
+      <h1>Your Day</h1>
       <p style={{ color: 'var(--ink3)', marginTop: 6, fontSize: 13 }}>
         Your sessions, your clients and your requests — nobody else&apos;s.
         {me.role === 'owner' ? ' You own this gym; the gym-wide view is under Sessions.' : ''}
@@ -658,10 +679,30 @@ function Requests({ requests, unread, names, me, onChange, setErr }: {
         if (rosterErr) { setMsg(`${rosterErr.message} — they are linked but not on your roster.`); setBusy(null); return; }
       }
 
-      const { error } = await supabase.from('coach_requests')
-        .update({ status: accept ? 'accepted' : 'declined', responded_at: new Date().toISOString() })
+      // The rows changed are counted, not just `error` — see src/lib/wroteRows.ts.
+      // `coach_requests_trainer_u` is `trainer_id = auth.uid()` and PostgREST
+      // reports an update filtered away by a policy as a plain success with
+      // nothing changed. A request the client withdrew while this board was
+      // open matches nothing in exactly the same way. Either way the coach read
+      // "Added to your roster." and the request was still sitting there
+      // unanswered the next time they looked — and on an accept the link and
+      // the roster row HAD been written, so the two halves disagreed.
+      const { error, count } = await supabase.from('coach_requests')
+        .update(
+          { status: accept ? 'accepted' : 'declined', responded_at: new Date().toISOString() },
+          { count: 'exact' },
+        )
         .eq('id', r.id);
       if (error) { setMsg(error.message); setBusy(null); return; }
+      if (count !== 1) {
+        setMsg(
+          accept
+            ? 'They are linked to you and on your roster, but the request itself was not marked answered — the server matched no row, so it may have been withdrawn. Reload before answering it again.'
+            : 'That request was not declined — the server matched no row, so it may already have been withdrawn or answered elsewhere.',
+        );
+        setBusy(null);
+        return;
+      }
 
       setErr(null);
       setMsg(accept ? 'Added to your roster.' : 'Declined.');

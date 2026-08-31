@@ -37,8 +37,9 @@ import { analyzeMeal, visionAvailable } from '../../src/lib/vision';
 import { parseFoodText, foodAIAvailable } from '../../src/lib/foodAI';
 import { BarcodeSheet } from '../../src/ui/BarcodeSheet';
 import { useFoodLog } from '../../src/ui/foodLog';
+import { isWhole } from '../../src/ui/loadStatus';
 import { notifySuccess } from '../../src/ui/haptics';
-import { Rule, Section, SectionHead, Hero, Card, Cta, Ghost, Meter, QuickRow } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, Card, Cta, Ghost, Meter, QuickRow, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../../src/theme/scale';
 import { useSettings } from '../../src/ui/settings';
 import { weightLabel, kgToLb, type WeightUnit } from '../../src/lib/units';
@@ -190,16 +191,33 @@ export default function Nutrition() {
   const [recipe, setRecipe] = useState<PlannedMeal | null>(null);
 
   /** Put a snack idea in today's log. Nothing else counts it — the section is
-   *  a menu, and reading a menu is not eating. */
-  const logSnack = (m: PlannedMeal, servings = 1) => {
-    void fl.addFood({
+   *  a menu, and reading a menu is not eating.
+   *
+   *  `void fl.addFood(...)` threw the answer away. `logFood` distinguishes three
+   *  outcomes for exactly this reason and the photo path forty lines down
+   *  already branches on all three: a snack the server REFUSED is not on the
+   *  record, and one that could not be sent is waiting rather than counted.
+   *  Both looked identical here — the row's + faded and nothing else happened —
+   *  so somebody tapping it, seeing no complaint, and eating the snack was
+   *  eating to a day's total that was missing it. */
+  const logSnack = async (m: PlannedMeal, servings = 1) => {
+    const food = {
       name: m.n,
       kcal: Math.round(m.K * servings),
       protein: Math.round(m.P * servings),
       carbs: Math.round(m.C * servings),
       fat: Math.round(m.F * servings),
-      via: 'manual',
-    });
+      via: 'manual' as const,
+    };
+    const out = await fl.logFood(food);
+    if (out === 'refused') {
+      Alert.alert('Not logged', `${m.n} could not be saved, so it is not on today's record.`);
+      return;
+    }
+    notifySuccess();
+    if (out === 'unsent') {
+      Alert.alert('Logged — waiting to send', `${m.n} is counted toward today and kept on this phone. It goes up when you have signal.`);
+    }
   };
   const [showGrocery, setShowGrocery] = useState(false);
   const [checked, setChecked] = useState<Record<string, boolean>>({});
@@ -256,7 +274,28 @@ export default function Nutrition() {
   const describeLog = async () => {
     const text = nl.trim(); if (!text) return;
     setLogBusy(true); const items = await parseFoodText(text); setLogBusy(false);
-    if (items && items.length) { items.forEach((it) => fl.addFood({ name: it.name, kcal: it.kcal, protein: it.protein, carbs: it.carbs, fat: it.fat, via: 'manual' })); setNl(''); notifySuccess(); }
+    if (items && items.length) {
+      // `items.forEach` over an async write started every one of them and
+      // waited for none, then fired the success haptic and cleared the box the
+      // typing was in. A member who described three things and had two refused
+      // was told, by the only signal this path has, that all three were logged
+      // — and the text they would have needed to try again was gone. The field
+      // is cleared only for what actually landed.
+      const outs = await Promise.all(items.map((it) =>
+        fl.logFood({ name: it.name, kcal: it.kcal, protein: it.protein, carbs: it.carbs, fat: it.fat, via: 'manual' })));
+      const refused = outs.filter((o) => o === 'refused').length;
+      const unsent = outs.filter((o) => o === 'unsent').length;
+      if (refused === outs.length) {
+        Alert.alert('Not logged', `Nothing you described could be saved, so none of it is on today's record. Your text is still in the box.`);
+        return;
+      }
+      setNl(''); notifySuccess();
+      if (refused > 0) {
+        Alert.alert('Partly logged', `${outs.length - refused} of ${outs.length} went on today's record. ${refused} could not be saved and ${refused === 1 ? 'is' : 'are'} not counted.`);
+      } else if (unsent > 0) {
+        Alert.alert('Logged — waiting to send', `${unsent === outs.length ? 'They are' : `${unsent} of them are`} counted toward today and kept on this phone until you have signal.`);
+      }
+    }
     else { Alert.alert('Could not read that', foodAIAvailable() ? 'Try e.g. \"2 eggs, toast and a coffee\".' : 'AI logging turns on with the AI backend.'); }
   };
 
@@ -345,6 +384,17 @@ export default function Nutrition() {
 
   const G = layout.gutter;
   const eaten = fl.consumed;
+  // Whether today's food log is what the server holds.
+  //
+  // Every figure below this line is `target − eaten`, and `eaten` is a FLOOR
+  // under anything but a whole read: the provider's own header says so. So a
+  // failed read did not make this screen blank, it made it generous — a member
+  // whose log could not be read was shown their entire day's allowance as
+  // "Calories Left", with three empty macro bars and the words "Nothing logged
+  // today" underneath, and ate to it. `bodyKnown` three hundred lines up does
+  // exactly this for the profile read; the food read, which is the one that
+  // moves every day, had nothing.
+  const dayWhole = isWhole(fl.status);
   // One sum, shared with the Food Log, so the two cannot drift apart again.
   // The budget argument is what stops a day's movement being counted twice:
   // this target is bmr * activity, so the multiplier has already paid for an
@@ -414,15 +464,25 @@ export default function Nutrition() {
           </View>
         ) : null}
 
-        {/* ── the hero: what is left to eat today ────────────────────────── */}
+        {/* ── the hero: what is left to eat today ──────────────────────────
+            `Calories Left` is `target − eaten`, so an unread log does not make
+            it blank, it makes it BIGGER — the safest-looking direction and the
+            wrong one. It is withheld until the day's log is whole, along with
+            the ring, which would otherwise draw an empty circle around a full
+            allowance. The label goes neutral with it: "Calories Left" over a
+            dash still names the thing being withheld, "Calories Over" would be
+            a claim in itself. */}
         <Hero
-          label={cal.net >= 0 ? 'Calories Left' : 'Calories Over'}
-          figure={Math.abs(cal.net).toLocaleString()}
-          unit="kcal"
-          note={caloriesNote(cal)}
+          label={!dayWhole ? 'Calories' : cal.net >= 0 ? 'Calories Left' : 'Calories Over'}
+          figure={dayWhole ? Math.abs(cal.net).toLocaleString() : fig(null)}
+          unit={dayWhole ? 'kcal' : undefined}
+          note={dayWhole ? caloriesNote(cal)
+            : fl.status === 'loading' ? 'Reading today’s food log…'
+            : fl.status === 'partial' ? 'You have logged more today than this screen can read in one go, so what is left cannot be worked out from it.'
+            : 'We couldn’t read today’s food log. What is left depends on what you have eaten, so this is unknown rather than your whole allowance.'}
           // undefined, not 0: an empty ring drawn for a target we do not have
           // is a figure invented to fill a slot.
-          arc={target.kcal ? eaten.kcal / target.kcal : undefined}
+          arc={dayWhole && target.kcal ? eaten.kcal / target.kcal : undefined}
           arcLabel="of today's calories eaten"
           onPress={() => router.push('/(client)/foodlog')}
         />
@@ -463,9 +523,18 @@ export default function Nutrition() {
               the figure above it means. The plan's own total keeps its place in
               the note, where it is named. */}
           <SectionHead title="Macros Eaten" note={`${tot.K.toLocaleString()} kcal planned below`} />
-          <Meter label="Protein" val={eaten.protein} target={target.protein} />
-          <Meter label="Carbs" val={eaten.carbs} target={target.carbs} dim />
-          <Meter label="Fat" val={eaten.fat} target={target.fat} dim />
+          {/* The same withholding as the hero, and for the sharper version of
+              the same reason: three empty bars ARE a statement in this screen's
+              visual language, and the statement is "you have eaten nothing". */}
+          {dayWhole ? (<>
+            <Meter label="Protein" val={eaten.protein} target={target.protein} />
+            <Meter label="Carbs" val={eaten.carbs} target={target.carbs} dim />
+            <Meter label="Fat" val={eaten.fat} target={target.fat} dim />
+          </>) : (
+            <Text style={{ ...ty.label, color: t.ink3 }}>
+              {fl.status === 'loading' ? 'Reading today’s food log…' : 'Today’s food log could not be read, so these bars would be empty for the wrong reason. Your targets are above.'}
+            </Text>
+          )}
         </Section>
 
         <Rule />
@@ -503,7 +572,7 @@ export default function Nutrition() {
 
         {/* ── the one card: log what you actually ate ────────────────────── */}
         <Section>
-          <SectionHead title="Log What You Ate" note={`${fl.consumed.kcal.toLocaleString()} of ${target.kcal.toLocaleString()} kcal`} />
+          <SectionHead title="Log What You Ate" note={dayWhole ? `${fl.consumed.kcal.toLocaleString()} of ${target.kcal.toLocaleString()} kcal` : `${target.kcal.toLocaleString()} kcal target`} />
           <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>Eating something off-plan? Add it and it counts toward your day.</Text>
           <Card>
             <View style={{ flexDirection: 'row', gap: sp.sm }}>
@@ -552,7 +621,11 @@ export default function Nutrition() {
               ))}
             </View>
           ) : (
-            <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.lg }}>Nothing logged today.</Text>
+            <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.lg }}>
+              {fl.status === 'loading' ? 'Reading today’s food log…'
+                : fl.status === 'error' ? 'We couldn’t read today’s food log. This is not a day with nothing in it — it is a day we can’t see.'
+                : 'Nothing logged today.'}
+            </Text>
           )}
         </Section>
 
@@ -719,7 +792,7 @@ export default function Nutrition() {
                       <Text style={{ ...value(20), color: t.ink }}>{num(m.K)}</Text>
                       <Text style={{ ...ty.caption, color: t.ink3 }}>kcal</Text>
                     </View>
-                    <Pressable onPress={() => logSnack(m)} hitSlop={10} accessibilityRole="button"
+                    <Pressable onPress={() => { void logSnack(m); }} hitSlop={10} accessibilityRole="button"
                       accessibilityLabel={`Log ${m.n}`}
                       style={{ width: 34, height: 34, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
                       <Icon name="plus" size={16} color={t.ink2} />
@@ -803,7 +876,7 @@ export default function Nutrition() {
               {/* A snack idea has no slot in the plan, so there is nothing for a
                   swap to write to — logging it is the action it has. */}
               {recipe.pos < 0
-                ? <Ghost label="Log This Snack" icon="plus" onPress={() => { logSnack(recipe, batch); setRecipe(null); }} />
+                ? <Ghost label="Log This Snack" icon="plus" onPress={() => { void logSnack(recipe, batch); setRecipe(null); }} />
                 : <Ghost label="Swap This Meal" icon="swap" onPress={() => { swap(recipe.pos, recipe.slot, recipe.idx); setRecipe(null); }} />}
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginTop: sp.lg, marginBottom: sp.lg }}>
                 <Text style={{ ...ty.label, color: t.ink2 }}>Servings</Text>
@@ -915,7 +988,14 @@ export default function Nutrition() {
           same one, and a second copy is how the two calorie sums on these very
           screens came to disagree. */}
       <BarcodeSheet visible={bcOpen} onClose={() => setBcOpen(false)}
-        onLogged={(f) => fl.addFood({ ...f, via: 'barcode' })} />
+        // Same three outcomes, same rule. A scanned barcode the server refuses
+        // is not on the record, and the sheet closing is not an answer.
+        onLogged={async (f) => {
+          const out = await fl.logFood({ ...f, via: 'barcode' });
+          if (out === 'refused') { Alert.alert('Not logged', `${f.name} could not be saved, so it is not on today's record.`); return; }
+          notifySuccess();
+          if (out === 'unsent') Alert.alert('Logged — waiting to send', `${f.name} is counted toward today and kept on this phone until you have signal.`);
+        }} />
     </SafeAreaView>
   );
 }

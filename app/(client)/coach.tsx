@@ -30,6 +30,9 @@ import { readinessScore, readinessSleep } from '../../src/lib/readiness';
 import { useDeviceSleep } from '../../src/ui/deviceSleep';
 import { suggestProgression } from '../../src/lib/progression';
 import { currentStreak } from '../../src/lib/streaks';
+import { isWhole } from '../../src/ui/loadStatus';
+import { liftLabel } from '../../src/lib/units';
+import { useSettings } from '../../src/ui/settings';
 
 const SUGGESTIONS = ['What should I eat post-workout?', "I'm sore today — should I still train?", 'Am I on track for my goal?', 'Give me a quick high-protein snack'];
 
@@ -48,8 +51,22 @@ export default function Coach() {
   const program = coachProgram ?? buildProgram(cd.goal, cd.bodyFatPct);
   const { sleep } = useWellness();
   const { water, waterGoal } = useHabits();
-  const { log } = useWorkoutLog();
-  const { consumed } = useFoodLog();
+  // Every line of `context` below is handed to a language model as fact about
+  // this person, and the model writes it back to them in the second person. So
+  // an unread read here does not produce a blank screen, it produces a
+  // confident sentence: "you haven't eaten anything today, let's get some food
+  // in" to somebody who has eaten three meals, or "your streak is at 0" to
+  // somebody on forty days. `readinessScore` already refuses to invent from a
+  // null sleep or a null hydration for exactly this reason — the training-load
+  // input has no null channel, so the gate has to be here.
+  const { log, status: logStatus } = useWorkoutLog();
+  const { consumed, status: foodStatus } = useFoodLog();
+  const logWhole = isWhole(logStatus);
+  const foodWhole = isWhole(foodStatus);
+  // What the member reads a load in, so the model does not speak kilograms to
+  // somebody who has never used one. Every other screen was converted for
+  // TF-37; this one still said "kg" through the model's mouth.
+  const wu = useSettings().weightUnit;
   // Device sleep first, exactly as the home screen does it. This read the
   // hand-typed wellness log alone, so a client with a watch syncing every night
   // had a coach that was told 'readiness: not enough data' and never heard about
@@ -64,10 +81,16 @@ export default function Coach() {
   // `: 0` was the bug the home screen already had fixed: a client with no water
   // goal set was reported to the coach as zero percent hydrated, which scores as
   // badly as a client who drank nothing all day. Unknown travels as null.
-  const _readiness = readinessScore({ avgSleepHours: _avgSleep, hydrationPct: waterGoal ? water / waterGoal : null, workoutsLast2Days: _load2d });
+  // Not scored at all from a log we could not read whole. `workoutsLast2Days`
+  // takes a number and has no way to say "unknown", so an unread log arrives as
+  // 0 — which scores as maximally rested and reads back to the member as a
+  // green light to train hard.
+  const _readiness = logWhole
+    ? readinessScore({ avgSleepHours: _avgSleep, hydrationPct: waterGoal ? water / waterGoal : null, workoutsLast2Days: _load2d })
+    : null;
   const _streak = currentStreak(log);
-  const _lastEx = log.length ? log[0].exercise : '';
-  const _prog = suggestProgression(log)[0];
+  const _lastEx = logWhole && log.length ? log[0].exercise : '';
+  const _prog = logWhole ? suggestProgression(log, wu)[0] : undefined;
   // How this client is coached, in a sentence the model can act on.
   //
   // It was never sent, so the AI coach gave identical answers to someone whose
@@ -88,7 +111,8 @@ export default function Coach() {
     bodyFatPct: cd.bodyFatPct, muscleKg: cd.muscleKg, mealsPerDay: cd.mealsPerDay,
     kcal: macros?.kcal ?? 'not set', protein: macros?.protein ?? 'not set', carbs: macros?.carbs ?? 'not set', fat: macros?.fat ?? 'not set',
     programTitle: program.title, programFocus: program.focus.join(', '),
-    readiness: _readiness ? `${_readiness.score}/100 (${_readiness.label})` : 'not enough data',
+    readiness: _readiness ? `${_readiness.score}/100 (${_readiness.label})`
+      : logWhole ? 'not enough data' : 'their training log could not be read, so readiness is unknown — do not treat it as rested',
     // Said plainly, with where it came from. A coach that knows the watch
     // measured 5.2 hours can talk about the night; one handed only a score
     // can only repeat the score back.
@@ -97,16 +121,31 @@ export default function Coach() {
       : `${Math.round(_sleepFor.avgHours * 10) / 10}h average over ${_sleepFor.nights.length} night${_sleepFor.nights.length === 1 ? '' : 's'}`
         + `, ${_sleepFor.fromDevice ? `${_sleepFor.fromDevice} measured by a device` : 'none measured by a device'}`
         + `${_sleepFor.fromTyped ? `, ${_sleepFor.fromTyped} logged by hand` : ''}`,
-    eatenToday: macros ? `${num(consumed.kcal)}/${num(macros.kcal)} kcal, protein ${consumed.protein}/${macros.protein}g` : `${num(consumed.kcal)} kcal eaten, no target set`,
-    streak: _streak,
+    // "0 kcal eaten" is the answer a failed food read produces, and it is the
+    // one thing on this screen a model will act on hardest.
+    eatenToday: !foodWhole
+      ? 'today’s food log could not be read — do not say they have eaten nothing, and do not tell them to eat on the strength of it'
+      : macros ? `${num(consumed.kcal)}/${num(macros.kcal)} kcal, protein ${consumed.protein}/${macros.protein}g` : `${num(consumed.kcal)} kcal eaten, no target set`,
+    streak: logWhole ? _streak : 'unknown — their training log could not be read whole',
     lastTrained: _lastEx || undefined,
-    nextLift: _prog ? `${_prog.exercise}: ${_prog.nextWeight}kg x ${_prog.nextReps} (${_prog.action})` : undefined,
+    // The load in the member's own unit, through the same `liftLabel` the
+    // Targets screen renders it with, rather than a hardcoded "kg" inside a
+    // template string. `nextWeight` is kilograms by design — the increment
+    // ladder is plate-pair metric — so the conversion belongs here, at the
+    // edge, exactly as it does on every screen that prints it.
+    nextLift: _prog ? `${_prog.exercise}: ${liftLabel(_prog.nextWeight, wu)} x ${_prog.nextReps} (${_prog.action})` : undefined,
     injuries: injurySummary(cd.injuries) || 'none disclosed',
     focusAreas: cd.focusAreas.length ? cd.focusAreas.join(', ') : 'none set',
   };
 
+  // "I know your plan, targets, and latest numbers" is a promise, and it was
+  // made before any of the reads behind it had come back — and kept being made
+  // when they failed. The model is told the same thing in `context`, so the two
+  // now agree: what it has, it has; what it could not read, it says it could
+  // not read rather than treating as a zero.
+  const knowsAll = logWhole && foodWhole && isWhole(cd.status);
   const [msgs, setMsgs] = useState<ChatMsg[]>([
-    { role: 'assistant', content: `Hi ${cd.name.split(' ')[0]} I'm your Repple coach. I know your plan, targets, and latest numbers — ask me anything about training or nutrition.` },
+    { role: 'assistant', content: `Hi ${cd.name.split(' ')[0]} I'm your Repple coach. ${knowsAll ? 'I know your plan, targets, and latest numbers' : 'I have your plan and whatever of your numbers loaded'} — ask me anything about training or nutrition.` },
   ]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
@@ -154,7 +193,7 @@ export default function Coach() {
           </View>
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.head, color: t.ink }}>AI Coach</Text>
-            <Text style={{ ...ty.caption, color: t.ink3 }}>Knows your plan &amp; numbers</Text>
+            <Text style={{ ...ty.caption, color: t.ink3 }}>{knowsAll ? 'Knows your plan & numbers' : 'Working from what loaded'}</Text>
           </View>
         </View>
         <Rule />

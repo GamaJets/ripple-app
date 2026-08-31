@@ -37,7 +37,7 @@ import {
 } from '../../src/lib/clientDrift';
 import { useTenant } from '../../src/ui/tenant';
 import { reportError } from '../../src/lib/reportError';
-import { View, Text, Pressable, ScrollView, Modal, TextInput, Alert, Image, KeyboardAvoidingView, Platform, ActivityIndicator, Share, type ViewStyle, type TextStyle } from 'react-native';
+import { View, Text, Pressable, ScrollView, Modal, TextInput, Alert, Image, KeyboardAvoidingView, Platform, ActivityIndicator, Share, Switch, type ViewStyle, type TextStyle } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { trialInfo } from '../../src/lib/trial';
@@ -63,6 +63,8 @@ import { useCoachNutrition } from '../../src/ui/coachNutrition';
 import { slotsFor, searchMeals, mealAt, type Slot } from '../../src/lib/meals';
 import { useCoachNotes } from '../../src/ui/coachNotes';
 import { useAnnouncements } from '../../src/ui/announcements';
+import { deliverySummary, pushConsequence } from '../../src/lib/notifyCopy';
+import { inboxAge } from '../../src/lib/notifyInbox';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useCheckIns } from '../../src/ui/checkins';
 import { useInvites } from '../../src/ui/invites';
@@ -346,7 +348,10 @@ export default function TrainerClients() {
   // used to be a `useState` that lost every note on relaunch), so the Save
   // button has to be able to say "in flight" and "that did not save".
   const [noteBusy, setNoteBusy] = useState(false);
-  const { addAnnouncement } = useAnnouncements();
+  // `mine` and `status` as well as the write: a coach who has posted notices
+  // could not see one of them anywhere in this app, so "did that go out?" was
+  // answered by posting it again. The sheet below lists them.
+  const { addAnnouncement, mine: myNotices, status: noticeStatus } = useAnnouncements();
   const { sent: sentInvites, sendInvite, revokeInvite } = useInvites();
   const { received: trainerInvites, acceptTrainerInvite, declineTrainerInvite } = useTrainerInvites();
   const { tagsFor, allTags, addTag, removeTag } = useClientTags();
@@ -362,6 +367,13 @@ export default function TrainerClients() {
   const [pnote, setPnote] = useState('');
   const [bcOpen, setBcOpen] = useState(false);
   const [bcText, setBcText] = useState('');
+  // Off by default, and it is a separate decision from posting. A notice always
+  // reaches the client's notifications and their Notices screen; the push is
+  // the part that rings a phone, at whatever hour it is where they are, and the
+  // person who wrote the words is the only one who can judge whether this one
+  // is worth that.
+  const [bcPush, setBcPush] = useState(false);
+  const [bcBusy, setBcBusy] = useState(false);
   const [fb, setFb] = useState('');
   const [nnote, setNnote] = useState('');
   const [sel, setSel] = useState<RosterClient | null>(null);
@@ -1683,23 +1695,72 @@ export default function TrainerClients() {
 
                 The rule this file keeps relearning: the sentence describes what
                 the write does TODAY, and it moves when the write moves. */}
-            <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs, marginBottom: sp.lg }}>Every client on your roster sees this on their dashboard. It is not a message and does not land in anyone’s thread — for that, use Broadcast.</Text>
-            <TextInput value={bcText} onChangeText={setBcText} placeholder="Your announcement…" placeholderTextColor={t.ink3} multiline style={{ ...field(t, 90), marginBottom: sp.lg }} />
+            <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs, marginBottom: sp.lg }}>Every client on your roster sees this on their dashboard, in their notifications, and in their Notices — where it stays after today. It is not a message and does not land in anyone’s thread; for that, use Broadcast.</Text>
+            <TextInput value={bcText} onChangeText={setBcText} placeholder="Your announcement…" placeholderTextColor={t.ink3} multiline style={{ ...field(t, 90), marginBottom: sp.md }} />
+
+            {/* The push is its own decision and the label says what it does.
+                Before this, a notice reached nobody at all; the temptation on
+                fixing that is to push every one of them, and a coach who can
+                ring forty phones at three in the morning should have to choose
+                it. There is no scheduler in this app and nothing records what
+                timezone anybody is in, so a "sends in the morning" option would
+                be a promise nothing here could keep — the honest control says
+                NOW, and lets the words be judged against that. */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginBottom: sp.lg }}>
+              <View style={{ flex: 1 }}>
+                <Text style={{ ...ty.body, color: t.ink }}>Also send a push</Text>
+                <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>{pushConsequence('coach', null)}</Text>
+              </View>
+              <Switch value={bcPush} onValueChange={setBcPush} />
+            </View>
+
             {/* Awaited, and the answer read. `addAnnouncement` reaches a server
                 now, so announcing "Posted" on the tap would be the same class of
-                claim this modal has already made twice. */}
-            <Cta label="Post to My Clients" wide onPress={async () => {
-              if (!bcText.trim()) { Alert.alert('Write something', 'Enter your announcement.'); return; }
-              const posted = await addAnnouncement(bcText);
-              if (!posted) {
-                // The sheet stays open with the text in it: they wrote it once.
-                Alert.alert('Not posted', 'That could not be posted, so your clients have not seen it. Your words are still here — try again in a moment.');
-                return;
-              }
-              setBcText(''); setBcOpen(false);
-              Alert.alert('Posted', 'It is on your clients’ dashboards. To write into people’s threads instead — everyone, or one tag — use Broadcast.',
-                [{ text: 'Open Broadcast', onPress: () => router.push('/(trainer)/broadcast') }, { text: 'Done', style: 'cancel' }]);
-            }} />
+                claim this modal has already made twice. What it reports is what
+                the fan-out COUNTED — rows notify_users() actually wrote — and
+                never the size of the roster, which is the false figure
+                app/(owner)/promotions.tsx used to print. */}
+            <View pointerEvents={bcBusy ? 'none' : 'auto'} style={{ opacity: bcBusy ? 0.6 : 1 }}>
+              <Cta label={bcBusy ? 'Posting…' : 'Post to My Clients'} wide onPress={async () => {
+                if (!bcText.trim()) { Alert.alert('Write something', 'Enter your announcement.'); return; }
+                setBcBusy(true);
+                let res;
+                try { res = await addAnnouncement(bcText, { push: bcPush }); } finally { setBcBusy(false); }
+                if (!res.ok || !res.delivery) {
+                  // The sheet stays open with the text in it: they wrote it once.
+                  Alert.alert('Not posted', 'That could not be posted, so your clients have not seen it. Your words are still here — try again in a moment.');
+                  return;
+                }
+                const summary = deliverySummary(res.delivery);
+                setBcText(''); setBcPush(false); setBcOpen(false);
+                Alert.alert('Posted', `${summary}\n\nTo write into people’s threads instead — everyone, or one tag — use Broadcast.`,
+                  [{ text: 'Open Broadcast', onPress: () => router.push('/(trainer)/broadcast') }, { text: 'Done', style: 'cancel' }]);
+              }} />
+            </View>
+
+            {/* What this coach has already posted. A notice used to be
+                write-only from here — nothing in the coach's app showed one
+                back — so the only way to check whether Thursday's cancellation
+                went out was to post it again. */}
+            <View style={{ marginTop: sp.lg }}>
+              <Text style={{ ...ty.micro, color: t.ink3 }}>Posted before</Text>
+              {noticeStatus === 'error' ? (
+                // An empty list under 'error' is unknown, not "you have posted
+                // none" — src/ui/loadStatus.ts.
+                <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs }}>
+                  Your posted notices could not be read just now. This is not a statement that you have none.
+                </Text>
+              ) : myNotices.length === 0 ? (
+                <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs }}>
+                  {noticeStatus === 'loading' ? 'Reading your notices…' : 'Nothing posted yet.'}
+                </Text>
+              ) : myNotices.slice(0, 3).map((a) => (
+                <View key={a.id} style={{ marginTop: sp.sm }}>
+                  <Text style={{ ...ty.label, color: t.ink2 }} numberOfLines={2}>{a.body}</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{inboxAge(a.at)}</Text>
+                </View>
+              ))}
+            </View>
           </View>
         </KeyboardAvoidingView>
       </Modal>

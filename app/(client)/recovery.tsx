@@ -435,7 +435,7 @@ export default function Recovery() {
     {/* The way out, on the screen that raised the problem. */}
     {needsReauth.length ? (
      <View style={{ alignSelf: 'flex-start', marginTop: sp.md }}>
-      <Ghost label={'Fix in Watch & devices'} onPress={() => router.push('/(client)/devices')} />
+      <Ghost label={'Fix in Watch & Devices'} onPress={() => router.push('/(client)/devices')} />
      </View>
     ) : null}
 

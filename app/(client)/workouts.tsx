@@ -651,6 +651,7 @@ export default function Train() {
     if (!dayISO) return;
     const nowISO = dayISO;
     let pr = false;
+    const historyWhole = workoutLogStatus === 'ready';
     const entries: WorkoutEntry[] = [...exercises.filter((e) => !isRemovedEx(e)), ...customEx].map((e) => {
       const s = logged[uid(e)] || [];
       if (!s.length) return null;
@@ -658,7 +659,15 @@ export default function Train() {
       // again here would multiply a pounds member's load by 0.45 twice.
       const setPairs = s.map((x) => [parseInt(x.reps, 10) || 0, parseFloat(x.kg) || 0] as [number, number]);
       const bestE1 = Math.max(0, ...setPairs.map(([r, kg]) => (r && kg ? est1RM(kg, r) : 0)));
-      if (bestE1 > priorBest1RM(workoutLog, nameOf(e))) pr = true;
+      // The same guard SessionRunner carries, for the same reason, on the other
+      // path into the same claim. `priorBest1RM` over an unread log returns 0
+      // and EVERY set beats it, so a refused read turned an ordinary Tuesday
+      // into "New personal record!" with confetti; over a truncated one
+      // (src/lib/rowCap.ts) the record being compared against may simply be in
+      // the part that did not come back. Only a whole read can establish that
+      // something is a lifetime best — see the note at SessionRunner's
+      // `historyWhole`, which this deliberately mirrors line for line.
+      if (historyWhole && bestE1 > priorBest1RM(workoutLog, nameOf(e))) pr = true;
       return { t: nowISO, exercise: nameOf(e), sets: setPairs };
     }).filter(Boolean) as WorkoutEntry[];
     if (!entries.length) return;
@@ -675,7 +684,18 @@ export default function Train() {
     }
     setLogged({}); setCustomEx([]);
     if (pr) setConfetti(true);
-    Alert.alert('Workout saved', `${entries.length} exercise${entries.length === 1 ? '' : 's'} logged.${pr ? ' New personal record!' : ''} Your streak and records are updated.`, [{ text: 'Nice' }]);
+    // "Your streak and records are updated" was stated whatever the log's
+    // status. Under anything but a whole read the boards downstream are drawn
+    // from a prefix, so the promise is one this screen cannot keep — and the
+    // absence of "New personal record!" is then an absence of evidence rather
+    // than evidence of absence, which is worth saying out loud to somebody who
+    // has just put a bar down.
+    Alert.alert('Workout saved',
+      `${entries.length} exercise${entries.length === 1 ? '' : 's'} logged.${pr ? ' New personal record!' : ''} `
+      + (historyWhole
+        ? 'Your streak and records are updated.'
+        : 'It is on your log. We could not read your full history just now, so we cannot say whether it set a record.'),
+      [{ text: 'Nice' }]);
   };
   const inp = { color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 10, flex: 1, ...ty.body } as const;
 
@@ -1006,7 +1026,12 @@ export default function Train() {
 
               <View style={{ marginTop: layout.section }}>
                 <SectionHead title="Today's Sessions" />
-                {todayCardio.length > 0 ? (
+                {/* Same three causes as the calendar's day list above. */}
+                {todayCardio.length === 0 && workoutLogStatus !== 'ready' ? (
+                  <Text style={{ ...ty.label, color: t.ink3 }}>
+                    {workoutLogStatus === 'loading' ? 'Reading your log…' : 'We couldn’t read your log, so we can’t say what is on today.'}
+                  </Text>
+                ) : todayCardio.length > 0 ? (
                   todayCardio.map((c, i) => (
                     <View key={i}>
                       {i > 0 ? <Rule /> : null}
@@ -1204,7 +1229,19 @@ export default function Train() {
               <View style={{ paddingTop: sp.lg }}>
                 <Text style={{ ...ty.head, color: t.ink, marginBottom: sp.md }}>{prettyDay(activeCalDay)}</Text>
                 {dayEntries.length === 0 ? (
-                  <Text style={{ ...ty.label, color: t.ink3 }}>Rest day — no workout logged.</Text>
+                  // Not "Rest day". That word CLASSIFIES the day, and an empty
+                  // `dayEntries` has three causes: nothing was logged, the read
+                  // failed, or the read stopped at its row limit before it
+                  // reached back this far. Under either of the last two the
+                  // calendar dot is missing for the same reason, so a member
+                  // scrolling back through a month of real training was shown
+                  // it as a month of rest days.
+                  <Text style={{ ...ty.label, color: t.ink3 }}>
+                    {workoutLogStatus === 'loading' ? 'Reading your log…'
+                      : workoutLogStatus === 'error' ? 'We couldn’t read your log, so we can’t say what you did on this day.'
+                      : workoutLogStatus === 'partial' ? 'Not read this far back — your log goes further than this screen can read in one go.'
+                      : 'Rest day — no workout logged.'}
+                  </Text>
                 ) : (
                   <View>
                     {pending.length ? (
@@ -1285,7 +1322,14 @@ export default function Train() {
 
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.lg }}>
               <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.brand }} />
-              <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }}>Days you trained · {workedDates.size} sessions logged · tap any day for details</Text>
+              {/* `workedDates` is a Set of DAY keys, so two sessions on one
+                  day counted once and the caption still called them sessions.
+                  It is days, it now says days — and it says nothing at all
+                  when the read behind it was not whole, because a count of
+                  trained days drawn from a prefix is a smaller life. */}
+              <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }}>
+                Days you trained{workoutLogStatus === 'ready' ? ` · ${workedDates.size} day${workedDates.size === 1 ? '' : 's'} logged` : ''} · tap any day for details
+              </Text>
             </View>
           </ScrollView>
         </View>

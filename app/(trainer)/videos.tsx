@@ -74,6 +74,7 @@ import { ExerciseVideo } from '../../src/ui/ExerciseVideo';
 import { useProgramTemplates } from '../../src/ui/programTemplates';
 import { useAuth } from '../../src/ui/auth';
 import { coverageFor, coverageLine } from '../../src/lib/videoCoverage';
+import { clipOwner, canManageClip, canRemoveClip } from '../../src/lib/clipOwner';
 import { useExerciseCatalogue } from '../../src/ui/exerciseDetail';
 import { exerciseSlug } from '../../src/lib/exerciseId';
 import { num } from '../../src/lib/format';
@@ -302,6 +303,9 @@ export default function TrainerVideos() {
   const { videos: vids, status, addVideo, removeVideo, setVisibility, grantTo, revokeFrom, listGrants, reload } = useExerciseVideos();
   const router = useRouter();
   const auth = useAuth();
+  // Whose clips are this coach's own. `coverageFor` below was already given
+  // this and already told own clips from the rest; the row list was not.
+  const myId = auth.user?.id ?? null;
   const { templates } = useProgramTemplates();
   // Every movement this coach has written into a template, however they spelt
   // it. Null while the library has not been read: a coverage claim built on a
@@ -321,7 +325,7 @@ export default function TrainerVideos() {
   const coverage = status === 'error' || status === 'loading' ? null : coverageFor(
     templates.flatMap((tpl) => tpl.program.days.flatMap((d) => d.exercises.map((e) => e.name))),
     vids,
-    auth.user?.id ?? null,
+    myId,
     illustratedSlugs,
   );
   const [linkOpen, setLinkOpen] = useState(false);
@@ -634,11 +638,41 @@ export default function TrainerVideos() {
           ) : null}
 
           {vids.map((v, i) => {
-            // Only a clip that reached the server has a sharing setting to
-            // change: `setVisibility` writes a row, and there is no row behind a
-            // local-only entry or a clip that ships with the app.
-            const mine = v.id.startsWith('db');
-            const localOnly = v.id.startsWith('vx');
+            // `mine` has to mean MINE, and it did not — it was
+            // `v.id.startsWith('db')`, which only means "this came from the
+            // exercise_videos table".
+            //
+            // useExerciseVideos deliberately does not filter that read by
+            // trainer (exvid_read decides, and it knows about grants and
+            // gym-wide sharing a client-side filter would get wrong), so this
+            // list also holds the clips that ship with Repple and every other
+            // coach's clips marked 'public'. All of them arrived with a 'db'
+            // id, so all of them were drawn with the visibility chip, the
+            // "Who can see this" panel, the named-sharing list and the Remove
+            // button — over rows `exvid_trainer_rw` (trainer_id = auth.uid())
+            // will not let this coach touch. The branch below already says
+            // "not one of yours" in words; the predicate above it disagreed.
+            //
+            // Two conditions now, and both are needed: a row on the server, and
+            // this coach's name on it. `trainerId` is null for a platform clip,
+            // so those fall out on their own. An unknown signed-in id resolves
+            // to false, which hides a control rather than offering one that
+            // cannot work.
+            //
+            // The question is answered in src/lib/clipOwner.ts rather than
+            // here, because the next control added to this row has to be able
+            // to ask it without re-deriving what a 'db' prefix means.
+            const owner = clipOwner(v, myId);
+            // `mine` gates everything that WRITES to the row, and `removable`
+            // is deliberately one case wider — a local-only entry has no row to
+            // refuse the delete, and forgetting it is the only thing a coach
+            // can do with one. Both come from clipOwner.ts rather than being
+            // re-derived here, so the "wider by exactly one" rule is stated
+            // once and tested.
+            const mine = canManageClip(v, myId);
+            const removable = canRemoveClip(v, myId);
+            const platform = owner === 'platform';
+            const localOnly = owner === 'local';
             const open = openId === v.id;
             const busy = visBusy === v.id;
             const vis = visOf(v.visibility);
@@ -668,7 +702,7 @@ export default function TrainerVideos() {
                     </Pressable>
                   ) : null}
 
-                  {mine || localOnly ? (
+                  {removable ? (
                     <Pressable onPress={() => confirmRemove(v)} hitSlop={8} accessibilityRole="button" accessibilityLabel={'Remove ' + v.name}>
                       <Icon name="minus" size={16} color={t.ink3} />
                     </Pressable>
@@ -707,7 +741,9 @@ export default function TrainerVideos() {
                       <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
                         {localOnly
                           ? 'This clip only exists on this phone, so there is nobody to share it with. Remove it and add it again when you have a connection.'
-                          : 'A clip that ships with Repple, not one of yours — everyone you coach can already watch it.'}
+                          : platform
+                            ? 'A clip that ships with Repple, not one of yours — everyone you coach can already watch it.'
+                            : 'Another coach’s clip, shared publicly. You can use it in a program and your clients can watch it, but who else sees it is theirs to change, not yours.'}
                       </Text>
                     )}
                   </View>

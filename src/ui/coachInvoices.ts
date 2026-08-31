@@ -31,6 +31,8 @@ import { reportError } from '../lib/reportError';
 import { capLimit, capped } from '../lib/rowCap';
 import type { LoadStatus } from './loadStatus';
 import { draftMinorUnits, type CoachInvoice, type InvoiceDraft, type InvoiceKind } from '../lib/coachInvoice';
+import { invoiceNotification } from '../lib/notifyCopy';
+import { recordInbox } from './pushNotifications';
 
 /** Every column the document needs and nothing else. */
 const INVOICE_COLS =
@@ -223,9 +225,90 @@ export async function fetchInvoiceCurrency(): Promise<InvoiceCurrency> {
   }
 }
 
+/* ── telling the person it is about ───────────────────────────────────────── */
+
+/**
+ * Write the client an inbox row about an invoice that has just been issued.
+ *
+ * ── Why there was nothing here, and why there is now ──────────────────────
+ *
+ * Invoices had no notification producer of any kind. A coach issued a document
+ * with somebody's name and an amount on it, and the person it was about was
+ * told by nothing at all: not a push, not an inbox row, not a screen. The only
+ * path to them was the coach remembering to open the share sheet.
+ *
+ * That is worse for `kind = 'received'` than for 'requested'. A "received"
+ * invoice is the coach RECORDING THAT THIS PERSON HAS PAID THEM — a claim
+ * about the client, made in the client's absence, that the client would want
+ * to know exists whether or not they agree with it.
+ *
+ * ── On issue, and only on issue ───────────────────────────────────────────
+ *
+ * Voiding does not notify. A void is the coach withdrawing a document that
+ * they, not this app, put in front of somebody: it may never have been sent at
+ * all (the share sheet is a separate act), so a "your invoice was cancelled"
+ * for a document the client has never seen is a notification about nothing.
+ * The coach voids and tells them the same way they sent it.
+ *
+ * ── Inbox only. No push ───────────────────────────────────────────────────
+ *
+ * recordInbox() rather than sendPush(): an invoice is not urgent, and the row
+ * is the durable half anyway — a push is gone when it is dismissed, and on the
+ * current binary expo-notifications is not in the build at all. Nothing is
+ * lost by not ringing a phone about paperwork.
+ *
+ * ── No route ─────────────────────────────────────────────────────────────
+ *
+ * Deliberately none. `coach_invoices` is readable by the ISSUING COACH ALONE
+ * (part 138) and there is no client screen for it, by design — the coach hands
+ * the document over, and that act is what decides the client should have it. A
+ * route would send them looking for a screen that does not exist, so the row is
+ * inert and its copy says to ask the coach instead.
+ *
+ * Returns three states; see IssueResult.notified.
+ */
+async function tellTheClient(invoice: CoachInvoice): Promise<boolean | null> {
+  // No account, nobody to tell. A coach bills people who have never installed
+  // this app and that is an ordinary invoice, not a failure.
+  if (!invoice.clientId) return null;
+  const note = invoiceNotification(invoice);
+  try {
+    // notify_users() re-checks on the server that this client is one of the
+    // coach's own, so a stale id cannot address a stranger's inbox. It returns
+    // the number of rows it wrote, which is the only honest answer to whether
+    // this landed — an undeployed function and a refused write both come back
+    // as zero, and both mean the client was not told.
+    const wrote = await recordInbox([invoice.clientId], note.title, note.body);
+    return wrote > 0;
+  } catch (e) {
+    reportError('coachInvoices.notify', e);
+    return false;
+  }
+}
+
 /* ── issuing ──────────────────────────────────────────────────────────────── */
 
-export interface IssueResult { ok: boolean; invoice?: CoachInvoice; error?: string }
+export interface IssueResult {
+  ok: boolean;
+  invoice?: CoachInvoice;
+  error?: string;
+  /**
+   * Whether the client was told, and it is a THREE-STATE answer.
+   *
+   * `true`  — an inbox row was written for them.
+   * `false` — the attempt was made and wrote nothing (the client is not on the
+   *           coach's roster any more, or notify_users() was refused).
+   * `null`  — nobody was addressed at all, because this invoice is not tied to
+   *           an account. A coach bills people who have never installed this
+   *           app, and there is nowhere to send those.
+   *
+   * Kept separate from `ok` so that no existing meaning changes: `ok` is
+   * whether the DOCUMENT was issued, and it stays true when the notification
+   * fails. An invoice that exists and a client who was not told is a real
+   * state, and the screen has to be able to say both halves.
+   */
+  notified?: boolean | null;
+}
 
 /**
  * Issue one, through the function that allocates the number.
@@ -266,7 +349,8 @@ export async function issueInvoice(draft: InvoiceDraft, clientId?: string | null
     // was written, whatever the absence of an error suggests.
     const row = (Array.isArray(data) ? data[0] : data) as InvoiceRow | null;
     if (!row?.id) return { ok: false, error: 'That invoice was not issued — nothing came back from the server.' };
-    return { ok: true, invoice: toInvoice(row) };
+    const invoice = toInvoice(row);
+    return { ok: true, invoice, notified: await tellTheClient(invoice) };
   } catch (e) {
     reportError('coachInvoices.issue', e);
     return { ok: false, error: 'That invoice was not issued.' };

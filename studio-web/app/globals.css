@@ -23,7 +23,14 @@
   --surface3: #1b3229;
   --ink: #e8f2f0;
   --ink2: #b6c9c4;
-  --ink3: #6f8b87;
+  /* #6f8b87 until the palettes were re-measured. ink3 is the most-read colour
+   * on this console — every eyebrow, every micro label, every note under a
+   * figure, every dash — and at that value it measured 3.73:1 against
+   * --surface3, below the 4.5:1 small text needs. src/theme/tokens.ts walked
+   * teal's ink3 to #809996 (4.51:1 on its worst ground) and this had not
+   * followed, so the console was failing contrast in precisely the places the
+   * phone apps had just stopped failing it. */
+  --ink3: #809996;
   --ring: rgba(255, 255, 255, 0.09);
   /* The row rule, deliberately fainter than --ring. Terminal draws a lot of
    * lines; if every one of them were --ring the grid would read as a cage. The
@@ -49,10 +56,18 @@
   --brand: #e0912f;
   --brand-ink: #2a1503;
 
+  /* The dark status set, lifted from `darkSem` in src/theme/tokens.ts. These
+   * are MARKS beside ink-coloured text, never coloured text, so 3:1 is the bar
+   * (WCAG 1.4.11) rather than 4.5:1.
+   *
+   * --crit was #d03b3b, which measured 2.79:1 against the darkest grounds in
+   * the app and 2.85:1 against --surface3 here: the one dot that means "this is
+   * broken" was the one dot you could not see. tokens.ts held the hue and
+   * walked lightness to #d34646 (3.08:1 here) and this file had not followed. */
   --good: #0ca30c;
   --warn: #fab219;
   --serious: #ec835a;
-  --crit: #d03b3b;
+  --crit: #d34646;
 
   --sans: var(--font-sans), ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --mono: var(--font-mono), ui-monospace, "SF Mono", Menlo, monospace;
@@ -75,7 +90,10 @@
   --surface3: #e3e9f4;
   --ink: #0f1830;
   --ink2: #3c4a63;
-  --ink3: #6b7896;
+  /* #6b7896 before the re-measure — 3.63:1 against --surface3, the same failure
+   * as its dark twin above. Clinical's own ink3 in src/theme/tokens.ts is
+   * #5d6984, which clears 4.51:1 on the worst of these four grounds. */
+  --ink3: #5d6984;
   --ring: rgba(15, 24, 48, 0.12);
   --ring2: rgba(15, 24, 48, 0.07);
   --rail: #eaeef6;
@@ -83,10 +101,23 @@
    * and unreadable, while #b45309 is 5.02:1 and carries white ink at the same. */
   --brand: #b45309;
   --brand-ink: #ffffff;
-  --good: #0ca30c;
-  --warn: #fab219;
-  --serious: #ec835a;
-  --crit: #d03b3b;
+
+  /* `lightSem` from src/theme/tokens.ts, and this block is the one that was
+   * most wrong.
+   *
+   * It carried the DARK status colours byte-identical to the block above —
+   * exactly the defect tokens.ts records having fixed on the app side. On these
+   * grounds --warn measured 1.51:1, --serious 2.16:1 and --good 2.75:1: three
+   * of the four marks on the daylight console were invisible, and --warn was a
+   * pale yellow dot on white saying a membership was about to lapse.
+   *
+   * The light values below hold each hue exactly and walk lightness down until
+   * the worst of these four grounds clears the 3:1 a non-text mark needs; all
+   * four now sit around 4.0:1. */
+  --good: #0a820a;
+  --warn: #956703;
+  --serious: #c44717;
+  --crit: #cf3737;
 }
 
 * { box-sizing: border-box; }

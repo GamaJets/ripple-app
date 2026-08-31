@@ -126,17 +126,18 @@ const KNOWN = new Map([
   // alone. The entry is deleted rather than zeroed: a zero is still an
   // exemption, and there is nothing left to exempt.
 
-  ['src/lib/gymSessions.ts:currency', { count: 2, why:
-    'The original offence, and the only currency one left in the tree. `recordSettlement` writes ' +
-    '`currency: run.currency ?? \'AED\'` into payroll_settlements (a permanent payment record that ' +
-    '/accounting and /close read back as fact), and `fetchSettlements` coerces the column the same ' +
-    'way on the way out. BOTH CALL SITES NOW PASS THE GYM\'S CURRENCY AND BLOCK THE SETTLEMENT ' +
-    'WITHOUT ONE — studio-web/app/payroll/page.tsx and studio-web/app/sessions/page.tsx — so the ' +
-    'fallback is unreachable from the product and this is a trap rather than a live bug. The edit: ' +
-    "make `run.currency` required (it is `currency?: string` today) and write it through, and change " +
-    'the read to `?? null` with `Settlement.currency` typed `string | null`, exactly as ' +
-    'src/lib/gymPasses.ts and the four console pages now do. That file belongs to another change in ' +
-    'flight tonight; it was not touched to avoid a collision.' }],
+  // src/lib/gymSessions.ts:currency — was 2, now 0. The original offence, and
+  // the last currency one in the tree. The entry named its own edit and that is
+  // exactly the edit made: `run.currency` is REQUIRED and written through, so a
+  // caller with no currency is a compile error rather than a dirham stamped
+  // onto a permanent payment record; and `fetchSettlements` reads `?? null`
+  // with `Settlement.currency` typed `string | null`, so a settlement that
+  // states no money is withheld by money() instead of printed as AED.
+  //
+  // The two console screens that render those rows — /sessions and /payroll —
+  // now show a dash naming the missing currency where money() withholds, rather
+  // than the empty cell a bare null would have left beside an Amount column.
+  // The entry is deleted rather than zeroed, for the reason the header gives.
 
   // ── the unit backlog ────────────────────────────────────────────────────
   //
@@ -178,8 +179,22 @@ const KNOWN = new Map([
     "A client's weight delta on the coach's roster. The coach reads in THEIR unit and the client's " +
     'delta is stored in kg, so this one needs `useSettings().weightUnit` on the coach side, not the ' +
     "client's — see app/(trainer)/client-training.tsx, which already distinguishes the two." }],
-  ['app/(client)/calendar.tsx:unit', { count: 1, why: 'A logged set summary in a day cell.' }],
-  ['app/(client)/coach.tsx:unit', { count: 1, why: 'The next-weight suggestion, rendered from progression.ts above.' }],
+  // app/(client)/calendar.tsx:unit — was 1, now 0. The one-line summary under a
+  // logged workout in a day cell reads through `liftLabel` with the member's own
+  // unit. Its neighbour, the cardio distance, deliberately does not convert:
+  // `c.unit` is stored on the entry because the member chose km or miles when
+  // they logged the run, and a body-measurement preference must not overrule an
+  // answer they already gave. Deleted rather than zeroed — a zero is still an
+  // exemption and there is nothing left to exempt.
+  // app/(client)/coach.tsx:unit — was 1, now 0. It was the worst-placed of the
+  // set: the next-weight suggestion is not printed on the screen, it is handed
+  // to a language model in `context` and written back to the member in the
+  // second person, so a pounds reader was told in prose to put 60 kg on the bar
+  // by something speaking as their coach. It reads through `liftLabel` with the
+  // member's own unit, and `suggestProgression` is now given that unit too, so
+  // the rationale sentence beside it stops naming kilograms as well. The entry
+  // is deleted rather than zeroed: a zero is still an exemption, and there is
+  // nothing left to exempt.
   // app/(client)/library.tsx:unit — was 1, now 0. The banked-set chip reads
   // through `liftLabel`, and so does its accessibility label, which said
   // "kilos" out loud and was the copy of the bug nobody could see.
@@ -188,9 +203,20 @@ const KNOWN = new Map([
   // app/(trainer)/leaderboard.tsx:unit — was 1, now 0. The COACH's unit, as
   // the trainer-dashboard entry below still asks for, and converted as a span
   // through `weightDeltaIn` so a steady 0.4 kg does not flicker between 0 and 1.
-  ['studio-web/app/coach/roster/page.tsx:unit', { count: 1, why:
-    'The console has no unit preference at all to read — it renders the stored metric value, so the ' +
-    'honest short-term label is "kg (stored)" and the real fix is a console-side preference.' }],
+  // studio-web/app/coach/roster/page.tsx:unit — was 1, now 0, and the entry is
+  // deleted rather than zeroed for the reason the header gives: a zero is still
+  // an exemption and there is nothing left to exempt.
+  //
+  // Its stated blocker — "the console has no unit preference at all to read" —
+  // had stopped being true. `profiles.weight_unit` exists and is nullable, and
+  // its schema comment says what it is for: "the unit this ACCOUNT reads
+  // weights in, whatever its role. Null means never chosen." `loadMe()` was
+  // already selecting that row, so the console learns the preference for the
+  // cost of one more column. studio-web/lib/units.ts sets out whose unit a
+  // roster column has to be in (the COACH's, not each client's — a column where
+  // row four is in pounds is not a column) and why a null falls back to the
+  // browser's region and says so rather than withholding the figure the way
+  // money() withholds an amount.
 ]);
 
 /** ISO 4217 codes this product has met, plus the ones a gym is likely to pick.

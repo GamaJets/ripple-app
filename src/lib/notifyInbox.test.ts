@@ -56,19 +56,23 @@ for (const p of KNOWN_PUSHES.filter((x) => /just opened|has read your/i.test(x.t
 
 // The catalogue is the thing the two rules above are read against, so it has to
 // still contain them. An empty filter passes a `for` loop silently.
-ok(KNOWN_PUSHES.length >= 16, 'the catalogue still lists every push in the repo');
+ok(KNOWN_PUSHES.length >= 19, 'the catalogue still lists every push in the repo');
 ok(byTitle('Session cancelled').length === 2, 'both cancellation pushes are listed — the coach one and the client one');
 ok(byTitle('The slot you were waiting for is yours').length === 2,
   'both waitlist promotions are listed — the coach cancelling and the client cancelling send the same news');
-// Seven of the sixteen: four that route to a chat thread (two from messaging.ts,
-// one from the coach's broadcast, one from the coach's nudge, all four already
-// written by part 26), two slot races, and one read receipt. Stated as a total
-// so that a rule which starts dropping something it did not drop before fails
-// here rather than quietly emptying somebody's inbox.
+// Seven of the nineteen: four that route to a chat thread (two from
+// messaging.ts, one from the coach's broadcast, one from the coach's nudge, all
+// four already written by part 26), two slot races, and one read receipt.
+// Stated as a total so that a rule which starts dropping something it did not
+// drop before fails here rather than quietly emptying somebody's inbox.
+//
+// The three added when the notice fan-out and the invoice notification were
+// built are all on the recorded side, which is the whole point of them: they
+// are the kinds nothing else in the product tells anybody about.
 eq(KNOWN_PUSHES.filter((p) => !inboxDecision(p.title, p.body, p.route).record).length, 7,
-  'seven of the sixteen pushes are deliberately not recorded');
-eq(KNOWN_PUSHES.filter((p) => inboxDecision(p.title, p.body, p.route).record).length, 9,
-  'the other nine are');
+  'seven of the nineteen pushes are deliberately not recorded');
+eq(KNOWN_PUSHES.filter((p) => inboxDecision(p.title, p.body, p.route).record).length, 12,
+  'the other twelve are');
 
 /* ── the rule that actually matters: chat is decided by route ──────────── */
 
@@ -118,6 +122,11 @@ eq(inboxIcon('/(client)/calendar'), 'calendar', 'a calendar push is drawn with t
 eq(inboxIcon('/(trainer)/chat?clientId=abc'), 'message', 'the coach thread is drawn as a message');
 eq(inboxIcon('/(client)/explore'), 'sparkle', 'an offer is drawn as a sparkle');
 eq(inboxIcon('/(client)/injuries'), 'heart', 'an injury ask is drawn as a heart');
+// Both of these drew the generic bell until the routes were mapped. The bell is
+// the fallback for "nothing here recognises this route", so a real kind wearing
+// it is a row that looks unclassified in a list where every neighbour is.
+eq(inboxIcon('/(client)/intake'), 'pencil', 'an intake ask is drawn as something to fill in');
+eq(inboxIcon('/(client)/notices'), 'info', 'a notice from a gym or a coach is drawn as a notice');
 eq(inboxIcon('/(owner)/dashboard'), 'bell', 'an unmapped route falls back to the bell');
 eq(inboxIcon(null), 'bell', 'no route falls back to the bell');
 eq(inboxIcon(''), 'bell', 'an empty route falls back to the bell');
@@ -127,7 +136,7 @@ eq(inboxIcon('/(client)/calendar-archive'), 'bell', 'the icon map matches whole 
 
 // Every icon the map can yield has to be one the inbox is able to draw. This is
 // a type-level fact made runtime-checkable, because the map is data.
-const DRAWABLE: InboxIcon[] = ['bell', 'calendar', 'message', 'sparkle', 'heart', 'dumbbell', 'trophy'];
+const DRAWABLE: InboxIcon[] = ['bell', 'calendar', 'message', 'sparkle', 'heart', 'dumbbell', 'trophy', 'info', 'pencil'];
 for (const p of KNOWN_PUSHES) {
   ok(DRAWABLE.includes(inboxIcon(p.route)), `${p.where} yields a drawable icon`);
 }

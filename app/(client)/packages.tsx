@@ -67,8 +67,9 @@ export default function ClientPackages() {
     // The name and the unit for every past purchase on this screen. A purchase
     // row carries neither of its own — no currency column at all, and no name —
     // so both come from the package it was bought from, in one read. An id this
-    // does not come back with is a package the client cannot see: withdrawn, or
-    // deleted. See packageLabels.
+    // does not come back with is a package the client cannot see — which since
+    // part 147 means DELETED, not merely withdrawn: pkg_read now lets a buyer
+    // read any package they paid for. See packageLabels.
     const ids = [...(p ?? []).map((r) => r.package_id), ...(s ?? []).map((r) => r.package_id)].filter(Boolean) as string[];
     setPkgInfo(await packageLabels(ids));
     setLoading(false);

@@ -21,7 +21,8 @@ import { View, Text, ScrollView, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Card, Cta, Ghost, ListRow, Hero, Flag, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Card, Cta, Ghost, ListRow, Hero, Flag, PartialRead, fig } from '../../src/ui/kit';
+import { isWhole } from '../../src/ui/loadStatus';
 import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
 import { useSessions } from '../../src/ui/sessions';
 import { useClientData } from '../../src/ui/clientData';
@@ -32,7 +33,14 @@ const fmt = (iso: string) => { const d = new Date(iso); return d.toLocaleDateStr
 export default function PtSessions() {
   const t = useTheme();
   const router = useRouter();
-  const { sessions, approveSession } = useSessions();
+  // The balance below is handled with three states and a written explanation of
+  // why; the DELIVERED SESSIONS list beside it read `sessions` and dropped the
+  // provider's `status` on the floor. So a refused read printed "Nothing to
+  // approve right now." to a client with three sessions waiting on them — and
+  // the coach on the other side, whose pay depends on those approvals, has no
+  // way of telling that from a client who simply has not looked.
+  const { sessions, status: sessionStatus, approveSession } = useSessions();
+  const sessionsWhole = isWhole(sessionStatus);
   const c = useClientData();
   const [note, setNote] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
@@ -124,7 +132,8 @@ export default function PtSessions() {
 
         {/* ── awaiting approval: the only actionable thing here ───────────── */}
         <Section>
-          <SectionHead title="Awaiting Your Approval" note={pending.length > 0 ? String(pending.length) : undefined} />
+          <SectionHead title="Awaiting Your Approval" note={sessionsWhole && pending.length > 0 ? String(pending.length) : undefined} />
+          {sessionStatus === 'partial' ? <PartialRead what="delivered sessions" shown={sessions.length} /> : null}
           {pending.map((s) => (
             <Card key={s.id} style={{ marginBottom: sp.md }}>
               <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: t.ink }}>{fmt(s.startsAt)}</Text>
@@ -136,7 +145,15 @@ export default function PtSessions() {
               <Cta label={busy === s.id ? 'Approving…' : 'Approve Session'} wide disabled={busy === s.id} onPress={() => approve(s.id)} />
             </Card>
           ))}
-          {pending.length === 0 ? <Text style={{ ...ty.label, color: t.ink3 }}>Nothing to approve right now.</Text> : null}
+          {/* "Nothing to approve right now" is a claim about the coach's
+              record, not about this screen, and only a whole read may make it. */}
+          {pending.length === 0 ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>
+              {sessionStatus === 'loading' ? 'Reading your sessions…'
+                : sessionStatus === 'error' ? 'We couldn’t read your sessions, so we can’t say whether your coach is waiting on you. Nothing has been approved or declined by this.'
+                : 'Nothing to approve right now.'}
+            </Text>
+          ) : null}
         </Section>
 
         {/* ── history ────────────────────────────────────────────────────── */}
@@ -144,7 +161,7 @@ export default function PtSessions() {
           <>
             <Rule />
             <Section>
-              <SectionHead title="Approved" note={String(done.length)} />
+              <SectionHead title="Approved" note={sessionsWhole ? String(done.length) : undefined} />
               {done.map((s, i) => (
                 <View key={s.id}>
                   {i > 0 ? <Rule /> : null}

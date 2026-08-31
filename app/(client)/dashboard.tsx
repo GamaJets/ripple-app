@@ -63,7 +63,13 @@ export default function Home() {
   const logKnown = logStatus !== 'error';
   const nutriAdjust = useCoachNutrition().get(c.id);
   const coachNotes = useCoachFeedback().getFeedback(c.id);
-  const ann = useAnnouncements().latest;
+  // Two slots, not one. `latest` is the newest notice from this client's COACH
+  // and `latestGym` the newest from their GYM: they are different authors
+  // addressing different groups, and the block below that says "From Your
+  // Coach" may only ever show the first. Both are the newest of their kind —
+  // the rest live in app/(client)/notices.tsx, which is what stops a notice
+  // being readable for one day and then nowhere.
+  const { latest: ann, latestGym: gymAnn } = useAnnouncements();
   const { water, waterGoal, addWater, removeWater } = useHabits();
   const { sleep } = useWellness();
   // Sleep a device measured, then the wellness log for nights it did not.
@@ -524,6 +530,16 @@ export default function Home() {
           <ListRow icon="trophy" title="Challenges" note="Track your progress against the goal"
             onPress={() => router.push('/(client)/challenges')} />
 
+          {/* Unconditional, and that is the point. The block further down shows
+              the LATEST notice from a coach or a gym and nothing else, which is
+              how "we are closed Monday" used to be readable for one day and
+              then nowhere at all. This row is the way back to the older ones,
+              and it is here whether or not there is a notice today — a screen
+              you can only reach when it has something on it is a screen nobody
+              learns exists. */}
+          <ListRow icon="info" title="Notices" note="Everything your gym and your coach have posted"
+            onPress={() => router.push('/(client)/notices')} />
+
           {needsCoach ? (
             <ListRow icon="people"
               title={solo ? 'Work with a Coach' : 'Find Your Coach'}
@@ -545,6 +561,22 @@ export default function Home() {
             {ann ? (
               <Text style={{ ...ty.body, color: t.ink2, marginTop: coachNotes.length > 0 ? sp.md : 0 }}>{ann.body}</Text>
             ) : null}
+          </Section>
+        </>) : null}
+
+        {/* ── from the gym ───────────────────────────────────────────────────
+            Its own block, under its own heading, and NOT gated on `solo`. A
+            gym's notice is addressed to its members, so a member who trains
+            without a coach must see it — and it may never appear under "From
+            Your Coach", which would put the gym's words in a coach's mouth.
+            Only the newest one is here; the rest are one tap away in Notices,
+            because a dashboard that grows a noticeboard stops being a
+            dashboard. */}
+        {gymAnn ? (<>
+          <Rule />
+          <Section>
+            <SectionHead title="From Your Gym" note="All notices" onPress={() => router.push('/(client)/notices')} />
+            <Text style={{ ...ty.body, color: t.ink2 }}>{gymAnn.body}</Text>
           </Section>
         </>) : null}
 

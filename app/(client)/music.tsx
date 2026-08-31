@@ -286,7 +286,7 @@ export default function Music() {
  <View style={{ flex: 1 }}>
  <Text style={{ ...ty.label, color: t.ink2 }}>{mineProblem}</Text>
  <Pressable onPress={loadMine} accessibilityRole="button" style={{ marginTop: sp.sm }}>
- <Text style={{ ...ty.label, fontWeight: '500', color: t.brand }}>Try again</Text>
+ <Text style={{ ...ty.label, fontWeight: '500', color: t.brand }}>Try Again</Text>
  </Pressable>
  </View>
  </View>

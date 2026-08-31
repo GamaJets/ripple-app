@@ -228,6 +228,68 @@ for (const file of files(RN_ROOTS)) {
   }
 }
 
+// ── 4. A hook called after an early return ──────────────────────────────────
+//
+// studio-web/app/sessions/page.tsx guarded on `me` at line 141 —
+//
+//     if (me === undefined) return <div>Loading…</div>;
+//
+// — and then called `const owed = useMemo(…)` at line 226, eighty-five lines
+// further down, still at the component's own top level.
+//
+// React identifies a hook by CALL ORDER and nothing else. The first render
+// returns at the guard having called four hooks; the render after `loadMe()`
+// resolves reaches the fifth, and React throws "Rendered more hooks than
+// during the previous render". Not a warning and not a degraded screen: the
+// whole route is a blank page with an error in the console, every time, for
+// everybody. /sessions is where a gym marks session outcomes and settles what
+// it owes its trainers, and it was unopenable.
+//
+// It survives review because the guard and the hook are a hundred lines apart
+// and each is unremarkable on its own, and it survives `tsc` because both are
+// perfectly legal TypeScript. Nothing else in this repo looks at call order.
+//
+// Structural rather than brace-counted, because brace counting breaks on JSX
+// and on `//` inside a string: every component in these trees is a top-level
+// `function X(` whose body ends at a lone `}` in column 0 and whose own
+// statements are indented exactly two spaces. A hook inside a nested callback,
+// a nested component or a conditional block is indented further and is not this
+// bug — a hook nested in a CONDITIONAL is a different offence that this does
+// not claim to catch.
+const HOOK_CALL = /\buse(State|Memo|Callback|Effect|Ref|Reducer|Context|Id|Transition|SyncExternalStore|OptimisticState)\s*[(<]/;
+const FN_DECL = /^(?:export\s+default\s+function|export\s+function|function)\s+([A-Za-z0-9_]+)/;
+/** A return at the component's own top level, including `if (…) return …`. */
+const TOP_RETURN = /^ {2}(?:if\s*\(.*\)\s*return\b|return\b)/;
+/** A statement at the component's own top level, where a hook is a hook. */
+const TOP_STMT = /^ {2}(?:const|let|var|use[A-Z])/;
+
+for (const file of files(['app', 'studio-web/app', 'studio-web/components']).filter((f) => f.endsWith('.tsx'))) {
+  const lines = blankComments(readFileSync(join(ROOT, file), 'utf8')).split('\n');
+  const raw = readFileSync(join(ROOT, file), 'utf8').split('\n');
+  const starts = lines.map((l, i) => (FN_DECL.test(l) ? i : -1)).filter((i) => i >= 0);
+  for (let n = 0; n < starts.length; n++) {
+    const from = starts[n];
+    let to = n + 1 < starts.length ? starts[n + 1] : lines.length;
+    for (let k = from + 1; k < to; k++) if (lines[k] === '}') { to = k; break; }
+    const name = FN_DECL.exec(lines[from])[1];
+    let returnedAt = null;
+    for (let k = from + 1; k < to; k++) {
+      const l = lines[k];
+      if (returnedAt === null) {
+        if (TOP_RETURN.test(l) && /\breturn\b/.test(l)) returnedAt = k + 1;
+      } else if (TOP_STMT.test(l) && HOOK_CALL.test(l)) {
+        findings.push(
+          `${file}:${k + 1}  ${name}() calls a hook after returning early at line ${returnedAt} — `
+          + `\`${raw[k].trim().slice(0, 60)}\`. React counts hooks by call order, so the render that gets `
+          + 'past that guard calls one more than the render before it and throws "Rendered more hooks than '
+          + 'during the previous render". The route is blank, not degraded. Move the hook above every return; '
+          + 'a hook may read state that is still loading, it may not be skipped.',
+        );
+      }
+    }
+  }
+}
+
 // ── report ──────────────────────────────────────────────────────────────────
 
 const scanned = files(ALL_ROOTS).length;
@@ -253,6 +315,7 @@ if (findings.length) {
 
 console.log(
   `runtime traps ok — ${scanned} files: no two modals share a visibility condition, `
-  + 'every required package is declared, and every env read is in the form Expo inlines'
+  + 'every required package is declared, every env read is in the form Expo inlines, '
+  + 'and no component calls a hook after an early return'
   + (undecided.length ? `, with ${undecided.length} left undecided above.` : '.'),
 );

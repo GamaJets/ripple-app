@@ -1,5 +1,15 @@
-// Owner · Operations. The session fee, announcements to trainers, a support
-// inbox and the gym's activity log.
+// Owner · Operations. The session fee, notices to members, a support inbox and
+// the gym's activity log.
+//
+// The Announce tab was a notepad. It wrote to a `useState` in
+// src/ui/ownerOps.tsx and its own confirmation said so — "Saved to this device
+// only — announcements do not reach trainers yet" — while `announcements` sat
+// in the schema with policies written for exactly this broadcast and no writer
+// anywhere in the product. So a gym closing on Monday had no way to say so.
+//
+// It now posts a real tenant-wide row and fans it out to every member's
+// notifications (src/ui/announcements.tsx, which carries the reasoning about
+// who counts as a member and why the push is a separate choice).
 //
 // The session fee is here because three other screens have always said it is.
 // Overview, Revenue and Trainers each carry the line "set a session fee in Ops"
@@ -17,8 +27,8 @@
 // No hero: this is a three-task console (write · triage · read), not a screen
 // with one live number to lead with.
 //
-// Every list starts empty and fills from real activity — announcements the
-// owner sends, and tickets from `useOwnerOps` plus real in-app feedback rows.
+// Every list starts empty and fills from real activity — notices the owner
+// posts, and tickets from `useOwnerOps` plus real in-app feedback rows.
 // Nothing is seeded, so each tab now says so honestly instead of rendering a
 // blank stretch of screen.
 //
@@ -39,13 +49,15 @@
 // from a missing writer. Nothing holds insert rights on it, so it cannot be
 // forged either.
 import { useState, useEffect } from 'react';
-import { View, Text, Pressable, ScrollView, TextInput, Alert } from 'react-native';
+import { View, Text, Pressable, ScrollView, TextInput, Alert, Switch } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Cta, ListRow, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { useOwnerOps } from '../../src/ui/ownerOps';
+import { useAnnouncements } from '../../src/ui/announcements';
+import { deliverySummary, pushConsequence } from '../../src/lib/notifyCopy';
 import { fetchAllFeedback, type FeedbackRow } from '../../src/ui/appFeedback';
 import { usePlatformTrainers } from '../../src/ui/trainers';
 import { useTenant, gymMoney, GYM_CURRENCY } from '../../src/ui/tenant';
@@ -100,7 +112,13 @@ export default function OwnerOps() {
   // `activity` is deliberately not taken from the provider any more: it is a
   // module-level empty array nothing writes to, and reading it here is what made
   // the Activity tab look like a feed waiting for its first event.
-  const { anns, addAnn, tickets, resolveTicket, openTickets } = useOwnerOps();
+  // The announcement half of `useOwnerOps` is gone from this screen. It was a
+  // module-level useState — a notepad the owner was told, in the button's own
+  // confirmation, did not reach anybody. Notices now go through the real table
+  // (src/ui/announcements.tsx); only the ticket half of that provider is read
+  // here.
+  const { tickets, resolveTicket, openTickets } = useOwnerOps();
+  const { addGymAnnouncement, mine: myNotices, status: noticeStatus } = useAnnouncements();
 
   // ── the session fee ──────────────────────────────────────────────────────
   //
@@ -267,6 +285,11 @@ export default function OwnerOps() {
   const openCount = allTickets.filter((x) => !x.resolved).length;
   const [tab, setTab] = useState<'announce' | 'support' | 'activity'>('announce');
   const [text, setText] = useState('');
+  // Off by default: the notice reaches every member's notifications either way,
+  // and the push is the part that rings a phone at whatever hour it is where
+  // they are.
+  const [annPush, setAnnPush] = useState(false);
+  const [annBusy, setAnnBusy] = useState(false);
   const [openT, setOpenT] = useState<string | null>(null);
   const G = layout.gutter;
 
@@ -277,7 +300,7 @@ export default function OwnerOps() {
         <View style={{ paddingTop: sp.md }}>
           <Text style={{ ...ty.micro, color: t.ink3 }}>Platform</Text>
           <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Operations</Text>
-          <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>Your session fee · talk to trainers · support · gym activity</Text>
+          <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>Your session fee · notices to members · support · gym activity</Text>
         </View>
 
         {/* ── the three jobs this screen does ────────────────────────────── */}
@@ -382,21 +405,82 @@ export default function OwnerOps() {
             onPress={() => router.push('/guide')} />
         </Section>
 
-        <Section>
-              <SectionHead title="New Announcement" />
-              <TextInput value={text} onChangeText={setText} placeholder="Note to self — this does not reach trainers yet…" placeholderTextColor={t.ink3} multiline
+        {/* ── a notice to the gym's members ─────────────────────────────────
+                This section used to write to a `useState` in src/ui/ownerOps.tsx
+                and say so — "Saved to this device only — announcements do not
+                reach trainers yet" — which was at least honest about being a
+                notepad. It now posts a real row to `announcements` with this
+                gym's tenant_id, which `ann_write` admits only for an owner of
+                that tenant, and fans it out to every member's notifications.
+
+                WHO GETS IT: every member row in this gym, from all_member_ids()
+                — the same list the promotions push uses. Not "active members":
+                `clients` has no such column, and `memberships` (which does)
+                covered one client row in ten in the live database, so an
+                "active only" rule would silently drop nine members in ten from
+                a closure notice. See src/ui/announcements.tsx for the whole
+                argument.
+
+                It reaches MEMBERS, not trainers. The old copy promised trainers
+                and there is still no trainer-facing reader for one, so saying
+                "trainers" here would be the same false sentence in a new
+                direction. */}
+            <Section>
+              <SectionHead title="Notice to Members" />
+              <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
+                Every member of your gym sees this in their notifications and on their Notices screen, where it stays after today.
+              </Text>
+              <TextInput value={text} onChangeText={setText} placeholder="e.g. We are closed Monday for the public holiday…" placeholderTextColor={t.ink3} multiline
                 style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: sp.md, minHeight: 80, textAlignVertical: 'top', marginBottom: sp.md }} />
-              <Cta wide label="Save Announcement"
-                onPress={() => { if (!text.trim()) { Alert.alert('Write something', 'Enter an announcement.'); return; } addAnn(text); setText(''); Alert.alert('Noted', 'Saved to this device only — announcements do not reach trainers yet.'); }} />
+
+              {/* The push is a separate decision with its consequence written
+                  on it. An owner who can ring every phone in the building is
+                  exactly the capability worth being plain about, and this app
+                  has no scheduler and no record of anybody's timezone — so the
+                  only truthful offer is "now, wherever they are". */}
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginBottom: sp.md }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ ...ty.body, color: t.ink }}>Also send a push</Text>
+                  <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>{pushConsequence('gym', null)}</Text>
+                </View>
+                <Switch value={annPush} onValueChange={setAnnPush} />
+              </View>
+
+              <View pointerEvents={annBusy ? 'none' : 'auto'} style={{ opacity: annBusy ? 0.6 : 1 }}>
+                <Cta wide label={annBusy ? 'Posting…' : 'Post to Members'}
+                  onPress={async () => {
+                    if (!text.trim()) { Alert.alert('Write something', 'Enter an announcement.'); return; }
+                    setAnnBusy(true);
+                    let res;
+                    try { res = await addGymAnnouncement(text, { push: annPush }); } finally { setAnnBusy(false); }
+                    // The text stays in the box on a failure: they wrote it
+                    // once, and a cleared field after a refused write is how a
+                    // notice gets lost between the owner and the server.
+                    if (!res.ok || !res.delivery) {
+                      Alert.alert('Not posted', 'That could not be posted, so no member has seen it. Your words are still here — try again in a moment.');
+                      return;
+                    }
+                    setText(''); setAnnPush(false);
+                    Alert.alert('Posted', deliverySummary(res.delivery));
+                  }} />
+              </View>
             </Section>
 
             <Rule />
 
             <Section>
-              <SectionHead title="Sent" note={anns.length ? `${anns.length} sent` : undefined} />
-              {anns.length === 0 ? (
-                <Empty tone={t.ink3}>Nothing sent yet — announcements you post appear here.</Empty>
-              ) : anns.map((a, i) => (
+              {/* The count is only stated over a whole read. Under 'error' the
+                  list in hand is whatever survived, and "0 sent" to an owner
+                  who posted three on Friday is the sentence
+                  src/ui/loadStatus.ts exists to stop. */}
+              <SectionHead title="Sent" note={noticeStatus === 'ready' && myNotices.length ? `${myNotices.length} sent` : undefined} />
+              {noticeStatus === 'error' ? (
+                <Empty tone={t.ink3}>Your notices could not be read just now. This is not a statement that you have sent none.</Empty>
+              ) : myNotices.length === 0 ? (
+                <Empty tone={t.ink3}>
+                  {noticeStatus === 'loading' ? 'Reading your notices…' : 'Nothing sent yet — notices you post appear here.'}
+                </Empty>
+              ) : myNotices.map((a, i) => (
                 <View key={a.id} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                   <Text style={{ ...ty.body, color: t.ink2 }}>{a.body}</Text>
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>{ago(a.at)}</Text>

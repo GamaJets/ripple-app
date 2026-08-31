@@ -37,6 +37,8 @@ import type { ExVideo } from '../lib/trainerMock';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { exerciseSlug } from '../lib/exerciseId';
+import { writeFailure } from '../lib/wroteRows';
+import { reportError } from '../lib/reportError';
 
 /** Who the trainer decided may watch a clip. Mirrors the CHECK constraint on
  *  exercise_videos.visibility; 'private' still reaches anyone named in
@@ -248,12 +250,34 @@ export function useExerciseVideos() {
     return 'local';
   };
 
-  /** Change who may watch a clip after the fact. */
+  /**
+   * Change who may watch a clip after the fact.
+   *
+   * ── Why the row count, and not `error` ─────────────────────────────────
+   *
+   * `load()` above deliberately does not filter by trainer: `exvid_read`
+   * decides what this person may see, and it publishes every clip marked
+   * 'public' and every platform clip belonging to no trainer. So the list this
+   * hook hands back is NOT the coach's own clips — it is every clip they are
+   * allowed to watch, including other coaches'.
+   *
+   * `exvid_trainer_rw` is `trainer_id = auth.uid()`, so an UPDATE aimed at one
+   * of those matches zero rows. PostgREST returns 204 with `error` null, which
+   * this read as success: it returned true and moved the chip to the level the
+   * coach picked. Proved live against phgfwzpkkwdysftlgkoq by seeding a second
+   * coach — one SELECT of the other coach's public clip, and an UPDATE of it
+   * affecting 0 rows with no error at all.
+   *
+   * A coach who sets a clip of a named client to "Only me", and is told it is
+   * private when it is still public, is the worst outcome this screen has. So
+   * the count is what decides, and the local state is only moved after it.
+   */
   const setVisibility = async (id: string, visibility: Visibility): Promise<boolean> => {
     if (!id.startsWith('db') || !USE_SUPABASE) return false;
-    const { error } = await supabase
-      .from('exercise_videos').update({ visibility }).eq('id', id.slice(2));
-    if (error) return false;
+    const r = await supabase
+      .from('exercise_videos').update({ visibility }, { count: 'exact' }).eq('id', id.slice(2));
+    const why = writeFailure('That sharing setting', r);
+    if (why) { reportError('exerciseVideos.setVisibility', new Error(why), { id, visibility }); return false; }
     setRemote((p) => p.map((x) => (x.id === id ? { ...x, visibility } : x)));
     return true;
   };
@@ -265,10 +289,20 @@ export function useExerciseVideos() {
    */
   const grantTo = async (id: string, clientId: string): Promise<boolean> => {
     if (!id.startsWith('db') || !USE_SUPABASE) return false;
-    const { error } = await supabase
+    // The row is asked for back. An upsert that conflicts takes the UPDATE
+    // path, and `exvid_grants_trainer_rw` can leave that matching nothing —
+    // at which point PostgREST resolves with no error and no row, and the
+    // toggle would light for a person who cannot watch the clip.
+    const { data, error } = await supabase
       .from('exercise_video_grants')
-      .upsert({ video_id: id.slice(2), client_id: clientId }, { onConflict: 'video_id,client_id' });
-    return !error;
+      .upsert({ video_id: id.slice(2), client_id: clientId }, { onConflict: 'video_id,client_id' })
+      .select('client_id');
+    if (error) { reportError('exerciseVideos.grantTo', error, { id, clientId }); return false; }
+    if (!data || data.length === 0) {
+      reportError('exerciseVideos.grantTo', new Error('grant upsert returned no row'), { id, clientId });
+      return false;
+    }
+    return true;
   };
 
   /**
@@ -300,11 +334,28 @@ export function useExerciseVideos() {
     return page.rows.map((r: any) => r.client_id);
   };
 
+  /**
+   * Take a clip back from one named person.
+   *
+   * The count, not `error`, for the reason setVisibility gives: a DELETE that
+   * `exvid_grants_trainer_rw` refuses matches zero rows and reports nothing.
+   * videos.tsx draws the toggle off on a true here and tells the coach the
+   * person can no longer watch it — so an unconfirmed revoke is a statement
+   * about somebody's access to a video that is not true.
+   *
+   * A grant that had already gone now reports as not-removed rather than as
+   * removed. That is deliberate: videos.tsx only calls this for a person the
+   * grant list said WAS granted, so no row means the list on screen is stale,
+   * and sending the coach back to look is the right end of that.
+   */
   const revokeFrom = async (id: string, clientId: string): Promise<boolean> => {
     if (!id.startsWith('db') || !USE_SUPABASE) return false;
-    const { error } = await supabase
-      .from('exercise_video_grants').delete().eq('video_id', id.slice(2)).eq('client_id', clientId);
-    return !error;
+    const r = await supabase
+      .from('exercise_video_grants').delete({ count: 'exact' })
+      .eq('video_id', id.slice(2)).eq('client_id', clientId);
+    const why = writeFailure('That person’s access', r);
+    if (why) { reportError('exerciseVideos.revokeFrom', new Error(why), { id, clientId }); return false; }
+    return true;
   };
 
   /** Remove a clip. The stored file goes with it — a row deleted on its own
@@ -314,8 +365,16 @@ export function useExerciseVideos() {
     if (id.startsWith('db')) {
       if (!USE_SUPABASE) return false;
       const target = remote.find((x) => x.id === id);
-      const { error } = await supabase.from('exercise_videos').delete().eq('id', id.slice(2));
-      if (error) return false;
+      // The count decides, for the reason setVisibility gives — and this one
+      // did more damage than the others when it was wrong. A refused DELETE
+      // returned true, so the clip was dropped from `remote` and the coach
+      // could no longer see it to try again, while the row and everyone's
+      // access to it stayed exactly where they were. The stored file was
+      // deleted underneath it, which is the one part that CAN succeed on
+      // somebody else's row, so the outcome was a live row pointing at nothing.
+      const r = await supabase.from('exercise_videos').delete({ count: 'exact' }).eq('id', id.slice(2));
+      const why = writeFailure('That clip', r);
+      if (why) { reportError('exerciseVideos.removeVideo', new Error(why), { id }); return false; }
       if (target?.path) {
         try { await supabase.storage.from('exercise-videos').remove([target.path]); } catch { /* the row is gone; a stray file is not worth failing the delete */ }
       }

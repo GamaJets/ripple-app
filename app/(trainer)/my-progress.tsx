@@ -613,7 +613,7 @@ export default function MyProgress() {
                     reading. It dashes instead; the scores beside it are real
                     either way. */}
                 <Text style={{ ...ty.label, ...numeric, color: t.ink2, marginTop: 3 }}>
-                  {fig(weightLabel(Number.isFinite(c.weightKg) && c.weightKg > 0 ? c.weightKg : null, wu))} · energy {c.energy}/5 · sleep {c.sleep}/5 · mood {c.mood}/5
+                  {fig(weightLabel(Number.isFinite(c.weightKg) && c.weightKg > 0 ? c.weightKg : null, wu))} · Energy {c.energy}/5 · Sleep {c.sleep}/5 · Mood {c.mood}/5
                 </Text>
                 {c.note ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, fontStyle: 'italic' }}>“{c.note}”</Text> : null}
               </View>

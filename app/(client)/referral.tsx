@@ -139,7 +139,7 @@ export default function Referral() {
               {code ? (
                 <Cta label="Share My Invite" wide onPress={invite} />
               ) : (
-                <Ghost label="Try again" onPress={load} />
+                <Ghost label="Try Again" onPress={load} />
               )}
             </View>
           </Card>

@@ -220,7 +220,7 @@ export default function CheckIn() {
                   ratings beside it are scores out of five and are not a
                   measurement of anything physical, so they are printed as they
                   are recorded. */}
-              <Text style={{ ...ty.body, ...numeric, color: t.ink2 }}>{fig(weightLabel(ci.latest.weightKg, wu))} · energy {ci.latest.energy}/5 · sleep {ci.latest.sleep}/5</Text>
+              <Text style={{ ...ty.body, ...numeric, color: t.ink2 }}>{fig(weightLabel(ci.latest.weightKg, wu))} · Energy {ci.latest.energy}/5 · Sleep {ci.latest.sleep}/5</Text>
               {ci.latest.note ? <Text style={{ ...ty.label, color: t.ink3, marginTop: 6, fontStyle: 'italic' }}>“{ci.latest.note}”</Text> : null}
             </Section>
           </View>

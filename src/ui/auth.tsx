@@ -6,7 +6,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { USE_SUPABASE } from '../lib/config';
 import { VARIANT } from '../lib/variant';
-import { registerForPush } from './pushNotifications';
 import {
   supabase,
   signIn as sbSignIn,
@@ -148,7 +147,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const next: AuthUser = { id: u.id, name, email: u.email || '', role };
     setUser(next);
     setBrandNotice(null);
-    registerForPush().catch(() => {});
+    // ── There was a registerForPush() here, and it was a privacy defect ─────
+    //
+    // It fired on every sign-in, unconditionally, without reading the member's
+    // Push Notifications preference — which meant somebody who had turned that
+    // switch OFF had the OS permission prompt raised at them anyway and had a
+    // live row written into `push_tokens` anyway. `push_tokens` is the table the
+    // send-push edge function resolves recipients from, so that row is a
+    // delivery address: the switch said off, the token said yes, and the token
+    // is what the sender reads. On the live database that is 20 rows across 15
+    // accounts, not one of which was ever checked against a preference.
+    //
+    // It cannot simply be wrapped in a check here, because at this exact moment
+    // the answer is not knowable. The preference is persisted in AsyncStorage
+    // and read asynchronously by SettingsProvider; a session rehydrated at
+    // launch can reach this line before that read has landed, and the only
+    // answer available would be a guess. Guessing "on" is the bug itself.
+    //
+    // So registration is not this file's job at all. SettingsProvider
+    // (src/ui/settings.tsx) owns the preference and applies it once per sign-in
+    // — keyed on the same auth revision this function drives — and it does so
+    // AFTER its own read has landed, in both directions: register when the
+    // answer is yes, take the row back out of `push_tokens` when it is no. That
+    // is one applier that knows the answer, in place of two that raced, one of
+    // which never asked. registerForPush() additionally refuses on its own
+    // unless consent is a recorded 'yes', so this cannot come back by accident.
     return { user: next, refused: null };
   }
 

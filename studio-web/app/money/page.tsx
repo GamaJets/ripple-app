@@ -120,6 +120,12 @@ export default function Money() {
 
   const tenantId = me.tenantId!;
   const sum = plans && members && payments ? summarise(payments, members, plans) : null;
+  // The currency each SUM is actually in. A set with no rows states nothing, so
+  // there is nothing to disagree with and the gym's own currency is the honest
+  // label; a set whose rows disagree has no single currency at all, and `null`
+  // is what makes `amount()` withhold the figure rather than pick a side.
+  const takenCcy = sum == null || sum.payments === 0 ? ccy : sum.takenCurrency;
+  const mrrCcy = sum == null || sum.mrrCents == null ? ccy : sum.mrrCurrency;
   const refresh = () => load(tenantId);
 
   // summarise needs all three reads, so any one of them failing leaves every
@@ -163,14 +169,28 @@ export default function Money() {
             is what this note was warning about. It has no default any more — it
             withholds an amount it cannot denominate — so the choice between the
             two doors is now about clarity rather than safety. */}
-        <Kpi label="Taken (30 days)" text={amount(sum?.takenCents, ccy)}
+        {/* The currency comes from the ROWS THAT WERE ADDED UP, and only falls
+            back to the gym's when they state none between them.
+
+            `ccy` alone was wrong in a way nothing showed: both of these sums
+            ignore what currency each row is in, `gym_payments.currency` and
+            `membership_plans.currency` are `not null default 'AED'`, and this
+            gym may have set GBP since. Those dirhams were added to those pounds
+            and the tile said GBP. `takenCurrency`/`mrrCurrency` are null
+            exactly when the contributing rows disagree, and a total that cannot
+            be denominated is withheld rather than labelled with a guess. */}
+        <Kpi label="Taken (30 days)" text={amount(sum?.takenCents, takenCcy)}
              note={sum?.takenCents == null ? (unread ?? 'nothing recorded yet')
-               : !ccy ? NO_CURRENCY_NOTE
-               : `${sum.payments} payments`} />
-        <Kpi label="Recurring / month" text={amount(sum?.mrrCents, ccy)}
+               : takenCcy ? `${sum.payments} payments`
+               : sum && sum.takenCurrency === null && sum.payments > 0
+                 ? 'these payments are in more than one currency, so there is no one total'
+                 : NO_CURRENCY_NOTE} />
+        <Kpi label="Recurring / month" text={amount(sum?.mrrCents, mrrCcy)}
              note={sum?.mrrCents == null ? (unread ?? 'no priced membership')
-               : !ccy ? NO_CURRENCY_NOTE
-               : undefined} />
+               : mrrCcy ? undefined
+               : sum && sum.mrrCurrency === null
+                 ? 'these plans are priced in more than one currency, so there is no one total'
+                 : NO_CURRENCY_NOTE} />
         <Kpi label="Active members" text={sum ? String(sum.activeMembers) : null} note={sum ? undefined : unread} />
         <Kpi label="Plans on sale" text={plans ? String(plans.filter((p) => p.active).length) : null} note={plans ? undefined : (plansErr ? 'the price book could not be read' : undefined)} />
       </div>

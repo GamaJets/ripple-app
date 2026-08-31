@@ -24,7 +24,8 @@ import { useSettings } from '../../src/ui/settings';
 import { weightIn, weightLabel } from '../../src/lib/units';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { personalRecords } from '../../src/lib/streaks';
-import { Rule, Section, SectionHead, Ghost } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Ghost, Notice } from '../../src/ui/kit';
+import { isWhole } from '../../src/ui/loadStatus';
 import { sp, layout, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 
 const LEVELS = ['Beginner', 'Novice', 'Intermediate', 'Advanced', 'Elite'];
@@ -46,9 +47,20 @@ export default function Standards() {
  const t = useTheme();
  const router = useRouter();
  const c = useClientData();
- const { log } = useWorkoutLog();
+ // Neither provider's status was read, and this screen GRADES somebody on what
+ // it finds. Under a failed log read `prs` is empty, every row printed "No data"
+ // and "Log this lift to see your level." — a flat statement that the member has
+ // never squatted — and under a truncated one (src/lib/rowCap.ts) the best set
+ // may be in the part that did not come back, so the level, the ratio and the
+ // "Next: Intermediate @ …" target are all graded low against a lift they have
+ // already beaten. The bodyweight has the same problem in the header: under a
+ // failed profile read `bw` is null and the screen told a member who weighs in
+ // every week to "add your weight for ratios".
+ const { log, status: logStatus } = useWorkoutLog();
  const wu = useSettings().weightUnit;
+ const liftsWhole = isWhole(logStatus);
  const prs = personalRecords(log);
+ const bodyWhole = isWhole(c.profileStatus);
  const bw = c.weightKg;
 
  const rows = LIFTS.map((lift) => {
@@ -83,7 +95,16 @@ export default function Standards() {
   <Rule />
 
   <Section>
-   <SectionHead title="The Big Lifts" note={bw != null ? `bodyweight ${weightLabel(bw, wu)}` : 'add your weight for ratios'} />
+   <SectionHead title="The Big Lifts" note={bw != null ? `bodyweight ${weightLabel(bw, wu)}` : bodyWhole ? 'add your weight for ratios' : 'bodyweight not read'} />
+   {/* Said before the rows, because every row below is a grade and this is the
+       reason a low one may not be the member's. */}
+   {!liftsWhole && logStatus !== 'loading' ? (
+    <Notice tone={t.warn} kicker="Standards"
+     title={logStatus === 'error' ? 'We couldn’t read your training log' : 'Not all of your log could be read'}
+     note={logStatus === 'error'
+      ? 'Nothing below is a level you are at — it is a level we could not look up. Your lifts are on your record.'
+      : 'You have logged more sessions than this screen can read in one go, so a best lift set before that is not counted here and the level beside it may be under-stated.'} />
+   ) : null}
    {rows.map(({ lift, best, ratio, lvl, nextTarget }, i) => (
     <View key={lift.name} style={{ paddingVertical: sp.lg, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' }}>
@@ -96,7 +117,9 @@ export default function Standards() {
         <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginLeft: 4 }}>{wu} · {ratio.toFixed(2)}×</Text>
        </View>
       ) : (
-       <Text style={{ ...ty.caption, color: t.ink3 }}>No data</Text>
+       // "No data" is a claim that this lift is not on the member's log. Only
+       // a whole read is entitled to make it.
+       <Text style={{ ...ty.caption, color: t.ink3 }}>{liftsWhole ? 'No data' : logStatus === 'loading' ? 'Reading…' : 'Not read'}</Text>
       )}
      </View>
      {lvl >= -1 ? (
@@ -119,7 +142,11 @@ export default function Standards() {
        </View>
       </View>
      ) : (
-      <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>Log this lift to see your level.</Text>
+      <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
+       {liftsWhole ? 'Log this lift to see your level.'
+        : logStatus === 'loading' ? 'Reading your log…'
+        : 'Nothing read for this lift, so there is no level to show. That is not the same as never having done it.'}
+      </Text>
      )}
     </View>
    ))}

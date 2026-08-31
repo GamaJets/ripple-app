@@ -12,6 +12,7 @@ import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Hero, KpiRow, Ghost, Notice, Cta, fig } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty } from '../../src/theme/scale';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
+import { isWhole } from '../../src/ui/loadStatus';
 import { currentStreak, longestStreak, freezeBudget, currentStreakFrozen } from '../../src/lib/streaks';
 
 const WEEKS = 12;
@@ -28,6 +29,17 @@ export default function Consistency() {
   // streak 0 days" over twelve blank weeks, has no way to tell that the fault is
   // ours, and every reason to conclude the month did not count.
   const known = logStatus !== 'error';
+  // …and 'partial' is not 'error', which is why `known` alone is not enough for
+  // the three figures under "Totals". A truncated read (src/lib/rowCap.ts) holds
+  // the NEWEST thousand sessions — the provider orders `performed_at`
+  // descending before capping — so the twelve-week grid and the current streak
+  // are drawn from real, complete, recent rows and stay honest under it. The
+  // all-time totals are not: "Sessions 1,000" under the word "Totals" is a
+  // subtotal wearing the name of a total, and "Best Streak" would nominate the
+  // best of the last three months as the best there has ever been. `isWhole`
+  // is false for 'partial' AND for 'loading', which also stops the first frame
+  // printing three zeroes before the read has landed.
+  const countable = isWhole(logStatus);
 
   const pad = (n: number) => String(n).padStart(2, '0');
   const key = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -86,13 +98,22 @@ export default function Consistency() {
           </View>
         ) : null}
 
-        {/* ── the hero: the streak the heatmap is about ───────────────────── */}
+        {/* ── the hero: the streak the heatmap is about ─────────────────────
+            `best` is all-time and follows the same rule as the totals below: on
+            a truncated read it is the best of the weeks that fitted, and
+            printing that as "Best 14" tells a client their best run was shorter
+            than it was. The freeze budget stays — it is counted from the recent
+            weeks the cap keeps. */}
         <Hero
           label="Current Streak"
           figure={known ? fig(streak) : fig(null)}
           unit={known ? (streak === 1 ? 'day' : 'days') : undefined}
           note={!known
             ? 'Not a broken streak — an unread one.'
+            : !countable
+            ? freezes > 0
+              ? `${freezes} freeze${freezes === 1 ? '' : 's'} in reserve · best run not all read`
+              : 'Best run not all read'
             : freezes > 0
             ? `Best ${best} · ${freezes} freeze${freezes === 1 ? '' : 's'} in reserve`
             : `Best ${best} day${best === 1 ? '' : 's'} · no freezes yet`}
@@ -101,15 +122,24 @@ export default function Consistency() {
         <Rule />
 
         <Section>
-          <SectionHead title="Totals" />
+          <SectionHead title="Totals" note={logStatus === 'partial' ? 'Not all read' : undefined} />
           {/* Three all-time totals reduced from `log`. With nothing read, three
               zeroes under the word "Totals" is a claim about the client's whole
-              training history, and it is the one thing we do not have. */}
+              training history, and it is the one thing we do not have. The same
+              is true of a read that came back at its row limit, which is why
+              this is `countable` and the heatmap above is `known`. */}
           <KpiRow items={[
-            { label: 'Sessions', value: known ? fig(totalSessions) : fig(null) },
-            { label: 'Days Trained', value: known ? fig(trainedDays) : fig(null) },
-            { label: 'Best Streak', value: known ? fig(best) : fig(null) },
+            { label: 'Sessions', value: countable ? fig(totalSessions) : fig(null) },
+            { label: 'Days Trained', value: countable ? fig(trainedDays) : fig(null) },
+            { label: 'Best Streak', value: countable ? fig(best) : fig(null) },
           ]} />
+          {known && !countable && logStatus === 'partial' ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+              You have trained more times than this screen can read in one go, so these three are
+              left blank rather than added up short. The grid below is your recent weeks and is
+              complete.
+            </Text>
+          ) : null}
         </Section>
 
         <Rule />

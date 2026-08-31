@@ -39,6 +39,24 @@
 // at the token and not at each of the two dozen sendPush() call sites, none of
 // which are this file's to edit and any one of which could be forgotten.
 //
+// ── Consent now gates REGISTRATION, not just delivery ─────────────────────
+//
+// Taking the row out of `push_tokens` was only half of it, and the missing half
+// was the louder one. src/ui/auth.tsx called registerForPush() on every sign-in
+// without reading this preference at all, so a member whose answer was no had
+// the OS permission prompt raised at them and a fresh row written back — which
+// is a false statement about their own privacy made by the app they went to in
+// order to control it. This provider's reconciler could only ever chase that,
+// and the comment on revokePushToken used to describe the chase.
+//
+// That call is gone from auth.tsx. Registration belongs to whoever knows the
+// answer, which is this file, and the answer is now published synchronously to
+// src/lib/pushConsent.ts the moment either the device cache lands or the member
+// taps the switch. registerForPush() reads that latch itself and refuses unless
+// it says 'yes' — so the launch-time window where nobody has read anything yet
+// is a REFUSAL, not a guess. Registering one launch later costs a launch;
+// prompting somebody who said no cannot be taken back.
+//
 // ── The push is gated on the read ──────────────────────────────────────────
 //
 // `synced` exists for the bug documented at length in clientData.tsx: a
@@ -53,7 +71,9 @@ import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
 import { useAuthRevision } from './authRevision';
-import { registerForPush, pushAvailable } from './pushNotifications';
+import { registerForPush, pushAvailable, handsetPushTokens, forgetRegisteredToken } from './pushNotifications';
+import { consentFromStored, recordPushConsent } from '../lib/pushConsent';
+import { assertWrote } from '../lib/wroteRows';
 import type { WeightUnit, LengthUnit } from '../lib/units';
 import { resolveUnits, deviceRegion, type UnitSource } from '../lib/unitPreference';
 
@@ -180,59 +200,118 @@ const isWeightUnit = (v: unknown): v is WeightUnit => v === 'kg' || v === 'lb';
 const isLengthUnit = (v: unknown): v is LengthUnit => v === 'cm' || v === 'in';
 
 /**
- * Take this handset's push token out of `push_tokens`, and keep it out.
+ * Is there still a row in `push_tokens` naming any of these tokens?
  *
- * ── Why this is not one delete ─────────────────────────────────────────────
+ * Three answers, not two. `null` is "the read failed", and it is a different
+ * fact from "there is no row" — this whole module turns on not confusing the
+ * two, because reporting a token gone on the strength of a read that never
+ * completed is how a member who switched notifications off goes on getting them.
+ */
+async function tokenRowsPresent(tokens: string[]): Promise<boolean | null> {
+  const { data, error } = await supabase.from('push_tokens').select('token').in('token', tokens);
+  if (error) { reportError('settings.push.revoke.verify', error); return null; }
+  return (data?.length ?? 0) > 0;
+}
+
+/**
+ * Take this handset's push token out of `push_tokens`, and prove it is gone.
  *
- * src/ui/auth.tsx calls registerForPush() on every sign-in, unconditionally and
- * without consulting this preference. That file is not this one's to change, so
- * on a launch where the member's answer is 'off' there are two things happening
- * at once: this provider revoking the token, and auth.tsx writing it back. Which
- * lands last is a race between two chains of network calls, and losing it means
- * a member with the switch off quietly receives notifications for a session.
+ * ── Turning it off has to REVOKE, not just stop ────────────────────────────
  *
- * So rather than racing it, we wait it out. registerForPush() is idempotent and
- * is exactly the work auth.tsx is doing, so awaiting our OWN call takes about as
- * long as theirs and hands back the very token they are about to write. Then the
- * row is deleted, read back, and deleted again if the in-flight registration put
- * it back between the two. A row that survives both passes is reported rather
- * than shrugged off: the switch says off and a live token says otherwise, and
- * nobody finds that out from a silent catch.
+ * `push_tokens` is not a preference table. It is the list of delivery addresses
+ * the send-push edge function resolves recipients from, so a row that survives
+ * the switch being turned off is a phone that keeps receiving. Stopping this
+ * app from registering again would not have helped the fifteen accounts that
+ * already have rows.
  *
- * It asks the OS for permission only where permission has never been decided —
- * and auth.tsx's own call is asking on this same launch regardless, so this adds
- * no prompt the member would not already be seeing.
+ * ── The race this used to lose, and why it is gone ─────────────────────────
  *
- * Yes, that means we write the row in order to delete it. The window is one
- * round trip on a launch where auth.tsx was going to write the same row anyway,
- * and it buys the one thing that makes the delete safe: the exact token for THIS
- * handset. There is no way to read a token without asking for one.
+ * src/ui/auth.tsx used to call registerForPush() on every sign-in,
+ * unconditionally. On a launch where the member's answer was 'off' there were
+ * two things happening at once — this provider revoking, auth.tsx writing it
+ * back — and losing that race meant a live token for a member with the switch
+ * off. The old version of this function coped by REGISTERING the token itself
+ * first, on the reasoning that auth.tsx was writing the same row anyway, then
+ * deleting twice. That is gone in both halves: auth.tsx no longer registers at
+ * all, and registerForPush() now refuses unless consent is a recorded 'yes', so
+ * there is nothing left to race and nothing to justify writing a row in order
+ * to delete it.
+ *
+ * What replaces it is handsetPushTokens(), which reads this handset's token(s)
+ * without asking the OS for anything and without writing anywhere. It also
+ * covers the case the old version silently got wrong: a member who turned
+ * notifications off for this app in the phone's own Settings and only later
+ * turned this switch off. The OS will not mint a token then, the old code read
+ * that as "nothing to delete" and returned TRUE, and the row stayed in the
+ * table — deliverable again the day they re-enabled the OS permission. The
+ * token is remembered on the device at registration, so it is still nameable.
  *
  * The delete is scoped to the token, not to the user: `push_tokens` is keyed by
  * token and a member may be signed in on a second handset whose own answer is
  * yes. Deleting by user_id would silence a phone whose owner never asked for it.
  *
+ * ── Zero rows deleted is not an error, so the count is what is checked ─────
+ *
+ * A PostgREST DELETE matching no rows returns 204 with `error: null`. Under
+ * `pt_self` (`user_id = auth.uid()`) a stale session, an expired JWT or a token
+ * belonging to another account all arrive in exactly that silence. So the row
+ * is READ first: once we know a row is there, a delete that matches nothing is
+ * a genuine failure and assertWrote says so. Where the read found nothing there
+ * is nothing to delete, and that is success without a delete being issued at
+ * all — the case assertWrote would have wrongly called a failure.
+ *
  * Resolves TRUE only when nothing in `push_tokens` can reach this handset any
- * more — either because the row is confirmed gone or because there was never a
- * token to begin with. A failed delete and a failed verify both resolve FALSE:
- * "we could not check" is not "it is gone", and this is the switch where the
- * difference is the member getting a notification they turned off.
+ * more. A failed delete and a failed verify both resolve FALSE: "we could not
+ * check" is not "it is gone", and this is the switch where the difference is
+ * the member getting a notification they turned off.
  */
 async function revokePushToken(cancelled: () => boolean): Promise<boolean> {
-  const token = await registerForPush();
-  // No token for this handset — nothing can reach it, and there is nothing to
-  // delete. Not a failure.
-  if (!token) return true;
+  const tokens = await handsetPushTokens();
+  // This handset has never registered and the OS will not name a token for it,
+  // so there is no row that could be ours. Nothing to delete is not a failure.
+  if (!tokens.length) return true;
   if (cancelled()) return false;
-  for (let pass = 0; pass < 2; pass++) {
-    const { error } = await supabase.from('push_tokens').delete().eq('token', token);
-    if (error) { reportError('settings.push.revoke', error); return false; }
+  // ── Without a session, "no row" is not an answer ──────────────────────────
+  //
+  // `pt_self` is `user_id = auth.uid()` for ALL commands, so an expired or
+  // missing JWT does not produce an error on either half of this: the SELECT
+  // comes back as an empty array and the DELETE comes back 204 with
+  // `Content-Range: */0`. Verified on the live database by issuing exactly
+  // those two requests with the anon key against a row that was, and stayed,
+  // present. Both are indistinguishable from the row being gone — which would
+  // have this function report a handset revoked while it goes on receiving.
+  //
+  // So identity is established before any of it is believed. No session means
+  // this cannot be done now, not that it is done: the caller turns that into
+  // 'off-pending', which says so out loud, and the reconciler retries on the
+  // next launch.
+  const { data: auth, error: whoErr } = await supabase.auth.getUser();
+  if (whoErr || !auth?.user?.id) { reportError('settings.push.revoke', whoErr ?? new Error('no session to revoke a push token under')); return false; }
+  if (cancelled()) return false;
+  // Two attempts, each verified. One would do now that nothing else registers
+  // concurrently; the second covers a reconciler run from a previous auth
+  // revision that has not yet noticed it was cancelled putting the row back
+  // between the delete and the check — cheap to survive, expensive to be wrong
+  // about.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const present = await tokenRowsPresent(tokens);
+    if (present === null) return false;              // could not check ≠ gone
+    if (!present) { await forgetRegisteredToken(); return true; }
     if (cancelled()) return false;
-    const { data, error: readErr } = await supabase.from('push_tokens').select('token').eq('token', token).maybeSingle();
-    if (readErr) { reportError('settings.push.revoke.verify', readErr); return false; }
-    if (!data) return true;         // gone, and it stayed gone
+    const res = await supabase.from('push_tokens').delete({ count: 'exact' }).in('token', tokens);
+    try {
+      // Named in the member's words: this sentence can reach reportError and,
+      // through 'off-pending', the alert on the settings screen.
+      assertWrote('This phone’s notification registration', res);
+    } catch (e) {
+      reportError('settings.push.revoke', e);
+      return false;
+    }
     if (cancelled()) return false;
   }
+  const stillThere = await tokenRowsPresent(tokens);
+  if (stillThere === null) return false;
+  if (!stillThere) { await forgetRegisteredToken(); return true; }
   reportError('settings.push.revoke', new Error('push token was re-registered after two deletes'));
   return false;
 }
@@ -261,8 +340,9 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   // whose stored answer is that they do not want one, on every single launch.
   const [cacheLoaded, setCacheLoaded] = useState(false);
   useEffect(() => { (async () => {
+    let raw: string | null = null;
     try {
-      const raw = await AsyncStorage.getItem('repple.settings');
+      raw = await AsyncStorage.getItem('repple.settings');
       if (raw) {
         // Read key by key rather than spreading the parsed object over state.
         // Every phone that ran an older build still has `notifEmail` in this
@@ -275,8 +355,19 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         if (isLengthUnit(c.lengthUnit)) patch.lengthUnit = c.lengthUnit;
         if (Object.keys(patch).length) setS((prev) => ({ ...prev, ...patch }));
       }
-    } catch {}
-    finally { setCacheLoaded(true); }
+    } catch { raw = null; }
+    finally {
+      // Publish the answer before anything is allowed to act on it. Until this
+      // line runs, src/lib/pushConsent.ts says 'unknown' and registerForPush()
+      // refuses outright — which is what stops a sign-in that beat this read
+      // from putting the OS permission prompt in front of somebody whose stored
+      // answer is no. consentFromStored applies the same default this state
+      // does (`DEFAULTS.notifPush`, on), including for a blob that failed to
+      // parse, so the switch on the settings screen and the token store cannot
+      // disagree about what an unreadable device is assumed to have said.
+      recordPushConsent(consentFromStored(raw));
+      setCacheLoaded(true);
+    }
   })(); }, []);
 
   // The account's answer, which wins over the cache when there is one. Keyed on
@@ -361,10 +452,15 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   // firing on the same flip would race each other for no gain.
   //
   // What this run is FOR is the case a tap cannot cover — a token that exists
-  // when it should not. Every member on the current build has one: auth.tsx has
-  // been registering unconditionally since long before this preference meant
+  // when it should not. Every member on the current build has one: auth.tsx
+  // registered unconditionally, since long before this preference meant
   // anything, so somebody who turned push off a month ago has a live row in
-  // `push_tokens` right now and no idea. This is the launch that removes it.
+  // `push_tokens` right now and no idea. Twenty such rows across fifteen
+  // accounts on the live database, counted. This is the launch that removes it.
+  //
+  // It is also, now that auth.tsx registers nothing, the ONLY thing that
+  // registers a handset on a sign-in — which is the point: one applier that has
+  // read the answer, in place of two that raced, one of which never asked.
   //
   // `latest.current` rather than a dependency, for the reason above: the effect
   // must SEE the current answer without being re-run by it.
@@ -396,6 +492,13 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     const next = { ...latest.current, ...patch };
     latest.current = next;
     setS(next);
+    // Published SYNCHRONOUSLY, before the storage write is even issued. The
+    // storage write is what a later launch reads, but `setPushEnabled` calls
+    // registerForPush() in the very next statement — and a gate that read the
+    // answer back out of AsyncStorage would race an un-awaited write and refuse
+    // to register the member who just asked for it. The latch is the answer;
+    // storage is only where it survives a relaunch.
+    if (patch.notifPush !== undefined) recordPushConsent(patch.notifPush ? 'yes' : 'no');
     AsyncStorage.setItem('repple.settings', JSON.stringify(next)).catch(() => {});
     // Only the unit columns go up. The notification preference now reaches the server: it is applied to `push_tokens`, so a handset that opted out receives nothing whatever a sending screen believes
     // because push permission genuinely is a property of this handset.

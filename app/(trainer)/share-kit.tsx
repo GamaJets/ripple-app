@@ -255,7 +255,7 @@ export default function ShareKit() {
         {/* ── what the card is about ─────────────────────────────────────── */}
         <Section>
           <Segmented
-            options={[{ key: 'week', label: 'My week' }, { key: 'result', label: 'A client result' }]}
+            options={[{ key: 'week', label: 'My Week' }, { key: 'result', label: 'A Client Result' }]}
             value={mode}
             onChange={(k) => setMode(k as Mode)}
           />

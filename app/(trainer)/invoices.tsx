@@ -140,9 +140,19 @@ export default function Invoices() {
     reset();
     await load();
     const issued = res.invoice;
+    // What the client was told, said out loud, because "issued" and "they know
+    // about it" are two different facts and this screen used to imply the
+    // second from the first. The notification is a heads-up and NOT the
+    // document: `coach_invoices` is readable by this coach alone, so the copy
+    // in their inbox tells them to expect it from you.
+    const told = res.notified === true
+      ? 'They have a notification about it — not the document, which still comes from you.'
+      : res.notified === false
+        ? 'They could not be notified about it, so the first they will hear of it is when you send it.'
+        : 'This one is not tied to an account, so nobody was notified — it goes to them when you send it.';
     Alert.alert(
       `Invoice ${invoiceNumber(issued.seq)} issued`,
-      `${money(issued) ?? DASH} to ${issued.billTo}. It is in your list now. Send it whenever you like.`,
+      `${money(issued) ?? DASH} to ${issued.billTo}. It is in your list now. ${told}`,
       [{ text: 'Later', style: 'cancel' }, { text: 'Send it', onPress: () => { void send(issued); } }],
     );
   };
@@ -317,7 +327,7 @@ export default function Invoices() {
         </Section>
 
         <View style={{ marginTop: layout.section }}>
-          <Cta label="Issue an invoice" wide disabled={!!currencyBlocker} onPress={() => setOpen(true)} />
+          <Cta label="Issue an Invoice" wide disabled={!!currencyBlocker} onPress={() => setOpen(true)} />
           {currencyBlocker ? (
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{currencyBlocker}</Text>
           ) : null}
@@ -431,7 +441,7 @@ export default function Invoices() {
               accessibilityLabel="Reason for voiding" style={inp} />
             <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.lg }}>
               <View style={{ flex: 1 }}>
-                <Cta label="Keep it" tone={t.surface2} wide onPress={() => { setVoidTarget(null); setVoidReason(''); }} />
+                <Cta label="Keep It" tone={t.surface2} wide onPress={() => { setVoidTarget(null); setVoidReason(''); }} />
               </View>
               <View style={{ flex: 1 }}>
                 <Cta label={busy ? 'Voiding…' : 'Void it'} tone={t.crit} wide

@@ -47,6 +47,7 @@ import type { IconName } from '../../src/ui/Icon';
 import type { LoadStatus } from '../../src/ui/loadStatus';
 import { useClientData } from '../../src/ui/clientData';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
+import { isWhole } from '../../src/ui/loadStatus';
 import { useBrand } from '../../src/ui/brand';
 import { useAuth } from '../../src/ui/auth';
 import { supabase } from '../../src/lib/supabase';
@@ -90,7 +91,12 @@ export default function Membership() {
   // twelve times was shown a zero under it with "No sessions logged yet this
   // month" spelled out underneath — a specific, checkable claim about their own
   // month that the app was in no position to make.
-  const logKnown = logStatus !== 'error';
+  //
+  // The gate was `!== 'error'`, which admits 'loading' — so that same sentence
+  // was still printed to EVERY member on the first frame, before the read had
+  // come back at all. `isWhole` is the gate loadStatus.ts asks for and excludes
+  // 'loading' and 'partial' as well.
+  const logKnown = isWhole(logStatus);
   const memberNo = memberNoFrom(c.name, c.id);
 
   const { visits, last } = useMemo(() => {
@@ -250,11 +256,15 @@ export default function Membership() {
 
         <Rule />
 
-        {/* ── the hero: the only live number this screen has ──────────────── */}
+        {/* ── the hero: the only live number this screen has ────────────────
+            Three sentences in the note, not two: "we couldn't read it" is wrong
+            while it is still being read, and a member who sees that on every
+            launch stops believing it for the time it is true. */}
         <Hero
           label="Sessions Logged This Month"
           figure={logKnown ? fig(visits) : fig(null)}
-          note={!logKnown ? 'We couldn’t read your training log — this is not a month with nothing in it.'
+          note={logStatus === 'loading' ? 'Reading your training log…'
+            : !logKnown ? 'We couldn’t read your training log — this is not a month with nothing in it.'
             : visits > 0 ? `Last logged ${last}` : 'No sessions logged yet this month'}
         />
 

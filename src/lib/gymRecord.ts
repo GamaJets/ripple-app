@@ -262,6 +262,48 @@ export interface RevenueSummary {
    *  plan is attached to any of them. */
   mrrCents: number | null;
   activeMembers: number;
+
+  /* ── what money each of those two sums is in ────────────────────────────
+   *
+   * Both totals add rows up and IGNORE what currency each row states. That was
+   * invisible while every gym was in the UAE and is a wrong number the moment
+   * one is not: `gym_payments.currency` and `membership_plans.currency` are
+   * both `not null default 'AED'`, so any row written before those write paths
+   * demanded a currency is a dirham row. A London gym that has since set GBP
+   * had those dirhams added to its pounds and the result labelled GBP, on the
+   * first tile of the Overview and of Plans & payments — the two figures an
+   * owner reads before anything else.
+   *
+   * Reported rather than fixed inside the sum, because there is no fixing it
+   * here: adding dirhams to pounds has no answer without a rate nobody has.
+   * Null means the contributing rows do NOT agree on one currency, and a caller
+   * holding a null must withhold the figure and say why — which is what
+   * /revenue, /accounting and /close already do for their own totals.
+   *
+   * Null is also what an EMPTY set gives, and that is correct for the same
+   * reason: no rows have stated anything, so the caller falls back to the gym's
+   * own `tenants.currency`, which is the only thing left that anybody chose.
+   */
+  takenCurrency: string | null;
+  mrrCurrency: string | null;
+}
+
+/**
+ * The one currency a set of rows shares, or null when it shares none.
+ *
+ * A row stating NO currency does not agree with the others — it is silent, and
+ * silence is not consent to whatever the rest of them say. Exported because
+ * /revenue's `oneCurrency` is this same rule written a second time, and a rule
+ * about money that exists twice will eventually be two rules.
+ */
+export function sharedCurrency(rows: Array<{ currency?: string | null }>): string | null {
+  if (!rows.length) return null;
+  // Empty string is normalised to null for the same reason money() refuses it:
+  // "" and null are the same fact — nobody has said — and letting "" through as
+  // a shared value would hand a caller a truthy-looking answer that prints as a
+  // leading space in front of somebody's money.
+  const seen = new Set(rows.map((r) => (r.currency ?? '').trim().toUpperCase() || null));
+  return seen.size === 1 ? ([...seen][0] ?? null) : null;
 }
 
 export function summarise(
@@ -280,6 +322,11 @@ export function summarise(
   // "not known", not zero.
   let mrr = 0;
   let priced = 0;
+  // The plans that actually CONTRIBUTE, so the currency question is asked of
+  // exactly the rows in the sum. A `once` plan is in the price book and not in
+  // this figure, and a currency it alone disagreed on would have withheld a
+  // total it never touched.
+  const contributing: MembershipPlan[] = [];
   for (const m of active) {
     const plan = m.planId ? byPlan.get(m.planId) : undefined;
     if (!plan) continue;
@@ -287,6 +334,8 @@ export function summarise(
     if (plan.interval === 'month') mrr += plan.priceCents;
     else if (plan.interval === 'year') mrr += Math.round(plan.priceCents / 12);
     // `once` is not recurring and contributes nothing to a monthly figure.
+    else continue;
+    contributing.push(plan);
   }
 
   return {
@@ -294,6 +343,8 @@ export function summarise(
     payments: payments.length,
     mrrCents: priced ? mrr : null,
     activeMembers: active.length,
+    takenCurrency: sharedCurrency(payments),
+    mrrCurrency: sharedCurrency(contributing),
   };
 }
 

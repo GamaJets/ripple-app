@@ -26,6 +26,7 @@ import { useClientData } from '../../src/ui/clientData';
 import { useSettings } from '../../src/ui/settings';
 import { weightIn, weightDeltaIn } from '../../src/lib/units';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
+import { isWhole } from '../../src/ui/loadStatus';
 import { useBrand } from '../../src/ui/brand';
 import { currentStreak, longestStreak, personalRecords } from '../../src/lib/streaks';
 
@@ -74,10 +75,16 @@ export default function Cards() {
   // Under 'error' the log is empty because it could not be read, not because
   // nothing was ever logged — so a streak of 0 and no PRs are unknowns here,
   // not zeroes, and a card is the last place to guess. These cards get posted.
-  const logKnown = logStatus !== 'error';
+  // `isWhole`, not `!== 'error'`. These cards are built to be screenshotted and
+  // posted, so every figure on one is a public claim — and a truncated read
+  // (src/lib/rowCap.ts) makes two of them quietly wrong rather than obviously
+  // missing: "Best ever: 12 days" is the best of the thousand sessions that
+  // came back, and the top estimated 1RM is the heaviest of those. Under
+  // 'loading' it also stops the first frame offering a streak of zero to share.
+  const logKnown = isWhole(logStatus);
   const hasStreak = logKnown && (streak > 0 || best > 0);
   const hasPr = logKnown && !!topPr;
-  const UNREAD = 'We couldn’t read your training log';
+  const UNREAD = logStatus === 'loading' ? 'Reading your training log…' : logStatus === 'partial' ? 'More logged than can be read at once — a “best ever” over part of it is not one' : 'We couldn’t read your training log';
 
   const cards = [
     // `available: true` was hardcoded on this one card while the other two

@@ -7,7 +7,8 @@ import { Linking } from 'react-native';
 import { appLink } from './deepLink';
 import { supabase } from './supabase';
 import { reportError } from './reportError';
-import { capLimit, capped } from './rowCap';
+import { capLimit, capped, TruncatedRead, ROW_CAP } from './rowCap';
+import { writeFailure } from './wroteRows';
 import { packBalance, readDraw, drew, drawReason, type PackPurchase } from './packDraw';
 import type { LoadStatus } from '../ui/loadStatus';
 
@@ -131,8 +132,21 @@ export async function createPackage(p: { name: string; price_cents: number; sess
  */
 export async function deactivatePackage(id: string): Promise<boolean> {
   try {
-    const { error } = await supabase.from('trainer_packages').update({ active: false }).eq('id', id);
-    return !error;
+    // `!error` was not "whether it actually stopped", which is what the line
+    // above promises and what payments.tsx branches on. `pkg_write` is
+    // `trainer_id = auth.uid()`, and `pkg_read` publishes every ACTIVE package
+    // to everybody — so an id this trainer can see is not necessarily one they
+    // may write, and an UPDATE matching no row comes back 204 with `error`
+    // null. Proved live against phgfwzpkkwdysftlgkoq with a second seeded
+    // coach: SELECT of the other coach's active package returned 1 row, the
+    // UPDATE of it affected 0 and raised nothing.
+    //
+    // A stale id does the same thing, which is the version that reaches a
+    // trainer with one account: the list is from before a refresh, the package
+    // was already withdrawn elsewhere, and the screen confirms a second
+    // withdrawal that changed nothing. The count is the only proof there is.
+    const r = await supabase.from('trainer_packages').update({ active: false }, { count: 'exact' }).eq('id', id);
+    return writeFailure('That package', r) === null;
   } catch { return false; }
 }
 
@@ -157,10 +171,12 @@ export async function fetchTrainerPackages(trainerId: string): Promise<TrainerPa
  *
  * `client_purchases` records `amount_cents` and no currency at all, so the only
  * place the unit of a past purchase is written down is the package it was
- * bought from. That makes an amount unlabelled whenever the package is gone or
- * unreadable — an inactive package is invisible to the client who bought it
- * under the pkg_read policy — and an unlabelled amount renders as a dash rather
- * than as a number in a currency we picked.
+ * bought from. That makes an amount unlabelled whenever the package row is
+ * actually GONE — deleted, not merely withdrawn — and an unlabelled amount
+ * renders as a dash rather than as a number in a currency we picked. A
+ * withdrawn package used to land here too, because pkg_read was `active or
+ * trainer_id = auth.uid()`; part 147 gives the buyer their own purchases back,
+ * so a coach retiring a pack no longer un-labels the money somebody paid.
  *
  * Ids absent from the returned map are ids we could not label. A read that
  * fails returns an empty map, which lands in the same place: dashes, not
@@ -178,10 +194,12 @@ export async function packageCurrencies(ids: string[]): Promise<Map<string, stri
  *
  * Both live on the same row and both are missing in the same circumstances, so
  * fetching them separately was two round trips that could disagree. What a
- * client can see of that row is decided by `pkg_read`, which is `active or
- * trainer_id = auth.uid()` — so a client reads only packages still ON SALE. A
- * coach who withdraws a package makes it unreadable to the very people who
- * bought it, and a package actually deleted is unreadable to everybody.
+ * client can see of that row is decided by `pkg_read`. Since part 147 that is:
+ * my own row, my current coach's rows that are still on sale, and — the arm
+ * this function depends on — every package I have actually bought or subscribed
+ * to, on sale or not, from a current coach or a former one. So a withdrawn pack
+ * a client paid for still labels itself. A package actually DELETED is
+ * unreadable to everybody, and that is the only case left that lands below.
  *
  * An id absent from the map is a package we could not read. That is not a
  * package with no name and no currency: the screen DESCRIBES such a pack by its
@@ -224,9 +242,31 @@ export async function fetchMyPurchases(): Promise<Purchase[] | null> {
   try {
     const { data: auth } = await supabase.auth.getUser();
     const uid = auth?.user?.id; if (!uid) return null;
-    const { data, error } = await supabase.from('client_purchases').select('*').eq('client_id', uid).order('created_at', { ascending: false });
+    // Capped, and a truncated read answers `null` — the same answer as a
+    // refusal, because to the caller it is the same fact.
+    //
+    // This was the only purchase read in the file with no `.limit()`, while
+    // `packageLabels`, `sessionsRemaining` and `fetchClientPurchases` all carry
+    // one. It matters more here than in any of them: these rows go straight
+    // into `packBalance`, whose entire output is a FIGURE — how many sessions
+    // the client has left — and rowCap.ts's rule for a figure over a partial
+    // set is that it is not a smaller number, it is a wrong one. A client whose
+    // history was cut off would be shown a balance short by whatever fell past
+    // the cap, and would book against it.
+    //
+    // Null rather than a rows-plus-flag pair because every caller of this
+    // function already renders null correctly, with a written sentence — "this
+    // is our end, not a statement about what you have bought" — and that
+    // sentence is true of a truncated read as well.
+    const { data, error } = await supabase.from('client_purchases').select('*').eq('client_id', uid)
+      .order('created_at', { ascending: false }).order('id', { ascending: false }).limit(capLimit());
     if (error) return null;
-    return (data as Purchase[]) ?? [];
+    const page = capped((data as Purchase[]) ?? []);
+    if (page.truncated) {
+      reportError('connect.fetchMyPurchases', new TruncatedRead('your purchase history', ROW_CAP));
+      return null;
+    }
+    return page.rows;
   } catch { return null; }
 }
 

@@ -35,6 +35,7 @@ import { capLimit, capped } from '../lib/rowCap';
 import { useAuthRevision } from './authRevision';
 import { parsePlan, type CoachMealPlan } from '../lib/mealPlan';
 import { reportError } from '../lib/reportError';
+import { writeFailure } from '../lib/wroteRows';
 
 export interface NutritionAdjust extends CoachAdjust {
   note?: string;
@@ -124,16 +125,39 @@ export function CoachNutritionProvider({ children }: { children: ReactNode }) {
       // band), but it is now awaited and checked rather than fired from inside
       // the first one's success callback. A half-applied adjustment — calories
       // cut but the carb split unchanged — is not something to report as done.
-      const { error: mErr } = await supabase.from('coach_nutrition').update({ carb_delta: merged.carbDelta ?? 0, fat_delta: merged.fatDelta ?? 0, meal_override: merged.mealOverride ?? null }).eq('client_id', clientId);
-      return !mErr;
+      // Counted, like the delete above and for the same reason: this half of
+      // the adjustment is a bare `.eq('client_id', …)` with no coach_id on it,
+      // so it is the policy alone that decides, and a refusal is 204 with no
+      // error. Reporting it done is precisely the half-applied adjustment the
+      // paragraph above refuses to report.
+      const mr = await supabase.from('coach_nutrition')
+        .update({ carb_delta: merged.carbDelta ?? 0, fat_delta: merged.fatDelta ?? 0, meal_override: merged.mealOverride ?? null }, { count: 'exact' })
+        .eq('client_id', clientId);
+      const why = writeFailure('That adjustment', mr);
+      if (why) { reportError('coachNutrition.setAdjust', new Error(why), { clientId }); return false; }
+      return true;
     } catch { return false; }
   };
+  /**
+   * Take the adjustment off entirely.
+   *
+   * The count, not `error`, for the reason `setPlan` below already gives — and
+   * this one decides what somebody EATS. `coach_nutrition_coach_rw` is
+   * `coach_id = auth.uid() AND is_my_client(client_id)`, and there is one row
+   * per client, so a client who has changed coach carries the previous coach's
+   * row: their new coach cannot delete it and, on `!error`, was told they had.
+   * The client goes on eating to a 400 kcal cut that no coach believes is still
+   * set. Proved live against phgfwzpkkwdysftlgkoq — 0 rows, no error, for the
+   * new coach; 1 row for the coach who wrote it.
+   */
   const clear = async (clientId: string): Promise<boolean> => {
     setMap((m) => { const n = { ...m }; delete n[clientId]; return n; });
     if (!USE_SUPABASE || !uid) return false;
     try {
-      const { error } = await supabase.from('coach_nutrition').delete().eq('client_id', clientId);
-      return !error;
+      const r = await supabase.from('coach_nutrition').delete({ count: 'exact' }).eq('client_id', clientId);
+      const why = writeFailure('That adjustment', r);
+      if (why) { reportError('coachNutrition.clear', new Error(why), { clientId }); return false; }
+      return true;
     } catch { return false; }
   };
 

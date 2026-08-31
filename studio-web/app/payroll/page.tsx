@@ -880,7 +880,11 @@ function Paid({ runs, unread, sessionsUnread, period }: {
       // helper defaults to rather than the money that actually left. The
       // coach's own copy of this table (/coach/earnings) always passed it, so
       // one row was being shown two ways.
-      render: (r) => money(r.amountCents, r.currency) },
+      // A run that records no currency at all is a dash with the reason, not an
+      // empty cell: money() returns null there, and a blank beside an Amount
+      // column reads as nothing having been paid.
+      render: (r) => money(r.amountCents, r.currency)
+        ?? <span className="dash">— this run records no currency</span> },
   ];
   return (
     <Section

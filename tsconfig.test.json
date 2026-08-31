@@ -114,6 +114,11 @@
     "src/lib/reviews.test.ts",
     "src/lib/plateMath.test.ts",
     "src/lib/wroteRows.test.ts",
-    "src/lib/unitPreference.test.ts"
+    "src/lib/unitPreference.test.ts",
+    "src/lib/pushConsent.test.ts",
+    "src/lib/historyWindow.test.ts",
+    "src/lib/notifyCopy.test.ts",
+    "src/lib/clipOwner.test.ts",
+    "src/lib/gymMoney.test.ts"
   ]
 }

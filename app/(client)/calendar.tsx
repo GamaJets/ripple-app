@@ -73,6 +73,8 @@ import { useSessions, cancelBookedSession, ptCancelLines, useCancellationPolicy,
 import { feeAmountLine } from '../../src/lib/booking';
 import { useClientData } from '../../src/ui/clientData';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
+import { useSettings } from '../../src/ui/settings';
+import { liftLabel, type WeightUnit } from '../../src/lib/units';
 import type { TrainingSession } from '../../src/lib/types';
 import type { WorkoutEntry } from '../../src/lib/mockData';
 import { workoutKind, KIND_LABEL, WORKOUT_KINDS, type WorkoutKind } from '../../src/lib/workoutKind';
@@ -154,8 +156,15 @@ const KIND_ICON: Record<WorkoutKind, IconName> = {
 // account for the day, and an entry whose detail never saved is still a session
 // that happened — silently omitting it is the same absence-of-evidence mistake
 // the log's own status flag exists to prevent.
-function logDetail(e: WorkoutEntry): string {
-  if (e.sets && e.sets.length) return e.sets.map((x) => `${x[0]}×${x[1]}kg`).join(' · ');
+//
+// The load takes the reader's unit rather than printing the stored kilograms.
+// The distance beside it deliberately does NOT: `c.unit` is recorded on the log
+// entry, because the member chose km or miles when they logged the run, and a
+// body-measurement preference has no business overriding an answer they already
+// gave. Same rule as app/(client)/activity.tsx, which this is built to agree
+// with word for word.
+function logDetail(e: WorkoutEntry, wu: WeightUnit): string {
+  if (e.sets && e.sets.length) return e.sets.map((x) => `${x[0]}×${liftLabel(x[1], wu)}`).join(' · ');
   if (e.cardio) {
     const c = e.cardio;
     return [
@@ -172,6 +181,7 @@ export default function Calendar() {
   const t = useTheme();
   const router = useRouter();
   const now = new Date();
+  const wu = useSettings().weightUnit;
   const { sessions, status: sessionsStatus, bookSession, cancelMyBooking, refresh } = useSessions();
   // The coach's own cancellation policy — the notice period this member is held
   // to, what a late cancellation costs and in what money — rather than the
@@ -963,7 +973,7 @@ export default function Calendar() {
                       </View>
                       <View style={{ flex: 1 }}>
                         <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>Logged {e.exercise}</Text>
-                        <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{KIND_LABEL[kind]} · {logDetail(e)}</Text>
+                        <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{KIND_LABEL[kind]} · {logDetail(e, wu)}</Text>
                       </View>
                       <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{timeLabel(e.t)}</Text>
                     </View>

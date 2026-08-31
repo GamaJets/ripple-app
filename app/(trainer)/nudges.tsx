@@ -137,9 +137,9 @@ export default function Nudges() {
       <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{item.caveat}</Text>
 
       <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.lg, flexWrap: 'wrap' }}>
-        <Cta label="Write a message" onPress={() => setDrafting(item)} />
-        <Ghost label="Why them?" onPress={() => setExplaining(item)} />
-        <Ghost label="Set aside" onPress={() => setAside(item)} />
+        <Cta label="Write a Message" onPress={() => setDrafting(item)} />
+        <Ghost label="Why Them?" onPress={() => setExplaining(item)} />
+        <Ghost label="Set Aside" onPress={() => setAside(item)} />
       </View>
     </View>
   );
@@ -177,7 +177,7 @@ export default function Nudges() {
             <Notice tone={t.crit} kicker="Unreadable" title="Nothing is suggested, because nothing was read"
               note="This is not a quiet week. The training records did not come back, so no client can honestly be called quiet — pull back and open this again once you are connected.">
               <View style={{ marginTop: sp.md }}>
-                <Ghost label="Try again" onPress={() => { void n.reload(); }} />
+                <Ghost label="Try Again" onPress={() => { void n.reload(); }} />
               </View>
             </Notice>
           </Section>
@@ -186,7 +186,7 @@ export default function Nudges() {
             <Notice tone={t.warn} kicker="Incomplete" title="Only part of the record came back"
               note="No client is suggested from a partial read. A gap in a training record looks exactly like silence, and this is the one screen where telling those apart is the whole point.">
               <View style={{ marginTop: sp.md }}>
-                <Ghost label="Try again" onPress={() => { void n.reload(); }} />
+                <Ghost label="Try Again" onPress={() => { void n.reload(); }} />
               </View>
             </Notice>
           </Section>
@@ -258,13 +258,13 @@ export default function Nudges() {
                             </Text>
                           ) : null}
                           <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md, flexWrap: 'wrap' }}>
-                            <Ghost label="Why them?" onPress={() => setExplaining(m)} />
+                            <Ghost label="Why Them?" onPress={() => setExplaining(m)} />
                             {/* Only a set-aside can be undone. The record that
                                 somebody was MESSAGED is what stops them being
                                 messaged twice, and part 140's delete policy
                                 refuses it — so no button offers it. */}
                             {m.muted.record.action === 'dismissed' ? (
-                              <Ghost label="Bring back" onPress={() => bringBack(m)} />
+                              <Ghost label="Bring Back" onPress={() => bringBack(m)} />
                             ) : null}
                           </View>
                         </View>
@@ -403,7 +403,7 @@ function DraftSheet({ nudge, onClose, onSent }: {
           <Cta label={sending ? 'Sending…' : 'Send'} onPress={() => { void doSend(); }}
             wide disabled={sending || !body.trim()} />
           <View style={{ marginTop: sp.md }}>
-            <Ghost label="Close without sending" onPress={onClose} />
+            <Ghost label="Close Without Sending" onPress={onClose} />
           </View>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
             Once sent, {nudge.name ?? 'they'} will not be suggested again for{' '}

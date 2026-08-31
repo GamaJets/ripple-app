@@ -399,7 +399,7 @@ export default function Settings() {
               <Row t={t} label="Deletion Status Unknown" sub="We couldn't check whether you already have a request in. That's a read that failed, not an answer — it does not mean you have none." right={
                 <Pressable onPress={() => { void loadDeletion(); }} hitSlop={8} accessibilityRole="button" accessibilityLabel="Check your deletion status again"
                   style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 7 }}>
-                  <Text style={{ ...ty.label, fontWeight: '600', color: t.ink2 }}>Try again</Text>
+                  <Text style={{ ...ty.label, fontWeight: '600', color: t.ink2 }}>Try Again</Text>
                 </Pressable>
               } />
               <Pressable onPress={deleteAccount} accessibilityRole="button" accessibilityLabel="Delete my account">

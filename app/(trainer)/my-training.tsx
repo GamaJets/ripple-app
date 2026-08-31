@@ -346,7 +346,7 @@ export default function MyTraining() {
           <Section>
             <SectionHead title="Your Last 7 Days" />
             <KpiRow items={[
-              { label: 'Days trained', value: whole ? fig(wk.days) : fig(null) },
+              { label: 'Days Trained', value: whole ? fig(wk.days) : fig(null) },
               { label: 'Exercises', value: whole ? fig(wk.workouts) : fig(null) },
               // A total over a truncated or unread log is not a total. `num`
               // gives it a thousands separator; a week of lifting passes 999 in

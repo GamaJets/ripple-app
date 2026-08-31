@@ -266,7 +266,7 @@ export default function TrainerSessions() {
             <Pressable onPress={() => void load()} hitSlop={8}
               accessibilityRole="button" accessibilityLabel="Try reading your sessions again"
               style={{ marginTop: sp.lg, borderWidth: hairline, borderColor: t.ring, borderRadius: radius.pill, paddingHorizontal: sp.lg, paddingVertical: sp.sm }}>
-              <Text style={{ ...ty.label, fontWeight: '600', color: t.ink2 }}>Try again</Text>
+              <Text style={{ ...ty.label, fontWeight: '600', color: t.ink2 }}>Try Again</Text>
             </Pressable>
           </View>
         ) : !loaded ? (

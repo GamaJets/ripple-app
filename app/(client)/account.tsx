@@ -193,7 +193,7 @@ export default function Account() {
               <Pressable onPress={() => { void loadPending(); }} hitSlop={8} accessibilityRole="button"
                 accessibilityLabel="Check again for an outstanding email change"
                 style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 7 }}>
-                <Text style={{ ...ty.label, fontWeight: '600', color: t.ink2 }}>Try again</Text>
+                <Text style={{ ...ty.label, fontWeight: '600', color: t.ink2 }}>Try Again</Text>
               </Pressable>
             </View>
           ) : pending.email ? (

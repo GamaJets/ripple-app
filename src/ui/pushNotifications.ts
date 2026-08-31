@@ -2,9 +2,11 @@
 // only exist in a build that included them, so every access is defensively
 // wrapped — on the current build (before the notifications rebuild) this file
 // no-ops instead of crashing, and lights up automatically once rebuilt.
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { inboxDecision, safeRoute } from '../lib/notifyInbox';
+import { pushConsent } from '../lib/pushConsent';
 import { VARIANT, type AppVariant } from '../lib/variant';
 
 let Notifications: any = null;
@@ -134,8 +136,100 @@ if (Notifications?.setNotificationHandler) {
   } catch { /* ignore */ }
 }
 
-/** Request permission, get the Expo push token, and save it for this user. */
+/**
+ * The last token this handset actually put into `push_tokens`.
+ *
+ * ── Why the token has to be written down ───────────────────────────────────
+ *
+ * Revoking is a delete keyed on the token, because `push_tokens` is keyed on
+ * the token and a member may be signed in on a second handset whose own answer
+ * is yes — deleting by user_id would silence a phone whose owner never asked
+ * for that. But getExpoPushTokenAsync() only answers while the OS permission is
+ * granted, and the commonest way to end up with a row that should not exist is
+ * exactly the case where it is NOT: somebody registered, then turned
+ * notifications off for this app in the phone's own Settings, and only later
+ * turned the switch off in here. At that moment the OS will not name the token,
+ * the row is still in the table, and a revoke that could not identify it would
+ * report success over a row that goes on being a delivery address the day they
+ * re-enable the OS permission.
+ *
+ * So the token is remembered on the device the moment it is registered, and
+ * forgotten only when its row is confirmed gone.
+ */
+const LAST_TOKEN_KEY = 'repple.pushToken';
+
+async function rememberToken(token: string): Promise<void> {
+  try { await AsyncStorage.setItem(LAST_TOKEN_KEY, token); } catch { /* the delete falls back to the OS token */ }
+}
+
+/** Called only once the row is confirmed gone — see revokePushToken. */
+export async function forgetRegisteredToken(): Promise<void> {
+  try { await AsyncStorage.removeItem(LAST_TOKEN_KEY); } catch { /* harmless: a stale note causes one extra delete */ }
+}
+
+/**
+ * Every token that could still name a row belonging to THIS handset, without
+ * asking the OS for anything.
+ *
+ * Deliberately never calls requestPermissionsAsync. This is the reader the
+ * revoke path uses, and raising a permission prompt at somebody in the act of
+ * turning notifications OFF would be absurd as well as wrong — the prompt is
+ * shown once per install and cannot be taken back.
+ *
+ * Returns both the live token and the remembered one when they differ. Expo can
+ * mint a new token for the same handset (a reinstall, a restored backup), and
+ * the old row does not disappear when it does; a revoke that removed only one
+ * of the two would leave the member reachable and be told it had succeeded.
+ */
+export async function handsetPushTokens(): Promise<string[]> {
+  const found: string[] = [];
+  try {
+    const remembered = await AsyncStorage.getItem(LAST_TOKEN_KEY);
+    if (remembered) found.push(remembered);
+  } catch { /* fall through to whatever the OS will tell us */ }
+  if (Notifications) {
+    try {
+      if (!(Device && Device.isDevice === false)) {
+        const status = (await Notifications.getPermissionsAsync())?.status;
+        // Not granted means the OS will not mint a token, and asking it to is
+        // the one thing this function must not do.
+        if (status === 'granted') {
+          const live = (await Notifications.getExpoPushTokenAsync())?.data ?? null;
+          if (live && !found.includes(live)) found.push(live);
+        }
+      }
+    } catch { /* the remembered token is still worth deleting */ }
+  }
+  return found;
+}
+
+/**
+ * Request permission, get the Expo push token, and save it for this user.
+ *
+ * ── The consent gate, and why it is HERE ───────────────────────────────────
+ *
+ * This function does two irreversible-ish things: it raises the OS notification
+ * prompt (shown once per install) and it writes a deliverable address into
+ * `push_tokens`, which is the table send-push resolves recipients from. Neither
+ * may happen to somebody whose stored answer is no.
+ *
+ * The gate is inside the function rather than at its call sites because there
+ * were three call sites, one of them in src/ui/auth.tsx firing on EVERY sign-in
+ * with no idea what the member had chosen — and the next call site added would
+ * have been the fourth chance to forget. A gate a caller cannot skip cannot be
+ * forgotten. `pushConsent()` is read synchronously, so there is no window
+ * between checking and acting.
+ *
+ * 'unknown' returns null and asks the OS for nothing. That is the launch-time
+ * window before the stored preference has been read back, and the rule for it
+ * is written out in src/lib/pushConsent.ts: registering one launch later costs
+ * a launch, while prompting somebody who said no cannot be undone. The provider
+ * in src/ui/settings.tsx calls this again the moment the answer is known, so
+ * "later" is milliseconds, not a launch, on all but a failed read.
+ */
 export async function registerForPush(): Promise<string | null> {
+  // Not `!== 'no'`. 'unknown' is not permission either — see above.
+  if (pushConsent() !== 'yes') return null;
   if (!Notifications) return null;
   try {
     if (Device && Device.isDevice === false) return null;
@@ -147,7 +241,13 @@ export async function registerForPush(): Promise<string | null> {
       try {
         const { data: auth } = await supabase.auth.getUser();
         const uid = auth?.user?.id;
-        if (uid) await supabase.from('push_tokens').upsert({ user_id: uid, token, platform: 'expo' }, { onConflict: 'token' });
+        if (uid) {
+          await supabase.from('push_tokens').upsert({ user_id: uid, token, platform: 'expo' }, { onConflict: 'token' });
+          // After the upsert, not before: the note is a record of what is in
+          // the table, and a note written for a row that was never inserted
+          // would send the revoke hunting for something that never existed.
+          await rememberToken(token);
+        }
       } catch { /* best-effort */ }
     }
     return token;

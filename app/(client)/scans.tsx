@@ -48,6 +48,7 @@ import { reportError } from '../../src/lib/reportError';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { useClientData } from '../../src/ui/clientData';
+import { isWhole } from '../../src/ui/loadStatus';
 import { useSettings } from '../../src/ui/settings';
 import { weightIn, weightLabel, weightToKg, weightDeltaIn, plain, convertedNote } from '../../src/lib/units';
 import { readBodyFromDevices, hasBodyFigure, type BodyRead } from '../../src/lib/wearables/body';
@@ -344,6 +345,13 @@ export default function Scans() {
     );
   };
   const scans = cd.scans;
+  // The export path already reads `cd.scansStatus` (it refuses to build a
+  // report from a failed read, and says which state it is in). The RENDER did
+  // not, so the same failed read that stops a report being sent still printed
+  // "No scans yet", "Scans 0" and "No weight history yet" as statements about
+  // the member's own body record. Same provider, same status, same rule.
+  const scansWhole = isWhole(cd.scansStatus);
+  const scansReading = cd.scansStatus === 'loading';
   const [img, setImg] = useState<string | null>(null);
   const [wt, setWt] = useState(''); const [bf, setBf] = useState(''); const [sm, setSm] = useState('');
   // A figure that arrived in kilograms — from the vision reader, from the OCR
@@ -820,6 +828,8 @@ export default function Scans() {
             ? (bfMove !== null && bfWas
                 ? `${bfMove <= 0 ? '−' : '+'}${Math.abs(bfMove)}% since ${bodyDayLabel(bfWas.at)} · `
                 : 'First reading · ') + measuredNote(bfNow, today)
+            : scansReading ? 'Reading your scans…'
+            : !scansWhole ? 'Your scans could not be read in full — this is not a body with nothing measured on it.'
             : 'No scans yet — add your InBody report to start tracking.'}
           onPress={() => router.push('/(client)/body-trends')}
         />
@@ -860,7 +870,9 @@ export default function Scans() {
             items={[
               { label: 'Weight', value: fig(weightIn(wNow?.value, wu)), unit: wNow ? wu : undefined, route: '/(client)/body-trends', good: !wWas || (!!wNow && wNow.value <= wWas.value), delta: (wNow && wWas ? dlt(wNow.value, wWas.value) : null) ?? undefined },
               { label: 'Muscle', value: fig(weightIn(mNow?.value, wu)), unit: mNow ? wu : undefined, route: '/(client)/body-trends', good: !mWas || (!!mNow && mNow.value >= mWas.value), delta: (mNow && mWas ? dlt(mNow.value, mWas.value) : null) ?? undefined },
-              { label: 'Scans', value: fig(scans.length), delta: ago ?? undefined },
+              // A count over a read that is not whole is the size of what came
+              // back, and `fig(0)` prints "0" rather than a dash.
+              { label: 'Scans', value: scansWhole ? fig(scans.length) : fig(null), delta: (scansWhole ? ago : 'not read') ?? undefined },
             ]}
           />
           {/* "Need to see the dates the weight was measured as well." Here they
@@ -897,7 +909,11 @@ export default function Scans() {
             </Text>
           </>) : (<>
             <SectionHead title="Weight" note="Measurements" onPress={() => router.push('/(client)/measurements')} />
-            <Text style={{ ...ty.label, color: t.ink3 }}>No weight history yet — the trend charts from your second check-in.</Text>
+            <Text style={{ ...ty.label, color: t.ink3 }}>
+              {scansReading ? 'Reading your weight history…'
+                : !scansWhole ? 'Your weight history could not be read, so there is nothing to chart. It is not gone.'
+                : 'No weight history yet — the trend charts from your second check-in.'}
+            </Text>
           </>)}
         </Section>
 
@@ -1259,9 +1275,13 @@ export default function Scans() {
             <Cta label="Save Scan & Update Profile" wide onPress={saveScan} />
 
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginTop: sp.xl, marginBottom: sp.sm }}>
-              <Text style={{ ...ty.micro, color: t.ink3 }}>Scan history</Text><Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{scans.length} scans</Text>
+              <Text style={{ ...ty.micro, color: t.ink3 }}>Scan history</Text><Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{scansWhole ? `${scans.length} scans` : 'not all read'}</Text>
             </View>
-            {scans.length === 0 ? <Text style={{ ...ty.label, color: t.ink3 }}>No scans yet.</Text> : null}
+            {scans.length === 0 ? (
+              <Text style={{ ...ty.label, color: t.ink3 }}>
+                {scansReading ? 'Reading…' : scansWhole ? 'No scans yet.' : 'Your scans could not be read — this list is empty for that reason, not because there are none.'}
+              </Text>
+            ) : null}
             {[...chrono].reverse().map((s, i, arr) => (
               <View key={s.id} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderBottomWidth: i < arr.length - 1 ? hairline : 0, borderBottomColor: t.ring }}>
                 {s.image ? <Image source={{ uri: s.image }} style={{ width: 40, height: 40, borderRadius: radius.sm }} /> : <View style={{ width: 40, height: 40, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}><Icon name="chart" size={16} color={t.ink3} /></View>}

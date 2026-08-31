@@ -131,7 +131,7 @@ export default function ShareSessionClip() {
         {/* ── the other half of the marketing story ──────────────────────── */}
         <Section>
           <SectionHead title="No clip today?" />
-          <ListRow icon="sparkle" title="Make a share card"
+          <ListRow icon="sparkle" title="Make a Share Card"
             note="Your week's real numbers as a graphic you can post"
             onPress={() => router.push('/(trainer)/share-kit')} />
         </Section>

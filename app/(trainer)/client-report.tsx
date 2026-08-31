@@ -469,10 +469,10 @@ export default function ClientReport() {
 
             <View style={{ marginTop: layout.section, flexDirection: 'row', gap: sp.md }}>
               <View style={{ flex: 1 }}>
-                <Cta label="Someone else" tone={t.surface2} wide onPress={() => { setPicked(null); setNote(''); }} />
+                <Cta label="Someone Else" tone={t.surface2} wide onPress={() => { setPicked(null); setNote(''); }} />
               </View>
               <View style={{ flex: 1 }}>
-                <Cta label="Send it" wide disabled={overall === 'loading'} onPress={send} />
+                <Cta label="Send It" wide disabled={overall === 'loading'} onPress={send} />
               </View>
             </View>
           </>

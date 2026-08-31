@@ -22,7 +22,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { ensureMediaPermission } from '../../src/ui/permissions';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
-import { Rule, Section, SectionHead, KpiRow, ListRow, Ghost, Field, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, KpiRow, ListRow, Ghost, Field, Flag, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../../src/theme/scale';
 import { ageFromDob } from '../../src/lib/age';
 import { macrosFor, applyCoachAdjust } from '../../src/lib/nutrition';
@@ -340,6 +340,19 @@ export default function Profile() {
     if (enteredCm != null && (heightVal !== heightFieldOfRecord || heightInVal !== heightInchFieldOfRecord)) cd.setHeightCm(enteredCm);
     const bf = parseFloat(bfVal);
     if (!isNaN(bf) && bf > 3 && bf < 70) cd.setBodyFat(round1(bf));
+    // "Saved — plan updated" was a 900 ms timer and nothing else. It fired
+    // whether or not anything reached the server: these four setters are local,
+    // and the write behind them is a debounced push in clientData.tsx that
+    // COUNTS ITS ROWS and reports the outcome through `cd.saveFailed`. That
+    // signal existed, injuries.tsx and habits.tsx both surface it, and this
+    // sheet — the one place in the client app where somebody edits their
+    // weight, height and body fat — read it nowhere.
+    //
+    // The optimistic close stays: the values are held locally, the push retries,
+    // and holding the sheet hostage to a debounce would be worse. What changes
+    // is the sentence. "Saved" is a claim about the server, so the button says
+    // what actually just happened, and the outcome is surfaced on the screen
+    // behind it in the same words the other two screens use.
     setSaved(true);
     setTimeout(() => { setSaved(false); setShowEdit(false); }, 900);
   };
@@ -488,6 +501,15 @@ export default function Profile() {
 
         {/* ── what this profile adds up to ───────────────────────────────── */}
         <Section>
+          {/* The one write on this screen, and whether it landed. clientData's
+              push counts the rows it matched — a PostgREST update matching zero
+              rows is not an error — and this is where the answer belongs, next
+              to the figures it decides. */}
+          {cd.saveFailed ? (
+            <Flag tone={t.crit} style={{ marginBottom: sp.md }}>
+              Your last profile change has not reached the server, so what is on this screen may not be what your coach sees. It keeps retrying — open Edit and save again if it does not clear.
+            </Flag>
+          ) : null}
           <SectionHead title="Daily Target" note={macros ? `${macros.kcal.toLocaleString()} kcal` : undefined} onPress={() => router.push('/(client)/nutrition')} />
           {macros ? (
             <KpiRow items={[
@@ -496,7 +518,16 @@ export default function Profile() {
               { label: 'Fat', value: fig(macros.fat), unit: 'g' },
             ]} />
           ) : (
-            <Text style={{ ...ty.label, color: t.ink3 }}>Add your weight and body fat above and your daily targets appear here.</Text>
+            // "Add your weight and body fat" is an instruction that only makes
+            // sense if we know they have not. `macros` is null equally when the
+            // profile read failed, and clientData says so through
+            // `profileStatus` — telling somebody who weighs in every week to go
+            // and add a weight reads as the app having lost it.
+            <Text style={{ ...ty.label, color: t.ink3 }}>
+              {cd.profileStatus === 'loading' ? 'Reading your profile…'
+                : cd.profileStatus === 'error' ? 'We couldn’t read your profile, so there is no target to work out. This is not a statement that your weight is missing.'
+                : 'Add your weight and body fat above and your daily targets appear here.'}
+            </Text>
           )}
         </Section>
 
@@ -603,7 +634,7 @@ export default function Profile() {
 
             <Pressable style={{ backgroundColor: saved ? t.surface2 : t.brand, borderRadius: radius.sm, paddingVertical: sp.md, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: sp.sm }} onPress={save}>
               {saved ? <Icon name="check" size={16} color={t.ink} /> : null}
-              <Text style={{ ...ty.body, fontWeight: '600', color: saved ? t.ink : t.brandInk }}>{saved ? 'Saved — plan updated' : 'Save'}</Text>
+              <Text style={{ ...ty.body, fontWeight: '600', color: saved ? t.ink : t.brandInk }}>{saved ? 'Sending…' : 'Save'}</Text>
             </Pressable>
           </ScrollView>
         </View>

@@ -19,7 +19,7 @@ import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Ghost, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Ghost, Notice, fig } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useCheckIns } from '../../src/ui/checkins';
@@ -30,6 +30,7 @@ import { useSettings } from '../../src/ui/settings';
 import { weightIn, weightLabel } from '../../src/lib/units';
 import { SessionHrSheet } from '../../src/ui/SessionHrSheet';
 import { ageFromDob } from '../../src/lib/hr';
+import { isWhole, worstStatus } from '../../src/ui/loadStatus';
 
 // NOTE: this screen used to filter and book against a hardcoded `CLIENT_ID = 'c1'`,
 // a leftover from the mock-data era. The real client id is the Supabase user id.
@@ -62,15 +63,29 @@ export default function Activity() {
   const cd = useClientData();
   const wu = useSettings().weightUnit;
   const age = ageFromDob(cd.dob);
-  const { log } = useWorkoutLog();
-  const { checkins } = useCheckIns();
-  const { sessions } = useSessions();
+  // All three providers report a LoadStatus and this screen used none of them.
+  //
+  // A feed built from three empty lists looks exactly like a feed built from
+  // three failed reads, and the screen said "Nothing yet · Log a workout or send
+  // a check-in to get started" over the second — to somebody with a year of
+  // training, three check-ins and a session booked for Thursday. `worstStatus`
+  // is the status of the feed as a whole: it is only as complete as its least
+  // complete source.
+  const { log, status: logStatus } = useWorkoutLog();
+  const { checkins, status: checkinStatus } = useCheckIns();
+  const { sessions, status: sessionStatus } = useSessions();
+  const feedStatus = worstStatus(logStatus, checkinStatus, sessionStatus);
+  // Only a whole log can say that a set was a personal record, for the same
+  // reason SessionRunner and the manual-log path in workouts.tsx both check it:
+  // `isNewPR` compares against the rest of the log, and a log that is a prefix
+  // (or empty because the read failed) makes every set look like a first.
+  const prsKnown = isWhole(logStatus);
 
   const events: Event[] = [];
 
   // Workouts + PR flags
   for (const e of log) {
-    const pr = isNewPR(log, e);
+    const pr = prsKnown && isNewPR(log, e);
     if (e.sets) {
       events.push({ at: e.t, icon: pr ? 'trophy' : 'dumbbell', title: pr ? `New PR — ${e.exercise}` : `Logged ${e.exercise}`, sub: e.sets.map((s) => `${s[0]}×${weightIn(s[1], wu)}${wu}`).join(' · '), route: pr ? '/(client)/records' : '/(client)/trends', hr: { title: e.exercise, startISO: e.t, durationMin: Math.max(20, e.sets.length * 4) } });
     } else if (e.cardio) {
@@ -79,10 +94,10 @@ export default function Activity() {
   }
   // Streak milestone (as of now)
   const streak = currentStreak(log);
-  const milestone = streakMilestone(streak);
+  const milestone = prsKnown ? streakMilestone(streak) : null;
   if (milestone) events.push({ at: new Date().toISOString(), icon: 'flame', title: 'Streak Milestone', sub: milestone, route: '/(client)/achievements' });
   // Check-ins
-  for (const c of checkins) events.push({ at: c.at, icon: 'pencil', title: 'Weekly Check-in Sent', sub: `${fig(weightLabel(c.weightKg, wu))} · energy ${c.energy}/5 · sleep ${c.sleep}/5`, route: '/(client)/checkin' });
+  for (const c of checkins) events.push({ at: c.at, icon: 'pencil', title: 'Weekly Check-in Sent', sub: `${fig(weightLabel(c.weightKg, wu))} · Energy ${c.energy}/5 · Sleep ${c.sleep}/5`, route: '/(client)/checkin' });
   // My sessions
   for (const s of sessions) {
     if (s.status === 'booked' && s.clientId === cd.id) events.push({ at: s.startsAt, icon: 'calendar', title: 'Session Booked', sub: `${timeLabel(s.startsAt)} · ${s.durationMin} min`, route: '/(client)/bookings' });
@@ -105,13 +120,36 @@ export default function Activity() {
         </View>
 
         <Section>
-          <SectionHead title="Recent" note={feed.length > 0 ? `${feed.length} event${feed.length === 1 ? '' : 's'}` : undefined} />
+          {/* The count is the size of what this screen managed to assemble, not
+              of what happened. It is shown only when all three reads landed
+              whole — under anything less it would be a smaller life stated as a
+              number. */}
+          <SectionHead title="Recent" note={isWhole(feedStatus) && feed.length > 0 ? `${feed.length} event${feed.length === 1 ? '' : 's'}` : undefined} />
+
+          {feedStatus === 'error' || feedStatus === 'partial' ? (
+            <Notice
+              tone={t.warn}
+              kicker="Activity"
+              title={feedStatus === 'error' ? 'We couldn’t read everything' : 'Not everything fits in one read'}
+              note={feedStatus === 'error'
+                ? 'Your training, check-ins and bookings are read from three places and at least one of them did not answer. What is listed below is real; what is missing is missing from this screen, not from your record.'
+                : 'You have more on record than this screen can read in one go. What is listed below is your most recent, and the rest is on your log rather than gone.'}
+            />
+          ) : null}
 
           {feed.length === 0 ? (
             <View style={{ alignItems: 'center', paddingVertical: sp.xl }}>
               <Icon name="bell" size={26} color={t.ink3} />
-              <Text style={{ ...ty.head, color: t.ink, marginTop: sp.md }}>Nothing yet</Text>
-              <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: sp.xs }}>Log a workout or send a check-in to get started.</Text>
+              {/* "Nothing yet" is a claim about the member's whole record, and
+                  it is only true under a whole read. */}
+              <Text style={{ ...ty.head, color: t.ink, marginTop: sp.md }}>
+                {feedStatus === 'loading' ? 'Reading…' : feedStatus === 'error' ? 'Nothing we could read' : 'Nothing yet'}
+              </Text>
+              <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: sp.xs }}>
+                {feedStatus === 'loading' ? 'Your training, check-ins and bookings are on their way.'
+                  : feedStatus === 'error' ? 'This is not an empty record — it is one we could not open. Pull down or come back when you have signal.'
+                  : 'Log a workout or send a check-in to get started.'}
+              </Text>
             </View>
           ) : feed.map((e, i) => {
             const isOpen = open === i;

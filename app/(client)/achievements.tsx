@@ -16,6 +16,7 @@ import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Hero, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty } from '../../src/theme/scale';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
+import { isWhole } from '../../src/ui/loadStatus';
 import { useSettings } from '../../src/ui/settings';
 import { volumeIn } from '../../src/lib/units';
 import { longestStreak, personalRecords } from '../../src/lib/streaks';
@@ -31,6 +32,18 @@ export default function Achievements() {
   // earned, and tells someone with a year of training to log their first
   // workout. `earned` therefore has to be able to say "unknown".
   const logKnown = logStatus !== 'error';
+  // 'partial' is not 'error', and it needs a different answer from either.
+  //
+  // A truncated read (src/lib/rowCap.ts) holds real rows — just not all of
+  // them — and every threshold here is MONOTONE: `totalWorkouts >= 50` over the
+  // newest thousand sessions can only be an under-count, never an over-count,
+  // and the same is true of `best`, `prs` and `totalVolume`. So on a partial
+  // read an EARNED badge is genuinely earned and may be shown; a LOCKED one is
+  // not known to be locked, because the sessions that would have unlocked it
+  // may be the ones that did not come back. That asymmetry is the whole shape
+  // of this screen under truncation, and it is why `earnedCount` — a figure
+  // over the set — is withheld while the individual "Earned" marks are not.
+  const countable = isWhole(logStatus);
 
   const totalWorkouts = log.length;
   const best = longestStreak(log);
@@ -75,11 +88,13 @@ export default function Achievements() {
         {/* ── the hero: how much of the set is unlocked ───────────────────── */}
         <Hero
           label="Unlocked"
-          figure={logKnown ? fig(earnedCount) : fig(null)}
+          figure={countable ? fig(earnedCount) : fig(null)}
           unit={`of ${badges.length}`}
-          arc={logKnown ? earnedCount / badges.length : undefined}
+          arc={countable ? earnedCount / badges.length : undefined}
           arcLabel="of badges earned"
-          note={!logKnown ? 'We couldn’t read your training log — badges you have earned are not shown below.'
+          note={logStatus === 'loading' ? 'Reading your training log…'
+            : !logKnown ? 'We couldn’t read your training log — badges you have earned are not shown below.'
+            : !countable ? 'You have trained more times than this screen can read in one go, so the count is left blank. Anything marked Earned below really is.'
             : earnedCount === 0 ? 'Log a workout to unlock your first badge' : `${badges.length - earnedCount} left to earn`}
         />
 
@@ -90,7 +105,7 @@ export default function Achievements() {
           {badges.map((b, bi) => (
             <View key={b.title}>
               {bi > 0 ? <Rule /> : null}
-              <View accessibilityLabel={`${b.title}, ${!logKnown ? 'not known' : b.earned ? 'unlocked' : 'locked'}. ${b.desc}`}
+              <View accessibilityLabel={`${b.title}, ${!logKnown ? 'not known' : b.earned ? 'unlocked' : countable ? 'locked' : 'not known'}. ${b.desc}`}
                 style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
                 <View style={{ width: 34, height: 34, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
                   <Icon name={logKnown && b.earned ? 'check' : 'trophy'} size={16} color={logKnown && b.earned ? t.brand : t.ink3} />
@@ -99,9 +114,13 @@ export default function Achievements() {
                   <Text style={{ ...ty.body, fontWeight: '500', color: b.earned ? t.ink : t.ink2 }}>{b.title}</Text>
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{b.desc}</Text>
                 </View>
-                {/* "Locked" is a claim that this badge has not been earned. With
-                    nothing read we do not know, and a dash says so. */}
-                <Text style={{ ...ty.micro, color: t.ink3 }}>{!logKnown ? fig(null) : b.earned ? 'Earned' : 'Locked'}</Text>
+                {/* "Locked" is a claim that this badge has not been earned.
+                    With nothing read we do not know, and a dash says so — and
+                    the same applies to a read that stopped at its row limit,
+                    where the sessions that earned it may simply not have come
+                    back. "Earned" survives both, because the thresholds only
+                    ever under-count. */}
+                <Text style={{ ...ty.micro, color: t.ink3 }}>{!logKnown ? fig(null) : b.earned ? 'Earned' : countable ? 'Locked' : fig(null)}</Text>
               </View>
             </View>
           ))}

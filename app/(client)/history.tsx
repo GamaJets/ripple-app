@@ -27,6 +27,29 @@
 // promise not rejecting proves nothing. `.error` is checked explicitly on both
 // queries below. Six real bugs in this codebase came from missing exactly that.
 //
+// ── And the fourth state the read had no name for ──────────────────────────
+//
+// A read can also SUCCEED and be incomplete. This query had no `.limit()` and
+// was ordered `performed_at` ASCENDING, so PostgREST's silent 1000-row ceiling
+// (src/lib/rowCap.ts) handed a member with five years of training their OLDEST
+// thousand sessions and nothing after them — with no error, no flag, and
+// nothing anywhere with cause to doubt it. The page then said, of somebody who
+// had trained the night before:
+//
+//     "Nothing logged since Mar 2023, 29 months ago."
+//
+// and printed a lifetime tonnage, a session count, a best month, a break list
+// and a personal-best timeline, every one of them computed over that prefix.
+//
+// Two changes. The order is now DESCENDING with `capLimit()`, which moves the
+// cut from today to the far end of the member's history — the chart window is
+// 36 months (`MAX_MONTHS`) and a thousand of the most recent sessions covers
+// it — and `capped()` reports whether it bit at all. And when it did bite, the
+// figures that are genuinely LIFETIME totals are withheld rather than
+// under-reported, because a smaller total is not a smaller truth, it is a
+// wrong number. See `wholeMonths` in src/lib/historyWindow.ts for why the
+// oldest month goes with them.
+//
 // With no backend (USE_SUPABASE off) the provider's in-memory log IS the whole
 // history, and there is nothing to fail, so that branch is 'ready' immediately.
 //
@@ -48,7 +71,7 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import Svg, { Rect, Line, Text as SvgText } from 'react-native-svg';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
-import { Rule, Section, SectionHead, Hero, KpiRow, Ghost, Cta, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, KpiRow, Ghost, Cta, Notice, fig } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
@@ -57,9 +80,11 @@ import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useSettings } from '../../src/ui/settings';
 import { volumeIn, volumeHeadline, est1RMIn, liftLabel, weightDeltaIn, convertedNote, type WeightUnit } from '../../src/lib/units';
 import { rowToEntry, type WorkoutRow } from '../../src/lib/workoutRow';
+import { capLimit, capped } from '../../src/lib/rowCap';
+import { wholeMonths } from '../../src/lib/historyWindow';
 import type { WorkoutEntry } from '../../src/lib/mockData';
 import {
-  monthlyHistory, monthLabel, yearRows, peakVolume, intensity, bestMonth, trainedMonths,
+  monthlyHistory, monthKey, monthLabel, yearRows, peakVolume, intensity, bestMonth, trainedMonths,
   gaps, longestGap, monthsSinceLast, historySpan, stageOf, historyNote, lifetimeTotals,
   prTimeline, volumeArc, MAX_MONTHS, MONTH_LABELS,
   type MonthCell, type YearRow,
@@ -70,7 +95,11 @@ import {
  */
 type Load =
   | { state: 'loading' }
-  | { state: 'ready'; log: WorkoutEntry[] }
+  /** `partialBefore` is the month the read stopped inside, dropped from `log`
+   *  because a part-month drawn at the scale of whole ones reads as a quiet
+   *  month. Null means the whole history came back and every total below is a
+   *  real total. */
+  | { state: 'ready'; log: WorkoutEntry[]; partialBefore: string | null }
   | { state: 'failed'; reason: string };
 
 /* ── charts ───────────────────────────────────────────────────────────────
@@ -222,7 +251,7 @@ export default function History() {
 
   const read = useCallback(async () => {
     setLoad({ state: 'loading' });
-    if (!USE_SUPABASE) { setLoad({ state: 'ready', log: localRef.current }); return; }
+    if (!USE_SUPABASE) { setLoad({ state: 'ready', log: localRef.current, partialBefore: null }); return; }
     try {
       // supabase-js resolves on failure. Check `.error`, on both calls.
       const { data: auth, error: authErr } = await supabase.auth.getUser();
@@ -236,16 +265,35 @@ export default function History() {
         setLoad({ state: 'failed', reason: 'You are not signed in, so there is no history to read.' });
         return;
       }
+      // NEWEST FIRST, and one row past the ceiling. Both halves matter: the
+      // limit is what makes truncation detectable at all (see rowCap.ts), and
+      // the descending order is what decides which end of a member's history
+      // gets lost when it happens. Ascending lost TODAY, which is the end every
+      // sentence on this page is about. `id` breaks ties so two sessions logged
+      // in the same second cannot swap places between reads and shuffle the
+      // page under somebody.
       const { data, error } = await supabase
-        .from('workouts').select('*').eq('user_id', uid).order('performed_at', { ascending: true });
+        .from('workouts').select('*').eq('user_id', uid)
+        .order('performed_at', { ascending: false }).order('id', { ascending: false })
+        .limit(capLimit());
       if (error) {
         reportError('history.read', error);
         setLoad({ state: 'failed', reason: 'Your training history could not be read.' });
         return;
       }
+      const page = capped((data ?? []) as WorkoutRow[]);
+      // Back into date order for the library, which walks months forwards.
+      const entries = page.rows.map(rowToEntry).reverse();
+      // The oldest month of a truncated read is a part-month and is dropped
+      // rather than charted short. See src/lib/historyWindow.ts.
+      const whole = wholeMonths(entries, page.truncated);
       // No rows is a genuinely empty history. It is not a failure, and it is
       // not the same render as one.
-      setLoad({ state: 'ready', log: ((data ?? []) as WorkoutRow[]).map(rowToEntry) });
+      setLoad({
+        state: 'ready',
+        log: whole.log,
+        partialBefore: page.truncated ? whole.droppedMonth ?? monthKey(entries[0]?.t ?? '') : null,
+      });
     } catch (e) {
       reportError('history.read', e);
       setLoad({ state: 'failed', reason: 'Your training history could not be read.' });
@@ -312,9 +360,17 @@ export default function History() {
 
   /* ── 3 of 3: the read landed ──────────────────────────────────────────── */
   const log = load.log;
+  // The read stopped part-way through the member's history. Everything drawn
+  // below is real and current; what is NOT true is that it is all of it, so
+  // every figure that is a LIFETIME total is withheld rather than under-stated.
+  const partialBefore = load.partialBefore;
+  const whole = partialBefore == null;
   const span = historySpan(log);
   const stage = stageOf(span);
 
+  // Safe to state as a fact: a truncated read came back with more than a
+  // thousand rows and `wholeMonths` never empties a non-empty set, so reaching
+  // here means the read landed whole and there is genuinely nothing in it.
   if (stage === 'empty' || !span) {
     return frame(
       <><Rule /><Section>
@@ -344,15 +400,37 @@ export default function History() {
   const dstr = (iso: string) => new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
 
   return frame(<>
+    {/* ── what could not be read, said before anything is counted ─────────── */}
+    {/* Not a PartialRead: that component is written for a LIST, and says the
+        rest are "on the server and not on this screen". Here the rest are on
+        the screen — the months are all charted — and what is missing is depth
+        behind them, which is a different sentence. */}
+    {partialBefore != null ? (
+      <View style={{ marginTop: sp.lg }}>
+        <Notice
+          tone={t.warn}
+          kicker="Not your whole history"
+          title={`Read back as far as ${monthLabel(partialBefore)}`}
+          note={`You have trained for longer than this page can read in one go. Everything charted below is real and current, and anything before ${monthLabel(partialBefore)} is on record and not counted here — so the lifetime totals are left blank rather than added up short.`}
+        />
+      </View>
+    ) : null}
+
     {/* ── the hero: everything you have ever lifted ───────────────────────── */}
     {/* Tonnes for a metric reader — the figure runs to six digits in
         kilograms — and pounds for an imperial one, because the tonne has no
-        imperial counterpart that is safe to print here. See volumeHeadline. */}
+        imperial counterpart that is safe to print here. See volumeHeadline.
+
+        Withheld outright on a truncated read. This is the one figure on the
+        page that claims to be a lifetime, and a lifetime total summed over the
+        part of a lifetime that fitted in one query is not a smaller number, it
+        is a wrong one — the same rule `money()` follows for a currency nobody
+        chose. `historyNote` goes with it: it counts days and sessions. */}
     <Hero
-      label={`Lifted since ${monthLabel(cells[0].key)}`}
-      figure={fig(headline?.figure.toLocaleString())}
-      unit={headline ? (headline.unit === 't' ? 'tonnes' : headline.unit) : undefined}
-      note={historyNote(log)}
+      label={whole ? `Lifted since ${monthLabel(cells[0].key)}` : `Lifted since ${monthLabel(cells[0].key)}, at least`}
+      figure={whole ? fig(headline?.figure.toLocaleString()) : fig(null)}
+      unit={whole && headline ? (headline.unit === 't' ? 'tonnes' : headline.unit) : undefined}
+      note={whole ? historyNote(log) : 'More than this page can add up in one read — see above.'}
     />
     {unitNote ? <Text style={{ ...ty.caption, color: t.ink3 }}>{unitNote}</Text> : null}
 
@@ -399,12 +477,21 @@ export default function History() {
         </Text>
       )}
       <View style={{ height: sp.lg }} />
+      {/* Sessions and Lifts are lifetime counts and go blank with the hero.
+          Best Month does not: it is the heaviest of the months ON THIS CHART,
+          which is a true statement about the months on this chart whether or
+          not there are older ones behind them — the delta names the month, so
+          the reader can see the window it was picked from. */}
       <KpiRow items={[
-        { label: 'Sessions', value: fig(life.sessions), delta: `${fig(life.days)} day${life.days === 1 ? '' : 's'}` },
+        { label: 'Sessions', value: whole ? fig(life.sessions) : fig(null), delta: whole ? `${fig(life.days)} day${life.days === 1 ? '' : 's'}` : 'not all read' },
         { label: 'Best Month', value: fig(volumeIn(best?.volumeKg, wu)?.toLocaleString()), unit: best?.volumeKg != null ? wu : undefined, delta: best ? monthLabel(best.key) : undefined },
-        { label: 'Lifts', value: fig(life.lifts), delta: 'with weights' },
+        { label: 'Lifts', value: whole ? fig(life.lifts) : fig(null), delta: whole ? 'with weights' : 'not all read' },
       ]} />
-      {earlier > 0 ? (
+      {/* `earlier` is derived from `span`, which under truncation is the span
+          of what was READ rather than of the member's training — so the count
+          would be wrong and the notice at the top already says more than this
+          line could. */}
+      {whole && earlier > 0 ? (
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
           Showing the last {MAX_MONTHS} months. {earlier} earlier month{earlier === 1 ? '' : 's'} of
           history {earlier === 1 ? 'is' : 'are'} on record but not charted here.
@@ -437,9 +524,14 @@ export default function History() {
             </View>
           </View>
         </View>
+        {/* It used to read "Your first month with weights on it". `volumeArc`
+            walks `cells`, which is the last MAX_MONTHS months — so for anybody
+            with more history than that, the month named on the left was not
+            their first, and the line beneath the chart said as much two
+            sections up. It is the first month CHARTED, and now says so. */}
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-          Your first month with weights on it against your most recent one. Months in between are
-          on the chart above, gaps and all.
+          The first month with weights on it that this page charts, against your most recent one.
+          Months in between are on the chart above, gaps and all.
         </Text>
       </Section>
     </>) : null}
@@ -501,8 +593,14 @@ export default function History() {
                 their pound readings would let half a pound of rounding at each
                 end turn the same 2.5 kg PR into 5 lb one month and 6 lb the
                 next, off nothing the lifter did. */}
+            {/* "first on record" is a claim about everything that came before,
+                and a truncated read has not seen everything that came before —
+                so under one it says only what it knows: this is the earliest
+                one on this page. */}
             <Text style={{ ...ty.caption, color: t.ink3 }}>
-              {m.prev != null ? `+${fig(weightDeltaIn(m.est1RM - m.prev, wu))} ${wu} on your last best` : 'first on record'}
+              {m.prev != null
+                ? `+${fig(weightDeltaIn(m.est1RM - m.prev, wu))} ${wu} on your last best`
+                : whole ? 'first on record' : 'earliest one read'}
             </Text>
           </View>
         </View>

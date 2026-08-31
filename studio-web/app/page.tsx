@@ -43,6 +43,19 @@ export default function Overview() {
   const [hub, setHub] = useState<{
     revenueCents: number | null;
     mrrCents: number | null;
+    /* The currency each of those two sums is actually in — from the rows that
+     * were added up, not from the gym's setting. Both totals ignore each row's
+     * own currency, and `gym_payments.currency` / `membership_plans.currency`
+     * are `not null default 'AED'`, so a gym that has since set GBP had its
+     * legacy dirhams added to its pounds and this tile labelled the result GBP.
+     * Null means the contributing rows disagree, and a total that cannot be
+     * denominated is withheld. */
+    revenueCurrency: string | null;
+    mrrCurrency: string | null;
+    /* Whether there were any contributing rows at all. An empty set states no
+     * currency to disagree with, so the gym's own is the honest label there —
+     * and that is a different fact from rows that state two. */
+    revenueRows: number;
     activeMembers: number | null;
     fillRate: number | null;
     visitsToday: number | null;
@@ -115,6 +128,9 @@ export default function Overview() {
       setHub({
         revenueCents: rec?.takenCents ?? null,
         mrrCents: rec?.mrrCents ?? null,
+        revenueCurrency: rec?.takenCurrency ?? null,
+        mrrCurrency: rec?.mrrCurrency ?? null,
+        revenueRows: rec?.payments ?? 0,
         activeMembers: rec ? rec.activeMembers : null,
         fillRate: att?.fillRate ?? null,
         visitsToday: door ? door.visits : null,
@@ -162,6 +178,12 @@ export default function Overview() {
 
   const roll: GymRollup | null = trainers ? gymRollup(trainers, gym?.sessionFee ?? null) : null;
   const ccy: TenantCurrency = gym?.currency ?? null;
+  // The currency each of the two money tiles is actually in. An empty set of
+  // rows states nothing, so the gym's own currency is the honest label; a set
+  // whose rows disagree has no single currency, and a null is what makes
+  // `amount()` withhold rather than pick whichever row happened to be first.
+  const takenCcy: TenantCurrency = hub == null || hub.revenueRows === 0 ? ccy : hub.revenueCurrency;
+  const mrrCcy: TenantCurrency = hub == null || hub.mrrCents == null ? ccy : hub.mrrCurrency;
 
   const cols: Column<GymTrainer>[] = [
     { key: 'name', header: 'Trainer', value: (t) => t.name },
@@ -249,12 +271,20 @@ export default function Overview() {
             money() now withholds a figure it cannot denominate, so both doors
             are safe and this one is simply the clearer of the two. A dash
             naming the unset setting is still the honest tile. */}
-        <Kpi label="Taken · 30d" text={hub ? amount(hub.revenueCents, ccy) : null}
+        <Kpi label="Taken · 30d" text={hub ? amount(hub.revenueCents, takenCcy) : null}
              note={hub && hub.revenueCents == null ? 'no payments recorded'
-               : hub && !ccy ? NO_CURRENCY_NOTE : undefined} />
-        <Kpi label="Recurring / mo" text={hub ? amount(hub.mrrCents, ccy) : null}
+               : hub && !takenCcy
+                 ? (hub.revenueRows > 0 && hub.revenueCurrency === null
+                     ? 'these payments are in more than one currency, so there is no one total'
+                     : NO_CURRENCY_NOTE)
+               : undefined} />
+        <Kpi label="Recurring / mo" text={hub ? amount(hub.mrrCents, mrrCcy) : null}
              note={hub && hub.mrrCents == null ? 'no priced plan on an active membership'
-               : hub && !ccy ? NO_CURRENCY_NOTE : undefined} />
+               : hub && !mrrCcy
+                 ? (hub.mrrCurrency === null
+                     ? 'these plans are priced in more than one currency, so there is no one total'
+                     : NO_CURRENCY_NOTE)
+               : undefined} />
         <Kpi label="Active members" value={hub?.activeMembers ?? null} />
         <Kpi label="Class fill" text={hub ? pct(hub.fillRate) : null}
              note={hub && hub.fillRate == null ? 'no capacity recorded' : 'booked ÷ capacity'} />

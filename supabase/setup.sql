@@ -21199,3 +21199,705 @@ drop policy if exists exvid_trainer_rw on public.exercise_videos;
 create policy exvid_trainer_rw on public.exercise_videos for all
   using (trainer_id = (select auth.uid()))
   with check (trainer_id = (select auth.uid()));
+
+-- ▶ an-invoice-that-tells-the-person-it-is-about.sql
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- A gym invoice that tells the member it is about.
+--
+-- ── What was missing ─────────────────────────────────────────────────────
+--
+-- `gym_invoices` (part 29) is what a gym says a member owes it. It has had a
+-- member read policy since the day it was written — `gym_invoices_own_r`, so
+-- the member may see their own — and no producer of any kind: no push, no
+-- inbox row, no email, nothing. A charge appeared against somebody's name and
+-- the only way they learned of it was being told at the desk.
+--
+-- The same was true of the coach invoices that shipped in part 138. Those are
+-- notified from the app (src/ui/coachInvoices.ts) and these are notified from
+-- a trigger, and the difference is not a preference:
+--
+--   coach_invoices  has exactly ONE writer, `issue_coach_invoice()`, called
+--                   from one screen. App code sees every row as it is created
+--                   and can also tell the COACH whether their client was
+--                   notified, which a trigger cannot report back.
+--   gym_invoices    has NO writer in this repository at all. Rows arrive from
+--                   the owner's web console and from hand-written SQL, neither
+--                   of which the phone app can observe. A notification written
+--                   next to each of those call sites would be a notification
+--                   with a hole wherever somebody forgot one — which is the
+--                   argument part 105 makes for writing `gym_events` from
+--                   triggers, in the same words.
+--
+-- ── WHY NO AMOUNT IS STATED ──────────────────────────────────────────────
+--
+-- This is the decision most likely to look like an omission, so: the figure is
+-- withheld ON PURPOSE, and the notification says where to find it.
+--
+-- `gym_invoices.currency` is `not null default 'AED'`. A default is not a
+-- choice — scripts/check-currency.mjs exists in this repo because that exact
+-- default silently denominated every non-UAE gym's settlements in dirhams —
+-- so a row's currency may well be a value nobody in that gym has ever seen,
+-- and Repple is white-labelled with gyms in several. On top of that,
+-- `amount_cents` is in minor units, and how many minor units make a unit
+-- depends on the currency (JPY, KWD and AED do not agree). The app knows both
+-- of those things and does them in one tested place (src/lib/coachMoney.ts);
+-- restating them in plpgsql would be a second copy that drifts, and the
+-- failure mode of a drifted copy here is a member told they owe a number that
+-- is not the number.
+--
+-- A figure whose currency is unknown is not printed bare and not guessed —
+-- that rule is the whole of check-currency.mjs. So this states the DATES,
+-- which are unambiguous, and sends the member to the document. When a member
+-- screen for `gym_invoices` exists, this copy gains a route and the amount can
+-- be rendered there by the code that already knows how.
+--
+-- ── When it fires ────────────────────────────────────────────────────────
+--
+-- On INSERT of a row that is already issued, and on the one transition from
+-- 'draft' to an issued status. Not on 'paid', 'void' or 'written_off': those
+-- are the gym's own bookkeeping and none of them is news that a charge has
+-- been made. Not on every status change either — an invoice going
+-- open → overdue → open would otherwise notify twice for one debt, and a
+-- notification somebody has already read arriving again reads as a second
+-- charge.
+--
+-- ── Why the insert is direct and not through notify_users() ──────────────
+--
+-- `notify_users()` (part 122) authorises on `auth.uid()`, and these rows are
+-- written by an owner through PostgREST TODAY and may be written by a job or
+-- by the service role tomorrow — where `auth.uid()` is null and the function
+-- correctly returns 0, notifying nobody. The recipient here is not a choice
+-- made by a caller at all: it is `new.member_id`, the person the row is
+-- already about, so there is no fan-out to authorise. The trigger writes that
+-- one row and nothing else.
+--
+-- SECURITY DEFINER because `notif_self` is `using (user_id = auth.uid())`,
+-- which is exactly backwards for a notification addressed to somebody else —
+-- the same reason part 122 gives — with `search_path` pinned so the tables it
+-- resolves cannot be chosen by whoever happens to be inserting. Revoked from
+-- public, anon AND authenticated, as part 51 and part 141 require of every
+-- trigger function: Postgres checks EXECUTE when a trigger is created, not
+-- when it fires, so a trigger function needs no grant to anybody.
+--
+-- Idempotent; safe to re-run.
+-- ─────────────────────────────────────────────────────────────────────────
+
+create or replace function public.gym_invoice_notify()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public', 'pg_temp'
+as $function$
+declare
+  v_body text;
+begin
+  -- 'draft' is not issued to anybody, and paid/void/written_off are the gym's
+  -- own bookkeeping rather than a charge being made.
+  if new.status not in ('open', 'overdue') then
+    return new;
+  end if;
+  -- On an update, only the first move out of 'draft'. Every other transition
+  -- is a status the member has already been told about once.
+  if tg_op = 'UPDATE' and old.status is not distinct from new.status then
+    return new;
+  end if;
+  if tg_op = 'UPDATE' and old.status <> 'draft' then
+    return new;
+  end if;
+
+  -- Dates, not money. See the header: the amount is withheld because the
+  -- currency on the row may be a default nobody chose, and a wrong figure is
+  -- worse than none.
+  v_body := 'Your gym has issued you an invoice dated '
+         || to_char(new.issued_on, 'FMDD Mon YYYY')
+         || coalesce(', due ' || to_char(new.due_on, 'FMDD Mon YYYY'), '')
+         || '. The amount and how to pay it are on the invoice itself — ask at reception for a copy.';
+
+  insert into public.notifications (user_id, title, body, icon)
+  values (new.member_id, 'An invoice from your gym', left(v_body, 500), 'bell');
+
+  return new;
+end;
+$function$;
+
+comment on function public.gym_invoice_notify() is
+  'Writes the member one inbox row when a gym invoice is issued to them. States dates only — never an amount; see part 146 for why.';
+
+drop trigger if exists gym_invoices_notify_member on public.gym_invoices;
+create trigger gym_invoices_notify_member
+  after insert or update of status on public.gym_invoices
+  for each row execute function public.gym_invoice_notify();
+
+-- A trigger function is callable by nobody. Postgres checks EXECUTE when the
+-- trigger is CREATED, not each time it fires, so these revokes cost nothing and
+-- close the hole part 141 found across a whole night of new functions: Supabase
+-- grants to `anon` and `authenticated` separately, and `revoke ... from public`
+-- leaves both standing.
+revoke all on function public.gym_invoice_notify() from public;
+revoke all on function public.gym_invoice_notify() from anon;
+revoke all on function public.gym_invoice_notify() from authenticated;
+
+-- ▶ a-price-list-is-not-a-public-document.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- A price list is not a public document, and link_coaching lost its guard.
+--
+-- Three things, found by walking the security advisor rather than dismissing
+-- it. One was a hole anybody on the internet could reach, one was a hole any
+-- coach in any gym could reach, and one was only ever documentation. They are
+-- in one file because they were proved in one sitting, against production.
+--
+-- Everything below was proved by DOING it — `set local role` plus
+-- `request.jwt.claims` for a real user id, the exact row set recorded either
+-- side of the change — inside a transaction that was rolled back. Table counts
+-- were re-measured afterwards against their pre-run values: trainer_packages
+-- 0 → 0, client_purchases 0 → 0, client_subscriptions 0 → 0, and the live
+-- pkg_read/pkg_write definitions and anon's grants were confirmed byte-identical
+-- to their pre-run text before anything was applied for real.
+--
+--
+-- ── 1 · pkg_read handed every active package to the anon key ───────────────
+--
+--     create policy pkg_read on trainer_packages
+--       for select using (active or trainer_id = auth.uid());
+--
+-- granted to {public}, which is anon and authenticated and everything else, on
+-- a table where `anon` also held a stock table-level SELECT that nobody in this
+-- repository wrote (the grant class 119-revoke-truncate.sql found on 80 of 89
+-- tables and deliberately left standing: "revoking those wholesale is a
+-- separate, tested change". This is that change, for this table).
+--
+-- The anon key is compiled into the shipped app. So the exploit is: hold the
+-- publishable key, sign in as nobody, select the table. Proved with three
+-- fixture packages belonging to two coaches in two different tenants:
+--
+--   anon, signed out          AUDIT-A-onsale @9900gbp + AUDIT-B-onsale @12900aed
+--   signed-in stranger        AUDIT-A-onsale @9900gbp + AUDIT-B-onsale @12900aed
+--   gym owner, other tenant   AUDIT-A-onsale @9900gbp + AUDIT-B-onsale @12900aed
+--
+-- Name, price, currency, session count, billing interval, and the coach's id,
+-- for every coach in the product, with no tenant scoping of any kind. The table
+-- holds 0 rows today, which is the only reason this is a finding and not an
+-- incident, and exactly why it is worth doing before a coach types a price into
+-- it.
+--
+-- ── Deciding the rule, on what the screens actually ask for ───────────────
+--
+-- Four candidate rules were considered. The evidence is every live reader of
+-- this table that goes through RLS — there are four, and the edge function
+-- `connect-checkout` is not one of them because it reads with the service role:
+--
+--   src/lib/connect.ts  fetchMyPackages()        trainer_id = me
+--   src/lib/connect.ts  fetchTrainerPackages(t)  called from ONE place,
+--                       app/(client)/packages.tsx line 65, and always with
+--                       `c.coachId` from myCoachId() — which is
+--                       `clients.trainer_id` for the signed-in client. Never
+--                       with anybody else's id.
+--   src/lib/connect.ts  packageLabels(ids)       ids come only from the
+--                       signed-in client's own client_purchases and
+--                       client_subscriptions rows.
+--   src/ui/coachInvoices.ts fetchInvoiceCurrency() trainer_id = me
+--
+-- So: NOBODY browses packages. There is no directory of prices. The client app
+-- shows the prices of exactly one coach — the buyer's own — and the labels of
+-- the things the buyer has already paid for. `app/(client)/trainers.tsx` and
+-- `src/ui/coachProfile.tsx` do list coaches, but they read `session_fee` off
+-- `trainers`; neither touches this table.
+--
+--   REJECTED · "tenant-wide". Nothing reads a sibling coach's prices, and a
+--   gym's coaches compete with each other. Wider than any screen asks for.
+--
+--   REJECTED · "listed/directory coaches, like `trainers`". This is the shape
+--   131-a-join-code-is-not-directory-information.sql uses, and it was the
+--   tempting answer because it is the established pattern. It is wrong here:
+--   131 exposes `trainers` that way because there IS a directory screen reading
+--   it. There is no screen that shows a non-client the price list of a coach
+--   they have not joined. Copying the pattern would have re-opened most of the
+--   hole to satisfy a symmetry rather than a reader.
+--
+--   REJECTED · `anon` keeps something. No unauthenticated path reads this
+--   table. Checkout is an edge function on the service role. `anon` gets
+--   nothing, as 131 gave it nothing.
+--
+--   CHOSEN · the buyer's own coach, plus what the buyer has bought.
+--
+-- The second half of that is not decoration, and it is the reason the narrowing
+-- is not a regression. connect.ts already documents the bug the old policy
+-- caused:
+--
+--   "an inactive package is invisible to the client who bought it under the
+--    pkg_read policy … an unlabelled amount renders as a dash rather than as a
+--    number in a currency we picked"
+--
+-- A client whose coach withdraws a pack loses the name and the CURRENCY of
+-- their own purchase — and this product is white-labelled, so a purchase with
+-- no currency cannot be printed at all. Worse, narrowing to "my current coach"
+-- alone would ALSO break a client who has since changed coach: their old
+-- purchase is from somebody who is no longer `clients.trainer_id`. So the
+-- purchase and subscription arms are load-bearing, and the new rule is strictly
+-- better than the old one for the person it is meant to serve:
+--
+--   client OF coach A, BEFORE   A-onsale, B-onsale        (a stranger's prices;
+--                                                          NOT the withdrawn
+--                                                          pack they paid for)
+--   client OF coach A, AFTER    A-onsale, A-withdrawn     (their coach, and
+--                                                          their own purchase)
+--
+-- ── Rows, not columns ─────────────────────────────────────────────────────
+--
+-- 131 had to revoke the table and grant single columns because `trainers`
+-- carries `join_code`, and RLS SELECTS ROWS, NEVER COLUMNS. That is not needed
+-- here and it would be cargo cult if it were done anyway: every column on
+-- trainer_packages — id, trainer_id, name, price_cents, currency, sessions,
+-- active, created_at, billing_interval — is something a buyer is entitled to
+-- see about a package they may buy. There is no join_code equivalent on this
+-- table. Nothing is carved.
+--
+-- ── Proof ─────────────────────────────────────────────────────────────────
+--
+--                                    BEFORE                     AFTER
+--   anon, signed out                 A-onsale + B-onsale        REFUSED 42501
+--   signed-in stranger, no coach     A-onsale + B-onsale        (nothing)
+--   gym owner, other tenant          A-onsale + B-onsale        (nothing)
+--   trainer A                        A-onsale + A-withdrawn     A-onsale +
+--                                      + B-onsale                 A-withdrawn
+--   trainer B                        A-onsale + B-onsale        B-onsale
+--   client of coach A                A-onsale + B-onsale        A-onsale +
+--                                                                 A-withdrawn
+--   client, ex-coach B, subscribed   A-onsale + B-onsale        B-onsale
+--
+-- and every real query the app makes still answers, run verbatim:
+--
+--   fetchTrainerPackages(myCoach)  as the client        → AUDIT-A-onsale
+--   packageLabels(withdrawn pack they bought)           → AUDIT-A-withdrawn/gbp
+--   packageLabels(the pack they subscribe to)           → AUDIT-B-onsale/aed
+--   fetchInvoiceCurrency()         as trainer A         → gbp
+--   createPackage + deactivatePackage as trainer A      → OK, 1 row deactivated
+--   anon INSERT a package for coach A                   → REFUSED 42501
+--   stranger UPDATE the price of coach A's packs        → 0 rows (and note:
+--     a PostgREST UPDATE matching zero rows is NOT an error — it was 0 rows
+--     before the change too, which is why the read was the whole finding)
+--
+-- Both policies also move from {public} to `to authenticated`. That is not
+-- cosmetic: it is what stops the next stock `anon` grant from reaching them.
+
+revoke select, insert, update, delete on public.trainer_packages from anon;
+
+drop policy if exists pkg_read on public.trainer_packages;
+create policy pkg_read on public.trainer_packages
+  for select
+  to authenticated
+  using (
+    -- my own price list, on sale or withdrawn
+    trainer_id = (select auth.uid())
+    -- what my coach currently sells
+    or (active and public.is_my_coach(trainer_id))
+    -- and whatever I have actually paid for, from whoever, forever: this is
+    -- the only place the NAME and the CURRENCY of a past purchase is written
+    -- down. client_purchases has no currency column at all.
+    or exists (select 1 from public.client_purchases cp
+                where cp.package_id = trainer_packages.id
+                  and cp.client_id = (select auth.uid()))
+    or exists (select 1 from public.client_subscriptions cs
+                where cs.package_id = trainer_packages.id
+                  and cs.client_id = (select auth.uid()))
+  );
+
+drop policy if exists pkg_write on public.trainer_packages;
+create policy pkg_write on public.trainer_packages
+  for all
+  to authenticated
+  using (trainer_id = (select auth.uid()))
+  with check (trainer_id = (select auth.uid()));
+
+
+-- ── 2 · link_coaching() lost the guard part 38 gave it ────────────────────
+--
+-- 38-tenant-isolation.sql section 2 is titled "link_coaching() had no
+-- authorization at all", explains that the function "re-points any client at
+-- any trainer", and replaces it with a guarded version. The repository has been
+-- correct ever since.
+--
+-- PRODUCTION WAS RUNNING THE UNGUARDED BODY. The live definition tonight was
+-- 06-account-provisioning.sql's — three statements, no auth.uid() anywhere.
+-- Part 06 creates it and part 38 replaces it, so a database built from this
+-- repo is fine; the live one had drifted back, and nobody would have noticed,
+-- because the file that describes the fix is still in the tree describing it.
+--
+-- The advisor called this
+-- `authenticated_security_definer_function_executable` and it is one of 95 such
+-- findings, which is precisely why "95 findings, all noise" is not an audit.
+-- The other 94 were read. They are noise. This one was not.
+--
+-- ── Exploited, on production rows ─────────────────────────────────────────
+--
+-- A pure client account cannot run the attack: `clients.trainer_id` has a
+-- foreign key to `trainers`, so the seizure fails 23503. Any account holding a
+-- `trainers` row can, and signing up as a coach is self-service. Signed in as
+-- trainer B, in a different tenant, with no request and no relationship of any
+-- kind to the victim:
+--
+--   BEFORE  link_coaching(me, a stranger's client)  ACCEPTED
+--           select from clients where trainer_id = me   → 1 client
+--
+-- That one column is the hinge. 19-trainer-read-access.sql gates a coach's
+-- read of workouts, measurements, check_ins, habit_logs, scans, food logs and
+-- the private coach conversation on `clients.trainer_id = auth.uid()`. Setting
+-- it is a complete read of a stranger's health history, and part 38 says so.
+--
+--   AFTER   the same call                            REFUSED 42501
+--
+-- ── The rule is tighter than part 38's, and why ───────────────────────────
+--
+-- Part 38's guard is `auth.uid() = p_coach or auth.uid() = p_client or
+-- is_owner_of(client_tenant)`. Restoring it verbatim would have closed the hole
+-- against strangers and left it open to the attack part 38 itself describes:
+-- `auth.uid() = p_coach` is satisfied by the attacker naming THEMSELVES as the
+-- coach, which is exactly the "point a stranger's client record at yourself"
+-- move. The guard as written does not stop the attack in its own comment.
+--
+-- So the coach arm now requires evidence that the client asked. Every caller
+-- was enumerated first — there are three, and no more:
+--
+--   src/ui/CoachRequests.tsx  and  studio-web/app/coach/page.tsx
+--       the coach accepting a coach_requests row. The row exists, and it is
+--       still 'pending' at the moment of the call — both files call
+--       link_coaching FIRST and update the request afterwards, deliberately.
+--       Status is therefore NOT filtered on.
+--   accept_invite(p_invite)  (SECURITY DEFINER, part 11)
+--       calls link_coaching(inv.coach_id, auth.uid()) — the client arm.
+--
+-- `join_by_code()` does not call this function; it writes a coach_requests row,
+-- which is the evidence the new arm looks for. An `is_owner_of` arm is kept.
+-- An "already linked" arm is kept too, so a re-run — a mode change, a retry
+-- after a failed roster write — cannot lock a working pair out; it can grant
+-- nothing, because the link it asserts already exists.
+--
+-- Proved, all four legitimate paths, on live rows:
+--
+--   client links their own coach (accept_invite path)      OK
+--   coach accepts, request row present (CoachRequests)     OK, trainer_id set
+--   gym owner links a member of their own gym              OK
+--   coach re-runs for a client already theirs (mode)       OK, mode=inperson
+--   trainer B seizes a stranger's client, no request       REFUSED 42501
+--
+-- If a future flow needs a coach to link a client who never asked, it fails
+-- loudly with a sentence, which is the right way to find out.
+
+create or replace function public.link_coaching(
+  p_coach uuid, p_client uuid, p_mode text default 'online'
+) returns void
+language plpgsql
+security definer
+set search_path = public
+as $fn$
+declare client_tenant uuid;
+begin
+  if auth.uid() is null then
+    raise exception 'Not signed in.' using errcode = '42501';
+  end if;
+
+  select tenant_id into client_tenant from profiles where id = p_client;
+
+  if not (
+    -- I am the client. This is accept_invite() and every self-serve path.
+    auth.uid() = p_client
+    -- I am the coach AND they asked for me. join_by_code() writes that row.
+    or (auth.uid() = p_coach and exists (
+          select 1 from coach_requests q
+           where q.client_id = p_client and q.trainer_id = p_coach))
+    -- I am the coach and they are ALREADY mine: a re-run cannot grant anything.
+    or (auth.uid() = p_coach and exists (
+          select 1 from clients c
+           where c.id = p_client and c.trainer_id = p_coach))
+    -- I own the gym they belong to.
+    or (client_tenant is not null and is_owner_of(client_tenant))
+  ) then
+    raise exception 'You can only link a coach and a client you are part of.'
+      using errcode = '42501';
+  end if;
+
+  insert into coaching_relationships (coach_id, client_id, mode, status)
+  values (p_coach, p_client, coalesce(p_mode, 'online'), 'active')
+  on conflict (coach_id, client_id) do update set mode = excluded.mode, status = 'active';
+
+  update clients set trainer_id = p_coach where id = p_client;
+end $fn$;
+
+revoke execute on function public.link_coaching(uuid, uuid, text) from public, anon;
+grant  execute on function public.link_coaching(uuid, uuid, text) to authenticated;
+
+
+-- ── 3 · the photo purge job was a signed-in stranger's to run ─────────────
+--
+-- 51-advisor-tidy.sql declares `photo_purge` "nobody's to read" and gives it an
+-- explicit deny. The three functions that WORK that queue were left executable
+-- by `authenticated`, which is the same table reached through a different door:
+--
+--   confirm_photo_purges()          ACCEPTED for a signed-in stranger, returned 0
+--   purge_progress_photo_files()    ACCEPTED for a signed-in stranger, 0/0
+--
+-- They are the cron entry points (part 48). They take no argument and scope on
+-- nothing; a stranger can advance another member's photo-deletion state machine
+-- and read back how much work it did. `purge_photo_file(p_path)` is revoked
+-- with them: it fires a real, NON-TRANSACTIONAL storage DELETE via net, so
+-- unlike everything else in this file it was NOT proved by invocation — proving
+-- it would have deleted a member's photograph. It is revoked on the same
+-- argument as its two siblings.
+--
+-- Nothing legitimate loses a door. pg_cron runs as postgres. The internal
+-- callers — purge_progress_photo_files, on_progress_photo_deleted, and
+-- queue_photo_file_purge — are all SECURITY DEFINER and owned by postgres, so
+-- their calls are checked against the owner, not the caller. And
+-- queue_photo_file_purge is the one of the four that IS properly guarded
+-- ("that is not your file", on a path prefix match against auth.uid()), so it
+-- keeps its grant. Proved after the revokes:
+--
+--   client queues their OWN path      OK, queued 1
+--   stranger queues someone else's    REFUSED 42501
+--   stranger calls confirm_photo_purges()        REFUSED 42501
+--   stranger calls purge_progress_photo_files()  REFUSED 42501
+
+revoke execute on function public.confirm_photo_purges()       from public, anon, authenticated;
+revoke execute on function public.purge_photo_file(text)       from public, anon, authenticated;
+revoke execute on function public.purge_progress_photo_files() from public, anon, authenticated;
+
+
+-- ── 4 · the four rls_enabled_no_policy tables say so out loud now ─────────
+--
+-- coach_ad_accounts, coach_reviews, referral_codes and stripe_webhook_events
+-- have RLS on and no policy. That already denies everyone but service_role and
+-- the definer functions, and it is what all four want. 51-advisor-tidy.sql made
+-- exactly this shape explicit for photo_purge and gave the reason: "an implicit
+-- denial reads like an unfinished table — one `create policy` away from
+-- somebody 'completing' it." The same reason applies four more times.
+--
+-- Verified first that no reader loses anything. Every path to these tables is
+-- either the service role in an edge function (ads-sync, ads-oauth,
+-- stripe-webhook) or a SECURITY DEFINER RPC, and both bypass RLS. src/ui/
+-- reviews.ts already says it in the file: "A direct .from('coach_reviews')
+-- anywhere in this repo returns 42501".
+--
+-- Measured before and after, as anon and as a signed-in stranger. Three of the
+-- four were unchanged at REFUSED 42501 both times, and the definer RPCs over
+-- them still answer afterwards — my_ad_account() returns without error,
+-- coach_reviews_for(my coach) returns 0 rows without error, my_referral_code()
+-- returns the caller's real code.
+--
+-- stripe_webhook_events was the odd one and is why measuring beat assuming: it
+-- answered `0 rows` rather than 42501, to anon AND to authenticated, because
+-- unlike its three neighbours it still carried the stock SELECT/INSERT/UPDATE/
+-- DELETE grants that 119-revoke-truncate.sql found across this schema. RLS was
+-- doing all the work and the table was one dropped policy away from being
+-- readable. The grants are removed, so a stranger now gets the honest answer
+-- instead of a silent empty set. The webhook itself is unaffected: it reads and
+-- upserts with the service role.
+
+revoke select, insert, update, delete on public.stripe_webhook_events from anon, authenticated;
+
+drop policy if exists "coach_ad_accounts belongs to the ad sync job" on public.coach_ad_accounts;
+create policy "coach_ad_accounts belongs to the ad sync job"
+  on public.coach_ad_accounts
+  for all to anon, authenticated
+  using (false) with check (false);
+
+drop policy if exists "coach_reviews is reached only through its functions" on public.coach_reviews;
+create policy "coach_reviews is reached only through its functions"
+  on public.coach_reviews
+  for all to anon, authenticated
+  using (false) with check (false);
+
+drop policy if exists "referral_codes is reached only through its functions" on public.referral_codes;
+create policy "referral_codes is reached only through its functions"
+  on public.referral_codes
+  for all to anon, authenticated
+  using (false) with check (false);
+
+drop policy if exists "stripe_webhook_events belongs to the webhook" on public.stripe_webhook_events;
+create policy "stripe_webhook_events belongs to the webhook"
+  on public.stripe_webhook_events
+  for all to anon, authenticated
+  using (false) with check (false);
+
+
+-- ── What was looked at and deliberately NOT changed ───────────────────────
+--
+-- All 95 `authenticated_security_definer_function_executable` findings were
+-- read, not sampled. 27 take no argument and resolve entirely against
+-- auth.uid(). 59 take arguments and gate them — the argument is checked against
+-- the caller, or the caller against the argument's owner, before anything is
+-- read or written. The nine that never mention auth.uid() at all were the
+-- interesting set, and six of them are fine:
+--
+--   all_member_ids()      scoped by is_owner_of(c.tenant_id)
+--   class_counts()        scoped by my_tenant()
+--   progress_photo_object_shared_with_viewer(p_name)
+--                         delegates to progress_photo_shared_with_viewer,
+--                         which is scoped on auth.uid()
+--
+-- and three are genuinely unscoped but must KEEP their grant, because an RLS
+-- policy expression is evaluated as the querying role and therefore needs
+-- EXECUTE. Revoking would refuse the very people the policy admits:
+--
+--   coach_doc_unaccepted(p_path)   used by storage.objects.coachdoc_obj_delete
+--   tenant_of_user(u)              used by public.app_errors.app_errors_owner
+--                                  and public.coach_clients.coach_clients_owner_r
+--
+-- Both are real oracles and both are recorded here rather than fixed. Any
+-- signed-in account can ask `tenant_of_user(<uuid>)` which gym a given user id
+-- belongs to, and can ask `coach_doc_unaccepted(<path>)` whether a coach
+-- document exists at a storage path and whether anyone has signed it. Neither
+-- returns a name, an amount or a document. Closing them means moving the
+-- predicate inside the policy or wrapping it in a caller-scoped function, which
+-- rewrites three live policies over app_errors, coach_clients and
+-- storage.objects — and a mistake there locks an owner out of their own gym's
+-- error log. That is a change with its own evidence to gather, and this file
+-- does not pretend to have gathered it.
+--
+-- Also left alone: the two `extension_in_public` findings (pg_net, btree_gist).
+-- Moving an extension schema is not a permission change and pg_net is what
+-- purge_photo_file calls by name.
+--
+-- Idempotent. Safe to re-run.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ▶ a-coach-has-an-inbox-too.sql
+
+-- ── A coach had no way to see who had written to them ──────────────────────
+--
+-- The client app has `/(client)/messages`, and it gets away with being a single
+-- thread because a client has exactly one coach. The coach app has
+-- `/(trainer)/chat`, which is ALSO a single thread — and a coach has many
+-- clients. The three ways into it are a client's own detail screen, a tap on a
+-- leaderboard row, and a push notification carrying `?clientId=…`. All three
+-- start from a client the coach has already picked. None of them answers the
+-- question a coach actually opens the app with, which is who is waiting on a
+-- reply. src/ui/notifications.tsx has stated this asymmetry in a comment for a
+-- while: "for a coach it is not: their threads are per-client".
+--
+-- `app/(trainer)/messages.tsx` is the list. This is the read behind it.
+--
+-- ── Why an RPC rather than a query the app assembles ───────────────────────
+--
+-- "The last message in each of my threads" is the shape PostgREST cannot ask
+-- for. The two ways to get it from the app were both bad:
+--
+--   · one query per client. A coach with forty clients opens forty round trips
+--     on a phone in a gym basement, and — worse than slow — gets forty
+--     independent chances to fail. A list where six rows failed and thirty-four
+--     succeeded has no honest rendering: the six are indistinguishable from
+--     clients who have never written, which is the exact lie
+--     src/ui/loadStatus.ts exists to stop.
+--   · select every message for every client and reduce on the device. That is
+--     the read most likely in this whole app to hit the 1000-row PostgREST cap
+--     (src/lib/rowCap.ts) — a year of one busy thread is enough — and a capped
+--     page reduces to a "last message" that is simply an older message, stated
+--     with confidence. Truncation there does not lose rows off the end of a
+--     list, it silently rewrites the content of the rows that remain.
+--
+-- One row per client, computed where the data is, is the only version whose
+-- failure mode is a failure. The function returns AT MOST one row per client on
+-- the caller's roster, so the app's `capLimit()` probe is measuring a set whose
+-- size is the roster — a number the coach can reason about.
+--
+-- ── Unread is not defined here ─────────────────────────────────────────────
+--
+-- `coach_unread_counts()` (88-message-read-state.sql) already decides what
+-- unread means for a coach: messages from the CLIENT side of the thread, newer
+-- than the coach's own `message_reads.last_read_at` row, with the epoch as the
+-- fallback so a coach who has never opened a thread has read nothing rather
+-- than everything. It is what the Clients tab already badges with
+-- (src/ui/roster.tsx) and what `mark_thread_read()` clears when a thread is
+-- opened.
+--
+-- So this function JOINS that one rather than restating its subquery. Two
+-- definitions of unread that drift apart is worse than none: the roster and the
+-- inbox would badge the same client differently, on the same phone, at the same
+-- moment, and nobody could say which was right. There is one definition, in one
+-- place, and this is a caller of it.
+--
+-- ── Scope, and what a caller cannot ask ────────────────────────────────────
+--
+-- No arguments, exactly as `my_coach()` has none and for the same reason: there
+-- is nothing to probe. `where c.trainer_id = auth.uid()` is the whole of the
+-- scope, and it is the same predicate `coach_unread_counts()` uses, so the two
+-- halves of every row are about the same set of people. An unauthenticated
+-- caller has a null `auth.uid()`, which matches no row rather than every row.
+--
+-- SECURITY DEFINER because it reads `profiles` for the client's name and face.
+-- `profiles_trainer_read` would allow that row by row for a linked client
+-- anyway; running as definer is what makes it ONE plan instead of a per-row
+-- policy evaluation, and the WHERE clause above is what keeps it honest.
+--
+-- ── Clients with no messages yet are IN this answer ────────────────────────
+--
+-- `left join lateral`, not `join`: a client the coach has never exchanged a
+-- word with comes back with a null `last_at`. That is deliberate and it is what
+-- lets the screen offer starting a conversation without a second read. What the
+-- screen must NOT do is print twenty empty rows, and it does not — see the
+-- header of app/(trainer)/messages.tsx. The database's job here is to say who
+-- exists and what the last word was; deciding which of them is worth a row is
+-- the screen's.
+--
+-- A hand-added `coach_clients` row is not in this answer at all, and cannot be:
+-- `messages.client_id` references a real account, and somebody a coach typed
+-- into their roster has none. Their name is joined in only as a fallback for a
+-- linked client whose `profiles` row carries no name, which is the same second
+-- look `useThreadPeerName` already takes.
+create or replace function public.coach_threads()
+returns table (
+  client_id uuid,
+  name text,
+  avatar text,
+  last_body text,
+  last_sender text,
+  last_kind text,
+  last_at timestamptz,
+  unread int
+)
+language sql stable security definer set search_path to 'public'
+as $fn$
+  select c.id,
+         -- The client's own name first, the coach's note about them second.
+         -- `nullif` on the empty string because a blank name is not a name, and
+         -- returning '' here would draw a circle with no initials in it rather
+         -- than the dash that says we could not say who this is.
+         coalesce(nullif(btrim(p.full_name), ''), nullif(btrim(cc.name), '')),
+         nullif(btrim(p.avatar), ''),
+         lm.body,
+         lm.sender,
+         lm.attachment_kind,
+         lm.created_at,
+         u.unread
+    from clients c
+    left join profiles p on p.id = c.id
+    left join coach_clients cc on cc.id = c.id and cc.trainer_id = auth.uid()
+    -- The one row this whole function exists for. `messages_client_id_created_at_idx`
+    -- is scanned backwards for it, so this is an index hit per client and not a
+    -- sort of the thread.
+    left join lateral (
+      select m.body, m.sender, m.attachment_kind, m.created_at
+        from messages m
+       where m.client_id = c.id
+       order by m.created_at desc, m.id desc
+       limit 1
+    ) lm on true
+    left join coach_unread_counts() u on u.client_id = c.id
+   where c.trainer_id = auth.uid()
+   -- Most recent first, and clients with nothing at the end. The screen sorts
+   -- again for its own reasons; this order is what makes a capped read keep the
+   -- conversations rather than the silence.
+   order by lm.created_at desc nulls last, c.id;
+$fn$;
+
+comment on function public.coach_threads() is
+  'One row per client on the calling coach''s roster: their name and avatar, the last message in the thread and who sent it, and the unread count from coach_unread_counts(). Takes no argument, so it can only ever answer about the caller. Clients with no messages come back with a null last_at rather than being omitted.';
+
+-- Part 141's argument, applied to the function this part adds rather than left
+-- for the next sweep to find: Postgres grants EXECUTE to PUBLIC on creation,
+-- and Supabase's default privileges hand `anon` and `authenticated` their own
+-- separate grants — so revoking PUBLIC alone leaves the publishable key able to
+-- call it. All three are named.
+revoke execute on function public.coach_threads() from public, anon;
+grant execute on function public.coach_threads() to authenticated;

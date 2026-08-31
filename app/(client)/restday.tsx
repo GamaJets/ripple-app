@@ -15,6 +15,7 @@ import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Hero, KpiRow, Notice, Cta, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, type as ty } from '../../src/theme/scale';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
+import { isWhole } from '../../src/ui/loadStatus';
 import { deloadCheck } from '../../src/lib/training';
 import { weekStats } from '../../src/lib/streaks';
 
@@ -28,7 +29,13 @@ export default function RestDay() {
   // six days straight that they were "well recovered" with "room to train". That
   // is not a display bug — it is training advice manufactured out of a failed
   // read, on the one screen whose whole job is to tell someone to stop.
-  const known = logStatus !== 'error';
+  // `isWhole`, so 'partial' and 'loading' are both excluded. This screen tells
+  // somebody whether to train today, and both of those states make it invent
+  // the answer: a truncated read (src/lib/rowCap.ts) hands `deloadCheck` a
+  // prefix and it counts consecutive hard weeks over a window that has a wall
+  // at the far end, and 'loading' printed "You have room to train — 0 training
+  // days this week" on the first frame, before anything had been read at all.
+  const known = isWhole(logStatus);
 
   const info = useMemo(() => {
     const dl = deloadCheck(log);
@@ -50,8 +57,19 @@ export default function RestDay() {
   // on the same morning. Both figures were right; the word was wrong.
   //
   // Narrowed to what the log can actually support: room to train, by volume.
-  const headline = !known ? 'We couldn’t read your training log' : dl.due ? 'Time for a deload week' : restToday ? 'Take a rest day' : 'You have room to train';
-  const body = !known
+  // `known` is now false for three different reasons and they are not the same
+  // sentence. "We couldn't read your training log" printed while it is still
+  // being read teaches a member to ignore it for the time it is true, and
+  // printed over a truncated read it names the wrong problem entirely.
+  const headline = logStatus === 'loading' ? 'Reading your training log'
+    : logStatus === 'partial' ? 'More training than this screen can read at once'
+    : !known ? 'We couldn’t read your training log'
+    : dl.due ? 'Time for a deload week' : restToday ? 'Take a rest day' : 'You have room to train';
+  const body = logStatus === 'loading'
+    ? 'This screen works entirely from what you have logged, and it is still coming back. Nothing here is a judgement about your recovery yet — read it as blank, not as a green light to train.'
+    : logStatus === 'partial'
+    ? 'This screen works entirely from what you have logged, and you have logged more than it can read in one go. Counting consecutive hard weeks against a history that stops part-way through would put a wall where your training carried on, so it says nothing rather than the wrong thing.'
+    : !known
     ? 'This screen works entirely from what you have logged, and we could not read it. Nothing here is a judgement about your recovery — read it as blank, not as a green light to train.'
     : dl.due
     ? dl.reason
@@ -91,7 +109,7 @@ export default function RestDay() {
           arc={known ? wk.days / 7 : undefined}
           arcLabel="of the week trained"
           tone={tone}
-          note={known ? `${dl.hardWeeks} consecutive hard week${dl.hardWeeks === 1 ? '' : 's'} behind you` : 'Nothing read — an empty ring here is not an empty week.'}
+          note={known ? `${dl.hardWeeks} consecutive hard week${dl.hardWeeks === 1 ? '' : 's'} behind you` : logStatus === 'loading' ? 'Still reading — an empty ring here is not an empty week.' : 'Nothing this screen can count — an empty ring here is not an empty week.'}
         />
 
         <Rule />

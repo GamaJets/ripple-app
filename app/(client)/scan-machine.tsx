@@ -35,7 +35,7 @@ import { recallMachine, rememberMachine } from '../../src/lib/machineMemory';
 import { Rule, Section, SectionHead, Cta, Ghost, Notice, Field } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
 import { useSettings } from '../../src/ui/settings';
-import { liftLabel } from '../../src/lib/units';
+import { liftLabel, readLift } from '../../src/lib/units';
 
 // "km", "m" and "mi" are three glyphs a screen reader says as themselves — and
 // "mi" spoken aloud is not a word. The distance toggle says the whole thing.
@@ -134,7 +134,26 @@ export default function ScanMachine() {
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [q]);
 
-  const addSet = () => { const r = parseInt(reps, 10) || 0; if (!r) return; setSets((p) => [...p, { reps: r, kg: parseFloat(kg) || 0 }]); setReps(''); tapLight(); };
+  // `parseFloat(kg) || 0` read the box as KILOGRAMS whatever the member reads
+  // in, and the box was labelled "KG" for everybody. So a member in pounds
+  // typed 225, and 225 KILOGRAMS — 496 lb — went permanently into their
+  // training log, into their volume, their estimated 1RM and next session's
+  // target. It is the only load-entry point in the client app that did not
+  // convert: app/(client)/workouts.tsx converts at the keyboard in `LogRow`
+  // and scans.tsx does the same, both through `readLift`.
+  //
+  // `readLift` also refuses text that is not a number instead of silently
+  // making it a bodyweight set, and states its bound in the unit on screen —
+  // telling somebody typing pounds that their figure is over 600 kg would be
+  // correcting them in a unit they do not use.
+  const addSet = () => {
+    const r = parseInt(reps, 10) || 0;
+    if (!r) return;
+    const load = readLift(kg, wu);
+    if (!load.ok) { Alert.alert('Check that load', load.reason); return; }
+    setSets((p) => [...p, { reps: r, kg: load.kg ?? 0 }]);
+    setReps(''); tapLight();
+  };
 
   // Cardio calories: entered from the machine/watch, or derived from avg watts.
   // With neither, there is no honest number — the entry saves without one.
@@ -155,7 +174,10 @@ export default function ScanMachine() {
       entry = { t: new Date().toISOString(), exercise: exercise.trim(), cardio: { mins: m, dist: parseFloat(dist) || 0, unit, watts: w || undefined }, kcal: estKcal() };
     } else {
       if (!sets.length) { Alert.alert('Log a set first', 'Enter reps (and weight) and tap Add set.'); return; }
-      entry = { t: new Date().toISOString(), exercise: exercise.trim(), sets: sets.map((s) => [s.reps, s.kg] as [number, number]), kcal: Math.round(sets.reduce((a, s) => a + s.reps * (s.kg || 0), 0) / 60) + sets.length * 8 };
+      // The same `strengthKcalOf` the caption above renders, so the log and
+      // the screen cannot state different figures — and `undefined` rather than
+      // a fabricated one when there was no load to estimate from.
+      entry = { t: new Date().toISOString(), exercise: exercise.trim(), sets: sets.map((s) => [s.reps, s.kg] as [number, number]), kcal: strengthKcalOf(sets) };
     }
     // `addWorkouts` resolves false only when the row never reached the server:
     // the set lives in this session's memory and is gone at the next launch.
@@ -180,7 +202,14 @@ export default function ScanMachine() {
   const inp = { flex: 1, ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 } as const;
 
   const showForm = scanned != null || manual;
-  const strengthKcal = Math.round(sets.reduce((a, s) => a + s.reps * (s.kg || 0), 0) / 60) + sets.length * 8;
+  /** Kilogram-reps moved, at the same rate the log's own estimate uses, or null
+   *  when nothing was loaded. Shared by the caption and by what is SAVED, so
+   *  the two can never state different numbers. */
+  const strengthKcalOf = (ss: { reps: number; kg: number }[]): number | undefined => {
+    const volume = ss.reduce((a, s) => a + s.reps * (s.kg || 0), 0);
+    return volume > 0 ? Math.round(volume / 60) : undefined;
+  };
+  const strengthKcal = strengthKcalOf(sets) ?? null;
   const kcalNow = estKcal();
   const G = layout.gutter;
 
@@ -327,7 +356,12 @@ export default function ScanMachine() {
                   <Field label="Reps">
                     <TextInput value={reps} onChangeText={setReps} keyboardType="numeric" style={inp} />
                   </Field>
-                  <Field label="KG" a11y="Load in kilograms">
+                  {/* The member's own unit, not a fixed "KG". The label and
+                      the conversion move together: relabelling one without the
+                      other is how a GBP gym's owner typed 50 into a box marked
+                      "Amount (GBP)" and 50 dirhams went into the ledger — see
+                      the header of scripts/check-currency.mjs. */}
+                  <Field label={wu.toUpperCase()} a11y={`Load in ${wu === 'kg' ? 'kilograms' : 'pounds'}`}>
                     <TextInput value={kg} onChangeText={setKg} keyboardType="numeric" style={inp} />
                   </Field>
                   <Ghost label="Add Set" onPress={addSet} />
@@ -347,7 +381,21 @@ export default function ScanMachine() {
                         </Pressable>
                       ))}
                     </View>
-                    <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: sp.sm }}>≈ {num(strengthKcal)} kcal, estimated from your total volume.</Text>
+                    {/* The figure and the sentence describing it have to be
+                        the same arithmetic. It said "estimated from your total
+                        volume" over `volume / 60 + sets × 8`, and that second
+                        term is not volume — three bodyweight sets at no load
+                        produced 24 kcal out of nothing at all. This is the same
+                        invention the header records removing from the CARDIO
+                        branch (`m * 8`) for the same reason; the strength
+                        branch kept its copy of it. Volume alone now, and no
+                        figure at all when there is no volume to estimate
+                        from. */}
+                    {strengthKcal != null ? (
+                      <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: sp.sm }}>≈ {num(strengthKcal)} kcal, estimated from your total volume.</Text>
+                    ) : (
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>No load on these sets, so there is nothing to estimate calories from — the session logs without a figure.</Text>
+                    )}
                   </View>
                 ) : null}
               </Section>

@@ -10,6 +10,9 @@
 // retention is inferred from attendance pattern breaks, so a member who moved
 // from classes to the floor looked exactly like a member who stopped coming.
 
+import { assertWhole, capLimit } from './rowCap';
+import { assertWrote } from './wroteRows';
+
 type Queryable = { from: (table: string) => any };
 
 export type VisitSource = 'desk' | 'qr' | 'door' | 'app' | 'manual';
@@ -187,6 +190,28 @@ export function lastSeenDays(
 
 /* ── reads ─────────────────────────────────────────────────────────────────── */
 
+/**
+ * The door log for a gym, newest first.
+ *
+ * Capped through src/lib/rowCap.ts, and this is the read that most needed it.
+ * Every caller is in the web console and every one of them turns these rows
+ * into a figure somebody acts on: "Inside now" and "Visits today" on the
+ * Overview, the conversion rate on Passes, the visits-per-month series on
+ * Analytics, and — worst of the four — `lastSeenDays` on Retention, which names
+ * a member and says how long it has been since they came in.
+ *
+ * PostgREST stops at 1000 rows and says nothing, and the order here is
+ * `entered_at desc`, so a truncated read keeps the most RECENT thousand visits
+ * and drops the older ones. Every member whose last visit fell off the end then
+ * looks like a member who has never been through the door: the retention board
+ * bands them as lost and the owner rings somebody who trained on Tuesday. That
+ * is not a smaller number, it is a false statement about a named person, so the
+ * read refuses rather than reporting it.
+ *
+ * An explicit `limit` is the caller deliberately asking for a prefix — a "last
+ * ten arrivals" strip — and is left alone: a set you asked to be cut off is not
+ * a set that was cut off behind your back.
+ */
 export async function fetchVisits(
   sb: Queryable,
   tenantId: string,
@@ -198,10 +223,13 @@ export async function fetchVisits(
     .eq('tenant_id', tenantId)
     .order('entered_at', { ascending: false });
   if (opts.sinceIso) q = q.gte('entered_at', opts.sinceIso);
-  if (opts.limit) q = q.limit(opts.limit);
+  q = q.limit(opts.limit ?? capLimit());
   const { data, error } = await q;
   if (error) throw error;
-  return (data ?? []).map(rowToVisit);
+  const rows = opts.limit
+    ? (data ?? [])
+    : assertWhole(data, opts.sinceIso ? 'visits in this period' : "this gym's door log");
+  return rows.map(rowToVisit);
 }
 
 function rowToVisit(r: any): Visit {
@@ -244,16 +272,27 @@ export async function checkIn(sb: Queryable, tenantId: string, v: CheckIn = {}):
   if (error) throw error;
 }
 
-/** Record a departure against an open visit. */
+/**
+ * Record a departure against an open visit.
+ *
+ * The count is checked, not `error` alone — see src/lib/wroteRows.ts. This
+ * update has TWO ways to match zero rows and neither of them is an error:
+ * `gym_visits_staff_u` is `tenant_id = my_tenant() AND my_role() in (trainer,
+ * owner)`, so anyone else's click is filtered away silently; and the
+ * `exited_at is null` guard below means a visit somebody already closed at the
+ * other desk matches nothing either. Without the count the desk saw the row
+ * reload unchanged, clicked Check out again, and read the gym as slow rather
+ * than as refusing.
+ */
 export async function checkOut(sb: Queryable, visitId: string, exitedAtIso?: string): Promise<void> {
-  const { error } = await sb
+  const r = await sb
     .from('gym_visits')
-    .update({ exited_at: exitedAtIso ?? new Date().toISOString() })
+    .update({ exited_at: exitedAtIso ?? new Date().toISOString() }, { count: 'exact' })
     .eq('id', visitId)
     // Only close a visit that is actually open, so a re-scan at the door cannot
     // overwrite a departure already recorded.
     .is('exited_at', null);
-  if (error) throw error;
+  assertWrote('That check-out', r);
 }
 
 /**

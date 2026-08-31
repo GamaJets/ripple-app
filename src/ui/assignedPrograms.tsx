@@ -16,6 +16,8 @@ import { USE_SUPABASE } from '../lib/config';
 import type { LoadStatus } from './loadStatus';
 import { capLimit, capped } from '../lib/rowCap';
 import { useAuthRevision } from './authRevision';
+import { writeFailure } from '../lib/wroteRows';
+import { reportError } from '../lib/reportError';
 
 interface AssignedProgramsValue {
   programs: Record<string, Program>;
@@ -94,12 +96,39 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
       return !error;
     } catch { return false; }
   };
+  /**
+   * Take a client off their coach-assigned programme.
+   *
+   * ── Why the row count, and not `error` ─────────────────────────────────
+   *
+   * `assigned_programs_coach_rw` is
+   * `coach_id = auth.uid() AND is_my_client(client_id)`. A DELETE that fails
+   * either half matches zero rows, and PostgREST answers 204 with `error`
+   * null — so `!error` was true for a delete that removed nothing, and
+   * builder.tsx's `revert` announced "Reverted to auto" over a client who is
+   * still training the programme their coach believes they took away.
+   *
+   * This is not a second-gym problem. There is ONE row per client
+   * (`onConflict: 'client_id'`), so it carries whichever coach last wrote it.
+   * When a client moves from coach A to coach B, coach B is their coach and
+   * the row is still coach A's — proved live against phgfwzpkkwdysftlgkoq by
+   * seeding exactly that: coach B could not even SELECT the programme their
+   * own client is following, and the DELETE affected 0 rows and raised
+   * nothing. Coach A's identical delete affected 1, so the count only ever
+   * rejects a write that genuinely did not happen.
+   *
+   * The local map is still cleared first, and that stays: the screen has to
+   * respond to the tap. `false` is what stops the screen ANNOUNCING it, and
+   * builder.tsx already handles it correctly.
+   */
   const clearProgram = async (clientId: string): Promise<boolean> => {
     setPrograms((p) => { const n = { ...p }; delete n[clientId]; return n; });
     if (!USE_SUPABASE || !uid) return false;
     try {
-      const { error } = await supabase.from('assigned_programs').delete().eq('client_id', clientId);
-      return !error;
+      const r = await supabase.from('assigned_programs').delete({ count: 'exact' }).eq('client_id', clientId);
+      const why = writeFailure('That programme', r);
+      if (why) { reportError('assignedPrograms.clearProgram', new Error(why), { clientId }); return false; }
+      return true;
     } catch { return false; }
   };
 

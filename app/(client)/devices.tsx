@@ -24,6 +24,7 @@ import type { WearableProvider, WorkoutSample } from '../../src/lib/wearables/ty
 import { useWearables } from '../../src/ui/wearables';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { importSources, withHr, useImportedIds, isLogged, fetchRecent } from '../../src/ui/watchImport';
+import { isWhole } from '../../src/ui/loadStatus';
 import { tapLight } from '../../src/ui/haptics';
 import { Rule, Section, SectionHead, Hero, ListRow, Cta, Ghost, Flag, Notice, fig } from '../../src/ui/kit';
 import { requestHealthAuth, writeAuthStatus, type WriteAuth } from '../../src/lib/wearables/appleHealth';
@@ -73,7 +74,21 @@ export default function Devices() {
  // half of why reconnecting appeared to do nothing.
  const linkRev = useLinkRevision();
  const [detail, setDetail] = useState<MetricKey | null>(null);
- const { log, addWorkouts, setSessionMins } = useWorkoutLog();
+ // `status`, which this screen dropped. Two things here read the log and both
+ // of them are wrong without it:
+ //
+ //   · `alreadyLogged` decides whether a watch workout is already in the log.
+ //     Against an empty-because-unread log every one of them reads as not
+ //     logged and is offered for import again — so an unread log turns the
+ //     import list into a duplicate-write path, which is the one failure on
+ //     this screen that changes the member's record rather than just describing
+ //     it wrongly.
+ //   · `planWrite` decides what to push INTO Apple Health, and the screen then
+ //     said "Your training log has no sessions yet, so there is nothing to
+ //     write" — a flat claim about the member's whole log, from a read that had
+ //     failed.
+ const { log, status: logStatus, addWorkouts, setSessionMins } = useWorkoutLog();
+ const logWhole = isWhole(logStatus);
  const apple = PROVIDERS.find((p) => p.meta.id === 'apple');
  const appleReady = !!apple && apple.isAvailable();
  // Import is no longer Apple-only: any connected provider that implements
@@ -89,7 +104,10 @@ export default function Devices() {
  const [wk, setWk] = useState<WorkoutSample[] | null>(null);
  const [wkBusy, setWkBusy] = useState(false);
  const { ids: importedIds, mark: markImported } = useImportedIds();
- const alreadyLogged = (sm: WorkoutSample) => isLogged(sm, importedIds, log);
+ // Null, not false, when the log is not whole: "we cannot tell" is a third
+ // answer and the row below renders it as one rather than as "not logged yet".
+ const alreadyLogged = (sm: WorkoutSample): boolean | null =>
+  logWhole ? isLogged(sm, importedIds, log) : (importedIds.has(sm.id) ? true : null);
  const findWorkouts = async () => {
    if (!canImport) {
      Alert.alert('Import workouts', 'Connect Apple Health or WHOOP first (in Available Devices below), then tap Find my workouts.');
@@ -146,7 +164,11 @@ export default function Devices() {
  const [hkBusy, setHkBusy] = useState(false);
  const [hkResult, setHkResult] = useState<WriteResult | null>(null);
  const [minsDraft, setMinsDraft] = useState<Record<string, string>>({});
- const hkPlan = hkLedger ? planWrite(log, hkLedger) : null;
+ // Not planned at all from a log that is not whole. `planWrite` compares the
+ // log against the ledger, so a prefix produces a plan that omits real sessions
+ // and an empty read produces "nothing to write" — both stated as fact about a
+ // permanent external record.
+ const hkPlan = hkLedger && logWhole ? planWrite(log, hkLedger) : null;
 
  const reviewHk = async () => {
   setHkBusy(true);
@@ -404,21 +426,35 @@ export default function Devices() {
           <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{sm.activity}</Text>
           <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{[wkDate(sm.start), `${sm.mins} min`, sm.distanceKm ? `${sm.distanceKm} km` : null, sm.kcal ? `${num(sm.kcal)} kcal` : null].filter(Boolean).join(' · ')}</Text>
          </View>
-         {done ? (
+         {/* Three answers, not two. `done === null` means the training log
+             could not be read whole, so we do not know whether this workout is
+             already in it — and offering Import there is offering a duplicate.
+             The button goes; the sentence explaining why is under the list. */}
+         {done === true ? (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }} accessibilityLabel={'Already in log: ' + sm.activity}>
            <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: t.brand }} />
            <Text style={{ ...ty.caption, color: t.ink3 }}>In log</Text>
           </View>
+         ) : done === null ? (
+          <Text style={{ ...ty.caption, color: t.ink3 }} accessibilityLabel={'Cannot check whether this is already logged: ' + sm.activity}>Can’t check</Text>
          ) : (
           <Ghost label="Import" onPress={() => importOne(sm)} />
          )}
         </View>
        );
       })}
-      <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.lg }}>
-       <View style={{ flex: 1 }}><Cta label="Import All" wide onPress={importAll} /></View>
-       <View style={{ flex: 1 }}><Ghost label="Refresh" onPress={findWorkouts} /></View>
-      </View>
+      {!logWhole ? (
+       <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
+        {logStatus === 'loading'
+         ? 'Reading your training log, so we can’t yet tell which of these are already in it.'
+         : 'Your training log could not be read in full, so we can’t tell which of these are already in it. Importing now would log some of them twice, so importing is off until it reads.'}
+       </Text>
+      ) : (
+       <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.lg }}>
+        <View style={{ flex: 1 }}><Cta label="Import All" wide onPress={importAll} /></View>
+        <View style={{ flex: 1 }}><Ghost label="Refresh" onPress={findWorkouts} /></View>
+       </View>
+      )}
      </View>
     )}
    </Section>
@@ -499,7 +535,16 @@ export default function Devices() {
      </View>
     ) : null}
 
-    {hkPlan == null ? (
+    {hkLedger != null && !logWhole ? (
+     // The ledger came back and the LOG did not. `planWrite` compares the two,
+     // so there is nothing honest to plan — and "nothing to write" would be a
+     // claim about the member's training rather than about this read.
+     <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.lg }}>
+      {logStatus === 'loading'
+       ? 'Reading your training log…'
+       : 'Your training log could not be read in full, so we can’t work out what is missing from Apple Health. Nothing has been written.'}
+     </Text>
+    ) : hkPlan == null ? (
      <View style={{ alignSelf: 'flex-start', marginTop: sp.lg }}>
       {hkBusy
        ? <ActivityIndicator color={t.brand} />

@@ -269,7 +269,7 @@ export default function OwnerDeletions() {
                 accessibilityRole="button"
                 accessibilityLabel="Try reading the queue again"
                 style={{ alignSelf: 'flex-start', marginTop: sp.md, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: 7 }}>
-                <Text style={{ ...ty.label, fontWeight: '600', color: t.ink2 }}>Try again</Text>
+                <Text style={{ ...ty.label, fontWeight: '600', color: t.ink2 }}>Try Again</Text>
               </Pressable>
             </View>
           ) : !loaded ? (

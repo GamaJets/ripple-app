@@ -15,6 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
+import { isWhole } from '../../src/ui/loadStatus';
 import { useSettings } from '../../src/ui/settings';
 import { volumeIn, est1RMIn, weightDeltaIn, convertedNote } from '../../src/lib/units';
 import { est1RM } from '../../src/lib/streaks';
@@ -45,7 +46,10 @@ export default function Trends() {
   // and a unit — the full costume of a measured figure. "Best week" is the
   // sharpest of them: it is the maximum over the ten weeks that loaded, so a
   // partial read quietly nominates the wrong week as the client's best ever.
-  const logKnown = logStatus !== 'error';
+  // The comment above named 'partial' and the guard did not exclude it, so the
+  // sentence describing the bug shipped alongside the bug. `isWhole` is the
+  // gate loadStatus.ts asks for and is false for 'partial' and 'loading' both.
+  const logKnown = isWhole(logStatus);
 
   // Weekly training volume (last 10 weeks, oldest → newest).
   const weeks = useMemo(() => {
@@ -117,7 +121,7 @@ export default function Trends() {
           label="Lifted This Week"
           figure={logKnown ? fig(volumeIn(thisWeek.vol, wu)?.toLocaleString()) : fig(null)}
           unit={logKnown ? wu : undefined}
-          note={!logKnown ? 'We couldn’t read your training log — this is not a week with nothing in it.'
+          note={logStatus === 'loading' ? 'Reading your training log…' : logStatus === 'partial' ? 'More logged than this screen can read at once, so the weekly figures would be short.' : !logKnown ? 'We couldn’t read your training log — this is not a week with nothing in it.'
             : thisWeek.sessions
             ? `${thisWeek.sessions} training day${thisWeek.sessions === 1 ? '' : 's'} since Monday`
             : 'No sessions logged this week yet.'}
@@ -165,7 +169,7 @@ export default function Trends() {
           <SectionHead title="Strength Trend" note="Estimated 1-rep max" />
           {exercises.length === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>
-              {logKnown ? 'Log a few sets and your strength trend shows up here.' : 'We couldn’t read your logged sets, so there is no strength trend to draw.'}
+              {logKnown ? 'Log a few sets and your strength trend shows up here.' : logStatus === 'loading' ? 'Reading your logged sets…' : logStatus === 'partial' ? 'More logged sets than this screen can read at once, so there is no honest trend to draw over them.' : 'We couldn’t read your logged sets, so there is no strength trend to draw.'}
             </Text>
           ) : (
             <>

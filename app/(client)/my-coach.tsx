@@ -370,7 +370,7 @@ export default function MyCoach() {
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{EDIT_NOTE}</Text>
                     <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.lg }}>
                       <View style={{ flex: 1 }}><Ghost label="Withdraw" onPress={withdraw} /></View>
-                      <View style={{ flex: 1 }}><Ghost label="Change it" onPress={openForm} /></View>
+                      <View style={{ flex: 1 }}><Ghost label="Change It" onPress={openForm} /></View>
                     </View>
                   </>) : (<>
                     <Text style={{ ...ty.label, color: t.ink3 }}>

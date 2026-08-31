@@ -203,7 +203,7 @@ export default function ClientCoachDocumentsScreen() {
                       </Pressable>
 
                       <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
-                        <Ghost label="Read it" onPress={() => open(d)} />
+                        <Ghost label="Read It" onPress={() => open(d)} />
                         {outstanding(d) ? (
                           <Cta
                             label={busyId === d.id ? 'Saving…' : 'Accept'}

@@ -972,7 +972,7 @@ export default function Builder() {
                               trusting the marker on every other row. */}
                           {e.group || e.hasDemo ? (
                             <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
-                              {[e.group, e.hasDemo ? 'illustrated' : null].filter(Boolean).join(' · ')}
+                              {[e.group, e.hasDemo ? 'Illustrated' : null].filter(Boolean).join(' · ')}
                             </Text>
                           ) : null}
                         </View>

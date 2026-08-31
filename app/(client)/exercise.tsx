@@ -53,7 +53,14 @@ export default function ExerciseScreen() {
   const goBack = useBackTo(from);
   const name = (raw || '').trim();
   const { detail, status, signedOut } = useExerciseDetail(name);
-  const { videos } = useExerciseVideos();
+  // `status`, not just `videos`. exerciseVideos.ts says so in as many words:
+  // "`[]` with status 'error' is not the same claim as `[]` with status
+  // 'ready', and the screens must not conflate them." This screen conflated
+  // them — a failed video read left `clip` null, fell through to the last
+  // branch below, and told a client "Nobody has filmed this movement" about a
+  // clip their coach uploaded last week. The catalogue read already had its own
+  // error branch; the video read had none.
+  const { videos, status: videoStatus } = useExerciseVideos();
   const cd = useClientData();
 
   // The client's own coach first. cd.trainerId is who actually trains them, so
@@ -146,8 +153,16 @@ export default function ExerciseScreen() {
           // actually changes it, rather than a grey silhouette implying a
           // demonstration we do not have.
           <Notice tone={t.ink3} kicker="Demonstration"
-            title={detail ? 'No Demonstration Yet' : signedOut ? 'Sign In to See This' : 'Not in Our Catalogue'}
-            note={detail
+            title={videoStatus === 'loading' ? 'Looking for a Clip…'
+              : videoStatus === 'error' ? 'We Couldn’t Check for a Clip'
+              : detail ? 'No Demonstration Yet' : signedOut ? 'Sign In to See This' : 'Not in Our Catalogue'}
+            note={videoStatus === 'loading'
+              ? 'Your coach’s video library is still being read.'
+              : videoStatus === 'error'
+              // "Nobody has filmed this" is a claim about the coach's library,
+              // and a failed read of that library is not evidence for it.
+              ? 'Your coach’s video library could not be read, so we cannot say whether there is a clip for this movement. There may well be one. The written guide below is unaffected.'
+              : detail
               ? 'Nobody has filmed this movement and the catalogue has no reference frames for it. Your coach can add a clip from their app.'
               // Not "this movement is not in our catalogue" — that is a claim
               // about our data, and while signed out we have not been allowed

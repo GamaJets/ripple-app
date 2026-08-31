@@ -68,7 +68,7 @@ import type { LoadStatus } from '../ui/loadStatus';
  *  tsconfig.test.json or run in the web console). The UI assigns these straight
  *  into `IconName`, so a value added here that Icon does not draw fails to
  *  typecheck at the use site. */
-export type InboxIcon = 'bell' | 'calendar' | 'message' | 'sparkle' | 'heart' | 'dumbbell' | 'trophy';
+export type InboxIcon = 'bell' | 'calendar' | 'message' | 'sparkle' | 'heart' | 'dumbbell' | 'trophy' | 'info' | 'pencil';
 
 export interface InboxDecision {
   /** Whether to write a `notifications` row alongside the push. */
@@ -97,6 +97,15 @@ const ICON_BY_ROUTE: ReadonlyArray<readonly [string, InboxIcon]> = [
   ['/(client)/messages', 'message'],
   ['/(trainer)/chat', 'message'],
   ['/(client)/injuries', 'heart'],
+  // The intake ask has been sending a push with this route since src/ui/intake.ts
+  // was written, and every one of those rows drew the generic bell — the icon a
+  // row gets when nothing in this list matches it, which is indistinguishable
+  // from "we have no idea what this is". A pencil, because the whole content of
+  // that notification is that the client has a form to fill in.
+  ['/(client)/intake', 'pencil'],
+  // A notice from a coach or a gym. Not the bell either: the bell is the
+  // fallback, and a noticeboard is a specific thing.
+  ['/(client)/notices', 'info'],
   ['/(client)/explore', 'sparkle'],
   ['/(client)/offers', 'sparkle'],
   ['/(client)/calendar', 'calendar'],
@@ -190,6 +199,19 @@ export const KNOWN_PUSHES: ReadonlyArray<{
   // either way: it writes a `messages` row first, and part 26's trigger records
   // that, which is the same reason the chat rule drops it.
   { where: 'app/(trainer)/dashboard.tsx', title: 'A nudge from your coach', body: 'Hey Sam — checking in! How is your week going?', route: '/(client)/messages' },
+  // The two notices. Both are RECORDED whether or not the author asked for a
+  // push — see src/ui/announcements.tsx — so these two rows are the only ones
+  // in this catalogue that describe a send which may happen with no push at
+  // all. The body is the author's own words; the heading is this app's.
+  { where: 'src/ui/announcements.tsx', title: 'A notice from your coach', body: 'No 6pm class this Thursday — the room is being re-floored.', route: '/(client)/notices' },
+  { where: 'src/ui/announcements.tsx', title: 'A notice from your gym', body: 'We are closed Monday for the public holiday. Normal hours from Tuesday.', route: '/(client)/notices' },
+  // The invoice. Like the nudge above it does NOT go through sendPush() — it
+  // calls recordInbox() directly, because an invoice is not worth waking a
+  // phone for and the inbox row is the durable half anyway. It is listed here
+  // so that reading this catalogue does not leave somebody believing an invoice
+  // notification is a push, and so the classification of its wording is
+  // visible: it has a body, it is not chat, and it is recorded.
+  { where: 'src/ui/coachInvoices.ts', title: 'An invoice from your coach', body: 'Invoice 0007 for AED 450.00 — Ten sessions. Your coach states this amount is being requested.', route: null },
 ];
 
 /* ── Where a stored row is allowed to send you ─────────────────────────────

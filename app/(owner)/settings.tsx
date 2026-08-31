@@ -43,6 +43,7 @@ import { sp, layout, hairline, type as ty, radius } from '../../src/theme/scale'
 import { BuildInfo } from '../../src/ui/BuildInfo';
 import { useAuth } from '../../src/ui/auth';
 import { useAppLock } from '../../src/ui/appLock';
+import { useSettings } from '../../src/ui/settings';
 import { lockSettingNote } from '../../src/lib/appLock';
 import { useTenant } from '../../src/ui/tenant';
 import { exportMyDataDetailed, requestAccountDeletion, withdrawAccountDeletion } from '../../src/lib/gdpr';
@@ -87,6 +88,7 @@ export default function OwnerSettings() {
   const router = useRouter();
   const auth = useAuth();
   const lock = useAppLock();
+  const st = useSettings();
   const toggleLock = async () => {
     if (!lock.available) {
       Alert.alert('Not available on this device',
@@ -99,6 +101,45 @@ export default function OwnerSettings() {
       Alert.alert('Not turned on', `${lock.label} was not confirmed, so the lock is still off.`);
     }
   };
+
+  // ── The owner had no notification preference at all ───────────────────────
+  //
+  // Not a broken switch — no switch, the same gap the coach app had before
+  // app/(trainer)/settings.tsx closed it. Repple Studio receives pushes like
+  // everybody else, and src/ui/auth.tsx registered every signed-in owner's
+  // handset in `push_tokens` unconditionally, so an owner was the one role in
+  // this product that could be reached and could not say no. Members could opt
+  // out, coaches could opt out, the person who runs the gym could not.
+  //
+  // This is the client's mechanism reused, not a third implementation.
+  // `useSettings()` is mounted app-wide in app/_layout.tsx, so it already wraps
+  // these routes. The switch does not filter sends: it takes this handset's row
+  // OUT of `push_tokens`, which is the table the send-push edge function
+  // resolves recipients from, so it reaches every sender at once rather than
+  // each of two dozen call sites. src/ui/settings.tsx carries the long note.
+  const togglePush = async () => {
+    const want = !st.notifPush;
+    const res = await st.setPushEnabled(want);
+    if (res === 'on' || res === 'off') return;
+    if (res === 'no-build') {
+      Alert.alert('Not on this build yet',
+        'This version of the app cannot receive push notifications at all — that needs a new build from the App Store, not a setting. Your choice has been saved and will apply as soon as you have one.');
+      return;
+    }
+    if (res === 'os-refused') {
+      // Not "…switched off for Repple Studio". This is a white-label build and
+      // the app on this phone may not be called Repple at all.
+      Alert.alert('Turned off on your phone',
+        "Notifications are switched off for this app in your phone's own Settings, so nothing can be delivered until you turn them back on there. Your choice here has been saved.");
+      return;
+    }
+    // 'off-pending'. Said out loud rather than hoped over: somebody who has just
+    // turned notifications off and then gets one needs to have been told it
+    // might happen. The reconciler in src/ui/settings.tsx retries every launch.
+    Alert.alert('Saved, but not confirmed',
+      "Push notifications are off from now on, but we couldn't confirm this phone has been taken off the list — you may still get one until the next time you open the app. Nothing else has changed.");
+  };
+
   const { tenant, loading: tenantLoading } = useTenant();
 
   // null = nothing read yet. A loaded object may still carry nulls, one per
@@ -334,6 +375,34 @@ export default function OwnerSettings() {
               <View style={{ width: 21, height: 21, borderRadius: radius.pill, backgroundColor: lock.enabled ? t.brandInk : t.ink3, alignSelf: lock.enabled ? 'flex-end' : 'flex-start' }} />
             </View>
           </Pressable>
+        </Section>
+
+        <Rule />
+
+        {/* Notifications.
+            An owner could be reached and could not say no — auth.tsx registered
+            every signed-in handset in `push_tokens` and this screen offered no
+            way out of it. The switch is the client app's, not a third
+            implementation: it removes this handset's row from `push_tokens`,
+            the table send-push resolves recipients from, so it reaches every
+            sender at once rather than each of two dozen call sites. */}
+        <Section>
+          <SectionHead title="Notifications" />
+          <Pressable onPress={() => { void togglePush(); }} accessibilityRole="switch"
+            accessibilityLabel="Push Notifications"
+            accessibilityState={{ checked: st.notifPush }}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
+            <View style={{ flex: 1 }}>
+              <Text style={{ ...ty.body, color: t.ink }}>Push Notifications</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>Class bookings, member messages and requests to join</Text>
+            </View>
+            <View style={{ width: 46, height: 27, borderRadius: radius.pill, backgroundColor: st.notifPush ? t.brand : t.surface3, borderWidth: hairline, borderColor: st.notifPush ? t.brand : t.ring, justifyContent: 'center', paddingHorizontal: 3 }}>
+              <View style={{ width: 21, height: 21, borderRadius: radius.pill, backgroundColor: st.notifPush ? t.brandInk : t.ink3, alignSelf: st.notifPush ? 'flex-end' : 'flex-start' }} />
+            </View>
+          </Pressable>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+            Turning this off takes this phone off the list entirely. Your gym runs exactly as before — you will see what happened next time you open the app rather than as it happens, and your other devices are unaffected.
+          </Text>
         </Section>
 
         <Rule />
