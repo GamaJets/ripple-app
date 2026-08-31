@@ -10,7 +10,7 @@
 // a fresh install does not ask twice.
 import { useCallback, useEffect, useState } from 'react';
 import { View, Text, ScrollView, Pressable, Modal, ActivityIndicator } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from './components';
 import { Icon } from './Icon';
 import { Cta } from './kit';
@@ -103,10 +103,15 @@ function Tick({ on, label, detail, onPress }: {
   );
 }
 
-function WaiverScreen({ state, accept, reload }: {
+function WaiverScreen({ state, accept, reload, insets }: {
   state: WaiverState;
   accept: () => Promise<{ ok: boolean; error?: string }>;
   reload: () => void;
+  /** Measured OUTSIDE the modal and passed in. A React Native <Modal> is its own
+   *  native view hierarchy, so react-native-safe-area-context's provider does
+   *  not reach inside it and every inset reads as 0 — which put this screen's
+   *  heading underneath the clock and the dynamic island. */
+  insets: { top: number; bottom: number };
 }) {
   const t = useTheme();
   const [ticked, setTicked] = useState<Record<string, boolean>>({});
@@ -125,8 +130,8 @@ function WaiverScreen({ state, accept, reload }: {
   };
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }}>
+    <View style={{ flex: 1, backgroundColor: t.bg, paddingTop: insets.top }}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 + insets.bottom }}>
         <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg }}>Before you start</Text>
         <Text style={{ ...ty.title, color: t.ink, marginTop: sp.xs }}>
           Read this and agree to carry on
@@ -170,7 +175,7 @@ function WaiverScreen({ state, accept, reload }: {
           Your agreement is recorded against your account with the date. Version {WAIVER_VERSION}.
         </Text>
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -179,6 +184,7 @@ function WaiverScreen({ state, accept, reload }: {
  *  reader was heading for is waiting when they agree. */
 export function WaiverGate({ children }: { children: React.ReactNode }) {
   const t = useTheme();
+  const insets = useSafeAreaInsets();
   const { state, applies, accept, reload } = useWaiver();
   // 'loading' does not block and does not pass: the app is already behind a
   // splash at this point, and the read is one query.
@@ -193,7 +199,7 @@ export function WaiverGate({ children }: { children: React.ReactNode }) {
             <ActivityIndicator color={t.brand} />
           </View>
         ) : (
-          <WaiverScreen state={state} accept={accept} reload={reload} />
+          <WaiverScreen state={state} accept={accept} reload={reload} insets={insets} />
         )}
       </Modal>
     </>
