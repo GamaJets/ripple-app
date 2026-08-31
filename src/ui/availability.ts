@@ -24,7 +24,12 @@ import type { LoadStatus } from './loadStatus';
 import { capLimit, capped } from '../lib/rowCap';
 import { useAuthRevision } from './authRevision';
 
-export interface AvailSlot { id: string; dow: number; hour: number; dur: number }
+export interface AvailSlot { id: string; dow: number; hour: number; minute: number; dur: number }
+
+/** Slot ordering, in one place: day, then hour, then minute. Written once
+ *  because it is applied in four (the server read, `persist`, and both sorts
+ *  that used to stop at the hour and therefore shuffled 9:45 above 9:15). */
+const byTime = (a: AvailSlot, b: AvailSlot) => a.dow - b.dow || a.hour - b.hour || a.minute - b.minute;
 
 const KEY = 'repple.trainer.availability';
 let SEQ = 1;
@@ -39,7 +44,16 @@ export function useAvailability() {
     let cancelled = false;
     (async () => {
       let local: AvailSlot[] = [];
-      try { const raw = await AsyncStorage.getItem(KEY); if (raw) { local = JSON.parse(raw); if (!cancelled) setSlots(local); } } catch { /* no cached copy; the server read below is the only source */ }
+      // The cached copy predates `minute`, so every slot in it is on the hour.
+      // Normalised on the way in rather than trusted, for the same reason the
+      // server rows are.
+      try {
+        const raw = await AsyncStorage.getItem(KEY);
+        if (raw) {
+          local = (JSON.parse(raw) as AvailSlot[]).map((sl) => ({ ...sl, minute: Number(sl.minute) || 0 }));
+          if (!cancelled) setSlots(local);
+        }
+      } catch { /* no cached copy; the server read below is the only source */ }
       // Local-only build: this device IS the store, so what is on screen is
       // authoritative and there is no absent server to misreport.
       if (!USE_SUPABASE) { if (!cancelled) setStatus('ready'); return; }
@@ -66,8 +80,8 @@ export function useAvailability() {
         // no future writer is obliged to preserve, and the cost of the limit is
         // nothing. `capped()` below is what makes it a claim rather than a hope.
         const { data: rows, error } = await supabase.from('trainer_availability')
-          .select('id, dow, hour, dur').eq('trainer_id', u)
-          .order('dow', { ascending: true }).order('hour', { ascending: true })
+          .select('id, dow, hour, minute, dur').eq('trainer_id', u)
+          .order('dow', { ascending: true }).order('hour', { ascending: true }).order('minute', { ascending: true })
           .limit(capLimit());
         if (cancelled) return;
         // This early return is the whole bug: the cached slots stayed on screen
@@ -75,8 +89,13 @@ export function useAvailability() {
         if (error) { setStatus('error'); return; }
         const page = capped(rows);
         if (page.rows.length) {
-          const server: AvailSlot[] = page.rows.map((r: any) => ({ id: String(r.id), dow: r.dow, hour: r.hour, dur: r.dur }));
-          setSlots(server.sort((a, b) => a.dow - b.dow || a.hour - b.hour));
+          // `minute` arrived after this table did, so a row written by an
+          // older build has no value for it in an older CACHE either. Null
+          // there means on the hour, which is what those rows have always
+          // meant — coerced rather than left undefined, because undefined
+          // reaches `String(m).padStart` and renders ":NaN".
+          const server: AvailSlot[] = page.rows.map((r: any) => ({ id: String(r.id), dow: r.dow, hour: r.hour, minute: Number(r.minute) || 0, dur: r.dur }));
+          setSlots(server.sort(byTime));
           // Deliberately not cached when short. This copy is what the coach
           // sees offline, and writing a truncated grid over the good one would
           // turn a temporary gap into the device's idea of their week.
@@ -86,7 +105,7 @@ export function useAvailability() {
           // Server has nothing, this device does: push the device copy up. Until
           // that insert lands the local slots are still unconfirmed, so a
           // failure here leaves the status at 'error' rather than 'ready'.
-          const { error: upErr } = await supabase.from('trainer_availability').insert(local.map((sl) => ({ trainer_id: u, dow: sl.dow, hour: sl.hour, dur: sl.dur })));
+          const { error: upErr } = await supabase.from('trainer_availability').insert(local.map((sl) => ({ trainer_id: u, dow: sl.dow, hour: sl.hour, minute: Number(sl.minute) || 0, dur: sl.dur })));
           setStatus(upErr ? 'error' : 'ready');
         } else {
           // Server confirmed: this coach genuinely has no availability set.
@@ -98,20 +117,25 @@ export function useAvailability() {
   }, [authRev]);
 
   const persist = (next: AvailSlot[]) => {
-    const sorted = [...next].sort((a, b) => a.dow - b.dow || a.hour - b.hour);
+    const sorted = [...next].sort(byTime);
     setSlots(sorted);
     try { AsyncStorage.setItem(KEY, JSON.stringify(sorted)); } catch { /* ignore */ }
   };
 
   /** Resolves true only once the slot is on the server, where the coach's other
    *  devices and the session generator will see it. False means this phone only. */
-  const addSlot = async (dow: number, hour: number, dur: number): Promise<boolean> => {
-    if (slots.some((s) => s.dow === dow && s.hour === hour)) return false; // no dup
+  const addSlot = async (dow: number, hour: number, minute: number, dur: number): Promise<boolean> => {
+    // The duplicate check runs on the minute as well. On the hour alone it
+    // refused a coach who already offered 9:00 from adding 9:30 — silently,
+    // since the caller only sees false, which also means "saved on this phone
+    // only". A unique index says the same thing server-side so two of their
+    // devices cannot race past it.
+    if (slots.some((s) => s.dow === dow && s.hour === hour && s.minute === minute)) return false;
     const localId = 'av' + Date.now().toString(36) + SEQ++;
-    persist([...slots, { id: localId, dow, hour, dur }]);
+    persist([...slots, { id: localId, dow, hour, minute, dur }]);
     if (!USE_SUPABASE || !uid) return false;
     try {
-      const { data, error } = await supabase.from('trainer_availability').insert({ trainer_id: uid, dow, hour, dur }).select('id').single();
+      const { data, error } = await supabase.from('trainer_availability').insert({ trainer_id: uid, dow, hour, minute, dur }).select('id').single();
       const sid = data?.id;
       if (error || !sid) return false;
       setSlots((p) => p.map((sl) => (sl.id === localId ? { ...sl, id: String(sid) } : sl)));
@@ -134,8 +158,11 @@ export function useAvailability() {
   return { slots, status, addSlot, removeSlot };
 }
 
-/** Concrete dates for a weekly slot over the next `weeks` weeks (from today). */
-export function upcomingDates(dow: number, hour: number, weeks = 4, from = new Date()): Date[] {
+/** Concrete dates for a weekly slot over the next `weeks` weeks (from today).
+ *
+ *  `minute` defaults to 0 so that a caller written before quarter hours
+ *  existed still produces the on-the-hour dates it always did. */
+export function upcomingDates(dow: number, hour: number, minute = 0, weeks = 4, from = new Date()): Date[] {
   const out: Date[] = [];
   const base = new Date(from.getFullYear(), from.getMonth(), from.getDate());
   for (let w = 0; w < weeks; w++) {
@@ -143,7 +170,7 @@ export function upcomingDates(dow: number, hour: number, weeks = 4, from = new D
       const cand = new Date(base);
       cand.setDate(base.getDate() + w * 7 + d);
       if (cand.getDay() === dow) {
-        cand.setHours(hour, 0, 0, 0);
+        cand.setHours(hour, minute, 0, 0);
         if (cand.getTime() > from.getTime()) out.push(cand);
         break;
       }

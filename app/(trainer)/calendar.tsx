@@ -100,6 +100,7 @@ export default function TrainerSchedule() {
   const [blkBusy, setBlkBusy] = useState(false);
   const [avDow, setAvDow] = useState(1);
   const [avHour, setAvHour] = useState(9);
+  const [avMinute, setAvMinute] = useState(0);
   // `addSession(...).ok` means only that the slot did not overlap one already on
   // this screen. Whether it reached the server is `saved`, and that is the half
   // that decides whether a client can ever see the slot — so a slot the server
@@ -110,7 +111,7 @@ export default function TrainerSchedule() {
     const saves: Promise<boolean>[] = [];
     let overlapped = 0;
     for (const sl of availSlots) {
-      for (const d of upcomingDates(sl.dow, sl.hour, 4)) {
+      for (const d of upcomingDates(sl.dow, sl.hour, sl.minute, 4)) {
         const ses: TrainingSession = { id: 'ms' + (SEQ++), trainerId: '', clientId: null, startsAt: d.toISOString(), durationMin: sl.dur, status: 'available', released: false };
         const res = addSession(ses);
         if (res.ok) saves.push(res.saved ?? Promise.resolve(false));
@@ -378,6 +379,11 @@ export default function TrainerSchedule() {
   // hour then minute is two short reads; one list of every quarter hour is a
   // drag through a haystack.
   const MINUTES = [0, 15, 30, 45];
+  /** A weekly slot's start, written once so the list row, the heading above the
+   *  picker and the Add button cannot drift apart. Minutes are always shown,
+   *  including :00 — "Wed 9am" and "Wed 9:15am" side by side reads as two
+   *  different kinds of thing. */
+  const avTime = (h: number, m: number) => `${h % 12 || 12}:${String(m).padStart(2, '0')}${h >= 12 ? 'pm' : 'am'}`;
   const DURS = [30, 45, 60, 90];
 
   const G = layout.gutter;
@@ -593,7 +599,7 @@ export default function TrainerSchedule() {
                 {i > 0 ? <Rule /> : null}
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
                   <Icon name="clock" size={16} color={t.brand} />
-                  <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: t.ink, flex: 1 }}>{DOW[sl.dow]} · {sl.hour % 12 || 12}{sl.hour >= 12 ? 'pm' : 'am'} · {sl.dur}min</Text>
+                  <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: t.ink, flex: 1 }}>{DOW[sl.dow]} · {avTime(sl.hour, sl.minute)} · {sl.dur}min</Text>
                   <Pressable onPress={() => removeAvail(sl.id)} hitSlop={8} accessibilityRole="button" accessibilityLabel={`Remove ${DOW[sl.dow]} slot`}>
                     <Icon name="minus" size={16} color={t.ink3} />
                   </Pressable>
@@ -605,12 +611,32 @@ export default function TrainerSchedule() {
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.md }}>
               {DOW.map((d, i) => <Chip key={d} t={t} label={d} on={avDow === i} onPress={() => setAvDow(i)} />)}
             </ScrollView>
+            {/* The same two rows the Add Session sheet uses, deliberately: hour
+                then quarter. This sheet was still on a hand-written 6am–8pm
+                list of whole hours — the assumption about when training happens
+                that HOURS above exists to refuse, and no way at all to offer
+                6:45 every Tuesday. */}
+            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.md }}>Time · {avTime(avHour, avMinute)}</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.md }}>
-              {[6,7,8,9,10,11,12,13,14,15,16,17,18,19,20].map((h) => (
+              {HOURS.map((h) => (
                 <Chip key={h} t={t} label={`${h % 12 || 12}${h >= 12 ? 'pm' : 'am'}`} on={avHour === h} onPress={() => setAvHour(h)} />
               ))}
             </ScrollView>
-            <Ghost label={`Add ${DOW[avDow]} ${avHour % 12 || 12}${avHour >= 12 ? 'pm' : 'am'}`} icon="plus" onPress={() => addAvail(avDow, avHour, 60)} />
+            <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.md }}>
+              {MINUTES.map((m) => (
+                <View key={m} style={{ flex: 1 }}>
+                  <Pressable onPress={() => setAvMinute(m)} accessibilityRole="button"
+                    accessibilityState={{ selected: m === avMinute }}
+                    accessibilityLabel={avTime(avHour, m)}
+                    style={{ paddingVertical: sp.sm, borderRadius: radius.pill, alignItems: 'center', backgroundColor: m === avMinute ? t.brand : t.surface2 }}>
+                    <Text style={{ ...ty.label, ...numeric, fontWeight: m === avMinute ? '500' : '400', color: m === avMinute ? t.brandInk : t.ink2 }}>
+                      :{String(m).padStart(2, '0')}
+                    </Text>
+                  </Pressable>
+                </View>
+              ))}
+            </View>
+            <Ghost label={`Add ${DOW[avDow]} ${avTime(avHour, avMinute)}`} icon="plus" onPress={() => addAvail(avDow, avHour, avMinute, 60)} />
           </ScrollView>
           <View style={{ height: sp.lg }} />
           <Cta label="Generate Open Slots · Next 4 Weeks" wide onPress={generateSlots} />
