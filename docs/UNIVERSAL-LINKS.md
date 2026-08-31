@@ -35,8 +35,15 @@ Replace `REPLACE_WITH_PLAY_APP_SIGNING_SHA256` with the SHA-256 fingerprint of
 the certificate the app is **actually signed with**. Under Play App Signing that
 is **Google's** signing certificate, not the upload key:
 
-> Play Console → your app → Test and release → **App integrity** → App signing →
-> SHA-256 certificate fingerprint
+> Play Console → your app → Test and release → **Protected with Play** →
+> app signing → SHA-256 certificate fingerprint
+
+(Google moved this: the old **App integrity** page now just redirects here.)
+
+Play Console can also hand you this whole file already filled in — look for the
+Digital Asset Links / deep-links section, which generates the JSON for the app's
+signing key. If you use that, keep the `paths`/relation shape below rather than
+pasting theirs wholesale, so it stays scoped to what we intend.
 
 Format is uppercase hex with colons, e.g. `AB:CD:12:…`. Take the app-signing
 one; taking the upload key's is the usual mistake and verifies against nothing.
@@ -52,3 +59,20 @@ signed with a different key — add its fingerprint to the same array.
 Android will also tell you directly, on a device with the app installed:
 
     adb shell pm get-app-links com.washateria.repple
+
+## Fingerprints on record
+
+Three Play listings, three signing certificates. Only the CLIENT app's belongs
+in `assetlinks.json` today, because `/join` is scoped to the client app.
+
+| App | Package | SHA-256 (Play app signing) |
+| --- | --- | --- |
+| Repple (client) | `com.washateria.repple` | **still needed** — this is the one `/join` requires |
+| Repple Coach | `com.washateria.repple.coach` | `E6:A1:5C:00:C9:36:7A:99:B2:DD:15:25:72:1F:38:5E:B0:E1:AC:C9:8C:89:B5:31:F8:BB:6C:09:93:CD:8C:DE` |
+| Repple Studio | `com.washateria.repple.studio` | not needed yet |
+
+The coach one is kept for later, not used now. It becomes relevant only if the
+coach app is ever given app links of its own — password reset being the obvious
+candidate, which today all three apps share and none of them claims, precisely
+so the OS never has to guess between them.
+
