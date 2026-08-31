@@ -41,7 +41,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Cta, Ghost, Notice, PartialRead } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Cta, Ghost, Flag, Notice, PartialRead } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, value } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
@@ -56,7 +56,7 @@ import { buildProgram, type Program } from '../../src/lib/programs';
 import { guardOverwrite } from '../../src/lib/overwriteGuard';
 import { guardInjuries } from '../../src/lib/injuryGate';
 import { useInjuryAcks } from '../../src/ui/injuryAcks';
-import { areaLabel, type Injury } from '../../src/lib/injuries';
+import { areaLabel, injuryFlag, type Injury } from '../../src/lib/injuries';
 import { goalToEnum, goalsDisagree } from '../../src/lib/rosterMerge';
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -268,6 +268,12 @@ export default function Builder() {
   const removeDay = (di: number) => setDays((ds) => ds.filter((_, i) => i !== di));
 
   const totalExercises = days.reduce((a, d) => a + d.exercises.length, 0);
+  // Per-exercise flags are easy to scroll past on a six-day programme, and the
+  // decision that matters is the one taken at the Assign button. This counts
+  // what is actually in the plan so that button can be preceded by the fact
+  // rather than by silence.
+  const loadsInjury = days.flatMap((d) => d.exercises)
+    .filter((e) => injuryFlag(e.name, e.group || '', clientInjuries) !== null);
   const canAssign = !!clientId && totalExercises > 0;
 
   // ── what the picker searches ────────────────────────────────────────────
@@ -575,6 +581,27 @@ export default function Builder() {
                       <View style={{ flex: 1 }}>
                         <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{e.name}</Text>
                         {e.group ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{e.group}</Text> : null}
+                        {/* The gate makes a coach READ what a client cannot do.
+                            It did nothing to help them act on it: they could
+                            acknowledge a moderate knee, then put squats, lunges
+                            and leg press in the programme and assign it, with
+                            this screen silent throughout — and the client's own
+                            app would quietly flag or swap those movements
+                            afterwards. The coach is the one making the decision,
+                            so they are told at the moment they are making it.
+
+                            `injuryFlag`'s own sentence is written for the client
+                            ("may stress YOUR knee"), so the wording is composed
+                            here instead of borrowed. */}
+                        {(() => {
+                          const f = injuryFlag(e.name, e.group || '', clientInjuries);
+                          if (!f) return null;
+                          return (
+                            <Text style={{ ...ty.caption, color: t.warn, marginTop: 3 }}>
+                              Loads their {areaLabel(f.injury.area).toLowerCase()} · {f.injury.severity}
+                            </Text>
+                          );
+                        })()}
                       </View>
                     </Pressable>
                     <Pressable onPress={() => removeExercise(di, e.key)} accessibilityRole="button" accessibilityLabel="Remove exercise" hitSlop={8}
@@ -650,6 +677,19 @@ export default function Builder() {
           <View style={{ opacity: canAssign && planGuard.allowed && injuryGate.allowed ? 1 : 0.4 }} pointerEvents={canAssign && planGuard.allowed && injuryGate.allowed ? 'auto' : 'none'}>
             <Cta wide label={injuryGate.label ?? planGuard.label ?? `Assign to ${client?.name ?? 'client'} · ${num(totalExercises)} exercises`} onPress={assign} />
           </View>
+          {/* Not a gate. A coach may have every reason to programme around a
+              knee deliberately — that is their judgement and their client. It
+              is only refusing to let them do it without noticing. */}
+          {injuryGate.allowed && loadsInjury.length ? (
+            <View style={{ marginBottom: sp.md }}>
+              <Flag tone={t.warn}>
+                {num(loadsInjury.length)} movement{loadsInjury.length === 1 ? '' : 's'} in this programme
+                load something {client?.name.split(' ')[0] ?? 'this client'} has disclosed
+                ({[...new Set(loadsInjury.map((e) => areaLabel(injuryFlag(e.name, e.group || '', clientInjuries)!.injury.area).toLowerCase()))].join(', ')}).
+                Each one is marked above.
+              </Flag>
+            </View>
+          ) : null}
           {!injuryGate.allowed ? (
             <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.sm }}>
               {injuryGate.reason}

@@ -61,6 +61,7 @@ import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
 import { capLimit, capped } from '../../src/lib/rowCap';
+import { areaLabel } from '../../src/lib/injuries';
 import { worstStatus, type LoadStatus } from '../../src/ui/loadStatus';
 import {
   assessDrift, fetchClientActivity, isQueryableId, DEFAULT_WINDOWS, DRIFT_LABEL,
@@ -547,6 +548,66 @@ export default function ClientScreen() {
                 tone={ap.status === 'error' ? t.warn : undefined}
                 onPress={go('/(trainer)/builder')} />
             </View>
+          </Section>
+        ) : null}
+
+        <Rule />
+
+        {/* ── what they cannot do ─────────────────────────────────────────────
+            The coach's side of this screen never read injuries at all. A client
+            disclosing a knee reached their coach as a flag on the roster row and
+            a gate on the programme builder, and nowhere on the page about them —
+            so the one place a coach looks up a person before deciding what to
+            put them through was the one place it was missing.
+
+            It sits above the hero deliberately. Everything below is how they are
+            going; this is what they must not be given, and it is the wrong thing
+            to find after you have already read three sections. */}
+        {id ? (
+          <Section>
+            <SectionHead title="Injuries They Have Disclosed" />
+            {unasked ? (
+              <Flag tone={t.ink3}>{unasked}</Flag>
+            ) : r.status === 'error' ? (
+              // The roster is where these come from, so a refused read means
+              // unknown — never "they have disclosed nothing". Saying the second
+              // on this particular screen is how somebody gets programmed into
+              // an injury they took the trouble to tell you about.
+              <Flag tone={t.warn}>
+                Your roster could not be read, so anything {who} has disclosed could not be read
+                either. This is not a statement that they have disclosed nothing.
+              </Flag>
+            ) : !client?.injuries ? (
+              <Text style={{ ...ty.body, color: t.ink2 }}>
+                Nothing on record for {who}. Injuries are disclosed by the client in their own app,
+                under Injuries &amp; Limitations.
+              </Text>
+            ) : client.injuries.length === 0 ? (
+              <Text style={{ ...ty.body, color: t.ink2 }}>
+                {who} has disclosed nothing they are working around. They can add anything in their
+                own app, under Injuries &amp; Limitations, and it appears here.
+              </Text>
+            ) : (
+              <>
+                {client.injuries.map((inj, i) => (
+                  <View key={`${inj.area}-${i}`} style={{ paddingVertical: sp.md, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
+                      <Text style={{ ...ty.body, fontWeight: '600', color: t.ink }}>{areaLabel(inj.area)}</Text>
+                      <Text style={{ ...ty.caption, color: t.ink3, textTransform: 'capitalize' }}>{inj.severity}</Text>
+                      {inj.isNew ? <Flag tone={t.warn}>New</Flag> : null}
+                    </View>
+                    {inj.note ? (
+                      <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.xs }}>“{inj.note}”</Text>
+                    ) : null}
+                  </View>
+                ))}
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                  Their own words, and only what they still have — anything they have marked recovered
+                  drops off. Their programme cannot be assigned until you have read these, and their
+                  app already flags or swaps movements that load them.
+                </Text>
+              </>
+            )}
           </Section>
         ) : null}
 

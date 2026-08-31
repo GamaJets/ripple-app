@@ -13,7 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Notice, Cta, Ghost } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Notice, Cta, Ghost, ListRow, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
 import { INJURY_AREAS, areaLabel, newInjuryId, type InjurySeverity } from '../../src/lib/injuries';
@@ -79,6 +79,25 @@ export default function Injuries() {
         <View style={{ marginTop: sp.md }}>
           <Cta label="Disclose an Injury" onPress={() => setOpen(true)} wide />
         </View>
+
+        {/* The second way in, not a replacement for the first. Typing it in is
+            still the shortest path and stays exactly where it was; this is for
+            somebody holding a physio report who would otherwise have to
+            translate it themselves. What comes back from a document is a set of
+            SUGGESTIONS they confirm one at a time — see app/(client)/injury-doc
+            for why it is never allowed to write on its own. */}
+        <ListRow icon="camera" title="Read it off a document"
+          note="Physio report, scan or doctor's note. You confirm what it finds — nothing is added on its own."
+          onPress={() => router.push('/(client)/injury-doc')} />
+
+        {/* An injury on this screen is in the list; whether it reached the
+            server is a separate fact, and it is the one that decides if the
+            coach ever sees it. Said here rather than left to be discovered. */}
+        {c.saveFailed ? (
+          <Flag tone={t.crit} style={{ marginTop: sp.sm }}>
+            Your last change has not reached the server yet, so your coach may still be seeing the old list. It keeps retrying — check back before you rely on it.
+          </Flag>
+        ) : null}
 
         {active.length > 0 ? (
           <View>

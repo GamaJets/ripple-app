@@ -17,6 +17,7 @@ import { injuryKey } from '../lib/injuryGate';
 import type { Injury } from '../lib/injuries';
 import { useAuthRevision } from './authRevision';
 import { reportError } from '../lib/reportError';
+import { sendPush } from './pushNotifications';
 
 interface Value {
   status: LoadStatus;
@@ -81,6 +82,16 @@ export function InjuryAcksProvider({ children }: { children: ReactNode }) {
       // is how a coach ends up believing they confirmed something nobody
       // recorded.
       setRows((r) => ({ ...r, [clientId]: keys }));
+      // Tell them it landed. Somebody who discloses an injury has otherwise no
+      // way of knowing their coach ever saw it — and this feature spent its
+      // whole life until now writing disclosures nobody could read, which is
+      // exactly the silence that hid it. The row itself is already readable by
+      // the client (injury_ack_client_read), so their app can show it whether
+      // or not this push is delivered; this is the nudge, not the record.
+      // no-error-ok: the acknowledgement is written and readable by them either way; a lost push costs a notification, not the fact
+      void sendPush([clientId], 'Your coach has read your injuries',
+        'They have seen what you disclosed, and cannot assign you a programme until they have.',
+        { route: '/(client)/injuries' });
       return true;
     } catch (e) { reportError('injuryAcks.write', e); return false; }
   }, []);
